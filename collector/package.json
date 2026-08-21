@@ -14,7 +14,7 @@
     "start": "node src/index.js schedule",
     "api": "node api/server.js",
     "check": "node --check src/index.js",
-    "test": "node test/routes.test.mjs && node test/insights.test.mjs && node test/events.test.mjs && node test/custody.test.mjs && node test/compliance.test.mjs"
+    "test": "node test/routes.test.mjs && node test/insights.test.mjs && node test/events.test.mjs && node test/custody.test.mjs && node test/compliance.test.mjs && node test/unauth_driver.test.mjs"
   },
   "dependencies": {
     "csv-parse": "^5.5.6",

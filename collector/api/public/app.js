@@ -346,10 +346,14 @@ V.unauthorized = async (root) => {
         const rs = await q('/api/unauthorized/list', { verdict: d.label }); b.innerHTML = ''; b.append(segTable(rs)); }) });
 
   veh.body.innerHTML = '';
-  if (byVeh.length) hbars(veh.body, byVeh.slice(0, 12).map((r) => ({ label: r.plate, n: r.unauthorized })), { color: '--s8',
-    onClick: (d) => drill(`Vehicle ${d.label}`, 'Unexplained occupancy segments', async (b) => {
+  // Show who was driving, not just which plate — a flag against a car nobody can
+  // name is not something anyone can act on.
+  if (byVeh.length) hbars(veh.body, byVeh.slice(0, 12).map((r) => ({
+      label: r.drivers ? `${r.plate} · ${r.drivers}` : `${r.plate} · driver unknown`,
+      plate: r.plate, n: r.unauthorized })), { color: '--s8',
+    onClick: (d) => drill(`Vehicle ${d.plate || d.label}`, 'Unexplained occupancy segments', async (b) => {
       const rs = await q('/api/unauthorized/list', { verdict: 'unauthorized' });
-      b.innerHTML = ''; b.append(segTable(rs.filter((r) => r.plate === d.label))); }) });
+      b.innerHTML = ''; b.append(segTable(rs.filter((r) => r.plate === (d.plate || d.label)))); }) });
   else empty(veh.body, 'No unexplained trips detected in this range');
 
   list.body.innerHTML = ''; list.body.append(segTable(rows));
@@ -372,6 +376,9 @@ function segTable(rows) {
   if (!rows.length) { const d = el('div'); empty(d, 'Nothing flagged here'); return d; }
   const t = tableFrom(rows, [
     { label: 'Plate', key: 'plate' },
+    // the driver who held the car that day — an unexplained trip needs a person
+    { label: 'Driver', key: 'drivers', render: (r) => r.drivers
+      ? esc(r.drivers) : '<span class="dim">unknown</span>' },
     { label: 'Started', key: 'started_at', render: (r) => new Date(r.started_at).toLocaleString() },
     { label: 'Duration', key: 'duration_min', num: true, render: (r) => r.duration_min + ' min' },
     { label: 'Distance', key: 'distance_km', num: true, render: (r) => (r.distance_km ?? 0) + ' km' },
@@ -380,7 +387,7 @@ function segTable(rows) {
     { label: 'Confidence', key: 'low_confidence', render: (r) => r.low_confidence ? '<span class="tag warn">low</span>' : '<span class="tag dim">ok</span>' },
   ]);
   t.querySelectorAll('tbody tr').forEach((tr, i) => { tr.style.cursor = 'pointer';
-    tr.onclick = () => { const r = rows[i]; drill(`${r.plate} · ${new Date(r.started_at).toLocaleString()}`,
+    tr.onclick = () => { const r = rows[i]; drill(`${r.plate}${r.drivers ? ' · ' + r.drivers : ''} · ${new Date(r.started_at).toLocaleString()}`,
       `${r.verdict} — ${r.duration_min} min, ${r.distance_km} km`, async (b) => {
         b.innerHTML = '';
         b.append(el('div', 'kpis', [['Duration', r.duration_min + ' min'], ['Distance', (r.distance_km ?? 0) + ' km'],

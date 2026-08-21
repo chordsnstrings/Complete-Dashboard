@@ -292,24 +292,45 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
   const [from, to] = range(req);
   const verdict = req.query.verdict || 'unauthorized';
   res.json(await q(
-    `SELECT plate, fleet_id, started_at, ended_at, duration_min, distance_km, top_speed, fixes,
-            max_gap_min, ignition_ratio, verdict, matched_platform, matched_trip_id,
-            low_confidence, unavailable_sources, start_lat, start_lng, end_lat, end_lng
-     FROM occupancy_segment WHERE started_at BETWEEN $1 AND $2 AND ($3='all' OR verdict=$3)
-     ORDER BY started_at DESC LIMIT 300`, [from, to, verdict]));
+    `SELECT o.plate, o.fleet_id, o.started_at, o.ended_at, o.duration_min, o.distance_km,
+            o.top_speed, o.fixes, o.max_gap_min, o.ignition_ratio, o.verdict,
+            o.matched_platform, o.matched_trip_id, o.low_confidence, o.unavailable_sources,
+            o.start_lat, o.start_lng, o.end_lat, o.end_lng,
+            -- the driver who held the car that day, not whoever has it now
+            (SELECT string_agg(DISTINCT v.driver_name, ', ')
+               FROM vehicle_driver_day v
+              WHERE v.plate = o.plate
+                AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
+                AND v.driver_name IS NOT NULL) AS drivers
+     FROM occupancy_segment o WHERE o.started_at BETWEEN $1 AND $2 AND ($3='all' OR o.verdict=$3)
+     ORDER BY o.started_at DESC LIMIT 300`, [from, to, verdict]));
 }));
 
+// Names the drivers who actually held the car on the days the flags occurred —
+// "L44305 had two unexplained trips" is a fact about a person, not a plate.
 app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
   const [from, to] = range(req);
   res.json(await q(
-    `SELECT plate,
-            count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
-            count(*) FILTER (WHERE verdict='authorized')::int authorized,
-            count(*) FILTER (WHERE verdict='sensor_suspect')::int sensor_suspect,
-            round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
-     FROM occupancy_segment WHERE started_at BETWEEN $1 AND $2
-     GROUP BY plate HAVING count(*) FILTER (WHERE verdict='unauthorized') > 0
-     ORDER BY unauthorized DESC LIMIT 100`, [from, to]));
+    `WITH seg AS (
+       SELECT plate,
+              count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
+              count(*) FILTER (WHERE verdict='authorized')::int authorized,
+              count(*) FILTER (WHERE verdict='sensor_suspect')::int sensor_suspect,
+              round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
+       FROM occupancy_segment WHERE started_at BETWEEN $1 AND $2
+       GROUP BY plate HAVING count(*) FILTER (WHERE verdict='unauthorized') > 0),
+     who AS (
+       SELECT o.plate, string_agg(DISTINCT v.driver_name, ', ') AS drivers
+       FROM occupancy_segment o
+       JOIN vehicle_driver_day v
+         ON v.plate = o.plate
+        AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
+       WHERE o.started_at BETWEEN $1 AND $2 AND o.verdict='unauthorized'
+         AND v.driver_name IS NOT NULL
+       GROUP BY o.plate)
+     SELECT seg.*, who.drivers
+     FROM seg LEFT JOIN who USING (plate)
+     ORDER BY seg.unauthorized DESC LIMIT 100`, [from, to]));
 }));
 
 // daily trend of unauthorized vs authorized occupancy
