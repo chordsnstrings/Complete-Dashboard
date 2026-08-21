@@ -631,14 +631,45 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
 
 // trigger a collector run on demand (backfill/incremental) — the worker owns scheduling,
 // this just records intent the worker picks up on its next tick.
+/* Queue an on-demand collector run.
+   This used to write a single source_state key, so requesting two things
+   seconds apart discarded the first — while answering {ok: true} to the
+   request it was about to throw away. A row per request, and a duplicate of
+   something already pending is REFUSED rather than merged, because "queued"
+   for a job that will never run is the same lie in a different shape. */
+const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe'];
 app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
-  // An allowlist, not a pass-through: the value is written to source_state and
-  // read back by the collector as an instruction.
-  const mode = ['backfill', 'analyst', 'probe'].includes(req.body?.mode) ? req.body.mode : 'incremental';
-  await pool.query(
-    `INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ('collector','-','trigger',$1, now())
-     ON CONFLICT (source, fleet_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [mode]);
-  res.json({ ok: true, queued: mode });
+  const mode = JOB_MODES.includes(req.body?.mode) ? req.body.mode : 'incremental';
+  const [existing] = await q(
+    `SELECT id, status, requested_at FROM collector_job
+     WHERE mode = $1 AND status IN ('queued', 'running') ORDER BY requested_at LIMIT 1`, [mode]);
+  if (existing) {
+    return res.status(409).json({
+      ok: false, mode, already: existing.status, job_id: existing.id,
+      requested_at: existing.requested_at,
+      detail: `a ${mode} is already ${existing.status}; queuing another would do the same work twice`,
+    });
+  }
+  const [job] = await q(
+    `INSERT INTO collector_job (mode, requested_by) VALUES ($1, $2)
+     RETURNING id, mode, status, requested_at`,
+    [mode, (req.get('x-admin-token') ? 'admin' : 'unauthenticated')]);
+  res.json({ ok: true, queued: mode, job_id: job.id, job });
+}));
+
+/* What has been asked for, what is running, and what happened to it. A queue
+   nobody can see is a queue nobody can trust. */
+app.get('/api/settings/jobs', wrap(async (_req, res) => {
+  const jobs = await q(
+    `SELECT id, mode, status, requested_by, requested_at, started_at, finished_at, error,
+            CASE WHEN finished_at IS NOT NULL AND started_at IS NOT NULL
+                 THEN round(extract(epoch FROM finished_at - started_at))::int END AS seconds
+     FROM collector_job ORDER BY requested_at DESC LIMIT 40`);
+  res.json({
+    jobs,
+    pending: jobs.filter((j) => j.status === 'queued').length,
+    running: jobs.filter((j) => j.status === 'running').length,
+  });
 }));
 
 /* ───────────────────────── static dashboard ───────────────────────── */

@@ -27,7 +27,7 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
 const SCHEMAS = ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql'];
+  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql'];
 for (const f of SCHEMAS) await db.exec(readFileSync(`sql/${f}`, 'utf8'));
 
 /* ── the one-time retraction must be exactly that ─────────────────────────
@@ -257,6 +257,47 @@ check('the trip table survived the injection attempt',
   const cab = st2.find((r) => r.source === 'cabman');
   check('a source that does not chunk still reports ok with no windows',
     cab && cab.status === 'ok' && cab.failed_windows.length === 0, JSON.stringify(cab && cab.status));
+}
+
+/* ── a queue of one is not a queue ───────────────────────────────────────
+   On-demand runs were a single source_state row: ask for two things seconds
+   apart and the second overwrote the first, while the API answered
+   {ok: true, queued: "backfill"} to a request it was about to discard. An hour
+   was spent waiting for a backfill that had been thrown away before it
+   started. */
+{
+  const post = (mode) => fetch(`http://127.0.0.1:${port}/api/settings/trigger`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ mode }) });
+  const a = await (await post('backfill')).json();
+  const b = await (await post('probe')).json();
+  check('two different requests both survive', a.ok && b.ok && a.job_id !== b.job_id,
+    JSON.stringify([a.job_id, b.job_id]));
+  const jobs = await (await fetch(`http://127.0.0.1:${port}/api/settings/jobs`)).json();
+  check('both are visible in the queue',
+    jobs.jobs.filter((j) => j.status === 'queued').length === 2, JSON.stringify(jobs.pending));
+  check('the queue names what each one is',
+    jobs.jobs.map((j) => j.mode).sort().join() === 'backfill,probe',
+    jobs.jobs.map((j) => j.mode).join());
+
+  // A duplicate is refused, not merged: "queued" for a job that will never run
+  // is the same lie in a different shape.
+  const dup = await post('backfill');
+  const dupBody = await dup.json();
+  check('a duplicate request is refused rather than silently merged',
+    dup.status === 409 && dupBody.ok === false, `${dup.status} ${JSON.stringify(dupBody)}`);
+  check('the refusal says what is already pending and since when',
+    /already queued/.test(dupBody.detail || '') && dupBody.job_id === a.job_id, dupBody.detail);
+
+  // An unknown mode falls back rather than reaching the collector as an
+  // instruction nobody validated.
+  const weird = await (await post('rm -rf /')).json();
+  check('an unrecognised mode falls back to incremental', weird.queued === 'incremental', weird.queued);
+  const src2 = readFileSync('api/server.js', 'utf8');
+  check('the mode is an allowlist, not a pass-through',
+    /JOB_MODES\.includes\(req\.body\?\.mode\)/.test(src2));
+  check('the old single-slot trigger is gone',
+    !/key='trigger'/.test(src2) && !/'trigger',\$1/.test(src2));
 }
 
 /* A 500 body must not hand an unauthenticated caller the storage engine. */

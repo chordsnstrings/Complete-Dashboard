@@ -30,7 +30,7 @@ export const pool = new pg.Pool(poolConfig());
 pool.on('error', (err) => log.error('db', 'idle client error', { err: err.message, code: err.code }));
 
 export async function migrate() {
-  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql', 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql']) {
+  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql', 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql']) {
     try {
       const sql = readFileSync(join(__dir, '..', 'sql', f), 'utf8');
       await pool.query(sql);

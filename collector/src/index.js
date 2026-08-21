@@ -39,20 +39,54 @@ async function main() {
     /* A provider changes what it sends without telling anyone, and an expired
        credential looks like a quiet week. Describe every surface daily. */
     cron.schedule('40 22 * * *', () => probePass());
-    // honour on-demand runs queued from the Settings page (POST /api/settings/trigger)
+    /* Honour on-demand runs queued from the Settings page.
+       One job at a time, claimed atomically. The previous version read a
+       single source_state key, so two requests arriving close together meant
+       the second silently replaced the first — and the API had already told
+       the caller the first was queued. */
+    let jobRunning = false;
     setInterval(async () => {
+      if (jobRunning) return;                 // never run two collections at once
       try {
-        const { rows } = await pool.query("SELECT value FROM source_state WHERE source='collector' AND key='trigger'");
-        const mode = rows[0]?.value;
-        if (!mode) return;
-        await pool.query("DELETE FROM source_state WHERE source='collector' AND key='trigger'");
-        log.info('scheduler', `on-demand ${mode} requested`);
-        if (mode === 'backfill') await backfill();
-        else if (mode === 'analyst') await analystPass();
-        else if (mode === 'probe') await probePass();
-        else await incremental();
-      } catch (e) { log.error('scheduler', 'trigger poll', { err: String(e) }); }
+        // Claim the oldest queued job in one statement, so a second poller (or
+        // a restarted container) cannot pick up the same work.
+        const { rows } = await pool.query(
+          `UPDATE collector_job SET status = 'running', started_at = now()
+           WHERE id = (SELECT id FROM collector_job WHERE status = 'queued'
+                       ORDER BY requested_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+           RETURNING id, mode`);
+        const job = rows[0];
+        if (!job) return;
+        jobRunning = true;
+        log.info('scheduler', `on-demand ${job.mode} claimed`, { job: job.id });
+        try {
+          if (job.mode === 'backfill') await backfill();
+          else if (job.mode === 'analyst') await analystPass();
+          else if (job.mode === 'probe') await probePass();
+          else await incremental();
+          await pool.query(
+            `UPDATE collector_job SET status='done', finished_at=now() WHERE id=$1`, [job.id]);
+          log.info('scheduler', `on-demand ${job.mode} finished`, { job: job.id });
+        } catch (e) {
+          // A job that failed must say so rather than sitting in 'running'
+          // forever, which reads as "still working" to anyone watching.
+          await pool.query(
+            `UPDATE collector_job SET status='failed', finished_at=now(), error=$2 WHERE id=$1`,
+            [job.id, String(e).slice(0, 500)]);
+          log.error('scheduler', `on-demand ${job.mode} failed`, { job: job.id, err: String(e) });
+        } finally { jobRunning = false; }
+      } catch (e) { log.error('scheduler', 'job poll', { err: String(e) }); jobRunning = false; }
     }, 20000);
+
+    /* A container that dies mid-job leaves the row in 'running' forever. On
+       boot, hand anything stranded back to the queue once — a job that was
+       genuinely half-done is idempotent (every write is an upsert), and a job
+       stuck at 'running' is indistinguishable from one still working. */
+    pool.query(
+      `UPDATE collector_job SET status='queued', started_at=NULL
+       WHERE status='running' AND started_at < now() - interval '3 hours'`)
+      .then(({ rowCount }) => { if (rowCount) log.warn('scheduler', 'requeued stranded jobs', { n: rowCount }); })
+      .catch((e) => log.error('scheduler', 'requeue', { err: String(e) }));
 
     // kick one of each at boot so the dashboard has fresh data immediately
     cabmanTick();

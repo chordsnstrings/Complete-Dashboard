@@ -1002,6 +1002,25 @@ app.get('/api/roster/states', (_, r) => r.json({
   no_state_reported: [{ platform: 'yango', n: 14 }],
 }));
 
+
+app.get('/api/settings/jobs', (_, r) => r.json({
+  jobs: [
+    { id: 7, mode: 'backfill', status: 'running', requested_by: 'admin',
+      requested_at: new Date(Date.now() - 20 * 60000).toISOString(),
+      started_at: new Date(Date.now() - 19 * 60000).toISOString(), finished_at: null, error: null, seconds: null },
+    { id: 6, mode: 'probe', status: 'done', requested_by: 'admin',
+      requested_at: new Date(Date.now() - 62 * 60000).toISOString(),
+      started_at: new Date(Date.now() - 62 * 60000).toISOString(),
+      finished_at: new Date(Date.now() - 61 * 60000).toISOString(), error: null, seconds: 44 },
+    { id: 5, mode: 'analyst', status: 'failed', requested_by: 'admin',
+      requested_at: new Date(Date.now() - 26 * 3600e3).toISOString(),
+      started_at: new Date(Date.now() - 26 * 3600e3).toISOString(),
+      finished_at: new Date(Date.now() - 26 * 3600e3 + 9000).toISOString(),
+      error: 'Error: 401 from the model endpoint — ARK_API_KEY rejected', seconds: 9 },
+  ],
+  pending: 0, running: 1,
+}));
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 
 app.use(express.static(join(__dir, 'api', 'public')));

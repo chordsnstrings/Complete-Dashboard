@@ -1263,6 +1263,8 @@ V.settings = async (root) => {
   actions.innerHTML = `<button class="btn" id="saveAll">Save credentials</button>
     <button class="btn sec" id="runInc">Run incremental now</button>
     <button class="btn sec" id="runBack">Run 12-month backfill</button>
+    <button class="btn sec" id="runProbe">Describe every provider API</button>
+    <button class="btn sec" id="runAnalyst">Run the analyst</button>
     <span class="note" id="setNote"></span>`;
   credP.body.append(actions);
   const note = actions.querySelector('#setNote');
@@ -1272,7 +1274,9 @@ V.settings = async (root) => {
       const r = await fetch(path, { method: path.endsWith('trigger') ? 'POST' : 'PUT',
         headers: { 'content-type': 'application/json', 'x-admin-token': state.admin }, body: JSON.stringify(body) });
       const j = await r.json();
-      if (!r.ok) throw new Error(j.error || r.status);
+      // A refused duplicate is not an error to hide — it is the answer.
+      if (r.status === 409) { note.className = 'note warn'; note.textContent = j.detail || 'already queued'; return null; }
+      if (!r.ok) throw new Error(j.error || j.detail || r.status);
       note.className = 'note ok'; return j;
     } catch (e) { note.className = 'note err'; note.textContent = String(e.message); return null; }
   };
@@ -1283,8 +1287,54 @@ V.settings = async (root) => {
     const j = await post('/api/settings', payload);
     if (j) { note.textContent = `saved ${j.updated.length} setting(s)`; render(); }
   };
-  actions.querySelector('#runInc').onclick = async () => { const j = await post('/api/settings/trigger', { mode: 'incremental' }); if (j) note.textContent = 'incremental queued — collector picks it up within ~20s'; };
-  actions.querySelector('#runBack').onclick = async () => { const j = await post('/api/settings/trigger', { mode: 'backfill' }); if (j) note.textContent = 'backfill queued — this pulls up to 12 months and takes a while'; };
+  const RUN = {
+    runInc: ['incremental', 'incremental queued — the collector claims it within ~20s'],
+    runBack: ['backfill', 'backfill queued — this pulls up to 12 months and takes a while'],
+    runProbe: ['probe', 'probe queued — it describes every provider surface and stores the shape'],
+    runAnalyst: ['analyst', 'analyst queued — it costs one model call and judges its own claims'],
+  };
+  Object.entries(RUN).forEach(([id, [mode, msg]]) => {
+    actions.querySelector('#' + id).onclick = async () => {
+      const j = await post('/api/settings/trigger', { mode });
+      if (j) { note.textContent = `${msg} (job ${j.job_id})`; jobs(); }
+    };
+  });
+
+  /* What has actually been asked for, and what happened to it.
+     On-demand runs used to be a single row that the next request overwrote —
+     silently, while the API answered "queued" to a job it was about to discard.
+     A queue nobody can see is a queue nobody can trust. */
+  const jp = panel('Requested runs', 'Every on-demand run, and what became of it.');
+  root.append(jp.panel);
+  const jobs = async () => {
+    loading(jp.body);
+    try {
+      const d = await api('/api/settings/jobs');
+      jp.body.innerHTML = '';
+      if (!d.jobs.length) { empty(jp.body, 'Nothing has been requested by hand'); return; }
+      const TONE = { queued: 'info', running: 'warn', done: 'ok', failed: 'err' };
+      jp.body.append(tableFrom(d.jobs, [
+        { label: 'Job', key: 'id', num: true },
+        { label: 'What', key: 'mode' },
+        { label: 'State', key: 'status', render: (r) => pill(r.status, TONE[r.status]) },
+        { label: 'Requested', key: 'requested_at', render: (r) => dtStr(r.requested_at) },
+        { label: 'Started', key: 'started_at', render: (r) => (r.started_at ? dtStr(r.started_at) : '—') },
+        { label: 'Took', key: 'seconds', num: true,
+          render: (r) => (r.seconds == null ? '—' : r.seconds > 90 ? `${Math.round(r.seconds / 60)} min` : `${r.seconds}s`) },
+        { label: 'Detail', key: 'error', render: (r) => (r.error
+          ? `<span class="note err">${esc(String(r.error).slice(0, 110))}</span>` : '') },
+      ]));
+      // `note` is a DOM element in this scope — the settings status line — so
+      // the shared helper of the same name is unreachable here. Build the
+      // element directly rather than shadowing something on purpose.
+      if (d.running) jp.body.append(el('div', 'note', esc('A run is in progress. Only one runs at a '
+        + 'time, so anything queued behind it starts when this finishes.')));
+    } catch (e) {
+      jp.body.innerHTML = '';
+      jp.body.append(el('div', 'note err', esc(`Could not load: ${e.message}`)));
+    }
+  };
+  jobs();
 };
 
 

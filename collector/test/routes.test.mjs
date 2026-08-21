@@ -78,6 +78,23 @@ check('a detail page keeps its parent lit in the nav',
 check('the property page is a page within Corporate, not a thirteenth destination',
   /const PARENT = \{[^}]*property: 'corporate'[^}]*\}/.test(jsTxt));
 check('breadcrumb element exists', /id="crumb"/.test(htmlTxt));
+
+/* A view that shadows an imported helper passes `node --check` and then blanks
+   the whole page at runtime — V.settings binds `note` to a DOM element, and a
+   call to the shared note() helper inside it threw "note is not a function".
+   Only the browser smoke test caught it, so the rule is written down here. */
+{
+  const settings = jsTxt.slice(jsTxt.indexOf('V.settings = async'));
+  const body = settings.slice(0, settings.indexOf('\n};'));
+  const shadowed = ['note', 'panel', 'el', 'esc', 'fmt', 'pill', 'empty', 'tableFrom']
+    .filter((n) => new RegExp(`const ${n}\\s*=`).test(body));
+  // Where a name IS shadowed, the shared helper must not also be called by that
+  // name in the same scope.
+  const misuse = shadowed.filter((n) => new RegExp(`[^.\\w]${n}\\(`).test(
+    body.replace(new RegExp(`const ${n}\\s*=[^;]*;`), '')));
+  check('no view calls a shared helper it has shadowed with a local of the same name',
+    misuse.length === 0, `shadowed: ${shadowed.join(', ')} | called anyway: ${misuse.join(', ')}`);
+}
 check('every driver tab is a real route', /href\('driver', id, t === 'overview' \? null : t\)/.test(driverJs));
 check('all six driver tabs registered', ['overview', 'activity', 'territory', 'earnings', 'quality', 'trips']
   .every((t) => new RegExp(`id: '${t}'`).test(driverJs)), 'DRIVER_TABS');
