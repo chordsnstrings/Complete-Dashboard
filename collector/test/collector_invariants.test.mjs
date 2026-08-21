@@ -182,5 +182,88 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
     String((fmsSrc.match(/\.reverse\(\)/g) || []).length));
 }
 
+
+/* ── an unguarded distance sum is a bug waiting for the tracker to come on ──
+   FMS distances are odometer-derived and a single row can read 193,027 km.
+   trip_norm carries `has_distance` for exactly this, and it kept not being
+   used: /api/trend/monthly reported 12,681,536 km for April 2026, and three
+   queries on the vehicle page had the same defect. Both were found only
+   because a year of Uber data finally landed and made the absurdity visible
+   next to something real.
+
+   This is a lint, not a proof. It flags a sum or average over distance_km with
+   no FILTER, in a statement that FMS rows can reach — meaning it is not scoped
+   to a driver (FMS rows carry no driver id), not pinned to a booking platform,
+   and not already restricted to bookings. An exemption needs a reason. */
+{
+  const { readFileSync: rf, readdirSync: rd } = await import('node:fs');
+  const FILES = [...rd('api').filter((f) => f.endsWith('.js')).map((f) => `api/${f}`),
+    ...rd('src').filter((f) => f.endsWith('.js')).map((f) => `src/${f}`)];
+
+  /* Named, with the reason each is safe. A query that stops being safe has to
+     be removed from here deliberately rather than drifting. */
+  const EXEMPT = {
+    'src/insights.js': 'the deadhead rule filters on deadhead_km IS NOT NULL, which only the hotel channel ever sets',
+  };
+
+  /* Window predicates live in template variables — `${TW}` is the per-driver
+     or per-plate window, `${FB}` the bookings-only one — so a scope check that
+     reads the raw statement sees a hole where the scoping is. Resolve them
+     from their own definitions in the same file rather than special-casing the
+     names, so a renamed or redefined predicate is followed rather than
+     silently treated as absent. */
+  const resolveVars = (src2, stmt) => {
+    let out2 = stmt;
+    for (const v of new Set([...stmt.matchAll(/\$\{(\w+)\}/g)].map((x) => x[1]))) {
+      const def = src2.match(new RegExp(`const ${v}\\s*=\\s*\`([^\`]*)\``))
+        || src2.match(new RegExp(`const ${v}\\s*=\\s*(?:\\(\\)\\s*=>\\s*)?\`([^\`]*)\``));
+      if (def) out2 = out2.split(`\${${v}}`).join(def[1]);
+    }
+    return out2;
+  };
+
+  const offenders = [];
+  for (const f of FILES) {
+    if (EXEMPT[f]) continue;
+    const src2 = rf(f, 'utf8');
+    for (const m of src2.matchAll(/`([^`]*SELECT[^`]*)`/gs)) {
+      const stmt = resolveVars(src2, m[1]);
+      if (!/FROM\s+trip(_norm|_ext)?\b/.test(stmt)) continue;
+
+      /* Scope means the WHERE clause, not a FILTER on some other column.
+         The first version of this check tested whether `is_booking` appeared
+         anywhere in the statement — and a statement that guards SOME of its
+         aggregates and not others contains it either way. Reintroducing the
+         exact April-2026 bug into a query whose neighbouring columns still
+         said FILTER (WHERE is_booking) passed the lint silently. Strip every
+         FILTER clause first, so only a real restriction counts. */
+      const whereOnly = stmt.replace(/FILTER\s*\([^()]*(?:\([^()]*\)[^()]*)*\)/gi, '');
+      const scoped = /driver_ext_id\s*=\s*ANY|driver_name IS NOT NULL|driver_ext_id IS NOT NULL/.test(whereOnly)
+        || /platform\s*=\s*'(?!fms)[a-z_]+'/.test(whereOnly)
+        || /\bis_booking\b/.test(whereOnly)
+        || /\bproduct IS NOT NULL\b/.test(whereOnly)
+        || /\bdeadhead_km IS NOT NULL\b/.test(whereOnly);
+      if (scoped) continue;
+      // Line numbers come from the ORIGINAL text; resolution changes offsets.
+      for (const g of m[1].matchAll(/(?:sum|avg)\((?:t\.)?distance_km\)(?!\s*FILTER)/g)) {
+        const line = src2.slice(0, m.index + 1 + g.index).split('\n').length;
+        offenders.push(`${f}:${line}`);
+      }
+    }
+  }
+  check('no distance sum is left unguarded in a query an odometer row can reach',
+    offenders.length === 0,
+    offenders.length ? `\n      ${offenders.join('\n      ')}` : '');
+
+  /* And the guard has to exist to be used. If has_distance ever leaves
+     trip_norm, every FILTER above silently becomes a syntax error at runtime
+     rather than at deploy — so assert the column is still defined. */
+  const v18 = rf('sql/schema_v18.sql', 'utf8');
+  check('trip_norm still defines the has_distance guard those filters depend on',
+    /AS has_distance/.test(v18));
+  check('and it still bounds the plausible range rather than only testing NOT NULL',
+    /distance_km\s*<\s*500/.test(v18));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
