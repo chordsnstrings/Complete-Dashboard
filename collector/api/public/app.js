@@ -1,0 +1,570 @@
+// Fleet Dashboard SPA — multi-angle analytics with click-to-expand drill-downs.
+import { barChart, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
+
+const $ = (s, r = document) => r.querySelector(s);
+const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
+const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+
+const VIEWS = [
+  { id: 'overview', label: 'Overview', ic: '◱', grp: 'Analyse', sub: 'Fleet-wide performance across every platform' },
+  { id: 'demand', label: 'Demand', ic: '◷', grp: 'Analyse', sub: 'When trips happen — by day, hour and weekday' },
+  { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'Analyse', sub: 'Per-driver output, quality and cross-platform activity' },
+  { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Analyse', sub: 'Utilisation and revenue per vehicle' },
+  { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share and mix' },
+  { id: 'finance', label: 'Finance', ic: '◈', grp: 'Analyse', sub: 'Revenue, payment mix and the transaction ledger' },
+  { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Operate', sub: 'Seat occupied, vehicle moved — but no booking on any channel' },
+  { id: 'safety', label: 'Safety', ic: '△', grp: 'Operate', sub: 'Harsh-driving events from the telematics layer' },
+  { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Operate', sub: 'Realtime positions — CABMAN refreshes every 5 minutes' },
+  { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Operate', sub: 'Collector health, coverage and history depth' },
+  { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Configure', sub: 'Credentials and collection schedule' },
+];
+
+const state = { view: 'overview', days: 30, platform: '', fleet: '', admin: localStorage.getItem('adminToken') || '' };
+
+const api = async (path, opts) => {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 120)}`);
+  return r.json();
+};
+function params(extra = {}) {
+  const to = new Date(); const from = new Date(); from.setDate(from.getDate() - state.days);
+  const p = new URLSearchParams({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), ...extra });
+  if (state.platform) p.set('platform', state.platform);
+  if (state.fleet) p.set('fleet', state.fleet);
+  return p.toString();
+}
+const q = (path, extra) => api(`${path}?${params(extra)}`);
+
+/* ─────────── shell ─────────── */
+function renderNav() {
+  const nav = $('#nav'); nav.innerHTML = '';
+  let grp = null;
+  VIEWS.forEach((v) => {
+    if (v.grp !== grp) { grp = v.grp; nav.append(el('div', 'grp', grp)); }
+    const a = el('a', v.id === state.view ? 'on' : '', `<span class="ic">${v.ic}</span>${v.label}`);
+    a.onclick = () => { state.view = v.id; location.hash = v.id; render(); };
+    nav.append(a);
+  });
+}
+function setHeader() {
+  const v = VIEWS.find((x) => x.id === state.view);
+  $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
+  $('#filters').style.display = (state.view === 'settings' || state.view === 'live' || state.view === 'sources') ? 'none' : 'flex';
+}
+function panel(title, cap) {
+  const p = el('div', 'panel');
+  p.append(el('h3', null, title));
+  if (cap) p.append(el('p', 'cap', cap));
+  const body = el('div'); p.append(body);
+  return { panel: p, body };
+}
+const loading = (host) => { host.innerHTML = '<div class="skel">Loading…</div>'; };
+
+/* ─────────── drill-down modal ─────────── */
+function drill(title, subtitle, renderBody) {
+  const back = el('div', 'modal-back');
+  const box = el('div', 'modal');
+  box.innerHTML = `<div class="modal-head"><div><h3>${esc(title)}</h3><p class="cap">${esc(subtitle || '')}</p></div>
+    <button class="btn sec" id="mClose">Close</button></div>`;
+  const body = el('div', 'modal-body'); box.append(body); back.append(box); document.body.append(back);
+  const close = () => back.remove();
+  box.querySelector('#mClose').onclick = close;
+  back.onclick = (e) => { if (e.target === back) close(); };
+  document.addEventListener('keydown', function esc2(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc2); } });
+  loading(body); Promise.resolve(renderBody(body)).catch((e) => { body.innerHTML = `<div class="empty"><b>Could not load</b>${esc(e.message)}</div>`; });
+}
+function tableFrom(rows, cols) {
+  if (!rows.length) { const d = el('div'); empty(d); return d; }
+  const wrap = el('div', 'tscroll');
+  const t = el('table');
+  t.innerHTML = `<thead><tr>${cols.map((c) => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
+    <tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(r) : esc(r[c.key] ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  wrap.append(t); return wrap;
+}
+// generic trip drill-down for any filter combination
+function drillTrips(title, subtitle, extra) {
+  drill(title, subtitle, async (body) => {
+    const rows = await q('/api/drivers/leaderboard', extra);
+    body.innerHTML = '';
+    body.append(tableFrom(rows.slice(0, 60), [
+      { label: 'Driver', key: 'driver_name' }, { label: 'Plate', key: 'plate' },
+      { label: 'Platform', key: 'platform' },
+      { label: 'Trips', key: 'trips', num: true }, { label: 'Km', key: 'km', num: true },
+      { label: 'Revenue', key: 'revenue', num: true, render: (r) => r.revenue ? 'AED ' + fmt(r.revenue) : '—' },
+      { label: 'Completion', key: 'completion_pct', num: true, render: (r) => r.completion_pct != null ? r.completion_pct + '%' : '—' },
+    ]));
+  });
+}
+
+/* ─────────── views ─────────── */
+const V = {};
+
+V.overview = async (root) => {
+  const kpiHost = el('div', 'kpis'); root.append(kpiHost);
+  const g1 = el('div', 'grid g23'); root.append(g1);
+  const trend = panel('Trips per day', 'Click a bar to see the drivers behind that day'); g1.append(trend.panel);
+  const mix = panel('Platform share', 'Trips by platform — click a slice to drill in'); g1.append(mix.panel);
+  const g2 = el('div', 'grid g3'); root.append(g2);
+  const prod = panel('Product mix', 'Which service tiers the fleet runs'); g2.append(prod.panel);
+  const pay = panel('Payment method', 'How riders pay'); g2.append(pay.panel);
+  const out = panel('Trip outcome', 'Completed vs cancelled'); g2.append(out.panel);
+  const lead = panel('Top drivers', 'Ranked by completed trips — click for detail'); root.append(lead.panel);
+  [kpiHost, trend.body, mix.body, prod.body, pay.body, out.body, lead.body].forEach(loading);
+
+  const [k, daily, byPlat, byProd, byPay, byStatus, drivers] = await Promise.all([
+    q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'platform' }), q('/api/mix'),
+    q('/api/mix', { by: 'payment' }), q('/api/mix', { by: 'status' }), q('/api/drivers/leaderboard'),
+  ]);
+
+  kpiHost.innerHTML = [
+    ['Trips', fmt(k.trips), `${fmt(k.drivers)} drivers`],
+    ['Distance', fmt(k.km) + ' km', `avg ${k.avg_km ?? '—'} km/trip`],
+    ['Revenue', k.revenue ? 'AED ' + fmt(k.revenue) : '—', 'from trip fares'],
+    ['Completion', k.completion_pct != null ? k.completion_pct + '%' : '—', `${k.cancel_pct ?? 0}% cancelled`],
+    ['Vehicles', fmt(k.vehicles), `${fmt(k.live_vehicles || 0)} tracked live`],
+    ['Safety alerts', fmt(k.alerts), 'harsh-driving events'],
+  ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+
+  barChart(trend.body, daily, { x: 'd', y: 'trips', label: 'trips',
+    onClick: (d) => drillTrips(`Trips on ${d.d}`, 'Drivers active that day', { from: d.d, to: d.d }) });
+  donut(mix.body, byPlat, { onClick: (d) => drillTrips(`${d.label} trips`, 'Drivers on this platform', { platform: d.label }) });
+  hbars(prod.body, byProd.slice(0, 6));
+  hbars(pay.body, byPay.slice(0, 6), { color: '--s2' });
+  stackedBar(out.body, byStatus.slice(0, 5));
+  lead.body.innerHTML = '';
+  lead.body.append(tableFrom(drivers.slice(0, 12), [
+    { label: '#', key: '_i', render: (r) => String(drivers.indexOf(r) + 1) },
+    { label: 'Driver', key: 'driver_name' }, { label: 'Plate', key: 'plate' },
+    { label: 'Trips', key: 'trips', num: true },
+    { label: 'Km', key: 'km', num: true },
+    { label: 'Completion', key: 'completion_pct', num: true, render: (r) => r.completion_pct != null ? r.completion_pct + '%' : '—' },
+  ]));
+};
+
+V.demand = async (root) => {
+  const g = el('div', 'grid g2'); root.append(g);
+  const hourly = panel('Hourly demand curve', 'Trip requests by hour of day'); g.append(hourly.panel);
+  const daily = panel('Daily volume', 'Click a bar to drill into that day'); g.append(daily.panel);
+  const hm = panel('Weekday × hour heatmap', 'Darker = busier. Click a cell for that slot'); root.append(hm.panel);
+  [hourly.body, daily.body, hm.body].forEach(loading);
+  const [h, d, grid] = await Promise.all([q('/api/trips/hourly'), q('/api/trips/daily'), q('/api/trips/heatmap')]);
+  areaChart(hourly.body, h.map((r) => ({ label: String(r.h).padStart(2, '0') + ':00', trips: r.trips })), { x: 'label', y: 'trips' });
+  barChart(daily.body, d, { x: 'd', y: 'trips', onClick: (r) => drillTrips(`Trips on ${r.d}`, 'Drivers active that day', { from: r.d, to: r.d }) });
+  heatmap(hm.body, grid, { onClick: (c) => drill(`${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][c.dow]} at ${String(c.h).padStart(2,'0')}:00`,
+    `${fmt(c.trips)} trips in this slot across the selected range`, async (b) => { b.innerHTML = '<div class="note">Slot-level trip list requires per-trip drill; showing driver ranking for the range.</div>';
+      const rows = await q('/api/drivers/leaderboard'); b.append(tableFrom(rows.slice(0, 25), [
+        { label: 'Driver', key: 'driver_name' }, { label: 'Trips', key: 'trips', num: true }, { label: 'Km', key: 'km', num: true }])); }) });
+};
+
+V.drivers = async (root) => {
+  const lead = panel('Driver leaderboard', 'Click a row for that driver’s full detail'); root.append(lead.panel);
+  const g = el('div', 'grid g2'); root.append(g);
+  const sc = panel('Trips vs distance', 'Each dot is a driver — spot high-trip/low-km and vice versa'); g.append(sc.panel);
+  const xp = panel('Cross-platform activity', 'Same driver across Uber / Yango / Bolt'); g.append(xp.panel);
+  const perf = panel('Platform performance records', 'Hours, acceptance and earnings as reported by each platform'); root.append(perf.panel);
+  [lead.body, sc.body, xp.body, perf.body].forEach(loading);
+  const [rows, cross, pf] = await Promise.all([q('/api/drivers/leaderboard'), q('/api/drivers/cross-platform'), q('/api/drivers/performance')]);
+
+  lead.body.innerHTML = '';
+  const t = tableFrom(rows.slice(0, 40), [
+    { label: '#', key: '_', render: (r) => String(rows.indexOf(r) + 1) },
+    { label: 'Driver', key: 'driver_name' }, { label: 'Plate', key: 'plate' }, { label: 'Platform', key: 'platform' },
+    { label: 'Trips', key: 'trips', num: true }, { label: 'Km', key: 'km', num: true },
+    { label: 'Avg km', key: 'avg_km', num: true },
+    { label: 'Revenue', key: 'revenue', num: true, render: (r) => r.revenue ? 'AED ' + fmt(r.revenue) : '—' },
+    { label: 'Completion', key: 'completion_pct', num: true, render: (r) => r.completion_pct != null ? `${r.completion_pct}%` : '—' },
+  ]);
+  t.querySelectorAll('tbody tr').forEach((tr, i) => {
+    tr.style.cursor = 'pointer';
+    tr.onclick = () => { const r = rows[i]; drill(r.driver_name || 'Driver', `${r.platform} · ${r.plate || 'no plate'}`, async (b) => {
+      b.innerHTML = '';
+      b.append(el('div', 'kpis', [['Trips', fmt(r.trips)], ['Distance', fmt(r.km) + ' km'], ['Avg trip', (r.avg_km ?? '—') + ' km'],
+        ['Revenue', r.revenue ? 'AED ' + fmt(r.revenue) : '—'], ['Completion', (r.completion_pct ?? '—') + '%']]
+        .map(([l, n]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div></div>`).join('')));
+      const mine = pf.filter((p) => p.driver_name === r.driver_name);
+      const ph = el('div', 'panel'); ph.append(el('h3', null, 'Platform-reported performance'));
+      ph.append(mine.length ? tableFrom(mine, [
+        { label: 'Platform', key: 'platform' }, { label: 'Period', key: 'period_start' },
+        { label: 'Trips', key: 'trips', num: true }, { label: 'Hrs online', key: 'hours_online', num: true, render: (x) => x.hours_online ? (+x.hours_online).toFixed(1) : '—' },
+        { label: 'Accept', key: 'acceptance_rate', num: true, render: (x) => x.acceptance_rate != null ? (x.acceptance_rate * 100).toFixed(0) + '%' : '—' },
+        { label: 'Earnings', key: 'earnings', num: true, render: (x) => x.earnings ? 'AED ' + fmt(x.earnings) : '—' },
+      ]) : el('div', 'note', 'No platform performance records in this range yet.'));
+      b.append(ph);
+    }); };
+  });
+  lead.body.append(t);
+
+  scatter(sc.body, rows.slice(0, 60).map((r) => ({ ...r, trips: +r.trips, km: +(r.km || 0) })),
+    { x: 'trips', y: 'km', label: 'driver_name', xLabel: 'trips', yLabel: 'km' });
+  xp.body.innerHTML = '';
+  xp.body.append(tableFrom(cross.slice(0, 15), [
+    { label: 'Driver', key: 'driver_name' },
+    { label: 'Uber', key: 'uber_trips', num: true }, { label: 'Yango', key: 'yango_trips', num: true },
+    { label: 'Bolt', key: 'bolt_trips', num: true }, { label: 'Total', key: 'total_trips', num: true },
+  ]));
+  perf.body.innerHTML = '';
+  perf.body.append(tableFrom(pf.slice(0, 25), [
+    { label: 'Platform', key: 'platform' }, { label: 'Driver', key: 'driver_name' },
+    { label: 'Period', key: 'period_start' }, { label: 'Trips', key: 'trips', num: true },
+    { label: 'Hrs online', key: 'hours_online', num: true, render: (x) => x.hours_online ? (+x.hours_online).toFixed(1) : '—' },
+    { label: 'Earnings', key: 'earnings', num: true, render: (x) => x.earnings ? 'AED ' + fmt(x.earnings) : '—' },
+  ]));
+};
+
+V.vehicles = async (root) => {
+  const g = el('div', 'grid g23'); root.append(g);
+  const top = panel('Trips per vehicle', 'Top vehicles by trip count — click to drill'); g.append(top.panel);
+  const util = panel('Fleet spread', 'How trips distribute across the fleet'); g.append(util.panel);
+  const tbl = panel('Vehicle table', 'Click a row for that vehicle’s activity'); root.append(tbl.panel);
+  [top.body, util.body, tbl.body].forEach(loading);
+  const rows = await q('/api/vehicles');
+  hbars(top.body, rows.slice(0, 12).map((r) => ({ label: r.plate, n: r.trips })), { seq: true,
+    onClick: (d) => drillTrips(`Vehicle ${d.label}`, 'Drivers who operated this vehicle', {}) });
+  donut(util.body, rows.slice(0, 6).map((r) => ({ label: r.plate, n: r.trips })));
+  tbl.body.innerHTML = '';
+  const t = tableFrom(rows.slice(0, 40), [
+    { label: 'Plate', key: 'plate' }, { label: 'Trips', key: 'trips', num: true },
+    { label: 'Km', key: 'km', num: true },
+    { label: 'Revenue', key: 'revenue', num: true, render: (r) => r.revenue ? 'AED ' + fmt(r.revenue) : '—' },
+    { label: 'Drivers', key: 'drivers', num: true }, { label: 'Platforms', key: 'platforms', num: true },
+    { label: 'Last trip', key: 'last_trip', render: (r) => r.last_trip ? String(r.last_trip).slice(0, 10) : '—' },
+  ]);
+  t.querySelectorAll('tbody tr').forEach((tr, i) => { tr.style.cursor = 'pointer';
+    tr.onclick = () => { const v = rows[i]; drill(`Vehicle ${v.plate}`, `${fmt(v.trips)} trips · ${fmt(v.km)} km`, async (b) => {
+      const track = await api(`/api/track?plate=${encodeURIComponent(v.plate)}`);
+      b.innerHTML = '';
+      b.append(el('div', 'kpis', [['Trips', fmt(v.trips)], ['Km', fmt(v.km)], ['Drivers', fmt(v.drivers)],
+        ['GPS points', fmt(track.length)]].map(([l, n]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div></div>`).join('')));
+      const p = el('div', 'panel'); p.append(el('h3', null, 'Recent GPS breadcrumb'), el('p', 'cap', 'CABMAN 5-minute telemetry'));
+      if (track.length) p.append(tableFrom(track.slice(-20).reverse(), [
+        { label: 'Time', key: 'captured_at', render: (r) => new Date(r.captured_at).toLocaleString() },
+        { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true },
+        { label: 'Speed', key: 'speed', num: true }, { label: 'Status', key: 'status' }]));
+      else p.append(el('div', 'note', 'No telemetry captured for this vehicle yet.'));
+      b.append(p);
+    }); };
+  });
+  tbl.body.append(t);
+};
+
+V.platforms = async (root) => {
+  const g = el('div', 'grid g2'); root.append(g);
+  const share = panel('Trips by platform', 'Share of total volume'); g.append(share.panel);
+  const fleetMix = panel('Trips by fleet', 'Ecosine vs Egari'); g.append(fleetMix.panel);
+  const cov = panel('Coverage & history depth', 'What each source has actually delivered'); root.append(cov.panel);
+  [share.body, fleetMix.body, cov.body].forEach(loading);
+  const [byPlat, byFleet, plats] = await Promise.all([q('/api/mix', { by: 'platform' }), q('/api/mix', { by: 'fleet' }), api('/api/platforms')]);
+  donut(share.body, byPlat, { onClick: (d) => drillTrips(`${d.label}`, 'Drivers on this platform', { platform: d.label }) });
+  donut(fleetMix.body, byFleet);
+  cov.body.innerHTML = '';
+  cov.body.append(tableFrom(plats, [
+    { label: 'Platform', key: 'platform' }, { label: 'Fleet', key: 'fleet_id' },
+    { label: 'Trips', key: 'trips', num: true },
+    { label: 'Earliest', key: 'earliest', render: (r) => r.earliest ? String(r.earliest).slice(0, 10) : '—' },
+    { label: 'Latest', key: 'latest', render: (r) => r.latest ? String(r.latest).slice(0, 10) : '—' },
+  ]));
+};
+
+V.finance = async (root) => {
+  const kh = el('div', 'kpis'); root.append(kh);
+  const g = el('div', 'grid g2'); root.append(g);
+  const rev = panel('Revenue per day', 'Fare revenue from trips'); g.append(rev.panel);
+  const pay = panel('Payment mix', 'Cash vs card vs wallet'); g.append(pay.panel);
+  const led = panel('Ledger by category', 'Platform fees, bonuses and adjustments'); root.append(led.panel);
+  [kh, rev.body, pay.body, led.body].forEach(loading);
+  const [k, daily, byPay, ledger] = await Promise.all([q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'payment' }), q('/api/finance/ledger')]);
+  kh.innerHTML = [['Revenue', k.revenue ? 'AED ' + fmt(k.revenue) : '—', 'trip fares'],
+    ['Trips', fmt(k.trips), 'billable rides'],
+    ['Avg fare', k.revenue && k.trips ? 'AED ' + (k.revenue / k.trips).toFixed(1) : '—', 'per trip'],
+    ['Distance', fmt(k.km) + ' km', 'total driven']]
+    .map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+  areaChart(rev.body, daily, { x: 'd', y: 'revenue', color: '--s3', valueFmt: (v) => fmt(v) });
+  donut(pay.body, byPay);
+  led.body.innerHTML = '';
+  if (ledger.length) hbars(led.body, ledger.slice(0, 12).map((r) => ({ label: r.category, n: Math.abs(+r.amount) })),
+    { color: '--s2', valueFmt: (v) => 'AED ' + fmt(v) });
+  else empty(led.body, 'Ledger fills once Yango/Bolt credentials are set');
+};
+
+V.safety = async (root) => {
+  const g = el('div', 'grid g2'); root.append(g);
+  const types = panel('Events by type', 'Harsh braking, acceleration, sharp turns, overspeed'); g.append(types.panel);
+  const veh = panel('Worst vehicles', 'Most harsh-driving events — click to drill'); g.append(veh.panel);
+  const tbl = panel('Per-vehicle breakdown', 'Event counts by category'); root.append(tbl.panel);
+  [types.body, veh.body, tbl.body].forEach(loading);
+  const [byType, byVeh] = await Promise.all([q('/api/alerts/summary'), q('/api/alerts/by-vehicle')]);
+  if (byType.length) donut(types.body, byType.map((r) => ({ label: r.alert_type, n: r.n })));
+  else empty(types.body, 'Safety events arrive with FMS credentials');
+  hbars(veh.body, byVeh.slice(0, 10).map((r) => ({ label: r.plate, n: r.alerts })), { color: '--s8' });
+  tbl.body.innerHTML = '';
+  tbl.body.append(tableFrom(byVeh.slice(0, 30), [
+    { label: 'Plate', key: 'plate' }, { label: 'Total', key: 'alerts', num: true },
+    { label: 'Harsh brake', key: 'harsh_brake', num: true }, { label: 'Harsh accel', key: 'harsh_accel', num: true },
+    { label: 'Sharp turn', key: 'sharp_turn', num: true }, { label: 'Overspeed', key: 'overspeed', num: true },
+  ]));
+};
+
+V.unauthorized = async (root) => {
+  const kh = el('div', 'kpis'); root.append(kh);
+  const g = el('div', 'grid g23'); root.append(g);
+  const trend = panel('Occupancy per day', 'Unauthorized vs booked occupancy segments'); g.append(trend.panel);
+  const verdicts = panel('How segments resolve', 'Every seat-occupancy interval, classified'); g.append(verdicts.panel);
+  const veh = panel('Vehicles with unexplained trips', 'Ranked by count — click to inspect'); root.append(veh.panel);
+  const list = panel('Flagged segments', 'Click a row for the full evidence trail'); root.append(list.panel);
+  const health = panel('Seat-sensor health', 'A dead or stuck pad makes the numbers above unreliable'); root.append(health.panel);
+  [kh, trend.body, verdicts.body, veh.body, list.body, health.body].forEach(loading);
+
+  const [sum, daily, byVeh, rows, sensors] = await Promise.all([
+    q('/api/unauthorized/summary'), q('/api/unauthorized/daily'), q('/api/unauthorized/by-vehicle'),
+    q('/api/unauthorized/list', { verdict: 'unauthorized' }), q('/api/sensor-health'),
+  ]);
+  const t = sum.totals || {};
+  kh.innerHTML = [
+    ['Unexplained trips', fmt(t.unauthorized || 0), 'no booking on any channel'],
+    ['Unexplained km', fmt(t.unauth_km || 0) + ' km', 'distance carried off-book'],
+    ['Matched to a booking', fmt(t.authorized || 0), 'legitimate, reconciled'],
+    ['Sensor suspect', fmt(t.sensor_suspect || 0), 'excluded — likely hardware'],
+    ['Inconclusive', fmt(t.partial || 0), 'telemetry gaps — cannot judge'],
+  ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+
+  if (t.low_confidence) {
+    const w = el('div', 'panel');
+    w.innerHTML = `<div class="note err">⚠ ${fmt(t.low_confidence)} flagged segment(s) were assessed while a revenue channel was unavailable — a booking may exist that we could not read. Fix the source in Settings before acting on these.</div>`;
+    root.insertBefore(w, g);
+  }
+
+  barChart(trend.body, daily, { x: 'd', y: 'unauthorized', color: '--s8', label: 'unexplained',
+    onClick: (d) => drill(`Unexplained occupancy on ${d.d}`, 'Segments flagged that day', async (b) => {
+      const rs = await api(`/api/unauthorized/list?from=${d.d}&to=${d.d}&verdict=unauthorized`);
+      b.innerHTML = ''; b.append(segTable(rs));
+    }) });
+  donut(verdicts.body, (sum.byVerdict || []).map((r) => ({ label: r.verdict, n: r.n })),
+    { onClick: (d) => drill(`Segments: ${d.label}`, 'All occupancy intervals with this verdict', async (b) => {
+        const rs = await q('/api/unauthorized/list', { verdict: d.label }); b.innerHTML = ''; b.append(segTable(rs)); }) });
+
+  veh.body.innerHTML = '';
+  if (byVeh.length) hbars(veh.body, byVeh.slice(0, 12).map((r) => ({ label: r.plate, n: r.unauthorized })), { color: '--s8',
+    onClick: (d) => drill(`Vehicle ${d.label}`, 'Unexplained occupancy segments', async (b) => {
+      const rs = await q('/api/unauthorized/list', { verdict: 'unauthorized' });
+      b.innerHTML = ''; b.append(segTable(rs.filter((r) => r.plate === d.label))); }) });
+  else empty(veh.body, 'No unexplained trips detected in this range');
+
+  list.body.innerHTML = ''; list.body.append(segTable(rows));
+
+  health.body.innerHTML = '';
+  const flagged = sensors.map((s2) => ({ ...s2,
+    ratio: s2.total_fixes ? (s2.occupied_fixes / s2.total_fixes * 100).toFixed(1) : '0',
+    verdict: s2.occupied_fixes === 0 ? 'never triggers' : (s2.sensor_suspect_segments > 0 ? 'suspect' : 'ok') }));
+  health.body.append(tableFrom(flagged.slice(0, 20), [
+    { label: 'Plate', key: 'plate' },
+    { label: 'Occupied fixes', key: 'occupied_fixes', num: true },
+    { label: 'Total fixes', key: 'total_fixes', num: true },
+    { label: 'Occupied %', key: 'ratio', num: true, render: (r) => r.ratio + '%' },
+    { label: 'Sensor', key: 'verdict', render: (r) => `<span class="tag ${r.verdict === 'ok' ? 'ok' : r.verdict === 'suspect' ? 'warn' : 'bad'}">${esc(r.verdict)}</span>` },
+  ]));
+};
+
+// shared: table of occupancy segments with click-through evidence
+function segTable(rows) {
+  if (!rows.length) { const d = el('div'); empty(d, 'Nothing flagged here'); return d; }
+  const t = tableFrom(rows, [
+    { label: 'Plate', key: 'plate' },
+    { label: 'Started', key: 'started_at', render: (r) => new Date(r.started_at).toLocaleString() },
+    { label: 'Duration', key: 'duration_min', num: true, render: (r) => r.duration_min + ' min' },
+    { label: 'Distance', key: 'distance_km', num: true, render: (r) => (r.distance_km ?? 0) + ' km' },
+    { label: 'Top speed', key: 'top_speed', num: true, render: (r) => (r.top_speed ?? 0) + ' km/h' },
+    { label: 'Verdict', key: 'verdict', render: (r) => `<span class="tag ${r.verdict === 'unauthorized' ? 'bad' : r.verdict === 'authorized' ? 'ok' : 'warn'}">${esc(r.verdict)}</span>` },
+    { label: 'Confidence', key: 'low_confidence', render: (r) => r.low_confidence ? '<span class="tag warn">low</span>' : '<span class="tag dim">ok</span>' },
+  ]);
+  t.querySelectorAll('tbody tr').forEach((tr, i) => { tr.style.cursor = 'pointer';
+    tr.onclick = () => { const r = rows[i]; drill(`${r.plate} · ${new Date(r.started_at).toLocaleString()}`,
+      `${r.verdict} — ${r.duration_min} min, ${r.distance_km} km`, async (b) => {
+        b.innerHTML = '';
+        b.append(el('div', 'kpis', [['Duration', r.duration_min + ' min'], ['Distance', (r.distance_km ?? 0) + ' km'],
+          ['Top speed', (r.top_speed ?? 0) + ' km/h'], ['GPS fixes', fmt(r.fixes)],
+          ['Largest gap', (r.max_gap_min ?? 0) + ' min'], ['Ignition on', Math.round((r.ignition_ratio || 0) * 100) + '%']]
+          .map(([l, n]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div></div>`).join('')));
+        const why = el('div', 'panel');
+        why.append(el('h3', null, 'Why this verdict'));
+        const reasons = {
+          unauthorized: 'The seat sensor reported a passenger, the vehicle covered real distance, and no booking on Uber, Yango, Bolt, the hotel platform or FMS overlaps this window (±15 min).',
+          authorized: `Matched to a ${r.matched_platform || 'booking'} (${r.matched_trip_id || '—'}).`,
+          sensor_suspect: 'Occupancy was implausibly long, or registered with the ignition off — consistent with a stuck seat pad rather than a passenger.',
+          partial: 'A telemetry gap falls inside this window, so we cannot claim to have observed the whole interval.',
+          stationary: 'Occupied but the vehicle never really moved — not a trip.',
+        };
+        why.append(el('p', 'note', reasons[r.verdict] || ''));
+        if (r.low_confidence) why.append(el('p', 'note err', `Assessed while these sources were unavailable: ${esc(r.unavailable_sources || '')}. A booking may exist that we could not read.`));
+        b.append(why);
+        const trk = el('div', 'panel'); trk.append(el('h3', null, 'Telemetry during this window'), el('p', 'cap', 'CABMAN 5-minute fixes'));
+        const track = await api(`/api/track?plate=${encodeURIComponent(r.plate)}&from=${r.started_at}&to=${r.ended_at}`);
+        if (track.length) {
+          const sp = el('div'); trk.append(sp);
+          areaChart(sp, track.map((x) => ({ t: new Date(x.captured_at).toLocaleTimeString(), speed: +x.speed || 0 })), { x: 't', y: 'speed', color: '--s8' });
+          trk.append(tableFrom(track, [
+            { label: 'Time', key: 'captured_at', render: (x) => new Date(x.captured_at).toLocaleTimeString() },
+            { label: 'Speed', key: 'speed', num: true }, { label: 'Seat', key: 'seat_occupied', render: (x) => x.seat_occupied ? 'occupied' : 'empty' },
+            { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true }]));
+        } else trk.append(el('div', 'note', 'No fixes stored for this window.'));
+        b.append(trk);
+      }); };
+  });
+  return t;
+}
+
+V.live = async (root) => {
+  const kh = el('div', 'kpis'); root.append(kh);
+  const p = panel('Live vehicles', 'CABMAN refreshes every 5 minutes · click a row for the GPS breadcrumb'); root.append(p.panel);
+  [kh, p.body].forEach(loading);
+  const rows = await api('/api/live');
+  const fresh = rows.filter((r) => !r.stale).length;
+  const moving = rows.filter((r) => +r.speed > 3).length;
+  const engaged = rows.filter((r) => /engag/i.test(r.status || '') || r.seat_occupied).length;
+  kh.innerHTML = [['Vehicles tracked', fmt(rows.length), 'with a GPS fix'],
+    ['Fresh (<11 min)', fmt(fresh), 'reporting now'],
+    ['Moving', fmt(moving), 'speed > 3 km/h'],
+    ['Engaged', fmt(engaged), 'passenger on board']]
+    .map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+  p.body.innerHTML = '';
+  if (!rows.length) { empty(p.body, 'Positions appear once CABMAN credentials are saved in Settings'); return; }
+  const t = tableFrom(rows, [
+    { label: 'Plate', key: 'plate' }, { label: 'Fleet', key: 'fleet_id' },
+    { label: 'Status', key: 'status', render: (r) => `<span class="tag ${/engag/i.test(r.status || '') ? 'ok' : 'dim'}">${esc(r.status || '—')}</span>` },
+    { label: 'Speed', key: 'speed', num: true, render: (r) => r.speed != null ? fmt(r.speed) + ' km/h' : '—' },
+    { label: 'Seat', key: 'seat_occupied', render: (r) => r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag dim">empty</span>' },
+    { label: 'Fix age', key: 'polled_at', render: (r) => `<span class="tag ${r.stale ? 'warn' : 'ok'}">${r.stale ? 'stale' : 'live'}</span>` },
+    { label: 'Last fix', key: 'captured_at', render: (r) => new Date(r.captured_at).toLocaleTimeString() },
+  ]);
+  t.querySelectorAll('tbody tr').forEach((tr, i) => { tr.style.cursor = 'pointer';
+    tr.onclick = () => { const v = rows[i]; drill(`Vehicle ${v.plate}`, 'GPS breadcrumb (5-minute resolution)', async (b) => {
+      const track = await api(`/api/track?plate=${encodeURIComponent(v.plate)}`);
+      b.innerHTML = '';
+      if (!track.length) return empty(b, 'No breadcrumb stored yet');
+      const sp = panel('Speed over time', `${track.length} fixes`); b.append(sp.panel);
+      areaChart(sp.body, track.slice(-60).map((r) => ({ t: new Date(r.captured_at).toLocaleTimeString(), speed: +r.speed || 0 })),
+        { x: 't', y: 'speed', color: '--s3' });
+      b.append(tableFrom(track.slice(-25).reverse(), [
+        { label: 'Time', key: 'captured_at', render: (r) => new Date(r.captured_at).toLocaleString() },
+        { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true },
+        { label: 'Speed', key: 'speed', num: true }, { label: 'Status', key: 'status' }]));
+    }); };
+  });
+  p.body.append(t);
+};
+
+V.sources = async (root) => {
+  const st = panel('Collector health', 'Last run per source — errors usually mean a credential needs updating'); root.append(st.panel);
+  const cv = panel('Data coverage', 'What has actually landed in the database'); root.append(cv.panel);
+  [st.body, cv.body].forEach(loading);
+  const [status, coverage] = await Promise.all([api('/api/status'), api('/api/coverage')]);
+  st.body.innerHTML = '';
+  st.body.append(tableFrom(status, [
+    { label: 'Source', key: 'source' }, { label: 'Mode', key: 'mode' },
+    { label: 'Status', key: 'status', render: (r) => `<span class="tag ${r.status === 'ok' ? 'ok' : 'bad'}">${esc(r.status)}</span>` },
+    { label: 'Rows', key: 'rows_written', num: true },
+    { label: 'Last run', key: 'finished_at', render: (r) => r.finished_at ? new Date(r.finished_at).toLocaleString() : '—' },
+    { label: 'Detail', key: 'error', render: (r) => r.error ? `<span class="note err">${esc(String(r.error).slice(0, 90))}</span>` : '<span class="note ok">healthy</span>' },
+  ]));
+  cv.body.innerHTML = '';
+  const cov = [
+    ...(coverage.trips || []).map((r) => ({ what: `trips · ${r.platform}`, n: r.n, from: r.from_ts, to: r.to_ts })),
+    ...(coverage.telemetry || []).map((r) => ({ what: `telemetry · ${r.source}`, n: r.n, from: null, to: r.last_poll })),
+    ...(coverage.alerts || []).map((r) => ({ what: 'safety alerts', n: r.n, from: null, to: r.latest })),
+    ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', n: r.n, from: null, to: r.latest })),
+  ];
+  cv.body.append(tableFrom(cov, [
+    { label: 'Dataset', key: 'what' }, { label: 'Rows', key: 'n', num: true },
+    { label: 'From', key: 'from', render: (r) => r.from ? String(r.from).slice(0, 10) : '—' },
+    { label: 'Latest', key: 'to', render: (r) => r.to ? String(r.to).slice(0, 16).replace('T', ' ') : '—' },
+  ]));
+};
+
+V.settings = async (root) => {
+  const auth = panel('Admin access', 'Changes require the admin token configured on the server'); root.append(auth.panel);
+  const tokRow = el('div', 'btnrow');
+  tokRow.innerHTML = `<input id="admTok" type="password" placeholder="admin token" style="flex:1;min-width:220px;background:var(--paper);border:1px solid var(--rule-strong);border-radius:3px;padding:8px 10px;font-family:'IBM Plex Mono';font-size:.8rem" value="${esc(state.admin)}">
+    <button class="btn sec" id="saveTok">Remember</button><span class="note" id="tokNote"></span>`;
+  auth.body.append(tokRow);
+  tokRow.querySelector('#saveTok').onclick = () => {
+    state.admin = tokRow.querySelector('#admTok').value.trim();
+    localStorage.setItem('adminToken', state.admin);
+    tokRow.querySelector('#tokNote').className = 'note ok';
+    tokRow.querySelector('#tokNote').textContent = 'saved in this browser';
+  };
+
+  const credP = panel('Credentials', 'Stored encrypted in the database. Leave blank to keep the current value; the collector picks changes up within 30 seconds.');
+  root.append(credP.panel); loading(credP.body);
+  const defs = await api('/api/settings');
+  credP.body.innerHTML = '';
+  const wrap = el('div', 'setgrid'); credP.body.append(wrap);
+  let grp = null;
+  defs.forEach((d) => {
+    if (d.group !== grp) { grp = d.group; wrap.append(el('div', 'setgroup', grp)); }
+    const row = el('div', 'setrow');
+    row.innerHTML = `<div class="lab">${esc(d.label)}<small>${esc(d.key)}${d.hint ? ' · ' + esc(d.hint) : ''}</small></div>
+      <div><input data-k="${esc(d.key)}" type="${d.secret ? 'password' : 'text'}" placeholder="${d.configured ? esc(d.value) : 'not set'}" ${d.secret ? '' : `value="${esc(d.value)}"`}></div>
+      <div><span class="tag ${d.configured ? (d.source === 'settings' ? 'ok' : 'dim') : 'warn'}">${d.configured ? d.source : 'unset'}</span></div>`;
+    wrap.append(row);
+  });
+  const actions = el('div', 'btnrow'); actions.style.marginTop = '16px';
+  actions.innerHTML = `<button class="btn" id="saveAll">Save credentials</button>
+    <button class="btn sec" id="runInc">Run incremental now</button>
+    <button class="btn sec" id="runBack">Run 12-month backfill</button>
+    <span class="note" id="setNote"></span>`;
+  credP.body.append(actions);
+  const note = actions.querySelector('#setNote');
+  const post = async (path, body) => {
+    if (!state.admin) { note.className = 'note err'; note.textContent = 'enter the admin token first'; return null; }
+    try {
+      const r = await fetch(path, { method: path.endsWith('trigger') ? 'POST' : 'PUT',
+        headers: { 'content-type': 'application/json', 'x-admin-token': state.admin }, body: JSON.stringify(body) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.status);
+      note.className = 'note ok'; return j;
+    } catch (e) { note.className = 'note err'; note.textContent = String(e.message); return null; }
+  };
+  actions.querySelector('#saveAll').onclick = async () => {
+    const payload = {};
+    wrap.querySelectorAll('input[data-k]').forEach((i) => { if (i.value.trim()) payload[i.dataset.k] = i.value.trim(); });
+    if (!Object.keys(payload).length) { note.className = 'note'; note.textContent = 'nothing changed'; return; }
+    const j = await post('/api/settings', payload);
+    if (j) { note.textContent = `saved ${j.updated.length} setting(s)`; render(); }
+  };
+  actions.querySelector('#runInc').onclick = async () => { const j = await post('/api/settings/trigger', { mode: 'incremental' }); if (j) note.textContent = 'incremental queued — collector picks it up within ~20s'; };
+  actions.querySelector('#runBack').onclick = async () => { const j = await post('/api/settings/trigger', { mode: 'backfill' }); if (j) note.textContent = 'backfill queued — this pulls up to 12 months and takes a while'; };
+};
+
+/* ─────────── render loop ─────────── */
+async function render() {
+  renderNav(); setHeader();
+  const root = $('#view'); root.innerHTML = '';
+  try { await (V[state.view] || V.overview)(root); }
+  catch (e) { root.innerHTML = `<div class="empty"><b>Could not load this view</b>${esc(e.message)}</div>`; }
+  freshness();
+}
+async function freshness() {
+  try {
+    const s = await api('/api/status');
+    const last = s.map((r) => r.finished_at).filter(Boolean).sort().pop();
+    const bad = s.filter((r) => r.status !== 'ok').length;
+    $('#freshness').innerHTML = last
+      ? `updated ${new Date(last).toLocaleTimeString()}<br>${bad ? `<span style="color:var(--warning)">${bad} source(s) need attention</span>` : 'all sources healthy'}`
+      : 'awaiting first collection';
+  } catch { $('#freshness').textContent = 'status unavailable'; }
+}
+
+$('#fRange').onchange = (e) => { state.days = +e.target.value; render(); };
+$('#fPlatform').onchange = (e) => { state.platform = e.target.value; render(); };
+$('#fFleet').onchange = (e) => { state.fleet = e.target.value; render(); };
+$('#refreshBtn').onclick = () => render();
+$('#themeBtn').onclick = () => {
+  const r = document.documentElement, cur = r.getAttribute('data-theme');
+  const dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  r.setAttribute('data-theme', dark ? 'light' : 'dark');
+  localStorage.setItem('theme', dark ? 'light' : 'dark');
+};
+if (localStorage.getItem('theme')) document.documentElement.setAttribute('data-theme', localStorage.getItem('theme'));
+if (location.hash.slice(1) && VIEWS.some((v) => v.id === location.hash.slice(1))) state.view = location.hash.slice(1);
+window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (VIEWS.some((v) => v.id === h)) { state.view = h; render(); } });
+render();
+setInterval(() => { if (state.view === 'live') render(); }, 60000);

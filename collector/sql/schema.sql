@@ -198,3 +198,42 @@ CREATE TABLE IF NOT EXISTS source_state (
   updated_at TIMESTAMPTZ DEFAULT now(),
   PRIMARY KEY (source, fleet_id, key)
 );
+
+-- ---------------------------------------------------------------------------
+-- Settings / credential store (edited from the dashboard Settings page).
+-- Secret values are stored AES-256-GCM encrypted (see src/settings.js).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS app_setting (
+  key        TEXT PRIMARY KEY,
+  value      TEXT,
+  is_secret  BOOLEAN DEFAULT false,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- ---------------------------------------------------------------------------
+-- Occupancy segments: seat-sensor derived "someone was aboard" intervals, and
+-- whether a booking on any revenue channel explains them (see src/reconcile.js).
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS occupancy_segment (
+  plate            TEXT NOT NULL,
+  started_at       TIMESTAMPTZ NOT NULL,
+  ended_at         TIMESTAMPTZ,
+  fleet_id         TEXT,
+  duration_min     INT,
+  distance_km      DOUBLE PRECISION,
+  top_speed        DOUBLE PRECISION,
+  fixes            INT,
+  max_gap_min      INT,
+  ignition_ratio   DOUBLE PRECISION,
+  start_lat        DOUBLE PRECISION, start_lng DOUBLE PRECISION,
+  end_lat          DOUBLE PRECISION, end_lng   DOUBLE PRECISION,
+  verdict          TEXT,          -- authorized | unauthorized | sensor_suspect | partial | stationary
+  matched_platform TEXT,
+  matched_trip_id  TEXT,
+  low_confidence   BOOLEAN DEFAULT false,
+  unavailable_sources TEXT,
+  ingested_at      TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (plate, started_at)
+);
+CREATE INDEX IF NOT EXISTS occ_verdict_idx ON occupancy_segment (verdict, started_at DESC);
+CREATE INDEX IF NOT EXISTS occ_started_idx ON occupancy_segment (started_at DESC);

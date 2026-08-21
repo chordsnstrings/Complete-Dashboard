@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fleet Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div id="app">
+  <aside class="side">
+    <div class="brand"><span class="dot"></span><b>Fleet</b>Dashboard</div>
+    <nav id="nav"></nav>
+    <div class="side-foot">
+      <button id="themeBtn" title="Toggle theme">◐ theme</button>
+      <div id="freshness" class="fresh">—</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="viewTitle">Overview</h1>
+        <p id="viewSub" class="sub">Fleet-wide performance across every platform</p>
+      </div>
+      <div class="filters" id="filters">
+        <select id="fRange" title="Date range">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="365">Last 12 months</option>
+        </select>
+        <select id="fPlatform" title="Platform">
+          <option value="">All platforms</option>
+          <option value="uber">Uber</option><option value="yango">Yango</option>
+          <option value="bolt">Bolt</option>
+          <option value="hotel">Hotel</option><option value="fms">FMS telematics</option>
+        </select>
+        <select id="fFleet" title="Fleet">
+          <option value="">Both fleets</option>
+          <option value="ecosine">Ecosine</option><option value="egari">Egari</option>
+        </select>
+        <button id="refreshBtn" title="Refresh">⟳</button>
+      </div>
+    </header>
+    <section id="view"></section>
+  </main>
+</div>
+<div id="tt"></div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

@@ -27,6 +27,18 @@ async function main() {
     setInterval(() => liveStatusTick(), config.liveStatusSeconds * 1000);
     // historical/aggregate refresh every 30 minutes
     cron.schedule('*/30 * * * *', () => incremental().catch((e) => log.error('scheduler', 'incremental', { err: String(e) })));
+    // honour on-demand runs queued from the Settings page (POST /api/settings/trigger)
+    setInterval(async () => {
+      try {
+        const { rows } = await pool.query("SELECT value FROM source_state WHERE source='collector' AND key='trigger'");
+        const mode = rows[0]?.value;
+        if (!mode) return;
+        await pool.query("DELETE FROM source_state WHERE source='collector' AND key='trigger'");
+        log.info('scheduler', `on-demand ${mode} requested`);
+        if (mode === 'backfill') await backfill(); else await incremental();
+      } catch (e) { log.error('scheduler', 'trigger poll', { err: String(e) }); }
+    }, 20000);
+
     // kick one of each at boot so the dashboard has fresh data immediately
     cabmanTick();
     incremental().catch((e) => log.error('scheduler', 'boot-incremental', { err: String(e) }));

@@ -3,17 +3,19 @@ import pg from 'pg';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { config } from './config.js';
 import { log } from './log.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-// Managed Postgres (e.g. DigitalOcean) presents a CA-signed cert the container doesn't have in its
-// trust store. We enable TLS but skip chain verification. IMPORTANT: strip `sslmode` from the URL
-// first — otherwise pg-connection-string parses it as verify-full and overrides our ssl option,
-// producing "self-signed certificate in certificate chain".
+
+// Connection string is infra config — read straight from the environment (kept out of config.js to
+// avoid an import cycle: config → settings → db). Managed Postgres presents a CA-signed cert the
+// container doesn't trust; we enable TLS but skip chain verification. Strip `sslmode` first, else
+// pg-connection-string parses it as verify-full and overrides our ssl option.
 function poolConfig() {
-  let cs = config.db.connectionString;
-  const needSsl = process.env.DATABASE_SSL === 'true' || /sslmode=/i.test(cs);
+  const p = process.env;
+  let cs = p.DATABASE_URL
+    || `postgres://${p.PGUSER || 'fleet'}:${p.PGPASSWORD || 'fleet'}@${p.PGHOST || 'db'}:${p.PGPORT || '5432'}/${p.PGDATABASE || 'fleet'}`;
+  const needSsl = p.DATABASE_SSL === 'true' || /sslmode=/i.test(cs);
   if (needSsl) { try { const u = new URL(cs); u.searchParams.delete('sslmode'); cs = u.toString(); } catch { /* keep as-is */ } }
   return { connectionString: cs, max: 8, ssl: needSsl ? { rejectUnauthorized: false } : undefined };
 }
