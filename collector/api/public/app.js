@@ -3,7 +3,7 @@
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
-import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, pill, dayStr, dtStr, money, pct } from './ui.js';
+import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, pill, note, dayStr, dtStr, money, pct } from './ui.js';
 import { state, api, params, q, qAll, href, parseHash, navigate } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
@@ -130,14 +130,88 @@ V.demand = async (root) => {
   const g = el('div', 'grid g2'); root.append(g);
   const hourly = panel('Hourly demand curve', 'Trip requests by hour of day'); g.append(hourly.panel);
   const daily = panel('Daily volume', 'Click a bar to drill into that day'); g.append(daily.panel);
+  const ctxP = panel('Volume against the weather and the calendar',
+    'Dubai demand is weather- and calendar-driven: heat empties the streets, rain floods them, and Ramadan moves the whole day. This puts the two side by side so a dip has a candidate explanation rather than a shrug.');
+  root.append(ctxP.panel);
   const hm = panel('Weekday × hour heatmap', 'Darker = busier. Click a cell for that slot'); root.append(hm.panel);
-  [hourly.body, daily.body, hm.body].forEach(loading);
-  const [h, d, grid] = await Promise.all([q('/api/trips/hourly'), q('/api/trips/daily'), q('/api/trips/heatmap')]);
+  [hourly.body, daily.body, ctxP.body, hm.body].forEach(loading);
+
+  const [h, d, grid, ctx] = await Promise.all([
+    q('/api/trips/hourly'), q('/api/trips/daily'), q('/api/trips/heatmap'),
+    q('/api/context').catch(() => []),
+  ]);
   areaChart(hourly.body, h.map((r) => ({ label: String(r.h).padStart(2, '0') + ':00', trips: r.trips })), { x: 'label', y: 'trips' });
   barChart(daily.body, d, { x: 'd', y: 'trips', onClick: (r) => drillTrips(`Trips on ${r.d}`, 'Drivers active that day', { from: r.d, to: r.d }) });
+
+  /* Join the day's trips to that day's weather and calendar. Both sides are
+     keyed on the calendar date, so a missing weather row leaves the trip row
+     intact rather than dropping the day. */
+  ctxP.body.innerHTML = '';
+  const day = (v) => String(v).slice(0, 10);
+  const byDay = new Map(ctx.map((c) => [day(c.day), c]));
+  const rows = d.map((r) => ({ ...r, ...(byDay.get(day(r.d)) || {}) }));
+  const withWeather = rows.filter((r) => r.temp_max != null);
+  if (!withWeather.length) {
+    ctxP.body.append(note('No weather rows for this range yet. The collector pulls Dubai daily observations and forecasts each cycle.'));
+  } else {
+    // Correlation between temperature and volume, stated plainly with its own
+    // caveat — a month of days is not enough to call this causal.
+    const n = withWeather.length;
+    const mx = withWeather.reduce((a, r) => a + r.temp_max, 0) / n;
+    const my = withWeather.reduce((a, r) => a + r.trips, 0) / n;
+    let sxy = 0, sxx = 0, syy = 0;
+    for (const r of withWeather) {
+      const dx = r.temp_max - mx, dy = r.trips - my;
+      sxy += dx * dy; sxx += dx * dx; syy += dy * dy;
+    }
+    const rho = sxx && syy ? sxy / Math.sqrt(sxx * syy) : 0;
+    const hot = withWeather.filter((r) => r.temp_max >= 42);
+    const mild = withWeather.filter((r) => r.temp_max < 42);
+    const avg = (a) => (a.length ? a.reduce((s, r) => s + r.trips, 0) / a.length : null);
+    const wet = rows.filter((r) => r.precipitation > 0);
+    const hol = rows.filter((r) => r.is_holiday);
+    const ram = rows.filter((r) => r.is_ramadan);
+
+    ctxP.body.append(kpiRow([
+      { label: 'Hottest day', value: `${Math.max(...withWeather.map((r) => r.temp_max)).toFixed(1)}°C`,
+        sub: `${fmt(withWeather.filter((r) => r.temp_max >= 42).length)} days at or above 42°C` },
+      { label: 'Trips on 42°C+ days', value: hot.length ? fmt(Math.round(avg(hot))) : '—',
+        sub: mild.length ? `vs ${fmt(Math.round(avg(mild)))} on cooler days` : 'no cooler days to compare' },
+      { label: 'Temp vs volume', value: rho.toFixed(2),
+        sub: Math.abs(rho) < 0.3 ? 'no meaningful relationship in this window'
+          : rho < 0 ? 'hotter days run quieter' : 'hotter days run busier',
+        tone: Math.abs(rho) < 0.3 ? null : 'warn' },
+      { label: 'Days with rain', value: fmt(wet.length),
+        sub: wet.length ? `averaging ${fmt(Math.round(avg(wet)))} trips` : 'none in this range' },
+      hol.length ? { label: 'Holidays', value: fmt(hol.length),
+        sub: `averaging ${fmt(Math.round(avg(hol)))} trips` } : null,
+      ram.length ? { label: 'Ramadan days', value: fmt(ram.length),
+        sub: `averaging ${fmt(Math.round(avg(ram)))} trips` } : null,
+    ]));
+
+    ctxP.body.append(tableFrom([...rows].reverse().slice(0, 45), [
+      { label: 'Day', key: 'd', render: (r) => dayStr(r.d) },
+      { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },
+      { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
+      { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+      { label: 'Max temp', key: 'temp_max', num: true, render: (r) => (r.temp_max != null
+        ? `<span class="pill ${r.temp_max >= 44 ? 'bad' : r.temp_max >= 41 ? 'warn' : 'ok'}">${r.temp_max.toFixed(1)}°C</span>` : '—') },
+      { label: 'Rain', key: 'precipitation', num: true, render: (r) => (r.precipitation ? `${r.precipitation} mm` : '—') },
+      { label: 'Wind', key: 'wind_max', num: true, render: (r) => (r.wind_max != null ? `${Math.round(r.wind_max)} km/h` : '—') },
+      { label: 'Calendar', key: '_c', render: (r) => [
+        r.is_holiday ? pill(r.holiday_name || 'holiday', 'warn') : null,
+        r.is_ramadan ? pill('Ramadan', 'warn') : null,
+        r.is_forecast ? pill('forecast', null) : null,
+      ].filter(Boolean).join(' ') || '—' },
+    ]));
+    ctxP.body.append(el('p', 'cap',
+      'A correlation over a few weeks of days is a hint, not a finding — Dubai\'s temperature barely varies within a month, ' +
+      'so the seasonal effect only becomes visible across a longer window. Rows marked forecast have not happened yet.'));
+  }
+
   heatmap(hm.body, grid, { onClick: (c) => drill(`${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][c.dow]} at ${String(c.h).padStart(2,'0')}:00`,
     `${fmt(c.trips)} trips in this slot across the selected range`, async (b) => { b.innerHTML = '<div class="note">Slot-level trip list requires per-trip drill; showing driver ranking for the range.</div>';
-      const rows = await q('/api/drivers/leaderboard'); b.append(tableFrom(rows.slice(0, 25), [
+      const rows2 = await q('/api/drivers/leaderboard'); b.append(tableFrom(rows2.slice(0, 25), [
         { label: 'Driver', key: 'driver_name' }, { label: 'Trips', key: 'trips', num: true }, { label: 'Km', key: 'km', num: true }])); }) });
 };
 
@@ -188,9 +262,52 @@ V.vehicles = async (root) => {
   await renderVehicleDirectory(root);
   const spread = panel('Fleet spread', 'How trips distribute across the fleet — a long tail here means assets carrying no load');
   root.append(spread.panel); loading(spread.body);
-  const rows = await q('/api/vehicles');
+  const tierP = panel('Which assets serve which tier',
+    'Uber Black and Comfort earn several times what UberX does per trip, so tier is an allocation decision. This is which cars are actually taking that work.');
+  root.append(tierP.panel); loading(tierP.body);
+
+  const [rows, byTier] = await Promise.all([q('/api/vehicles'), q('/api/product/by-vehicle').catch(() => [])]);
   hbars(spread.body, rows.slice(0, 14).map((r) => ({ label: r.plate, n: r.trips })), { seq: true,
     onClick: (d) => { location.hash = href('vehicle', d.label); } });
+
+  tierP.body.innerHTML = '';
+  if (!byTier.length) {
+    tierP.body.append(note('No product tier recorded against vehicles in this range. Uber names the tier on each trip, so this fills in with the Uber feed.'));
+  } else {
+    // Pivot to one row per plate, one column per tier — the shape that answers
+    // "is the premium work concentrated, and on which cars".
+    const tiers = [...new Set(byTier.map((r) => r.product))]
+      .sort((a, b) => byTier.filter((x) => x.product === b).reduce((s, x) => s + x.trips, 0)
+                    - byTier.filter((x) => x.product === a).reduce((s, x) => s + x.trips, 0))
+      .slice(0, 6);
+    const byPlate = new Map();
+    for (const r of byTier) {
+      const cur = byPlate.get(r.plate) || { plate: r.plate, total: 0 };
+      cur[r.product] = r.trips; cur.total += r.trips;
+      byPlate.set(r.plate, cur);
+    }
+    const pivot = [...byPlate.values()].sort((a, b) => b.total - a.total).slice(0, 30);
+    tierP.body.append(tableFrom(pivot, [
+      { label: 'Plate', key: 'plate', render: (r) => `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>` },
+      ...tiers.map((t) => ({ label: t, key: t, num: true,
+        render: (r) => (r[t] ? `${fmt(r[t])}<span class="dim"> · ${Math.round((r[t] / r.total) * 100)}%</span>` : '—') })),
+      { label: 'Total', key: 'total', num: true, render: (r) => fmt(r.total) },
+    ]));
+    // Concentration is the actionable part: a premium tier served by two cars
+    // is a single point of failure for the fleet's best-earning work.
+    const premium = tiers.find((t) => /black|lux|premier|comfort/i.test(t));
+    if (premium) {
+      const serving = pivot.filter((r) => r[premium]).sort((a, b) => (b[premium] || 0) - (a[premium] || 0));
+      const total = serving.reduce((a, r) => a + r[premium], 0);
+      const topTwo = serving.slice(0, 2).reduce((a, r) => a + r[premium], 0);
+      tierP.body.append(el('p', 'cap',
+        `${serving.length} vehicle(s) took ${esc(premium)} work. ` +
+        (serving.length && total
+          ? `The top two carried ${Math.round((topTwo / total) * 100)}% of it` +
+            (serving.length <= 3 ? ' — losing one of those cars takes most of the tier with it.' : '.')
+          : '')));
+    }
+  }
 };
 
 // The per-vehicle pages. `state.param` is the plate, `state.sub` is the tab.
@@ -215,23 +332,128 @@ V.platforms = async (root) => {
 };
 
 V.finance = async (root) => {
-  const kh = el('div', 'kpis'); root.append(kh);
+  const kh = el('div'); root.append(kh); loading(kh);
   const g = el('div', 'grid g2'); root.append(g);
   const rev = panel('Revenue per day', 'Fare revenue from trips'); g.append(rev.panel);
-  const pay = panel('Payment mix', 'Cash vs card vs wallet'); g.append(pay.panel);
+  const pay = panel('Payment mix', 'Cash vs card vs wallet — cash is money the fleet has to collect'); g.append(pay.panel);
+  const g2 = el('div', 'grid g2'); root.append(g2);
+  const tier = panel('What each service tier earns', 'Uber Black and Comfort carry a different fare per kilometre than UberX — this is where tier allocation shows up as money');
+  g2.append(tier.panel);
+  const comp = panel('Earnings components', 'How the platform breaks a payout down: fares, tips, promotions, and what it deducts'); g2.append(comp.panel);
+  const tips = panel('Tips by driver', 'Service quality expressed in money. Riders tip the experience, not the route.'); root.append(tips.panel);
   const led = panel('Ledger by category', 'Platform fees, bonuses and adjustments'); root.append(led.panel);
-  [kh, rev.body, pay.body, led.body].forEach(loading);
-  const [k, daily, byPay, ledger] = await Promise.all([q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'payment' }), q('/api/finance/ledger')]);
-  kh.innerHTML = [['Revenue', k.revenue ? 'AED ' + fmt(k.revenue) : '—', 'trip fares'],
-    ['Trips', fmt(k.trips), 'billable rides'],
-    ['Avg fare', k.revenue && k.trips ? 'AED ' + (k.revenue / k.trips).toFixed(1) : '—', 'per trip'],
-    ['Distance', fmt(k.km) + ' km', 'total driven']]
-    .map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
-  areaChart(rev.body, daily, { x: 'd', y: 'revenue', color: '--s3', valueFmt: (v) => fmt(v) });
+  [rev.body, pay.body, tier.body, comp.body, tips.body, led.body].forEach(loading);
+
+  const [k, daily, byPay, byProd, ledger, components, tipRows] = await Promise.all([
+    q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'payment' }), q('/api/mix'),
+    q('/api/finance/ledger'),
+    q('/api/earnings/components').catch(() => []),
+    q('/api/earnings/tips').catch(() => []),
+  ]);
+
+  const cash = byPay.find((p) => /cash/i.test(p.label));
+  const tipTotal = tipRows.reduce((a, r) => a + (+r.tips || 0), 0);
+  const fareTotal = tipRows.reduce((a, r) => a + (+r.fare || 0), 0);
+  kh.replaceWith(kpiRow([
+    { label: 'Revenue', value: money(k.revenue), sub: `${fmt(k.trips)} trips` },
+    { label: 'Average fare', value: k.revenue && k.trips ? money(k.revenue / k.trips, 'AED', 2) : '—', sub: 'per trip' },
+    { label: 'Revenue per km', value: k.revenue && k.km ? money(k.revenue / k.km, 'AED', 2) : '—', sub: `over ${fmt(k.km)} km` },
+    { label: 'Cash to collect', value: cash ? money(cash.revenue) : money(0),
+      sub: cash ? `${fmt(cash.n)} cash trips` : 'card only',
+      tone: cash && k.revenue && cash.revenue / k.revenue > 0.25 ? 'warn' : null },
+    { label: 'Tips', value: tipTotal ? money(tipTotal) : '—',
+      sub: fareTotal ? `${((tipTotal / fareTotal) * 100).toFixed(2)}% of net fare` : 'no tip data collected yet',
+      tone: fareTotal ? (tipTotal / fareTotal >= 0.03 ? 'good' : 'warn') : null },
+  ]));
+
+  areaChart(rev.body, daily, { x: 'd', y: 'revenue', color: '--s3', valueFmt: (v) => money(v) });
   donut(pay.body, byPay);
+
+  /* Tier economics: the count alone hides the point, which is that a tier can
+     be a small share of trips and a large share of revenue, or the reverse. */
+  tier.body.innerHTML = '';
+  const withRev = byProd.filter((r) => r.revenue != null && +r.revenue > 0);
+  if (!withRev.length) {
+    tier.body.append(note('No fares attached to product tiers in this range. The Uber trip export names the tier but omits the fare, so this fills in from the hotel and telematics feeds, or once Uber payout components cover the window.'));
+    if (byProd.length) tier.body.append(tableFrom(byProd.slice(0, 8), [
+      { label: 'Tier', key: 'label' }, { label: 'Trips', key: 'n', num: true, render: (r) => fmt(r.n) },
+    ], { compact: true }));
+  } else {
+    const totalTrips = withRev.reduce((a, r) => a + r.n, 0);
+    const totalRev = withRev.reduce((a, r) => a + +r.revenue, 0);
+    tier.body.append(tableFrom(withRev.slice(0, 10), [
+      { label: 'Tier', key: 'label' },
+      { label: 'Trips', key: 'n', num: true, render: (r) => fmt(r.n) },
+      { label: 'Share of trips', key: '_st', num: true, render: (r) => pct((r.n / totalTrips) * 100, 1) },
+      { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+      { label: 'Share of revenue', key: '_sr', num: true, render: (r) => pct((+r.revenue / totalRev) * 100, 1) },
+      { label: 'Per trip', key: '_pt', num: true, render: (r) => money(+r.revenue / r.n, 'AED', 2) },
+    ], { compact: true }));
+    // The tier that punches above its trip share is the one worth steering toward.
+    const best = [...withRev].sort((a, b) => (+b.revenue / b.n) - (+a.revenue / a.n))[0];
+    const worst = [...withRev].sort((a, b) => (+a.revenue / a.n) - (+b.revenue / b.n))[0];
+    if (best && worst && best.label !== worst.label) {
+      const ratio = (+best.revenue / best.n) / (+worst.revenue / worst.n);
+      tier.body.append(el('p', 'cap',
+        `${esc(best.label)} earns ${ratio.toFixed(1)}× per trip what ${esc(worst.label)} does ` +
+        `(${money(+best.revenue / best.n, 'AED', 2)} vs ${money(+worst.revenue / worst.n, 'AED', 2)}). ` +
+        `Trip length differs between tiers, so compare per-kilometre before reallocating vehicles.`));
+    }
+  }
+
+  /* Components arrive signed: fares and tips add, cash already collected and
+     fees subtract. Drawing them all one way would show a deduction as income. */
+  comp.body.innerHTML = '';
+  if (!components.length) {
+    comp.body.append(note('No payout breakdown collected yet. Uber publishes components per payout period; they appear once a period covering this range has been pulled.'));
+  } else {
+    const agg = new Map();
+    for (const c of components) {
+      const cur = agg.get(c.category) || { label: c.category.replace(/_/g, ' '), amount: 0, parent: c.parent };
+      cur.amount += +c.amount || 0;
+      agg.set(c.category, cur);
+    }
+    const rows = [...agg.values()].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+    const max = Math.max(...rows.map((r) => Math.abs(r.amount))) || 1;
+    const host = el('div', 'hbars');
+    rows.forEach((c, i) => {
+      const neg = c.amount < 0;
+      const r = el('div', 'hb');
+      r.innerHTML = `<div class="k" title="${esc(c.parent || '')}">${esc(c.label)}</div>
+        <div class="track"><div class="fill" style="width:${(Math.abs(c.amount) / max * 100).toFixed(1)}%;
+          background:var(${neg ? '--s2' : i === 0 ? '--b600' : '--b400'});animation-delay:${i * 45}ms"></div></div>
+        <div class="v num">${neg ? '−' : ''}${money(Math.abs(c.amount))}</div>`;
+      host.append(r);
+    });
+    comp.body.append(host);
+    comp.body.append(el('div', 'legend', `
+      <span><i style="background:var(--b500)"></i>added to the payout</span>
+      <span><i style="background:var(--s2)"></i>deducted (cash already taken, fees)</span>`));
+  }
+
+  /* Tips are the one quality signal riders pay for directly. */
+  tips.body.innerHTML = '';
+  if (!tipRows.length) {
+    tips.body.append(note('No tip data yet. Tips never appear in the trip feed — they come from the Uber payout breakdown, which fills in per payout period.'));
+  } else {
+    const t = tableFrom(tipRows.slice(0, 30), [
+      { label: 'Driver', key: 'driver_name', render: (r) => (r.driver_ext_id
+        ? `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name || r.driver_ext_id)}</a>`
+        : esc(r.driver_name || '—')) },
+      { label: 'Tips', key: 'tips', num: true, render: (r) => money(r.tips, 'AED', 2) },
+      { label: 'Net fare', key: 'fare', num: true, render: (r) => money(r.fare) },
+      { label: 'Tip rate', key: 'tip_pct', num: true, render: (r) => (r.tip_pct != null
+        ? `<span class="pill ${+r.tip_pct >= 3 ? 'ok' : +r.tip_pct >= 1 ? 'warn' : 'bad'}">${(+r.tip_pct).toFixed(2)}%</span>` : '—') },
+    ]);
+    tips.body.append(t);
+    tips.body.append(el('p', 'cap',
+      'Tip rate is tips as a share of net fare, so it compares a high-volume driver with a low-volume one fairly. ' +
+      'It reflects the ride experience more than the route — which is what makes it coachable.'));
+  }
+
   led.body.innerHTML = '';
   if (ledger.length) hbars(led.body, ledger.slice(0, 12).map((r) => ({ label: r.category, n: Math.abs(+r.amount) })),
-    { color: '--s2', valueFmt: (v) => 'AED ' + fmt(v) });
+    { color: '--s2', valueFmt: (v) => money(v) });
   else empty(led.body, 'Ledger fills once Yango/Bolt credentials are set');
 };
 
@@ -585,6 +807,34 @@ V.insights = async (root) => {
       b.classList.add('primary'); draw(b.dataset.cat);
     };
   });
+
+  /* What the platform itself is asking for. These are Uber's own targets for
+     the org — acceptance, cancellation, ratings — and they carry weight the
+     fleet's internal rules do not: falling short of them affects allocation. */
+  const rec = panel('What Uber is asking the fleet to fix',
+    'Targets the platform sets for the org. Falling short affects trip allocation, so these are not advisory.');
+  root.append(rec.panel); loading(rec.body);
+  const recs = await api('/api/recommendations').catch(() => []);
+  rec.body.innerHTML = '';
+  if (!recs.length) {
+    rec.body.append(note('No platform recommendations collected. Uber publishes these per org; they appear once the fleet-portal collector has run against an account that can see them.'));
+  } else {
+    rec.body.append(tableFrom(recs, [
+      { label: 'Platform', key: 'platform' },
+      { label: 'Target', key: 'rec_type', render: (r) => esc(String(r.rec_type || '').replace(/_/g, ' ')) },
+      { label: 'Period', key: '_p', render: (r) => (r.period_start
+        ? `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` : 'current') },
+      { label: 'Fleet is at', key: 'org_value', num: true },
+      { label: 'Target', key: 'target_value', num: true },
+      { label: 'Meeting it', key: 'flagged', render: (r) => (r.flagged
+        ? pill('below target', 'bad') : pill('on target', 'ok')) },
+      { label: 'Drivers flagged', key: 'flagged_count', num: true, render: (r) => (r.flagged_count != null ? fmt(r.flagged_count) : '—') },
+    ]));
+    const behind = recs.filter((r) => r.flagged);
+    if (behind.length) rec.body.append(el('p', 'cap',
+      `${behind.length} of ${recs.length} targets are not being met. Each names the drivers behind it — ` +
+      `open a driver's Quality page to see their own acceptance and cancellation figures.`));
+  }
 };
 
 /* Compliance is the one place where the data is unambiguous: a date, and a vehicle

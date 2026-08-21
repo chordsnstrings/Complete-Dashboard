@@ -552,6 +552,78 @@ app.get('/api/breaks', (_, r) => r.json([
     candidate_events: JSON.stringify([EV[5]]) },
 ]));
 
+
+/* ── finance & context fixtures ───────────────────────────────────────────── */
+app.get('/api/mix', (req, r) => {
+  const by = req.query.by;
+  if (by === 'payment') return r.json([
+    { label: 'card', n: 1642, revenue: 61200 }, { label: 'cash', n: 318, revenue: 14800 },
+    { label: 'uber_wallet', n: 83, revenue: 2900 }, { label: 'corporate', n: 41, revenue: 3400 }]);
+  if (by === 'platform') return r.json([
+    { label: 'uber', n: 1508, revenue: 52100 }, { label: 'fms', n: 402, revenue: null },
+    { label: 'hotel', n: 131, revenue: 9073 }, { label: 'yango', n: 43, revenue: 1900 }]);
+  if (by === 'status') return r.json([
+    { label: 'completed', n: 1962, revenue: 78400 }, { label: 'rider_cancelled', n: 91, revenue: 0 },
+    { label: 'driver_cancelled', n: 31, revenue: 0 }]);
+  if (by === 'fleet') return r.json([
+    { label: 'ecosine', n: 1701, revenue: 68200 }, { label: 'egari', n: 383, revenue: 14100 }]);
+  // product tiers — the point is that share of trips and share of revenue differ
+  return r.json([
+    { label: 'UberX', n: 1204, revenue: 34900 },
+    { label: 'Comfort', n: 486, revenue: 24300 },
+    { label: 'Uber Black', n: 112, revenue: 18600 },
+    { label: 'hotel', n: 131, revenue: 9073 },
+    { label: 'Electric', n: 151, revenue: 4400 }]);
+});
+
+app.get('/api/earnings/components', (_, r) => r.json([
+  { driver_ext_id: 'drv-0', driver_name: 'Ahmed Tarig Mohamed', category: 'net_fare', parent: 'earnings', amount: 52180, currency: 'AED' },
+  { driver_ext_id: 'drv-0', driver_name: 'Ahmed Tarig Mohamed', category: 'tip', parent: 'earnings', amount: 1642, currency: 'AED' },
+  { driver_ext_id: 'drv-1', driver_name: 'Muhammad Ashraf Bakhsh', category: 'promotion', parent: 'earnings', amount: 3410, currency: 'AED' },
+  { driver_ext_id: 'drv-1', driver_name: 'Muhammad Ashraf Bakhsh', category: 'toll_reimbursement', parent: 'reimbursements', amount: 980, currency: 'AED' },
+  { driver_ext_id: 'drv-2', driver_name: 'Najeeb Ullah Khan', category: 'cash_collected', parent: 'payouts', amount: -14800, currency: 'AED' },
+  { driver_ext_id: 'drv-2', driver_name: 'Najeeb Ullah Khan', category: 'service_fee', parent: 'payouts', amount: -9120, currency: 'AED' },
+]));
+
+app.get('/api/earnings/tips', (_, r) => r.json(drivers.map((name, i) => ({
+  driver_ext_id: `drv-${i}`, driver_name: name,
+  tips: +(420 - i * 44).toFixed(2), fare: 12800 - i * 900,
+  tip_pct: +(((420 - i * 44) / (12800 - i * 900)) * 100).toFixed(2),
+}))));
+
+app.get('/api/context', (_, r) => {
+  const out = [];
+  for (let b = 30; b >= -3; b--) {
+    const d = new Date(Date.now() - b * 864e5);
+    const iso = d.toISOString().slice(0, 10);
+    out.push({ day: iso + 'T00:00:00.000Z',
+      temp_max: +(38 + Math.sin(b / 4) * 4 + rnd(-1, 2)).toFixed(1),
+      precipitation: b === 9 ? 4.2 : 0, wind_max: +rnd(12, 26).toFixed(1),
+      is_forecast: b < 0, hijri_month: 'Safar',
+      is_ramadan: false, is_holiday: b === 14, holiday_name: b === 14 ? 'Islamic New Year' : null });
+  }
+  r.json(out);
+});
+
+app.get('/api/trips/daily', (_, r) => {
+  const out = [];
+  for (let b = 30; b >= 0; b--) {
+    const d = new Date(Date.now() - b * 864e5).toISOString().slice(0, 10);
+    const trips = Math.round(60 + Math.sin(b / 3) * 18 + rnd(0, 22) - (b === 14 ? 25 : 0));
+    out.push({ d, trips, km: Math.round(trips * rnd(9, 14)), revenue: Math.round(trips * rnd(28, 42)) });
+  }
+  r.json(out);
+});
+
+app.get('/api/recommendations', (_, r) => r.json([
+  { platform: 'uber', rec_type: 'acceptance_rate', period_start: dayISO(28), period_end: dayISO(0),
+    org_value: 0.79, target_value: 0.85, flagged_count: 14, flagged: true, updated_at: new Date().toISOString() },
+  { platform: 'uber', rec_type: 'cancellation_rate', period_start: dayISO(28), period_end: dayISO(0),
+    org_value: 0.11, target_value: 0.06, flagged_count: 9, flagged: true, updated_at: new Date().toISOString() },
+  { platform: 'uber', rec_type: 'driver_rating', period_start: dayISO(28), period_end: dayISO(0),
+    org_value: 4.82, target_value: 4.7, flagged_count: 2, flagged: false, updated_at: new Date().toISOString() },
+]));
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 
 app.use(express.static(join(__dir, 'api', 'public')));
