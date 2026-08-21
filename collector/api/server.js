@@ -19,9 +19,16 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
 });
 
 // Writes (credential changes) require ADMIN_TOKEN via x-admin-token header.
+// When ADMIN_TOKEN is set, writes require it. When it is unset the API runs OPEN —
+// convenient during setup, but it means anyone who reaches this URL can read and
+// change stored credentials. Set ADMIN_TOKEN before treating this as production.
+let warnedOpen = false;
 const requireAdmin = (req, res, next) => {
   const want = process.env.ADMIN_TOKEN;
-  if (!want) return res.status(503).json({ error: 'ADMIN_TOKEN not configured on the server' });
+  if (!want) {
+    if (!warnedOpen) { log.warn('api', 'ADMIN_TOKEN unset — write endpoints are UNAUTHENTICATED'); warnedOpen = true; }
+    return next();
+  }
   if (req.get('x-admin-token') !== want) return res.status(401).json({ error: 'unauthorized' });
   next();
 };
