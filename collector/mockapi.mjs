@@ -998,7 +998,8 @@ app.get('/api/roster/states', (_, r) => r.json({
   ],
   oldest_observation: new Date(Date.now() - 26 * 3600e3).toISOString(),
   newest_observation: new Date().toISOString(), rows: 231,
-  unknown_states: [{ platform: 'yango', word: 'on_order', n: 3 }],
+  unrecognised_words: [{ platform: 'yango', word: 'on_order', n: 3 }],
+  no_state_reported: [{ platform: 'yango', n: 14 }],
 }));
 
 app.get(/^\/api\//, (_, r) => r.json([]));

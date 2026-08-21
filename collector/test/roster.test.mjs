@@ -209,9 +209,15 @@ const st = await get('/api/roster/states');
 check('the provider’s own word is reported alongside the normalised one',
   st.by_state.some((r) => r.state_raw === 'ONBOARDING_STATUS_WAITLIST' && r.state === 'waitlist'),
   JSON.stringify(st.by_state));
-check('words we could not classify are listed rather than hidden',
-  st.unknown_states.length === 1 && st.unknown_states[0].word === 'on_order',
-  JSON.stringify(st.unknown_states));
+// A provider that sends a word we cannot map is a mapping we could add; a
+// provider that sends no state at all is nothing to map. Reported together,
+// fourteen live Yango drivers looked like a classification failure when the
+// endpoint simply does not return a status.
+check('a word we could not map is listed as one',
+  st.unrecognised_words.length === 1 && st.unrecognised_words[0].word === 'on_order',
+  JSON.stringify(st.unrecognised_words));
+check('a provider that sends no state at all is reported separately',
+  Array.isArray(st.no_state_reported), JSON.stringify(st.no_state_reported));
 check('how stale the roster is, is reported',
   st.oldest_observation != null && st.newest_observation != null);
 check('a state row counts how many of its people hold a vehicle',

@@ -171,19 +171,29 @@ async function rosterStates(host) {
     { label: 'Oldest observation', value: d.oldest_observation ? dtStr(d.oldest_observation) : '—',
       sub: 'a roster nobody has refreshed describes the past' },
     { label: 'Newest observation', value: d.newest_observation ? dtStr(d.newest_observation) : '—' },
-    { label: 'Words we could not classify', value: fmt(d.unknown_states.length),
-      tone: d.unknown_states.length ? 'warn' : 'good' },
+    { label: 'Words we could not classify', value: fmt((d.unrecognised_words || []).length),
+      tone: (d.unrecognised_words || []).length ? 'warn' : 'good',
+      sub: 'a mapping we could add' },
+    { label: 'Providers reporting no state', value: fmt((d.no_state_reported || []).length),
+      sub: (d.no_state_reported || []).map((r) => r.platform).join(', ') || 'none' },
   ]));
-  if (d.unknown_states.length) {
+  if ((d.unrecognised_words || []).length) {
     const { panel: p, body } = panel('States we did not recognise',
-      'These are kept as the provider wrote them rather than guessed into a bucket. Guessing wrong '
-      + 'here describes somebody’s employment incorrectly.');
-    body.append(tableFrom(d.unknown_states, [
+      'The provider sent a word and we have no mapping for it. These are kept as written rather than '
+      + 'guessed into a bucket — guessing wrong here describes somebody’s employment incorrectly — and '
+      + 'each one is a mapping that could be added.');
+    body.append(tableFrom(d.unrecognised_words, [
       { label: 'Platform', key: 'platform' },
-      { label: 'The provider’s word', key: 'word', render: (r) => `<code>${esc(r.word || '(empty)')}</code>` },
+      { label: 'The provider’s word', key: 'word', render: (r) => `<code>${esc(r.word)}</code>` },
       { label: 'People', key: 'n', num: true },
     ]));
     host.append(p);
+  }
+  if ((d.no_state_reported || []).length) {
+    host.append(note(`${d.no_state_reported.map((r) => `${r.platform} (${fmt(r.n)} people)`).join(', ')} `
+      + 'send no state at all on the endpoint we read. That is not a classification failure and there is '
+      + 'nothing to map — the roster row still carries the useful fact that these people are on the books, '
+      + 'and nothing is claimed about whether they can work.'));
   }
   if (!d.by_state.length) return empty(host, 'No provider has reported a roster yet');
   host.append(tableFrom(d.by_state, [

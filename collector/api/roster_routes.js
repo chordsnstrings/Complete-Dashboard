@@ -204,8 +204,19 @@ export function rosterRoutes(app, { q, wrap, range }) {
       oldest_observation: freshness?.oldest || null,
       newest_observation: freshness?.newest || null,
       rows: freshness?.rows ?? 0,
-      unknown_states: byState.filter((r) => r.state === 'unknown')
+      /* Two different gaps that both arrive as `unknown`, and only one of them
+         is a mapping problem:
+           - the provider sent a word we do not recognise  -> add it to the map
+           - the provider sent no state at all             -> nothing to map,
+             and the roster row still carries the useful fact that this person
+             is on the books.
+         Reporting them together made fourteen Yango drivers look like a
+         classification failure when the summary endpoint simply does not
+         return a status. */
+      unrecognised_words: byState.filter((r) => r.state === 'unknown' && r.state_raw != null)
         .map((r) => ({ platform: r.platform, word: r.state_raw, n: r.n })),
+      no_state_reported: byState.filter((r) => r.state === 'unknown' && r.state_raw == null)
+        .map((r) => ({ platform: r.platform, n: r.n })),
     });
   }));
 }
