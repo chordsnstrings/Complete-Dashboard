@@ -588,6 +588,72 @@ app.post('/api/events', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
+/* ───────────────── what the sources actually carry ─────────────────
+   Every collector stores the provider's original record in `raw`. That is the
+   only honest answer to "what else does this API give us" — the mapped columns
+   are what we chose to keep, not what arrived. This reports the keys present
+   in `raw`, how often they are filled, and a few example values, so a field
+   worth promoting to a real column can be found rather than guessed at. */
+app.get('/api/schema/raw-fields', wrap(async (req, res) => {
+  const table = ['trip', 'alert', 'telemetry_snapshot', 'driver_performance', 'vehicle_profile']
+    .includes(req.query.table) ? req.query.table : 'trip';
+  const platform = req.query.platform || null;
+  const sample = Math.min(Math.max(+req.query.sample || 4000, 100), 20000);
+
+  const rows = await q(
+    `WITH s AS (
+       SELECT raw FROM ${table}
+       WHERE raw IS NOT NULL AND ($1::text IS NULL OR platform = $1)
+       ORDER BY random() LIMIT ${sample}
+     ),
+     kv AS (SELECT key, value FROM s, jsonb_each(s.raw))
+     SELECT key,
+            count(*)::int present,
+            count(*) FILTER (WHERE value NOT IN ('null'::jsonb, '""'::jsonb))::int filled,
+            count(DISTINCT value)::int distinct_values,
+            (array_agg(DISTINCT left(value #>> '{}', 60))
+               FILTER (WHERE value NOT IN ('null'::jsonb, '""'::jsonb)))[1:5] examples
+     FROM kv GROUP BY key ORDER BY filled DESC, key`, [platform]);
+
+  const [{ n } = { n: 0 }] = await q(
+    `SELECT count(*)::int n FROM ${table} WHERE raw IS NOT NULL AND ($1::text IS NULL OR platform = $1)`, [platform]);
+
+  // Which of these are already promoted to a real column, so the interesting
+  // list is the rest.
+  const cols = (await q(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = $1`, [table]))
+    .map((c) => c.column_name);
+  const norm = (k) => k.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const mapped = new Set(cols.map(norm));
+
+  res.json({
+    table, platform, rows_with_raw: n, sampled: Math.min(sample, n),
+    fields: rows.map((r) => ({
+      key: r.key,
+      fill_pct: r.present ? Math.round((r.filled / r.present) * 100) : 0,
+      distinct_values: r.distinct_values,
+      examples: r.examples || [],
+      // A loose match: "Trip request time" against requested_at will not hit,
+      // which is fine — a false "unmapped" costs a glance, a false "mapped"
+      // hides a field.
+      already_a_column: mapped.has(norm(r.key)),
+    })),
+  });
+}));
+
+// Distinct values of one raw field, with counts — for deciding whether a field
+// is a dimension worth charting or free text.
+app.get('/api/schema/raw-values', wrap(async (req, res) => {
+  const table = ['trip', 'alert', 'telemetry_snapshot', 'driver_performance', 'vehicle_profile']
+    .includes(req.query.table) ? req.query.table : 'trip';
+  if (!req.query.key) return res.status(400).json({ error: 'key required' });
+  res.json(await q(
+    `SELECT raw ->> $2 AS value, count(*)::int n
+     FROM ${table}
+     WHERE raw ? $2 AND ($1::text IS NULL OR platform = $1)
+     GROUP BY 1 ORDER BY n DESC LIMIT 60`, [req.query.platform || null, req.query.key]));
+}));
+
 /* ───────────────── per-driver detail pages ───────────────── */
 // Registered before the catch-all, like every other /api route.
 driverRoutes(app, { q, wrap, endOfDay });

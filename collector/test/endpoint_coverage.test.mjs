@@ -33,6 +33,7 @@ const EXEMPT = {
   '/api/driver/vehicles': 'superseded by /api/driver/custody; kept for external callers',
   '/api/vehicle/drivers': 'superseded by /api/vehicle/drivers-detail; kept for external callers',
   '/api/finance/daily': 'the same series as /api/trips/daily, which the finance view already draws',
+  '/api/schema/raw-values': 'drill-down called with a key from /api/schema/raw-fields, not by literal path',
 };
 
 check('routes were found to check', routes.length > 40, String(routes.length));
