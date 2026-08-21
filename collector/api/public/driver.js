@@ -69,8 +69,15 @@ function startScatter(host, days) {
   // who always starts between 06:20 and 07:10 has a real pattern, and plotting
   // it against a full 24-hour axis flattens that into a single line.
   const hs = pts.map((d) => d.first_hour);
-  let lo = Math.floor(Math.min(...hs) - 0.6), hi = Math.ceil(Math.max(...hs) + 0.6);
-  if (hi - lo < 4) { const mid = (hi + lo) / 2; lo = Math.max(0, mid - 2); hi = Math.min(24, mid + 2); }
+  // Clamp to the clock: a driver whose first trip is at 00:20 must not produce
+  // a "-1:00" gridline, and one finishing at 23:50 must not produce "25:00".
+  let lo = Math.max(0, Math.floor(Math.min(...hs) - 0.6));
+  let hi = Math.min(24, Math.ceil(Math.max(...hs) + 0.6));
+  if (hi - lo < 4) {
+    const mid = (hi + lo) / 2;
+    lo = Math.max(0, Math.min(20, mid - 2));
+    hi = Math.min(24, lo + 4);
+  }
   const X = (t) => P.l + ((+new Date(t) - x0) / Math.max(1, x1 - x0)) * (W - P.l - P.r);
   const Y = (h) => P.t + ((h - lo) / (hi - lo)) * (H - P.t - P.b);
   const step = (hi - lo) <= 6 ? 1 : (hi - lo) <= 12 ? 2 : 4;
@@ -223,7 +230,7 @@ async function tabOverview(root, id, prof) {
     { label: 'Days', key: 'days', num: true },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-  ]);
+  ], { compact: true });
   vt.querySelectorAll('tbody tr').forEach((tr, i) => {
     const r = prof.vehicles[i];
     tr.title = `${r.plate} · held ${dayStr(r.first_day)} → ${dayStr(r.last_day)}` +
