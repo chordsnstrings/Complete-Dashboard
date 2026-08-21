@@ -16,6 +16,15 @@ export const config = {
   // Other live pollers (Uber online/on-trip status, FMS live) — lighter cadence.
   get liveStatusSeconds() { return getInt('LIVE_STATUS_SECONDS', 120); },
 
+  // LLM used to judge whether a news headline can plausibly move a Dubai fleet.
+  get modelark() {
+    return {
+      baseUrl: get('ARK_BASE_URL', 'https://ark.ap-southeast.bytepluses.com/api/v3'),
+      apiKey: get('ARK_API_KEY'),
+      model: get('ARK_MODEL', 'glm-5-2-260617'),
+    };
+  },
+
   get fms() {
     return {
       base: get('FMS_BASE', 'http://103.185.74.197/currentinfotest/ItlService.svc'),

@@ -1,0 +1,197 @@
+// World-event layer: what was happening when the numbers moved.
+//
+// Three tiers, cheapest and most reliable first:
+//   1. seasonal  — computed from the calendar (Dubai summer, school terms). Zero API risk.
+//   2. calendar  — Ramadan/Eid from the Hijri API (these reshape demand every year).
+//   3. news      — GDELT headlines, classified by an LLM into "does this move a Dubai fleet?".
+//
+// Nothing here claims causation. It supplies candidates so a human can judge, and it
+// quantifies the coincidence so the judgement is informed.
+import { config } from '../config.js';
+import { http } from '../http.js';
+import { upsert, upsertMany, logRun, pool } from '../db.js';
+import { log } from '../log.js';
+
+const SRC = 'events';
+const q = (t, p = []) => pool.query(t, p).then((r) => r.rows);
+
+/* ── 1. seasonal: the rhythms a Dubai fleet lives by ───────────────────── */
+function seasonalEvents(fromYear, toYear) {
+  const out = [];
+  for (let y = fromYear; y <= toYear; y++) {
+    // Peak summer: residents travel out, heat suppresses street demand, tourism troughs.
+    out.push({ source: 'seasonal', code: 'summer', title: `Dubai summer ${y}`, category: 'seasonal', scope: 'dubai',
+      starts_on: `${y}-06-15`, ends_on: `${y}-09-15`, expected_effect: 'demand_down', confidence: 0.75,
+      summary: 'Peak heat and the annual exodus. Residential demand falls, hotel occupancy softens, and EV range drops under constant AC load.' });
+    // High season: tourism peak, events calendar, comfortable weather.
+    out.push({ source: 'seasonal', code: 'high_season', title: `Dubai high season ${y}-${String(y + 1).slice(2)}`, category: 'seasonal', scope: 'dubai',
+      starts_on: `${y}-11-01`, ends_on: `${y + 1}-03-31`, expected_effect: 'demand_up', confidence: 0.8,
+      summary: 'Tourism peak with a dense events calendar. Historically the strongest months for ride demand.' });
+    // UAE school calendar (approximate public-school terms; drives commuter patterns).
+    out.push({ source: 'seasonal', code: 'school_summer_break', title: `UAE school summer break ${y}`, category: 'seasonal', scope: 'uae',
+      starts_on: `${y}-07-01`, ends_on: `${y}-08-31`, expected_effect: 'demand_down', confidence: 0.6,
+      summary: 'School run disappears and families travel. Weekday morning peaks flatten noticeably.' });
+    out.push({ source: 'seasonal', code: 'school_winter_break', title: `UAE school winter break ${y}`, category: 'seasonal', scope: 'uae',
+      starts_on: `${y}-12-08`, ends_on: `${y}-12-31`, expected_effect: 'demand_up', confidence: 0.5,
+      summary: 'Commuter demand dips but leisure and airport demand rise over the holiday period.' });
+  }
+  return out;
+}
+
+/* ── 2. Ramadan / Eid from the Hijri calendar ──────────────────────────── */
+async function ramadanEvents(years) {
+  const out = [];
+  for (const y of years) {
+    try {
+      // Hijri→Gregorian for 1 Ramadan (month 9) of the Hijri year overlapping y
+      const hy = Math.round((y - 622) * 1.0307);
+      const { data } = await http(`https://api.aladhan.com/v1/hToG/01-09-${hy}`, { timeoutMs: 20000, retries: 2 });
+      const g = data?.data?.gregorian?.date;                    // DD-MM-YYYY
+      if (!g) continue;
+      const [dd, mm, yyyy] = g.split('-');
+      const start = new Date(`${yyyy}-${mm}-${dd}`);
+      const end = new Date(start.getTime() + 29 * 864e5);
+      const eidEnd = new Date(end.getTime() + 3 * 864e5);
+      const d = (x) => x.toISOString().slice(0, 10);
+      out.push({ source: 'calendar', code: 'ramadan', title: `Ramadan ${hy}`, category: 'holiday', scope: 'uae',
+        starts_on: d(start), ends_on: d(end), expected_effect: 'demand_down', confidence: 0.85,
+        summary: 'Daytime demand collapses and shifts to a sharp post-iftar night peak. Working hours are shortened across the UAE.' });
+      out.push({ source: 'calendar', code: 'eid_fitr', title: `Eid al-Fitr ${hy}`, category: 'holiday', scope: 'uae',
+        starts_on: d(end), ends_on: d(eidEnd), expected_effect: 'demand_up', confidence: 0.7,
+        summary: 'Multi-day public holiday: leisure, family visiting and airport demand spike together.' });
+    } catch (e) { log.warn(SRC, `ramadan ${y} lookup failed`, { err: String(e).slice(0, 80) }); }
+  }
+  return out;
+}
+
+/* ── 3. news: headlines that plausibly move a Dubai fleet ──────────────── */
+// GDELT allows ~1 request / 5s. We make a handful of narrow queries, once per run.
+const NEWS_QUERIES = [
+  { code: 'gulf_conflict', q: '("Iran" OR "Strait of Hormuz" OR "Red Sea") (conflict OR strike OR attack OR war)', category: 'geopolitical', scope: 'regional' },
+  { code: 'uae_travel', q: '("UAE" OR "Dubai") (tourism OR "travel demand" OR airport OR visa)', category: 'economic', scope: 'uae' },
+  { code: 'dubai_transport', q: '("Dubai") (taxi OR "ride hailing" OR RTA OR transport)', category: 'regulatory', scope: 'dubai' },
+  { code: 'fuel_energy', q: '("UAE fuel price" OR "petrol price" OR "electricity tariff")', category: 'economic', scope: 'uae' },
+];
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function fetchNews() {
+  const arts = [];
+  for (const nq of NEWS_QUERIES) {
+    try {
+      const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(nq.q)}`
+        + `&mode=artlist&maxrecords=10&format=json&timespan=7d&sort=hybridrel`;
+      const { data } = await http(url, { timeoutMs: 30000, retries: 1, expect: 'json' });
+      if (typeof data === 'string') { log.warn(SRC, `gdelt throttled for ${nq.code}`); await sleep(6000); continue; }
+      for (const a of (data?.articles || [])) {
+        arts.push({ ...nq, title: a.title, url: a.url, domain: a.domain, seendate: a.seendate });
+      }
+    } catch (e) { log.warn(SRC, `news ${nq.code} failed`, { err: String(e).slice(0, 80) }); }
+    await sleep(6000);                                   // respect the 1-per-5s limit
+  }
+  return arts;
+}
+
+// Ask an LLM whether a headline plausibly affects Dubai ride demand, and how.
+// Conservative by design: default to "unknown / low confidence" rather than inventing a story.
+async function classifyNews(articles) {
+  if (!articles.length || !config.modelark?.apiKey) return [];
+  const list = articles.slice(0, 30).map((a, i) => `${i}. ${a.title}`).join('\n');
+  const prompt = `You assess whether news affects a taxi/ride-hailing fleet operating in Dubai, UAE.
+For each headline return: index, effect (demand_up|demand_down|supply_down|risk_up|none), confidence 0-1, and one short reason.
+Be strict: most headlines have no measurable effect on a Dubai fleet — use "none" with low confidence unless the link is direct and material.
+Return ONLY a JSON array like [{"i":0,"effect":"none","confidence":0.1,"reason":"..."}].
+
+${list}`;
+  try {
+    const { data } = await http(`${config.modelark.baseUrl}/chat/completions`, {
+      method: 'POST', timeoutMs: 90000, retries: 1,
+      headers: { authorization: `Bearer ${config.modelark.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: config.modelark.model, messages: [{ role: 'user', content: prompt }], max_tokens: 1600 }),
+    });
+    const txt = data?.choices?.[0]?.message?.content || '';
+    const m = txt.match(/\[[\s\S]*\]/);
+    if (!m) return [];
+    return JSON.parse(m[0]);
+  } catch (e) { log.warn(SRC, 'llm classify failed', { err: String(e).slice(0, 100) }); return []; }
+}
+
+/* ── break detection + attribution ─────────────────────────────────────── */
+export async function detectBreaks() {
+  const rows = await q(
+    `SELECT date_trunc('month', requested_at)::date m, platform,
+            count(*)::int trips, count(distinct driver_ext_id)::int drivers
+     FROM trip GROUP BY 1,2 HAVING count(*) > 20 ORDER BY 2,1`);
+  const byPlatform = {};
+  for (const r of rows) (byPlatform[r.platform] ||= []).push(r);
+
+  let n = 0;
+  for (const [platform, series] of Object.entries(byPlatform)) {
+    for (let i = 1; i < series.length; i++) {
+      const a = series[i - 1], b = series[i];
+      const change = a.trips ? (b.trips - a.trips) / a.trips : 0;
+      if (Math.abs(change) < 0.30) continue;                   // only structural moves
+
+      const dChange = a.drivers ? (b.drivers - a.drivers) / a.drivers : 0;
+      const prodA = a.trips / (a.drivers || 1), prodB = b.trips / (b.drivers || 1);
+      const pChange = prodA ? (prodB - prodA) / prodA : 0;
+
+      // Decomposition: fewer drivers (supply) vs each driver doing less (demand//throttle)
+      let attribution = 'mixed';
+      if (Math.abs(pChange) > Math.abs(dChange) * 2) attribution = 'demand';
+      else if (Math.abs(dChange) > Math.abs(pChange) * 2) attribution = 'supply';
+
+      const events = await q(
+        `SELECT title, category, scope, starts_on, ends_on, expected_effect, confidence, summary
+         FROM world_event
+         WHERE starts_on <= $2 AND coalesce(ends_on, starts_on) >= $1
+         ORDER BY confidence DESC NULLS LAST LIMIT 8`, [a.m, b.m]);
+
+      await upsert('metric_break', {
+        metric: 'trips', grain: 'month', platform, fleet_id: null,
+        period_from: a.m, period_to: b.m,
+        value_from: a.trips, value_to: b.trips, change_pct: change,
+        drivers_from: a.drivers, drivers_to: b.drivers,
+        driver_change_pct: dChange, productivity_change_pct: pChange,
+        attribution, candidate_events: JSON.stringify(events),
+      }, ['metric', 'grain', 'platform', 'period_from', 'period_to']);
+      n++;
+    }
+  }
+  return n;
+}
+
+export async function collect({ mode = 'incremental' } = {}) {
+  try {
+    const yNow = new Date().getUTCFullYear();
+    const seasonal = seasonalEvents(yNow - 2, yNow + 1);
+    const ramadan = await ramadanEvents([yNow - 1, yNow, yNow + 1]);
+    let rows = [...seasonal, ...ramadan];
+
+    // news tier (best-effort; never blocks the rest)
+    let newsRows = [];
+    try {
+      const arts = await fetchNews();
+      const verdicts = await classifyNews(arts);
+      const byIdx = Object.fromEntries(verdicts.map((v) => [v.i, v]));
+      newsRows = arts.slice(0, 30).map((a, i) => {
+        const v = byIdx[i];
+        if (!v || v.effect === 'none' || (v.confidence ?? 0) < 0.4) return null;   // keep only material ones
+        const day = a.seendate ? `${a.seendate.slice(0, 4)}-${a.seendate.slice(4, 6)}-${a.seendate.slice(6, 8)}` : null;
+        if (!day) return null;
+        return { source: 'news', code: a.code, title: (a.title || '').slice(0, 300), category: a.category, scope: a.scope,
+          starts_on: day, ends_on: day, expected_effect: v.effect, confidence: v.confidence,
+          url: a.url, summary: v.reason, raw: { domain: a.domain } };
+      }).filter(Boolean);
+    } catch (e) { log.warn(SRC, 'news tier skipped', { err: String(e).slice(0, 80) }); }
+
+    rows = [...rows, ...newsRows];
+    const written = rows.length ? await upsertMany('world_event', rows, ['source', 'code', 'starts_on', 'title']) : 0;
+    const breaks = await detectBreaks();
+    await logRun({ source: SRC, fleet_id: null, mode, status: 'ok', rows_written: written + breaks });
+    log.info(SRC, 'done', { seasonal: seasonal.length, ramadan: ramadan.length, news: newsRows.length, breaks });
+  } catch (e) {
+    await logRun({ source: SRC, fleet_id: null, mode, status: 'error', error: String(e) });
+    log.error(SRC, 'failed', { err: String(e) });
+  }
+}

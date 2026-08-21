@@ -22,9 +22,17 @@ function poolConfig() {
 export const pool = new pg.Pool(poolConfig());
 
 export async function migrate() {
-  const sql = readFileSync(join(__dir, '..', 'sql', 'schema.sql'), 'utf8');
-  await pool.query(sql);
-  log.info('db', 'schema migrated');
+  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql']) {
+    try {
+      const sql = readFileSync(join(__dir, '..', 'sql', f), 'utf8');
+      await pool.query(sql);
+      log.info('db', `migrated ${f}`);
+    } catch (e) {
+      // v2 is additive; a failure there must not block the base schema/boot
+      log.error('db', `migration ${f} failed`, { err: String(e).slice(0, 200) });
+      if (f === 'schema.sql') throw e;
+    }
+  }
 }
 
 // Upsert one row into `table`, conflict on `conflict` columns, updating the rest.

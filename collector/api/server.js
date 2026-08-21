@@ -27,7 +27,10 @@ const requireAdmin = (req, res, next) => {
 };
 
 // filters: ?from=&to=&platform=&fleet=
-const range = (req) => [req.query.from || '2000-01-01', req.query.to || '2100-01-01',
+// A bare `to=YYYY-MM-DD` parses as midnight, which silently drops that day's trips.
+// Extend a date-only bound to the end of the day so ranges are inclusive as users expect.
+const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
+const range = (req) => [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01'),
   req.query.platform || null, req.query.fleet || null];
 const F = `requested_at BETWEEN $1 AND $2 AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`;
 
@@ -258,6 +261,97 @@ app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
 /* ───────────────────────── static dashboard ───────────────────────── */
 app.use(express.static(join(__dir, 'public'), { maxAge: '5m' }));
 app.get('*', (_, res) => res.sendFile(join(__dir, 'public', 'index.html')));
+
+
+/* ───────────────────────── actionable insights ───────────────────────── */
+app.get('/api/insights', wrap(async (req, res) => {
+  const sev = req.query.severity || null;
+  const cat = req.query.category || null;
+  res.json(await q(
+    `SELECT code, severity, category, entity_type, entity_id, title, detail, action,
+            impact_aed, metric, fleet_id, window_start, window_end, computed_at
+     FROM insight
+     WHERE ($1::text IS NULL OR severity=$1) AND ($2::text IS NULL OR category=$2)
+     ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 WHEN 'info' THEN 2 ELSE 3 END,
+              impact_aed DESC NULLS LAST, computed_at DESC
+     LIMIT 200`, [sev, cat]));
+}));
+
+app.get('/api/insights/summary', wrap(async (_, res) => {
+  const bySev = await q(`SELECT severity, count(*)::int n, round(sum(impact_aed)::numeric,0) impact FROM insight GROUP BY 1`);
+  const byCat = await q(`SELECT category, count(*)::int n, round(sum(impact_aed)::numeric,0) impact FROM insight GROUP BY 1 ORDER BY 2 DESC`);
+  const [tot] = await q(`SELECT count(*)::int n, round(sum(impact_aed)::numeric,0) total_impact FROM insight`);
+  res.json({ total: tot, by_severity: bySev, by_category: byCat });
+}));
+
+// monthly trend + automatic structural-break detection (what changed, and when)
+app.get('/api/trend/monthly', wrap(async (req, res) => {
+  const rows = await q(
+    `SELECT date_trunc('month', requested_at)::date m,
+            count(*)::int trips,
+            count(distinct driver_ext_id)::int drivers,
+            count(distinct plate)::int vehicles,
+            round(sum(distance_km)::numeric,0) km,
+            round(sum(price)::numeric,0) revenue,
+            round(100.0*sum((status ILIKE '%cancel%')::int)/nullif(count(*),0),1) cancel_pct
+     FROM trip WHERE ($1::text IS NULL OR platform=$1)
+     GROUP BY 1 ORDER BY 1`, [req.query.platform || null]);
+  // flag month-over-month breaks > 30%
+  const breaks = [];
+  for (let i = 1; i < rows.length; i++) {
+    const a = rows[i - 1], b = rows[i];
+    const d = a.trips ? (b.trips - a.trips) / a.trips : 0;
+    if (Math.abs(d) >= 0.3) breaks.push({ from: a.m, to: b.m, change_pct: Math.round(d * 100),
+      trips_from: a.trips, trips_to: b.trips, drivers_from: a.drivers, drivers_to: b.drivers });
+  }
+  res.json({ months: rows, breaks });
+}));
+
+// external context joined to the day (weather + calendar) for causality overlays
+app.get('/api/context', wrap(async (req, res) => {
+  const [from, to] = [req.query.from || '2000-01-01', req.query.to || '2100-01-01'];
+  res.json(await q(
+    `SELECT w.day, w.temp_max, w.precipitation, w.wind_max, w.is_forecast,
+            c.hijri_month, c.is_ramadan, c.is_holiday, c.holiday_name
+     FROM weather_daily w LEFT JOIN calendar_day c USING (day)
+     WHERE w.day BETWEEN $1 AND $2 ORDER BY w.day`, [from, to]));
+}));
+
+
+/* ───────────────── world events + causal attribution ───────────────── */
+// "What was happening when the numbers moved" — candidates, not proof.
+app.get('/api/breaks', wrap(async (req, res) => {
+  res.json(await q(
+    `SELECT metric, grain, platform, fleet_id, period_from, period_to,
+            value_from, value_to, change_pct, drivers_from, drivers_to,
+            driver_change_pct, productivity_change_pct, attribution, candidate_events, detected_at
+     FROM metric_break
+     WHERE ($1::text IS NULL OR platform=$1)
+     ORDER BY period_to DESC`, [req.query.platform || null]));
+}));
+
+app.get('/api/events', wrap(async (req, res) => {
+  const [from, to] = [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
+  res.json(await q(
+    `SELECT source, code, title, category, scope, starts_on, ends_on,
+            expected_effect, confidence, url, summary
+     FROM world_event
+     WHERE starts_on <= $2 AND coalesce(ends_on, starts_on) >= $1
+     ORDER BY starts_on DESC LIMIT 300`, [from, to]));
+}));
+
+// operator-added context — the people who run the fleet know things the APIs never will
+app.post('/api/events', requireAdmin, wrap(async (req, res) => {
+  const b = req.body || {};
+  if (!b.title || !b.starts_on) return res.status(400).json({ error: 'title and starts_on required' });
+  await q(
+    `INSERT INTO world_event (source,code,title,category,scope,starts_on,ends_on,expected_effect,confidence,summary)
+     VALUES ('manual',$1,$2,$3,$4,$5,$6,$7,$8,$9)
+     ON CONFLICT (source,code,starts_on,title) DO UPDATE SET summary=EXCLUDED.summary, ends_on=EXCLUDED.ends_on`,
+    [b.code || null, b.title, b.category || 'local', b.scope || 'dubai', b.starts_on,
+     b.ends_on || b.starts_on, b.expected_effect || 'unknown', b.confidence ?? 0.5, b.summary || null]);
+  res.json({ ok: true });
+}));
 
 const port = process.env.PORT || 8080;
 migrate().catch((e) => log.error('api', 'migrate failed', { err: String(e) }))
