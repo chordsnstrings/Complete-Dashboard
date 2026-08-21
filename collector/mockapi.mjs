@@ -940,7 +940,12 @@ app.get('/api/coverage/calendar', (_, r) => {
       // A gap the provider has already answered "nothing" for looks identical
       // to one nobody requested, until the chunk records say which it is.
       gaps: gaps.map((g, gi) => ({ ...g,
-        verdict: gi === 0 ? 'asked_and_empty' : gi === 1 ? 'never_asked' : 'window_failed' })),
+        verdict: gi === 0 ? 'asked_and_empty' : gi === 1 ? 'never_asked' : 'window_failed',
+        // A partly-requested gap: the middle case, which is the one worth
+        // being able to tell apart from an entirely unrequested one.
+        days_answered: gi === 0 ? g.days : gi === 1 ? Math.floor(g.days / 3) : 0,
+        days_failed: gi === 2 ? g.days : 0,
+        days_unrequested: gi === 0 ? 0 : gi === 1 ? g.days - Math.floor(g.days / 3) : 0 })),
       gaps_asked_and_empty: gaps[0]?.days || 0,
       gaps_never_asked: gaps[1]?.days || 0,
       gaps_window_failed: gaps[2]?.days || 0,

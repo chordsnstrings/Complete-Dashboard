@@ -111,9 +111,19 @@ export async function renderCoverage(root) {
         { label: 'Days missing', key: 'days', num: true },
         { label: 'Was it asked for?', key: 'verdict', render: (g) => ({
           asked_and_empty: '<span class="tag ok">asked — provider returned nothing</span>',
-          window_failed: '<span class="tag bad">the request failed</span>',
-          never_asked: '<span class="tag warn">no record of asking</span>',
+          window_failed: '<span class="tag bad">a request inside it failed</span>',
+          never_asked: '<span class="tag warn">not fully requested</span>',
         }[g.verdict] || '<span class="tag dim">unknown</span>') },
+        /* A partly-requested gap and an entirely unrequested one are both
+           "not fully requested" — you cannot conclude anything from a hole
+           with unasked days in it — but the difference is between "start the
+           backfill" and "it is nearly done". */
+        { label: 'Days accounted for', key: 'days_answered', num: true,
+          render: (g) => (g.days_answered == null ? '—'
+            : [g.days_answered ? `${fmt(g.days_answered)} answered` : null,
+               g.days_failed ? `<span class="dim">${fmt(g.days_failed)} failed</span>` : null,
+               g.days_unrequested ? `<span class="dim">${fmt(g.days_unrequested)} never asked</span>` : null,
+              ].filter(Boolean).join('<br>') || '—') },
       ], { compact: true }));
       const askedDays = s.gaps_asked_and_empty || 0;
       const neverDays = s.gaps_never_asked || 0;

@@ -611,6 +611,47 @@ const W = 'from=2026-08-01&to=2026-08-31';
   const partial = cov2.sources.find((x) => x.source === 'asked');
   check('a window covering only part of a gap does not count as having answered it',
     partial.gaps[0]?.verdict === 'never_asked', String(partial.gaps[0]?.verdict));
+  check('but it says how much of the gap WAS requested, rather than reporting nothing',
+    partial.gaps[0]?.days_answered === 9 && partial.gaps[0]?.days_unrequested > 0,
+    JSON.stringify(partial.gaps[0]));
+
+  /* ── the live shape, which the first version of this got exactly wrong ────
+     Collectors chunk by month. A 155-day hole is never spanned by a single
+     monthly window, so asking "does ONE chunk cover this gap" answered no for
+     the FMS gap that had in fact been requested six times over, every window
+     returning zero rows and no error. It printed "no record of asking" about
+     the best-documented hole in the database. Coverage is the union. */
+  await q(`DELETE FROM collection_run WHERE source = 'asked'`);
+  await q(`DELETE FROM trip WHERE platform = 'asked'`);
+  await day('asked', '2026-01-05'); await day('asked', '2026-06-20');
+  await run('asked', [
+    { from: '2026-05-25', to: '2026-06-24', rows: 0, error: null },
+    { from: '2026-04-25', to: '2026-05-24', rows: 0, error: null },
+    { from: '2026-03-26', to: '2026-04-24', rows: 0, error: null },
+    { from: '2026-02-24', to: '2026-03-25', rows: 0, error: null },
+    { from: '2026-01-25', to: '2026-02-23', rows: 0, error: null },
+    { from: '2025-12-26', to: '2026-01-24', rows: 0, error: null },
+  ]);
+  const cov3 = await get('/api/coverage/calendar?from=2026-01-01&to=2026-06-25');
+  const spanned = cov3.sources.find((x) => x.source === 'asked');
+  check('a gap covered by several monthly windows counts as answered',
+    spanned.gaps[0]?.verdict === 'asked_and_empty',
+    `${spanned.gaps[0]?.verdict} over ${spanned.gaps[0]?.days} days`);
+  check('every day of it is accounted for',
+    spanned.gaps[0]?.days_answered === spanned.gaps[0]?.days
+    && spanned.gaps[0]?.days_unrequested === 0,
+    JSON.stringify(spanned.gaps[0]));
+
+  /* And one failed window inside an otherwise fully-answered hole makes the
+     whole answer unsafe. "Five of six months say nothing and the sixth timed
+     out" is not evidence that the fleet was idle. */
+  await run('asked', [{ from: '2026-03-01', to: '2026-03-10', rows: 0, error: 'timeout after 600s' }]);
+  const cov4 = await get('/api/coverage/calendar?from=2026-01-01&to=2026-06-25');
+  const tainted = cov4.sources.find((x) => x.source === 'asked');
+  check('one failed window inside a gap outranks every window that answered',
+    tainted.gaps[0]?.verdict === 'window_failed', String(tainted.gaps[0]?.verdict));
+  check('and the failed days are counted apart from the answered ones',
+    tainted.gaps[0]?.days_failed === 10, String(tainted.gaps[0]?.days_failed));
 }
 
 server.close();

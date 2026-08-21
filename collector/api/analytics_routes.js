@@ -817,16 +817,47 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       if (!target.has(a.source)) target.set(a.source, []);
       target.get(a.source).push({ from: a.from_day, to: a.to_day, last_tried: a.last_tried });
     }
-    const covers = (wins, gFrom, gTo) => (wins || []).some((w) => w.from <= gFrom && w.to >= gTo);
+    /* Coverage is by the UNION of windows, not by any single one.
+       The first version of this asked whether ONE chunk spanned the whole gap.
+       Collectors chunk by month; a 155-day hole is never spanned by a monthly
+       window, so the live FMS gap — requested six times over, every window
+       answered with zero rows and no error — was labelled "no record of
+       asking", which is the opposite of what the records say. The check has to
+       be per day: is every day of this hole inside some window that came back?
+
+       A day inside a FAILED window outranks everything, because one failed
+       request is enough to make the whole answer unsafe. */
+    const dayList = (gFrom, gTo) => {
+      const out2 = [];
+      for (let t = Date.parse(gFrom); t <= Date.parse(gTo); t += 864e5) {
+        out2.push(new Date(t).toISOString().slice(0, 10));
+      }
+      return out2;
+    };
+    const inAny = (wins, d) => (wins || []).some((w) => w.from <= d && w.to >= d);
 
     for (const s of out) {
-      s.gaps = (s.gaps || []).map((g) => ({
-        ...g,
-        // Three states, and only one of them is a bug.
-        verdict: covers(failedWindows.get(s.source), g.from, g.to) ? 'window_failed'
-          : covers(answeredEmpty.get(s.source), g.from, g.to) ? 'asked_and_empty'
-            : 'never_asked',
-      }));
+      const ok = answeredEmpty.get(s.source);
+      const bad = failedWindows.get(s.source);
+      s.gaps = (s.gaps || []).map((g) => {
+        const days = dayList(g.from, g.to);
+        const failedDays = days.filter((d) => inAny(bad, d)).length;
+        const answeredDays = days.filter((d) => !inAny(bad, d) && inAny(ok, d)).length;
+        return {
+          ...g,
+          // Three states, and only one of them is a bug worth chasing.
+          verdict: failedDays ? 'window_failed'
+            : answeredDays === days.length ? 'asked_and_empty'
+              : 'never_asked',
+          // A partly-requested gap is still "never asked" as a verdict — you
+          // cannot conclude anything from a hole with unrequested days in it —
+          // but saying how much of it WAS requested is the difference between
+          // "start the backfill" and "it is nearly done".
+          days_answered: answeredDays,
+          days_failed: failedDays,
+          days_unrequested: days.length - answeredDays - failedDays,
+        };
+      });
       s.gaps_asked_and_empty = s.gaps.filter((g) => g.verdict === 'asked_and_empty')
         .reduce((a, g) => a + g.days, 0);
       s.gaps_never_asked = s.gaps.filter((g) => g.verdict === 'never_asked')
