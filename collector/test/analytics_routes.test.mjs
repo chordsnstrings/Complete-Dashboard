@@ -202,6 +202,17 @@ const W = 'from=2026-08-01&to=2026-08-31';
     !JSON.stringify(c.drivers).includes('cash-supervisor'));
   check('each driver says how much of their cash is valued',
     c.drivers.every((d) => d.value_known_pct != null));
+  /* Counted over the table, not over the returned list. "AED x is in drivers'
+     hands" and "n drivers holding cash" are numbers somebody sizes a cash
+     control on; both were the length and sum of a list the endpoint caps at
+     200 rows, which understates by exactly the tail nobody is watching. */
+  check('the driver count is its own number, not the length of the list',
+    typeof c.driver_count === 'number' && c.driver_count === c.drivers.length,
+    `${c.driver_count} vs ${c.drivers.length}`);
+  check('the response says whether the list was cut', c.truncated === false, String(c.truncated));
+  check('the cash total is not a sum over the visible page',
+    c.total_cash_trips === c.drivers.reduce((a, d) => a + d.cash_trips, 0),
+    String(c.total_cash_trips));
 }
 
 /* ── receivables ─────────────────────────────────────────────────────────── */
@@ -213,6 +224,18 @@ const W = 'from=2026-08-01&to=2026-08-31';
     r.rows.some((x) => x.settlement_class === 'salary' && /Driver/.test(x.counterparty)));
   check('cash is not a receivable', !kinds.has('cash'));
   check('each debt carries an age', r.rows.every((x) => x.age_days != null));
+  // Same rule, and the higher stakes: somebody reconciles against this.
+  check('the counterparty count is its own number, not the length of the list',
+    typeof r.counterparties === 'number' && r.counterparties === r.rows.length,
+    `${r.counterparties} vs ${r.rows.length}`);
+  check('the oldest debt is over the whole table, not the visible rows',
+    r.oldest_days != null && r.oldest_days >= Math.max(...r.rows.map((x) => x.age_days ?? 0)),
+    `${r.oldest_days} vs ${Math.max(...r.rows.map((x) => x.age_days ?? 0))}`);
+  check('bookings carrying no fare are counted apart from the amount',
+    typeof r.priced_trips === 'number' && r.priced_trips <= r.total_trips,
+    `${r.priced_trips} of ${r.total_trips}`);
+  check('the outstanding total covers every receivable booking, not the page',
+    r.total_trips === r.rows.reduce((a, x) => a + x.trips, 0), String(r.total_trips));
 }
 
 /* ── the corporate channel ───────────────────────────────────────────────── */
@@ -387,6 +410,75 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('the cash share of gross is stated', y.cash_pct === 75, String(y.cash_pct));
   check('a non-numeric value in the payload is null, not a crash',
     f.find((r) => r.platform === 'bolt')?.driver_score == null);
+}
+
+
+/* ── one source dark is a bug; every source dark is a fact ────────────────
+   A gap in one provider means the collector failed and the fix is to re-run
+   it. The same gap in two independent providers, over the same days, resuming
+   on the same day, means the fleet was not working and the fix is to stop
+   trying. The live data has exactly that shape: Uber dark 2025-10-23 to
+   2026-02-22, FMS dark 2025-09-21 to 2026-02-22, both resuming on the same
+   day. An Uber report API and a telematics box do not share an outage.
+
+   The two readings lead to opposite actions, so the distinction has to be made
+   by the endpoint rather than left to whoever is looking at the calendar. */
+{
+  await q(`DELETE FROM trip`);
+  let sn = 0;
+  const mk = (platform, day) => q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_name, requested_at, status, distance_km)
+     VALUES ($1, $2, 'ecosine', 'L1', 'D', $3, 'completed', 10)`,
+    [platform, `sq${sn++}`, `${day}T10:00:00+04:00`]);
+
+  // Both sources run 01-05, both dark 06-12, both back 13-16.
+  for (const d of ['01', '02', '03', '04', '05', '13', '14', '15', '16']) {
+    await mk('uber', `2026-06-${d}`);
+    await mk('bolt', `2026-06-${d}`);
+  }
+  // A third source is dark 20-24 ALONE, while uber keeps reporting.
+  for (const d of ['17', '18', '19', '20', '21', '22', '23', '24']) await mk('uber', `2026-06-${d}`);
+  for (const d of ['17', '18', '19', '25']) await mk('hotel', `2026-06-${d}`);
+
+  const cov = await get('/api/coverage/calendar?from=2026-06-01&to=2026-06-25');
+  const shared = cov.shared_silence || [];
+  check('a window where every source went quiet at once is reported',
+    shared.length === 1, JSON.stringify(shared));
+  check('it names the days, not just the length',
+    shared[0]?.from === '2026-06-06' && shared[0]?.to === '2026-06-12',
+    `${shared[0]?.from}..${shared[0]?.to}`);
+  check('it names which sources were dark together',
+    (shared[0]?.sources || []).join(',') === 'bolt,uber', String(shared[0]?.sources));
+  check('the window length is counted', shared[0]?.days === 7, String(shared[0]?.days));
+
+  /* The false positive that would make this useless: one source dark while
+     another is reporting normally is a collection failure, not a quiet fleet,
+     and must NOT appear here. */
+  check('a single source going dark alone is NOT reported as fleet-wide silence',
+    !shared.some((g) => g.from >= '2026-06-20' && g.to <= '2026-06-24'),
+    JSON.stringify(shared));
+
+  /* And the days are still counted as missing per source, because from the
+     collector's point of view they genuinely were not collected. Reporting
+     them twice with two different meanings is the point. */
+  const uber = cov.sources.find((s2) => s2.source === 'uber');
+  check('the shared window is still counted in the source’s own missing days',
+    uber.missing_days >= 7, String(uber.missing_days));
+
+  /* A source with no span at all cannot be "dark inside its span", and a
+     one-day source has no interior. Neither may drag a window into the
+     shared-silence list. */
+  await q(`DELETE FROM trip WHERE platform = 'hotel'`);
+  await mk('yango', '2026-06-11');
+  const cov2 = await get('/api/coverage/calendar?from=2026-06-01&to=2026-06-25');
+  check('a source that reported on exactly one day is not treated as having a span',
+    (cov2.shared_silence || []).every((g) => !(g.sources || []).includes('yango')),
+    JSON.stringify(cov2.shared_silence));
+  /* And that single yango row falls INSIDE the shared window, so the window is
+     no longer a day nothing was seen — it must break. */
+  check('a window stops being fleet-wide silence the moment anything is seen in it',
+    !(cov2.shared_silence || []).some((g) => g.from <= '2026-06-11' && g.to >= '2026-06-11'),
+    JSON.stringify(cov2.shared_silence));
 }
 
 server.close();

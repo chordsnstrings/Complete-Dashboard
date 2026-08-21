@@ -95,7 +95,12 @@ async function settleCash(host) {
     { label: 'Value we can see', value: money(c.total_cash_value_known),
       sub: `${pct(c.value_known_pct, 0)} of cash bookings report a fare`,
       tone: c.value_known_pct != null && c.value_known_pct < 60 ? 'warn' : null },
-    { label: 'Drivers holding cash', value: fmt(c.drivers.length) },
+    /* Counted in the database. This was c.drivers.length — the length of a
+       list the endpoint caps at 200 — under a label that reads as a fleet
+       fact. It is right until the fleet has more than 200 drivers taking cash,
+       and then it is quietly a cap. */
+    { label: 'Drivers holding cash', value: fmt(c.driver_count ?? c.drivers.length),
+      sub: c.truncated ? `${fmt(c.drivers.length)} shown below` : 'every one of them listed below' },
   ]));
   if (c.caveat) host.append(note(c.caveat));
   if (!c.drivers.length) return empty(host, 'No cash booking in this window');
@@ -108,6 +113,9 @@ async function settleCash(host) {
     { label: 'Vehicles', key: 'plates', render: (r) => (r.plates || []).slice(0, 3).map((pl) => entity('vehicle', pl, pl)).join(' ') },
     { label: 'Last cash trip', key: 'last_cash_trip', render: (r) => dtStr(r.last_cash_trip) },
   ]));
+  if (c.truncated) host.append(note(
+    `Listing the ${fmt(c.drivers.length)} drivers holding the most cash, of ${fmt(c.driver_count)}. `
+    + 'The totals above are over all of them.'));
   host.append(note('A fare collected by a supervisor is deliberately excluded: this is the money a '
     + 'driver personally ends a shift holding, which is the number a cash-handling control is sized on.'));
 }
@@ -117,11 +125,19 @@ async function settleReceivables(host) {
   const r = await q('/api/settlement/receivables');
   host.innerHTML = '';
   host.append(kpiRow([
-    { label: 'Outstanding', value: money(r.total), sub: `across ${fmt(r.total_trips)} bookings` },
-    { label: 'Counterparties', value: fmt(r.rows.length) },
-    { label: 'Oldest debt', value: r.rows.length
-      ? `${Math.max(...r.rows.map((x) => x.age_days ?? 0))} days` : '—',
-      tone: r.rows.some((x) => (x.age_days ?? 0) > 60) ? 'warn' : null },
+    /* Every one of these three came off the visible list, which the endpoint
+       caps at 200 counterparties ordered by amount. An outstanding figure that
+       silently excludes its own tail is worse than none, because somebody will
+       reconcile against it. All three are computed over the table now. */
+    { label: 'Outstanding', value: money(r.total),
+      sub: `across ${fmt(r.total_trips)} bookings`
+        + (r.priced_trips < r.total_trips
+          ? `, ${fmt(r.total_trips - r.priced_trips)} of which carry no fare` : '') },
+    { label: 'Counterparties', value: fmt(r.counterparties ?? r.rows.length),
+      sub: r.truncated ? `${fmt(r.rows.length)} shown below` : 'every one of them listed below' },
+    { label: 'Oldest debt', value: r.oldest_days != null ? `${fmt(r.oldest_days)} days` : '—',
+      sub: 'since the earliest unsettled booking',
+      tone: (r.oldest_days ?? 0) > 60 ? 'warn' : null },
   ]));
   if (!r.rows.length) return empty(host, 'Nothing outstanding in this window');
   host.append(tableFrom(r.rows, [

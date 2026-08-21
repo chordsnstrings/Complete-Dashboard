@@ -88,7 +88,7 @@ function csvToTrips(csv) {
 // Pull historical trips one month at a time. Sequential is necessary but not
 // sufficient: a report abandoned mid-generation keeps its slot, so pacing and a
 // realistic poll budget are what actually keep us under the three-report cap.
-async function pullTrips(from, to) {
+async function pullTrips(from, to, onStep) {
   let total = 0;
   const windows = [...dateChunks(from, to, config.uber.reportRangeDays)];
   // Newest first. A backfill that starts twelve months ago spends its first
@@ -101,6 +101,15 @@ async function pullTrips(from, to) {
   let consecutiveFailures = 0;
   for (const [s, e] of windows) {
     const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
+    /* A monthly Uber report takes minutes and a year is twelve of them, so a
+       whole backfill can spend hours inside this one loop. Reporting only when
+       the SOURCE finishes makes a working run indistinguishable from a wedged
+       one for that whole time — and the boot requeue, which abandons a job that
+       restarts three times without advancing, could not tell them apart either
+       and marked a run that had just landed 35,000 rows as 'may be crashing the
+       collector'. */
+    await onStep?.({ window: `${iso(s)}..${iso(e)}`,
+      index: chunks.length, of: windows.length, rows_so_far: total });
     try {
       const id = await generateReport(s, e);
       const url = await downloadReport(id);
@@ -228,9 +237,9 @@ export async function pullLive() {
   return rows.length ? upsertMany('telemetry_snapshot', rows, ['source', 'plate', 'captured_at']) : 0;
 }
 
-export async function collect({ from, to, mode }) {
+export async function collect({ from, to, mode, onStep }) {
   try {
-    const trips = await pullTrips(from, to);
+    const trips = await pullTrips(from, to, onStep);
     const perf = await pullEarnerBreakdowns(from, to);
     // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
     // are still missing", and it is the difference between a hole that is

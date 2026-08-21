@@ -136,11 +136,29 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
   check('the requeue distinguishes a job that advanced from one that did not',
     /done_at_last_attempt/.test(idx));
   check('an advancing job has its attempt counter reset rather than incremented',
-    /attempts = CASE WHEN coalesce\(\(progress ->> 'done'\)::int, 0\)\s*\n\s*> coalesce\(\(progress ->> 'done_at_last_attempt'\)::int, -1\)\s*\n\s*THEN 1/.test(idx));
+    /attempts = CASE WHEN \$\{ADVANCED\} THEN 1 ELSE coalesce\(attempts, 0\) \+ 1 END/.test(idx));
   check('the abandonment message says what was actually observed',
     /restarted three times without completing a single source/.test(idx));
   check('the log names which source the stranded job was on',
     /was_on/.test(idx));
+
+  /* ── per-source progress is too coarse for a source that takes hours ──────
+     Uber walks twelve monthly report windows and FMS walks twelve months of
+     130 vehicles; each takes hours. Measured only in completed SOURCES, a run
+     that had landed 35,000 rows across eleven windows was indistinguishable
+     from one that had done nothing, and the requeue abandoned it as such. */
+  check('the long sources report each window, not only their completion',
+    /onStep\?\.\(\{ window:/.test((await import('node:fs')).readFileSync('src/sources/uber.js', 'utf8'))
+    && /onStep\?\.\(\{ window:/.test((await import('node:fs')).readFileSync('src/sources/fms.js', 'utf8')));
+  check('the runner passes a step callback down to every source',
+    /mod\.collect\(\{ from, to, mode, onStep \}\)/.test(run));
+  check('a completed window counts as progress for the requeue',
+    /steps_at_last_attempt/.test(idx));
+  check('the two progress measures are defined once, so they cannot disagree',
+    /const ADVANCED = /.test(idx) && (idx.match(/\$\{ADVANCED\}/g) || []).length >= 3,
+    String((idx.match(/\$\{ADVANCED\}/g) || []).length));
+  check('the abandonment message names both kinds of progress',
+    /without completing a single source /.test(idx) && /or collection window/.test(idx));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

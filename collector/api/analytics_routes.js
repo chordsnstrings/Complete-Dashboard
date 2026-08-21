@@ -127,21 +127,40 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        FROM trip_ext
        WHERE ${FB} AND driver_holds_cash
        GROUP BY 1, 2 ORDER BY cash_trips DESC LIMIT 200`, p);
-    const totals = rows.reduce((a, r) => ({
-      cash_trips: a.cash_trips + r.cash_trips,
-      priced: a.priced + r.priced_cash_trips,
-      value: a.value + (NUM(r.cash_value) || 0),
-    }), { cash_trips: 0, priced: 0, value: 0 });
+    /* Totalled in the database, not over the 200 rows returned. "AED x is in
+       drivers' hands" is a figure somebody acts on, and summing the visible
+       page understates it by exactly the tail — which is the part nobody is
+       watching. The driver count has the same problem and is the more likely
+       to be wrong first, because a fleet has more drivers than it has drivers
+       worth listing. */
+    const [totals] = await q(
+      /* The driver count is over the SAME grouping the list uses, not over
+         DISTINCT driver_ext_id. Those differ whenever one person appears both
+         with and without a platform id — and a tile reading 4 above a list of
+         5 rows is a contradiction on screen, which is worse than either number
+         being slightly off. The tile has to describe the list it sits above. */
+      `SELECT (SELECT count(*)::int FROM (
+                 SELECT 1 FROM trip_ext WHERE ${FB} AND driver_holds_cash
+                 GROUP BY coalesce(driver_name, '(unnamed)'), driver_ext_id) g) AS drivers,
+              count(*)::int cash_trips,
+              count(*) FILTER (WHERE price IS NOT NULL)::int priced,
+              sum(price) AS value
+       FROM trip_ext WHERE ${FB} AND driver_holds_cash`, p);
+    const cashTrips = totals?.cash_trips || 0;
+    const priced = totals?.priced || 0;
     res.json({
       drivers: rows.map((r) => ({
         ...r, cash_value: r.priced_cash_trips ? round(r.cash_value, 0) : null,
         value_known_pct: share(r.priced_cash_trips, r.cash_trips),
       })),
-      total_cash_trips: totals.cash_trips,
-      total_cash_value_known: totals.priced ? round(totals.value, 0) : null,
-      value_known_pct: share(totals.priced, totals.cash_trips),
-      caveat: totals.priced < totals.cash_trips
-        ? `${totals.cash_trips - totals.priced} of ${totals.cash_trips} cash trips come from a channel `
+      driver_count: totals?.drivers || 0,
+      shown: rows.length,
+      truncated: (totals?.drivers || 0) > rows.length,
+      total_cash_trips: cashTrips,
+      total_cash_value_known: priced ? round(NUM(totals.value) || 0, 0) : null,
+      value_known_pct: share(priced, cashTrips),
+      caveat: priced < cashTrips
+        ? `${cashTrips - priced} of ${cashTrips} cash trips come from a channel `
           + 'that does not report a fare, so the value column is a floor, not the total.'
         : null,
     });
@@ -162,14 +181,37 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        FROM trip_ext
        WHERE ${FB} AND is_receivable
        GROUP BY 1, 2, 3, 4 ORDER BY amount DESC NULLS LAST LIMIT 200`, p);
+    // Same rule: the outstanding total is a sum over the table, not over the
+    // page. A receivables figure that quietly excludes its own tail is worse
+    // than no figure, because somebody will reconcile against it.
+    const [t] = await q(
+      // Counted over the same grouping the list uses, for the same reason as
+      // cash exposure: the tile has to describe the list it sits above.
+      `SELECT count(*)::int trips,
+              count(*) FILTER (WHERE price IS NOT NULL)::int priced_trips,
+              sum(price) AS amount,
+              (SELECT count(*)::int FROM (
+                 SELECT 1 FROM trip_ext WHERE ${FB} AND is_receivable
+                 GROUP BY settlement_class,
+                          CASE WHEN settlement_class = 'salary'
+                               THEN coalesce(driver_name, '(unnamed driver)')
+                               ELSE coalesce(partner_name, partner_id, '(unnamed property)') END,
+                          partner_id, driver_ext_id) g) AS counterparties,
+              min(requested_at) AS oldest
+       FROM trip_ext WHERE ${FB} AND is_receivable`, p);
     res.json({
       rows: rows.map((r) => ({
         ...r, amount: r.priced_trips ? round(r.amount, 0) : null,
         label: LABEL[r.settlement_class] || r.settlement_class,
         age_days: r.oldest ? Math.floor((Date.now() - Date.parse(r.oldest)) / 864e5) : null,
       })),
-      total: round(rows.reduce((a, r) => a + (NUM(r.amount) || 0), 0), 0),
-      total_trips: rows.reduce((a, r) => a + r.trips, 0),
+      total: t?.priced_trips ? round(NUM(t.amount) || 0, 0) : 0,
+      total_trips: t?.trips || 0,
+      counterparties: t?.counterparties || 0,
+      priced_trips: t?.priced_trips || 0,
+      oldest_days: t?.oldest ? Math.floor((Date.now() - Date.parse(t.oldest)) / 864e5) : null,
+      shown: rows.length,
+      truncated: (t?.counterparties || 0) > rows.length,
     });
   }));
 
@@ -630,7 +672,69 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         days: s.days,
       };
     }).sort((a, b) => b.total_rows - a.total_rows);
-    res.json({ window: [from, to], sources: out });
+
+    /* ── the question this page could not answer ──────────────────────────
+       A hole in one source is a collection failure. The SAME hole in two
+       independent providers, over the same days, resuming on the same day, is
+       almost certainly not: it is a fleet that was not operating.
+
+       This one is live right now. Uber is dark 2025-10-23 → 2026-02-22 and FMS
+       is dark 2025-09-21 → 2026-02-22, and the two resume on the identical
+       day. Uber's report API and a Chinese telematics box do not share an
+       outage. Reading the coverage page as it stood, somebody would spend a
+       week trying to re-fetch four months that were never driven.
+
+       The distinction is worth making explicitly rather than leaving to the
+       reader, because the two conclusions lead to opposite actions: re-run the
+       collector, or stop trying. */
+    const dayKeys = [];
+    for (let t = Date.parse(from); t <= Date.parse(to); t += 864e5) {
+      dayKeys.push(new Date(t).toISOString().slice(0, 10));
+    }
+    /* Two different populations, deliberately.
+
+       DARK is over sources with a collecting span — a source that has reported
+       on exactly one day has no interior, so "it was dark on the 8th" says
+       nothing about it.
+
+       LIVE is over EVERY source. Anything that saw a single row that day means
+       the day was not silent, whatever the source's span looks like. Computing
+       both over the same restricted set let a one-day source report inside a
+       claimed fleet-wide silence without breaking it — which is precisely the
+       false positive this whole block exists to avoid, since a window that is
+       'evidence the fleet was not working' collapses the moment one trip
+       lands in it. */
+    const spans = out.filter((s) => s.first_day && s.last_day && s.days_with_data > 1);
+    const seenBy = new Map(out.map((s) => [s.source, new Set(s.days.map((d) => d.day))]));
+    const inSpan = (s, d) => d >= s.first_day && d <= s.last_day;
+
+    const shared = [];
+    let run = null;
+    for (const d of dayKeys) {
+      const dark = spans.filter((s) => inSpan(s, d) && !seenBy.get(s.source).has(d)).map((s) => s.source);
+      const live = out.filter((s) => seenBy.get(s.source).has(d)).map((s) => s.source);
+      if (dark.length >= 2 && live.length === 0) {
+        const key = dark.slice().sort().join(',');
+        if (run && run.key === key) { run.to = d; run.days++; }
+        else { if (run) shared.push(run); run = { key, sources: dark.slice().sort(), from: d, to: d, days: 1 }; }
+      } else if (run) { shared.push(run); run = null; }
+    }
+    if (run) shared.push(run);
+
+    res.json({
+      window: [from, to],
+      sources: out,
+      /* Windows where two or more independent sources were each inside their
+         own collecting span and each saw nothing, with no other source seeing
+         anything either. Reported separately from per-source gaps because the
+         conclusion is different: this is evidence about the fleet, not about
+         the collector. */
+      shared_silence: shared
+        .filter((g) => g.days >= 3)
+        .sort((a, b) => b.days - a.days)
+        .slice(0, 10)
+        .map(({ key, ...g }) => g),
+    });
   }));
 
   /* ───────────────────────── corridors ─────────────────────────

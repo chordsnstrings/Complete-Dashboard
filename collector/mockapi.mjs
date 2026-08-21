@@ -763,6 +763,7 @@ app.get('/api/settlement/mix', (_, r) => r.json({
   ],
 }));
 app.get('/api/settlement/cash-exposure', (_, r) => r.json({
+  driver_count: 63, shown: 8, truncated: true,
   drivers: drivers.map((d, i) => ({ driver_name: d, driver_ext_id: `drv-${i}`, cash_trips: 60 - i * 6,
     priced_cash_trips: Math.max(0, 14 - i * 2), cash_value: Math.max(0, 14 - i * 2) * 95,
     value_known_pct: Math.round((Math.max(0, 14 - i * 2) / (60 - i * 6)) * 100),
@@ -772,6 +773,7 @@ app.get('/api/settlement/cash-exposure', (_, r) => r.json({
   caveat: '342 of 430 cash trips come from a channel that does not report a fare, so the value column is a floor, not the total.',
 }));
 app.get('/api/settlement/receivables', (_, r) => r.json({
+  counterparties: 41, priced_trips: 180, oldest_days: 96, shown: 8, truncated: true,
   rows: hotels.map((h, i) => ({ settlement_class: 'on_account', label: 'On account', counterparty: h.name,
     partner_id: h.id, driver_ext_id: null, trips: 30 - i * 6, priced_trips: 30 - i * 6,
     amount: (30 - i * 6) * 110, oldest: dayISO(70 - i * 10), newest: dayISO(i),
@@ -912,7 +914,13 @@ app.get('/api/coverage/calendar', (_, r) => {
   };
   r.json({ window: [dayISO(90).slice(0, 10), dayISO(0).slice(0, 10)],
     sources: [src('uber', 36, 18, 430), src('fms', null, 0, 260), src('hotel', null, 0, 14),
-      src('yango', 70, 40, 6)] });
+      src('yango', 70, 40, 6)],
+    // Two independent providers dark over the same window, resuming the same
+    // day. The live fleet has exactly this shape across four months.
+    shared_silence: [
+      { from: dayISO(36).slice(0, 10), to: dayISO(19).slice(0, 10), days: 18, sources: ['fms', 'uber'] },
+      { from: dayISO(70).slice(0, 10), to: dayISO(66).slice(0, 10), days: 5, sources: ['uber', 'yango'] },
+    ] });
 });
 app.get('/api/geo/corridors', (_, r) => {
   const areas = ['Al Thanyah Fifth', 'Business Bay', 'Dubai Airport', 'Palm Jumeirah', 'Al Barsha 1',
@@ -1097,7 +1105,8 @@ app.get('/api/settings/jobs', (_, r) => r.json({
       requested_at: new Date(Date.now() - 20 * 60000).toISOString(),
       started_at: new Date(Date.now() - 19 * 60000).toISOString(), finished_at: null, error: null, seconds: null,
       attempts: 3, running_seconds: 19 * 60,
-      progress: { current: 'hotel', done: 4, total: 8, remaining: ['external', 'events', 'fms'] } },
+      progress: { current: 'hotel', done: 4, total: 8, remaining: ['external', 'events', 'fms'],
+        steps: 7, step: { window: '2026-03-01..2026-03-31', index: 6, of: 12, rows_so_far: 18420 } } },
     { id: 6, mode: 'probe', status: 'done', requested_by: 'admin',
       requested_at: new Date(Date.now() - 62 * 60000).toISOString(),
       started_at: new Date(Date.now() - 62 * 60000).toISOString(),

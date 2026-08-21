@@ -18,9 +18,17 @@ async function call(op, params) {
 }
 
 // ---- historical trips ----
-async function pullTrips(fleet, from, to) {
+async function pullTrips(fleet, from, to, onStep) {
   let total = 0;
-  for (const [s, e] of dateChunks(from, to, 31)) {
+  /* The longest step in the whole collection sequence: 130 vehicles across
+     twelve monthly windows of five-minute telematics, four and a half hours
+     end to end. Reporting only on completion makes that indistinguishable from
+     a hung process for the entire afternoon. */
+  const windows = [...dateChunks(from, to, 31)];
+  let wi = 0;
+  for (const [s, e] of windows) {
+    await onStep?.({ window: `${dotDate(s)}..${dotDate(e)}`, index: wi++, of: windows.length,
+      rows_so_far: total, fleet: fleet.fleet });
     const { data } = await call('GetTripPassenger', {
       username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
       fromdate: dotDate(s), todate: dotDate(e),
@@ -81,11 +89,11 @@ export async function pullLive(fleet) {
 }
 
 // backfill/incremental entry point
-export async function collect({ from, to, mode }) {
+export async function collect({ from, to, mode, onStep }) {
   for (const fleet of config.fms.fleets) {
     if (!fleet.password) { log.warn(SRC, `no password for ${fleet.fleet}, skipping`); continue; }
     try {
-      const trips = await pullTrips(fleet, from, to);
+      const trips = await pullTrips(fleet, from, to, onStep);
       const alerts = await pullAlerts(fleet, from, to);
       await logRun({ source: SRC, fleet_id: fleet.fleet, mode, window_start: from, window_end: to, status: 'ok', rows_written: trips + alerts });
       log.info(SRC, `done ${fleet.fleet}`, { trips, alerts });

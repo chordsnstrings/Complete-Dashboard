@@ -1789,9 +1789,19 @@ V.settings = async (root) => {
         /* Which of the eight sources the run is actually on. A backfill's FMS
            step takes four and a half hours; without this the row said 'running'
            all afternoon and a working job looked exactly like a wedged one. */
-        { label: 'On', key: 'progress', render: (r) => (r.progress?.current
-          ? `${esc(r.progress.current)} <span class="dim">(${r.progress.done + 1} of ${r.progress.total})</span>`
-          : r.progress?.total ? `<span class="dim">all ${r.progress.total} done</span>` : '') },
+        { label: 'On', key: 'progress', render: (r) => {
+          const p2 = r.progress;
+          if (!p2?.current) return p2?.total ? `<span class="dim">all ${p2.total} done</span>` : '';
+          // The window within the source, where the source reports one. Uber
+          // and FMS each take hours, and "uber (1 of 8)" held still for all of
+          // it while eleven monthly reports landed behind it.
+          const st = p2.step;
+          return `${esc(p2.current)} <span class="dim">(${p2.done + 1} of ${p2.total})</span>`
+            + (st?.window
+              ? `<br><span class="dim">${esc(st.window)} — window ${st.index + 1} of ${st.of}`
+                + `${st.rows_so_far ? `, ${fmt(st.rows_so_far)} rows so far` : ''}</span>`
+              : '');
+        } },
         { label: 'Restarts', key: 'attempts', num: true,
           render: (r) => (r.attempts > 1
             ? `<span class="pill ${r.attempts >= 3 ? 'bad' : 'warn'}">${r.attempts}</span>` : '') },
@@ -1807,6 +1817,8 @@ V.settings = async (root) => {
         jp.body.append(el('div', 'note', esc(
           (live.progress?.current
             ? `Currently collecting ${live.progress.current}`
+              + (live.progress.step?.of
+                ? ` (window ${live.progress.step.index + 1} of ${live.progress.step.of})` : '')
               + (rem.length ? `, then ${rem.join(', ')}.` : ', the last of the sequence.')
             : 'A run is in progress.')
           + ' Only one runs at a time, so anything queued behind it starts when this finishes.'

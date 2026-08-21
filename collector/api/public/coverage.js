@@ -31,6 +31,38 @@ export async function renderCoverage(root) {
     { label: 'Rows in window', value: fmt(c.sources.reduce((a, s) => a + s.total_rows, 0)) },
   ]));
 
+  /* ── the distinction that changes what you do about a hole ──────────────
+     A gap in one source is a collection failure and the fix is to re-run the
+     collector. The same gap in two independent providers, over the same days,
+     resuming on the same day, is a fleet that was not operating — and the fix
+     is to stop trying. The two look identical on a per-source calendar, and
+     the wrong reading costs a week. */
+  const shared = c.shared_silence || [];
+  if (shared.length) {
+    const { panel: sp, body: sb } = panel('Windows where every source went quiet at once',
+      'Two or more independent providers, each inside its own collecting span, each seeing nothing — '
+      + 'and nothing else seeing anything either');
+    root.append(sp);
+    sb.append(tableFrom(shared, [
+      { label: 'From', key: 'from', render: (r) => dayStr(r.from) },
+      { label: 'To', key: 'to', render: (r) => dayStr(r.to) },
+      { label: 'Days', key: 'days', num: true },
+      { label: 'Sources dark together', key: 'sources', render: (r) => esc((r.sources || []).join(', ')) },
+    ]));
+    const big = shared[0];
+    sb.append(el('p', 'note',
+      `The largest is ${fmt(big.days)} days, ${dayStr(big.from)} to ${dayStr(big.to)}, `
+      + `across ${esc((big.sources || []).join(' and '))}. `
+      + 'A ride-hailing report API and a telematics box do not share an outage, and they do not resume on '
+      + 'the same day by coincidence. Treat a window like this as a period the fleet did not work, not as '
+      + 'data to go and fetch — but confirm it against the business before writing it off, because the one '
+      + 'thing that would also produce this shape is a credential that expired everywhere at once.'));
+    sb.append(el('p', 'cap',
+      'These days are still counted in each source’s own missing-days figure above, because from the '
+      + 'collector’s point of view they are genuinely uncollected. They are shown here separately so the '
+      + 'two readings do not get confused.'));
+  }
+
   c.sources.forEach((s) => {
     const { panel: p, body } = panel(s.source,
       `${fmt(s.total_rows)} rows over ${fmt(s.days_with_data)} days · `

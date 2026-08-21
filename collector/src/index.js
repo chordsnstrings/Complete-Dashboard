@@ -104,30 +104,36 @@ async function main() {
 
        A job that got FURTHER than its last attempt is a working job that was
        interrupted, and its counter resets. Only a job that restarts having
-       made no progress at all is a job that might be the cause. */
+       made no progress at all is a job that might be the cause.
+
+       "Further" counts completed sources AND completed windows within a
+       source, because Uber and FMS each take hours: measured only in sources,
+       a run that had landed 35,000 rows across eleven monthly windows looked
+       identical to one that had done nothing, and was abandoned as such. */
+    /* "Advanced" once, so the three places that ask cannot disagree. */
+    const ADVANCED = `(coalesce((progress ->> 'done')::int, 0)
+                         > coalesce((progress ->> 'done_at_last_attempt')::int, -1)
+                       OR coalesce((progress ->> 'steps')::int, 0)
+                         > coalesce((progress ->> 'steps_at_last_attempt')::int, -1))`;
     pool.query(
       `UPDATE collector_job
-       SET status = CASE WHEN coalesce(attempts, 0) >= 3
-                          AND coalesce((progress ->> 'done')::int, 0)
-                              <= coalesce((progress ->> 'done_at_last_attempt')::int, -1)
+       SET status = CASE WHEN coalesce(attempts, 0) >= 3 AND NOT ${ADVANCED}
                          THEN 'failed' ELSE 'queued' END,
            started_at = NULL,
-           attempts = CASE WHEN coalesce((progress ->> 'done')::int, 0)
-                                > coalesce((progress ->> 'done_at_last_attempt')::int, -1)
-                           THEN 1 ELSE coalesce(attempts, 0) + 1 END,
+           attempts = CASE WHEN ${ADVANCED} THEN 1 ELSE coalesce(attempts, 0) + 1 END,
            -- Remember how far it had got, so the next restart can tell whether
            -- this one advanced.
            progress = coalesce(progress, '{}'::jsonb)
-                      || jsonb_build_object('done_at_last_attempt',
-                                            coalesce((progress ->> 'done')::int, 0)),
-           error = CASE WHEN coalesce(attempts, 0) >= 3
-                         AND coalesce((progress ->> 'done')::int, 0)
-                             <= coalesce((progress ->> 'done_at_last_attempt')::int, -1)
-                        THEN 'abandoned: restarted three times without completing a single source, '
-                             || 'so the job itself may be killing the collector'
+                      || jsonb_build_object(
+                           'done_at_last_attempt', coalesce((progress ->> 'done')::int, 0),
+                           'steps_at_last_attempt', coalesce((progress ->> 'steps')::int, 0)),
+           error = CASE WHEN coalesce(attempts, 0) >= 3 AND NOT ${ADVANCED}
+                        THEN 'abandoned: restarted three times without completing a single source '
+                             || 'or collection window, so the job itself may be killing the collector'
                         ELSE error END
        WHERE status = 'running'
-       RETURNING id, mode, attempts, progress ->> 'current' AS was_on`)
+       RETURNING id, mode, attempts, progress ->> 'current' AS was_on,
+                 coalesce((progress ->> 'steps')::int, 0) AS steps`)
       .then(({ rows }) => {
         if (rows.length) {
           log.warn('scheduler', 'requeued jobs stranded by a restart',

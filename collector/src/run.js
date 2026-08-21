@@ -68,7 +68,20 @@ async function runWindowInner(mode, from, to, onProgress) {
        that ambiguity is exactly what hid this bug: the job sat at 'running' for
        hours and nothing anywhere said which of the eight sources it was on. */
     await onProgress?.({ current: name, done, total: names.length, remaining: names.slice(done + 1) });
-    try { await mod.collect({ from, to, mode }); }
+    /* Sources that walk many windows report each one. `steps` is what makes a
+       long single source distinguishable from a wedged one — and what lets the
+       boot requeue tell an advancing job from a stuck one, which per-source
+       progress alone could not: Uber and FMS each take hours, so `done` sat at
+       the same number across three restarts of a run that was landing tens of
+       thousands of rows. Sources that do not walk windows simply ignore the
+       extra key. */
+    let steps = 0;
+    const onStep = (st) => {
+      steps++;
+      return onProgress?.({ current: name, done, total: names.length,
+        remaining: names.slice(done + 1), step: st, steps });
+    };
+    try { await mod.collect({ from, to, mode, onStep }); }
     catch (e) { log.error('run', `${name} threw`, { err: String(e) }); }
     done++;
     log.info('run', `${mode} ${name} finished`, { done, of: names.length });
