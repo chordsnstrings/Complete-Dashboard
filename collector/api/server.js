@@ -111,17 +111,23 @@ app.get('/api/drivers/performance', wrap(async (req, res) => res.json(await q(
 
 /* ───────────────────────── vehicles / fleet ───────────────────────── */
 app.get('/api/vehicles', wrap(async (req, res) => res.json(await q(
-  `SELECT plate, count(*)::int trips, round(sum(distance_km)::numeric,0) km,
-          round(sum(price)::numeric,0) revenue, count(distinct driver_ext_id)::int drivers,
-          count(distinct platform)::int platforms, max(requested_at) last_trip
-   FROM trip WHERE ${F} AND plate IS NOT NULL AND plate<>''
-   GROUP BY plate ORDER BY trips DESC LIMIT 200`, range(req)))));
+  `SELECT t.plate, count(*)::int trips, round(sum(t.distance_km)::numeric,0) km,
+          round(sum(t.price)::numeric,0) revenue, count(distinct t.driver_ext_id)::int drivers,
+          count(distinct t.platform)::int platforms, max(t.requested_at) last_trip,
+          cd.driver_name AS current_driver, cd.as_of AS driver_as_of
+   FROM trip t
+   LEFT JOIN vehicle_current_driver cd ON cd.plate = upper(replace(t.plate,' ',''))
+   WHERE ${F} AND t.plate IS NOT NULL AND t.plate<>''
+   GROUP BY t.plate, cd.driver_name, cd.as_of ORDER BY trips DESC LIMIT 200`, range(req)))));
 
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
-  `SELECT DISTINCT ON (plate) plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, status,
-          seat_occupied, fuel_level, ac_on, odometer,
-          (now()-polled_at > interval '11 minutes') AS stale
-   FROM telemetry_snapshot ORDER BY plate, polled_at DESC`))));
+  `SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
+          s.seat_occupied, s.fuel_level, s.ac_on, s.odometer,
+          (now()-s.polled_at > interval '11 minutes') AS stale,
+          cd.driver_name AS current_driver, cd.as_of AS driver_as_of
+   FROM (SELECT DISTINCT ON (plate) * FROM telemetry_snapshot ORDER BY plate, polled_at DESC) s
+   LEFT JOIN vehicle_current_driver cd ON cd.plate = s.plate
+   ORDER BY s.plate`))));
 
 app.get('/api/track', wrap(async (req, res) => {
   if (!req.query.plate) return res.status(400).json({ error: 'plate required' });
@@ -136,14 +142,41 @@ app.get('/api/alerts/summary', wrap(async (req, res) => res.json(await q(
   `SELECT alert_type, count(*)::int n FROM alert WHERE occurred_at BETWEEN $1 AND $2
    GROUP BY 1 ORDER BY 2 DESC`, [range(req)[0], range(req)[1]]))));
 
+// Harsh-driving is a person's behaviour, not a plate's — name whoever held the car.
 app.get('/api/alerts/by-vehicle', wrap(async (req, res) => res.json(await q(
-  `SELECT plate, count(*)::int alerts,
-          sum((alert_type ILIKE '%brake%')::int)::int harsh_brake,
-          sum((alert_type ILIKE '%accel%')::int)::int harsh_accel,
-          sum((alert_type ILIKE '%turn%')::int)::int sharp_turn,
-          sum((alert_type ILIKE '%speed%')::int)::int overspeed
-   FROM alert WHERE occurred_at BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 2 DESC LIMIT 100`,
+  `SELECT a.plate, cd.driver_name AS current_driver, count(*)::int alerts,
+          sum((a.alert_type ILIKE '%brake%')::int)::int harsh_brake,
+          sum((a.alert_type ILIKE '%accel%')::int)::int harsh_accel,
+          sum((a.alert_type ILIKE '%turn%')::int)::int sharp_turn,
+          sum((a.alert_type ILIKE '%speed%')::int)::int overspeed
+   FROM alert a
+   LEFT JOIN vehicle_current_driver cd ON cd.plate = a.plate
+   WHERE a.occurred_at BETWEEN $1 AND $2
+   GROUP BY a.plate, cd.driver_name ORDER BY alerts DESC LIMIT 100`,
   [range(req)[0], range(req)[1]]))));
+
+// Who was driving this plate, day by day (handovers included).
+app.get('/api/vehicle/drivers', wrap(async (req, res) => {
+  if (!req.query.plate) return res.status(400).json({ error: 'plate required' });
+  const plate = req.query.plate.toUpperCase().replace(/[\s-]+/g, '');
+  res.json(await q(
+    `SELECT day, driver_ext_id, driver_name, platform, trips, km, revenue,
+            first_trip_at, last_trip_at, is_primary
+     FROM vehicle_driver_day
+     WHERE plate = $1 AND day BETWEEN $2 AND $3
+     ORDER BY day DESC, trips DESC`,
+    [plate, req.query.from || '2000-01-01', req.query.to || '2100-01-01']));
+}));
+
+// The mirror view: which vehicles has this driver used?
+app.get('/api/driver/vehicles', wrap(async (req, res) => {
+  if (!req.query.driver_id) return res.status(400).json({ error: 'driver_id required' });
+  res.json(await q(
+    `SELECT plate, count(*)::int days, sum(trips)::int trips, round(sum(km)::numeric,0) km,
+            min(day) first_day, max(day) last_day
+     FROM vehicle_driver_day WHERE driver_ext_id = $1
+     GROUP BY plate ORDER BY days DESC`, [req.query.driver_id]));
+}));
 
 /* ───────────────────────── finance ───────────────────────── */
 app.get('/api/finance/ledger', wrap(async (req, res) => res.json(await q(

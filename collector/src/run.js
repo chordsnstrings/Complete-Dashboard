@@ -9,6 +9,7 @@ import * as external from './sources/external.js';
 import * as events from './sources/events.js';
 import { reconcile } from './reconcile.js';
 import { computeInsights } from './insights.js';
+import { rebuildCustody } from './custody.js';
 import { config, loadSettings } from './config.js';
 import { monthsAgo, daysAgo } from './util.js';
 import { setState } from './db.js';
@@ -26,6 +27,10 @@ export async function runWindow(mode, from, to) {
   // CABMAN is not part of the historical window — it runs on its own 5-minute schedule.
   // Once bookings are in, reconcile seat-sensor occupancy against them (unauthorized trips).
   try { await reconcile({ from, to }); } catch (e) { log.error('run', 'reconcile', { err: String(e) }); }
+  // Derive who was driving which vehicle each day, so vehicle facts can name a person.
+  try {
+    await rebuildCustody({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
+  } catch (e) { log.error('run', 'custody', { err: String(e) }); }
   // Turn the freshly-landed data into ranked, actionable findings.
   try {
     await computeInsights({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
