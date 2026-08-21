@@ -79,8 +79,18 @@ async function tabOverview(root, plate, prof) {
   ]);
 
   kpiHost.replaceWith(kpiRow([
-    { label: 'Trips', value: fmt(k.trips), sub: `${fmt(k.days_worked)} earning days` },
-    { label: 'Distance', value: `${fmt(k.km)} km`, sub: `avg ${fmt(k.avg_km, 1)} km per trip` },
+    /* Bookings, not bookings-plus-their-telematics-twins. This tile counted
+       both and captioned it "trips", so a vehicle whose tracker was reporting
+       looked like it did two to three times the work of one whose tracker was
+       not — a difference in what we collect, presented as a difference in how
+       hard the car worked. */
+    { label: 'Bookings', value: fmt(k.trips),
+      sub: `${fmt(k.days_earning ?? k.days_worked)} earning days`
+        + (k.telematics_journeys ? ` · ${fmt(k.telematics_journeys)} tracked journeys behind them` : '') },
+    { label: 'Distance', value: `${fmt(k.km)} km`,
+      sub: k.measured_trips
+        ? `avg ${fmt(k.avg_km, 1)} km over ${fmt(k.measured_trips)} measured bookings`
+        : 'no booking on this vehicle carries a usable distance' },
     { label: 'Revenue', value: money(k.revenue), sub: k.revenue_per_km ? `${money(k.revenue_per_km, 'AED', 2)} per km` : 'from trip fares' },
     { label: 'Utilisation', value: k.utilisation != null ? pct(k.utilisation * 100, 1) : '—', sub: 'platform-reported, share of online time earning',
       tone: k.utilisation == null ? null : k.utilisation >= 0.5 ? 'good' : k.utilisation >= 0.3 ? 'warn' : 'critical' },

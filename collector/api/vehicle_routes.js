@@ -158,10 +158,23 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   /* ── headline numbers ─────────────────────────────────────────────────── */
   app.get('/api/vehicle/kpis', withVehicle(async (req, res, plate, p) => {
     const [t] = await q(
-      `SELECT count(*)::int trips,
-              count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days_worked,
-              round(sum(distance_km)::numeric,0) km, round(avg(distance_km)::numeric,1) avg_km,
-              round(sum(price)::numeric,2) revenue, round(avg(price)::numeric,2) avg_fare,
+      /* Every aggregate here is guarded, because `plate` is the join key and
+         FMS telematics rows carry plates. Their distances are odometer-derived
+         and one row can read 193,027 km, so an unguarded sum makes a vehicle's
+         "km driven" a number nobody can reconcile with anything. `trips` had
+         the same problem in the other direction: an FMS row is the same
+         physical journey a ride platform already reported, so counting both
+         showed this vehicle doing two to three times the work it did. */
+      `SELECT count(*) FILTER (WHERE is_booking)::int trips,
+              count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+              count(DISTINCT local_day)::int days_worked,
+              count(DISTINCT local_day) FILTER (WHERE is_booking)::int days_earning,
+              round(sum(distance_km) FILTER (WHERE has_distance AND is_booking)::numeric,0) km,
+              round(avg(distance_km) FILTER (WHERE has_distance AND is_booking)::numeric,1) avg_km,
+              count(*) FILTER (WHERE has_distance AND is_booking)::int measured_trips,
+              round(sum(price) FILTER (WHERE has_fare)::numeric,2) revenue,
+              round(avg(price) FILTER (WHERE has_fare)::numeric,2) avg_fare,
+              count(*) FILTER (WHERE has_fare)::int priced_trips,
               -- outcome, not status: Bolt reports a completed trip as
               -- 'finished', and FMS telematics rows hardcode 'completed' on
               -- journeys that cannot be cancelled, so a bare status test both
@@ -171,8 +184,8 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
               round(100.0*count(*) FILTER (WHERE outcome='not_completed')
                     /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
-              count(*) FILTER (WHERE is_booking)::int bookings,
-              count(DISTINCT driver_ext_id)::int drivers, count(DISTINCT platform)::int platforms
+              count(DISTINCT driver_ext_id)::int drivers,
+              count(DISTINCT platform) FILTER (WHERE is_booking)::int platforms
        FROM trip_norm WHERE ${TW}`, p);
     const [u] = await q(
       `SELECT round(avg(utilisation)::numeric,3) utilisation,
@@ -206,12 +219,17 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   /* ── the daily spine ──────────────────────────────────────────────────── */
   app.get('/api/vehicle/daily', withVehicle(async (req, res, plate, p) => res.json(await q(
     `WITH t AS (
-       SELECT local_day AS day, count(*)::int trips,
+       SELECT local_day AS day,
+              count(*) FILTER (WHERE is_booking)::int trips,
+              count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
               -- ILIKE '%cancel%' missed three of Bolt's four failure modes
               -- (client_did_not_show, driver_did_not_respond, driver_rejected).
               count(*) FILTER (WHERE outcome='not_completed')::int cancelled,
               count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
-              round(sum(distance_km)::numeric,1) km, round(sum(price)::numeric,2) revenue,
+              -- Guarded: an odometer row on this plate would otherwise put a
+              -- six-figure km on a single day of this vehicle's chart.
+              round(sum(distance_km) FILTER (WHERE has_distance AND is_booking)::numeric,1) km,
+              round(sum(price) FILTER (WHERE has_fare)::numeric,2) revenue,
               count(DISTINCT driver_ext_id)::int drivers
        FROM trip_norm WHERE ${TW} GROUP BY 1),
      g AS (
@@ -327,10 +345,16 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
 
   /* ── how the asset is used: product tier, payment, platform ───────────── */
   app.get('/api/vehicle/mix', withVehicle(async (req, res, plate, p) => {
+    /* Same guard, same reason. This groups by platform among other things, so
+       an unguarded avg_km put the odometer reading straight into the FMS row
+       of a table sitting beside real per-trip distances. */
     const one = (col) => q(
       `SELECT coalesce(${col},'unknown') label, count(*)::int n,
-              round(sum(price)::numeric,0) revenue, round(avg(distance_km)::numeric,1) avg_km
-       FROM trip WHERE ${TW} GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);
+              count(*) FILTER (WHERE is_booking)::int bookings,
+              round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+              round(avg(distance_km) FILTER (WHERE has_distance)::numeric,1) avg_km,
+              count(*) FILTER (WHERE has_distance)::int measured
+       FROM trip_norm WHERE ${TW} GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);
     const [product, payment, platform, status] = await Promise.all(
       [one('product'), one('payment_type'), one('platform'), one('status')]);
     const hours = await q(

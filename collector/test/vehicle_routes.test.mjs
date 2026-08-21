@@ -112,6 +112,43 @@ check('alerts normalised per 100km', k.alerts_per_100km > 0, String(k.alerts_per
 check('an idle day is a day it reported but did not earn', k.idle_days === 1, String(k.idle_days));
 check('revenue per km derived', k.revenue_per_km > 0, String(k.revenue_per_km));
 
+/* ── an odometer row on this plate must not become this vehicle's distance ──
+   `plate` is the join key on every query on this page, and FMS telematics rows
+   carry plates. Their distances are odometer-derived: one row can read 193,027
+   km. Unguarded, the Distance tile on a vehicle whose tracker is reporting
+   becomes a number nobody can reconcile with anything — and `trips` had the
+   mirror problem, counting the telematics twin of a booking the ride platform
+   already reported, so the same car looked two to three times busier when its
+   tracker happened to be on. */
+{
+  const before = { trips: k.trips, km: Number(k.km) };
+  await q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, distance_km, status)
+     VALUES ('fms','odo-v','ecosine',$1,'2026-08-13T09:00:00+04:00',193027,'completed')`, [PLATE]);
+  const k2 = (await get(`/api/vehicle/kpis?plate=${PLATE}&${W}`)).body;
+  check('a 193,027 km odometer row leaves the vehicle’s distance unchanged',
+    Number(k2.km) === before.km, `${k2.km} vs ${before.km}`);
+  check('and it is not counted as a booking',
+    k2.trips === before.trips, `${k2.trips} vs ${before.trips}`);
+  check('but it is reported as the tracked journey it is, not discarded',
+    k2.telematics_journeys >= 1, String(k2.telematics_journeys));
+  check('the average distance says how many bookings it was measured over',
+    k2.measured_trips > 0 && k2.measured_trips <= k2.trips,
+    `${k2.measured_trips} of ${k2.trips}`);
+
+  const d2 = (await get(`/api/vehicle/daily?plate=${PLATE}&${W}`)).body;
+  const odoDay = d2.find((r) => String(r.day).slice(0, 10) === '2026-08-13');
+  check('nor does it put a six-figure km on a single day of the chart',
+    !odoDay || Number(odoDay.km || 0) < 1000, JSON.stringify(odoDay));
+
+  const mix = (await get(`/api/vehicle/mix?plate=${PLATE}&${W}`)).body;
+  const fmsRow = (mix.platform || []).find((r) => r.label === 'fms');
+  check('and the platform mix does not print the odometer as an average trip length',
+    !fmsRow || fmsRow.avg_km == null || Number(fmsRow.avg_km) < 500,
+    JSON.stringify(fmsRow));
+  await q(`DELETE FROM trip WHERE external_id = 'odo-v'`);
+}
+
 /* ── daily spine ────────────────────────────────────────────────────────── */
 const daily = (await get(`/api/vehicle/daily?plate=${PLATE}&${W}`)).body;
 check('daily includes the day with no trips', daily.length === 5, String(daily.length));
