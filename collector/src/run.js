@@ -20,7 +20,29 @@ import { log } from './log.js';
 
 const HISTORICAL = { fms, uber, uberFleet, yango, bolt, hotel, external, events };
 
+/* Only one historical collection at a time.
+   The scheduler runs an incremental every thirty minutes and an on-demand
+   backfill can be queued at any point, so the two overlapped routinely — and
+   both call the Uber report pipeline, which the provider caps at three reports
+   in flight per org. A backfill working through twelve monthly windows was
+   competing with an incremental for the same three slots, and an abandoned
+   report keeps its slot, so the long job lost windows to the short one.
+
+   A queued run waits rather than being dropped: skipping it silently is how a
+   collection gap opens without anything saying so. */
+let inFlight = null;
 export async function runWindow(mode, from, to) {
+  if (inFlight) {
+    log.info('run', `${mode} waiting — another collection is in flight`);
+    await inFlight.catch(() => {});
+  }
+  let release;
+  inFlight = new Promise((r) => { release = r; });
+  try { return await runWindowInner(mode, from, to); }
+  finally { release(); inFlight = null; }
+}
+
+async function runWindowInner(mode, from, to) {
   await loadSettings(true);   // pick up Settings-page credential changes without a redeploy
   log.info('run', `${mode} ${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}`);
   for (const [name, mod] of Object.entries(HISTORICAL)) {

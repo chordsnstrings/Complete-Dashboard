@@ -78,5 +78,20 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
   check(`all ${files.length} shipped source files parse`, broken.length === 0, broken.join(', '));
 }
 
+/* ── two historical collections must not overlap ──────────────────────────
+   The scheduler runs an incremental every thirty minutes and a backfill can be
+   queued at any moment. Both call the Uber report pipeline, which the provider
+   caps at three reports in flight per org — and an abandoned report keeps its
+   slot. A twelve-window backfill competing with a three-day incremental loses
+   windows to it, which is how a hole opens while both runs report ok. */
+{
+  const run = (await import('node:fs')).readFileSync('src/run.js', 'utf8');
+  check('a second collection waits for the first rather than running beside it',
+    /let inFlight = null;/.test(run) && /await inFlight\.catch/.test(run));
+  check('and it waits rather than being silently dropped',
+    !/if \(inFlight\) return;/.test(run) && /waiting — another collection is in flight/.test(run));
+  check('the lock is released even when the run throws', /finally \{ release\(\); inFlight = null; \}/.test(run));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
