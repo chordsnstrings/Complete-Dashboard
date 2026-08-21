@@ -7,13 +7,17 @@ import { config } from './config.js';
 import { log } from './log.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-// Managed Postgres (e.g. DigitalOcean) requires TLS; the connection string carries sslmode=require.
-const needSsl = process.env.DATABASE_SSL === 'true' || /sslmode=require/.test(config.db.connectionString);
-export const pool = new pg.Pool({
-  connectionString: config.db.connectionString,
-  max: 8,
-  ssl: needSsl ? { rejectUnauthorized: false } : undefined,
-});
+// Managed Postgres (e.g. DigitalOcean) presents a CA-signed cert the container doesn't have in its
+// trust store. We enable TLS but skip chain verification. IMPORTANT: strip `sslmode` from the URL
+// first — otherwise pg-connection-string parses it as verify-full and overrides our ssl option,
+// producing "self-signed certificate in certificate chain".
+function poolConfig() {
+  let cs = config.db.connectionString;
+  const needSsl = process.env.DATABASE_SSL === 'true' || /sslmode=/i.test(cs);
+  if (needSsl) { try { const u = new URL(cs); u.searchParams.delete('sslmode'); cs = u.toString(); } catch { /* keep as-is */ } }
+  return { connectionString: cs, max: 8, ssl: needSsl ? { rejectUnauthorized: false } : undefined };
+}
+export const pool = new pg.Pool(poolConfig());
 
 export async function migrate() {
   const sql = readFileSync(join(__dir, '..', 'sql', 'schema.sql'), 'utf8');
