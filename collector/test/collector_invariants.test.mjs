@@ -91,6 +91,40 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
   check('and it waits rather than being silently dropped',
     !/if \(inFlight\) return;/.test(run) && /waiting — another collection is in flight/.test(run));
   check('the lock is released even when the run throws', /finally \{ release\(\); inFlight = null; \}/.test(run));
+
+  /* ── the order the sources run in ─────────────────────────────────────────
+     This is not style. An FMS year backfill takes four and a half hours; the
+     deployment restarts the container on every push; and a restart requeues the
+     running job, which begins the sequence from the top. With FMS first, four
+     weeks of backfills re-ran FMS and reached Uber on none of them — while the
+     job row said 'running' and every collection_run row said 'ok'. The 299-day
+     Uber hole the backfill exists to close survived every attempt to close it.
+
+     So: the longest-running source goes last, where being cut short costs the
+     least, and the source with the largest hole goes first. */
+  const order = run.match(/const HISTORICAL = \{([^}]*)\}/)?.[1]
+    .split(',').map((x) => x.trim()).filter(Boolean) || [];
+  check('every historical source is still in the sequence', order.length === 8, order.join(','));
+  check('the four-and-a-half-hour source runs last, not first',
+    order[order.length - 1] === 'fms', order.join(','));
+  check('the source with the largest hole runs first', order[0] === 'uber', order.join(','));
+
+  /* ── and it says which one it is on ──────────────────────────────────────
+     A four-hour step that reports only on completion is indistinguishable from
+     a hung process. That ambiguity is what hid the bug above for weeks. */
+  check('progress is reported before a source runs, not after',
+    /await onProgress\?\.\(\{ current: name/.test(run));
+  check('progress names what is still to come, so a truncated run is visible',
+    /remaining: names\.slice/.test(run));
+  check('backfill and incremental both accept the progress callback',
+    /export const backfill = \(onProgress\)/.test(run)
+    && /export const incremental = \(onProgress\)/.test(run));
+
+  const idx = (await import('node:fs')).readFileSync('src/index.js', 'utf8');
+  check('the scheduler persists that progress against the job row',
+    /UPDATE collector_job SET progress/.test(idx));
+  check('a failed progress write cannot fail the collection it is describing',
+    /progress write failed/.test(idx) && /\.catch\(\(e\) => log\.warn\('scheduler', 'progress write failed'/.test(idx));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

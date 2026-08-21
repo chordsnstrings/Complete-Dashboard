@@ -13,6 +13,7 @@
    Plus the finding the table exists for: a car attached to somebody who is not
    allowed to drive it. */
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { normaliseState, canEarn, cleanReason, stateRow, STATES } from '../src/roster.js';
@@ -76,9 +77,7 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
 /* ── end to end ───────────────────────────────────────────────────────── */
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql',
-  'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql']) await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 const put = (o) => q(
   `INSERT INTO driver_platform_state (platform,driver_ext_id,fleet_id,full_name,state,state_raw,

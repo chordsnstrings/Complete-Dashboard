@@ -10,6 +10,7 @@ import { vehicleRoutes } from './vehicle_routes.js';
 import { analyticsRoutes, analystRoutes } from './analytics_routes.js';
 import { rosterRoutes } from './roster_routes.js';
 import { dayRoutes } from './day_routes.js';
+import { segmentRoutes, slotRoutes } from './segment_routes.js';
 import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -410,7 +411,14 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => res.json(await q(
   `SELECT driver_name, driver_ext_id, platform, max(plate) plate, count(*)::int trips,
           round(sum(distance_km)::numeric,0) km, round(avg(distance_km)::numeric,1) avg_km,
           round(sum(price)::numeric,0) revenue,
-          round(100.0*sum((status='completed')::int)/nullif(count(*),0)) completion_pct
+          -- Testing status = 'completed' scored every completed Bolt trip as a
+          -- failure (Bolt says 'finished'), and FMS telematics rows, which
+          -- hardcode 'completed' and cannot be cancelled at all, padded the
+          -- denominator. outcome is NULL on telematics, so FILTER drops them
+          -- from both sides rather than counting them as successes.
+          round(100.0*count(*) FILTER (WHERE outcome='completed')
+                /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0)) completion_pct,
+          count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n
    FROM trip_norm WHERE ${F} AND driver_name IS NOT NULL
    GROUP BY driver_name, driver_ext_id, platform ORDER BY trips DESC LIMIT 100`, range(req)))));
 
@@ -991,9 +999,19 @@ app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
    nobody can see is a queue nobody can trust. */
 app.get('/api/settings/jobs', wrap(async (_req, res) => {
   const jobs = await q(
+    /* attempts and progress are both here for the same reason: a job that says
+       'running' tells you nothing. attempts counts how many times a container
+       restart requeued it — three means something about the job is killing the
+       collector. progress names the source it is on right now, because a
+       backfill runs eight sources in sequence and one of them takes four and a
+       half hours, during which a working run and a wedged one look identical.
+       elapsed lets a watcher say how long that has been true. */
     `SELECT id, mode, status, requested_by, requested_at, started_at, finished_at, error,
+            coalesce(attempts, 0)::int AS attempts, progress,
             CASE WHEN finished_at IS NOT NULL AND started_at IS NOT NULL
-                 THEN round(extract(epoch FROM finished_at - started_at))::int END AS seconds
+                 THEN round(extract(epoch FROM finished_at - started_at))::int END AS seconds,
+            CASE WHEN finished_at IS NULL AND started_at IS NOT NULL
+                 THEN round(extract(epoch FROM now() - started_at))::int END AS running_seconds
      FROM collector_job ORDER BY requested_at DESC LIMIT 40`);
   res.json({
     jobs,
@@ -1083,9 +1101,10 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
             count(distinct plate)::int vehicles,
             round(sum(distance_km)::numeric,0) km,
             round(sum(price)::numeric,0) revenue,
-            round(100.0*sum((status ILIKE '%cancel%')::int)/nullif(count(*),0),1) cancel_pct,
+            round(100.0*count(*) FILTER (WHERE outcome='not_completed')
+                  /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
             array_agg(DISTINCT platform) platforms
-     FROM trip WHERE ($1::text IS NULL OR platform=$1)
+     FROM trip_norm WHERE ($1::text IS NULL OR platform=$1)
      GROUP BY 1 ORDER BY 1`, [req.query.platform || null]);
   if (!observed.length) return res.json({ months: [], breaks: [], gaps: [] });
 
@@ -1378,6 +1397,14 @@ rosterRoutes(app, { q, wrap, range });
    Every source that saw a given Dubai-local day, including whether each one
    was collecting at all. */
 dayRoutes(app, { q, wrap });
+
+/* Occupancy segments as pages rather than a modal: the list with its own
+   facets, and one interval with every booking that stood near it. */
+segmentRoutes(app, { q, wrap, range, DAYWIN });
+
+/* One weekday-hour cell of the demand heatmap, as a rostering question rather
+   than a colour: who covers it, on what, from where, and how reliably. */
+slotRoutes(app, { q, wrap, range });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

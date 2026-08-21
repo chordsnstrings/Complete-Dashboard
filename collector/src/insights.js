@@ -385,12 +385,22 @@ async function staleTelemetry() {
 /* ─────────────────── 8. Cancellations: fares lost at the door ─────────────────── */
 async function cancellations(from, to) {
   const rows = await q(
-    `SELECT platform, fleet_id, count(*)::int total,
-            sum((status ILIKE '%cancel%')::int)::int cancels,
-            (sum((status ILIKE '%cancel%')::int)::float/nullif(count(*),0)) rate,
-            avg(price) avg_price
-     FROM trip WHERE requested_at BETWEEN $1 AND $2
-     GROUP BY platform, fleet_id HAVING count(*) > 50`, [from, to]);
+    /* Both sides of this ratio were wrong on Bolt, which is the platform the
+       finding fires on most: ILIKE cancel matches none of client_did_not_show,
+       driver_did_not_respond or driver_rejected, and the denominator counted
+       FMS telematics rows that hardcode 'completed' and cannot be cancelled at
+       all. The normalised outcome is NULL for both telematics and for a status
+       no platform explains, so a row only enters this ratio if its platform
+       actually reported how the trip ended. */
+    `SELECT platform, fleet_id,
+            count(*) FILTER (WHERE outcome IS NOT NULL)::int total,
+            count(*) FILTER (WHERE outcome='not_completed')::int cancels,
+            (count(*) FILTER (WHERE outcome='not_completed')::float
+             /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0)) rate,
+            avg(price) FILTER (WHERE has_fare) avg_price
+     FROM trip_norm WHERE requested_at BETWEEN $1 AND $2
+     GROUP BY platform, fleet_id
+     HAVING count(*) FILTER (WHERE outcome IS NOT NULL) > 50`, [from, to]);
   let n = 0;
   for (const r of rows) {
     if (!r.rate || r.rate < 0.10) continue;

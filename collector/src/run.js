@@ -18,7 +18,22 @@ import { monthsAgo, daysAgo } from './util.js';
 import { setState } from './db.js';
 import { log } from './log.js';
 
-const HISTORICAL = { fms, uber, uberFleet, yango, bolt, hotel, external, events };
+/* Order matters, and it took a live diagnosis to see why.
+   ──────────────────────────────────────────────────────────────────────────
+   FMS was first in this object, and an FMS year backfill takes four and a half
+   hours — it walks 130 vehicles through twelve monthly windows of five-minute
+   telematics. Uber came second. This deployment restarts the container on every
+   push, and a restart requeues the running job from the top, so in practice the
+   backfill re-ran four hours of FMS on every deploy and reached Uber on none of
+   them. The 299-day Uber hole the backfill exists to fill survived weeks of
+   attempts, each of which reported no failure at all, because the step that
+   would have filled it was never reached.
+
+   So the order is by outstanding need and cost, cheapest and most-broken first:
+   Uber has the largest hole and its windows are report-pull requests that cost
+   minutes; FMS has the most rows already and by far the longest run, so it goes
+   last where being cut short costs the least. */
+const HISTORICAL = { uber, uberFleet, yango, bolt, hotel, external, events, fms };
 
 /* Only one historical collection at a time.
    The scheduler runs an incremental every thirty minutes and an on-demand
@@ -31,24 +46,34 @@ const HISTORICAL = { fms, uber, uberFleet, yango, bolt, hotel, external, events 
    A queued run waits rather than being dropped: skipping it silently is how a
    collection gap opens without anything saying so. */
 let inFlight = null;
-export async function runWindow(mode, from, to) {
+export async function runWindow(mode, from, to, onProgress) {
   if (inFlight) {
     log.info('run', `${mode} waiting — another collection is in flight`);
     await inFlight.catch(() => {});
   }
   let release;
   inFlight = new Promise((r) => { release = r; });
-  try { return await runWindowInner(mode, from, to); }
+  try { return await runWindowInner(mode, from, to, onProgress); }
   finally { release(); inFlight = null; }
 }
 
-async function runWindowInner(mode, from, to) {
+async function runWindowInner(mode, from, to, onProgress) {
   await loadSettings(true);   // pick up Settings-page credential changes without a redeploy
   log.info('run', `${mode} ${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}`);
+  const names = Object.keys(HISTORICAL);
+  let done = 0;
   for (const [name, mod] of Object.entries(HISTORICAL)) {
+    /* Say which source is in flight BEFORE running it. A four-hour step that
+       reports only on completion is indistinguishable from a hung process, and
+       that ambiguity is exactly what hid this bug: the job sat at 'running' for
+       hours and nothing anywhere said which of the eight sources it was on. */
+    await onProgress?.({ current: name, done, total: names.length, remaining: names.slice(done + 1) });
     try { await mod.collect({ from, to, mode }); }
     catch (e) { log.error('run', `${name} threw`, { err: String(e) }); }
+    done++;
+    log.info('run', `${mode} ${name} finished`, { done, of: names.length });
   }
+  await onProgress?.({ current: null, done, total: names.length, remaining: [] });
   // CABMAN is not part of the historical window — it runs on its own 5-minute schedule.
   // Once bookings are in, reconcile seat-sensor occupancy against them (unauthorized trips).
   try { await reconcile({ from, to }); } catch (e) { log.error('run', 'reconcile', { err: String(e) }); }
@@ -94,8 +119,10 @@ export async function probePass() {
   catch (e) { log.error('probe', 'pass failed', { err: String(e) }); return null; }
 }
 
-export const backfill = () => runWindow('backfill', monthsAgo(config.backfillMonths), new Date());
-export const incremental = () => runWindow('incremental', daysAgo(config.incrementalDays), new Date());
+export const backfill = (onProgress) =>
+  runWindow('backfill', monthsAgo(config.backfillMonths), new Date(), onProgress);
+export const incremental = (onProgress) =>
+  runWindow('incremental', daysAgo(config.incrementalDays), new Date(), onProgress);
 
 // CABMAN realtime GPS — fixed 5-minute refresh, persisted to telemetry_snapshot (via cabman.collect,
 // which upserts snapshots and writes a collection_run row). This is the owner of CABMAN data.

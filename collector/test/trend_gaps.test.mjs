@@ -12,7 +12,13 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql'])
+/* v6 and v7 are loaded because the route reads trip_norm, not trip: the cancel
+   ratio it reports was computed with ILIKE '%cancel%', which matches none of
+   Bolt's client_did_not_show, driver_did_not_respond or driver_rejected, and
+   its denominator counted FMS telematics rows that hardcode 'completed' and
+   cannot be cancelled at all. */
+for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
+                 'schema_v6.sql', 'schema_v7.sql'])
   await db.exec(readFileSync(`sql/${f}`, 'utf8'));
 
 // Sep and Oct 2025 busy on Uber with named drivers; Nov–Jan absent entirely;

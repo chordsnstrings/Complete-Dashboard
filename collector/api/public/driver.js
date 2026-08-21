@@ -219,7 +219,9 @@ async function tabOverview(root, id, prof) {
     { label: 'Hours online', value: k.hours_online != null ? fmt(k.hours_online, 1) : '—', sub: k.hours_on_trip != null ? `${fmt(k.hours_on_trip, 1)}h with a passenger` : 'platform-reported' },
     { label: 'Utilisation', value: k.utilisation_pct != null ? pct(k.utilisation_pct) : '—', sub: 'on-trip ÷ online', tone: k.utilisation_pct == null ? null : k.utilisation_pct >= 55 ? 'good' : k.utilisation_pct >= 35 ? 'warn' : 'critical' },
     { label: 'Trips', value: fmt(k.trips), sub: `${fmt(k.km)} km · avg ${fmt(k.avg_km, 1)} km` },
-    { label: 'Completion', value: pct(k.completion_pct, 1), sub: `${pct(k.cancel_pct, 1)} cancelled`, tone: k.completion_pct >= 95 ? 'good' : k.completion_pct >= 85 ? 'warn' : 'critical' },
+    { label: 'Completion', value: pct(k.completion_pct, 1),
+      sub: k.outcome_n ? `${pct(k.cancel_pct, 1)} did not complete, over ${fmt(k.outcome_n)} trips` : 'no platform here reports an outcome',
+      tone: k.completion_pct == null ? null : k.completion_pct >= 95 ? 'good' : k.completion_pct >= 85 ? 'warn' : 'critical' },
     { label: 'Revenue', value: money(k.revenue), sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' },
     k.rating ? { label: 'Rating', value: fmt(k.rating, 2), sub: 'platform-reported', tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' } : null,
   ]));
@@ -459,8 +461,15 @@ async function tabQuality(root, id) {
   const totalAlerts = qy.alerts.reduce((a, r) => a + r.n, 0);
 
   kpiHost.replaceWith(kpiRow([
-    { label: 'Completion', value: pct(k.completion_pct, 1), tone: k.completion_pct >= 95 ? 'good' : k.completion_pct >= 85 ? 'warn' : 'critical' },
-    { label: 'Cancellation', value: pct(k.cancel_pct, 1), sub: 'of all requested trips', tone: k.cancel_pct <= 5 ? 'good' : k.cancel_pct <= 12 ? 'warn' : 'critical' },
+    /* A null completion used to paint red. `null >= 95` is false, so every
+       driver whose platforms report no outcome at all scored 'critical' — the
+       page accused them of a 0% completion rate it had never measured. */
+    { label: 'Completion', value: pct(k.completion_pct, 1),
+      sub: k.outcome_n ? `over ${fmt(k.outcome_n)} trips whose platform reports an outcome` : 'no platform reported an outcome',
+      tone: k.completion_pct == null ? null : k.completion_pct >= 95 ? 'good' : k.completion_pct >= 85 ? 'warn' : 'critical' },
+    { label: 'Did not complete', value: pct(k.cancel_pct, 1),
+      sub: 'cancelled, rejected, no-show — normalised across platforms',
+      tone: k.cancel_pct == null ? null : k.cancel_pct <= 5 ? 'good' : k.cancel_pct <= 12 ? 'warn' : 'critical' },
     { label: 'Acceptance', value: k.acceptance_rate != null ? pct(k.acceptance_rate * 100) : '—', sub: 'platform-reported' },
     { label: 'Rating', value: k.rating ? fmt(k.rating, 2) : '—', sub: 'platform-reported' },
     { label: 'Harsh events', value: fmt(totalAlerts), sub: qy.alert_km ? `over ${fmt(qy.alert_km)} km` : 'no matched distance' },
@@ -469,8 +478,21 @@ async function tabQuality(root, id) {
   ]));
 
   cx.body.innerHTML = '';
-  if (!qy.cancels.length) cx.body.append(note('Every trip in this window completed.'));
-  else hbars(cx.body, qy.cancels.map((c) => ({ label: c.status.replace(/_/g, ' '), n: c.n })), { label: 'label', value: 'n', seq: true });
+  /* Each platform has its own word for the same thing — Bolt reports
+     'client_did_not_show' where Uber reports 'rider_canceled' — so the label
+     carries the platform. Without it the bars read as five different problems. */
+  if (!qy.cancels.length) {
+    cx.body.append(note(k.outcome_n
+      ? `None of the ${fmt(k.outcome_n)} trips whose platform reported an outcome failed to complete.`
+      : 'No platform this driver works on reported how any of these trips ended, so there is nothing to break down.'));
+  } else {
+    hbars(cx.body, qy.cancels.map((c) => ({
+      label: `${c.status.replace(/_/g, ' ')}${c.platform ? ` · ${c.platform}` : ''}`, n: c.n,
+    })), { label: 'label', value: 'n', seq: true });
+    cx.body.append(el('p', 'cap',
+      'Raw provider strings, deliberately — what counts as “did not complete” is decided by the normalised '
+      + 'outcome, but the word each platform uses for it is worth seeing.'));
+  }
 
   ev.body.innerHTML = '';
   if (!qy.alerts.length) ev.body.append(note('No harsh-driving events on the vehicles this driver held. Attribution needs both a telematics alert and a custody record for the same day, so a gap in either shows as nothing here.'));
@@ -514,7 +536,12 @@ async function tabTrips(root, id) {
     { label: 'Minutes', key: 'duration_s', num: true, render: (r) => (r.duration_s ? fmt(r.duration_s / 60) : '—') },
     { label: 'Product', key: 'product' },
     { label: 'Pay', key: 'payment_type' },
-    { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', /cancel/i.test(r.status || '') ? 'warn' : 'ok') },
+    /* The pill used to be green unless the word "cancel" appeared, so Bolt's
+       client_did_not_show, driver_did_not_respond and driver_rejected all
+       showed as successes. The colour comes from the normalised outcome; the
+       text stays the provider's own word. */
+    { label: 'Status', key: 'status', render: (r) => pill(r.status || '—',
+      r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null) },
     { label: 'Fare', key: 'price', num: true, render: (r) => (r.price ? money(r.price, r.currency) : '—') },
   ];
   const draw = (list) => { host.innerHTML = ''; host.append(tableFrom(list.slice(0, 400), cols)); };

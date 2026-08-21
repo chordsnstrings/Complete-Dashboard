@@ -1081,7 +1081,9 @@ app.get('/api/settings/jobs', (_, r) => r.json({
   jobs: [
     { id: 7, mode: 'backfill', status: 'running', requested_by: 'admin',
       requested_at: new Date(Date.now() - 20 * 60000).toISOString(),
-      started_at: new Date(Date.now() - 19 * 60000).toISOString(), finished_at: null, error: null, seconds: null },
+      started_at: new Date(Date.now() - 19 * 60000).toISOString(), finished_at: null, error: null, seconds: null,
+      attempts: 3, running_seconds: 19 * 60,
+      progress: { current: 'hotel', done: 4, total: 8, remaining: ['external', 'events', 'fms'] } },
     { id: 6, mode: 'probe', status: 'done', requested_by: 'admin',
       requested_at: new Date(Date.now() - 62 * 60000).toISOString(),
       started_at: new Date(Date.now() - 62 * 60000).toISOString(),
@@ -1217,8 +1219,158 @@ app.get('/api/mix/detail', (req, r) => {
     unlabelled_trips: 0, unlabelled_platforms: [], groups: [] });
 });
 
-app.get(/^\/api\//, (_, r) => r.json([]));
 
+
+/* ── occupancy segments as pages ─────────────────────────────────────────── */
+const SEG_VERDICTS = ['unauthorized', 'authorized', 'sensor_suspect', 'partial', 'unverifiable'];
+const segAt = (i) => new Date(Date.UTC(2026, 7, 3 + (i % 16), 4 + (i % 14), (i * 7) % 60)).toISOString();
+const mkSeg = (i) => ({
+  plate: plates[i % plates.length], fleet_id: i % 3 ? 'ecosine' : 'egari',
+  started_at: segAt(i),
+  ended_at: new Date(Date.parse(segAt(i)) + (12 + (i % 40)) * 6e4).toISOString(),
+  duration_min: 12 + (i % 40), distance_km: +(2 + (i % 17) * 1.4).toFixed(1),
+  top_speed: 40 + (i % 60), fixes: 4 + (i % 12), max_gap_min: i % 5 === 0 ? 25 : 5,
+  ignition_ratio: +(0.4 + (i % 6) / 10).toFixed(2),
+  verdict: SEG_VERDICTS[i % SEG_VERDICTS.length],
+  matched_platform: i % SEG_VERDICTS.length === 1 ? 'uber' : null,
+  matched_trip_id: i % SEG_VERDICTS.length === 1 ? `t-${i}` : null,
+  low_confidence: i % 7 === 0, unavailable_sources: i % 7 === 0 ? 'bolt, yango' : null,
+  verdict_reason: i % 9 === 0 ? null
+    : `no booking within 15 min on any of 5 channels; nearest was ${20 + (i % 200)} min away`,
+  nearest_platform: 'uber', nearest_trip_id: `n-${i}`, nearest_gap_min: 20 + (i % 200),
+  channels_checked: 'uber, yango, bolt, hotel, fms', boundary_gap_min: i % 11,
+  start_lat: rnd(25.05, 25.3), start_lng: rnd(55.1, 55.42),
+  end_lat: rnd(25.05, 25.3), end_lng: rnd(55.1, 55.42),
+  local_day: segAt(i).slice(0, 10),
+  drivers: i % 6 === 0 ? null : drivers[i % drivers.length],
+});
+const ALL_SEGS = Array.from({ length: 64 }, (_, i) => mkSeg(i));
+
+app.get('/api/segments', (req, r) => {
+  let rows = ALL_SEGS;
+  if (req.query.verdict) rows = rows.filter((x) => x.verdict === req.query.verdict);
+  if (req.query.plate) rows = rows.filter((x) => x.plate === req.query.plate);
+  if (req.query.day) rows = rows.filter((x) => x.local_day === req.query.day);
+  if (req.query.driver) rows = rows.filter((x) => (x.drivers || '').includes(req.query.driver));
+  const by = (key) => {
+    const m = new Map();
+    ALL_SEGS.forEach((x) => {
+      const k = x[key]; const c = m.get(k) || { key: k, n: 0, unauthorized: 0, unauth_km: 0, km: 0 };
+      c.n++; c.km += x.distance_km;
+      if (x.verdict === 'unauthorized') { c.unauthorized++; c.unauth_km += x.distance_km; }
+      m.set(k, c);
+    });
+    return [...m.values()].map((c) => ({ ...c, km: +c.km.toFixed(1), unauth_km: +c.unauth_km.toFixed(1) }));
+  };
+  r.json({
+    rows, total: rows.length, truncated: false,
+    low_confidence: rows.filter((x) => x.low_confidence).length,
+    unreasoned: rows.filter((x) => !x.verdict_reason).length,
+    filter: { verdict: req.query.verdict || null, plate: req.query.plate || null,
+      day: req.query.day || null, driver: req.query.driver || null },
+    facets: {
+      verdict: by('verdict').sort((a, b) => b.n - a.n),
+      plate: by('plate').sort((a, b) => b.unauthorized - a.unauthorized),
+      day: by('local_day').sort((a, b) => String(a.key).localeCompare(String(b.key))),
+      reason: [
+        { key: 'no booking within 15 min on any of 5 channels', n: 21, verdict: 'unauthorized' },
+        { key: 'matched a uber booking 2 min away', n: 14, verdict: 'authorized' },
+        { key: '(no reason recorded)', n: 7, verdict: 'partial' },
+      ],
+    },
+    known_verdicts: SEG_VERDICTS,
+  });
+});
+
+app.get('/api/segment', (req, r) => {
+  const seg = ALL_SEGS.find((x) => x.plate === req.query.plate && x.started_at === req.query.at) || ALL_SEGS[0];
+  const t0 = Date.parse(seg.started_at);
+  const track = Array.from({ length: 14 }, (_, i) => ({
+    captured_at: new Date(t0 + i * 3e5).toISOString(),
+    lat: +rnd(25.05, 25.3).toFixed(4), lng: +rnd(55.1, 55.42).toFixed(4),
+    speed: i < 2 || i > 11 ? 0 : Math.round(rnd(20, 80)),
+    seat_occupied: i % 5 === 4 ? null : true, ignition: i > 1, status: 'Engaged',
+  }));
+  r.json({
+    segment: seg, track,
+    profile: { fixes: track.length, moving_fixes: 10, moving_pct: 71,
+      max_speed: 82, median_speed: 44, observed: seg.max_gap_min <= 11 },
+    // Deliberately at the same offset, so the clock-skew warning renders.
+    nearby_vehicle_trips: [0, 1, 2].map((i) => ({
+      platform: ['uber', 'bolt', 'yango'][i], external_id: `nv-${i}`,
+      driver_name: drivers[i], driver_ext_id: `drv-${i}`,
+      requested_at: new Date(t0 + 240 * 6e4 + i * 6e4).toISOString(),
+      ended_at: new Date(t0 + 260 * 6e4).toISOString(),
+      status: ['completed', 'finished', 'complete'][i], outcome: 'completed',
+      price: 40 + i * 5, distance_km: 12, pickup_addr: 'Dubai Mall', dropoff_addr: 'DXB T3',
+      gap_min: 240 + i,
+    })),
+    nearby_driver_trips: [{
+      platform: 'uber', external_id: 'nd-0', plate: plates[3], driver_name: drivers[0],
+      requested_at: new Date(t0 + 30 * 6e4).toISOString(), ended_at: new Date(t0 + 55 * 6e4).toISOString(),
+      status: 'completed', outcome: 'completed', gap_min: 30,
+    }],
+    same_day_segments: ALL_SEGS.filter((x) => x.local_day === seg.local_day).slice(0, 4),
+    custody: [-1, 0, 1].map((d) => ({
+      day: new Date(t0 + d * 864e5).toISOString().slice(0, 10),
+      driver_name: drivers[(d + 3) % drivers.length], driver_ext_id: `drv-${d + 3}`,
+      platform: 'uber', trips: 6 + d,
+    })),
+    channels_that_day: [
+      { platform: 'uber', rows_that_day: 812 }, { platform: 'bolt', rows_that_day: 64 },
+      { platform: 'hotel', rows_that_day: 18 }, { platform: 'fms', rows_that_day: 190 },
+    ],
+  });
+});
+
+/* ── one weekday-hour slot ───────────────────────────────────────────────── */
+app.get('/api/slot', (req, r) => {
+  const dow = +req.query.dow || 0, hour = +req.query.hour || 0;
+  const trips = 30 + ((dow * 7 + hour) % 60);
+  const possible = 4;
+  const daysSeen = 3;
+  r.json({
+    slot: { dow, hour },
+    headline: {
+      trips, days_seen: daysSeen, drivers: 2 + (hour % 5), vehicles: 3 + (hour % 4),
+      platforms: 3, avg_km: 14.2, revenue: trips * 38, priced_n: Math.round(trips * 0.4),
+      completion_pct: 91.4, possible_days: possible,
+      trips_per_occurrence: +(trips / possible).toFixed(1),
+      coverage_pct: Math.round((daysSeen / possible) * 100),
+      revenue_per_priced_trip: 38,
+    },
+    drivers: drivers.slice(0, 5).map((n, i) => ({
+      driver_ext_id: `drv-${i}`, driver_name: n, trips: Math.max(1, Math.round(trips * (0.45 - i * 0.09))),
+      days: 3 - (i % 3), platforms: ['uber', 'bolt'][i % 2], revenue: 400 - i * 60,
+      completion_pct: i === 4 ? null : 96 - i * 6,
+    })),
+    platforms: [
+      { platform: 'uber', trips: Math.round(trips * 0.6), revenue: 0, priced_n: 0 },
+      { platform: 'bolt', trips: Math.round(trips * 0.25), revenue: 380, priced_n: 9 },
+      { platform: 'hotel', trips: Math.round(trips * 0.15), revenue: 720, priced_n: 6 },
+    ],
+    corridors: ['Dubai International Airport', 'Dubai Marina', 'Business Bay', 'Deira']
+      .map((place, i) => ({ place, trips: 12 - i * 3 })),
+    occurrences: Array.from({ length: daysSeen }, (_, i) => ({
+      day: `2026-08-${String(3 + i * 7).padStart(2, '0')}`, trips: 8 + i * 9, revenue: 300 + i * 90,
+    })),
+    peers: Array.from({ length: 7 }, (_, d) => ({ dow: d, trips: 20 + ((d * 11 + hour) % 40), days: 4 })),
+    settlement: [
+      { settlement_class: 'cash', trips: Math.round(trips * 0.5), revenue: 700 },
+      { settlement_class: 'card', trips: Math.round(trips * 0.3), revenue: 420 },
+      { settlement_class: 'on_account', trips: Math.round(trips * 0.2), revenue: 260 },
+    ],
+    outcome: [
+      { outcome: 'completed', trips: Math.round(trips * 0.9) },
+      { outcome: 'not_completed', trips: Math.round(trips * 0.07) },
+      { outcome: '(not reported)', trips: Math.round(trips * 0.03) },
+    ],
+  });
+});
+
+// Anything not fixtured above answers with an empty list rather than a 404,
+// so a new page renders its own empty state instead of the view error box.
+app.get(/^\/api\//, (_, r) => r.json([]));
 app.use(express.static(join(__dir, 'api', 'public')));
 app.get('*', (_, r) => r.sendFile(join(__dir, 'api', 'public', 'index.html')));
 app.listen(8099, () => console.log('mock api on http://localhost:8099'));

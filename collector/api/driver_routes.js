@@ -266,11 +266,23 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               round(sum(distance_km)::numeric,0) km, round(avg(distance_km)::numeric,1) avg_km,
               round(sum(price)::numeric,2) revenue,
               round(avg(price)::numeric,2) avg_fare,
-              round(100.0*sum((status='completed')::int)/nullif(count(*),0),1) completion_pct,
-              round(100.0*sum((status ILIKE '%cancel%')::int)/nullif(count(*),0),1) cancel_pct,
+              -- Normalised, because the four platforms do not share a status
+              -- vocabulary: Bolt says 'finished' for a completed trip and
+              -- 'client_did_not_show' / 'driver_did_not_respond' /
+              -- 'driver_rejected' for three of its four failure modes, none of
+              -- which match ILIKE '%cancel%'. FMS telematics rows hardcode
+              -- 'completed' and cannot be cancelled at all, so they are dropped
+              -- from both sides by the outcome IS NOT NULL denominator rather
+              -- than inflating this person's success rate.
+              round(100.0*count(*) FILTER (WHERE outcome='completed')
+                    /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) completion_pct,
+              round(100.0*count(*) FILTER (WHERE outcome='not_completed')
+                    /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
+              count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
+              count(*) FILTER (WHERE is_booking)::int bookings,
               round(avg(duration_s)::numeric/60,1) avg_minutes,
               count(DISTINCT plate)::int vehicles, count(DISTINCT platform)::int platforms
-       FROM trip WHERE ${TW}`, p);
+       FROM trip_norm WHERE ${TW}`, p);
     // "typical start" — the median hour of the first trip of each working day,
     // which is a far better description of a shift than the mean of all trips.
     const [shift] = await q(
@@ -304,8 +316,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     `WITH t AS (
        SELECT (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
               count(*)::int trips,
-              sum((status='completed')::int)::int completed,
-              sum((status ILIKE '%cancel%')::int)::int cancelled,
+              count(*) FILTER (WHERE outcome='completed')::int completed,
+              count(*) FILTER (WHERE outcome='not_completed')::int cancelled,
+              count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
               round(sum(distance_km)::numeric,1) km,
               round(sum(price)::numeric,2) revenue,
               min(requested_at) first_trip_at, max(requested_at) last_trip_at,
@@ -314,7 +327,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               round((extract(epoch from (max(requested_at)-min(requested_at)))/3600)::numeric,2) span_h,
               string_agg(DISTINCT plate, ',') plates,
               string_agg(DISTINCT platform, ',') platforms
-       FROM trip WHERE ${TW} GROUP BY 1),
+       FROM trip_norm WHERE ${TW} GROUP BY 1),
      h AS (
        SELECT period_start AS day, sum(hours_online) hours_online, sum(hours_on_trip) hours_on_trip,
               sum(earnings) earnings
@@ -349,9 +362,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days,
               sum(distance_km) km, sum(price) revenue,
               avg(distance_km) avg_km,
-              100.0*sum((status='completed')::int)/nullif(count(*),0) completion,
-              100.0*sum((status ILIKE '%cancel%')::int)/nullif(count(*),0) cancel
-       FROM trip WHERE requested_at BETWEEN $1 AND $2 AND driver_ext_id IS NOT NULL
+              100.0*count(*) FILTER (WHERE outcome='completed')
+                   /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0) completion,
+              100.0*count(*) FILTER (WHERE outcome='not_completed')
+                   /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0) cancel
+       FROM trip_norm WHERE requested_at BETWEEN $1 AND $2 AND driver_ext_id IS NOT NULL
        GROUP BY 1 HAVING count(*) >= 5`, [p[0], p[1]]);
     const mineIds = new Set(d.ids);
     const mine = peers.filter((r) => mineIds.has(r.driver_ext_id));
@@ -488,14 +503,20 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   /* ── quality: cancellations, safety events, unauthorised use ───────── */
   app.get('/api/driver/quality', withDriver(async (req, res, d, p) => {
     const cancels = await q(
-      `SELECT coalesce(status,'unknown') status, count(*)::int n,
+      // The raw provider string, kept deliberately — the point of this table
+      // is to show the vocabulary each platform actually uses. But what counts
+      // as "not completed" is decided by the normalised outcome, so Bolt's
+      // 'finished' is not listed here as a failure reason, which is what
+      // status <> 'completed' did.
+      `SELECT coalesce(status,'unknown') status, platform, count(*)::int n,
               round(100.0*count(*)/sum(count(*)) OVER (),1) pct
-       FROM trip WHERE ${TW} AND status IS NOT NULL AND status <> 'completed'
-       GROUP BY 1 ORDER BY n DESC LIMIT 12`, p);
+       FROM trip_norm WHERE ${TW} AND outcome = 'not_completed'
+       GROUP BY 1,2 ORDER BY n DESC LIMIT 12`, p);
     const cancelDaily = await q(
-      `SELECT (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
-              sum((status ILIKE '%cancel%')::int)::int cancelled, count(*)::int trips
-       FROM trip WHERE ${TW} GROUP BY 1 ORDER BY 1`, p);
+      `SELECT local_day AS day,
+              count(*) FILTER (WHERE outcome='not_completed')::int cancelled,
+              count(*) FILTER (WHERE outcome IS NOT NULL)::int trips
+       FROM trip_norm WHERE ${TW} GROUP BY 1 ORDER BY 1`, p);
     // Harsh-driving events are recorded against the vehicle, so they are only
     // this driver's when they held the vehicle that day.
     // DISTINCT matters: vehicle_driver_day carries one row per platform, so a
@@ -520,8 +541,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   /* ── the raw record, because eventually someone needs the trips ────── */
   app.get('/api/driver/trips', withDriver(async (req, res, d, p) => res.json(await q(
     `SELECT platform, external_id, requested_at, ended_at, plate, pickup_addr, dropoff_addr,
-            distance_km, duration_s, status, product, payment_type, price, currency
-     FROM trip WHERE ${TW}
+            distance_km, duration_s, status, product, payment_type, price, currency,
+            -- The provider's own word stays in the status column; outcome is
+            -- what the UI may colour by, because the four platforms disagree
+            -- about which strings mean success.
+            outcome, is_booking, has_fare
+     FROM trip_norm WHERE ${TW}
      ORDER BY requested_at DESC LIMIT ${Math.min(+req.query.limit || 200, 1000)}`, p))));
 
   /* ── which vehicles, day by day (handovers visible) ────────────────── */

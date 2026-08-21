@@ -10,6 +10,7 @@
    telematics twins added to bookings, money divided by rows that carry no
    money, and a Dubai day that is not a UTC day. */
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { dayRoutes } from '../api/day_routes.js';
@@ -19,10 +20,7 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql',
-  'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql'])
-  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 let n = 0;
 const trip = (o) => q(

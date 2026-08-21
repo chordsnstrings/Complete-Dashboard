@@ -3,8 +3,8 @@
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
-import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, tabBar, pill, note, entity, dayStr, dtStr, money, pct } from './ui.js';
-import { state, api, params, q, qAll, href, parseHash, navigate, store } from './data.js';
+import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity, dayStr, dtStr, money, pct } from './ui.js';
+import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCauses } from './causes.js';
@@ -16,6 +16,8 @@ import { renderAnalyst, ANALYST_TABS } from './analyst.js';
 import { renderProviders } from './providers.js';
 import { renderRoster, ROSTER_TABS } from './roster.js';
 import { renderDay } from './day.js';
+import { renderSegments, renderSegment, segmentTable } from './segments.js';
+import { renderSlot } from './slot.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -174,23 +176,6 @@ function setHeader(detail) {
   const noFilter = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights', 'compliance'];
   $('#filters').style.display = noFilter.includes(state.view) ? 'none' : 'flex';
 }
-// generic trip drill-down for any filter combination
-function drillTrips(title, subtitle, extra) {
-  drill(title, subtitle, async (body) => {
-    const rows = await q('/api/drivers/leaderboard', extra);
-    body.innerHTML = '';
-    body.append(tableFrom(rows.slice(0, 60), [
-      { label: 'Driver', key: 'driver_name',
-      render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
-    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
-      { label: 'Platform', key: 'platform' },
-      { label: 'Trips', key: 'trips', num: true }, { label: 'Km', key: 'km', num: true },
-      { label: 'Revenue', key: 'revenue', num: true, render: (r) => r.revenue ? 'AED ' + fmt(r.revenue) : '—' },
-      { label: 'Completion', key: 'completion_pct', num: true, render: (r) => r.completion_pct != null ? r.completion_pct + '%' : '—' },
-    ]));
-  });
-}
-
 /* ─────────── views ─────────── */
 const V = {};
 
@@ -353,10 +338,15 @@ V.demand = async (root) => {
       'so the seasonal effect only becomes visible across a longer window. Rows marked forecast have not happened yet.'));
   }
 
-  heatmap(hm.body, grid, { onClick: (c) => drill(`${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][c.dow]} at ${String(c.h).padStart(2,'0')}:00`,
-    `${fmt(c.trips)} trips in this slot across the selected range`, async (b) => { b.innerHTML = '<div class="note">Slot-level trip list requires per-trip drill; showing driver ranking for the range.</div>';
-      const rows2 = await q('/api/drivers/leaderboard'); b.append(tableFrom(rows2.slice(0, 25), [
-        { label: 'Driver', key: 'driver_name' }, { label: 'Trips', key: 'trips', num: true }, { label: 'Km', key: 'km', num: true }])); }) });
+  /* A cell used to open a modal that showed the driver ranking for the WHOLE
+     range — identically whichever cell you clicked, under a title naming the
+     slot. It is now a page about that slot: who covers it, on how many of the
+     weekdays it could have covered, from where, and what happens if that person
+     is off. */
+  heatmap(hm.body, grid, { onClick: (c) => { location.hash = href('slot', String(c.dow), String(c.h)); } });
+  hm.body.append(el('p', 'cap',
+    'Darker is busier. A cell opens that hour as a rostering question — who holds it, how reliably it fires, '
+    + 'and where the work starts.'));
 };
 
 V.drivers = async (root) => {
@@ -472,6 +462,25 @@ V.action = async (root) => {
 };
 /* A day is a page. It was a modal titled "Trips on 14 August" that contained a
    driver leaderboard, and could not be linked to. */
+/* Occupancy segments. `#segments/<kind>/<value>` where kind is one of
+   verdict|plate|day|driver, and `#segment/<plate>/<started_at>` for one
+   interval. These replaced four separate modals that opened the same body. */
+V.segments = async (root) => {
+  const KINDS = ['verdict', 'plate', 'day', 'driver'];
+  const kind = KINDS.includes(state.param) ? state.param : null;
+  await renderSegments(root, kind, kind ? state.sub : null);
+};
+V.segment = async (root) => renderSegment(root, state.param, state.sub);
+
+/* One weekday-hour cell of the demand heatmap: `#slot/<dow>/<hour>`. */
+V.slot = async (root) => {
+  const dow = Number(state.param), hour = Number(state.sub);
+  if (!Number.isInteger(dow) || dow < 0 || dow > 6 || !Number.isInteger(hour) || hour < 0 || hour > 23) {
+    return empty(root, 'A slot address is #slot/<weekday 0-6>/<hour 0-23>.');
+  }
+  await renderSlot(root, dow, hour);
+};
+
 V.day = async (root) => {
   let detail = null;
   await renderDay(root, state.param, (d) => { detail = d; });
@@ -571,7 +580,12 @@ async function platformShare(root) {
   const cov = panel('Coverage & history depth', 'What each source has actually delivered'); root.append(cov.panel);
   [share.body, fleetMix.body, cov.body].forEach(loading);
   const [byPlat, byFleet, plats] = await Promise.all([q('/api/mix', { by: 'platform' }), q('/api/mix', { by: 'fleet' }), api('/api/platforms')]);
-  donut(share.body, byPlat, { onClick: (d) => drillTrips(`${d.label}`, 'Drivers on this platform', { platform: d.label }) });
+  /* Clicking a slice used to open a modal listing that platform's drivers. It
+     now sets the platform filter and goes to the driver directory — the same
+     answer, on a page with the search box, the compliance columns and an
+     address that carries the filter with it. */
+  donut(share.body, byPlat, { onClick: (d) => setFilter({ platform: d.label, view: 'drivers', param: null, sub: null }) });
+  share.body.append(el('p', 'cap', 'Click a slice to filter the whole dashboard to that platform and open its drivers.'));
   donut(fleetMix.body, byFleet);
   cov.body.innerHTML = '';
   cov.body.append(tableFrom(plats, [
@@ -1044,14 +1058,14 @@ V.unauthorized = async (root) => {
     root.insertBefore(w, g);
   }
 
+  /* Every click here used to open a modal. A flag against a named driver is
+     the most serious claim this product makes, and it needs an address you can
+     paste into a message — so each of these now navigates to a page. */
   barChart(trend.body, daily, { x: 'd', y: 'unauthorized', color: '--s8', label: 'unexplained',
-    onClick: (d) => drill(`Unexplained occupancy on ${d.d}`, 'Segments flagged that day', async (b) => {
-      const rs = await api(`/api/unauthorized/list?from=${dayKey(d.d)}&to=${dayKey(d.d)}&verdict=unauthorized`);
-      b.innerHTML = ''; b.append(segTable(rs));
-    }) });
+    onClick: (d) => { location.hash = href('segments', 'day', dayKey(d.d)); } });
+  trend.body.append(el('p', 'cap', 'Click a bar for that day’s segments; the day’s full picture — every source, every platform — is on its own page.'));
   donut(verdicts.body, (sum.byVerdict || []).map((r) => ({ label: r.verdict, n: r.n })),
-    { onClick: (d) => drill(`Segments: ${d.label}`, 'All occupancy intervals with this verdict', async (b) => {
-        const rs = await q('/api/unauthorized/list', { verdict: d.label }); b.innerHTML = ''; b.append(segTable(rs)); }) });
+    { onClick: (d) => { location.hash = href('segments', 'verdict', d.label); } });
 
   veh.body.innerHTML = '';
   // Show who was driving, not just which plate — a flag against a car nobody can
@@ -1059,12 +1073,15 @@ V.unauthorized = async (root) => {
   if (byVeh.length) hbars(veh.body, byVeh.slice(0, 12).map((r) => ({
       label: r.drivers ? `${r.plate} · ${r.drivers}` : `${r.plate} · driver unknown`,
       plate: r.plate, n: r.unauthorized })), { color: '--s8',
-    onClick: (d) => drill(`Vehicle ${d.plate || d.label}`, 'Unexplained occupancy segments', async (b) => {
-      const rs = await q('/api/unauthorized/list', { verdict: 'unauthorized' });
-      b.innerHTML = ''; b.append(segTable(rs.filter((r) => r.plate === (d.plate || d.label)))); }) });
+    onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } });
   else empty(veh.body, 'No unexplained trips detected in this range');
 
-  list.body.innerHTML = ''; list.body.append(segTable(rows));
+  /* The evidence table lives in segments.js now. This page and that one were
+     two implementations of the same table and had drifted: this one printed a
+     hardcoded English sentence keyed on the verdict, with no entry for
+     `unverifiable` or `pending`, so eight of fifty-two segments opened a blank
+     "Why this verdict". Every row is a link to that segment's own page. */
+  list.body.innerHTML = ''; list.body.append(segmentTable(rows));
 
   health.body.innerHTML = '';
   const flagged = sensors.map((s2) => ({ ...s2,
@@ -1079,60 +1096,9 @@ V.unauthorized = async (root) => {
   ]));
 };
 
-// shared: table of occupancy segments with click-through evidence
-function segTable(rows) {
-  if (!rows.length) { const d = el('div'); empty(d, 'Nothing flagged here'); return d; }
-  const t = tableFrom(rows, [
-    { label: 'Plate', key: 'plate' },
-    // the driver who held the car that day — an unexplained trip needs a person
-    { label: 'Driver', key: 'drivers', render: (r) => r.drivers
-      ? esc(r.drivers) : '<span class="dim">unknown</span>' },
-    { label: 'Started', key: 'started_at', render: (r) => new Date(r.started_at).toLocaleString() },
-    { label: 'Duration', key: 'duration_min', num: true, render: (r) => r.duration_min + ' min' },
-    { label: 'Distance', key: 'distance_km', num: true, render: (r) => (r.distance_km ?? 0) + ' km' },
-    { label: 'Top speed', key: 'top_speed', num: true, render: (r) => (r.top_speed ?? 0) + ' km/h' },
-    { label: 'Verdict', key: 'verdict', render: (r) => `<span class="tag ${r.verdict === 'unauthorized' ? 'bad' : r.verdict === 'authorized' ? 'ok' : 'warn'}">${esc(r.verdict)}</span>` },
-    { label: 'Confidence', key: 'low_confidence', render: (r) => r.low_confidence ? '<span class="tag warn">low</span>' : '<span class="tag dim">ok</span>' },
-  ]);
-  t.querySelectorAll('tbody tr').forEach((tr, i) => { tr.style.cursor = 'pointer';
-    tr.onclick = () => { const r = rows[i]; drill(`${r.plate}${r.drivers ? ' · ' + r.drivers : ''} · ${new Date(r.started_at).toLocaleString()}`,
-      `${r.verdict} — ${r.duration_min} min, ${r.distance_km} km`, async (b) => {
-        b.innerHTML = '';
-        b.append(el('div', 'kpis', [['Duration', r.duration_min + ' min'], ['Distance', (r.distance_km ?? 0) + ' km'],
-          ['Top speed', (r.top_speed ?? 0) + ' km/h'], ['GPS fixes', fmt(r.fixes)],
-          ['Largest gap', (r.max_gap_min ?? 0) + ' min'], ['Ignition on', Math.round((r.ignition_ratio || 0) * 100) + '%']]
-          .map(([l, n]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div></div>`).join('')));
-        const why = el('div', 'panel');
-        why.append(el('h3', null, 'Why this verdict'));
-        const reasons = {
-          unauthorized: 'The seat sensor reported a passenger, the vehicle covered real distance, and no booking on Uber, Yango, Bolt, the hotel platform or FMS overlaps this window (±15 min).',
-          authorized: `Matched to a ${r.matched_platform || 'booking'} (${r.matched_trip_id || '—'}).`,
-          sensor_suspect: 'Occupancy was implausibly long, or registered with the ignition off — consistent with a stuck seat pad rather than a passenger.',
-          partial: 'A telemetry gap falls inside this window, so we cannot claim to have observed the whole interval.',
-          stationary: 'Occupied but the vehicle never really moved — not a trip.',
-        };
-        why.append(el('p', 'note', reasons[r.verdict] || ''));
-        if (r.low_confidence) why.append(el('p', 'note err', `Assessed while these sources were unavailable: ${esc(r.unavailable_sources || '')}. A booking may exist that we could not read.`));
-        b.append(why);
-        const trk = el('div', 'panel'); trk.append(el('h3', null, 'Telemetry during this window'), el('p', 'cap', 'CABMAN 5-minute fixes'));
-        const track = await api(`/api/track?plate=${encodeURIComponent(r.plate)}&from=${r.started_at}&to=${r.ended_at}`);
-        if (track.length) {
-          const sp = el('div'); trk.append(sp);
-          areaChart(sp, track.map((x) => ({ t: new Date(x.captured_at).toLocaleTimeString(), speed: +x.speed || 0 })), { x: 't', y: 'speed', color: '--s8' });
-          trk.append(tableFrom(track, [
-            { label: 'Time', key: 'captured_at', render: (x) => new Date(x.captured_at).toLocaleTimeString() },
-            { label: 'Speed', key: 'speed', num: true }, { label: 'Seat', key: 'seat_occupied', render: (x) => x.seat_occupied ? 'occupied' : 'empty' },
-            { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true }]));
-        } else trk.append(el('div', 'note', 'No fixes stored for this window.'));
-        b.append(trk);
-      }); };
-  });
-  return t;
-}
-
 V.live = async (root) => {
   const kh = el('div', 'kpis'); root.append(kh);
-  const p = panel('Live vehicles', 'CABMAN refreshes every 5 minutes · click a row for the GPS breadcrumb'); root.append(p.panel);
+  const p = panel('Live vehicles', 'CABMAN refreshes every 5 minutes · click a row for that vehicle’s movement page'); root.append(p.panel);
   [kh, p.body].forEach(loading);
   const rows = await api('/api/live');
   const fresh = rows.filter((r) => !r.stale).length;
@@ -1146,7 +1112,10 @@ V.live = async (root) => {
   p.body.innerHTML = '';
   if (!rows.length) { empty(p.body, 'Positions appear once CABMAN credentials are saved in Settings'); return; }
   const t = tableFrom(rows, [
-    { label: 'Plate', key: 'plate' }, { label: 'Fleet', key: 'fleet_id' },
+    // A plate that is only text is a dead end on the one page an operator has
+    // open all day. Every vehicle here has a page.
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+    { label: 'Fleet', key: 'fleet_id' },
     { label: 'Status', key: 'status', render: (r) => `<span class="tag ${/engag/i.test(r.status || '') ? 'ok' : 'dim'}">${esc(r.status || '—')}</span>` },
     { label: 'Speed', key: 'speed', num: true, render: (r) => r.speed != null ? fmt(r.speed) + ' km/h' : '—' },
     { label: 'Seat', key: 'seat_occupied', /* Three states, not two. Only the CABMAN feed carries a seat sensor; FMS and
@@ -1158,21 +1127,18 @@ V.live = async (root) => {
     { label: 'Fix age', key: 'polled_at', render: (r) => `<span class="tag ${r.stale ? 'warn' : 'ok'}">${r.stale ? 'stale' : 'live'}</span>` },
     { label: 'Last fix', key: 'captured_at', render: (r) => new Date(r.captured_at).toLocaleTimeString() },
   ]);
+  /* The breadcrumb used to be a modal titled after the plate. It is now the
+     vehicle's own Movement tab, which has the map, the parked clusters and the
+     replayable days the modal never had — and an address you can send. */
   t.querySelectorAll('tbody tr').forEach((tr, i) => { tr.style.cursor = 'pointer';
-    tr.onclick = () => { const v = rows[i]; drill(`Vehicle ${v.plate}`, 'GPS breadcrumb (5-minute resolution)', async (b) => {
-      const track = await api(`/api/track?plate=${encodeURIComponent(v.plate)}`);
-      b.innerHTML = '';
-      if (!track.length) return empty(b, 'No breadcrumb stored yet');
-      const sp = panel('Speed over time', `${track.length} fixes`); b.append(sp.panel);
-      areaChart(sp.body, track.slice(-60).map((r) => ({ t: new Date(r.captured_at).toLocaleTimeString(), speed: +r.speed || 0 })),
-        { x: 't', y: 'speed', color: '--s3' });
-      b.append(tableFrom(track.slice(-25).reverse(), [
-        { label: 'Time', key: 'captured_at', render: (r) => new Date(r.captured_at).toLocaleString() },
-        { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true },
-        { label: 'Speed', key: 'speed', num: true }, { label: 'Status', key: 'status' }]));
-    }); };
+    tr.onclick = (e) => {
+      if (e.target.closest('a')) return;
+      location.hash = href('vehicle', rows[i].plate, 'movement');
+    };
   });
   p.body.append(t);
+  p.body.append(el('p', 'cap',
+    'Click a row for that vehicle’s movement page — the map, the replayable days and every stationary cluster.'));
 };
 
 
@@ -1722,15 +1688,39 @@ V.settings = async (root) => {
         { label: 'Requested', key: 'requested_at', render: (r) => dtStr(r.requested_at) },
         { label: 'Started', key: 'started_at', render: (r) => (r.started_at ? dtStr(r.started_at) : '—') },
         { label: 'Took', key: 'seconds', num: true,
-          render: (r) => (r.seconds == null ? '—' : r.seconds > 90 ? `${Math.round(r.seconds / 60)} min` : `${r.seconds}s`) },
+          render: (r) => (r.seconds != null
+            ? (r.seconds > 90 ? `${Math.round(r.seconds / 60)} min` : `${r.seconds}s`)
+            : r.running_seconds != null
+              ? `<span class="dim">${Math.round(r.running_seconds / 60)} min so far</span>` : '—') },
+        /* Which of the eight sources the run is actually on. A backfill's FMS
+           step takes four and a half hours; without this the row said 'running'
+           all afternoon and a working job looked exactly like a wedged one. */
+        { label: 'On', key: 'progress', render: (r) => (r.progress?.current
+          ? `${esc(r.progress.current)} <span class="dim">(${r.progress.done + 1} of ${r.progress.total})</span>`
+          : r.progress?.total ? `<span class="dim">all ${r.progress.total} done</span>` : '') },
+        { label: 'Restarts', key: 'attempts', num: true,
+          render: (r) => (r.attempts > 1
+            ? `<span class="pill ${r.attempts >= 3 ? 'bad' : 'warn'}">${r.attempts}</span>` : '') },
         { label: 'Detail', key: 'error', render: (r) => (r.error
           ? `<span class="note err">${esc(String(r.error).slice(0, 110))}</span>` : '') },
       ]));
       // `note` is a DOM element in this scope — the settings status line — so
       // the shared helper of the same name is unreachable here. Build the
       // element directly rather than shadowing something on purpose.
-      if (d.running) jp.body.append(el('div', 'note', esc('A run is in progress. Only one runs at a '
-        + 'time, so anything queued behind it starts when this finishes.')));
+      const live = d.jobs.find((j) => j.status === 'running');
+      if (live) {
+        const rem = live.progress?.remaining || [];
+        jp.body.append(el('div', 'note', esc(
+          (live.progress?.current
+            ? `Currently collecting ${live.progress.current}`
+              + (rem.length ? `, then ${rem.join(', ')}.` : ', the last of the sequence.')
+            : 'A run is in progress.')
+          + ' Only one runs at a time, so anything queued behind it starts when this finishes.'
+          + (live.attempts > 1
+            ? ` This job has been restarted ${live.attempts - 1} time(s) by a container restart — each restart`
+              + ' begins the sequence again, so a long run may never reach its later sources.'
+            : ''))));
+      }
     } catch (e) {
       jp.body.innerHTML = '';
       jp.body.append(el('div', 'note err', esc(`Could not load: ${e.message}`)));
@@ -1850,9 +1840,12 @@ async function freshness() {
   } catch { $('#freshness').textContent = 'status unavailable'; }
 }
 
-$('#fRange').onchange = (e) => { state.days = +e.target.value; render(); };
-$('#fPlatform').onchange = (e) => { state.platform = e.target.value; render(); };
-$('#fFleet').onchange = (e) => { state.fleet = e.target.value; render(); };
+/* A filter change rewrites the address rather than re-rendering in place, so
+   the URL always describes what is on screen and the back button undoes it.
+   `hashchange` does the render. */
+$('#fRange').onchange = (e) => setFilter({ days: +e.target.value });
+$('#fPlatform').onchange = (e) => setFilter({ platform: e.target.value });
+$('#fFleet').onchange = (e) => setFilter({ fleet: e.target.value });
 $('#refreshBtn').onclick = (e) => {
   const b = e.currentTarget; b.classList.remove('spin'); void b.offsetWidth; b.classList.add('spin');
   render();
@@ -1864,13 +1857,24 @@ $('#themeBtn').onclick = () => {
   store.set('theme', dark ? 'light' : 'dark');
 };
 if (store.get('theme')) document.documentElement.setAttribute('data-theme', store.get('theme'));
-// Routes are `#<view>[/<param>[/<sub>]]`. An unknown view falls back to the
-// overview rather than rendering nothing.
+/* Routes are `#<view>[/<param>[/<sub>]][?days=&platform=&fleet=]`.
+   An unknown view falls back to the overview rather than rendering nothing. */
 function applyRoute() {
   const r = parseHash();
   const known = VIEWS.some((v) => v.id === r.view) || !!V[r.view];
   state.view = known ? r.view : 'overview';
   state.param = r.param; state.sub = r.sub;
+  // The address is the authority. A link with no filter in it means the
+  // defaults, not "whatever the last page happened to be showing" — otherwise
+  // clicking a plain link would silently carry a 365-day window into a page
+  // whose caption claims 30.
+  state.days = r.days ?? 30;
+  state.platform = r.platform ?? '';
+  state.fleet = r.fleet ?? '';
+  const rng = $('#fRange'), plt = $('#fPlatform'), flt = $('#fFleet');
+  if (rng) rng.value = String(state.days);
+  if (plt) plt.value = state.platform;
+  if (flt) flt.value = state.fleet;
 }
 applyRoute();
 window.addEventListener('hashchange', () => { applyRoute(); render(); });

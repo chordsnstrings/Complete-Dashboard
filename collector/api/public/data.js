@@ -54,15 +54,50 @@ export function unfiltered(extra = {}) {
 export const qAll = (path, extra) => api(`${path}?${unfiltered(extra)}`);
 
 /* ── routing ───────────────────────────────────────────────────────────── */
+/* `#<view>[/<param>[/<sub>]][?days=&platform=&fleet=]`.
+   The window and the platform/fleet filters used to live only in `state`, so
+   every link anyone sent was a link to the DEFAULT window on that page. Someone
+   would narrow to Bolt over 90 days, find the thing, paste the URL, and the
+   person opening it saw all platforms over 30 days and no reason to think
+   otherwise. A filter that changes what a page says has to be part of the
+   page's address. */
+const DEFAULTS = { days: 30, platform: '', fleet: '' };
+
+export function filterQuery() {
+  const p = new URLSearchParams();
+  if (state.days !== DEFAULTS.days) p.set('days', String(state.days));
+  if (state.platform) p.set('platform', state.platform);
+  if (state.fleet) p.set('fleet', state.fleet);
+  const s = p.toString();
+  return s ? '?' + s : '';
+}
+
 export const href = (view, param, sub) =>
-  '#' + [view, param, sub].filter(Boolean).map(encodeURIComponent).join('/');
+  '#' + [view, param, sub].filter(Boolean).map(encodeURIComponent).join('/') + filterQuery();
 
 export function parseHash(h = location.hash.slice(1)) {
-  const [view, param, sub] = h.split('/').map((s) => (s ? decodeURIComponent(s) : null));
-  return { view: view || null, param: param || null, sub: sub || null };
+  const qi = h.indexOf('?');
+  const path = qi >= 0 ? h.slice(0, qi) : h;
+  const search = new URLSearchParams(qi >= 0 ? h.slice(qi + 1) : '');
+  const [view, param, sub] = path.split('/').map((s) => (s ? decodeURIComponent(s) : null));
+  return {
+    view: view || null, param: param || null, sub: sub || null,
+    // Only values the app actually offers. A hand-edited `days=9999` would
+    // otherwise widen every query on the page silently.
+    days: [7, 30, 90, 180, 365].includes(+search.get('days')) ? +search.get('days') : null,
+    platform: search.get('platform') || null,
+    fleet: search.get('fleet') || null,
+  };
 }
 export function navigate(view, param, sub) {
   const next = href(view, param, sub);
   if (location.hash === next) return false;
   location.hash = next; return true;
+}
+/* Change a filter without leaving the page — and write it into the address, so
+   the back button undoes it and the URL still describes what is on screen. */
+export function setFilter(patch) {
+  Object.assign(state, patch);
+  const { view, param, sub } = state;
+  location.hash = href(view, param, sub);
 }

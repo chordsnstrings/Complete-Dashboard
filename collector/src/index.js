@@ -60,11 +60,18 @@ async function main() {
         if (!job) return;
         jobRunning = true;
         log.info('scheduler', `on-demand ${job.mode} claimed`, { job: job.id });
+        /* Write which source the run is on as it goes. Eight sources run in
+           sequence and one of them takes four and a half hours; without this
+           the job row says 'running' for the whole afternoon and a wedged
+           process is indistinguishable from a working one. */
+        const progress = (p2) => pool.query(
+          `UPDATE collector_job SET progress = $2 WHERE id = $1`, [job.id, JSON.stringify(p2)])
+          .catch((e) => log.warn('scheduler', 'progress write failed', { err: String(e).slice(0, 80) }));
         try {
-          if (job.mode === 'backfill') await backfill();
+          if (job.mode === 'backfill') await backfill(progress);
           else if (job.mode === 'analyst') await analystPass();
           else if (job.mode === 'probe') await probePass();
-          else await incremental();
+          else await incremental(progress);
           await pool.query(
             `UPDATE collector_job SET status='done', finished_at=now() WHERE id=$1`, [job.id]);
           log.info('scheduler', `on-demand ${job.mode} finished`, { job: job.id });

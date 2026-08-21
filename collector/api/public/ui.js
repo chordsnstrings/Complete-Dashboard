@@ -32,19 +32,15 @@ export function tableFrom(rows, cols, { compact = false } = {}) {
   wrap.append(t); return wrap;
 }
 
-export function drill(title, subtitle, renderBody) {
-  const back = el('div', 'modal-back');
-  const box = el('div', 'modal');
-  box.innerHTML = `<div class="modal-head"><div><h3>${esc(title)}</h3><p class="cap">${esc(subtitle || '')}</p></div>
-    <button class="btn sec" id="mClose">Close</button></div>`;
-  const body = el('div', 'modal-body'); box.append(body); back.append(box); document.body.append(back);
-  const close = () => back.remove();
-  box.querySelector('#mClose').onclick = close;
-  back.onclick = (e) => { if (e.target === back) close(); };
-  document.addEventListener('keydown', function onEsc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', onEsc); } });
-  loading(body);
-  Promise.resolve(renderBody(body)).catch((e) => { body.innerHTML = `<div class="empty"><b>Could not load</b>${esc(e.message)}</div>`; });
-}
+/* There is no `drill()` any more.
+   Every one of the eleven modals this app used to open has become a page with
+   an address: an occupancy segment is #segment/<plate>/<started_at>, a heatmap
+   cell is #slot/<dow>/<hour>, a day is #day/<date>. The modal was always the
+   wrong container for this product — the things it opened are exactly the
+   things somebody needs to send to somebody else, and a modal cannot be sent.
+
+   The .modal CSS is deliberately left in app.css: it costs nothing and removing
+   it is the kind of tidying that breaks a page nobody tested. */
 
 /* A row of headline numbers. Values may carry a `sub` line and a `tone`
    (good / warn / serious / critical) that colours the number. */

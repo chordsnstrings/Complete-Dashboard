@@ -5,6 +5,7 @@
    They share one shape: a number rendered to a human that was not true, and in
    most cases a SECOND number on the same screen that contradicted it. */
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 
@@ -13,10 +14,7 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql',
-  'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql'])
-  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 let n = 0;
 const trip = (o) => q(
@@ -275,12 +273,33 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
        impact_aed, window_start, window_end, computed_at)
      VALUES ($1,'critical','utilisation','vehicle',$2,'t','d','a',$3,NULL,NULL,$4)
      ON CONFLICT DO NOTHING`, [code, entity, impact, when]);
-  // Three runs of the same finding, exactly as the collector produced them.
+  /* Two layers, and both are load-bearing.
+
+     schema_v15 added a partial unique index over the NULL-window rules, so the
+     duplicates can no longer be WRITTEN — three runs of the same finding
+     collapse to one row at insert time. That is the actual fix, and it is what
+     this first block checks.
+
+     The endpoint still deduplicates on read, because 2,979 rows written before
+     v15 existed are still in the live table and the page has to be correct
+     over them too. The second block drops the index and reproduces exactly what
+     production held, to prove the read path has not quietly stopped working
+     now that the write path makes it look redundant. */
   for (const t of ['2026-08-20T10:00:00Z', '2026-08-20T10:30:00Z', '2026-08-20T11:00:00Z']) {
     await ins('idle_vehicle', 'L100', t, 1680);
   }
   await ins('vehicle_doc_expiring', 'L101', '2026-08-20T11:00:00Z', null);
+  check('the unique index stops a duplicate finding being written at all',
+    (await q(`SELECT count(*)::int n FROM insight WHERE code='idle_vehicle'`))[0].n === 1,
+    String((await q(`SELECT count(*)::int n FROM insight WHERE code='idle_vehicle'`))[0].n));
+
+  await q('DROP INDEX insight_nullwindow_uniq');
+  for (const t of ['2026-08-20T10:30:00Z', '2026-08-20T11:00:00Z']) {
+    await ins('idle_vehicle', 'L100', t, 1680);
+  }
   const stored = (await q(`SELECT count(*)::int n FROM insight`))[0].n;
+  check('without the index the old duplication reappears, so the fixture is real',
+    stored === 4, String(stored));
 
   const page = await get('/api/insights');
   check('a finding appears once however many runs wrote it',

@@ -162,10 +162,18 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days_worked,
               round(sum(distance_km)::numeric,0) km, round(avg(distance_km)::numeric,1) avg_km,
               round(sum(price)::numeric,2) revenue, round(avg(price)::numeric,2) avg_fare,
-              round(100.0*sum((status='completed')::int)/nullif(count(*),0),1) completion_pct,
-              round(100.0*sum((status ILIKE '%cancel%')::int)/nullif(count(*),0),1) cancel_pct,
+              -- outcome, not status: Bolt reports a completed trip as
+              -- 'finished', and FMS telematics rows hardcode 'completed' on
+              -- journeys that cannot be cancelled, so a bare status test both
+              -- under-counted real completions and padded the denominator.
+              round(100.0*count(*) FILTER (WHERE outcome='completed')
+                    /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) completion_pct,
+              count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
+              round(100.0*count(*) FILTER (WHERE outcome='not_completed')
+                    /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
+              count(*) FILTER (WHERE is_booking)::int bookings,
               count(DISTINCT driver_ext_id)::int drivers, count(DISTINCT platform)::int platforms
-       FROM trip WHERE ${TW}`, p);
+       FROM trip_norm WHERE ${TW}`, p);
     const [u] = await q(
       `SELECT round(avg(utilisation)::numeric,3) utilisation,
               round(sum(hours_online)::numeric,1) hours_online,
@@ -198,11 +206,14 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   /* ── the daily spine ──────────────────────────────────────────────────── */
   app.get('/api/vehicle/daily', withVehicle(async (req, res, plate, p) => res.json(await q(
     `WITH t AS (
-       SELECT (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int trips,
-              sum((status ILIKE '%cancel%')::int)::int cancelled,
+       SELECT local_day AS day, count(*)::int trips,
+              -- ILIKE '%cancel%' missed three of Bolt's four failure modes
+              -- (client_did_not_show, driver_did_not_respond, driver_rejected).
+              count(*) FILTER (WHERE outcome='not_completed')::int cancelled,
+              count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
               round(sum(distance_km)::numeric,1) km, round(sum(price)::numeric,2) revenue,
               count(DISTINCT driver_ext_id)::int drivers
-       FROM trip WHERE ${TW} GROUP BY 1),
+       FROM trip_norm WHERE ${TW} GROUP BY 1),
      g AS (
        SELECT (captured_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int fixes,
               round(max(speed)::numeric,0) top_speed,

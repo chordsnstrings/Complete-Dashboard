@@ -28,7 +28,19 @@ const ROUTES = [
   'causes', 'insights', 'action/idle_vehicle/L45235', 'action/nope/-',
   'analyst', 'analyst/refuted', 'analyst/immaterial', 'analyst/unsupported', 'analyst/rules',
   'compliance', 'unauthorized',
+  // Segments and slots: the pages that replaced the eleven modals. Every filter
+  // kind is a route, including one nobody would type, because a facet chip can
+  // produce any of them.
+  'segments', 'segments/verdict/unauthorized', 'segments/verdict/authorized',
+  'segments/plate/L45235', 'segments/day/2026-08-03', 'segments/driver/Ahmed',
+  'segments/nonsense/x',
+  'segment/L45235/2026-08-03T04:00:00.000Z', 'segment/L45235/not-a-time',
+  'slot/2/19', 'slot/0/3', 'slot/9/99',
   'safety', 'safety/vehicles', 'safety/events', 'live', 'map', 'sources', 'coverage', 'providers', 'settings',
+  // The window and platform filters now live in the address. A link carrying
+  // them has to render the same as one that does not.
+  'overview?days=90&platform=uber', 'drivers?days=7&fleet=egari',
+  'segments/verdict/unauthorized?days=180',
 ];
 const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';
 

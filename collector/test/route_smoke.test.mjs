@@ -14,6 +14,7 @@
    array because the fixture has no matching row is fine; a route that cannot
    parse its own query is not. */
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema, SCHEMA_FILES } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { driverRoutes } from '../api/driver_routes.js';
@@ -27,9 +28,10 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-const SCHEMAS = ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql'];
-for (const f of SCHEMAS) await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+// Read from src/db.js, so a migration the server applies is a migration this
+// smoke test applies. A hand-maintained copy drifted once and the failure it
+// produced pointed at the test rather than at the code.
+const SCHEMAS = await applySchema(db);
 
 /* ── the one-time retraction must be exactly that ─────────────────────────
    schema_v8 deletes every occupancy_segment with a NULL verdict_reason. Both

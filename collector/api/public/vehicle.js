@@ -178,6 +178,33 @@ async function tabMovement(root, plate) {
 
   const mv = await qAll('/api/vehicle/movement', { plate });
   const map = makeMap(node, { zoom: 10 });
+
+  /* The replay dropdown is built from days that already have stored fixes, so
+     the day currently in progress is either missing or half-there. An operator
+     asking "where is this car" needs the newest fixes regardless of which day
+     they fall on — this is what the Live page's breadcrumb modal used to give
+     and had no other home. */
+  const now = panel('Most recent fixes', 'Newest first, whatever day they fall on — the replay above is by completed day');
+  root.append(now.panel); loading(now.body);
+  qAll('/api/track', { plate }).then((track) => {
+    now.body.innerHTML = '';
+    if (!track.length) return now.body.append(note('No GPS fix has ever been stored for this plate.'));
+    const recent = track.slice(-40).reverse();
+    const age = Math.round((Date.now() - Date.parse(recent[0].captured_at)) / 60000);
+    now.body.append(el('p', 'cap', age < 60
+      ? `Last fix ${age} minute(s) ago — CABMAN polls every five minutes.`
+      : `Last fix ${dtStr(recent[0].captured_at)}. This tracker is not currently reporting.`));
+    now.body.append(tableFrom(recent, [
+      { label: 'Time', key: 'captured_at', render: (r) => dtStr(r.captured_at) },
+      { label: 'Speed', key: 'speed', num: true, render: (r) => (r.speed != null ? `${fmt(r.speed)} km/h` : '—') },
+      { label: 'Seat', key: 'seat_occupied', render: (r) => (r.seat_occupied == null
+        ? '<span class="tag dim">not reported</span>'
+        : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
+      { label: 'Ignition', key: 'ignition', render: (r) => (r.ignition == null ? '—' : r.ignition ? 'on' : 'off') },
+      { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true },
+      { label: 'Source', key: 'source' },
+    ], { compact: true }));
+  }).catch(() => { now.body.innerHTML = ''; now.body.append(note('Telemetry could not be read.')); });
   let layer = null;
 
   const sel = ctl.querySelector('#vDay');
@@ -238,8 +265,12 @@ async function tabMovement(root, plate) {
   park.body.append(el('p', 'cap', 'Each fix is a five-minute sample, so the hours column is a floor, not a measure.'));
 
   seg.body.innerHTML = '';
+  /* Every row here is an accusation or an exoneration, and until now it was
+     dead text: the verdict pill said "unauthorized" and there was nowhere to
+     go to find out why. The start time is the segment's address. */
   seg.body.append(tableFrom(mv.segments.slice(0, 60), [
-    { label: 'Started', key: 'started_at', render: (r) => dtStr(r.started_at) },
+    { label: 'Started', key: 'started_at',
+      render: (r) => `<a href="${href('segment', plate, r.started_at)}">${esc(dtStr(r.started_at))}</a>` },
     { label: 'Ended', key: 'ended_at', render: (r) => timeStr(r.ended_at) },
     { label: 'Minutes', key: 'duration_min', num: true },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
@@ -249,6 +280,11 @@ async function tabMovement(root, plate) {
     { label: 'Matched', key: 'matched_platform' },
     { label: 'Confidence', key: 'low_confidence', render: (r) => (r.low_confidence ? 'low' : 'normal') },
   ]));
+  if (mv.segments.length > 60) seg.body.append(el('p', 'cap',
+    `Showing 60 of ${fmt(mv.segments.length)} movement periods. `
+    + `<a href="${href('segments', 'plate', plate)}">All of them, filterable by verdict</a>.`));
+  else if (mv.segments.length) seg.body.append(el('p', 'cap',
+    `<a href="${href('segments', 'plate', plate)}">The same periods with the verdict filter and the evidence trail</a>.`));
 }
 
 /* ── tab: safety ─────────────────────────────────────────────────────────── */
