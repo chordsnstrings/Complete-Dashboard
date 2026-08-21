@@ -100,11 +100,33 @@ export async function renderCoverage(root) {
     }
     body.append(strip);
     if (s.gaps.length) {
+      /* Three states, and only one of them is a bug worth chasing. This page
+         used to show a gap and stop, which meant a hole the provider has
+         already answered "nothing" for looked exactly like a hole nobody had
+         requested. The live FMS gap is the first kind: every window covering
+         those 155 days was asked for and came back empty with no error. */
       body.append(tableFrom(s.gaps, [
         { label: 'Gap starts', key: 'from', render: (g) => dayStr(g.from) },
         { label: 'Gap ends', key: 'to', render: (g) => dayStr(g.to) },
         { label: 'Days missing', key: 'days', num: true },
+        { label: 'Was it asked for?', key: 'verdict', render: (g) => ({
+          asked_and_empty: '<span class="tag ok">asked — provider returned nothing</span>',
+          window_failed: '<span class="tag bad">the request failed</span>',
+          never_asked: '<span class="tag warn">no record of asking</span>',
+        }[g.verdict] || '<span class="tag dim">unknown</span>') },
       ], { compact: true }));
+      const askedDays = s.gaps_asked_and_empty || 0;
+      const neverDays = s.gaps_never_asked || 0;
+      const failedDays = s.gaps_window_failed || 0;
+      const lines = [];
+      if (askedDays) lines.push(`${fmt(askedDays)} of these days were requested and the provider `
+        + 'returned no rows and no error. That is the provider\u2019s answer, not our bug — it is '
+        + 'the date this source started reporting, and re-running the collector will not change it.');
+      if (failedDays) lines.push(`${fmt(failedDays)} fall inside a window whose request FAILED. `
+        + 'Those are worth re-running, and the reason is on the Data sources page.');
+      if (neverDays) lines.push(`${fmt(neverDays)} have no record of ever being requested — either the `
+        + 'backfill has not reached them or it was cut short before it did.');
+      if (lines.length) body.append(el('p', 'cap', lines.join(' ')));
     } else {
       body.append(el('p', 'cap', 'No missing day inside this source’s collecting span.'));
     }

@@ -782,6 +782,59 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     }
     if (run) shared.push(run);
 
+    /* WAS A GAP EVER ASKED FOR?
+       ──────────────────────────────────────────────────────────────────────
+       This is the distinction that decides what to do about a hole, and it is
+       the one the page could not make. FMS is dark for 155 days over a period
+       Uber — now fully collected — shows as busy, and the obvious reading was
+       a broken collector. The collection_run chunk records say otherwise:
+       every window covering that period was requested and came back with zero
+       rows and no error. The provider was asked and answered "nothing".
+
+       So the FMS hole is not a collection failure. It is the date the
+       telematics boxes started reporting. Nobody should spend another hour
+       trying to re-fetch it, and nothing in this product said so until the
+       per-window records existed to say it.
+
+       Only chunks that SUCCEEDED and returned nothing count as an answer. A
+       window that errored is still an open question. */
+    const attempts = await q(
+      `SELECT source,
+              (c ->> 'from') AS from_day, (c ->> 'to') AS to_day,
+              (c ->> 'rows')::int AS rows,
+              (c ->> 'error') IS NOT NULL AS failed,
+              max(finished_at) AS last_tried
+       FROM collection_run r, jsonb_array_elements(coalesce(r.detail -> 'chunks', '[]'::jsonb)) c
+       WHERE c ? 'from' AND c ? 'to'
+       GROUP BY 1, 2, 3, 4, 5`);
+
+    const answeredEmpty = new Map();   // source -> [{from,to,last_tried}]
+    const failedWindows = new Map();
+    for (const a of attempts) {
+      if (!a.from_day || !a.to_day) continue;
+      const target = a.failed ? failedWindows : (a.rows === 0 ? answeredEmpty : null);
+      if (!target) continue;
+      if (!target.has(a.source)) target.set(a.source, []);
+      target.get(a.source).push({ from: a.from_day, to: a.to_day, last_tried: a.last_tried });
+    }
+    const covers = (wins, gFrom, gTo) => (wins || []).some((w) => w.from <= gFrom && w.to >= gTo);
+
+    for (const s of out) {
+      s.gaps = (s.gaps || []).map((g) => ({
+        ...g,
+        // Three states, and only one of them is a bug.
+        verdict: covers(failedWindows.get(s.source), g.from, g.to) ? 'window_failed'
+          : covers(answeredEmpty.get(s.source), g.from, g.to) ? 'asked_and_empty'
+            : 'never_asked',
+      }));
+      s.gaps_asked_and_empty = s.gaps.filter((g) => g.verdict === 'asked_and_empty')
+        .reduce((a, g) => a + g.days, 0);
+      s.gaps_never_asked = s.gaps.filter((g) => g.verdict === 'never_asked')
+        .reduce((a, g) => a + g.days, 0);
+      s.gaps_window_failed = s.gaps.filter((g) => g.verdict === 'window_failed')
+        .reduce((a, g) => a + g.days, 0);
+    }
+
     res.json({
       window: [from, to],
       sources: out,

@@ -551,6 +551,68 @@ const W = 'from=2026-08-01&to=2026-08-31';
     !strand.some((x) => x.measured < 3), JSON.stringify(strand.map((x) => x.measured)));
 }
 
+
+/* ── "we asked and got nothing" is not "we never asked" ───────────────────
+   These look identical on a calendar and lead to opposite actions. The live
+   case: FMS is dark for 155 days over a period Uber shows as busy, which reads
+   as a broken collector — and the chunk records say every window covering it
+   was requested and came back with zero rows and no error. The provider was
+   asked and answered nothing, so that hole is the date the telematics boxes
+   started reporting, and re-running the collector will never change it.
+
+   A window that ERRORED is a different thing again and stays an open
+   question. */
+{
+  await q(`DELETE FROM trip`);
+  await q(`DELETE FROM collection_run`);
+  let gn = 0;
+  const day = (plat, d) => q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_name, requested_at, status, distance_km)
+     VALUES ($1, $2, 'ecosine', 'L1', 'D', $3, 'completed', 10)`,
+    [plat, `g${gn++}`, `${d}T10:00:00+04:00`]);
+
+  // asked: data on the 1st and the 20th, nothing between.
+  await day('asked', '2026-06-01'); await day('asked', '2026-06-20');
+  // failed: same shape.
+  await day('failed', '2026-06-01'); await day('failed', '2026-06-20');
+  // silent: same shape, and no chunk record at all.
+  await day('silent', '2026-06-01'); await day('silent', '2026-06-20');
+
+  const run = (source, chunks) => q(
+    `INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, finished_at, detail)
+     VALUES ($1, 'ecosine', 'backfill', 'ok', 0, now(), $2::jsonb)`,
+    [source, JSON.stringify({ chunks })]);
+  await run('asked', [{ from: '2026-05-25', to: '2026-06-25', rows: 0, error: null }]);
+  await run('failed', [{ from: '2026-05-25', to: '2026-06-25', rows: 0, error: 'timeout after 600s' }]);
+
+  const cov = await get('/api/coverage/calendar?from=2026-06-01&to=2026-06-25');
+  const by = Object.fromEntries(cov.sources.map((x) => [x.source, x]));
+
+  check('a gap the provider answered with nothing is marked as answered',
+    by.asked.gaps[0]?.verdict === 'asked_and_empty', String(by.asked.gaps[0]?.verdict));
+  check('a gap whose request failed is a different verdict, and still an open question',
+    by.failed.gaps[0]?.verdict === 'window_failed', String(by.failed.gaps[0]?.verdict));
+  check('a gap nobody ever requested is neither of the above',
+    by.silent.gaps[0]?.verdict === 'never_asked', String(by.silent.gaps[0]?.verdict));
+  check('the days are totalled per verdict, so the page can say what to do',
+    by.asked.gaps_asked_and_empty === by.asked.missing_days
+    && by.asked.gaps_never_asked === 0,
+    `${by.asked.gaps_asked_and_empty} / ${by.asked.gaps_never_asked} of ${by.asked.missing_days}`);
+  check('a failed window is never counted as an answer',
+    by.failed.gaps_asked_and_empty === 0 && by.failed.gaps_window_failed > 0,
+    `${by.failed.gaps_asked_and_empty} / ${by.failed.gaps_window_failed}`);
+
+  /* A chunk that only PARTLY covers a gap does not answer it. Claiming a hole
+     is answered because one of its days was requested is exactly the kind of
+     confident wrong statement this whole endpoint exists to avoid. */
+  await q(`DELETE FROM collection_run WHERE source = 'asked'`);
+  await run('asked', [{ from: '2026-06-02', to: '2026-06-10', rows: 0, error: null }]);
+  const cov2 = await get('/api/coverage/calendar?from=2026-06-01&to=2026-06-25');
+  const partial = cov2.sources.find((x) => x.source === 'asked');
+  check('a window covering only part of a gap does not count as having answered it',
+    partial.gaps[0]?.verdict === 'never_asked', String(partial.gaps[0]?.verdict));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -937,7 +937,14 @@ app.get('/api/coverage/calendar', (_, r) => {
       to: dayISO(holeFrom - holeDays + 1).slice(0, 10), days: holeDays }];
     return { source, total_rows: days.reduce((a, d) => a + d.rows, 0), days_with_data: days.length,
       first_day: days[0].day, last_day: days[days.length - 1].day, median_rows_per_day: perDay,
-      gaps, missing_days: holeDays || 0, days };
+      // A gap the provider has already answered "nothing" for looks identical
+      // to one nobody requested, until the chunk records say which it is.
+      gaps: gaps.map((g, gi) => ({ ...g,
+        verdict: gi === 0 ? 'asked_and_empty' : gi === 1 ? 'never_asked' : 'window_failed' })),
+      gaps_asked_and_empty: gaps[0]?.days || 0,
+      gaps_never_asked: gaps[1]?.days || 0,
+      gaps_window_failed: gaps[2]?.days || 0,
+      missing_days: holeDays || 0, days };
   };
   r.json({ window: [dayISO(90).slice(0, 10), dayISO(0).slice(0, 10)],
     sources: [src('uber', 36, 18, 430), src('fms', null, 0, 260), src('hotel', null, 0, 14),
