@@ -556,6 +556,13 @@ app.get('/api/breaks', (_, r) => r.json([
 /* ── finance & context fixtures ───────────────────────────────────────────── */
 app.get('/api/mix', (req, r) => {
   const by = req.query.by;
+  // The hotel channel's booking types are not Uber tiers, and a fixture that
+  // ignores ?platform= renders a caption saying so directly above a chart of
+  // Uber tiers.
+  if (req.query.platform === 'hotel') return r.json([
+    { label: 'hotel: pick_and_drop', platform: 'hotel', n: 708, revenue: 78600, priced_n: 708, revenue_per_trip: 111.0 },
+    { label: 'hotel: drop_off', platform: 'hotel', n: 492, revenue: 51200, revenue_per_trip: 104.1, priced_n: 492 },
+    { label: 'hotel: hourly', platform: 'hotel', n: 53, revenue: 8600, revenue_per_trip: 162.3, priced_n: 53 }]);
   if (by === 'payment') return r.json([
     { label: 'card', n: 1642, revenue: 61200 }, { label: 'cash', n: 318, revenue: 14800 },
     { label: 'uber_wallet', n: 83, revenue: 2900 }, { label: 'corporate', n: 41, revenue: 3400 }]);
@@ -623,6 +630,207 @@ app.get('/api/recommendations', (_, r) => r.json([
   { platform: 'uber', rec_type: 'driver_rating', period_start: dayISO(28), period_end: dayISO(0),
     org_value: 4.82, target_value: 4.7, flagged_count: 2, flagged: false, updated_at: new Date().toISOString() },
 ]));
+
+
+/* ── commercial analytics fixtures ───────────────────────────────────────
+   Shaped like the real responses, including the parts that are awkward: a
+   settlement class whose revenue is null because the channel reports no fare,
+   a source with a hole in the middle of its collecting span, and a vehicle
+   whose premium shortfall is measured against its own model. */
+const hotels = [
+  { id: 'h-palm', name: 'Palm Grand' }, { id: 'h-marina', name: 'Marina Bay' },
+  { id: 'h-creek', name: 'Creek View' }, { id: 'h-jbr', name: 'JBR Residences' },
+];
+app.get('/api/settlement/mix', (_, r) => r.json({
+  total_trips: 2140, unlabelled_trips: 96, unlabelled_platforms: ['bolt'],
+  classes: [
+    { settlement_class: 'card', label: 'Card', meaning: 'Cleared through a card processor at the end of the ride.',
+      trips: 820, trip_share_pct: 38.3, priced_trips: 210, revenue: 24800, avg_fare: 118.1, km: 9800, foc_trips: 0, platforms: ['uber', 'hotel'], last_at: new Date().toISOString() },
+    { settlement_class: 'off_platform', label: 'Settled off-platform', meaning: 'Uber records the fare as settled outside the app. The export gives no further detail, so this is a settlement route and not, on this evidence, a business-account label.',
+      trips: 470, trip_share_pct: 22.0, priced_trips: 0, revenue: null, avg_fare: null, km: 6100, foc_trips: 0, platforms: ['uber'], last_at: new Date().toISOString() },
+    { settlement_class: 'cash', label: 'Cash', meaning: 'The driver was handed money and is holding it until it is banked.',
+      trips: 430, trip_share_pct: 20.1, priced_trips: 88, revenue: 7300, avg_fare: 83.0, km: 5200, foc_trips: 0, platforms: ['uber', 'hotel'], last_at: new Date().toISOString() },
+    { settlement_class: 'wallet', label: 'Wallet', meaning: 'Apple Pay, Google Pay, PayPal and equivalents — cleared, no cash risk.',
+      trips: 210, trip_share_pct: 9.8, priced_trips: 0, revenue: null, avg_fare: null, km: 2600, foc_trips: 0, platforms: ['uber'], last_at: new Date().toISOString() },
+    { settlement_class: 'on_account', label: 'On account', meaning: 'Charged to the room or the property. Outstanding until the hotel settles.',
+      trips: 84, trip_share_pct: 3.9, priced_trips: 84, revenue: 9200, avg_fare: 109.5, km: 1500, foc_trips: 0, platforms: ['hotel'], last_at: new Date().toISOString() },
+    { settlement_class: 'salary', label: 'Salary deduction', meaning: 'Posted against an employee’s salary. Outstanding until payroll runs.',
+      trips: 22, trip_share_pct: 1.0, priced_trips: 22, revenue: 1900, avg_fare: 86.4, km: 380, foc_trips: 0, platforms: ['hotel'], last_at: new Date().toISOString() },
+    { settlement_class: 'complimentary', label: 'Complimentary', meaning: 'Given away. Costs a driver-hour and fuel, earns nothing.',
+      trips: 8, trip_share_pct: 0.4, priced_trips: 0, revenue: null, avg_fare: null, km: 120, foc_trips: 8, platforms: ['hotel'], last_at: new Date().toISOString() },
+  ],
+}));
+app.get('/api/settlement/cash-exposure', (_, r) => r.json({
+  drivers: drivers.map((d, i) => ({ driver_name: d, driver_ext_id: `drv-${i}`, cash_trips: 60 - i * 6,
+    priced_cash_trips: Math.max(0, 14 - i * 2), cash_value: Math.max(0, 14 - i * 2) * 95,
+    value_known_pct: Math.round((Math.max(0, 14 - i * 2) / (60 - i * 6)) * 100),
+    platforms: ['uber', 'hotel'], plates: [plates[i], plates[(i + 1) % plates.length]],
+    last_cash_trip: new Date(Date.now() - i * 36e5).toISOString() })),
+  total_cash_trips: 430, total_cash_value_known: 7300, value_known_pct: 20,
+  caveat: '342 of 430 cash trips come from a channel that does not report a fare, so the value column is a floor, not the total.',
+}));
+app.get('/api/settlement/receivables', (_, r) => r.json({
+  rows: hotels.map((h, i) => ({ settlement_class: 'on_account', label: 'On account', counterparty: h.name,
+    partner_id: h.id, driver_ext_id: null, trips: 30 - i * 6, priced_trips: 30 - i * 6,
+    amount: (30 - i * 6) * 110, oldest: dayISO(70 - i * 10), newest: dayISO(i),
+    age_days: 70 - i * 10 })).concat([{ settlement_class: 'salary', label: 'Salary deduction',
+      counterparty: drivers[0], partner_id: null, driver_ext_id: 'drv-0', trips: 12, priced_trips: 12,
+      amount: 980, oldest: dayISO(41), newest: dayISO(3), age_days: 41 }]),
+  total: 8250, total_trips: 84,
+}));
+app.get('/api/corporate/summary', (_, r) => r.json({
+  bookings: 1253, priced: 1245, revenue: 138400, cost: 96200, avg_fare: 111.2, km: 18600,
+  revenue_per_km: 7.44, deadhead_km: 3120, deadhead_measured: 1140, deadhead_measured_pct: 91,
+  deadhead_ratio_pct: 16.8, foc_trips: 10, overrun_trips: 7, scheduled_trips: 604, scheduled_pct: 48.2,
+  authorized_trips: 155, authorized_pct: 12.4, missing_trips: 0, guests: 812, properties: 4,
+  drivers: 35, vehicles: 35, outside_dubai: 9, zoned: 707, outside_dubai_pct: 1.3,
+  concentration_hhi: 3480, top_property: 'Palm Grand', top_property_share_pct: 55.5,
+}));
+app.get('/api/corporate/properties', (_, r) => r.json(hotels.map((h, i) => ({
+  partner_id: h.id, name: h.name, bookings: 696 - i * 180, priced: 690 - i * 180,
+  revenue: (696 - i * 180) * 110, cost: (696 - i * 180) * 76, avg_fare: 110 + i * 4,
+  km: (696 - i * 180) * 14, revenue_per_km: 7.8 - i * 0.3, avg_deadhead_km: 2.4 + i * 0.8,
+  foc: Math.max(0, 6 - i * 2), overrun: Math.max(0, 4 - i), scheduled: Math.round((696 - i * 180) * 0.48),
+  scheduled_pct: 48, hourly: 20 - i * 4, pick_and_drop: 400 - i * 100, drop_off: 260 - i * 70,
+  guests: 420 - i * 110, drivers: 30 - i * 5, bookings_per_guest: 1.66 - i * 0.1,
+  first_at: dayISO(300), last_at: dayISO(i),
+})).filter((h) => h.bookings > 0)));
+app.get('/api/corporate/property', (req, res) => {
+  const h = hotels.find((x) => x.id === req.query.id) || hotels[0];
+  res.json({
+    profile: { name: h.name, partner_id: h.id, bookings: 696, first_at: dayISO(300), last_at: dayISO(0),
+      guests: 420, drivers: 30, vehicles: 28, revenue: 76560, priced: 690, avg_fare: 110.9 },
+    daily: Array.from({ length: 24 }, (_, i) => ({ day: dayISO(23 - i).slice(0, 10),
+      bookings: Math.round(20 + Math.sin(i / 3) * 8), revenue: Math.round(2200 + Math.cos(i / 4) * 500) })),
+    types: [{ label: 'pick_and_drop', n: 400, revenue: 46000, avg_km: 15.2 },
+      { label: 'drop_off', n: 260, revenue: 24800, avg_km: 12.1 },
+      { label: 'hourly', n: 36, revenue: 5760, avg_km: 41.0 }],
+    payments: [{ label: 'cash-driver', settlement_class: 'cash', label_class: 'Cash', n: 220, revenue: 23000 },
+      { label: 'room-charge', settlement_class: 'on_account', label_class: 'On account', n: 166, revenue: 19200 },
+      { label: 'pos-driver', settlement_class: 'card', label_class: 'Card', n: 190, revenue: 21400 },
+      { label: 'posted-for-salary', settlement_class: 'salary', label_class: 'Salary deduction', n: 120, revenue: 12960 }],
+    guests: Array.from({ length: 18 }, (_, i) => ({ guest_id: `guest-${1000 + i}`, bookings: 9 - (i % 8),
+      revenue: (9 - (i % 8)) * 112, room_no: String(1200 + i), first_at: dayISO(60 - i), last_at: dayISO(i) })),
+    drivers: drivers.map((d, i) => ({ driver_name: d, driver_ext_id: `drv-${i}`, bookings: 60 - i * 6,
+      avg_deadhead_km: 1.8 + i * 0.4, revenue: (60 - i * 6) * 110 })),
+    dayparts: [{ label: 'night', n: 90 }, { label: 'morning', n: 210 }, { label: 'midday', n: 160 },
+      { label: 'evening', n: 180 }, { label: 'late', n: 56 }],
+  });
+});
+app.get('/api/corporate/guests', (_, r) => r.json({
+  guests: Array.from({ length: 40 }, (_, i) => ({ guest_id: `guest-${2000 + i}`, bookings: 8 - (i % 7),
+    revenue: (8 - (i % 7)) * 108, priced: 8 - (i % 7), properties: 1 + (i % 2),
+    property: hotels[i % hotels.length].name, room_no: String(900 + i),
+    purpose: i % 5 === 0 ? 'AIRPORT TRANSFER' : null, first_at: dayISO(90 - i), last_at: dayISO(i % 30),
+    km: (8 - (i % 7)) * 14, span_days: 90 - i - (i % 30) })),
+  total_guests: 812, total_bookings: 1253, repeat_guests: 214, repeat_rate_pct: 26.4,
+  bookings_from_repeat_pct: 48.1,
+}));
+app.get('/api/corporate/leakage', (req, r) => {
+  const kinds = [
+    { kind: 'complimentary', label: 'Given away', why: 'A driver-hour and the fuel were spent; nothing was billed.', n: 10 },
+    { kind: 'overrun', label: 'Ran past the booked hours', why: 'An hourly charter that ran over its booked hours.', n: 7 },
+    { kind: 'unpriced', label: 'No fare recorded', why: 'The booking closed without a fare.', n: 8 },
+    { kind: 'zero_priced', label: 'Priced at zero', why: 'A completed booking with a fare of exactly zero.', n: 3 },
+    { kind: 'unauthorized', label: 'Charged with no authorisation on file', why: 'A billed booking with no authorisation object attached.', n: 1098 },
+    { kind: 'deadhead_exceeds_fare', label: 'Drove further to reach the job than the job itself', why: 'The unpaid approach leg was longer than the paid ride.', n: 46 },
+    { kind: 'missing', label: 'Flagged as a missing trip by the booking system', why: 'The booking system itself flagged this record as incomplete.', n: 0 },
+  ];
+  const rows = req.query.kind ? Array.from({ length: 12 }, (_, i) => ({
+    external_id: `bk-${i}`, requested_at: new Date(Date.now() - i * 72e5).toISOString(),
+    ended_at: new Date(Date.now() - i * 72e5 + 18e5).toISOString(), driver_name: drivers[i % drivers.length],
+    driver_ext_id: `drv-${i % drivers.length}`, plate: plates[i % plates.length],
+    property: hotels[i % hotels.length].name, partner_id: hotels[i % hotels.length].id,
+    product: ['pick_and_drop', 'hourly', 'drop_off'][i % 3], payment_type: 'room-charge',
+    settlement_class: 'on_account', price: 120 - i * 4, cost: 80 - i * 3, distance_km: 3 + i,
+    deadhead_km: 12 - i * 0.4, hours: null, room_no: String(1100 + i), trip_purpose: null,
+    over_run: false, has_authorization: i % 3 === 0, guest_id: `guest-${3000 + i}`,
+  })) : [];
+  r.json({ kinds, summary: { total: 1253, overrun_value: 1840, foc_cost: 720, wasted_km: 386.4 },
+    kind: req.query.kind || null, rows });
+});
+app.get('/api/corporate/approach', (req, r) => {
+  const by = req.query.by || 'property';
+  const labels = by === 'daypart' ? ['night', 'morning', 'midday', 'evening', 'late']
+    : by === 'driver' ? drivers : by === 'type' ? ['pick_and_drop', 'drop_off', 'hourly']
+      : by === 'zone' ? ['inside-dubai', 'outside-dubai'] : hotels.map((h) => h.name);
+  r.json(labels.map((label, i) => {
+    const bookings = 300 - i * 40, measured = Math.round((300 - i * 40) * 0.9);
+    const deadhead = Math.round((2.4 + i * 0.7) * measured * 10) / 10;
+    const paid = Math.round(bookings * 14.2 * 10) / 10;
+    return { label, bookings, measured, deadhead_km: deadhead, avg_deadhead_km: 2.4 + i * 0.7,
+      paid_km: paid, ratio_pct: Math.round((deadhead / paid) * 1000) / 10 };
+  }).filter((x) => x.bookings > 0));
+});
+app.get('/api/tiers/by-vehicle', (_, r) => r.json({
+  fleet_premium_pct: 12.1,
+  vehicles: plates.map((p, i) => {
+    const trips = 400 - i * 40, black = i % 3 === 0 ? 0 : 30 - i * 3, comfort = i % 4 === 0 ? 2 : 20 - i * 2;
+    const premium = black + comfort;
+    return { plate: p, trips, black, comfort, electric: Math.round(trips * 0.44),
+      uberx: trips - premium - Math.round(trips * 0.44), premium, km: trips * 12,
+      avg_km: 12 + i * 0.3, make: i % 2 ? 'Lexus' : 'BYD', model: i % 2 ? 'ES' : 'Han EV',
+      year: 2024, colour: i % 2 ? 'black' : 'white',
+      premium_pct: Math.round((premium / trips) * 1000) / 10,
+      model_key: i % 2 ? 'Lexus ES' : 'BYD Han EV', model_premium_pct: i % 2 ? 11.2 : 8.4,
+      model_best_pct: i % 2 ? 14.2 : 10.1,
+      // The shortfall is against the same MODEL's best, never the fleet's — a
+      // BYD compared against a Lexus is a spec sheet, not a finding.
+      premium_gap_pct: (() => {
+        const best = i % 2 ? 14.2 : 10.1, mine = (premium / trips) * 100;
+        return best - mine > 5 ? Math.round((best - mine) * 10) / 10 : null;
+      })() };
+  }),
+}));
+app.get('/api/tiers/mix', (_, r) => r.json(
+  ['night', 'morning', 'midday', 'evening', 'late'].flatMap((label, i) =>
+    ['UberX', 'Electric', 'Comfort', 'Black'].map((tier, j) => ({
+      label, tier, n: Math.round(300 / (j + 1) - i * 12), avg_km: 11 + j * 3 })))
+    .filter((x) => x.n > 0)));
+app.get('/api/coverage/calendar', (_, r) => {
+  const src = (source, holeFrom, holeDays, perDay) => {
+    const days = [];
+    for (let b = 90; b >= 0; b--) {
+      const day = dayISO(b).slice(0, 10);
+      if (holeFrom != null && b <= holeFrom && b > holeFrom - holeDays) continue;
+      days.push({ day, rows: Math.round(perDay * (0.7 + Math.random() * 0.6)),
+        plates: 30 + Math.round(Math.random() * 10), drivers: 25 + Math.round(Math.random() * 8) });
+    }
+    const gaps = holeFrom == null ? [] : [{ from: dayISO(holeFrom).slice(0, 10),
+      to: dayISO(holeFrom - holeDays + 1).slice(0, 10), days: holeDays }];
+    return { source, total_rows: days.reduce((a, d) => a + d.rows, 0), days_with_data: days.length,
+      first_day: days[0].day, last_day: days[days.length - 1].day, median_rows_per_day: perDay,
+      gaps, missing_days: holeDays || 0, days };
+  };
+  r.json({ window: [dayISO(90).slice(0, 10), dayISO(0).slice(0, 10)],
+    sources: [src('uber', 36, 18, 430), src('fms', null, 0, 260), src('hotel', null, 0, 14),
+      src('yango', 70, 40, 6)] });
+});
+app.get('/api/geo/corridors', (_, r) => {
+  const areas = ['Al Thanyah Fifth', 'Business Bay', 'Dubai Airport', 'Palm Jumeirah', 'Al Barsha 1',
+    'Marsa Dubai', 'Downtown Dubai', 'Al Nahda First', 'Jumeirah 1', 'Deira'];
+  r.json({
+    note: 'Areas are parsed from the address text each provider returns, not from a place id.',
+    corridors: areas.flatMap((a, i) => areas.slice(0, 4).map((b, j) => ({
+      from_area: a, to_area: b, trips: Math.max(3, 90 - i * 6 - j * 9),
+      avg_km: 8 + j * 4, avg_min: 18 + j * 7, priced: (i + j) % 3 ? 0 : 20,
+      avg_fare: (i + j) % 3 ? null : 96 + j * 12, platforms: ['uber', 'fms'] }))).filter((c) => c.from_area !== c.to_area),
+    origins: areas.map((area, i) => ({ area, trips: 420 - i * 34, morning: 200 - i * 18,
+      evening: 180 - i * 12, avg_km: 11 + i * 0.5 })),
+  });
+});
+app.get('/api/funnel/drivers', (_, r) => r.json(drivers.map((d, i) => ({
+  platform: i % 2 ? 'yango' : 'bolt', driver_name: d, driver_ext_id: `drv-${i}`,
+  period_start: dayISO(28), period_end: dayISO(0),
+  offered: 200 - i * 14, accepted: 150 - i * 12, completed: 120 - i * 10,
+  cancelled_driver: 4 + i, cancelled_client: 8 + i, work_time_seconds: 360000 - i * 20000,
+  price_cash: 3000 - i * 200, price_cashless: 1000 - i * 60, commission: -(800 - i * 50),
+  driver_score: 90 - i * 3, state: i === 6 ? 'suspended' : 'active',
+  accept_pct: Math.round(((150 - i * 12) / (200 - i * 14)) * 1000) / 10,
+  complete_pct: Math.round(((120 - i * 10) / (150 - i * 12)) * 1000) / 10,
+  commission_cost: 800 - i * 50, gross: 4000 - i * 260, hours: Math.round((360000 - i * 20000) / 360) / 10,
+  cash_pct: Math.round(((3000 - i * 200) / (4000 - i * 260)) * 1000) / 10,
+}))));
 
 app.get(/^\/api\//, (_, r) => r.json([]));
 

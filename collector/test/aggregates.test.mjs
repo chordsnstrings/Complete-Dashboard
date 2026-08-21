@@ -71,7 +71,12 @@ const slice = (from, to) => src.slice(src.indexOf(from), src.indexOf(to));
 const app = express();
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
 const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
-const asDate = (v, fallback) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : fallback);
+const asDate = (v, fallback) => {
+  const s = String(v || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return fallback;
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? fallback : s;
+};
 const range = (req) => {
   let from = asDate(req.query.from, '2000-01-01');
   let to = asDate(req.query.to, '2100-01-01');

@@ -21,8 +21,16 @@ function poolConfig() {
 }
 export const pool = new pg.Pool(poolConfig());
 
+/* pg-pool emits 'error' when a socket belonging to an IDLE client fails. With
+   no listener that is an unhandled 'error' event thrown out of a socket
+   callback, which takes the process down — and managed Postgres reaps idle
+   backends as a matter of routine, so a failover killed both containers rather
+   than reconnecting. The pool discards the broken client itself; all this has
+   to do is refuse to be fatal. */
+pool.on('error', (err) => log.error('db', 'idle client error', { err: err.message, code: err.code }));
+
 export async function migrate() {
-  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql', 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql']) {
+  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql', 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql']) {
     try {
       const sql = readFileSync(join(__dir, '..', 'sql', f), 'utf8');
       await pool.query(sql);

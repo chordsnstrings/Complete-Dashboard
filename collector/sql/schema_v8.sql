@@ -36,4 +36,28 @@ COMMENT ON COLUMN occupancy_segment.nearest_gap_min IS
 -- in place because the segment boundaries themselves were built from skewed
 -- timestamps, so the rows cannot be corrected — they have to be rebuilt from
 -- telemetry on the next reconcile pass.
-DELETE FROM occupancy_segment WHERE verdict_reason IS NULL;
+--
+-- This ran on EVERY boot, and both containers replay every schema file at
+-- startup (src/db.js). `verdict_reason` is NULL on stationary, partial and
+-- sensor_suspect segments by construction — classifySegment returns before the
+-- reason is assigned — so the one-time retraction was deleting the reconciler's
+-- entire non-accusatory output on every deploy and every restart. In production
+-- that showed as an Unauthorized-trips page reporting zero of everything, which
+-- reads as "nothing to see" rather than "the evidence table is empty".
+--
+-- A one-time data change needs a record that it has been done. Guarded, this
+-- runs once per database and is a no-op on every subsequent boot.
+CREATE TABLE IF NOT EXISTS schema_once (
+  name       TEXT PRIMARY KEY,
+  applied_at TIMESTAMPTZ DEFAULT now()
+);
+COMMENT ON TABLE schema_once IS
+  'One row per one-time data migration that has already been applied. Every schema file is replayed on every boot, so any statement that CHANGES data rather than defining structure has to be guarded by a row here.';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM schema_once WHERE name = 'v8_retract_skewed_verdicts') THEN
+    DELETE FROM occupancy_segment WHERE verdict_reason IS NULL;
+    INSERT INTO schema_once (name) VALUES ('v8_retract_skewed_verdicts');
+  END IF;
+END $$;

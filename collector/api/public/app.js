@@ -3,11 +3,15 @@
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
-import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, pill, note, dayStr, dtStr, money, pct } from './ui.js';
+import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, tabBar, pill, note, entity, dayStr, dtStr, money, pct } from './ui.js';
 import { state, api, params, q, qAll, href, parseHash, navigate } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCauses } from './causes.js';
+import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
+import { renderSettlement, SETTLE_TABS } from './settlement.js';
+import { renderCoverage } from './coverage.js';
+import { renderCorridors } from './corridors.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -38,8 +42,11 @@ const VIEWS = [
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Analyse', sub: 'When trips happen — by day, hour and weekday' },
   { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'Analyse', sub: 'Per-driver output, quality and cross-platform activity' },
   { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Analyse', sub: 'Utilisation and revenue per vehicle' },
-  { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share and mix' },
+  { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
+  { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Analyse', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
   { id: 'finance', label: 'Finance', ic: '◈', grp: 'Analyse', sub: 'Revenue, payment mix and the transaction ledger' },
+  { id: 'settlement', label: 'Settlement', ic: '◫', grp: 'Analyse', sub: 'Who settles the fare and when — cash in hand, and what is outstanding' },
+  { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Analyse', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
   { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Analyse', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
   { id: 'insights', label: 'Action list', ic: '✦', grp: 'Operate', sub: 'What needs doing, ranked by what it costs to ignore' },
   { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'Operate', sub: 'Documents and licences with an expiry date attached' },
@@ -48,13 +55,14 @@ const VIEWS = [
   { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Operate', sub: 'Realtime positions — CABMAN refreshes every 5 minutes' },
   { id: 'map', label: 'Map & replay', ic: '◍', grp: 'Operate', sub: 'Where every vehicle is now, and where it went on any given day' },
   { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Operate', sub: 'Collector health, coverage and history depth' },
+  { id: 'coverage', label: 'Collection gaps', ic: '▦', grp: 'Operate', sub: 'Which days each source actually collected — a hole here makes every rate across it wrong' },
   { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Configure', sub: 'Credentials and collection schedule' },
 ];
 
 /* ─────────── shell ─────────── */
 // A detail page keeps its parent lit in the sidebar — `#driver/…` is a page
 // *within* Drivers, not a thirteenth top-level destination.
-const PARENT = { driver: 'drivers', vehicle: 'vehicles' };
+const PARENT = { driver: 'drivers', vehicle: 'vehicles', property: 'corporate' };
 
 function renderNav() {
   const nav = $('#nav'); nav.innerHTML = '';
@@ -81,6 +89,12 @@ function setHeader(detail) {
     $('#viewTitle').textContent = detail?.name || state.param || 'Vehicle';
     $('#viewSub').textContent = `${tab.label} — ${[spec.year, spec.make, spec.model].filter(Boolean).join(' ') || 'every source that describes this asset'}`;
     crumb.innerHTML = `<a href="${href('vehicles')}">Vehicles</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
+    crumb.style.display = 'flex';
+  } else if (state.view === 'property') {
+    const tab = PROPERTY_TABS.find((t) => t.id === (state.sub || 'overview')) || PROPERTY_TABS[0];
+    $('#viewTitle').textContent = detail?.name || 'Property';
+    $('#viewSub').textContent = `${tab.label} — every booking this property placed, with its cost as well as its price`;
+    crumb.innerHTML = `<a href="${href('corporate', 'properties')}">Corporate &amp; hotels</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
     crumb.style.display = 'flex';
   } else {
     const v = VIEWS.find((x) => x.id === state.view) || VIEWS[0];
@@ -283,6 +297,19 @@ V.driver = async (root) => renderDriver(root, state.param, state.sub || 'overvie
 // gaps drawn as gaps, and the outside events that overlap them.
 V.causes = async (root) => renderCauses(root);
 
+/* The commercial pages. Each is a tabbed multipage view whose tab is part of
+   the address, so "the eleven bookings we gave away last month" is a link. */
+V.corporate = async (root) => renderCorporate(root, CORP_TABS.some((t) => t.id === state.param) ? state.param : 'overview');
+V.property = async (root) => {
+  let detail = null;
+  await renderProperty(root, state.param, PROPERTY_TABS.some((t) => t.id === state.sub) ? state.sub : 'overview',
+    (d) => { detail = d; });
+  return detail;
+};
+V.settlement = async (root) => renderSettlement(root, SETTLE_TABS.some((t) => t.id === state.param) ? state.param : 'mix');
+V.coverage = async (root) => renderCoverage(root);
+V.corridors = async (root) => renderCorridors(root);
+
 V.vehicles = async (root) => {
   // The directory is the way into the per-vehicle pages; the panel below it is
   // the only question that is about the fleet rather than about one asset.
@@ -340,7 +367,24 @@ V.vehicles = async (root) => {
 // The per-vehicle pages. `state.param` is the plate, `state.sub` is the tab.
 V.vehicle = async (root) => renderVehicle(root, state.param, state.sub || 'overview');
 
+/* Platforms — three pages, because "which channel" and "which product on that
+   channel" and "how much demand we turned away" are three different questions
+   and only the first was being asked. */
+const PLATFORM_TABS = [
+  { id: 'share', label: 'Share', ic: '◨' },
+  { id: 'tiers', label: 'Product tiers', ic: '◆' },
+  { id: 'funnel', label: 'Acceptance funnel', ic: '⌁' },
+];
 V.platforms = async (root) => {
+  const tab = PLATFORM_TABS.some((t) => t.id === state.param) ? state.param : 'share';
+  root.append(tabBar(PLATFORM_TABS, tab, (id) => href('platforms', id === 'share' ? null : id)));
+  const host = el('div'); root.append(host);
+  if (tab === 'tiers') return platformTiers(host);
+  if (tab === 'funnel') return platformFunnel(host);
+  return platformShare(host);
+};
+
+async function platformShare(root) {
   const g = el('div', 'grid g2'); root.append(g);
   const share = panel('Trips by platform', 'Share of total volume'); g.append(share.panel);
   const fleetMix = panel('Trips by fleet', 'Ecosine vs Egari'); g.append(fleetMix.panel);
@@ -356,7 +400,118 @@ V.platforms = async (root) => {
     { label: 'Earliest', key: 'earliest', render: (r) => r.earliest ? String(r.earliest).slice(0, 10) : '—' },
     { label: 'Latest', key: 'latest', render: (r) => r.latest ? String(r.latest).slice(0, 10) : '—' },
   ]));
-};
+  cov.body.append(note('A source that stopped mid-window still shows its full trip count here. '
+    + 'Collection gaps shows which days it actually collected.'));
+}
+
+/* Uber's consumer tier is this fleet's limousine product mix. The export
+   carries no fare, so this page deliberately holds no money: a tier table with
+   invented revenue would be worse than no tier table. */
+async function platformTiers(root) {
+  loading(root);
+  const [t, mix] = await Promise.all([q('/api/tiers/by-vehicle'), q('/api/tiers/mix', { by: 'daypart' })]);
+  root.innerHTML = '';
+  if (!t.vehicles.length) return empty(root, 'No Uber trip with a vehicle in this range');
+  const under = t.vehicles.filter((v) => v.premium_gap_pct != null)
+    .sort((a, b) => b.premium_gap_pct - a.premium_gap_pct);
+  root.append(kpiRow([
+    { label: 'Premium share', value: pct(t.fleet_premium_pct, 1), sub: 'Black and Comfort, fleet-wide' },
+    { label: 'Vehicles carrying Uber work', value: fmt(t.vehicles.length) },
+    { label: 'Below what their own model achieves', value: fmt(under.length),
+      sub: 'same make and model, 20+ trips', tone: under.length ? 'warn' : 'good' },
+    { label: 'Largest shortfall', value: under.length ? pct(under[0].premium_gap_pct, 1) : '—',
+      sub: under.length ? `${under[0].plate} · ${under[0].model_key}` : null },
+  ]));
+  const g = el('div', 'grid g2'); root.append(g);
+  const tp = panel('Tier by time of day', 'Where the premium work actually sits in the day');
+  const rollup = new Map();
+  mix.forEach((r) => {
+    const c = rollup.get(r.tier) || { label: r.tier, n: 0 };
+    c.n += r.n; rollup.set(r.tier, c);
+  });
+  donut(tp.body, [...rollup.values()]);
+  tp.body.append(el('p', 'cap', mix.length
+    ? `Busiest daypart for premium work: ${(() => {
+      const best = {};
+      mix.filter((r) => ['Black', 'Comfort'].includes(r.tier)).forEach((r) => { best[r.label] = (best[r.label] || 0) + r.n; });
+      const top = Object.entries(best).sort((a, b) => b[1] - a[1])[0];
+      return top ? `${top[0]} (${fmt(top[1])} trips)` : '—';
+    })()}` : ''));
+  g.append(tp.panel);
+  const gp = panel('Cars doing less premium work than their twins',
+    'Compared against the best premium share achieved by the same make and model, not against the fleet average.');
+  if (under.length) {
+    hbars(gp.body, under.slice(0, 12).map((v) => ({ label: `${v.plate} · ${v.model_key}`, n: v.premium_gap_pct })),
+      { valueFmt: (v) => `${fmt(v, 1)} pts`, onClick: (d) => { location.hash = href('vehicle', String(d.label).split(' · ')[0]); } });
+  } else empty(gp.body, 'Every car is carrying as much premium work as its model does elsewhere');
+  g.append(gp.panel);
+
+  root.append(tableFrom(t.vehicles, [
+    { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+    { label: 'Model', key: 'model_key', render: (r) => esc([r.year, r.make, r.model].filter(Boolean).join(' ') || '—') },
+    { label: 'Trips', key: 'trips', num: true },
+    { label: 'Black', key: 'black', num: true },
+    { label: 'Comfort', key: 'comfort', num: true },
+    { label: 'Electric', key: 'electric', num: true },
+    { label: 'UberX', key: 'uberx', num: true },
+    { label: 'Premium', key: 'premium_pct', num: true, render: (r) => pct(r.premium_pct, 1) },
+    { label: 'Same model achieves', key: 'model_best_pct', num: true, render: (r) => pct(r.model_best_pct, 1) },
+    { label: 'Shortfall', key: 'premium_gap_pct', num: true,
+      render: (r) => (r.premium_gap_pct == null ? '—' : `<b class="warn-t">${pct(r.premium_gap_pct, 1)}</b>`) },
+    { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
+    { label: 'Avg km', key: 'avg_km', num: true, render: (r) => fmt(r.avg_km, 1) },
+  ]));
+  root.append(note('No revenue column here is deliberate. The Uber trip export has no fare field at '
+    + 'all, so a per-tier revenue figure would have to be invented — and the mix itself is the lever: '
+    + 'the same car, the same hour, a different tier.'));
+}
+
+/* Yango and Bolt report what a trip table cannot: how many jobs were offered
+   and who turned them down. It is the only place lost demand is visible. */
+async function platformFunnel(root) {
+  loading(root);
+  const rows = await q('/api/funnel/drivers');
+  root.innerHTML = '';
+  const live = rows.filter((r) => r.offered != null);
+  if (!live.length) {
+    root.append(note('No channel in this window reported an offer count. Only Yango and Bolt publish '
+      + 'one, and they publish it per period rather than per trip — widen the range, or check that '
+      + 'those collectors are running.'));
+    return;
+  }
+  const sum = (k) => live.reduce((a, r) => a + (+r[k] || 0), 0);
+  const offered = sum('offered'), accepted = sum('accepted'), completed = sum('completed');
+  root.append(kpiRow([
+    { label: 'Jobs offered', value: fmt(offered) },
+    { label: 'Accepted', value: fmt(accepted), sub: offered ? pct((accepted / offered) * 100, 1) : null,
+      tone: offered && accepted / offered < 0.7 ? 'warn' : null },
+    { label: 'Completed', value: fmt(completed), sub: accepted ? pct((completed / accepted) * 100, 1) + ' of accepted' : null },
+    { label: 'Lost before it started', value: fmt(offered - accepted),
+      sub: 'offered and not accepted', tone: offered - accepted > 0 ? 'warn' : null },
+    { label: 'Platform commission', value: money(sum('commission_cost')),
+      sub: 'what the channel kept' },
+  ]));
+  root.append(tableFrom(live, [
+    { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+    { label: 'Channel', key: 'platform' },
+    { label: 'Period', key: 'period_start', render: (r) => `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` },
+    { label: 'Offered', key: 'offered', num: true, render: (r) => fmt(r.offered) },
+    { label: 'Accepted', key: 'accepted', num: true, render: (r) => fmt(r.accepted) },
+    { label: 'Accept %', key: 'accept_pct', num: true, render: (r) => pct(r.accept_pct, 1) },
+    { label: 'Completed', key: 'completed', num: true, render: (r) => fmt(r.completed) },
+    { label: 'Complete %', key: 'complete_pct', num: true, render: (r) => pct(r.complete_pct, 1) },
+    { label: 'They cancelled', key: 'cancelled_driver', num: true, render: (r) => fmt(r.cancelled_driver) },
+    { label: 'Rider cancelled', key: 'cancelled_client', num: true, render: (r) => fmt(r.cancelled_client) },
+    { label: 'Hours', key: 'hours', num: true, render: (r) => fmt(r.hours, 1) },
+    { label: 'Gross', key: 'gross', num: true, render: (r) => money(r.gross) },
+    { label: 'Cash share', key: 'cash_pct', num: true, render: (r) => pct(r.cash_pct, 0) },
+    { label: 'Commission', key: 'commission_cost', num: true, render: (r) => money(r.commission_cost) },
+    { label: 'State', key: 'state', render: (r) => (r.state ? pill(r.state, r.state === 'active' ? 'ok' : 'warn') : '—') },
+  ]));
+  root.append(note('These counts come from each channel’s own driver report, not from our trip table, '
+    + 'and they are per reporting period rather than per day — so they answer "is this driver turning '
+    + 'work away", not "what happened on Tuesday".'));
+}
 
 V.finance = async (root) => {
   const kh = el('div'); root.append(kh); loading(kh);

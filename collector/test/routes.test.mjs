@@ -71,8 +71,12 @@ const dataJs = readFileSync('api/public/data.js', 'utf8');
 const mapJs = readFileSync('api/public/map.js', 'utf8');
 check('router parses view/param/sub', /export function parseHash/.test(dataJs));
 check('app applies the parsed route', /applyRoute\(\)/.test(jsTxt));
+// Every detail page must name a top-level parent, or opening it silently
+// unlights the sidebar and the user loses their place.
 check('a detail page keeps its parent lit in the nav',
-  /const PARENT = \{ driver: 'drivers', vehicle: 'vehicles' \}/.test(jsTxt));
+  /const PARENT = \{[^}]*driver: 'drivers'[^}]*vehicle: 'vehicles'[^}]*\}/.test(jsTxt));
+check('the property page is a page within Corporate, not a thirteenth destination',
+  /const PARENT = \{[^}]*property: 'corporate'[^}]*\}/.test(jsTxt));
 check('breadcrumb element exists', /id="crumb"/.test(htmlTxt));
 check('every driver tab is a real route', /href\('driver', id, t === 'overview' \? null : t\)/.test(driverJs));
 check('all six driver tabs registered', ['overview', 'activity', 'territory', 'earnings', 'quality', 'trips']

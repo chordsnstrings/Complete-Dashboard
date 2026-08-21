@@ -184,6 +184,16 @@ export function findMatch(seg, bookings, rules = RULES) {
 }
 
 /** Full pass over a window: build, classify, match, persist. */
+/* The three verdicts that never reach the booking-matching branch still need a
+   reason. Written with NULL they are indistinguishable from a verdict issued
+   before the reason column existed — which is precisely the test the v8
+   retraction used to decide what to delete. */
+const NON_CANDIDATE_REASON = {
+  stationary: 'the vehicle did not travel far or fast enough for this to be a trip',
+  sensor_suspect: 'the seat reading is not physically plausible — treated as a hardware fault, not a journey',
+  partial: 'the journey is cut off by the edge of available telemetry',
+};
+
 export async function reconcile({ from, to }) {
   const { rows: fixes } = await pool.query(
     `SELECT plate, fleet_id, captured_at, seat_occupied, speed, ignition, lat, lng, odometer
@@ -277,6 +287,13 @@ export async function reconcile({ from, to }) {
             : `no booking of any kind on this plate in the window, across ${configured.join(', ') || 'no channels'}`;
         }
       }
+
+      // Every verdict carries a reason, including the three that never reach
+      // the branch above. They were being written with a NULL reason, which is
+      // indistinguishable from "issued before this code existed" — and the v8
+      // retraction used exactly that test to decide what to delete.
+      if (!reason) reason = NON_CANDIDATE_REASON[verdict]
+        || `classified ${verdict} from telemetry alone; no booking match was attempted`;
 
       out.push({
         plate, fleet_id: seg.fleet_id,

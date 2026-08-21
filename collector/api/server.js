@@ -7,6 +7,8 @@ import { describeSettings, setSetting, deleteSetting, loadSettings } from '../sr
 import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
+import { analyticsRoutes } from './analytics_routes.js';
+import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
 
@@ -15,9 +17,16 @@ const app = express();
 app.use(express.json({ limit: '256kb' }));
 
 const q = (text, params) => pool.query(text, params).then((r) => r.rows);
+/* A 500 body used to carry the driver's own message, which names the storage
+   engine, the column and the type ("invalid input syntax for type timestamp
+   with time zone"). The full error is logged; the caller gets a reference to
+   quote. The real fix for this class of bug is test/route_smoke.test.mjs,
+   which executes every route rather than grepping for it. */
+let errSeq = 0;
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
-  log.error('api', req.path, { err: String(e) });
-  res.status(500).json({ error: 'internal', detail: String(e).slice(0, 200) });
+  const ref = `e${Date.now().toString(36)}-${(++errSeq).toString(36)}`;
+  log.error('api', req.path, { ref, query: req.query, err: String(e) });
+  res.status(500).json({ error: 'internal', ref });
 });
 
 // Writes (credential changes) require ADMIN_TOKEN via x-admin-token header.
@@ -45,22 +54,62 @@ const requireAdmin = (req, res, next) => {
    which bind against raw timestamps. */
 const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
 
-// A date that is not a date must not reach Postgres as one: `?from=banana`
-// otherwise 500s with a driver error.
-const asDate = (v, fallback) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : fallback);
+/* A date that is not a date must not reach Postgres as one. The shape check
+   alone was not enough: `2026-13-45` matches ten digits and two dashes, passes
+   straight through, and 500s inside Postgres with "date/time field value out of
+   range". The round-trip through Date is what actually distinguishes a
+   well-formed string from a real day. */
+const asDate = (v, fallback) => {
+  const s = String(v || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return fallback;
+  const d = new Date(`${s}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? fallback : s;
+};
 const range = (req) => {
   let from = asDate(req.query.from, '2000-01-01');
   let to = asDate(req.query.to, '2100-01-01');
   if (from > to) [from, to] = [to, from];      // an inverted range is a typo, not an empty set
   return [from, to, req.query.platform || null, req.query.fleet || null];
 };
-const F = `local_day BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`;
+/* The window predicate, optionally table-qualified. It was a bare string, and
+   the moment a query joined a second table that also has `platform` and
+   `fleet_id` — vehicle_current_driver does — Postgres rejected the whole
+   statement as ambiguous at parse time. /api/vehicles was returning a 500 on
+   every single call in production because of it, which the front end turned
+   into "Could not load this view" over the entire Vehicles page. */
+const W = (alias = '') => {
+  const c = alias ? `${alias}.` : '';
+  return `${c}local_day BETWEEN $1::date AND $2::date`
+    + ` AND ($3::text IS NULL OR ${c}platform=$3)`
+    + ` AND ($4::text IS NULL OR ${c}fleet_id=$4)`;
+};
+const F = W();
 // Bookings only. A telematics row is a GPS-derived journey, and the same
 // physical trip is recorded by BOTH the ride platform and the tracker — summing
 // them counts it twice. See sql/schema_v7.sql.
 const FB = `${F} AND is_booking`;
 
+/* Liveness: the process is up and the event loop is turning. Nothing more —
+   a liveness probe that touches the database restarts a healthy container
+   every time the database hiccups. */
 app.get('/api/health', (_, res) => res.json({ ok: true }));
+
+/* Readiness: can this instance actually answer? A green health check in front
+   of a missing view is worse than a red one, because it routes users to it. */
+app.get('/api/ready', wrap(async (_, res) => {
+  const need = ['trip_norm', 'trip_ext', 'source_day_coverage'];
+  try {
+    const [row] = await q(
+      `SELECT ${need.map((v, i) => `to_regclass('${v}') IS NOT NULL AS v${i}`).join(', ')}`);
+    const missing = need.filter((_, i) => !row[`v${i}`]);
+    if (missing.length) {
+      return res.status(503).json({ ready: false, reason: 'schema incomplete', missing });
+    }
+    res.json({ ready: true, views: need });
+  } catch (e) {
+    res.status(503).json({ ready: false, reason: 'database unreachable' });
+  }
+}));
 
 /* ───────────────────────── overview ───────────────────────── */
 app.get('/api/kpis', wrap(async (req, res) => {
@@ -292,8 +341,8 @@ app.get('/api/vehicles', wrap(async (req, res) => res.json(await q(
           count(distinct t.platform)::int platforms, max(t.requested_at) last_trip,
           cd.driver_name AS current_driver, cd.as_of AS driver_as_of
    FROM trip_norm t
-   LEFT JOIN vehicle_current_driver cd ON cd.plate = upper(replace(t.plate,' ',''))
-   WHERE ${F} AND t.plate IS NOT NULL AND t.plate<>''
+   LEFT JOIN vehicle_current_driver cd ON cd.plate = t.plate
+   WHERE ${W('t')} AND t.plate IS NOT NULL AND t.plate<>''
    GROUP BY t.plate, cd.driver_name, cd.as_of ORDER BY trips DESC LIMIT 200`, range(req)))));
 
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
@@ -847,11 +896,27 @@ driverRoutes(app, { q, wrap, endOfDay });
 /* ───────────────── per-vehicle detail pages ───────────────── */
 vehicleRoutes(app, { q, wrap, endOfDay });
 
+/* ───────────────── commercial analytics ─────────────────
+   Settlement, the corporate channel, product tiers, coverage holes and
+   corridors — all built on trip_ext, all registered before the catch-all. */
+analyticsRoutes(app, { q, wrap, range, F, FB });
+
+/* ───────────────── live provider probes ─────────────────
+   Read-only, allowlisted, shape-only. The question these answer — "does this
+   provider expose something we are not collecting?" — cannot be settled from
+   the columns we happen to have chosen. */
+probeRoutes(app, { wrap });
+
 // Static dashboard LAST: app.get('*') would otherwise shadow any API route
 // registered after it (this silently broke /api/insights once already).
 app.use(express.static(join(__dir, 'public'), { maxAge: '5m' }));
 app.get('*', (_, res) => res.sendFile(join(__dir, 'public', 'index.html')));
 
 const port = process.env.PORT || 8080;
-migrate().catch((e) => log.error('api', 'migrate failed', { err: String(e) }))
-  .finally(() => app.listen(port, () => log.info('api', `listening on :${port}`)));
+/* Fail closed. This used to `.catch(log).finally(listen)`, which served traffic
+   on a half-built schema behind a health check that returned ok unconditionally
+   — so a failed schema_v7 meant `trip_norm` did not exist and eleven endpoints
+   500'd while the platform reported the app healthy and routed users to it. */
+migrate()
+  .then(() => app.listen(port, () => log.info('api', `listening on :${port}`)))
+  .catch((e) => { log.error('api', 'migrate failed — refusing to serve', { err: String(e) }); process.exit(1); });

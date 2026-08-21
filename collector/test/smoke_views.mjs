@@ -18,8 +18,14 @@ const ROUTES = [
   'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',
   'vehicles', 'vehicle/L45235', 'vehicle/L45235/drivers', 'vehicle/L45235/movement',
   'vehicle/L45235/safety', 'vehicle/L45235/compliance', 'vehicle/L45235/trips',
-  'platforms', 'finance', 'causes', 'insights', 'compliance', 'unauthorized',
-  'safety', 'live', 'map', 'sources', 'settings',
+  'platforms', 'platforms/tiers', 'platforms/funnel',
+  'corridors', 'finance', 'settlement', 'settlement/cash', 'settlement/receivables',
+  'corporate', 'corporate/properties', 'corporate/guests',
+  'corporate/leakage', 'corporate/leakage/complimentary',
+  'corporate/approach', 'corporate/approach/daypart',
+  'property/h-palm', 'property/h-palm/guests', 'property/h-palm/drivers',
+  'causes', 'insights', 'compliance', 'unauthorized',
+  'safety', 'live', 'map', 'sources', 'coverage', 'settings',
 ];
 const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';
 

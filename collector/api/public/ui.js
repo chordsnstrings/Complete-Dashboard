@@ -3,6 +3,7 @@
    detail pages of its own: a per-driver page needs the same panels, tables and
    modals as the overview, and copying them would have let the two drift. */
 import { fmt, empty } from './charts.js';
+import { href } from './data.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const el = (tag, cls, html) => {
@@ -70,6 +71,14 @@ export function tabBar(tabs, active, hrefFor) {
   });
   return bar;
 }
+
+/* Every drill-down in this app used to end at a table of names that were not
+   links: you could find the driver responsible for something and then have no
+   way to open them. `entity` makes any cell that names a driver, a vehicle or a
+   property a real address, so a finding always leads somewhere. */
+export const entity = (view, id, text) => (id
+  ? `<a class="ent" href="${href(view, id)}">${esc(text ?? id)}</a>`
+  : `<span class="ent-off">${esc(text ?? '—')}</span>`);
 
 export const pill = (text, tone) => `<span class="pill${tone ? ' ' + tone : ''}">${esc(text)}</span>`;
 
