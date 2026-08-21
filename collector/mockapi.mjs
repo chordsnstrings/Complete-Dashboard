@@ -592,10 +592,13 @@ app.get('/api/trend/monthly', (_, r) => {
       // FMS odometer rows and reported 12,681,536 km in one month.
       ? { ...row, m: k, cancel_pct: 3.2, km: Math.round(row.measured_trips * 11.8),
           priced_trips: Math.round(row.trips * 0.35), no_data: false,
+          // Collection starts on 21 August 2025, so that month holds 11 days.
+          partial_month: k === '2025-08', days_in_record: k === '2025-08' ? 11 : null,
           drivers_known: row.attributed_trips > 0 }
       : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0, earning_vehicles: 0,
           km: null, measured_trips: 0, revenue: null, priced_trips: 0, cancel_pct: null,
-          platforms: [], booking_platforms: [], no_data: true, drivers_known: false };
+          platforms: [], booking_platforms: [], no_data: true, drivers_known: false,
+          partial_month: false, days_in_record: null };
   });
   const breaks = [];
   for (let i = 1; i < months.length; i++) {
@@ -607,6 +610,8 @@ app.get('/api/trend/monthly', (_, r) => {
       trips_from: a.trips, trips_to: b.trips,
       drivers_from: a.drivers_known ? a.drivers : null,
       drivers_to: b.drivers_known ? b.drivers : null,
+      boundary_artifact: !!(a.partial_month || b.partial_month),
+      partial_side: a.partial_month ? a.m : b.partial_month ? b.m : null,
       vehicles_from: a.earning_vehicles, vehicles_to: b.earning_vehicles,
       km_per_trip_from: a.measured_trips ? +(a.km / a.measured_trips).toFixed(1) : null,
       km_per_trip_to: b.measured_trips ? +(b.km / b.measured_trips).toFixed(1) : null,

@@ -1192,19 +1192,47 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
   const key = (d) => new Date(d).toISOString().slice(0, 7);
   const byMonth = new Map(observed.map((r) => [key(r.m), r]));
   const first = new Date(observed[0].m), last = new Date(observed[observed.length - 1].m);
+  /* The first and last months of any record are partial by construction: the
+     data starts and ends mid-month. Collection here begins on 21 August, so
+     that month holds eleven days and September reads as +344% against it —
+     which is a fact about when we started collecting, not about the fleet. Any
+     comparison that averages the ends of the record is dragged by them, so
+     they are flagged and the analyses that average can exclude them.
+
+     Marked from the RECORD's span, never from trip density: a month with
+     genuinely quiet days is a quiet month, and excluding it would hide exactly
+     the thing worth seeing. */
+  const [span = {}] = await q(
+    `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
+     FROM trip_norm WHERE ($1::text IS NULL OR platform=$1)`, [req.query.platform || null]);
+  const spanFrom = span.a || null, spanTo = span.b || null;
+  const lastOf = (ym) => {
+    const [y, mo] = ym.split('-').map(Number);
+    return `${ym}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, '0')}`;
+  };
+  const dayDiff = (a2, b2) => Math.round((Date.parse(b2) - Date.parse(a2)) / 864e5) + 1;
+
   const months = [];
   for (const d = new Date(first); d <= last; d.setUTCMonth(d.getUTCMonth() + 1)) {
     const k = key(d);
     const row = byMonth.get(k);
+    const partial = !!row && ((spanFrom && spanFrom > `${k}-01`) || (spanTo && spanTo < lastOf(k)));
     months.push(row
       ? { ...row, m: k, no_data: false,
+          // True where the record itself starts or ends inside this month, so
+          // the month holds fewer days than it appears to.
+          partial_month: partial,
+          days_in_record: partial
+            ? Math.max(1, dayDiff(spanFrom > `${k}-01` ? spanFrom : `${k}-01`,
+              spanTo < lastOf(k) ? spanTo : lastOf(k)))
+            : null,
           // FMS-derived trips carry no driver id, so "0 drivers" on a month
           // that has trips means unattributable, not idle.
           drivers_known: row.attributed_trips > 0 }
       : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0,
           earning_vehicles: 0, km: null, measured_trips: 0, revenue: null, priced_trips: 0,
           cancel_pct: null, platforms: [], booking_platforms: [],
-          no_data: true, drivers_known: false });
+          no_data: true, drivers_known: false, partial_month: false, days_in_record: null });
   }
 
   // Month-over-month breaks, computed only between months we actually observed.
@@ -1216,6 +1244,14 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
     if (Math.abs(d) < 0.3) continue;
     breaks.push({
       from: a.m, to: b.m, change_pct: Math.round(d * 100),
+      /* A move into or out of a month the record only partly covers is not a
+         business event. Collection here starts on 21 August, so August holds
+         eleven days and September reads as +344% against it. Reported rather
+         than dropped — a break that silently disappears is its own kind of
+         lie — but flagged so nothing downstream treats it as a thing that
+         happened. */
+      boundary_artifact: !!(a.partial_month || b.partial_month),
+      partial_side: a.partial_month ? a.m : b.partial_month ? b.m : null,
       trips_from: a.trips, trips_to: b.trips,
       drivers_from: a.drivers_known ? a.drivers : null,
       drivers_to: b.drivers_known ? b.drivers : null,

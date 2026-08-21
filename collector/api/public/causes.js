@@ -201,7 +201,13 @@ export async function renderCauses(root) {
      barely moved while the driver count halved and the vehicle count did not.
      Those are opposite problems with opposite fixes, and a trip-count chart
      cannot tell them apart — which is the whole reason this page exists. */
-  const supply = observed.filter((m) => m.drivers_known && m.trips > 0);
+  /* Whole months only. The record starts and ends mid-month, so the first and
+     last months hold fewer days than they appear to — collection here begins
+     on 21 August, giving that month eleven days. Averaging them into a
+     first-third/last-third comparison drags both ends toward zero and
+     understates whatever really moved. */
+  const supply = observed.filter((m) => m.drivers_known && m.trips > 0 && !m.partial_month);
+  const droppedPartial = observed.filter((m) => m.drivers_known && m.trips > 0 && m.partial_month);
   if (supply.length >= 6) {
     const per = (m) => (m.drivers ? m.trips / m.drivers : null);
     const firstThird = supply.slice(0, Math.max(1, Math.floor(supply.length / 3)));
@@ -264,9 +270,14 @@ export async function renderCauses(root) {
       }
     }
     sb.append(el('p', 'cap',
-      'Attributable months only: a month sourced entirely from telematics carries no driver id and cannot '
-      + 'be compared on this axis. Bookings exclude telematics journeys, which are the same physical trips '
-      + 'seen by the tracker.'));
+      'Attributable whole months only: a month sourced entirely from telematics carries no driver id and '
+      + 'cannot be compared on this axis, and a month the record only partly covers holds fewer days than '
+      + 'it looks like it does. Bookings exclude telematics journeys, which are the same physical trips '
+      + 'seen by the tracker.'
+      + (droppedPartial.length
+        ? ` ${droppedPartial.map((m) => MONTH(m.m)).join(' and ')} `
+          + `${droppedPartial.length > 1 ? 'are' : 'is'} excluded for that reason.`
+        : '')));
   }
 
   trendChart(trend.body, months, (m) => {
@@ -292,10 +303,18 @@ export async function renderCauses(root) {
     // The endpoint computes breaks from trips directly; the stored table is
     // filled by the collector, which may not have run since the last backfill.
     brk.body.append(note('Breaks are visible in the trend above, but the collector has not yet written its decomposition for them. It runs on the next collection cycle.'));
+    if ((t.breaks || []).some((b) => b.boundary_artifact)) {
+      brk.body.append(el('div', 'note err',
+        'A break marked "boundary" touches a month the record only partly covers — collection started or '
+        + 'stopped inside it, so the month holds fewer days than a full one. That is a fact about when we '
+        + 'began collecting, not about the fleet. It is shown rather than hidden, because a break that '
+        + 'silently disappears is its own kind of lie, but nothing should be concluded from it.'));
+    }
     brk.body.append(tableFrom(t.breaks || [], [
       { label: 'From', key: 'from', render: (r) => MONTH(r.from) },
       { label: 'To', key: 'to', render: (r) => MONTH(r.to) },
-      { label: 'Change', key: 'change_pct', num: true, render: (r) => `${r.change_pct > 0 ? '+' : ''}${r.change_pct}%` },
+      { label: 'Change', key: 'change_pct', num: true, render: (r) => `${r.change_pct > 0 ? '+' : ''}${r.change_pct}%`
+        + (r.boundary_artifact ? ' <span class="tag warn">boundary</span>' : '') },
       { label: 'Trips', key: '_t', num: true, render: (r) => `${fmt(r.trips_from)} → ${fmt(r.trips_to)}` },
       { label: 'Drivers', key: '_d', num: true, render: (r) => (r.drivers_from == null ? 'not comparable' : `${r.drivers_from} → ${r.drivers_to}`) },
       { label: 'Vehicles earning', key: '_v', num: true,

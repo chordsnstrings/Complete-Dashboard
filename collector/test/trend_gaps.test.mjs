@@ -140,6 +140,77 @@ check('a break where the platform mix changed says so',
     apr?.trips === 1, `${apr?.trips} in April`);
 }
 
+
+/* ── the ends of a record are partial by construction ─────────────────────
+   Collection starts and stops mid-month, so the first and last months hold
+   fewer days than they appear to. Live, collection began on 21 August: that
+   month holds eleven days and September reads as +344% against it. Nothing
+   happened — that is a fact about when we started collecting.
+
+   The flag comes from the RECORD'S SPAN, not from trip density: a month with
+   genuinely quiet days is a quiet month, not a partial one, and excluding it
+   from every comparison would hide exactly the thing worth seeing. */
+{
+  const p2 = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+  const ms = p2.months.filter((m) => !m.no_data);
+  const firstObserved = ms[0], lastObserved = ms[ms.length - 1];
+
+  // The fixture's first trip is 1 September, so that month is WHOLE — even
+  // though its last ten days carry no trips at all.
+  check('a month the record covers from its first day is not partial, however quiet its tail',
+    firstObserved.m === '2025-09' && firstObserved.partial_month === false,
+    JSON.stringify([firstObserved.m, firstObserved.partial_month]));
+  // The last trip is 20 March, so that month IS partial.
+  check('the month the record stops inside is flagged as partial',
+    lastObserved.partial_month === true, JSON.stringify([lastObserved.m, lastObserved.partial_month]));
+  /* The Dubai-boundary test above added a 01:00 booking on 1 April, so the
+     record now ends there and April holds exactly one day. That is the sharp
+     version of this case: a month whose entire content is one trip would
+     otherwise be compared against a full month as though the two were alike.
+
+     Checked against the record's real last day rather than a restatement of
+     the endpoint's own arithmetic — a test that recomputes the code's formula
+     agrees with it by construction and can never fail. */
+  const [{ last_day: recordEnd }] = await q(
+    `SELECT to_char(max((requested_at AT TIME ZONE 'Asia/Dubai')::date),'YYYY-MM-DD') last_day FROM trip`);
+  const expectedDays = Number(recordEnd.slice(8, 10));   // the record ends inside this month
+  check('it says how many days of it the record actually holds',
+    recordEnd.slice(0, 7) !== lastObserved.m || lastObserved.days_in_record === expectedDays,
+    `${lastObserved.m} holds ${lastObserved.days_in_record}, record ends ${recordEnd}`);
+  check('a month holding a single day of the record says exactly that, not zero and not a full month',
+    lastObserved.days_in_record >= 1 && lastObserved.days_in_record <= 31,
+    String(lastObserved.days_in_record));
+  check('a whole month inside the record is never flagged',
+    ms.slice(0, -1).every((m) => m.partial_month === false),
+    JSON.stringify(ms.filter((m) => m.partial_month).map((m) => m.m)));
+
+  /* Now make the record START mid-month, which is the live case: collection
+     began on 21 August 2025 and that month reads as an 84% collapse against
+     September purely because it holds eleven days. */
+  await q(
+    `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,requested_at,distance_km,status,price)
+     VALUES ('uber','partial-1','ecosine','L1','d1','Driver d1','2025-08-21T10:00:00+04:00',10,'completed',40),
+            ('uber','partial-2','ecosine','L1','d1','Driver d1','2025-08-25T10:00:00+04:00',10,'completed',40)`);
+  const p3 = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+  const aug = p3.months.find((m) => m.m === '2025-08');
+  check('a month the record starts inside is flagged as partial',
+    aug?.partial_month === true, JSON.stringify([aug?.m, aug?.partial_month]));
+  check('and the day count is from the record’s own start, not the month’s',
+    aug?.days_in_record === 11, String(aug?.days_in_record));
+
+  const augBreak = (p3.breaks || []).find((b) => b.from === '2025-08');
+  check('the break out of it is reported rather than hidden',
+    !!augBreak, JSON.stringify((p3.breaks || []).map((b) => [b.from, b.to])));
+  check('but flagged as a boundary artefact, so nothing reads it as an event',
+    augBreak?.boundary_artifact === true, String(augBreak?.boundary_artifact));
+  check('and it names which side of it was the partial month',
+    augBreak?.partial_side === '2025-08', String(augBreak?.partial_side));
+  check('a break between two whole months carries no such flag',
+    (p3.breaks || []).filter((b) => b.from !== '2025-08' && b.to !== p3.months.filter((m) => !m.no_data).slice(-1)[0].m)
+      .every((b) => b.boundary_artifact === false),
+    JSON.stringify((p3.breaks || []).map((b) => [b.from, b.to, b.boundary_artifact])));
+}
+
 server.close();
 
 console.log(`\n${pass} passed, ${fail} failed`);
