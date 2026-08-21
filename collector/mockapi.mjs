@@ -121,13 +121,27 @@ app.get('/api/insights/summary', (_, r) => r.json({
 }));
 const mkDoc=(plate,make,model,days,drv)=>({plate,make,model,year:2023,doc_type:'Vehicle Registration Form',
   status:'ACTIVE', expires_at:new Date(Date.now()+days*864e5).toISOString(), days_left:days, driver_name:drv});
-app.get('/api/compliance/vehicles', (_, r) => r.json([
+app.get('/api/compliance/vehicles', (_, r) => {
+  const rows = [
   mkDoc('L40924','Tesla','Model Y',5,'Ahmed Tarig Mohamed'), mkDoc('L37810','Tesla','Model Y',5,'Aliyan Khalil'),
   mkDoc('L20048','Tesla','Model Y',5,'Najeeb Ullah Khan'), mkDoc('L41452','BYD','Han EV',5,'Asad Khan Khan'),
   mkDoc('L40959','BYD','Han EV',5,null), mkDoc('L39421','Tesla','Model Y',13,'Roy Ocdol'),
   mkDoc('L40547','Tesla','Model Y',13,null), mkDoc('L44259','Lexus','ES 300h',33,'Muhammad Khalid Gul'),
-]));
+];
+  // Totals come from the database in production, not from the list —
+  // the page's legal claims must not be a filter over a capped array.
+  const dl = (x) => Number(x.days_left);
+  r.json({ rows,
+    totals: { total: rows.length + 40, vehicles: 96, doc_types: 1,
+      expired: rows.filter((x) => dl(x) < 0).length,
+      within_7: rows.filter((x) => dl(x) >= 0 && dl(x) <= 7).length,
+      within_45: rows.filter((x) => dl(x) > 7 && dl(x) <= 45).length },
+    doc_types: [{ doc_type: 'registration', n: rows.length + 40 }],
+    shown: rows.length, truncated: true });
+});
 app.get('/api/compliance/drivers', (_, r) => r.json({
+  totals: { total: 148, with_date: 96, expired: 2, within_45: 5, no_date_at_all: 52 },
+  shown: 8, truncated: false,
   drivers: [
     // Six rows carrying the identical placeholder the source writes when the
     // field was never filled in, plus two real dates.

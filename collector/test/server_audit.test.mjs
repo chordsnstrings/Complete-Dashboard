@@ -388,6 +388,62 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
     busy.trips === 25, String(busy.trips));
 }
 
+/* ── a legal claim must not be a .filter().length ─────────────────────────
+   The Compliance page prints "Vehicle docs expired — cannot legally work" and
+   "Driver licences expired — stand down until renewed". Both were counted by
+   filtering the array the page had just fetched, and both lists are capped at
+   300 rows. Expired rows sort first, so the numbers agree right up until the
+   fleet crosses the cap — at which point they quietly stop, on the two tiles
+   in this product that assert somebody may not drive. */
+{
+  await q(`DELETE FROM vehicle_document`);
+  await q(`DELETE FROM driver_compliance`);
+  const day = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+  for (let i = 0; i < 6; i++) {
+    await q(`INSERT INTO vehicle_document (platform,vehicle_ext_id,doc_type,plate,fleet_id,status,expires_at)
+             VALUES ('uber',$1,'registration',$2,'ecosine','ACTIVE',$3::date)`,
+      [`vd${i}`, `LX${i}`, day(i < 2 ? -5 : i < 4 ? 3 : 30)]);
+  }
+  const vc = await get('/api/compliance/vehicles');
+  check('the vehicle document response separates the list from the counts',
+    Array.isArray(vc.rows) && vc.totals && typeof vc.totals.expired === 'number',
+    JSON.stringify(Object.keys(vc)));
+  check('expired is counted in the database, not off the returned list',
+    vc.totals.expired === 2, String(vc.totals.expired));
+  check('the seven-day and forty-five-day bands do not overlap',
+    vc.totals.within_7 === 2 && vc.totals.within_45 === 2,
+    `${vc.totals.within_7} / ${vc.totals.within_45}`);
+  check('the document types come from the whole table, not the visible rows',
+    (vc.doc_types || []).some((d) => d.doc_type === 'registration'), JSON.stringify(vc.doc_types));
+  check('the response says whether the list was cut', 'truncated' in vc);
+
+  /* Six drivers share one licence date — the placeholder this source writes
+     for an unset field — plus one genuine expiry and two with no date at all.
+     The placeholder must not be counted as an expiry, and the people with NO
+     date must be visible rather than absent from every tile. */
+  for (let i = 0; i < 6; i++) {
+    await q(`INSERT INTO driver_compliance (platform,driver_ext_id,fleet_id,full_name,licence_no,licence_expires)
+             VALUES ('hotel',$1,'ecosine',$2,'123456','2020-01-01'::date)`, [`p${i}`, `Placeholder ${i}`]);
+  }
+  await q(`INSERT INTO driver_compliance (platform,driver_ext_id,fleet_id,full_name,licence_no,licence_expires)
+           VALUES ('hotel','real1','ecosine','Real Expiry','DL-9',$1::date)`, [day(-3)]);
+  for (let i = 0; i < 2; i++) {
+    await q(`INSERT INTO driver_compliance (platform,driver_ext_id,fleet_id,full_name,licence_no)
+             VALUES ('hotel',$1,'ecosine',$2,'DL-N')`, [`n${i}`, `No Date ${i}`]);
+  }
+  const dc = await get('/api/compliance/drivers');
+  check('the placeholder date is detected', dc.placeholder_date === '2020-01-01', String(dc.placeholder_date));
+  check('six identical dates are not six expired licences',
+    dc.totals.expired === 1, `${dc.totals.expired} (should be the one real expiry)`);
+  check('the placeholder rows are reported as their own number',
+    dc.placeholder_rows === 6, String(dc.placeholder_rows));
+  check('drivers with no licence date at all are counted rather than invisible',
+    dc.totals.no_date_at_all === 2, String(dc.totals.no_date_at_all));
+  check('the total covers every driver record, dated or not',
+    dc.totals.total === 9, String(dc.totals.total));
+}
+
 server.close();
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -125,6 +125,22 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
     /UPDATE collector_job SET progress/.test(idx));
   check('a failed progress write cannot fail the collection it is describing',
     /progress write failed/.test(idx) && /\.catch\(\(e\) => log\.warn\('scheduler', 'progress write failed'/.test(idx));
+
+  /* ── a deploy is not the job's fault ──────────────────────────────────────
+     The boot requeue counted every restart alike and abandoned a job at three
+     with "it may be crashing the collector". That was untrue of the only job
+     it ever fired on: a year backfill that had been advancing every single
+     time and was interrupted by ordinary deploys. A job that got FURTHER than
+     its last attempt is a working job; only one that restarts having completed
+     no source at all is a candidate for being the cause. */
+  check('the requeue distinguishes a job that advanced from one that did not',
+    /done_at_last_attempt/.test(idx));
+  check('an advancing job has its attempt counter reset rather than incremented',
+    /attempts = CASE WHEN coalesce\(\(progress ->> 'done'\)::int, 0\)\s*\n\s*> coalesce\(\(progress ->> 'done_at_last_attempt'\)::int, -1\)\s*\n\s*THEN 1/.test(idx));
+  check('the abandonment message says what was actually observed',
+    /restarted three times without completing a single source/.test(idx));
+  check('the log names which source the stranded job was on',
+    /was_on/.test(idx));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

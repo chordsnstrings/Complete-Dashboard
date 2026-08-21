@@ -1462,25 +1462,34 @@ V.insights = async (root) => {
    that is either legal or not. Sorted by urgency, not by plate. */
 V.compliance = async (root) => {
   const kh = el('div', 'kpis'); root.append(kh); loading(kh);
-  const [veh, drvPage] = await Promise.all([
-    api('/api/compliance/vehicles').catch(() => []),
-    api('/api/compliance/drivers').catch(() => ({ drivers: [] })),
+  const [vehPage, drvPage] = await Promise.all([
+    api('/api/compliance/vehicles').catch(() => ({ rows: [], totals: {} })),
+    api('/api/compliance/drivers').catch(() => ({ drivers: [], totals: {} })),
   ]);
+  const veh = vehPage.rows || [];
   const drv = drvPage.drivers || [];
   const dl = (r) => Number(r.days_left);
-  const vExpired = veh.filter((r) => dl(r) < 0).length;
-  const vWeek = veh.filter((r) => dl(r) >= 0 && dl(r) <= 7).length;
-  const vMonth = veh.filter((r) => dl(r) > 7 && dl(r) <= 45).length;
+  /* Counted in the database, not by filtering the list on screen. Both lists
+     are capped — 300 documents, 300 licences — and every tile on this page was
+     a .filter().length over whichever rows arrived, under captions like
+     "cannot legally work" and "stand down until renewed". They agree today
+     because expired rows sort first; they stop agreeing the day the fleet
+     crosses the cap, silently. */
+  const vt = vehPage.totals || {};
+  const vExpired = vt.expired ?? veh.filter((r) => dl(r) < 0).length;
+  const vWeek = vt.within_7 ?? veh.filter((r) => dl(r) >= 0 && dl(r) <= 7).length;
+  const vMonth = vt.within_45 ?? veh.filter((r) => dl(r) > 7 && dl(r) <= 45).length;
   /* A licence date shared by most of the roster is what this source writes when
      the field was never filled in. Counted as expiries it read "77 drivers must
      stand down" — while the insight engine, which runs the same check, was
      already refusing to accuse any of them. The two halves of the product
      disagreed about whether 77 people could legally drive. */
   const placeholder = drvPage.placeholder_date;
-  const real = drv.filter((r) => r.licence_expires
-    && String(r.licence_expires).slice(0, 10) !== placeholder);
-  const dExpired = real.filter((r) => dl(r) < 0).length;
+  const dt = drvPage.totals || {};
+  const dExpired = dt.expired ?? drv.filter((r) => r.licence_expires
+    && String(r.licence_expires).slice(0, 10) !== placeholder && dl(r) < 0).length;
   const dPlaceholder = drvPage.placeholder_rows || 0;
+  const dNoDate = dt.no_date_at_all || 0;
 
   kh.innerHTML = [
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
@@ -1490,13 +1499,20 @@ V.compliance = async (root) => {
       placeholder ? 'excluding the placeholder date' : 'stand down until renewed', dExpired ? 'err' : 'ok'],
     ...(dPlaceholder ? [['Licence dates that are a default', fmt(dPlaceholder),
       'a data problem, not an expiry', 'warn']] : []),
+    /* The people we hold no expiry date for at all. They were invisible: not
+       expired, not expiring, not a placeholder — simply absent from every tile
+       on a page whose subject is whether the roster can legally drive. */
+    ...(dNoDate ? [['No licence date on file', fmt(dNoDate),
+      'we cannot say whether these are valid', 'warn']] : []),
   ].map(([l, n, d, cls]) => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
 
   if (drvPage.caveat) root.append(note(drvPage.caveat));
 
   // The data holds registration only; naming three document types implied a
   // completeness this page does not have.
-  const docTypes = [...new Set(veh.map((r) => r.doc_type).filter(Boolean))];
+  // From the whole table, not from the rows on screen — the same reason the
+  // tiles above stopped counting the array they had just been handed.
+  const docTypes = (vehPage.doc_types || []).map((d) => d.doc_type).filter(Boolean);
   const vp = panel('Vehicle documents', docTypes.length
     ? `${docTypes.join(', ')} — the document types this source actually publishes`
     : 'documents with an expiry date');
@@ -1519,6 +1535,10 @@ V.compliance = async (root) => {
         + (r.driver_as_of ? ` <span class="dim">as of ${esc(String(r.driver_as_of).slice(0, 10))}</span>` : '')
       : '<span class="dim">nobody currently attributed</span>') },
   ]));
+  if (veh.length) vp.body.append(el('p', 'cap',
+    `Showing ${fmt(Math.min(120, veh.length))} of ${fmt(vt.total ?? veh.length)} documents with an expiry date`
+    + `${vt.vehicles ? ` across ${fmt(vt.vehicles)} vehicles` : ''}, soonest first. `
+    + 'The counts above are over all of them, not over this list.'));
 
   const dp = panel('Driver licences', placeholder
     ? `From the platforms that publish an expiry date. Rows carrying ${placeholder} are the source's `
@@ -1540,6 +1560,10 @@ V.compliance = async (root) => {
     } },
     { label: 'State', key: 'state', render: (r) => `<span class="tag ${/suspend|deact/i.test(r.state || '') ? 'warn' : 'ok'}">${esc(r.state || '—')}</span>` },
   ]));
+  if (drv.length) dp.body.append(el('p', 'cap',
+    `Showing ${fmt(Math.min(120, drv.length))} of ${fmt(dt.total ?? drv.length)} driver records, `
+    + `${fmt(dt.with_date ?? 0)} of which carry an expiry date at all. `
+    + 'The counts above are over all of them, not over this list.'));
 };
 
 V.sources = async (root) => {

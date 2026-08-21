@@ -97,21 +97,42 @@ async function main() {
        been thrown away.
 
        The attempt count is what stops it looping forever on a job that kills
-       the container every time it runs. */
+       the container every time it runs — but only that. It counted every
+       restart alike, so a backfill interrupted three times by ordinary deploys
+       was abandoned with 'it may be crashing the collector', which was simply
+       untrue: it had been advancing every time.
+
+       A job that got FURTHER than its last attempt is a working job that was
+       interrupted, and its counter resets. Only a job that restarts having
+       made no progress at all is a job that might be the cause. */
     pool.query(
       `UPDATE collector_job
-       SET status = CASE WHEN coalesce(attempts, 0) >= 3 THEN 'failed' ELSE 'queued' END,
+       SET status = CASE WHEN coalesce(attempts, 0) >= 3
+                          AND coalesce((progress ->> 'done')::int, 0)
+                              <= coalesce((progress ->> 'done_at_last_attempt')::int, -1)
+                         THEN 'failed' ELSE 'queued' END,
            started_at = NULL,
-           attempts = coalesce(attempts, 0) + 1,
+           attempts = CASE WHEN coalesce((progress ->> 'done')::int, 0)
+                                > coalesce((progress ->> 'done_at_last_attempt')::int, -1)
+                           THEN 1 ELSE coalesce(attempts, 0) + 1 END,
+           -- Remember how far it had got, so the next restart can tell whether
+           -- this one advanced.
+           progress = coalesce(progress, '{}'::jsonb)
+                      || jsonb_build_object('done_at_last_attempt',
+                                            coalesce((progress ->> 'done')::int, 0)),
            error = CASE WHEN coalesce(attempts, 0) >= 3
-                        THEN 'abandoned after 3 restarts mid-run — it may be crashing the collector'
+                         AND coalesce((progress ->> 'done')::int, 0)
+                             <= coalesce((progress ->> 'done_at_last_attempt')::int, -1)
+                        THEN 'abandoned: restarted three times without completing a single source, '
+                             || 'so the job itself may be killing the collector'
                         ELSE error END
        WHERE status = 'running'
-       RETURNING id, mode, attempts`)
+       RETURNING id, mode, attempts, progress ->> 'current' AS was_on`)
       .then(({ rows }) => {
         if (rows.length) {
           log.warn('scheduler', 'requeued jobs stranded by a restart',
-            { jobs: rows.map((r) => `${r.mode}#${r.id} (attempt ${r.attempts})`) });
+            { jobs: rows.map((r) => `${r.mode}#${r.id} (attempt ${r.attempts}`
+              + `${r.was_on ? `, was on ${r.was_on}` : ''})`) });
         }
       })
       .catch((e) => log.error('scheduler', 'requeue', { err: String(e) }));

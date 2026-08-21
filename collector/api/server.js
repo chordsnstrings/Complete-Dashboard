@@ -1196,19 +1196,43 @@ app.get('/api/context', wrap(async (req, res) => {
 
 
 /* ────────────────── compliance & platform verdicts ────────────────── */
-app.get('/api/compliance/vehicles', wrap(async (req, res) => res.json(await q(
-  `SELECT d.plate, d.doc_type, d.status, d.expires_at,
-          (d.expires_at::date - now()::date) AS days_left,
-          p.make, p.model, p.year, p.vin, p.image_url,
-          -- Whoever holds the car NOW, which is the right person for a document
-          -- expiring next week — with the id, so the name can be a link rather
-          -- than a name somebody has to go and look up.
-          cd.driver_name, cd.driver_ext_id, cd.as_of AS driver_as_of
-   FROM vehicle_document d
-   LEFT JOIN vehicle_profile p ON p.platform=d.platform AND p.vehicle_ext_id=d.vehicle_ext_id
-   LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
-   WHERE d.expires_at IS NOT NULL
-   ORDER BY d.expires_at ASC LIMIT 300`))));
+/* The counts come from the database, not from the returned list.
+   The page built "Vehicle docs expired — cannot legally work" by filtering the
+   array it had just fetched, which is capped at 300 rows ordered by expiry.
+   Every document past its date sorts to the front, so today the two numbers
+   agree — and the day the fleet crosses 300 documents on file they stop
+   agreeing, silently, on a tile that makes a legal claim. A total is a count,
+   not a length. */
+app.get('/api/compliance/vehicles', wrap(async (req, res) => {
+  const rows = await q(
+    `SELECT d.plate, d.doc_type, d.status, d.expires_at,
+            (d.expires_at::date - now()::date) AS days_left,
+            p.make, p.model, p.year, p.vin, p.image_url,
+            -- Whoever holds the car NOW, which is the right person for a
+            -- document expiring next week — with the id, so the name can be a
+            -- link rather than a name somebody has to go and look up.
+            cd.driver_name, cd.driver_ext_id, cd.as_of AS driver_as_of
+     FROM vehicle_document d
+     LEFT JOIN vehicle_profile p ON p.platform=d.platform AND p.vehicle_ext_id=d.vehicle_ext_id
+     LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
+     WHERE d.expires_at IS NOT NULL
+     ORDER BY d.expires_at ASC LIMIT 300`);
+  const [t] = await q(
+    `SELECT count(*)::int total,
+            count(*) FILTER (WHERE expires_at::date < now()::date)::int expired,
+            count(*) FILTER (WHERE expires_at::date >= now()::date
+                               AND expires_at::date <= now()::date + 7)::int within_7,
+            count(*) FILTER (WHERE expires_at::date > now()::date + 7
+                               AND expires_at::date <= now()::date + 45)::int within_45,
+            count(DISTINCT plate)::int vehicles,
+            count(DISTINCT doc_type)::int doc_types
+     FROM vehicle_document WHERE expires_at IS NOT NULL`);
+  const types = await q(
+    `SELECT doc_type, count(*)::int n FROM vehicle_document
+     WHERE expires_at IS NOT NULL AND doc_type IS NOT NULL GROUP BY 1 ORDER BY n DESC`);
+  res.json({ rows, totals: t, doc_types: types,
+    shown: rows.length, truncated: (t?.total ?? 0) > rows.length });
+}));
 
 /* Driver licences, with the placeholder check the insight engine already does.
    The page counted every row with a past expiry date and captioned it "stand
@@ -1238,8 +1262,28 @@ app.get('/api/compliance/drivers', wrap(async (_, res) => {
   // One date on more than half the rows is a default, not a coincidence.
   const share = mode && mode.with_date ? mode.n / mode.with_date : 0;
   const placeholder = share >= 0.5 && mode.n >= 5;
+  /* Counted in the database, excluding the placeholder date, rather than by
+     filtering the 300 rows the page happened to receive. "Driver licences
+     expired — stand down until renewed" is the single most consequential
+     sentence this product prints, and it was a .filter().length over a capped
+     list. */
+  const [t] = await q(
+    `SELECT count(*)::int total,
+            count(*) FILTER (WHERE licence_expires IS NOT NULL)::int with_date,
+            count(*) FILTER (WHERE licence_expires IS NOT NULL
+                               AND ($1::text IS NULL OR to_char(licence_expires,'YYYY-MM-DD') <> $1)
+                               AND licence_expires < now()::date)::int expired,
+            count(*) FILTER (WHERE licence_expires IS NOT NULL
+                               AND ($1::text IS NULL OR to_char(licence_expires,'YYYY-MM-DD') <> $1)
+                               AND licence_expires >= now()::date
+                               AND licence_expires <= now()::date + 45)::int within_45,
+            count(*) FILTER (WHERE licence_expires IS NULL)::int no_date_at_all
+     FROM driver_compliance`, [placeholder ? mode.licence_expires : null]);
   res.json({
     drivers: rows,
+    totals: t,
+    shown: rows.length,
+    truncated: (t?.total ?? 0) > rows.length,
     placeholder_date: placeholder ? mode.licence_expires : null,
     placeholder_rows: placeholder ? mode.n : 0,
     rows_with_a_date: mode?.with_date ?? 0,
