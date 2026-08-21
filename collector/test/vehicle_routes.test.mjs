@@ -13,7 +13,9 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql'])
+for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
+  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql',
+  'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql', 'schema_v15.sql', 'schema_v16.sql'])
   await db.exec(readFileSync(`sql/${f}`, 'utf8'));
 
 const PLATE = 'L46174', OTHER = 'L41435';
@@ -186,6 +188,36 @@ await q(`INSERT INTO vehicle_document (platform,vehicle_ext_id,doc_type,plate,st
 const dir2 = (await get(`/api/vehicles/directory?${W}`)).body;
 check('a vehicle with no trips still appears', dir2.some((r) => r.plate === 'L00009'), String(dir2.length));
 check('a vehicle with no trips reports zero, not null', dir2.find((r) => r.plate === 'L00009')?.trips === 0);
+
+/* ── the directory must not add telematics twins to bookings ─────────────
+   `trips` included FMS journeys, which carry no driver, no fare and no booking
+   — so a car that drove all month with nothing behind it counted as "Earning",
+   inverting the exact question that tile exists to answer. */
+{
+  const dir = (await get(`/api/vehicles/directory?${W}`)).body;
+  check('bookings and telematics journeys are separate columns',
+    dir.every((r) => 'trips' in r && 'telematics_journeys' in r),
+    Object.keys(dir[0] || {}).join(','));
+  check('the two are never summed into one number',
+    dir.every((r) => r.trips >= 0 && r.telematics_journeys >= 0));
+  check('distance is guarded, so an odometer row cannot become the km column',
+    dir.every((r) => r.km == null || Number(r.km) < 500000), JSON.stringify(dir.map((r) => r.km)));
+  check('the id needed to link the current driver is returned',
+    dir.every((r) => 'current_driver_id' in r));
+}
+
+/* ── and it must use Dubai days, like every other endpoint ───────────── */
+{
+  await q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+       requested_at, status, distance_km)
+     VALUES ('uber','vtz-1','ecosine',$1,'d1','Someone','2026-08-15T01:00:00+04:00','completed',7)`,
+    [PLATE]);
+  const narrow = (await get('/api/vehicles/directory?from=2026-08-15&to=2026-08-15')).body;
+  const row = narrow.find((r) => r.plate === PLATE);
+  check('a 01:00 Dubai trip falls inside a window that starts that day',
+    !!row && row.trips > 0, JSON.stringify(narrow.map((r) => [r.plate, r.trips])));
+}
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

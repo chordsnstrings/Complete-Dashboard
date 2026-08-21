@@ -15,8 +15,8 @@
    the server folds Uber/Yango/Bolt ids that share a name into one identity. */
 
 import { barChart, areaChart, donut, hbars, heatmap, empty } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note,
-  dayStr, dtStr, timeStr, hourStr, money, pct, fmt } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
+  dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt } from './ui.js';
 import { qAll, href } from './data.js';
 import { makeMap, fitTo } from './map.js';
 
@@ -561,15 +561,31 @@ export async function renderDriverDirectory(root) {
     <span class="cap" id="dn"></span>`;
   root.append(bar);
   const grid = el('div', 'dircards'); root.append(grid);
-  const tblP = panel('All drivers', 'Sorted by trips in this window — click any row for the full detail'); root.append(tblP.panel);
+  /* "All drivers" now means all drivers. The directory was built from the trip
+     table, so anyone who took nothing in the window had no row — under this
+     exact heading — and 64 of the people missing that way had an expired
+     licence, which is precisely who an operator opens this page to find. The
+     vehicle directory beside it does the opposite on purpose and says so. */
+  const tblP = panel('All drivers',
+    'Everyone on the books, including people with no trip in this window — those are the ones worth '
+    + 'finding. Sorted by trips; click any row for the full detail.');
+  root.append(tblP.panel);
   loading(tblP.body); loading(grid);
 
   const rows = await qAll('/api/drivers/directory');
-  bar.querySelector('#dn').textContent = `${rows.length} drivers`;
+  const active = rows.filter((r) => r.active_in_window);
+  const idle = rows.filter((r) => !r.active_in_window && r.ever_driven);
+  const never = rows.filter((r) => !r.ever_driven);
+  const expired = rows.filter((r) => r.licence_days_left != null && r.licence_days_left < 0);
+  bar.querySelector('#dn').textContent =
+    `${rows.length} drivers · ${active.length} drove in this window`
+    + (idle.length ? ` · ${idle.length} did not` : '')
+    + (never.length ? ` · ${never.length} never have` : '')
+    + (expired.length ? ` · ${expired.length} with an expired licence` : '');
 
   // the top few as cards, because a leaderboard is read as a ranking
   grid.innerHTML = '';
-  rows.slice(0, 6).forEach((r, i) => {
+  active.slice(0, 6).forEach((r, i) => {
     const c = el('a', 'dircard');
     c.href = href('driver', r.driver_ext_id);
     const initials = (r.driver_name || '?').split(' ').filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase();
@@ -586,15 +602,28 @@ export async function renderDriverDirectory(root) {
 
   const cols = [
     { label: '#', key: '_i', render: (r) => String(rows.indexOf(r) + 1) },
+    { label: 'In this window', key: '_a', render: (r) => (r.active_in_window
+      ? pill('drove', 'ok')
+      : r.ever_driven ? pill('no trip', 'warn') : pill('never driven', 'bad')) },
     { label: 'Driver', key: 'driver_name', render: (r) => `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name)}</a>` },
     { label: 'Platforms', key: '_p', render: (r) => (r.platforms || []).map((p) => pill(p, 'plat')).join('') },
-    { label: 'Usual vehicle', key: 'plate' },
+    { label: 'Usual vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },
     { label: 'Days', key: 'days', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
-    { label: 'Last trip', key: 'last_trip', render: (r) => dayStr(r.last_trip) },
+    /* dayStr has no year, and this dashboard offers a 12-month window: "21 Oct"
+       and "21 Aug" sat side by side with nothing to say which year, so a driver
+       who last drove ten months ago read as current. The lifetime last trip is
+       shown when there is none in the window, because that is the number that
+       answers "is this person still with us". */
+    { label: 'Last trip', key: 'last_trip', render: (r) => {
+      const v = r.last_trip || r.last_ever;
+      if (!v) return '<span class="ent-off">never</span>';
+      const ago = Math.floor((Date.now() - Date.parse(v)) / 864e5);
+      return `${dateStr(v)} <small class="dim">${fmt(ago)}d ago</small>`;
+    } },
     { label: 'Licence', key: '_l', render: (r) => (r.licence_days_left == null ? '—'
       : pill(r.licence_days_left < 0 ? `expired` : `${r.licence_days_left}d`, r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok')) },
   ];

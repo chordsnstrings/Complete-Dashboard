@@ -16,6 +16,16 @@ const normPlate = (s) => String(s || '').toUpperCase().replace(/[\s-]+/g, '');
 
 export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   const win = (req) => [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
+  /* Dubai calendar days, matching trip_norm.local_day and every other endpoint.
+     Bound as a raw timestamptz in a UTC session, a window starting on the 1st
+     began at 04:00 Dubai and ended at 03:59 on the day after the last — so this
+     directory and the /api/vehicles panel on the same screen disagreed about
+     the same plate. */
+  const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  const winDays = (req) => [
+    isDay(req.query.from) ? req.query.from : '2000-01-01',
+    isDay(req.query.to) ? req.query.to : '2100-01-01',
+  ];
 
   // `$1..$2` window, `$3` plate — same argument order in every query below.
   const TW = `plate = $3 AND requested_at BETWEEN $1 AND $2`;
@@ -38,7 +48,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
      Every plate we hold anything about, including ones with no trips in the
      window — an asset that earned nothing is exactly the one worth seeing. */
   app.get('/api/vehicles/directory', wrap(async (req, res) => {
-    const [from, to] = win(req);
+    const [from, to] = winDays(req);
     res.json(await q(
       `WITH plates AS (
          SELECT DISTINCT plate FROM (
@@ -48,13 +58,25 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          ) s
        ),
        t AS (
-         SELECT plate, count(*)::int trips,
-                count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days,
-                round(sum(distance_km)::numeric,0) km, round(sum(price)::numeric,0) revenue,
+         /* Bookings and telematics journeys counted apart, and distance guarded.
+            Summing them showed a 2-3.5x overcount as "trips" and rendered a
+            193,027 km odometer row as 1.6 million km against one car. */
+         SELECT plate,
+                count(*) FILTER (WHERE is_booking)::int trips,
+                count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+                count(DISTINCT local_day) FILTER (WHERE is_booking)::int days,
+                count(DISTINCT local_day)::int days_moved,
+                round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+                round(sum(distance_km) FILTER (WHERE NOT is_booking AND has_distance)::numeric,0) telematics_km,
+                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+                count(*) FILTER (WHERE has_fare)::int priced_trips,
                 count(DISTINCT driver_ext_id)::int drivers,
                 count(DISTINCT platform)::int platforms,
-                max(requested_at) last_trip, min(fleet_id) fleet_id
-         FROM trip WHERE requested_at BETWEEN $1 AND $2 AND plate IS NOT NULL AND plate <> ''
+                max(requested_at) FILTER (WHERE is_booking) last_trip,
+                max(requested_at) last_movement,
+                min(fleet_id) fleet_id
+         FROM trip_norm
+         WHERE local_day BETWEEN $1::date AND $2::date AND plate IS NOT NULL AND plate <> ''
          GROUP BY plate
        ),
        tel AS (
@@ -67,18 +89,30 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        ),
        al AS (
          SELECT plate, count(*)::int alerts FROM alert
-         WHERE occurred_at BETWEEN $1 AND $2 GROUP BY plate
+         WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+         GROUP BY plate
        )
-       SELECT p.plate, coalesce(t.trips,0) trips, coalesce(t.days,0) days, t.km, t.revenue,
-              coalesce(t.drivers,0) drivers, coalesce(t.platforms,0) platforms, t.last_trip,
+       SELECT p.plate,
+              coalesce(t.trips,0) trips,
+              coalesce(t.telematics_journeys,0) telematics_journeys,
+              coalesce(t.days,0) days, coalesce(t.days_moved,0) days_moved,
+              t.km, t.telematics_km, t.revenue, coalesce(t.priced_trips,0) priced_trips,
+              coalesce(t.drivers,0) drivers, coalesce(t.platforms,0) platforms,
+              t.last_trip, t.last_movement,
               coalesce(t.fleet_id, v.fleet_id, vp.fleet_id) fleet_id,
               coalesce(v.make, vp.make) make, coalesce(v.model, vp.model) model,
               coalesce(v.year, vp.year) AS year,
               tel.last_fix, tel.status, tel.speed,
-              (now() - tel.polled_at > interval '11 minutes') stale,
+              /* Staleness is a property of the FIX, not of our poll. CABMAN
+                 re-sends every vehicle's last position on every cycle, so a
+                 tracker dead for a year still got a fresh polled_at. */
+              (now() - tel.last_fix > interval '11 minutes') stale,
+              round(extract(epoch FROM now() - tel.last_fix) / 60)::int fix_age_min,
               doc.soonest_expiry, (doc.soonest_expiry::date - now()::date) doc_days_left,
               coalesce(al.alerts,0) alerts,
-              cd.driver_name current_driver, cd.as_of driver_as_of
+              -- The id as well as the name: the page names a person and could
+              -- not link to them because the id was dropped here.
+              cd.driver_name current_driver, cd.driver_ext_id current_driver_id, cd.as_of driver_as_of
        FROM plates p
        LEFT JOIN t   ON t.plate = p.plate
        LEFT JOIN tel ON tel.plate = p.plate

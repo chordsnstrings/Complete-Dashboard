@@ -23,6 +23,15 @@ function canonName(s) {
 
 export function driverRoutes(app, { q, wrap, endOfDay }) {
   const win = (req) => [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
+  /* Dubai calendar days, matching trip_norm.local_day and every other endpoint.
+     Binding a bare date against a timestamptz in a UTC session made the window
+     start at 04:00 Dubai and end at 03:59 the following day, so this page and
+     the /api/vehicles panel beside it disagreed about the same plate. */
+  const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  const winDays = (req) => [
+    isDay(req.query.from) ? req.query.from : '2000-01-01',
+    isDay(req.query.to) ? req.query.to : '2100-01-01',
+  ];
 
   /* Resolve `?id=` (a platform driver id) or `?name=` into every record for that
      person. Returns null when nothing matches, so callers can 404 honestly. */
@@ -76,50 +85,152 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     return fn(req, res, d, [...win(req), d.ids]);
   });
 
-  /* ── directory: every driver we know of, one row each ───────────────── */
+  /* ── directory: every driver we know of, one row each ─────────────────
+     Four things were wrong here and all four made the page describe the fleet
+     as busier and cleaner than it is:
+
+       - it was built FROM the trip table, so a driver who took nothing in the
+         window had no row at all — under a panel headed "All drivers". Sixty-
+         four of the people missing that way had an expired licence, which is
+         exactly who an operator opens this page to find. The sibling vehicle
+         directory does the opposite on purpose and says so.
+       - the window was bound as a raw timestamptz in a UTC session, so it
+         dropped the Dubai 00:00-04:00 slice of the first day and added a
+         phantom one after the last — and the /api/vehicles panel on the same
+         screen used Dubai days, so the two disagreed about the same plate.
+       - the fold summed trips and kilometres but never recomputed
+         completion_pct, so a person carried whichever account happened to be
+         listed first — presented as that human's completion rate.
+       - `days` took the MAX across a person's accounts rather than the union,
+         so days worked on one platform and not another were discarded.
+
+     Completion is over trip_norm.outcome, not status='completed': Bolt says
+     'finished', and testing for 'completed' scored every completed Bolt trip
+     as a failure. */
   app.get('/api/drivers/directory', wrap(async (req, res) => {
-    const [from, to] = win(req);
+    const [from, to] = winDays(req);
     const rows = await q(
-      `WITH t AS (
-         SELECT driver_ext_id, max(driver_name) driver_name, min(fleet_id) fleet_id,
-                count(*)::int trips,
-                count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days,
-                round(sum(distance_km)::numeric,0) km,
-                round(sum(price)::numeric,0) revenue,
+      `WITH ids AS (
+         -- Everyone we know of, from any source, whether or not they drove.
+         SELECT DISTINCT driver_ext_id, driver_name FROM trip
+           WHERE driver_ext_id IS NOT NULL AND coalesce(btrim(driver_name), '') <> ''
+         UNION
+         SELECT driver_ext_id, full_name FROM driver_compliance
+           WHERE driver_ext_id IS NOT NULL AND coalesce(btrim(full_name), '') <> ''
+         UNION
+         SELECT driver_ext_id, full_name FROM driver_platform_state
+           WHERE driver_ext_id IS NOT NULL AND coalesce(btrim(full_name), '') <> ''
+       ),
+       who AS (
+         SELECT driver_ext_id, max(driver_name) AS driver_name FROM ids GROUP BY 1
+       ),
+       t AS (
+         SELECT driver_ext_id, min(fleet_id) fleet_id,
+                count(*) FILTER (WHERE is_booking)::int trips,
+                count(*) FILTER (WHERE outcome = 'completed')::int completed,
+                count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable,
+                count(DISTINCT local_day)::int days,
+                round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+                count(*) FILTER (WHERE has_fare)::int priced_trips,
                 max(requested_at) last_trip, min(requested_at) first_trip,
-                round(100.0*sum((status='completed')::int)/nullif(count(*),0)) completion_pct,
                 array_agg(DISTINCT platform) platforms,
                 mode() WITHIN GROUP (ORDER BY plate) plate
-         FROM trip
-         WHERE requested_at BETWEEN $1 AND $2 AND driver_ext_id IS NOT NULL AND driver_name IS NOT NULL
+         FROM trip_norm
+         WHERE local_day BETWEEN $1::date AND $2::date AND driver_ext_id IS NOT NULL
          GROUP BY driver_ext_id
+       ),
+       -- The last trip EVER, so "has not driven in this window" and "has never
+       -- driven" are different rows rather than the same blank.
+       ever AS (
+         SELECT driver_ext_id, max(requested_at) last_ever, count(*)::int lifetime
+         FROM trip WHERE driver_ext_id IS NOT NULL GROUP BY 1
        )
-       SELECT t.*, dc.state, dc.licence_expires, dc.rating,
-              (dc.licence_expires - now()::date) AS licence_days_left
-       FROM t LEFT JOIN driver_compliance dc ON dc.driver_ext_id = t.driver_ext_id
-       ORDER BY t.trips DESC LIMIT 500`, [from, to]);
+       SELECT who.driver_ext_id, who.driver_name,
+              coalesce(t.trips, 0) AS trips, coalesce(t.completed, 0) AS completed,
+              coalesce(t.bookable, 0) AS bookable, coalesce(t.days, 0) AS days,
+              t.km, t.revenue, coalesce(t.priced_trips, 0) AS priced_trips,
+              t.last_trip, t.first_trip, t.plate, t.fleet_id,
+              coalesce(t.platforms, ARRAY[]::text[]) AS platforms,
+              ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
+              dc.state, dc.licence_expires, dc.rating,
+              (dc.licence_expires - now()::date) AS licence_days_left,
+              dps.state AS platform_state, dps.can_earn
+       FROM who
+       LEFT JOIN t   ON t.driver_ext_id = who.driver_ext_id
+       LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
+       LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
+       LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
+       ORDER BY coalesce(t.trips, 0) DESC, who.driver_name LIMIT 800`, [from, to]);
 
-    // Fold per-platform rows into one row per person, so the directory lists
-    // humans rather than accounts.
+    /* Fold per-platform rows into one row per person, so the directory lists
+       humans rather than accounts. Counts are carried through and the ratios
+       are computed ONCE at the end — folding a pre-computed percentage keeps
+       one account's number and calls it the person's. */
     const byName = new Map();
     for (const r of rows) {
       const k = canonName(r.driver_name);
       const cur = byName.get(k);
-      if (!cur) { byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])] }); continue; }
+      if (!cur) {
+        byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],
+          _days: new Set() });
+        continue;
+      }
       cur.ids.push(r.driver_ext_id);
-      cur.trips += r.trips; cur.days = Math.max(cur.days, r.days);
+      cur.trips += r.trips;
+      cur.completed += r.completed; cur.bookable += r.bookable;
+      cur.priced_trips += r.priced_trips;
+      cur.lifetime_trips += r.lifetime_trips;
       cur.km = +(cur.km || 0) + +(r.km || 0);
       cur.revenue = +(cur.revenue || 0) + +(r.revenue || 0);
       cur.platforms = [...new Set([...cur.platforms, ...(r.platforms || [])])];
-      if (r.driver_name.length > cur.driver_name.length) cur.driver_name = r.driver_name;
+      if ((r.driver_name || '').length > (cur.driver_name || '').length) cur.driver_name = r.driver_name;
       if (r.last_trip > cur.last_trip) cur.last_trip = r.last_trip;
-      if (r.first_trip < cur.first_trip) cur.first_trip = r.first_trip;
+      if (r.first_trip && (!cur.first_trip || r.first_trip < cur.first_trip)) cur.first_trip = r.first_trip;
+      if (r.last_ever > cur.last_ever) cur.last_ever = r.last_ever;
       cur.state = cur.state || r.state;
+      cur.platform_state = cur.platform_state || r.platform_state;
       if (r.licence_days_left != null && (cur.licence_days_left == null || r.licence_days_left < cur.licence_days_left)) {
         cur.licence_days_left = r.licence_days_left; cur.licence_expires = r.licence_expires;
       }
+      cur._multiAccountDays = true;
     }
-    res.json([...byName.values()].sort((a, b) => b.trips - a.trips));
+
+    /* Distinct working days across ALL of a person's accounts. Taking the max
+       of pre-aggregated per-account counts discarded every day worked on one
+       platform and not another. Only asked for the people who actually have
+       more than one account. */
+    const multi = [...byName.values()].filter((p) => p.ids.length > 1);
+    if (multi.length) {
+      const dayRows = await q(
+        `SELECT driver_ext_id, local_day FROM trip_norm
+         WHERE local_day BETWEEN $1::date AND $2::date
+           AND driver_ext_id = ANY($3)`,
+        [from, to, multi.flatMap((p) => p.ids)]);
+      const idToPerson = new Map();
+      multi.forEach((p) => p.ids.forEach((id) => idToPerson.set(id, p)));
+      const days = new Map();
+      for (const d of dayRows) {
+        const person = idToPerson.get(d.driver_ext_id);
+        if (!person) continue;
+        const set = days.get(person) || new Set();
+        set.add(String(d.local_day).slice(0, 10));
+        days.set(person, set);
+      }
+      days.forEach((set, person) => { person.days = set.size; });
+    }
+
+    res.json([...byName.values()].map((p) => {
+      delete p._days; delete p._multiAccountDays;
+      return {
+        ...p,
+        // Computed once, over the whole person.
+        completion_pct: p.bookable ? Math.round((p.completed / p.bookable) * 100) : null,
+        // "No trip in this window" and "never driven" are different facts.
+        active_in_window: p.trips > 0,
+        ever_driven: (p.lifetime_trips || 0) > 0,
+      };
+    }).sort((a, b) => b.trips - a.trips || String(a.driver_name).localeCompare(String(b.driver_name))));
   }));
 
   /* ── who this is: identity, credentials, platforms, tenure ─────────── */

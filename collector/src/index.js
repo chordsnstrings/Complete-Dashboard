@@ -51,10 +51,11 @@ async function main() {
         // Claim the oldest queued job in one statement, so a second poller (or
         // a restarted container) cannot pick up the same work.
         const { rows } = await pool.query(
-          `UPDATE collector_job SET status = 'running', started_at = now()
+          `UPDATE collector_job
+           SET status = 'running', started_at = now(), attempts = coalesce(attempts, 0) + 1
            WHERE id = (SELECT id FROM collector_job WHERE status = 'queued'
                        ORDER BY requested_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-           RETURNING id, mode`);
+           RETURNING id, mode, attempts`);
         const job = rows[0];
         if (!job) return;
         jobRunning = true;
@@ -78,14 +79,34 @@ async function main() {
       } catch (e) { log.error('scheduler', 'job poll', { err: String(e) }); jobRunning = false; }
     }, 20000);
 
-    /* A container that dies mid-job leaves the row in 'running' forever. On
-       boot, hand anything stranded back to the queue once — a job that was
-       genuinely half-done is idempotent (every write is an upsert), and a job
-       stuck at 'running' is indistinguishable from one still working. */
+    /* A container that dies mid-job leaves the row in 'running' forever, and
+       this deployment restarts on every push. ANY job marked running at boot is
+       stranded by definition: this process has just started, so nothing it owns
+       can be in flight. Requeued immediately rather than after a timeout —
+       every collector write is an upsert, so repeating a half-done job is safe,
+       and the three-hour wait meant a backfill killed by a deploy simply never
+       finished. It sat at 'running' while the coverage page it was meant to fix
+       stayed unchanged, which is exactly the shape of a job that has silently
+       been thrown away.
+
+       The attempt count is what stops it looping forever on a job that kills
+       the container every time it runs. */
     pool.query(
-      `UPDATE collector_job SET status='queued', started_at=NULL
-       WHERE status='running' AND started_at < now() - interval '3 hours'`)
-      .then(({ rowCount }) => { if (rowCount) log.warn('scheduler', 'requeued stranded jobs', { n: rowCount }); })
+      `UPDATE collector_job
+       SET status = CASE WHEN coalesce(attempts, 0) >= 3 THEN 'failed' ELSE 'queued' END,
+           started_at = NULL,
+           attempts = coalesce(attempts, 0) + 1,
+           error = CASE WHEN coalesce(attempts, 0) >= 3
+                        THEN 'abandoned after 3 restarts mid-run — it may be crashing the collector'
+                        ELSE error END
+       WHERE status = 'running'
+       RETURNING id, mode, attempts`)
+      .then(({ rows }) => {
+        if (rows.length) {
+          log.warn('scheduler', 'requeued jobs stranded by a restart',
+            { jobs: rows.map((r) => `${r.mode}#${r.id} (attempt ${r.attempts})`) });
+        }
+      })
       .catch((e) => log.error('scheduler', 'requeue', { err: String(e) }));
 
     // kick one of each at boot so the dashboard has fresh data immediately

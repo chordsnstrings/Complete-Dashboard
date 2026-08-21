@@ -281,10 +281,23 @@ V.demand = async (root) => {
   const day = (v) => String(v).slice(0, 10);
   const byDay = new Map(ctx.map((c) => [day(c.day), c]));
   const rows = d.map((r) => ({ ...r, ...(byDay.get(day(r.d)) || {}) }));
-  const withWeather = rows.filter((r) => r.temp_max != null);
+  /* Only days that are BOTH weather-covered and fully collected.
+     weather_daily holds about the last month, so over a 12-month selection this
+     panel described one month while labelling nothing — "Days with rain: 1"
+     read as a statement about the year. And a day nobody collected has zero
+     trips, which dragged every hot-versus-cool average toward whichever side
+     the collection gap happened to fall on. */
+  const usable = rows.filter((r) => !r.uncollected && !r.sources_silent);
+  const withWeather = usable.filter((r) => r.temp_max != null);
+  const weatherDays = rows.filter((r) => r.temp_max != null).length;
   if (!withWeather.length) {
     ctxP.body.append(note('No weather rows for this range yet. The collector pulls Dubai daily observations and forecasts each cycle.'));
   } else {
+    ctxP.body.append(note(`${fmt(withWeather.length)} of the ${fmt(rows.length)} days in this window have `
+      + `both weather and a complete collection, and everything below is over those days only`
+      + (weatherDays < rows.length
+        ? ` — weather is stored for about the last month, so a longer selection describes a shorter period than its title.`
+        : '.')));
     // Correlation between temperature and volume, stated plainly with its own
     // caveat — a month of days is not enough to call this causal.
     const n = withWeather.length;
@@ -498,18 +511,27 @@ V.vehicles = async (root) => {
       cur[r.product] = r.trips; cur.total += r.trips;
       byPlate.set(r.plate, cur);
     }
-    const pivot = [...byPlate.values()].sort((a, b) => b.total - a.total).slice(0, 30);
+    /* The concentration sentence is computed over ALL vehicles; the slice is
+       for the table only. Computing it over the visible 30 made both the count
+       and the share wrong, and wrong in the direction that makes the fleet look
+       more concentrated than it is — which is that sentence's whole point. */
+    const allPlates = [...byPlate.values()].sort((a, b) => b.total - a.total);
+    const pivot = allPlates.slice(0, 30);
     tierP.body.append(tableFrom(pivot, [
-      { label: 'Plate', key: 'plate', render: (r) => `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>` },
+      { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
       ...tiers.map((t) => ({ label: t, key: t, num: true,
         render: (r) => (r[t] ? `${fmt(r[t])}<span class="dim"> · ${Math.round((r[t] / r.total) * 100)}%</span>` : '—') })),
       { label: 'Total', key: 'total', num: true, render: (r) => fmt(r.total) },
     ]));
+    if (allPlates.length > pivot.length) {
+      tierP.body.append(el('p', 'cap',
+        `Showing the ${fmt(pivot.length)} busiest of ${fmt(allPlates.length)} vehicles.`));
+    }
     // Concentration is the actionable part: a premium tier served by two cars
     // is a single point of failure for the fleet's best-earning work.
     const premium = tiers.find((t) => /black|lux|premier|comfort/i.test(t));
     if (premium) {
-      const serving = pivot.filter((r) => r[premium]).sort((a, b) => (b[premium] || 0) - (a[premium] || 0));
+      const serving = allPlates.filter((r) => r[premium]).sort((a, b) => (b[premium] || 0) - (a[premium] || 0));
       const total = serving.reduce((a, r) => a + r[premium], 0);
       const topTwo = serving.slice(0, 2).reduce((a, r) => a + r[premium], 0);
       tierP.body.append(el('p', 'cap',
@@ -1489,8 +1511,14 @@ V.sources = async (root) => {
     'Last run per source. "partial" means the run wrote rows AND left windows unfetched — which is how '
     + 'a 299-day hole in the Uber trip history survived for months behind a run that said ok.');
   root.append(st.panel);
-  const cv = panel('Data coverage', 'What has actually landed in the database'); root.append(cv.panel);
+  const cv = panel('Data coverage',
+    'What has actually landed — and, for each dated source, how many days of the window it covered. '
+    + 'A row count between two dates says nothing about the days in between.');
+  root.append(cv.panel);
   [st.body, cv.body].forEach(loading);
+  // This page hides the global range filter, so the coverage question is asked
+  // over the full observed history rather than over an invisible window.
+  const [from, to] = ['2000-01-01', new Date().toISOString().slice(0, 10)];
   const [status, coverage] = await Promise.all([api('/api/status'), api('/api/coverage')]);
   st.body.innerHTML = '';
   const TAG = { ok: 'ok', partial: 'warn', error: 'bad' };
@@ -1525,17 +1553,46 @@ V.sources = async (root) => {
     root.append(hp.panel);
   }
   cv.body.innerHTML = '';
+  /* "Rows / From / Latest" reads as an unbroken span. Every hole between those
+     two dates — the exact failure mode the rest of this codebase is written
+     around — was invisible: a source that collected 56 days of a year was
+     presented as having covered it. The calendar endpoint that answers this
+     correctly already existed and was not called from here. */
+  const cal = await api(`/api/coverage/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+    .catch(() => ({ sources: [] }));
+  const byCal = Object.fromEntries((cal.sources || []).map((s2) => [s2.source, s2]));
   const cov = [
-    ...(coverage.trips || []).map((r) => ({ what: `trips · ${r.platform}`, n: r.n, from: r.from_ts, to: r.to_ts })),
-    ...(coverage.telemetry || []).map((r) => ({ what: `telemetry · ${r.source}`, n: r.n, from: null, to: r.last_poll })),
-    ...(coverage.alerts || []).map((r) => ({ what: 'safety alerts', n: r.n, from: null, to: r.latest })),
-    ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', n: r.n, from: null, to: r.latest })),
-  ];
+    ...(coverage.trips || []).map((r) => ({ what: `trips · ${r.platform}`, src: r.platform,
+      n: r.n, from: r.from_ts, to: r.to_ts })),
+    ...(coverage.telemetry || []).map((r) => ({ what: `telemetry · ${r.source}`, src: null,
+      n: r.n, from: null, to: r.last_poll })),
+    ...(coverage.alerts || []).map((r) => ({ what: 'safety alerts', src: null, n: r.n, from: null, to: r.latest })),
+    ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', src: null, n: r.n, from: null, to: r.latest })),
+  ].map((r) => ({ ...r, cal: r.src ? byCal[r.src] : null }));
   cv.body.append(tableFrom(cov, [
-    { label: 'Dataset', key: 'what' }, { label: 'Rows', key: 'n', num: true },
-    { label: 'From', key: 'from', render: (r) => r.from ? String(r.from).slice(0, 10) : '—' },
-    { label: 'Latest', key: 'to', render: (r) => r.to ? String(r.to).slice(0, 16).replace('T', ' ') : '—' },
+    { label: 'Dataset', key: 'what' },
+    { label: 'Rows', key: 'n', num: true, render: (r) => fmt(r.n) },
+    { label: 'From', key: 'from', render: (r) => (r.from ? String(r.from).slice(0, 10) : '—') },
+    { label: 'Latest', key: 'to', render: (r) => (r.to ? String(r.to).slice(0, 16).replace('T', ' ') : '—') },
+    { label: 'Days collected', key: '_d', render: (r) => (r.cal
+      ? `${fmt(r.cal.days_with_data)} of ${fmt(r.cal.days_with_data + r.cal.missing_days)}`
+      : '<span class="ent-off">not a dated source</span>') },
+    { label: 'Missing', key: '_m', render: (r) => (!r.cal ? '—'
+      : r.cal.missing_days
+        ? `<a class="lnk" href="${href('coverage')}">${fmt(r.cal.missing_days)} days</a>`
+        : pill('none', 'ok')) },
+    { label: 'Largest gap', key: '_g', render: (r) => {
+      const g = r.cal && r.cal.gaps && r.cal.gaps[0];
+      return g ? `${dayStr(g.from)} → ${dayStr(g.to)} <small class="dim">${g.days}d</small>`
+        : (r.cal ? '<span class="ent-off">none</span>' : '—');
+    } },
   ]));
+  const holed = cov.filter((r) => r.cal && r.cal.missing_days);
+  if (holed.length) {
+    cv.body.append(note(`${holed.map((r) => `${r.src} is missing ${r.cal.missing_days} days`).join(', ')}. `
+      + 'A row count between two dates says nothing about what is in between — Collection gaps draws it.'));
+  }
+
   /* What each provider actually sends, versus what we keep. Every collector
      stores the original record in `raw`; this reads it back, so "does Uber
      segregate business trips?" is answerable from the dashboard instead of by

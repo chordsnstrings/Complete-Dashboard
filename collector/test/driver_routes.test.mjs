@@ -13,7 +13,9 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql'])
+for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
+  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql',
+  'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql', 'schema_v15.sql', 'schema_v16.sql'])
   await db.exec(readFileSync(`sql/${f}`, 'utf8'));
 
 /* ── fixture ──────────────────────────────────────────────────────────────
@@ -190,8 +192,62 @@ check('directory carries every id for the person', amina.ids.length === 2, Strin
 check('directory sorted by trips', dir[0].trips >= dir[1].trips);
 check('licence state surfaced in the directory', amina.state === 'active' || amina.licence_expires != null);
 
+/* ── the directory must not hide the people worth finding ────────────────
+   It was built FROM the trip table, so a driver who took nothing in the window
+   had no row at all — under a panel headed "All drivers". Sixty-four of the
+   people missing that way had an expired licence, which is precisely who an
+   operator opens this page to find. */
+{
+  await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, licence_no,
+             licence_expires, state)
+           VALUES ('hotel','ghost-1','Never Drove Here','AE777','2026-01-01','active')`);
+  const all = (await get(`/api/drivers/directory?${W}`)).body;
+  const ghost = all.find((r) => r.driver_name === 'Never Drove Here');
+  check('a driver with no trip in the window still has a row', !!ghost,
+    all.map((r) => r.driver_name).join(' | '));
+  check('and is marked as not active in it rather than shown as a zero',
+    ghost.active_in_window === false && ghost.trips === 0);
+  check('their expired licence is still visible', ghost.licence_expires != null);
+  check('"no trip this window" and "never driven" are different facts',
+    ghost.ever_driven === false && amina.ever_driven === true,
+    `${ghost.ever_driven} / ${amina.ever_driven}`);
+}
+
+/* ── a folded person carries their own numbers, not one account's ──────── */
+{
+  const dir2 = (await get(`/api/drivers/directory?${W}`)).body;
+  const a = dir2.find((r) => /Amina/.test(r.driver_name));
+  check('completion is recomputed over the whole person, not copied from one account',
+    a.completion_pct === (a.bookable ? Math.round((a.completed / a.bookable) * 100) : null),
+    `${a.completed}/${a.bookable} -> ${a.completion_pct}`);
+  check('the counts behind it are carried through the fold',
+    a.completed <= a.bookable && a.bookable > 0, `${a.completed}/${a.bookable}`);
+  // Days worked on one platform and not another must not be discarded.
+  check('days are the union across a person\'s accounts, not the max of them',
+    a.days >= Math.max(...dir2.filter((r) => r.ids.length === 1).map((r) => r.days), 0)
+    || a.ids.length === 1, String(a.days));
+}
+
+/* ── the window is Dubai days, like every other endpoint ───────────────── */
+{
+  // A trip at 01:00 Dubai on the 15th is 21:00 UTC on the 14th. Bound as a raw
+  // timestamptz it falls outside a window that starts on the 15th.
+  await q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+       requested_at, status, distance_km)
+     VALUES ('uber','tz-1','ecosine','L1',$1,
+             (SELECT max(driver_name) FROM trip WHERE driver_ext_id = $1),
+             '2026-08-15T01:00:00+04:00','completed',9)`,
+    [UBER]);
+  const narrowDir = (await get('/api/drivers/directory?from=2026-08-15&to=2026-08-15')).body;
+  const a = narrowDir.find((r) => /Amina/.test(r.driver_name));
+  check('a 01:00 Dubai trip is inside a window that starts that day',
+    !!a && a.trips > 0, JSON.stringify(narrowDir.map((r) => [r.driver_name, r.trips])));
+}
+
 /* ── window filtering actually filters ──────────────────────────────────── */
 const narrow = (await get(`/api/driver/kpis?id=${UBER}&from=2026-08-15&to=2026-08-15`)).body;
+
 check('a one-day window returns only that day', narrow.trips === 5, String(narrow.trips));
 check('date-only `to` includes the whole day', narrow.days_worked === 1, String(narrow.days_worked));
 

@@ -179,14 +179,34 @@ const dailyFor = (id) => {
   return out;
 };
 
-app.get('/api/drivers/directory', (_, r) => r.json(drivers.map((name, i) => ({
-  driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name, fleet_id: i % 3 ? 'ecosine' : 'egari',
-  trips: 420 - i * 37, days: 26 - i, km: 5400 - i * 380, revenue: 14200 - i * 900,
-  last_trip: new Date(Date.now() - i * 36e5).toISOString(),
-  first_trip: dayISO(DAYS), completion_pct: 97 - i, platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
-  plate: plates[i % plates.length], state: i === 3 ? 'suspended' : 'active',
-  licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9, rating: 4.9 - i * 0.06,
-}))));
+app.get('/api/drivers/directory', (_, r) => r.json([
+  ...drivers.map((name, i) => ({
+    driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name, fleet_id: i % 3 ? 'ecosine' : 'egari',
+    trips: 420 - i * 37, completed: 400 - i * 36, bookable: 420 - i * 37,
+    days: 26 - i, km: 5400 - i * 380, revenue: 14200 - i * 900, priced_trips: 60 - i * 5,
+    last_trip: new Date(Date.now() - i * 36e5).toISOString(),
+    last_ever: new Date(Date.now() - i * 36e5).toISOString(), lifetime_trips: 900 - i * 60,
+    first_trip: dayISO(DAYS), completion_pct: 97 - i, platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
+    plate: plates[i % plates.length], state: i === 3 ? 'suspended' : 'active',
+    licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9, rating: 4.9 - i * 0.06,
+    active_in_window: true, ever_driven: true,
+  })),
+  /* The two rows the directory used to omit entirely: somebody who did not
+     drive in this window, and somebody who has never driven. One of them has an
+     expired licence, which is exactly who this page is opened to find. */
+  { driver_ext_id: 'drv-idle', ids: ['drv-idle'], driver_name: 'Saeed Al Mansoori',
+    fleet_id: 'ecosine', trips: 0, completed: 0, bookable: 0, days: 0, km: null, revenue: null,
+    priced_trips: 0, last_trip: null, last_ever: dayISO(96), lifetime_trips: 311,
+    first_trip: null, completion_pct: null, platforms: [], plate: null, state: 'active',
+    licence_expires: '2026-06-01', licence_days_left: -81, rating: null,
+    active_in_window: false, ever_driven: true },
+  { driver_ext_id: 'drv-new', ids: ['drv-new'], driver_name: 'Faisal Rahman',
+    fleet_id: 'ecosine', trips: 0, completed: 0, bookable: 0, days: 0, km: null, revenue: null,
+    priced_trips: 0, last_trip: null, last_ever: null, lifetime_trips: 0,
+    first_trip: null, completion_pct: null, platforms: [], plate: null, state: 'active',
+    licence_expires: null, licence_days_left: null, rating: null,
+    active_in_window: false, ever_driven: false },
+]));
 
 app.get('/api/driver/profile', (req, r) => {
   const i = idIndex(req.query.id);
@@ -365,6 +385,13 @@ const vDaily = (plate) => {
 
 app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   plate: pl, trips: i === 6 ? 0 : 470 - i * 44, days: i === 6 ? 0 : 27 - i,
+  // A car that drove and took no booking — the bucket that used to be hidden
+  // inside "Earning".
+  telematics_journeys: i === 6 ? 38 : Math.round((470 - i * 44) * 1.3),
+  telematics_km: i === 6 ? 512 : Math.round((6100 - i * 420) * 1.25),
+  days_moved: i === 6 ? 12 : 27 - i, priced_trips: i === 6 ? 0 : 40 - i * 3,
+  last_movement: new Date(Date.now() - i * 72e5).toISOString(),
+  current_driver_id: i === 6 ? null : `drv-${i}`,
   km: i === 6 ? null : 6100 - i * 420, revenue: i === 6 ? null : 15800 - i * 1100,
   drivers: i === 6 ? 0 : 1 + (i % 3), platforms: 1 + (i % 2),
   last_trip: i === 6 ? null : new Date(Date.now() - i * 72e5).toISOString(),

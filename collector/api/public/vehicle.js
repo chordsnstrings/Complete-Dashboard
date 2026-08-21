@@ -13,7 +13,7 @@
    portal knows the papers. These pages put the three next to each other. */
 
 import { barChart, areaChart, donut, hbars, empty } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note,
+import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dtStr, timeStr, money, pct, fmt } from './ui.js';
 import { qAll, href } from './data.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
@@ -410,14 +410,25 @@ export async function renderVehicleDirectory(root) {
   const rows = await qAll('/api/vehicles/directory');
   bar.querySelector('#vdn').textContent = `${rows.length} vehicles`;
 
+  /* `trips` used to include telematics journeys, so a car that drove all month
+     with no booking behind it counted as "Earning" — inverting the exact
+     question the tile exists to answer. Three states now, and the middle one is
+     the operationally interesting bucket that was hidden inside the first. */
   const earning = rows.filter((r) => r.trips > 0).length;
+  const movedOnly = rows.filter((r) => !r.trips && r.telematics_journeys > 0).length;
+  const still = rows.length - earning - movedOnly;
   const tracked = rows.filter((r) => r.last_fix).length;
   const staleN = rows.filter((r) => r.stale).length;
   const expiring = rows.filter((r) => r.doc_days_left != null && r.doc_days_left < 30).length;
   kpiHost.replaceWith(kpiRow([
     { label: 'Vehicles', value: fmt(rows.length), sub: 'with any record at all' },
-    { label: 'Earning', value: fmt(earning), sub: `${fmt(rows.length - earning)} with no trip in this window`,
+    { label: 'Took a booking', value: fmt(earning), sub: 'earned in this window',
       tone: earning === rows.length ? 'good' : rows.length - earning > rows.length / 4 ? 'critical' : 'warn' },
+    { label: 'Moved, no booking', value: fmt(movedOnly),
+      sub: 'the tracker saw it drive and nothing paid for it',
+      tone: movedOnly ? 'critical' : 'good' },
+    { label: 'Did not move', value: fmt(still), sub: 'no booking and no journey',
+      tone: still ? 'warn' : 'good' },
     { label: 'Tracked', value: fmt(tracked), sub: `${fmt(staleN)} with a stale fix`,
       tone: staleN === 0 ? 'good' : 'warn' },
     { label: 'Documents due', value: fmt(expiring), sub: 'expiring within 30 days',
@@ -427,8 +438,13 @@ export async function renderVehicleDirectory(root) {
   const cols = [
     { label: 'Plate', key: 'plate', render: (r) => `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>` },
     { label: 'Vehicle', key: '_v', render: (r) => esc([r.year, r.make, r.model].filter(Boolean).join(' ') || '—') },
-    { label: 'Current driver', key: 'current_driver', render: (r) => esc(r.current_driver || '—') },
-    { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },
+    { label: 'Current driver', key: 'current_driver',
+      render: (r) => (r.current_driver_id
+        ? entity('driver', r.current_driver_id, r.current_driver)
+        : `<span class="ent-off">${esc(r.current_driver || '—')}</span>`) },
+    { label: 'Bookings', key: 'trips', num: true, render: (r) => fmt(r.trips) },
+    { label: 'Journeys seen', key: 'telematics_journeys', num: true,
+      render: (r) => fmt(r.telematics_journeys) },
     { label: 'Days', key: 'days', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
