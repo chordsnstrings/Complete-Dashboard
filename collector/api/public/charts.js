@@ -1,6 +1,11 @@
 // Minimal SVG chart kit — thin marks, recessive grid, hover tooltips, click-to-drill.
 // Colours come from CSS custom properties (the validated categorical palette).
 const tt = () => document.getElementById('tt');
+/* Every token here must exist in app.css. `--s7`/`--s8` were referenced and
+   never defined: as an SVG fill an undefined var resolves to BLACK, and as a
+   CSS background to TRANSPARENT — so the seventh slice of a donut went black
+   and a bar coloured `--s8` disappeared entirely. Both are now defined; this
+   list and the palette must stay in step. */
 export const CAT = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
 export const SEQ = ['--b100', '--b200', '--b300', '--b400', '--b500', '--b600', '--b700'];
 
@@ -56,10 +61,16 @@ export function barChart(host, data, { x, y, label, color = '--b400', onClick, v
   });
   data.forEach((d, i) => {
     const h = ih * (+d[y]) / max, bx = pl + step * i + (step - bw) / 2, by = pt + ih - h;
-    const r = mk('rect', { x: bx, y: by, width: bw, height: Math.max(h, 1), rx: 3, fill: `var(${color})` });
+    const r = mk('rect', { x: bx, y: by, width: bw, height: Math.max(h, 1), rx: 3, fill: `var(${color})`, 'data-rise': '' });
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}`, onClick && (() => onClick(d)));
     svg.append(r);
-    if (data.length <= 16) svg.append(txt(bx + bw / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
+    // Past ~16 bars the labels used to be dropped entirely, so the default
+    // 30-day range showed a chart with no dates at all under a caption inviting
+    // you to click a specific day. Thin them instead, the way areaChart does.
+    const every = Math.max(1, Math.ceil(data.length / 12));
+    if (i % every === 0 || i === data.length - 1) {
+      svg.append(txt(bx + bw / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
+    }
   });
   host.append(svg);
 }
@@ -87,8 +98,8 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
   let line = '', area = `M ${X(0)} ${pt + ih}`;
   data.forEach((d, i) => { const px = X(i), py = Y(+d[y]); line += (i ? ' L ' : 'M ') + px + ' ' + py; area += ` L ${px} ${py}`; });
   area += ` L ${X(data.length - 1)} ${pt + ih} Z`;
-  svg.append(mk('path', { d: area, fill: `url(#${id})` }),
-    mk('path', { d: line, fill: 'none', stroke: `var(${color})`, 'stroke-width': 2, 'stroke-linejoin': 'round' }));
+  svg.append(mk('path', { d: area, fill: `url(#${id})`, 'data-fade': '' }),
+    mk('path', { d: line, fill: 'none', stroke: `var(${color})`, 'stroke-width': 2, 'stroke-linejoin': 'round', 'data-draw': '' }));
   data.forEach((d, i) => {
     const c = mk('circle', { cx: X(i), cy: Y(+d[y]), r: 9, fill: 'transparent' });
     interactive(c, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>`, onClick && (() => onClick(d)));
@@ -105,12 +116,14 @@ export function donut(host, data, { label = 'label', value = 'n', onClick } = {}
   if (!data.length) return empty(host);
   const tot = data.reduce((a, d) => a + +d[value], 0) || 1;
   const S = 190, r = 74, ir = 47, cx = S / 2, cy = S / 2;
-  const svg = mk('svg', { viewBox: `0 0 ${S} ${S}`, role: 'img', style: 'max-width:190px;margin:0 auto' });
+  // The width used to be hard-capped at 190px, which left three quarters of a
+  // wide panel blank. The cap now lives in CSS so it can respond to the panel.
+  const svg = mk('svg', { viewBox: `0 0 ${S} ${S}`, role: 'img', class: 'donut', style: 'margin:0 auto;display:block' });
   let a0 = -Math.PI / 2;
   data.slice(0, 8).forEach((d, i) => {
     const frac = +d[value] / tot, a1 = a0 + frac * Math.PI * 2, gap = 0.016;
     const p = arc(cx, cy, r, ir, a0 + gap, Math.max(a1 - gap, a0 + gap));
-    const path = mk('path', { d: p, fill: `var(${CAT[i % CAT.length]})` });
+    const path = mk('path', { d: p, fill: `var(${CAT[i % CAT.length]})`, 'data-fade': '' });
     interactive(path, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(frac * 100).toFixed(1)}%)`, onClick && (() => onClick(d)));
     svg.append(path); a0 = a1;
   });
@@ -202,7 +215,7 @@ export function stackedBar(host, data, { label = 'label', value = 'n' } = {}) {
   const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
   data.forEach((d, i) => {
     const w = +d[value] / tot * W;
-    const r = mk('rect', { x: x + (x ? 1 : 0), y: 0, width: Math.max(w - 1, 1), height: H, rx: 2, fill: `var(${CAT[i % CAT.length]})` });
+    const r = mk('rect', { x: x + (x ? 1 : 0), y: 0, width: Math.max(w - 1, 1), height: H, rx: 2, fill: `var(${CAT[i % CAT.length]})`, 'data-fade': '' });
     interactive(r, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(+d[value] / tot * 100).toFixed(1)}%)`);
     svg.append(r); x += w;
   });
@@ -235,6 +248,10 @@ function shortLabel(v) {
   return s.length > 11 ? s.slice(0, 10) + '…' : s;
 }
 export function empty(host, msg = 'No data for this range yet') {
+  // Callers reach here after loading() has filled the host with a skeleton.
+  // Appending without clearing left a forever-shimmering "Loading…" bar sitting
+  // on top of the empty state.
+  host.innerHTML = '';
   const d = document.createElement('div'); d.className = 'empty';
   d.innerHTML = `<b>Nothing to show</b>${msg}`;
   host.append(d); return d;

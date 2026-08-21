@@ -1127,27 +1127,59 @@ function countUp(node) {
   requestAnimationFrame(tick);
 }
 
+/* Entrance motion.
+   ──────────────────────────────────────────────────────────────────────────
+   None of this was firing. The selectors had drifted from the markup: it looked
+   for `.hb .bar-cell > i` while charts.js emits `.hb .track > .fill`, and for
+   `[data-draw]` / `[data-rise]` / `[data-fade]` attributes that were never set
+   on anything. The keyframes existed, the CSS was correct, and no element ever
+   matched — so the dashboard had no motion at all and the failure was silent.
+
+   The rule the motion follows: it should carry meaning, not decorate. A bar
+   growing from its baseline shows magnitude. A number counting up shows scale.
+   A line drawing itself shows direction over time. Anything that does not say
+   something is left still. */
 function animateView(root) {
   if (REDUCED) return;
-  // stagger direct children and any grid/kpi groups
+
+  // Stagger the top-level groups so the page assembles rather than appearing.
   root.classList.add('stagger');
-  root.querySelectorAll('.kpis, .grid, .hbars, .tscroll tbody').forEach((g) => g.classList.add('stagger'));
-  // count up the hero numbers
+  root.querySelectorAll('.kpis, .grid, .hbars, .pbars, .shifts, .dircards, .tscroll tbody')
+    .forEach((g) => g.classList.add('stagger'));
+
+  // Headline numbers count up to their value.
   root.querySelectorAll('.kpi .n').forEach(countUp);
-  // give each horizontal bar its own small delay
-  root.querySelectorAll('.hb .bar-cell > i').forEach((b, i) => { b.style.animationDelay = (i * 45) + 'ms'; });
-  // line charts draw themselves in
+
+  // Horizontal bars grow from their origin, in reading order.
+  root.querySelectorAll('.hb .fill').forEach((b, i) => { b.style.animationDelay = `${i * 45}ms`; });
+  root.querySelectorAll('.pbar .pb-track > i').forEach((b, i) => { b.style.animationDelay = `${i * 45}ms`; });
+  root.querySelectorAll('.shift .sh-track > i').forEach((b, i) => { b.style.animationDelay = `${Math.min(i * 22, 700)}ms`; });
+
+  // Lines draw themselves along their own length.
   root.querySelectorAll('svg path[data-draw]').forEach((path) => {
     try {
       const len = path.getTotalLength();
+      if (!len) return;
       path.style.setProperty('--len', Math.ceil(len));
       path.classList.add('draw');
     } catch { /* non-path geometry */ }
   });
+
+  // Bars rise from the axis; areas and slices fade in behind them.
   root.querySelectorAll('svg [data-rise]').forEach((r, i) => {
-    r.classList.add('rise'); r.style.animationDelay = (i * 22) + 'ms';
+    r.classList.add('rise');
+    r.style.animationDelay = `${Math.min(i * 22, 600)}ms`;
   });
-  root.querySelectorAll('svg [data-fade]').forEach((r) => r.classList.add('fade'));
+  root.querySelectorAll('svg [data-fade]').forEach((r, i) => {
+    r.classList.add('fade');
+    r.style.animationDelay = `${Math.min(i * 40, 400)}ms`;
+  });
+
+  // Cards that carry a claim settle in rather than snapping.
+  root.querySelectorAll('.breakcard, .idcard').forEach((c, i) => {
+    c.classList.add('settle');
+    c.style.animationDelay = `${Math.min(i * 60, 500)}ms`;
+  });
 }
 
 /* ─────────── render loop ─────────── */
@@ -1170,7 +1202,7 @@ async function freshness() {
     const last = s.map((r) => r.finished_at).filter(Boolean).sort().pop();
     const bad = s.filter((r) => r.status !== 'ok').length;
     $('#freshness').innerHTML = last
-      ? `updated ${new Date(last).toLocaleTimeString()}<br>${bad ? `<span style="color:var(--warning)">${bad} source(s) need attention</span>` : 'all sources healthy'}`
+      ? `updated ${new Date(last).toLocaleTimeString()}<br>${bad ? `<span style="color:var(--warn)">${bad} source(s) need attention</span>` : 'all sources healthy'}`
       : 'awaiting first collection';
   } catch { $('#freshness').textContent = 'status unavailable'; }
 }
