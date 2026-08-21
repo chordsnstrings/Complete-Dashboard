@@ -35,6 +35,14 @@ export function rosterRoutes(app, { q, wrap, range }) {
     const [from, to, platform, fleet] = range(req);
     const p = [from, to, platform, fleet];
 
+    /* Which platforms we hold ANY trip for. Without this, "never driven" is
+       inferred from our own trip table, and that table has no Bolt rows at all
+       — so 36 Bolt drivers were being reported as never having driven when the
+       truth is that we do not collect their trips. An inference drawn across a
+       collection gap is not a finding about a person. */
+    const withTrips = new Set((await q(
+      `SELECT DISTINCT platform FROM trip WHERE driver_name IS NOT NULL`)).map((r) => r.platform));
+
     const rows = await q(
       `WITH s AS (
          SELECT ${CANON} AS person, platform, driver_ext_id, full_name, state, state_raw,
@@ -79,7 +87,11 @@ export function rosterRoutes(app, { q, wrap, range }) {
               -- a claim, true when every claim was "cannot earn", and false as
               -- soon as one platform permits work — which is exactly the
               -- three-valued answer this needs.
-              bool_and(s.can_earn = false) AS blocked_everywhere,
+              bool_and(s.can_earn = false) AS cannot_earn_anywhere,
+              -- Stopped is a different fact from cannot-earn. A waitlisted
+              -- driver cannot earn and has not been stopped; conflating the two
+              -- files somebody who has not started yet under "suspended".
+              bool_and(s.state IN ('suspended', 'deactivated')) AS stopped_everywhere,
               max(s.score) AS score,
               array_remove(array_agg(DISTINCT s.plate), NULL) AS plates,
               max(s.observed_at) AS observed_at,
@@ -100,6 +112,9 @@ export function rosterRoutes(app, { q, wrap, range }) {
 
     const people = rows.map((r) => {
       const lifetime = r.lifetime_trips || 0;
+      // Can we even see this person's work? If every platform they are on is
+      // one we hold no trips for, a lifetime count of zero says nothing.
+      const activityKnown = (r.platforms || []).some((pl) => withTrips.has(pl));
       /* Categories, in the order the claims get weaker.
 
          `bool_or` returns NULL only when EVERY platform declined to say — which
@@ -107,13 +122,24 @@ export function rosterRoutes(app, { q, wrap, range }) {
          able to earn" asserts something about their employment that no provider
          actually said, so it gets a category of its own. This is the difference
          between reporting a gap in our knowledge and inventing a fact. */
-      const blocked = r.blocked_everywhere === true;
-      const category = (r.can_earn_anywhere == null && !blocked)
-        ? 'unclassified'
-        : lifetime === 0
-          ? (r.can_earn_anywhere ? 'never_started' : 'in_pipeline')
-          : blocked ? 'blocked'
-            : r.trips === 0 ? 'idle_this_window' : 'working';
+      const blocked = r.stopped_everywhere === true;
+      /* Ordered by how strong the claim is, strongest first.
+
+         What a provider ASSERTS about somebody's standing comes before
+         anything INFERRED from our own trip table, because that table may
+         simply not contain their platform. Getting the order wrong reported 31
+         suspended and deactivated Bolt drivers as "still waiting to start",
+         and printed blocked: 0 on the same screen as "31 holding a vehicle
+         while blocked".
+
+         And stopped is not the same fact as cannot-earn: a waitlisted driver
+         cannot earn and has not been stopped. */
+      const category = blocked ? 'blocked'
+        : r.cannot_earn_anywhere === true ? 'in_pipeline'
+          : r.can_earn_anywhere == null ? 'unclassified'
+            : !activityKnown ? 'activity_unknown'
+              : lifetime === 0 ? 'never_started'
+                : r.trips === 0 ? 'idle_this_window' : 'working';
       return {
         ...r,
         revenue: r.revenue == null ? null : round(r.revenue, 0),
@@ -121,6 +147,7 @@ export function rosterRoutes(app, { q, wrap, range }) {
         category,
         // A car attached to somebody who cannot drive it.
         blocked_everywhere: blocked,
+        activity_known: activityKnown,
         holding_vehicle_while_blocked: !!(blocked && (r.plates || []).length),
         days_since_last_trip: r.last_ever
           ? Math.floor((Date.now() - Date.parse(r.last_ever)) / 864e5) : null,
@@ -141,12 +168,20 @@ export function rosterRoutes(app, { q, wrap, range }) {
         // People no provider described in a word we recognise. Counted, so the
         // gap is visible rather than absorbed into a neighbouring category.
         unclassified: count('unclassified'),
+        // People whose platforms we hold no trips for. Their output is not
+        // zero — it is unobserved, and the two must not share a number.
+        activity_unknown: count('activity_unknown'),
         holding_vehicle_while_blocked: people.filter((x) => x.holding_vehicle_while_blocked).length,
         multi_platform: people.filter((x) => (x.platforms || []).length > 1).length,
       },
+      platforms_with_trips: [...withTrips].sort(),
       caveat: 'Platform accounts are folded into one person by name, because no provider shares an '
-        + 'id with another. The `accounts` column shows how many were folded, so the join can be '
-        + 'checked rather than trusted.',
+        + 'id with another. The accounts column shows how many were folded, so the join can be '
+        + 'checked rather than trusted.'
+        + (withTrips.size
+          ? ` Trip history exists for ${[...withTrips].sort().join(', ')} only; a driver on any other `
+            + 'platform has their output reported as unobserved rather than as zero.'
+          : ' No platform has any trip history, so no output can be observed at all.'),
     });
   }));
 

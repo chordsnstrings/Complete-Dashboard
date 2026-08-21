@@ -160,6 +160,37 @@ check('an unclassifiable standing is its own category, not the pipeline',
 
 check('a stopped driver is categorised as stopped',
   by['Stopped Person'].category === 'blocked', by['Stopped Person']?.category);
+
+/* ── a provider's assertion outranks an inference from our own tables ─────
+   Live, this reported `blocked: 0` on the same screen as "31 holding a vehicle
+   while blocked": 31 suspended and deactivated Bolt drivers had a lifetime
+   trip count of zero — not because they had never driven, but because the
+   trip table holds no Bolt rows at all — and a zero lifetime was being read
+   first, filing them as "still waiting to start". */
+await put({ platform: 'bolt', id: 'b3', name: 'Suspended NoTrips', state: 'suspended',
+  reason: 'Licence expired', plate: 'L103', canEarn: false });
+await put({ platform: 'bolt', id: 'b4', name: 'Bolt Only Active', state: 'active',
+  plate: 'L104', canEarn: true });
+{
+  const d2 = await get('/api/roster?from=2026-08-01&to=2026-08-31');
+  const b = Object.fromEntries(d2.people.map((p) => [p.name, p]));
+  check('a suspended driver we hold no trips for is stopped, not "waiting to start"',
+    b['Suspended NoTrips'].category === 'blocked', b['Suspended NoTrips']?.category);
+  check('and the blocked total agrees with the vehicles-held-while-blocked total',
+    d2.totals.blocked >= d2.totals.holding_vehicle_while_blocked,
+    `${d2.totals.blocked} blocked vs ${d2.totals.holding_vehicle_while_blocked} holding`);
+  check('an active driver on a platform with no trip history is not called "never driven"',
+    b['Bolt Only Active'].category === 'activity_unknown', b['Bolt Only Active']?.category);
+  check('their lifetime output is marked unobserved rather than zero',
+    b['Bolt Only Active'].activity_known === false);
+  check('the response names which platforms have trip history at all',
+    Array.isArray(d2.platforms_with_trips) && d2.platforms_with_trips.includes('uber')
+    && !d2.platforms_with_trips.includes('bolt'), JSON.stringify(d2.platforms_with_trips));
+  check('the caveat says output on the other platforms is unobserved, not zero',
+    /unobserved rather than as zero/.test(d2.caveat), d2.caveat);
+  check('a driver on a platform we DO collect is still judged normally',
+    b['Idle Person'].category === 'idle_this_window');
+}
 check('a car attached to somebody who cannot drive it is flagged',
   by['Stopped Person'].holding_vehicle_while_blocked === true
   && d.totals.holding_vehicle_while_blocked === 1);

@@ -38,6 +38,9 @@ const CAT = {
   // No provider described this person in a word we recognise, so nothing is
   // claimed about whether they can work.
   unclassified: { label: 'Standing not reported', tone: null },
+  // We hold no trips for any platform this person is on, so their output is
+  // unobserved rather than zero.
+  activity_unknown: { label: 'Output not observed', tone: 'warn' },
 };
 
 export async function renderRoster(root) {
@@ -65,6 +68,10 @@ export async function renderRoster(root) {
       ? { label: 'Standing not reported', value: fmt(t.unclassified),
           sub: 'no provider used a word we recognise', tone: 'warn' }
       : null,
+    t.activity_unknown
+      ? { label: 'Output not observed', value: fmt(t.activity_unknown),
+          sub: 'we hold no trips for their platform', tone: 'warn' }
+      : null,
     { label: 'Holding a car while stopped', value: fmt(t.holding_vehicle_while_blocked),
       tone: t.holding_vehicle_while_blocked ? 'critical' : null,
       sub: 'earns nothing, still costs' },
@@ -78,7 +85,7 @@ export async function renderRoster(root) {
   }
 
   const FILTER = {
-    pipeline: (x) => ['in_pipeline', 'never_started', 'unclassified'].includes(x.category),
+    pipeline: (x) => ['in_pipeline', 'never_started', 'unclassified', 'activity_unknown'].includes(x.category),
     idle: (x) => x.category === 'idle_this_window',
     blocked: (x) => x.category === 'blocked',
   };
@@ -125,11 +132,15 @@ export async function renderRoster(root) {
         : '<span class="ent-off">none attached</span>') },
     { label: 'Trips this window', key: 'trips', num: true },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
-    { label: 'Trips ever', key: 'lifetime_trips', num: true, render: (r) => fmt(r.lifetime_trips || 0) },
+    // Zero and unobserved are different numbers and must not share a cell.
+    { label: 'Trips ever', key: 'lifetime_trips', num: true,
+      render: (r) => (r.activity_known ? fmt(r.lifetime_trips || 0)
+        : '<span class="ent-off">not observed</span>') },
     { label: 'Last drove', key: 'last_ever',
       render: (r) => (r.last_ever
         ? `${dayStr(r.last_ever)} <small class="dim">${fmt(r.days_since_last_trip)}d</small>`
-        : '<span class="ent-off">never</span>') },
+        : r.activity_known ? '<span class="ent-off">never</span>'
+          : '<span class="ent-off">not observed</span>') },
     { label: 'Score', key: 'score', num: true, render: (r) => (r.score == null ? '—' : fmt(r.score)) },
     { label: 'Reason given', key: 'reason',
       render: (r) => (r.reason ? esc(String(r.reason).slice(0, 90)) : '—') },
