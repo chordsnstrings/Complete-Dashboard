@@ -77,7 +77,9 @@ export function renderLive(map, rows, onPick) {
   const pts = [];
   for (const r of rows) {
     if (r.lat == null || r.lng == null) continue;
-    const engaged = r.seat_occupied || /engag/i.test(r.status || '');
+    const seat = r.seat_occupied;
+    const seatUnknown = seat === null || seat === undefined;
+    const engaged = seat === true || /engag/i.test(r.status || '');
     const moving = Number(r.speed) > 3;
     const colour = r.stale ? css('--ink-3') : engaged ? css('--s3') : moving ? css('--s1') : css('--s5');
     const m = L.circleMarker([r.lat, r.lng], {
@@ -87,7 +89,9 @@ export function renderLive(map, rows, onPick) {
     m.bindTooltip(
       `<b>${r.plate}</b>${r.current_driver ? '<br>' + r.current_driver : ''}` +
       `<br>${r.status || '—'} · ${r.speed != null ? r.speed + ' km/h' : 'no speed'}` +
-      `<br>${engaged ? 'passenger on board' : 'empty'}${r.stale ? '<br><i>fix is stale</i>' : ''}`,
+      `<br>${seatUnknown && !/engag/i.test(r.status || '') ? 'seat sensor not reported'
+        : engaged ? 'passenger on board' : 'empty'}`
+      + `${r.stale ? `<br><i>last fix ${r.fix_age_min != null ? `${r.fix_age_min} min ago` : 'is stale'}</i>` : ''}`,
       { direction: 'top' });
     if (onPick) m.on('click', () => onPick(r));
     pts.push([r.lat, r.lng]);
@@ -110,20 +114,25 @@ export function renderJourney(map, journey) {
     let run = [seg.points[0]];
     const flush = () => {
       if (run.length < 2) { run = [run[run.length - 1]]; return; }
-      const occupied = !!run[0].occupied;
+      /* Tri-state: true, false, or null for "this feed does not report it".
+         Coercing null to false drew the whole trail dashed in the running-empty
+         colour with a "Running empty" tooltip — a claim, not an absence. */
+      const occ = run[0].occupied;
+      const occupied = occ === true, unknown = occ === null || occ === undefined;
       L.polyline(run.map((p) => [p.lat, p.lng]), {
-        color: occupied ? css('--s3') : css('--s1'),
-        weight: occupied ? 4 : 3, opacity: occupied ? .95 : .65,
-        dashArray: occupied ? null : '5,6',
+        color: unknown ? css('--ink-3') : occupied ? css('--s3') : css('--s1'),
+        weight: occupied ? 4 : 3, opacity: unknown ? .5 : occupied ? .95 : .65,
+        dashArray: occupied ? null : unknown ? '2,4' : '5,6',
       }).addTo(layer).bindTooltip(
-        `${occupied ? 'Passenger on board' : 'Running empty'}<br>` +
+        `${unknown ? 'Occupancy not reported by this feed' : occupied ? 'Passenger on board' : 'Running empty'}<br>` +
         `${new Date(run[0].t).toLocaleTimeString()} → ${new Date(run[run.length - 1].t).toLocaleTimeString()}`,
         { sticky: true });
       run = [run[run.length - 1]];
     };
     for (let i = 1; i < seg.points.length; i++) {
       const p = seg.points[i];
-      if (!!p.occupied !== !!run[0].occupied) { run.push(p); flush(); }
+      // A change BETWEEN the three states breaks the run, including into null.
+      if (p.occupied !== run[0].occupied) { run.push(p); flush(); }
       run.push(p);
     }
     flush();

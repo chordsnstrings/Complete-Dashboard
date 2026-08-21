@@ -23,6 +23,22 @@ import { renderDay } from './day.js';
    empty modal titled with a raw timestamp. */
 const dayKey = (v) => String(v ?? '').slice(0, 10);
 
+/* Uber publishes these as fractions (0.79 against a 0.85 target), and the table
+   rendered the raw number beside a column headed "Target". */
+const pctOf = (v) => (v == null || !Number.isFinite(Number(v)) ? '—'
+  : Number(v) <= 1 ? `${(Number(v) * 100).toFixed(1)}%` : fmt(v, 1));
+
+/* Whether a published target is being missed. `flagged` is a JSON array of the
+   drivers Uber named, so testing it for truthiness marked every row — empty
+   array included — as below target. Cancellation is the one metric where LOWER
+   is better, so the direction is read from the rule name. */
+function missingTarget(r) {
+  const org = Number(r.org_value), target = Number(r.target_value);
+  if (!Number.isFinite(org) || !Number.isFinite(target)) return null;
+  const lowerIsBetter = /cancel/i.test(String(r.rec_type || ''));
+  return lowerIsBetter ? org > target : org < target;
+}
+
 /* A breakdown that quietly drops the rows a provider never labelled reads as a
    complete picture of a subset. Telematics trips carry no payment type at all,
    so the old donut was 80% "unknown" — and once that bucket was removed the
@@ -102,7 +118,7 @@ const VIEWS = [
 /* ─────────── shell ─────────── */
 // A detail page keeps its parent lit in the sidebar — `#driver/…` is a page
 // *within* Drivers, not a thirteenth top-level destination.
-const PARENT = { driver: 'drivers', vehicle: 'vehicles', property: 'corporate', day: 'demand' };
+const PARENT = { driver: 'drivers', vehicle: 'vehicles', property: 'corporate', day: 'demand', action: 'insights' };
 
 function renderNav() {
   const nav = $('#nav'); nav.innerHTML = '';
@@ -130,6 +146,11 @@ function setHeader(detail) {
     $('#viewSub').textContent = `${tab.label} — ${[spec.year, spec.make, spec.model].filter(Boolean).join(' ') || 'every source that describes this asset'}`;
     crumb.innerHTML = `<a href="${href('vehicles')}">Vehicles</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
     crumb.style.display = 'flex';
+  } else if (state.view === 'action') {
+    $('#viewTitle').textContent = detail?.title || 'Finding';
+    $('#viewSub').textContent = 'One finding, its evidence, and what to do about it';
+    crumb.innerHTML = `<a href="${href('insights')}">Action list</a><span>/</span><b>${esc(state.param || '')}</b>`;
+    crumb.style.display = 'flex';
   } else if (state.view === 'day') {
     const label = /^\d{4}-\d{2}-\d{2}$/.test(state.param || '')
       ? new Date(`${state.param}T12:00:00Z`).toLocaleDateString(undefined,
@@ -150,7 +171,7 @@ function setHeader(detail) {
     $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
     crumb.style.display = 'none';
   }
-  const noFilter = ['settings', 'live', 'sources', 'day', 'providers'];
+  const noFilter = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights', 'compliance'];
   $('#filters').style.display = noFilter.includes(state.view) ? 'none' : 'flex';
 }
 // generic trip drill-down for any filter combination
@@ -378,6 +399,64 @@ V.property = async (root) => {
 V.settlement = async (root) => renderSettlement(root, SETTLE_TABS.some((t) => t.id === state.param) ? state.param : 'mix');
 V.coverage = async (root) => renderCoverage(root);
 V.corridors = async (root) => renderCorridors(root);
+
+/* One finding, as an address. It was a modal, so the evidence trail for a
+   specific problem could not be sent to the person who has to fix it — and the
+   entity it named was plain text, so a finding about a vehicle dead-ended at
+   the vehicle's name. */
+V.action = async (root) => {
+  const code = state.param, entityId = state.sub === '-' ? null : state.sub;
+  root.innerHTML = '';
+  loading(root);
+  const page = await api('/api/insights').catch(() => ({ insights: [] }));
+  const rows = (page.insights || []).filter((r) => r.code === code
+    && (entityId == null || String(r.entity_id) === String(entityId)));
+  root.innerHTML = '';
+  if (!rows.length) {
+    root.append(note('That finding is no longer open. Either it was resolved and the engine has stopped '
+      + 'raising it, or the collection window it was computed over has moved on.'));
+    root.append(el('p', 'cap', `Looking for ${esc(code || '?')}${entityId ? ` on ${esc(entityId)}` : ''}.`));
+    return { title: 'Finding' };
+  }
+  const r = rows[0];
+  const ENTITY_VIEW = { vehicle: 'vehicle', driver: 'driver', partner: 'property' };
+  const view = ENTITY_VIEW[r.entity_type];
+  root.append(kpiRow([
+    { label: 'Severity', value: r.severity, tone: { critical: 'critical', warning: 'warn', good: 'good' }[r.severity] },
+    { label: 'Category', value: r.category },
+    { label: 'About', html: view && r.entity_id ? entity(view, r.entity_id, `${r.entity_type} ${r.entity_id}`)
+      : esc(`${r.entity_type || 'fleet'} ${r.entity_id || ''}`) },
+    { label: 'Computed', value: r.computed_at ? dtStr(r.computed_at) : '—',
+      sub: r.window_start ? `over ${dayStr(r.window_start)} → ${dayStr(r.window_end)}` : 'current state' },
+    r.impact_aed
+      ? { label: 'Sized at', value: money(r.impact_aed),
+          sub: r.code === 'idle_vehicle' ? 'a modelled holding cost, not a measurement' : 'as measured',
+          tone: r.code === 'idle_vehicle' ? 'warn' : null }
+      : null,
+  ]));
+  const why = panel('What we found', 'The evidence behind this flag.');
+  why.body.innerHTML = `<p style="margin:0">${esc(r.detail || '')}</p>`;
+  root.append(why.panel);
+  const act = panel('What to do', 'The smallest useful next step.');
+  act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
+  root.append(act.panel);
+  if (view && r.entity_id) {
+    root.append(note(`Open the ${esc(r.entity_type)} to see everything else known about it — this finding `
+      + 'is one reading, and the page beside it is the rest of them.'));
+  }
+  if (rows.length > 1) {
+    const more = panel('The same rule elsewhere', `${rows.length - 1} other open finding(s) from this rule.`);
+    more.body.append(tableFrom(rows.slice(1), [
+      { label: 'About', key: 'entity_id',
+        render: (x) => (ENTITY_VIEW[x.entity_type]
+          ? entity(ENTITY_VIEW[x.entity_type], x.entity_id, x.entity_id) : esc(x.entity_id || '—')) },
+      { label: 'Finding', key: 'title' },
+      { label: 'Computed', key: 'computed_at', render: (x) => dtStr(x.computed_at) },
+    ]));
+    root.append(more.panel);
+  }
+  return { title: r.title };
+};
 /* A day is a page. It was a modal titled "Trips on 14 August" that contained a
    driver leaderboard, and could not be linked to. */
 V.day = async (root) => {
@@ -613,7 +692,14 @@ V.finance = async (root) => {
     q('/api/mix', { by: 'service' }).catch(() => []),
   ]);
 
-  const cash = (payDetail.groups || []).find((p) => /cash/i.test(p.label));
+  /* Cash is three labels on this fleet — `cash` (Uber), `cash-driver` and
+     `cash-supervisor` (hotel) — and /api/mix/detail returns them ordered by
+     count, so `.find` always landed on the Uber one, whose revenue is null
+     because that export has no fare column. The tile rendered "—" while the
+     fleet was holding real money. Read from the settlement endpoint instead, so
+     this and the Settlement page cannot disagree about what cash is. */
+  const settle = await q('/api/settlement/mix').catch(() => ({ classes: [] }));
+  const cash = (settle.classes || []).find((c) => c.settlement_class === 'cash');
   const tipTotal = tipRows.reduce((a, r) => a + (+r.tips || 0), 0);
   const fareTotal = tipRows.reduce((a, r) => a + (+r.fare || 0), 0);
 
@@ -633,9 +719,12 @@ V.finance = async (root) => {
       sub: k.priced_trips ? `over ${fmt(k.priced_trips)} priced trips` : 'no fares in this range' },
     { label: 'Revenue per km', value: money(k.revenue_per_km, 'AED', 2),
       sub: k.priced_km ? `over ${fmt(k.priced_km)} priced km` : 'no priced distance' },
-    { label: 'Cash to collect', value: cash ? money(cash.revenue) : money(0),
-      sub: cash ? `${fmt(cash.n)} cash trips` : 'no cash trips recorded',
-      tone: cash && k.revenue && +cash.revenue / +k.revenue > 0.25 ? 'warn' : null },
+    { label: 'Cash collected by drivers',
+      value: cash ? (cash.revenue == null ? 'not reported' : money(cash.revenue)) : money(0),
+      sub: cash
+        ? `${fmt(cash.trips)} cash bookings; ${fmt(cash.priced_trips)} of them report a fare`
+        : 'no cash booking in this range',
+      tone: cash && cash.priced_trips < cash.trips ? 'warn' : null },
     { label: 'Tips', value: tipTotal ? money(tipTotal) : '—',
       sub: fareTotal ? `${((tipTotal / fareTotal) * 100).toFixed(2)}% of net fare` : 'no tip data collected yet',
       tone: fareTotal ? (tipTotal / fareTotal >= 0.03 ? 'good' : 'warn') : null },
@@ -1038,7 +1127,12 @@ V.live = async (root) => {
     { label: 'Plate', key: 'plate' }, { label: 'Fleet', key: 'fleet_id' },
     { label: 'Status', key: 'status', render: (r) => `<span class="tag ${/engag/i.test(r.status || '') ? 'ok' : 'dim'}">${esc(r.status || '—')}</span>` },
     { label: 'Speed', key: 'speed', num: true, render: (r) => r.speed != null ? fmt(r.speed) + ' km/h' : '—' },
-    { label: 'Seat', key: 'seat_occupied', render: (r) => r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag dim">empty</span>' },
+    { label: 'Seat', key: 'seat_occupied', /* Three states, not two. Only the CABMAN feed carries a seat sensor; FMS and
+   Uber carry none, so collapsing NULL into "empty" asserted a measurement that
+   does not exist for 83 of 130 vehicles. */
+      render: (r) => (r.seat_occupied === null || r.seat_occupied === undefined
+        ? '<span class="tag dim">not reported</span>'
+        : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
     { label: 'Fix age', key: 'polled_at', render: (r) => `<span class="tag ${r.stale ? 'warn' : 'ok'}">${r.stale ? 'stale' : 'live'}</span>` },
     { label: 'Last fix', key: 'captured_at', render: (r) => new Date(r.captured_at).toLocaleTimeString() },
   ]);
@@ -1102,27 +1196,47 @@ V.map = async (root) => {
     ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
     legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving, empty'], ['--s5', 'Stopped'], ['--ink-3', 'Stale fix']]
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('');
+    /* Set the plate BEFORE asking for the replay. `.click()` synchronously ran
+       the replay handler, whose first statement reads the select — so it
+       fetched whichever vehicle was previously chosen and drew that one's day
+       under the plate you clicked. */
     layer = renderLive(map, withGps, (r) => {
-      $('#mReplay').click();
-      const sel = $('#mPlate'); if (sel) sel.value = r.plate;
+      const sel = $('#mPlate');
+      if (sel) {
+        if (![...sel.options].some((o) => o.value === r.plate)) sel.append(new Option(r.plate, r.plate));
+        sel.value = r.plate;
+      }
+      showReplay(r.plate);
     });
     if (!withGps.length) empty(stat, 'No GPS fixes stored yet — CABMAN populates this every 5 minutes');
   };
 
-  const showReplay = async () => {
-    const plate = $('#mPlate').value, day = $('#mDay').value;
+  /* `plate` is passed explicitly rather than re-read from the DOM, so a caller
+     that has just set it cannot race the read. */
+  const showReplay = async (plateArg) => {
+    const plate = plateArg || $('#mPlate').value, day = $('#mDay').value;
     if (!plate || !day) return;
     clear();
     const j = await api(`/api/map/journey?plate=${encodeURIComponent(plate)}&day=${day}`);
     stat.innerHTML = [
       ['Fixes', fmt(j.fixes), `on ${day}`],
       ['Distance', fmt(j.distance_km) + ' km', 'between fixes'],
-      ['With passenger', fmt(j.occupied_km) + ' km', j.distance_km ? Math.round(j.occupied_km / j.distance_km * 100) + '% of distance' : '—'],
+      /* Null, not zero, when this vehicle's feed never reports occupancy. FMS
+         carries no seat sensor, so every FMS-tracked plate showed a hard
+         "0 km · 0% of distance" — a positive claim that it drove empty all day,
+         on days it ran fifteen bookings. */
+      j.occupancy_reported
+        ? ['With passenger', fmt(j.occupied_km) + ' km',
+          j.occupancy_measured_km ? Math.round(j.occupied_km / j.occupancy_measured_km * 100) + '% of measured distance' : '—']
+        : ['With passenger', 'not measured', 'this vehicle\'s feed carries no seat sensor'],
       ['Driver', j.driver || '—', j.driver_trips != null ? j.driver_trips + ' trips' : 'from trip records'],
     ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
-    legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
+    legend.innerHTML = (j.occupancy_reported
+      ? [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
+      : [['--ink-3', 'Occupancy not reported by this feed']])
       .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')
-      + `<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line rather than guessing the route.</span>`;
+      + '<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line '
+      + 'rather than guessing the route.</span>';
     if (!j.fixes) { empty(stat, `No GPS fixes stored for ${plate} on ${day}`); return; }
     layer = renderJourney(map, j);
   };
@@ -1158,19 +1272,30 @@ V.map = async (root) => {
 V.insights = async (root) => {
   const kh = el('div', 'kpis'); root.append(kh); loading(kh);
 
-  const [sum, all] = await Promise.all([
+  const [sum, page] = await Promise.all([
     api('/api/insights/summary').catch(() => null),
-    api('/api/insights').catch(() => []),
+    api('/api/insights').catch(() => ({ insights: [] })),
   ]);
+  const all = page.insights || [];
 
   const bySev = Object.fromEntries((sum?.by_severity || []).map((r) => [r.severity, r.n]));
-  const impact = Number(sum?.total?.total_impact || 0);
+  /* A modelled figure and a measured one do not belong in one total. The old
+     "Quantified cost" tile summed impact_aed across the whole table, and the
+     only rule that sets it sets a constant — fourteen days at an assumed AED
+     120 — so the headline was (number of runs) x (idle vehicles) x 1,680. It
+     read AED 1,424,592. */
+  const measured = Number(sum?.total?.measured_impact || 0);
+  const modelled = sum?.modelled || {};
   kh.innerHTML = [
-    ['Open actions', fmt(sum?.total?.n ?? all.length), 'across every source'],
+    ['Open actions', fmt(sum?.total?.n ?? all.length),
+      sum?.duplicates_suppressed ? `${fmt(sum.duplicates_suppressed)} duplicate rows suppressed` : 'across every source'],
     ['Critical', fmt(bySev.critical || 0), 'act today', bySev.critical ? 'err' : 'ok'],
     ['Warnings', fmt(bySev.warning || 0), 'act this week', bySev.warning ? 'warn' : 'ok'],
-    ['Quantified cost', impact ? 'AED ' + fmt(Math.round(impact)) : '—', 'where it can be sized'],
-  ].map(([l, n, d, cls]) => `<div class="kpi ${cls || ''}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+    ['Measured cost', measured ? 'AED ' + fmt(Math.round(measured)) : '—',
+      'only findings that carry a real figure'],
+    ['Idle capital, modelled', modelled.aed ? 'AED ' + fmt(Math.round(modelled.aed)) : '—',
+      modelled.assumption || 'an assumption, not a measurement', 'warn'],
+  ].map(([l, n, d, cls]) => `<div class="kpi ${cls || ''}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
 
   if (!all.length) {
     const p0 = panel('Nothing to action', 'The engine runs after each collection'); root.append(p0.panel);
@@ -1178,25 +1303,49 @@ V.insights = async (root) => {
     return;
   }
 
-  // category filter
-  const cats = [...new Set(all.map((r) => r.category))].sort();
+  /* Category chips from the SUMMARY, not from the page. Built from the visible
+     rows they offered exactly two buttons — "All (200)" and one category —
+     because 200 duplicates of a single rule had consumed every slot, and the
+     operator had no way to know the other categories existed. */
+  const catCounts = Object.fromEntries((sum?.by_category || []).map((r) => [r.category, r.n]));
+  const cats = Object.keys(catCounts).length
+    ? Object.keys(catCounts).sort()
+    : [...new Set(all.map((r) => r.category))].sort();
   const bar = el('div', 'panel');
-  bar.innerHTML = `<div class="btnrow"><button class="btn primary" data-cat="">All (${all.length})</button>` +
-    cats.map((c) => `<button class="btn" data-cat="${esc(c)}">${esc(c)} (${all.filter((r) => r.category === c).length})</button>`).join('') +
-    `</div>`;
+  bar.innerHTML = `<div class="btnrow"><button class="btn primary" data-cat="">All (${fmt(sum?.total?.n ?? all.length)})</button>`
+    + cats.map((c) => `<button class="btn" data-cat="${esc(c)}">${esc(c)} (${fmt(catCounts[c] ?? all.filter((r) => r.category === c).length)})</button>`).join('')
+    + '</div>';
   root.append(bar);
+  if (page.truncated) {
+    root.append(note(`Showing the first ${fmt(page.limit)} of ${fmt(sum?.total?.n ?? '?')} findings, `
+      + 'most severe first. Use a category above to narrow it rather than scrolling.'));
+  }
 
   const listPanel = panel('Ranked actions', 'Most consequential first — click any row for the evidence behind it');
   root.append(listPanel.panel);
 
   const SEV = { critical: 'err', warning: 'warn', info: 'info', good: 'ok' };
-  const draw = (cat) => {
-    const rows = cat ? all.filter((r) => r.category === cat) : all;
+  // A finding names an entity; the entity has a page. Every row leads there.
+  const ENTITY_VIEW = { vehicle: 'vehicle', driver: 'driver', partner: 'property' };
+
+  const draw = async (cat) => {
+    loading(listPanel.body);
+    /* Refetched per category rather than filtered client-side: the page holds
+       at most 200 rows, so filtering them locally showed a category's first few
+       findings and called it the category. */
+    let rows = all;
+    if (cat) {
+      try { rows = (await api(`/api/insights?category=${encodeURIComponent(cat)}`)).insights || []; }
+      catch { rows = all.filter((r) => r.category === cat); }
+    }
     listPanel.body.innerHTML = '';
     if (!rows.length) return empty(listPanel.body, 'Nothing in this category');
     const list = el('div', 'hbars');
     rows.forEach((r) => {
-      const item = el('div', 'insight-row');
+      const view = ENTITY_VIEW[r.entity_type];
+      const item = el('a', 'insight-row');
+      // An address, so the evidence for one finding can be sent to somebody.
+      item.href = href('action', r.code, r.entity_id || '-');
       item.innerHTML = `
         <div class="insight-sev"><span class="tag ${SEV[r.severity] || ''}">${esc(r.severity)}</span></div>
         <div class="insight-main">
@@ -1204,27 +1353,9 @@ V.insights = async (root) => {
           <div class="insight-action">${esc(r.action || '')}</div>
         </div>
         <div class="insight-meta">
-          <span class="tag">${esc(r.category)}</span>
+          ${view && r.entity_id ? `<span class="tag">${esc(r.entity_type)} ${esc(r.entity_id).slice(0, 14)}</span>` : `<span class="tag">${esc(r.category)}</span>`}
           ${r.impact_aed ? `<span class="num" style="color:var(--critical);font-weight:600">AED ${fmt(Math.round(r.impact_aed))}</span>` : ''}
         </div>`;
-      item.onclick = () => drill(r.title, `${r.category} · ${r.severity}`, (b) => {
-        b.innerHTML = '';
-        const why = panel('What we found', 'the evidence behind this flag'); b.append(why.panel);
-        why.body.innerHTML = `<p style="margin:0 0 12px">${esc(r.detail || '')}</p>`;
-        const act = panel('What to do', 'the smallest useful next step'); b.append(act.panel);
-        act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
-        const facts = [
-          ['Entity', `${r.entity_type || '—'} ${r.entity_id || ''}`],
-          ['Fleet', r.fleet_id || 'both'],
-          ['Window', r.window_start ? `${String(r.window_start).slice(0, 10)} → ${String(r.window_end || '').slice(0, 10)}` : 'current state'],
-          ['Estimated cost', r.impact_aed ? 'AED ' + fmt(Math.round(r.impact_aed)) : 'not quantifiable'],
-          ['Rule', r.code],
-          ['Computed', r.computed_at ? new Date(r.computed_at).toLocaleString() : '—'],
-        ];
-        const fp = panel('Details', ''); b.append(fp.panel);
-        fp.body.innerHTML = `<div class="kv">${facts.map(([k, v]) =>
-          `<div class="kv-k">${esc(k)}</div><div class="kv-v">${esc(v)}</div>`).join('')}</div>`;
-      });
       list.append(item);
     });
     listPanel.body.append(list);
@@ -1253,16 +1384,25 @@ V.insights = async (root) => {
       { label: 'Target', key: 'rec_type', render: (r) => esc(String(r.rec_type || '').replace(/_/g, ' ')) },
       { label: 'Period', key: '_p', render: (r) => (r.period_start
         ? `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` : 'current') },
-      { label: 'Fleet is at', key: 'org_value', num: true },
-      { label: 'Target', key: 'target_value', num: true },
-      { label: 'Meeting it', key: 'flagged', render: (r) => (r.flagged
-        ? pill('below target', 'bad') : pill('on target', 'ok')) },
-      { label: 'Drivers flagged', key: 'flagged_count', num: true, render: (r) => (r.flagged_count != null ? fmt(r.flagged_count) : '—') },
+      { label: 'Fleet is at', key: 'org_value', num: true, render: (r) => pctOf(r.org_value) },
+      { label: 'Target', key: 'target_value', num: true, render: (r) => pctOf(r.target_value) },
+      /* `flagged` is a JSON ARRAY of the drivers Uber named. `r.flagged ? …`
+         is therefore true for every row, including an empty array — so every
+         target was marked "below target", including the ones being met. The
+         comparison has to be between the two numbers. */
+      { label: 'Meeting it', key: 'm', render: (r) => {
+        const behind = missingTarget(r);
+        return behind == null ? pill('no target published', '')
+          : behind ? pill('below target', 'bad') : pill('on target', 'ok');
+      } },
+      { label: 'Drivers named', key: 'flagged_count', num: true,
+        render: (r) => (r.flagged_count != null ? fmt(r.flagged_count) : '—') },
     ]));
-    const behind = recs.filter((r) => r.flagged);
-    if (behind.length) rec.body.append(el('p', 'cap',
-      `${behind.length} of ${recs.length} targets are not being met. Each names the drivers behind it — ` +
-      `open a driver's Quality page to see their own acceptance and cancellation figures.`));
+    const behind = recs.filter((r) => missingTarget(r) === true);
+    rec.body.append(el('p', 'cap', behind.length
+      ? `${behind.length} of ${recs.length} targets are not being met. Each names the drivers behind it — `
+        + `open a driver's Quality page to see their own acceptance and cancellation figures.`
+      : `All ${recs.length} published targets are being met.`));
   }
 };
 
@@ -1270,24 +1410,44 @@ V.insights = async (root) => {
    that is either legal or not. Sorted by urgency, not by plate. */
 V.compliance = async (root) => {
   const kh = el('div', 'kpis'); root.append(kh); loading(kh);
-  const [veh, drv] = await Promise.all([
+  const [veh, drvPage] = await Promise.all([
     api('/api/compliance/vehicles').catch(() => []),
-    api('/api/compliance/drivers').catch(() => []),
+    api('/api/compliance/drivers').catch(() => ({ drivers: [] })),
   ]);
+  const drv = drvPage.drivers || [];
   const dl = (r) => Number(r.days_left);
   const vExpired = veh.filter((r) => dl(r) < 0).length;
   const vWeek = veh.filter((r) => dl(r) >= 0 && dl(r) <= 7).length;
   const vMonth = veh.filter((r) => dl(r) > 7 && dl(r) <= 45).length;
-  const dExpired = drv.filter((r) => r.licence_expires && dl(r) < 0).length;
+  /* A licence date shared by most of the roster is what this source writes when
+     the field was never filled in. Counted as expiries it read "77 drivers must
+     stand down" — while the insight engine, which runs the same check, was
+     already refusing to accuse any of them. The two halves of the product
+     disagreed about whether 77 people could legally drive. */
+  const placeholder = drvPage.placeholder_date;
+  const real = drv.filter((r) => r.licence_expires
+    && String(r.licence_expires).slice(0, 10) !== placeholder);
+  const dExpired = real.filter((r) => dl(r) < 0).length;
+  const dPlaceholder = drvPage.placeholder_rows || 0;
 
   kh.innerHTML = [
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
     ['Expiring in 7 days', fmt(vWeek), 'renew now', vWeek ? 'err' : 'ok'],
     ['Expiring in 45 days', fmt(vMonth), 'start the paperwork', vMonth ? 'warn' : 'ok'],
-    ['Driver licences expired', fmt(dExpired), 'stand down until renewed', dExpired ? 'err' : 'ok'],
-  ].map(([l, n, d, cls]) => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+    ['Driver licences expired', fmt(dExpired),
+      placeholder ? 'excluding the placeholder date' : 'stand down until renewed', dExpired ? 'err' : 'ok'],
+    ...(dPlaceholder ? [['Licence dates that are a default', fmt(dPlaceholder),
+      'a data problem, not an expiry', 'warn']] : []),
+  ].map(([l, n, d, cls]) => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
 
-  const vp = panel('Vehicle documents', 'registration, insurance and permits with an expiry date');
+  if (drvPage.caveat) root.append(note(drvPage.caveat));
+
+  // The data holds registration only; naming three document types implied a
+  // completeness this page does not have.
+  const docTypes = [...new Set(veh.map((r) => r.doc_type).filter(Boolean))];
+  const vp = panel('Vehicle documents', docTypes.length
+    ? `${docTypes.join(', ')} — the document types this source actually publishes`
+    : 'documents with an expiry date');
   root.append(vp.panel);
   if (!veh.length) empty(vp.body, 'No vehicle documents collected yet');
   else vp.body.append(tableFrom(veh.slice(0, 120), [
@@ -1295,23 +1455,31 @@ V.compliance = async (root) => {
       const d = dl(r);
       const cls = d < 0 ? 'err' : d <= 7 ? 'err' : d <= 45 ? 'warn' : 'ok';
       return `<span class="tag ${cls}">${d < 0 ? Math.abs(d) + 'd ago' : d + 'd'}</span>`; } },
-    { label: 'Plate', key: 'plate', render: (r) => `<span class="plate">${esc(r.plate || '—')}</span>` },
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Vehicle', key: 'make', render: (r) => esc([r.make, r.model, r.year].filter(Boolean).join(' ') || '—') },
     { label: 'Document', key: 'doc_type' },
     { label: 'Expires', key: 'expires_at', render: (r) => String(r.expires_at || '').slice(0, 10) },
     { label: 'Driver', key: 'driver_name', render: (r) => esc(r.driver_name || '—') },
   ]));
 
-  const dp = panel('Driver licences', 'from the platforms that publish an expiry date');
+  const dp = panel('Driver licences', placeholder
+    ? `From the platforms that publish an expiry date. Rows carrying ${placeholder} are the source's `
+      + 'default and are marked as such rather than counted as expired.'
+    : 'from the platforms that publish an expiry date');
   root.append(dp.panel);
   if (!drv.length) empty(dp.body, 'No driver licence dates collected yet — Hotel publishes these, Uber does not expose them to this role');
   else dp.body.append(tableFrom(drv.slice(0, 120), [
     { label: 'Due', key: 'days_left', num: true, render: (r) => r.licence_expires
       ? `<span class="tag ${dl(r) < 0 ? 'err' : dl(r) <= 45 ? 'warn' : 'ok'}">${dl(r) < 0 ? Math.abs(dl(r)) + 'd ago' : dl(r) + 'd'}</span>` : '—' },
-    { label: 'Driver', key: 'full_name' },
+    { label: 'Driver', key: 'full_name',
+      render: (r) => entity('driver', r.driver_ext_id, r.full_name) },
     { label: 'Platform', key: 'platform' },
     { label: 'Licence', key: 'licence_no', render: (r) => `<span class="plate">${esc(r.licence_no || '—')}</span>` },
-    { label: 'Expires', key: 'licence_expires', render: (r) => String(r.licence_expires || '—').slice(0, 10) },
+    { label: 'Expires', key: 'licence_expires', render: (r) => {
+      const d = String(r.licence_expires || '').slice(0, 10);
+      if (!d) return '—';
+      return d === placeholder ? `${esc(d)} ${pill('a default, not a date', 'warn')}` : esc(d);
+    } },
     { label: 'State', key: 'state', render: (r) => `<span class="tag ${/suspend|deact/i.test(r.state || '') ? 'warn' : 'ok'}">${esc(r.state || '—')}</span>` },
   ]));
 };

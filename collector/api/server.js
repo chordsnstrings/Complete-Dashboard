@@ -735,10 +735,32 @@ app.get('/api/finance/ledger', wrap(async (req, res) => res.json(await q(
    GROUP BY category, currency ORDER BY abs(sum(amount)) DESC LIMIT 60`,
   [range(req)[0], range(req)[1], range(req)[2]]))));
 
-app.get('/api/finance/daily', wrap(async (req, res) => res.json(await q(
-  `SELECT date_trunc('day',event_at)::date d, round(sum(amount)::numeric,2) amount
-   FROM ledger_entry WHERE ${DAYWIN('event_at')} GROUP BY 1 ORDER BY 1`,
-  [range(req)[0], range(req)[1]]))));
+/* One row per calendar day, with null — not zero — where nothing was recorded.
+   areaChart positions points by array index, so days absent from the response
+   were not gaps: the line was drawn straight from the last collected day to the
+   next as if they were adjacent, compressing a 123-day hole into one segment.
+   And a null amount coerced to 0, so 186 days on which no fare was ever
+   collected were drawn as AED 0 of revenue. */
+app.get('/api/finance/daily', wrap(async (req, res) => {
+  const [from, to] = range(req);
+  res.json(await q(
+    `WITH cal AS (SELECT generate_series($1::date, $2::date, interval '1 day')::date AS d),
+     led AS (
+       SELECT (event_at AT TIME ZONE 'Asia/Dubai')::date AS d,
+              round(sum(amount)::numeric,2) amount, count(*)::int entries
+       FROM ledger_entry WHERE ${DAYWIN('event_at')} GROUP BY 1
+     ),
+     fare AS (
+       SELECT local_day AS d, round(sum(price)::numeric,2) revenue,
+              count(*) FILTER (WHERE has_fare)::int priced_trips
+       FROM trip_norm WHERE local_day BETWEEN $1::date AND $2::date AND has_fare GROUP BY 1
+     )
+     SELECT to_char(cal.d, 'YYYY-MM-DD') AS d, led.amount, led.entries,
+            fare.revenue, coalesce(fare.priced_trips, 0) AS priced_trips,
+            (led.d IS NULL AND fare.d IS NULL) AS nothing_recorded
+     FROM cal LEFT JOIN led ON led.d = cal.d LEFT JOIN fare ON fare.d = cal.d
+     ORDER BY cal.d`, [from, to]));
+}));
 
 /* ───────────────────────── unauthorized trips ───────────────────────── */
 // Seat-sensor occupancy that no booking explains. See docs/unauthorized-trips.md.
@@ -984,24 +1006,71 @@ app.get('/api/settings/jobs', wrap(async (_req, res) => {
 
 
 /* ───────────────────────── actionable insights ───────────────────────── */
+/* The ranked action list.
+   Two problems compounded here. The table had accumulated forty-eight copies of
+   every NULL-window finding per day (schema_v15 fixes the cause and purges the
+   copies), and the ordering put impact_aed first — which only one rule sets, to
+   a hardcoded constant — so all 200 slots were consumed by copies of that one
+   rule before any other critical finding was reached. The category chips were
+   then built from those same 200 rows, offering the operator two buttons.
+
+   Deduplicated at read time as well, so a stale duplicate cannot resurface, and
+   the response says how many rows the limit cut. */
+const INSIGHT_LIMIT = 200;
 app.get('/api/insights', wrap(async (req, res) => {
   const sev = req.query.severity || null;
   const cat = req.query.category || null;
-  res.json(await q(
-    `SELECT code, severity, category, entity_type, entity_id, title, detail, action,
-            impact_aed, metric, fleet_id, window_start, window_end, computed_at
-     FROM insight
-     WHERE ($1::text IS NULL OR severity=$1) AND ($2::text IS NULL OR category=$2)
+  const rows = await q(
+    `WITH latest AS (
+       SELECT DISTINCT ON (code, entity_type, entity_id)
+              code, severity, category, entity_type, entity_id, title, detail, action,
+              impact_aed, metric, fleet_id, window_start, window_end, computed_at
+       FROM insight
+       WHERE ($1::text IS NULL OR severity=$1) AND ($2::text IS NULL OR category=$2)
+       ORDER BY code, entity_type, entity_id, computed_at DESC
+     )
+     SELECT * FROM latest
      ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 WHEN 'info' THEN 2 ELSE 3 END,
-              impact_aed DESC NULLS LAST, computed_at DESC
-     LIMIT 200`, [sev, cat]));
+              computed_at DESC, impact_aed DESC NULLS LAST
+     LIMIT ${INSIGHT_LIMIT + 1}`, [sev, cat]);
+  const truncated = rows.length > INSIGHT_LIMIT;
+  res.json({ insights: rows.slice(0, INSIGHT_LIMIT), truncated, limit: INSIGHT_LIMIT });
 }));
 
+/* Counts over the DEDUPLICATED set, and the money kept apart from it.
+   The "quantified cost" tile summed impact_aed across the whole table. Only one
+   rule sets that field, and it sets it to a constant — fourteen days at an
+   assumed AED 120 holding cost — so the headline was (number of runs) x (number
+   of idle vehicles) x 1,680. It read AED 1,424,592.
+
+   A modelled figure and a measured one do not belong in the same total, so the
+   assumption is returned with it and the tile can say so. */
+const IDLE_DAY_COST = Number(process.env.VEHICLE_DAY_COST_AED || 120);
 app.get('/api/insights/summary', wrap(async (_, res) => {
-  const bySev = await q(`SELECT severity, count(*)::int n, round(sum(impact_aed)::numeric,0) impact FROM insight GROUP BY 1`);
-  const byCat = await q(`SELECT category, count(*)::int n, round(sum(impact_aed)::numeric,0) impact FROM insight GROUP BY 1 ORDER BY 2 DESC`);
-  const [tot] = await q(`SELECT count(*)::int n, round(sum(impact_aed)::numeric,0) total_impact FROM insight`);
-  res.json({ total: tot, by_severity: bySev, by_category: byCat });
+  const base = `WITH latest AS (
+      SELECT DISTINCT ON (code, entity_type, entity_id) *
+      FROM insight ORDER BY code, entity_type, entity_id, computed_at DESC)`;
+  const bySev = await q(`${base} SELECT severity, count(*)::int n FROM latest GROUP BY 1`);
+  const byCat = await q(`${base} SELECT category, count(*)::int n FROM latest GROUP BY 1 ORDER BY 2 DESC`);
+  const [tot] = await q(
+    `${base}
+     SELECT count(*)::int n,
+            round(sum(impact_aed) FILTER (WHERE code <> 'idle_vehicle')::numeric, 0) AS measured_impact,
+            round(sum(impact_aed) FILTER (WHERE code = 'idle_vehicle')::numeric, 0) AS modelled_impact,
+            count(*) FILTER (WHERE code = 'idle_vehicle')::int AS idle_vehicles
+     FROM latest`);
+  const [raw] = await q(`SELECT count(*)::int n FROM insight`);
+  res.json({
+    total: tot, by_severity: bySev, by_category: byCat,
+    modelled: {
+      idle_vehicles: tot?.idle_vehicles ?? 0,
+      aed: tot?.modelled_impact ?? null,
+      assumption: `${IDLE_DAY_COST} AED per vehicle per day of holding cost, over a 14-day lookback`,
+    },
+    // Visible so a duplicate explosion cannot be silent again.
+    stored_rows: raw?.n ?? 0,
+    duplicates_suppressed: Math.max(0, (raw?.n ?? 0) - (tot?.n ?? 0)),
+  });
 }));
 
 // monthly trend + automatic structural-break detection (what changed, and when)
@@ -1094,10 +1163,47 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => res.json(await q(
    WHERE d.expires_at IS NOT NULL
    ORDER BY d.expires_at ASC LIMIT 300`))));
 
-app.get('/api/compliance/drivers', wrap(async (_, res) => res.json(await q(
-  `SELECT platform, driver_ext_id, full_name, phone, licence_no, licence_expires,
-          (licence_expires - now()::date) AS days_left, state, suspension_reason, rating
-   FROM driver_compliance ORDER BY licence_expires ASC NULLS LAST LIMIT 300`))));
+/* Driver licences, with the placeholder check the insight engine already does.
+   The page counted every row with a past expiry date and captioned it "stand
+   down until renewed" — 77 of them. Every one carried the SAME date and the
+   SAME licence number, because the source system fills an unset field with a
+   default. licenceRisk() in src/insights.js detects exactly that pattern and
+   refuses to accuse anybody; this page had no equivalent guard, so the two
+   halves of the product disagreed about whether 77 people could legally drive.
+
+   A repeated date is a data-quality problem, not a compliance one, and it is
+   returned as such. */
+app.get('/api/compliance/drivers', wrap(async (_, res) => {
+  const rows = await q(
+    `SELECT platform, driver_ext_id, full_name, phone, licence_no, licence_expires,
+            (licence_expires - now()::date) AS days_left, state, suspension_reason, rating
+     FROM driver_compliance ORDER BY licence_expires ASC NULLS LAST LIMIT 300`);
+  const [mode] = await q(
+    /* to_char, not the raw date. node-postgres hands a DATE back as a JS Date,
+       and String(thatDate).slice(0, 10) is "Thu Jan 01" — which then fails to
+       match the row's own value and reads as a weekday to a human. This is the
+       third place in this codebase the same slice has been wrong. */
+    `SELECT to_char(licence_expires, 'YYYY-MM-DD') AS licence_expires, count(*)::int n,
+            (SELECT count(*)::int FROM driver_compliance WHERE licence_expires IS NOT NULL) AS with_date,
+            count(DISTINCT licence_no)::int distinct_numbers
+     FROM driver_compliance WHERE licence_expires IS NOT NULL
+     GROUP BY licence_expires ORDER BY n DESC LIMIT 1`);
+  // One date on more than half the rows is a default, not a coincidence.
+  const share = mode && mode.with_date ? mode.n / mode.with_date : 0;
+  const placeholder = share >= 0.5 && mode.n >= 5;
+  res.json({
+    drivers: rows,
+    placeholder_date: placeholder ? mode.licence_expires : null,
+    placeholder_rows: placeholder ? mode.n : 0,
+    rows_with_a_date: mode?.with_date ?? 0,
+    caveat: placeholder
+      ? `${mode.n} of ${mode.with_date} licence dates are the identical value `
+        + `${mode.licence_expires}, which is what this source writes when the field `
+        + 'was never filled in. They are a data-quality problem, not expired licences, and are counted '
+        + 'separately below rather than as people who must stand down.'
+      : null,
+  });
+}));
 
 app.get('/api/recommendations', wrap(async (_, res) => res.json(await q(
   `SELECT platform, rec_type, period_start, period_end, org_value, target_value,

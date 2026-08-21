@@ -840,3 +840,7 @@ span.dim{color:var(--ink-3);font-size:.72rem}
 .daynav b{font-family:"Fraunces",Georgia,serif;font-size:1.15rem}
 .daynav a{color:var(--ink-2);text-decoration:none;font-size:.82rem;border-bottom:1px solid var(--rule)}
 .daynav a:hover{color:var(--accent-ink);border-bottom-color:currentColor}
+
+/* An action-list row is a link to that finding's own page. */
+a.insight-row{text-decoration:none;color:inherit;display:grid}
+a.insight-row:hover{border-color:var(--accent)}

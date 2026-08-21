@@ -15,7 +15,10 @@ app.get('/api/live', (_, r) => r.json(plates.map((p, i) => ({
   plate: p, fleet_id: i % 3 ? 'ecosine' : 'egari', source: 'cabman',
   captured_at: new Date(Date.now() - i * 6e4).toISOString(), polled_at: new Date().toISOString(),
   lat: rnd(25.05, 25.30), lng: rnd(55.10, 55.42), speed: i % 3 ? Math.round(rnd(0, 70)) : 0,
-  status: i % 3 === 0 ? 'Engaged' : 'Active', seat_occupied: i % 3 === 0, stale: i === 7,
+  status: i % 3 === 0 ? 'Engaged' : 'Active',
+  // Tri-state: only the CABMAN feed carries a seat sensor.
+  seat_occupied: i % 4 === 3 ? null : i % 3 === 0, stale: i === 7,
+  fix_age_min: i === 7 ? 581000 : i, poll_age_min: 1,
   current_driver: drivers[i],
 }))));
 
@@ -30,7 +33,8 @@ app.get('/api/map/journey', (req, res) => {
     pts.push({ t: new Date(Date.parse('2026-08-21T06:00:00Z') + i * 3e5).toISOString(),
       lat, lng, speed: Math.round(rnd(0, 80)), status: 'Active', occupied: i > 10 && i < 26 });
   }
-  res.json({ plate: req.query.plate, day: req.query.day, fixes: pts.length,
+  res.json({
+    occupancy_reported: true, occupancy_measured_km: 78.4, occupancy_reported_fixes: 44, plate: req.query.plate, day: req.query.day, fixes: pts.length,
     segments: [{ points: pts.slice(0, 22), occupied: false }, { points: pts.slice(24), occupied: true }],
     driver: 'Ahmed Tarig Mohamed', driver_trips: 7,
     distance_km: 83.4, moving_km: 78.1, occupied_km: 31.2 });
@@ -99,11 +103,21 @@ const insights = [
     action:'Plan charging around the afternoon peak; expect lower effective range per charge.',
     impact_aed:null, computed_at:new Date().toISOString(), window_start:'2026-08-23', window_end:'2026-08-23' },
 ];
-app.get('/api/insights', (_, r) => r.json(insights));
+app.get('/api/insights', (req, r) => {
+  const rows = req.query.category ? insights.filter((i) => i.category === req.query.category) : insights;
+  r.json({ insights: rows, truncated: false, limit: 200 });
+});
 app.get('/api/insights/summary', (_, r) => r.json({
-  total:{ n: insights.length, total_impact:'1680' },
-  by_severity:[{severity:'critical',n:4,impact:'1680'},{severity:'warning',n:2},{severity:'info',n:1}],
-  by_category:[{category:'utilisation',n:2},{category:'compliance',n:1},{category:'demand',n:2},{category:'safety',n:1},{category:'data',n:1}],
+  // Measured and modelled are separate numbers: the modelled one is a constant
+  // multiplied by a count, and folding it into a fleet-wide money total once
+  // produced a headline of AED 1,424,592.
+  total: { n: insights.length, measured_impact: null, modelled_impact: '5040', idle_vehicles: 3 },
+  modelled: { idle_vehicles: 3, aed: '5040',
+    assumption: '120 AED per vehicle per day of holding cost, over a 14-day lookback' },
+  stored_rows: insights.length, duplicates_suppressed: 0,
+  by_severity: [{ severity: 'critical', n: 4 }, { severity: 'warning', n: 2 }, { severity: 'info', n: 1 }],
+  by_category: [{ category: 'utilisation', n: 2 }, { category: 'compliance', n: 1 },
+    { category: 'demand', n: 2 }, { category: 'safety', n: 1 }, { category: 'data', n: 1 }],
 }));
 const mkDoc=(plate,make,model,days,drv)=>({plate,make,model,year:2023,doc_type:'Vehicle Registration Form',
   status:'ACTIVE', expires_at:new Date(Date.now()+days*864e5).toISOString(), days_left:days, driver_name:drv});
@@ -113,10 +127,23 @@ app.get('/api/compliance/vehicles', (_, r) => r.json([
   mkDoc('L40959','BYD','Han EV',5,null), mkDoc('L39421','Tesla','Model Y',13,'Roy Ocdol'),
   mkDoc('L40547','Tesla','Model Y',13,null), mkDoc('L44259','Lexus','ES 300h',33,'Muhammad Khalid Gul'),
 ]));
-app.get('/api/compliance/drivers', (_, r) => r.json([
-  {platform:'hotel',driver_ext_id:'d1',full_name:'SOAIEED ALOM MIHIN',licence_no:'123456',licence_expires:'2026-01-01',days_left:-232,state:'active'},
-  {platform:'bolt',driver_ext_id:'d2',full_name:'Abdelmohsen Said',licence_no:'AE1802580',licence_expires:'2026-09-20',days_left:30,state:'suspended'},
-]));
+app.get('/api/compliance/drivers', (_, r) => r.json({
+  drivers: [
+    // Six rows carrying the identical placeholder the source writes when the
+    // field was never filled in, plus two real dates.
+    ...Array.from({ length: 6 }, (_, i) => ({ platform: 'hotel', driver_ext_id: `d${10 + i}`,
+      full_name: drivers[i], licence_no: '123456', licence_expires: '2026-01-01',
+      days_left: -232, state: 'active' })),
+    { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', licence_no: 'AE1802580',
+      licence_expires: '2026-09-20', days_left: 30, state: 'suspended' },
+    { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', licence_no: 'AE9911',
+      licence_expires: '2026-08-01', days_left: -20, state: 'active' },
+  ],
+  placeholder_date: '2026-01-01', placeholder_rows: 6, rows_with_a_date: 8,
+  caveat: '6 of 8 licence dates are the identical value 2026-01-01, which is what this source writes '
+    + 'when the field was never filled in. They are a data-quality problem, not expired licences, and '
+    + 'are counted separately below rather than as people who must stand down.',
+}));
 
 
 /* ── per-driver detail fixtures ───────────────────────────────────────────

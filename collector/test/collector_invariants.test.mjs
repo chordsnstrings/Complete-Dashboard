@@ -55,5 +55,28 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
   check(`${f} records a run row on failure`, /status: 'error'/.test(t));
 }
 
+/* ── every source file must actually parse ────────────────────────────────
+   A backtick inside a SQL comment that sits inside a template literal ends the
+   literal early. It has now happened four times: the file passes review, the
+   route it defines 500s or the whole page goes blank, and nothing catches it
+   until a browser does. `npm run check` only parses src/index.js.
+
+   This parses every file the app ships. It costs about a second. */
+{
+  const { execFileSync } = await import('node:child_process');
+  const { readdirSync, statSync } = await import('node:fs');
+  const walk = (dir) => readdirSync(dir).flatMap((f) => {
+    const p2 = `${dir}/${f}`;
+    if (f === 'node_modules' || f === 'vendor') return [];
+    return statSync(p2).isDirectory() ? walk(p2) : (p2.endsWith('.js') ? [p2] : []);
+  });
+  const files = [...walk('src'), ...walk('api')];
+  const broken = files.filter((f) => {
+    try { execFileSync(process.execPath, ['--check', f], { stdio: 'pipe' }); return false; }
+    catch { return true; }
+  });
+  check(`all ${files.length} shipped source files parse`, broken.length === 0, broken.join(', '));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

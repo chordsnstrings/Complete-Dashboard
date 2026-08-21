@@ -5,8 +5,20 @@
 import { pool, upsert } from './db.js';
 import { log } from './log.js';
 
+const SRC = 'insights';
 const q = (t, p) => pool.query(t, p).then((r) => r.rows);
 const money = (n) => (n == null ? null : Math.round(Number(n) * 100) / 100);
+
+/* node-postgres returns DATE and TIMESTAMP columns as JS Date objects, and a
+   Date interpolated into a template literal renders as
+   "Fri Aug 01 2025 00:00:00 GMT+0000 (Coordinated Universal Time)". That string
+   was being STORED as the user-facing title and detail of an insight. Every
+   date that reaches a sentence goes through one of these. */
+const day = (v) => (v == null ? null : new Date(v).toISOString().slice(0, 10));
+const minute = (v) => (v == null ? null : new Date(v).toISOString().slice(0, 16).replace('T', ' '));
+const month = (v) => (v == null ? null : new Date(v).toLocaleDateString('en-GB',
+  { month: 'long', year: 'numeric', timeZone: 'UTC' }));
+const daysAgoFrom = (v) => (v == null ? null : Math.floor((Date.now() - new Date(v).getTime()) / 864e5));
 
 // Assumed daily holding cost per vehicle (depreciation + insurance + permit + finance).
 // Used only to size the "idle capital" impact; tune in settings later.
@@ -31,23 +43,38 @@ async function idleVehicles() {
        SELECT plate, fleet_id, max(captured_at) last_seen
        FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, fleet_id),
      earned AS (
-       SELECT plate, count(*)::int trips, max(requested_at) last_trip
-       FROM trip WHERE requested_at > now() - ($1 || ' days')::interval AND plate IS NOT NULL
-       GROUP BY plate)
-     SELECT s.plate, s.fleet_id, s.last_seen, coalesce(e.trips,0) trips, e.last_trip
-     FROM seen s LEFT JOIN earned e USING (plate)
+       SELECT plate, count(*)::int trips
+       FROM trip_norm WHERE requested_at > now() - ($1 || ' days')::interval
+         AND is_booking AND plate IS NOT NULL
+       GROUP BY plate),
+     /* The last trip EVER, unbounded. Reading it out of the 14-day CTE meant a
+        NULL там stood for "no trip in the lookback" and the template turned it
+        into the absolute claim "No trip has ever been recorded for this plate".
+        Live, all 200 rows on the Action list carried that sentence and it was
+        false for every one of them — the plate at the top had 81 trips, and one
+        of the 23 had 1,039. */
+     ever AS (
+       SELECT plate, max(requested_at) last_trip, count(*) FILTER (WHERE platform <> 'fms')::int lifetime
+       FROM trip WHERE plate IS NOT NULL GROUP BY plate)
+     SELECT s.plate, s.fleet_id, s.last_seen, coalesce(e.trips,0) trips,
+            ev.last_trip, coalesce(ev.lifetime, 0) AS lifetime
+     FROM seen s
+     LEFT JOIN earned e USING (plate)
+     LEFT JOIN ever ev USING (plate)
      WHERE coalesce(e.trips,0) = 0
        AND s.last_seen > now() - interval '48 hours'     -- tracker genuinely reporting
      ORDER BY s.last_seen DESC`, [String(IDLE_LOOKBACK_DAYS)]);
   for (const r of rows) {
     const lastTrip = r.last_trip
-      ? `Its last recorded trip was ${new Date(r.last_trip).toISOString().slice(0, 10)}.`
+      ? `Its last recorded trip was ${day(r.last_trip)}, ${daysAgoFrom(r.last_trip)} days ago`
+        + ` (${r.lifetime} recorded in total).`
       : `No trip has ever been recorded for this plate in the collected data.`;
     await put({
       code: 'idle_vehicle', severity: 'critical', category: 'utilisation',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} is reporting but has not earned in ${IDLE_LOOKBACK_DAYS} days`,
-      detail: `The tracker reported as recently as ${new Date(r.last_seen).toISOString().slice(0, 16).replace('T', ' ')}, so the vehicle is present and powered — but no trip on any platform in the last ${IDLE_LOOKBACK_DAYS} days. ${lastTrip}`,
+      detail: `The tracker reported as recently as ${minute(r.last_seen)}, so the vehicle is present and `
+        + `powered — but no booking on any platform in the last ${IDLE_LOOKBACK_DAYS} days. ${lastTrip}`,
       action: `Confirm it is not in workshop or reserve. If roadworthy, assign a driver — otherwise take it off the active cost base.`,
       impact_aed: money(IDLE_LOOKBACK_DAYS * VEHICLE_DAY_COST_AED), metric: 0,
       window_start: null, window_end: null,
@@ -70,7 +97,7 @@ async function dormantVehicles() {
       code: 'vehicle_dormant', severity: 'warning', category: 'data',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} has sent no signal for ${days} days`,
-      detail: `Last position ${new Date(r.last_seen).toISOString().slice(0, 10)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is still carried in the vehicle list, so it quietly inflates every per-vehicle average.`,
+      detail: `Last position ${day(r.last_seen)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is still carried in the vehicle list, so it quietly inflates every per-vehicle average.`,
       action: `Reconcile against the asset register: retire it, or refit the tracker if the car is still ours.`,
       impact_aed: null, metric: days, window_start: null, window_end: null,
     });
@@ -148,7 +175,7 @@ async function licenceRisk() {
       code: gone ? 'licence_expired' : 'licence_expiring',
       severity: gone ? 'critical' : 'warning', category: 'compliance',
       entity_type: 'driver', entity_id: r.driver_ext_id, fleet_id: r.fleet_id,
-      title: `${r.full_name || r.driver_ext_id}'s licence ${gone ? 'has expired' : 'expires soon'} (${r.licence_expires})`,
+      title: `${r.full_name || r.driver_ext_id}'s licence ${gone ? 'has expired' : 'expires soon'} (${day(r.licence_expires)})`,
       detail: `Licence ${r.licence_no || '—'} on ${r.platform}. ${gone
         ? 'Every trip driven on an expired licence is uninsured exposure for the company, not just the driver.'
         : 'Renewal windows in the UAE take days, not hours.'}`,
@@ -168,24 +195,45 @@ async function unsafeDriving(from, to) {
               sum((alert_type ILIKE '%speed%')::int)::int overspeed,
               sum((alert_type ILIKE '%brake%')::int)::int harsh_brake
        FROM alert WHERE occurred_at BETWEEN $1 AND $2 AND plate IS NOT NULL GROUP BY plate),
+     /* The denominator is TELEMATICS distance, one population, guarded.
+        It used to sum the raw trip table, which put a plate's bookings AND its FMS
+        twins in the same figure — roughly doubling the distance and therefore
+        halving the event rate — and included the odometer-derived rows the
+        schema warns about, one of which carries 193,027 km. The alert table
+        covers all movement, so telematics distance is the right denominator. */
      km AS (
-       SELECT plate, sum(distance_km) km FROM trip
-       WHERE requested_at BETWEEN $1 AND $2 AND plate IS NOT NULL GROUP BY plate)
-     SELECT ev.plate, ev.events, ev.overspeed, ev.harsh_brake, km.km,
-            (ev.events::float / nullif(km.km,0) * 100) per100
-     FROM ev JOIN km USING (plate)
-     WHERE km.km > 50 ORDER BY per100 DESC NULLS LAST LIMIT 25`, [from, to]);
+       SELECT plate, sum(distance_km) km FROM trip_norm
+       WHERE requested_at BETWEEN $1 AND $2 AND plate IS NOT NULL
+         AND NOT is_booking AND has_distance
+       GROUP BY plate),
+     rate AS (
+       SELECT ev.plate, ev.events, ev.overspeed, ev.harsh_brake, km.km,
+              (ev.events::float / nullif(km.km,0) * 100) per100
+       FROM ev JOIN km USING (plate) WHERE km.km > 50),
+     /* The median over the WHOLE eligible population. It used to be computed in
+        JS from the same worst-25 rows the query had already selected, so the
+        published multiple was against the median of the worst — far above the
+        fleet's — and the threshold that decides who gets flagged was anchored
+        to it. */
+     med AS (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY per100) AS m FROM rate)
+     SELECT rate.*, med.m AS fleet_median, (SELECT count(*)::int FROM rate) AS population
+     FROM rate, med ORDER BY per100 DESC NULLS LAST LIMIT 25`, [from, to]);
   if (!rows.length) return 0;
-  const vals = rows.map((r) => r.per100).filter(Boolean).sort((a, b) => a - b);
-  const med = vals[Math.floor(vals.length / 2)] || 0;
+  const med = Number(rows[0].fleet_median) || 0;
   let n = 0;
   for (const r of rows) {
     if (!r.per100 || r.per100 < med * 2) continue;   // only the clear outliers
     await put({
       code: 'unsafe_driving', severity: 'warning', category: 'safety',
       entity_type: 'vehicle', entity_id: r.plate,
-      title: `${r.plate}: ${r.per100.toFixed(1)} harsh events per 100km — ${(r.per100 / (med || 1)).toFixed(1)}× fleet median`,
-      detail: `${r.events} events over ${Math.round(r.km)}km (${r.overspeed} overspeed, ${r.harsh_brake} harsh braking). Sustained harsh driving predicts both collisions and tyre/brake spend.`,
+      title: `${r.plate}: ${r.per100.toFixed(1)} harsh events per 100km — `
+        + `${(r.per100 / (med || 1)).toFixed(1)}x the fleet median of ${med.toFixed(1)}`,
+      detail: `${r.events} events over ${Math.round(r.km)}km of tracked movement `
+        + `(${r.overspeed} overspeed, ${r.harsh_brake} harsh braking, `
+        + `${Math.max(0, r.events - r.overspeed - r.harsh_brake)} other). `
+        + `The median across all ${r.population} vehicles with enough distance to judge is `
+        + `${med.toFixed(1)} per 100km. Sustained harsh driving predicts both collisions and `
+        + `tyre and brake spend.`,
       action: `Pull the dashcam clips for the worst events and run a coaching conversation with whoever drove this plate.`,
       impact_aed: null, metric: r.per100, window_start: from, window_end: to,
     });
@@ -218,30 +266,94 @@ async function deadhead(from, to) {
   return n;
 }
 
-/* ─────────────────── 6. Demand trend: is the business shrinking? ─────────────────── */
+/* ─────────────────── 6. Demand trend: is the business shrinking? ───────────────────
+   Three things were wrong here at once and they compounded into two
+   contradictory fleet-wide verdicts sitting live on the same page — "down 32%"
+   tagged critical beside "up 18%" tagged good:
+
+     - months were grouped in UTC, so every 00:00-04:00 Dubai trip landed in the
+       previous day and the month-boundary trips in the wrong month;
+     - months with no COLLECTED rows are simply absent from a GROUP BY, so the
+       first and last observed months stepped straight across the Uber 299-day
+       hole and the FMS 155-day hole. The comparison was between two months on
+       either side of a period nobody fetched;
+     - the verdict was keyed on the first and last observed month, which move
+       whenever the observed set changes, so a new verdict inserted a new row
+       instead of replacing the old one.
+
+   Now: Dubai-local months, a filled calendar, an explicit refusal to compare
+   across a month that was not collected, and a key that lets the verdict
+   replace itself. */
 async function volumeTrend() {
   const rows = await q(
-    `SELECT date_trunc('month', requested_at)::date m, count(*)::int trips,
-            count(distinct driver_ext_id)::int drivers, count(distinct plate)::int vehicles
-     FROM trip WHERE requested_at > now() - interval '18 months'
-     GROUP BY 1 ORDER BY 1`);
-  if (rows.length < 2) return 0;
-  const full = rows.slice(0, -1);                     // drop the partial current month
-  if (full.length < 2) return 0;
-  const first = full[0], last = full[full.length - 1];
+    `WITH cal AS (
+       SELECT generate_series(date_trunc('month', now() - interval '17 months'),
+                              date_trunc('month', now()), interval '1 month')::date AS m
+     ),
+     agg AS (
+       SELECT local_month AS m, count(*) FILTER (WHERE is_booking)::int trips,
+              count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id IS NOT NULL)::int drivers,
+              count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL)::int vehicles
+       FROM trip_norm WHERE requested_at > now() - interval '18 months' GROUP BY 1
+     ),
+     -- Days in each month on which ANY source collected anything.
+     cov AS (
+       SELECT date_trunc('month', day)::date AS m, count(DISTINCT day)::int collected_days
+       FROM source_day_coverage GROUP BY 1
+     )
+     SELECT to_char(cal.m, 'YYYY-MM-DD') AS m,
+            coalesce(agg.trips, 0) AS trips,
+            coalesce(agg.drivers, 0) AS drivers,
+            coalesce(agg.vehicles, 0) AS vehicles,
+            coalesce(cov.collected_days, 0) AS collected_days,
+            extract(days FROM (cal.m + interval '1 month' - interval '1 day'))::int AS days_in_month
+     FROM cal LEFT JOIN agg ON agg.m = cal.m LEFT JOIN cov ON cov.m = cal.m
+     ORDER BY cal.m`);
+  if (rows.length < 3) return 0;
+
+  // Drop the partial current month, then keep only months that were collected
+  // for at least four fifths of their days. A month collected for six days is
+  // not a low month, it is an unobserved one.
+  const closed = rows.slice(0, -1);
+  const usable = closed.filter((r) => r.collected_days >= r.days_in_month * 0.8);
+  if (usable.length < 2) {
+    log.info(SRC, 'volume trend skipped — not enough fully collected months',
+      { closed: closed.length, usable: usable.length });
+    return 0;
+  }
+  const first = usable[0], last = usable[usable.length - 1];
+  // A hole anywhere between the two endpoints makes the comparison meaningless
+  // even when both endpoints are complete.
+  const between = closed.filter((r) => r.m > first.m && r.m < last.m);
+  const holes = between.filter((r) => r.collected_days < r.days_in_month * 0.8);
+  if (holes.length) {
+    log.info(SRC, 'volume trend skipped — a collection hole sits between the endpoints',
+      { from: first.m, to: last.m, holes: holes.map((h) => h.m) });
+    return 0;
+  }
   const change = (last.trips - first.trips) / (first.trips || 1);
   if (Math.abs(change) < 0.15) return 0;
   const down = change < 0;
+  // A driver count of zero means the platform did not attribute the trips, not
+  // that nobody drove them; saying "0 drivers" is a claim about the fleet.
+  const who = (r) => (r.drivers ? `${r.drivers} drivers` : 'an unrecorded number of drivers');
   await put({
     code: 'volume_trend', severity: down ? 'critical' : 'good', category: 'demand',
     entity_type: 'fleet', entity_id: 'all',
-    title: `Trip volume ${down ? 'down' : 'up'} ${Math.abs(Math.round(change * 100))}% since ${first.m}`,
-    detail: `${first.m}: ${first.trips} trips with ${first.drivers} drivers on ${first.vehicles} vehicles → ${last.m}: ${last.trips} trips with ${last.drivers} drivers on ${last.vehicles} vehicles.`,
+    title: `Trip volume ${down ? 'down' : 'up'} ${Math.abs(Math.round(change * 100))}% `
+      + `from ${month(first.m)} to ${month(last.m)}`,
+    detail: `${month(first.m)}: ${first.trips} bookings with ${who(first)} on ${first.vehicles} vehicles `
+      + `-> ${month(last.m)}: ${last.trips} bookings with ${who(last)} on ${last.vehicles} vehicles. `
+      + `Both months were collected on at least ${Math.round(0.8 * 100)}% of their days, and every month `
+      + `between them was too — a comparison across a collection hole is not a trend.`,
     action: down
-      ? `Separate the two causes before reacting: fewer drivers supplying, or less demand per driver. The fix is different for each.`
+      ? `Separate the two causes before reacting: fewer drivers supplying, or less demand per driver. `
+        + `The fix is different for each.`
       : `Check the supply side can hold this — utilisation and driver hours are the constraint.`,
     impact_aed: null, metric: change,
-    window_start: first.m, window_end: last.m,
+    // NULL window, so the partial unique index in schema_v15 lets this verdict
+    // REPLACE the previous one instead of accumulating beside it.
+    window_start: null, window_end: null,
   });
   return 1;
 }
@@ -261,7 +373,7 @@ async function staleTelemetry() {
       code: 'stale_tracker', severity: ageH > 72 ? 'critical' : 'warning', category: 'data',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} has not reported a position for ${Math.round(ageH)}h`,
-      detail: `Last fix from ${r.source} at ${new Date(r.captured_at).toISOString().slice(0, 16).replace('T', ' ')}. Either the vehicle is off the road or the tracker has failed — and while it is dark, nothing about this car can be verified.`,
+      detail: `Last fix from ${r.source} at ${minute(r.captured_at)}. Either the vehicle is off the road or the tracker has failed — and while it is dark, nothing about this car can be verified.`,
       action: `Check the device. A dead tracker also disables unauthorised-use detection for this vehicle.`,
       impact_aed: null, metric: ageH, window_start: null, window_end: null,
     });
@@ -309,8 +421,8 @@ async function weatherOutlook() {
       code: rain >= 1 ? 'weather_rain' : 'weather_heat',
       severity: 'info', category: 'demand', entity_type: 'fleet', entity_id: 'all',
       title: rain >= 1
-        ? `Rain forecast ${r.day} (${rain}mm) — demand spikes, so do collisions`
-        : `Extreme heat ${r.day} (${heat}°C) — EV range and AC load both suffer`,
+        ? `Rain forecast ${day(r.day)} (${rain}mm) — demand spikes, so do collisions`
+        : `Extreme heat ${day(r.day)} (${heat}°C) — EV range and AC load both suffer`,
       detail: rain >= 1
         ? `Dubai rain reliably lifts ride demand while cutting road grip. Both effects land in the same hours.`
         : `Sustained ${heat}°C drives continuous AC use, which cuts usable EV range and raises mid-shift charging stops.`,
@@ -373,7 +485,7 @@ async function vehicleDocuments() {
         ? `${r.plate}: ${r.doc_type} expired ${Math.abs(days)} days ago`
         : `${r.plate}: ${r.doc_type} expires in ${days} days`,
       detail: `${r.make || ''} ${r.model || ''}`.trim()
-        + ` — ${r.doc_type} valid until ${new Date(r.expires_at).toISOString().slice(0, 10)}.${who}`
+        + ` — ${r.doc_type} valid until ${day(r.expires_at)}.${who}`
         + (gone ? ' A vehicle working on expired documents is uninsured and un-hireable if stopped.'
                 : ' Renewal in the UAE is not same-day; leaving it to the last week risks losing the car from service.'),
       action: gone ? `Take it off dispatch until the renewed document is on file.`
@@ -408,7 +520,7 @@ async function platformFlags() {
         code: 'drivers_online_no_trips', severity: 'critical', category: 'utilisation',
         entity_type: 'fleet', entity_id: 'all', fleet_id: r.fleet_id,
         title: `${idle.length} drivers were online but completed no trips`,
-        detail: `Uber flagged ${idle.length} driver(s) logged in for about ${hours.toFixed(1)} hours in total with zero completed trips (${r.period_start}). Paid-for supply that produced nothing.`,
+        detail: `Uber flagged ${idle.length} driver(s) logged in for about ${hours.toFixed(1)} hours in total with zero completed trips (${day(r.period_start)}). Paid-for supply that produced nothing.`,
         action: `Check whether they were genuinely available, sitting in a dead zone, or logged in without intending to work.`,
         impact_aed: null, metric: idle.length,
         window_start: r.period_start, window_end: r.period_end,
@@ -424,7 +536,7 @@ async function platformFlags() {
       title: isAcc
         ? `${flagged.length} drivers below Uber's acceptance target`
         : `${flagged.length} drivers above Uber's cancellation target`,
-      detail: `Fleet sits at ${pct(r.org_value)} against a target of ${pct(r.target_value)} for ${r.period_start} → ${r.period_end}. Uber names ${flagged.length} driver(s) on the wrong side of it — these are the accounts that drag dispatch priority for everyone.`,
+      detail: `Fleet sits at ${pct(r.org_value)} against a target of ${pct(r.target_value)} for ${day(r.period_start)} → ${day(r.period_end)}. Uber names ${flagged.length} driver(s) on the wrong side of it — these are the accounts that drag dispatch priority for everyone.`,
       action: isAcc
         ? `Review why they decline: vehicle mismatch, positioning, or app left on while unavailable.`
         : `Cancellations after acceptance hurt rider trust and cost the approach drive. Coach the named drivers.`,

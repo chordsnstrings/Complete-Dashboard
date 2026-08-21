@@ -25,7 +25,7 @@ const ROUTES = [
   'corporate/leakage', 'corporate/leakage/complimentary',
   'corporate/approach', 'corporate/approach/daypart',
   'property/h-palm', 'property/h-palm/guests', 'property/h-palm/drivers',
-  'causes', 'insights',
+  'causes', 'insights', 'action/idle_vehicle/L45235', 'action/nope/-',
   'analyst', 'analyst/refuted', 'analyst/immaterial', 'analyst/unsupported', 'analyst/rules',
   'compliance', 'unauthorized',
   'safety', 'safety/vehicles', 'safety/events', 'live', 'map', 'sources', 'coverage', 'providers', 'settings',

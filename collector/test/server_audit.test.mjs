@@ -263,6 +263,112 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
     Number(health[0].occupied_pct) === 100, String(health[0].occupied_pct));
 }
 
+/* ── the action list was 200 copies of one rule ──────────────────────────
+   The insight table accumulated a fresh row per finding on every collector run
+   — every thirty minutes — because the unique key contained NULL window
+   columns and Postgres UNIQUE is NULLS DISTINCT. Live: 2,979 open actions, of
+   which the 200 the page could show were all one rule, and a "quantified cost"
+   tile of AED 1,424,592 that was a run counter times a constant. */
+{
+  const ins = (code, entity, when, impact) => q(
+    `INSERT INTO insight (code, severity, category, entity_type, entity_id, title, detail, action,
+       impact_aed, window_start, window_end, computed_at)
+     VALUES ($1,'critical','utilisation','vehicle',$2,'t','d','a',$3,NULL,NULL,$4)
+     ON CONFLICT DO NOTHING`, [code, entity, impact, when]);
+  // Three runs of the same finding, exactly as the collector produced them.
+  for (const t of ['2026-08-20T10:00:00Z', '2026-08-20T10:30:00Z', '2026-08-20T11:00:00Z']) {
+    await ins('idle_vehicle', 'L100', t, 1680);
+  }
+  await ins('vehicle_doc_expiring', 'L101', '2026-08-20T11:00:00Z', null);
+  const stored = (await q(`SELECT count(*)::int n FROM insight`))[0].n;
+
+  const page = await get('/api/insights');
+  check('a finding appears once however many runs wrote it',
+    page.insights.filter((r) => r.code === 'idle_vehicle' && r.entity_id === 'L100').length === 1,
+    String(page.insights.length));
+  check('the newest copy is the one kept',
+    page.insights.find((r) => r.code === 'idle_vehicle').computed_at.startsWith('2026-08-20T11:00'),
+    page.insights.find((r) => r.code === 'idle_vehicle')?.computed_at);
+  check('the response says whether the limit cut anything', 'truncated' in page && 'limit' in page);
+
+  const sum = await get('/api/insights/summary');
+  check('the counts are over the deduplicated set', sum.total.n === 2, String(sum.total.n));
+  check('and how many duplicates were suppressed is visible',
+    sum.duplicates_suppressed === stored - 2, `${sum.duplicates_suppressed} of ${stored}`);
+  /* A modelled figure and a measured one do not belong in one total. */
+  check('a modelled cost is reported apart from a measured one',
+    sum.total.measured_impact == null && Number(sum.modelled.aed) === 1680,
+    JSON.stringify({ measured: sum.total.measured_impact, modelled: sum.modelled.aed }));
+  check('the assumption behind the modelled figure is stated',
+    /per vehicle per day/.test(sum.modelled.assumption || ''), sum.modelled.assumption);
+  check('category counts come from the whole table, not the visible page',
+    sum.by_category.reduce((a, c) => a + c.n, 0) === sum.total.n);
+}
+
+/* ── 77 expired licences that were all one placeholder ───────────────────
+   Every one of those rows carried the identical date and the identical licence
+   number, because the source writes a default into an unset field. The insight
+   engine already refused to accuse anybody; this page counted them and said
+   "stand down until renewed". */
+{
+  for (let i = 0; i < 8; i++) {
+    await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, licence_no,
+               licence_expires, state)
+             VALUES ('hotel',$1,$2,'123456','2026-01-01','active')`, [`p${i}`, `Placeholder ${i}`]);
+  }
+  await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, licence_no,
+             licence_expires, state)
+           VALUES ('bolt','r1','Real Person','AE99','2026-08-01','active')`);
+  const c = await get('/api/compliance/drivers');
+  check('a date repeated across most of the roster is identified as a default',
+    c.placeholder_date === '2026-01-01' && c.placeholder_rows === 8,
+    `${c.placeholder_date} x ${c.placeholder_rows}`);
+  check('the caveat says it is a data problem, not an expiry',
+    /data-quality problem, not expired licences/.test(c.caveat || ''), c.caveat);
+  check('a genuine date is not swept up with it',
+    c.drivers.some((d) => d.licence_no === 'AE99'));
+  /* node-postgres returns a DATE as a JS Date, and String(thatDate).slice(0, 10)
+     is "Thu Jan 01". Every date a server response carries as an identifier is
+     formatted in SQL rather than sliced in JS. */
+  check('a date used as an identifier is a date, not a weekday',
+    /^\d{4}-\d{2}-\d{2}$/.test(c.placeholder_date || ''), c.placeholder_date);
+  // With fewer repeats than half the roster, nothing is called a placeholder.
+  for (let i = 0; i < 20; i++) {
+    await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, licence_no,
+               licence_expires, state) VALUES ('bolt',$1,$2,$3,$4,'active')`,
+      [`u${i}`, `Unique ${i}`, `AE${i}`, `2027-0${1 + (i % 9)}-01`]);
+  }
+  const c2 = await get('/api/compliance/drivers');
+  check('a roster of genuine dates is not accused of being a default',
+    c2.placeholder_date === null, String(c2.placeholder_date));
+}
+
+/* ── revenue per day drew AED 0 where nothing was ever collected ─────── */
+{
+  const fin = await get(`/api/finance/daily?from=${DAY}&to=2026-08-16`);
+  check('every calendar day in the window is present', fin.length === 3, String(fin.length));
+  check('a day with nothing recorded is null, not zero',
+    fin.every((r) => r.nothing_recorded === false || (r.amount === null && r.revenue === null)),
+    JSON.stringify(fin));
+  check('and says so explicitly', fin.some((r) => r.nothing_recorded === true));
+  check('the day is a plain date string, not a JS Date rendering',
+    /^\d{4}-\d{2}-\d{2}$/.test(fin[0].d), fin[0].d);
+}
+
+/* ── the daily trend must distinguish a hole from a quiet day ─────────── */
+{
+  const daily = await get(`/api/trips/daily?from=2026-08-10&to=2026-08-20`);
+  check('every calendar day in the window is present', daily.length === 11, String(daily.length));
+  check('a day is a plain date string', /^\d{4}-\d{2}-\d{2}$/.test(daily[0].d), daily[0].d);
+  check('each day carries how many sources were silent on it',
+    daily.every((r) => typeof r.sources_silent === 'number' && typeof r.uncollected === 'boolean'));
+  check('telematics volume rides alongside bookings rather than inside them',
+    daily.every((r) => 'telematics_journeys' in r));
+  const busy = daily.find((r) => r.d === DAY);
+  check('the day with data reports its bookings, not its bookings plus twins',
+    busy.trips === 25, String(busy.trips));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
