@@ -7,7 +7,13 @@ import { config } from './config.js';
 import { log } from './log.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
-export const pool = new pg.Pool({ connectionString: config.db.connectionString, max: 8 });
+// Managed Postgres (e.g. DigitalOcean) requires TLS; the connection string carries sslmode=require.
+const needSsl = process.env.DATABASE_SSL === 'true' || /sslmode=require/.test(config.db.connectionString);
+export const pool = new pg.Pool({
+  connectionString: config.db.connectionString,
+  max: 8,
+  ssl: needSsl ? { rejectUnauthorized: false } : undefined,
+});
 
 export async function migrate() {
   const sql = readFileSync(join(__dir, '..', 'sql', 'schema.sql'), 'utf8');
