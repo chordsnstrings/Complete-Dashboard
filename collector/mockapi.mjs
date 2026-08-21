@@ -736,7 +736,7 @@ app.get('/api/corporate/leakage', (req, r) => {
     { kind: 'overrun', label: 'Ran past the booked hours', why: 'An hourly charter that ran over its booked hours.', n: 7 },
     { kind: 'unpriced', label: 'No fare recorded', why: 'The booking closed without a fare.', n: 8 },
     { kind: 'zero_priced', label: 'Priced at zero', why: 'A completed booking with a fare of exactly zero.', n: 3 },
-    { kind: 'unauthorized', label: 'Charged with no authorisation on file', why: 'A billed booking with no authorisation object attached.', n: 1098 },
+    { kind: 'unauthorized', label: 'Charged with no authorisation on file', why: 'A billed booking with no authorisation object attached, at a property whose own workflow requires one.', n: 12 },
     { kind: 'deadhead_exceeds_fare', label: 'Drove further to reach the job than the job itself', why: 'The unpaid approach leg was longer than the paid ride.', n: 46 },
     { kind: 'missing', label: 'Flagged as a missing trip by the booking system', why: 'The booking system itself flagged this record as incomplete.', n: 0 },
   ];
@@ -750,7 +750,9 @@ app.get('/api/corporate/leakage', (req, r) => {
     deadhead_km: 12 - i * 0.4, hours: null, room_no: String(1100 + i), trip_purpose: null,
     over_run: false, has_authorization: i % 3 === 0, guest_id: `guest-${3000 + i}`,
   })) : [];
-  r.json({ kinds, summary: { total: 1253, overrun_value: 1840, foc_cost: 720, wasted_km: 386.4 },
+  r.json({ kinds: kinds.map((k) => ({ ...k, disabled: null })),
+    summary: { total: 1253, overrun_value: 1840, foc_cost: null, foc_km: 148.2, foc_hours: 6.4,
+      wasted_km: 386.4, properties_requiring_approval: 2, properties: 6 },
     kind: req.query.kind || null, rows });
 });
 app.get('/api/corporate/approach', (req, r) => {

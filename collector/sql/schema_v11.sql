@@ -33,3 +33,31 @@ COMMENT ON TABLE provider_probe IS
   'Shape of each provider surface the collectors call: field names, fill rates, and values only for fields narrow enough to be a dimension. Never records.';
 COMMENT ON COLUMN provider_probe.unmapped IS
   'Fields the provider sends that no column on our side holds. This is the list that answers "what else could we be collecting".';
+
+-- The counterparty, as the provider describes it.
+--
+-- The corporate channel's property list carries `tripApprovalRequired`,
+-- `tripPurposeRequired`, `active`, an address and a phone number, and the
+-- collector was keeping only the name. Without the approval flag, the leakage
+-- report "charged with no authorisation on file" fired on 1,095 of 1,254
+-- bookings — 87% — because most properties do not use the approval workflow at
+-- all. A finding that fires on seven bookings in eight is not a finding, and
+-- this one names people.
+CREATE TABLE IF NOT EXISTS partner (
+  platform          TEXT NOT NULL,
+  partner_id        TEXT NOT NULL,
+  name              TEXT,
+  active            BOOLEAN,
+  address           TEXT,
+  phone             TEXT,
+  approval_required BOOLEAN,   -- does a booking here need an authorisation?
+  purpose_required  BOOLEAN,   -- must the traveller state why?
+  editable_amount   BOOLEAN,
+  raw               JSONB,
+  updated_at        TIMESTAMPTZ DEFAULT now(),
+  PRIMARY KEY (platform, partner_id)
+);
+CREATE INDEX IF NOT EXISTS partner_name_idx ON partner (name);
+
+COMMENT ON COLUMN partner.approval_required IS
+  'Whether this counterparty''s own booking workflow requires an authorisation. A missing authorisation is only evidence of anything where this is true.';

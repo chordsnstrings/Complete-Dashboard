@@ -830,3 +830,7 @@ b.warn-t{color:var(--warn)}
 .chips-l{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin-right:6px}
 .chip.warn{border-color:var(--warn);color:var(--ink);background:var(--warn-bg)}
 span.dim{color:var(--ink-3);font-size:.72rem}
+/* A leakage category that CANNOT fire — because the field it depends on is not
+   in use — must not look like one that fired zero times. */
+.leak.off{opacity:.55;border-style:dashed;cursor:default}
+.leak.off b{color:var(--ink-3)}

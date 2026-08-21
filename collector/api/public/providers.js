@@ -14,6 +14,21 @@ import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dtStr, pct } from './ui.js';
 import { api } from './data.js';
 
+/* A provider with no credential produces no data, and a provider with nothing
+   to offer produces no data. Those are opposite situations and they looked
+   identical — the first live pass returned no Uber rows at all because a guard
+   read a config path that does not exist, and the page showed an Uber-shaped
+   silence. */
+function host_note(root, unconfigured) {
+  const { panel: p, body } = panel('Providers that could not be probed',
+    'Nothing was asked of these, so their absence from the tables below says nothing about what they offer.');
+  body.append(tableFrom(unconfigured, [
+    { label: 'Provider', key: 'provider' },
+    { label: 'Why', key: 'note' },
+  ]));
+  root.append(p);
+}
+
 export async function renderProviders(root) {
   root.innerHTML = '';
   loading(root);
@@ -26,6 +41,7 @@ export async function renderProviders(root) {
     return;
   }
   const unmapped = d.surfaces.reduce((a, s) => a + (s.unmapped_n || 0), 0);
+  const unconfigured = d.surfaces.filter((s) => s.surface === '(not configured)');
   root.append(kpiRow([
     { label: 'Surfaces probed', value: fmt(d.surfaces.length),
       sub: `across ${new Set(d.surfaces.map((s) => s.provider)).size} providers` },
@@ -36,8 +52,15 @@ export async function renderProviders(root) {
       sub: d.failing.length ? d.failing.map((f) => f.surface).slice(0, 2).join(', ') : null },
     { label: 'Fields we are not keeping', value: fmt(unmapped),
       sub: 'sent by a provider, with no column on our side', tone: unmapped ? 'warn' : null },
+    { label: 'Providers not configured', value: fmt(unconfigured.length),
+      sub: unconfigured.length ? unconfigured.map((s) => s.provider).join(', ') : 'all credentials present',
+      tone: unconfigured.length ? 'warn' : 'good' },
     { label: 'Last probe', value: d.last_probe ? dtStr(d.last_probe) : '—' },
   ]));
+
+  if (unconfigured.length) {
+    host_note(root, unconfigured);
+  }
 
   if (d.failing.length) {
     const { panel: p, body } = panel('Surfaces that did not answer',
@@ -57,7 +80,7 @@ export async function renderProviders(root) {
   });
 
   for (const [provider, list] of byProvider) {
-    list.forEach((s) => {
+    list.filter((s) => s.surface !== '(not configured)').forEach((s) => {
       const { panel: p, body } = panel(`${provider} · ${s.surface}`,
         [s.note, s.ok ? `${fmt(s.record_count)} records sampled` : 'did not answer',
           s.probed_at ? dtStr(s.probed_at) : null].filter(Boolean).join(' · '));

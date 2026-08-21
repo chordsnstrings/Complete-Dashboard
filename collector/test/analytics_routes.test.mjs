@@ -25,7 +25,7 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
 for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-                 'schema_v6.sql', 'schema_v7.sql', 'schema_v9.sql'])
+                 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql'])
   await db.exec(readFileSync(`sql/${f}`, 'utf8'));
 
 const trip = (o) => q(
@@ -104,6 +104,15 @@ await trip({ platform: 'hotel', id: 'hd_bad', plate: 'L102', drv: 'hd1', day: 4,
 await trip({ platform: 'hotel', id: 'h_bad_flag', plate: 'L103', drv: 'hd2', day: 4, km: 5,
   price: 55, cost: 40, pay: 'cash-driver', partner: 'h2', partnerName: 'Marina Bay',
   raw: { client: 'guest4', overRun: 'sometimes', hourlyTripMargin: 'n/a' } });
+
+/* Two properties. Only one of them runs an approval workflow — which is the
+   whole point: a missing authorisation is evidence at h1 and means nothing at
+   h2, and without that distinction the category flagged 87% of every live
+   booking on the channel. */
+await q(`INSERT INTO partner (platform, partner_id, name, approval_required, purpose_required, active)
+         VALUES ('hotel','h1','Palm Grand', true, true, true),
+                ('hotel','h2','Marina Bay', false, false, true),
+                ('hotel','h3','Solo House', false, false, true)`);
 
 /* A collection hole: this source has data on day 1 and day 10, nothing in
    between, and nothing at all before day 1. Only the first is a gap. */
@@ -290,6 +299,20 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('an approach longer than the ride is flagged',
     by.deadhead_exceeds_fare.n === 1, String(by.deadhead_exceeds_fare.n));
   check('every leakage kind explains why it matters', l.kinds.every((k) => k.why && k.label));
+  // 48 bookings alternate across h1/h1/h1/h2, so h1 holds 36 of them; a third
+  // of those carry an authorisation. Only h1 requires one, so h2's bookings —
+  // and h3's — must not be accused.
+  check('a missing authorisation is only counted where the property requires one',
+    by.unauthorized.n > 0 && by.unauthorized.n < 30, String(by.unauthorized.n));
+  check('the count of properties that require approval is reported',
+    l.summary.properties_requiring_approval === 1 && l.summary.properties === 3,
+    `${l.summary.properties_requiring_approval} of ${l.summary.properties}`);
+  const accused = await get(`/api/corporate/leakage?${W}&kind=unauthorized`);
+  check('no booking at a property without an approval workflow is accused',
+    accused.rows.every((r) => r.partner_id === 'h1'),
+    [...new Set(accused.rows.map((r) => r.partner_id))].join(','));
+  check('a giveaway is measured in the units this channel actually reports',
+    l.summary.foc_km != null || l.summary.foc_cost != null, JSON.stringify(l.summary));
   const rows = await get(`/api/corporate/leakage?${W}&kind=deadhead_exceeds_fare`);
   check('a leakage kind opens onto the named, dated bookings behind it',
     rows.rows.length === 1 && rows.rows[0].external_id === 'hd_bad', JSON.stringify(rows.rows[0]?.external_id));

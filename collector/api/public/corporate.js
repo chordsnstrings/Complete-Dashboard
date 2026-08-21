@@ -273,20 +273,33 @@ async function corpLeakage(host, kind = state.sub) {
   host.innerHTML = '';
   const strip = el('div', 'leaks');
   l.kinds.forEach((k) => {
-    const a = el('a', `leak${k.kind === kind ? ' on' : ''}${k.n ? '' : ' zero'}`);
-    a.href = href('corporate', 'leakage', k.kind === kind ? null : k.kind);
-    a.innerHTML = `<b class="num">${fmt(k.n)}</b><span>${esc(k.label)}</span>`;
+    // A category that CANNOT fire is not the same as one that found nothing,
+    // and must not read as a clean bill of health.
+    const a = el(k.disabled ? 'div' : 'a', `leak${k.kind === kind ? ' on' : ''}${k.n ? '' : ' zero'}${k.disabled ? ' off' : ''}`);
+    if (!k.disabled) a.href = href('corporate', 'leakage', k.kind === kind ? null : k.kind);
+    a.innerHTML = `<b class="num">${k.disabled ? 'n/a' : fmt(k.n)}</b><span>${esc(k.label)}</span>`;
+    if (k.disabled) a.title = k.disabled;
     strip.append(a);
   });
   host.append(strip);
+  const off = l.kinds.filter((k) => k.disabled);
+  if (off.length) off.forEach((k) => host.append(note(`${k.label}: ${k.disabled}`)));
 
   const sum = l.summary;
   host.append(kpiRow([
     { label: 'Bookings in window', value: fmt(sum.total) },
-    { label: 'Cost of rides given away', value: money(sum.foc_cost), tone: sum.foc_cost ? 'warn' : null },
+    // This channel reports no delivery cost, so a giveaway is measured in the
+    // things it does record: distance driven and a driver's time.
+    sum.foc_cost != null
+      ? { label: 'Cost of rides given away', value: money(sum.foc_cost), tone: 'warn' }
+      : { label: 'Given away', value: sum.foc_km == null ? '—' : `${fmt(sum.foc_km, 1)} km`,
+          sub: sum.foc_hours ? `${fmt(sum.foc_hours, 1)} driver-hours` : 'no cost is reported on this channel',
+          tone: sum.foc_km ? 'warn' : null },
     { label: 'Value of hourly overruns', value: money(sum.overrun_value),
       sub: 'billed or not is not in this record' },
     { label: 'Km driven to reach shorter jobs', value: sum.wasted_km == null ? '—' : `${fmt(sum.wasted_km, 1)} km` },
+    { label: 'Properties requiring approval', value: `${fmt(sum.properties_requiring_approval)} of ${fmt(sum.properties)}`,
+      sub: 'a missing authorisation only counts at these' },
   ]));
 
   if (!kind) {

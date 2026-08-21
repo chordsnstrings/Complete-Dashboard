@@ -26,7 +26,7 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
 const SCHEMAS = ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql'];
+  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql'];
 for (const f of SCHEMAS) await db.exec(readFileSync(`sql/${f}`, 'utf8'));
 
 /* ── the one-time retraction must be exactly that ─────────────────────────

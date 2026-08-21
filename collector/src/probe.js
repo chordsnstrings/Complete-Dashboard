@@ -75,13 +75,29 @@ export function firstList(data) {
   return null;
 }
 
-/* Which of a surface's fields have no column on our side. A loose match: a
-   false "unmapped" costs a glance, a false "mapped" hides a field. */
-export function unmappedAgainst(fields, columns) {
-  const norm = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+/* Which of a surface's fields have no column on our side.
+   ──────────────────────────────────────────────────────────────────────────
+   Name-matching alone is not good enough here, and the first live pass proved
+   it: FMS sends "Start Location", "StartLat", "Total Travel Distance" and
+   "Trip Duration", every one of which the collector maps — to pickup_addr,
+   pickup_lat, distance_km and duration_s. All twelve came back flagged as "not
+   kept", which makes the single most useful column on the page worthless.
+
+   So each surface declares its own aliases. A field is unmapped only when it
+   matches no column name AND no declared alias. A false "unmapped" costs a
+   reader's glance; a false "mapped" hides a field forever, so where the two
+   trade off this still errs toward flagging. */
+export const norm = (k) => String(k).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+export function unmappedAgainst(fields, columns, aliases = {}) {
   const have = new Set(columns.map(norm));
-  return fields.filter((f) => f.fill_pct > 0 && !have.has(norm(f.key.split('.').pop()))
-    && !have.has(norm(f.key))).map((f) => f.key);
+  const aliased = new Set(Object.keys(aliases).map(norm));
+  return fields.filter((f) => {
+    if (!f.fill_pct) return false;
+    const leaf = norm(f.key.split('.').pop());
+    const full = norm(f.key);
+    return !have.has(leaf) && !have.has(full) && !aliased.has(leaf) && !aliased.has(full);
+  }).map((f) => f.key);
 }
 
 // The columns each surface's data would land in, so "unmapped" means something.
@@ -100,15 +116,58 @@ const VEHICLE_COLS = ['platform', 'vehicle_ext_id', 'plate', 'fleet_id', 'make',
    Each is a call one of the collectors already makes. `cols` names the table
    its data lands in, so the probe can report what the provider sends that we
    have nowhere to put. */
+
+/* What each provider's oddly-named fields actually land in. Written from the
+   collector's own mapping, so if a collector stops mapping a field the alias
+   here is what makes the probe say so. */
+const FMS_TRIP_ALIASES = {
+  'Plate No': 'plate', 'Start Time': 'requested_at', 'End Time': 'ended_at',
+  'Start Location': 'pickup_addr', 'End Location': 'dropoff_addr',
+  StartLat: 'pickup_lat', StartLon: 'pickup_lng', EndLat: 'dropoff_lat', EndLon: 'dropoff_lng',
+  'Total Travel Distance': 'distance_km', 'Trip Duration': 'duration_s',
+  'Seat Count': 'seat_count', Slno: 'external_id',
+};
+const HOTEL_TRIP_ALIASES = {
+  _id: 'external_id', startTime: 'requested_at', endTime: 'ended_at',
+  pickLocation: 'pickup_addr', dropOffLocation: 'dropoff_addr',
+  startLat: 'pickup_lat', startLon: 'pickup_lng', endLat: 'dropoff_lat', endLon: 'dropoff_lng',
+  totalDistance: 'distance_km', paymentMethod: 'payment_type', type: 'product',
+  tripZone: 'zone', isScheduled: 'is_scheduled', isMissingTrip: 'is_missing',
+  driverOwnTrip: 'driver_own', hotel: 'partner_id',
+  'car.licenseNumber': 'plate', 'driver._id': 'driver_ext_id', 'driver.firstName': 'driver_name',
+  'driver.lastName': 'driver_name', driverStartLat: 'deadhead_km', driverStartLon: 'deadhead_km',
+};
+const YANGO_TRIP_ALIASES = {
+  id: 'external_id', car_license_number: 'plate', driver_id: 'driver_ext_id',
+  driver_full_name: 'driver_name', booked_at: 'requested_at', ended_at: 'ended_at',
+  address_from: 'pickup_addr', address_to: 'dropoff_addr', mileage: 'distance_km',
+  category: 'product', payment_method: 'payment_type', currency_code: 'currency',
+};
+const BOLT_DRIVER_ALIASES = {
+  driver_uuid: 'driver_ext_id', first_name: 'full_name', last_name: 'full_name',
+  phone: 'phone', state: 'state',
+};
+
 export function surfaces({ from, to }) {
   const list = [];
-  const add = (provider, surface, cols, note, run) =>
-    list.push({ provider, surface, cols, note, run });
+  const add = (provider, surface, cols, note, run, aliases) =>
+    list.push({ provider, surface, cols, note, run, aliases: aliases || null });
+
+  /* A provider that is not configured must produce a VISIBLE row, never
+     silence. The first live pass returned no Uber surfaces at all — not an
+     error, an absence — because the guard tested config.uber.clientId when the
+     real path is config.uber.oauth.clientId. Zero rows and "this provider has
+     nothing to offer" looked identical, which is the exact confusion this whole
+     module exists to remove. */
+  const skip = (provider, why) =>
+    list.push({ provider, surface: '(not configured)', cols: null, note: why, aliases: null,
+      run: async () => { throw new Error(why); } });
 
   /* Uber — OAuth REST. The trip report itself needs the web session cookie and
      is probed separately, because that cookie expires and its absence is worth
      reporting as its own finding rather than as a failure of everything. */
-  if (config.uber?.clientId) {
+  if (!config.uber?.oauth?.clientId) skip('uber', 'UBER_CLIENT_ID is not set, so no Uber surface can be probed');
+  else {
     const rest = {
       drivers: (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers?org_id=${encodeURIComponent(org)}&limit=50`,
       'driver-actions': (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?org_id=${encodeURIComponent(org)}&limit=50`,
@@ -147,8 +206,9 @@ export function surfaces({ from, to }) {
   }
 
   /* FMS / InfoTrack — the surfaces documented at the top of sources/fms.js. */
-  for (const fleet of (config.fms?.fleets || [])) {
-    if (!fleet.password) continue;
+  const fmsFleet = (config.fms?.fleets || []).find((f) => f.password);
+  if (!fmsFleet) skip('fms', 'no FMS fleet has a password set, so no FMS surface can be probed');
+  for (const fleet of (fmsFleet ? [fmsFleet] : [])) {
     const call = async (op, extra = {}) => {
       const { data, status } = await http(
         `${config.fms.base}/${op}?${qs({ username: fleet.username, Password: fleet.password, ...extra })}`,
@@ -156,10 +216,13 @@ export function surfaces({ from, to }) {
       return { data, status };
     };
     add('fms', `${fleet.fleet}:GetTripPassenger`, TRIP_COLS, 'historical journeys', () =>
-      call('GetTripPassenger', { vehicleno: 'ALL', fromdate: dotDate(new Date(from)), todate: dotDate(new Date(to)) }));
+      call('GetTripPassenger', { vehicleno: 'ALL', fromdate: dotDate(new Date(from)), todate: dotDate(new Date(to)) }),
+      FMS_TRIP_ALIASES);
     add('fms', `${fleet.fleet}:GetAlertData`, ['platform', 'external_id', 'plate', 'alert_type', 'occurred_at', 'lat', 'lng'],
       'harsh-driving and power events', () =>
-      call('GetAlertData', { vehicleno: 'ALL', fromdate: dotDate(new Date(from)), todate: dotDate(new Date(to)) }));
+      call('GetAlertData', { vehicleno: 'ALL', fromdate: dotDate(new Date(from)), todate: dotDate(new Date(to)) }),
+      { 'Plate No': 'plate', 'Alert Name': 'alert_type', 'Alert Date Time': 'occurred_at',
+        'Start Location': 'pickup_addr', Slno: 'external_id' });
     add('fms', `${fleet.fleet}:GetVehicleCurrentDetails`,
       ['plate', 'captured_at', 'lat', 'lng', 'speed', 'status', 'ignition', 'odometer'],
       'live position', () => call('GetVehicleCurrentDetails', {}));
@@ -167,23 +230,26 @@ export function surfaces({ from, to }) {
   }
 
   /* CABMAN DT — the realtime tracking feed. */
-  if (config.cabman?.fleets?.length) {
-    const c = config.cabman.fleets[0];
-    if (c?.password) {
-      add('cabman', 'GetIVDData', ['plate', 'captured_at', 'lat', 'lng', 'speed', 'status',
-        'seat_occupied', 'ignition', 'odometer', 'driver_name'], 'realtime seat and position feed', async () => {
-        const { data, status } = await http(config.cabman.url, {
-          method: 'POST', timeoutMs: 60000, retries: 0,
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ InterfaceUniqueId: c.id, UserName: c.username, Password: c.password }),
-        });
-        return { data, status };
+  const cab = config.cabman?.fleets?.find((f) => f.pass);
+  if (!cab) skip('cabman', 'no CABMAN fleet has a password set, so the realtime feed cannot be probed');
+  if (cab) {
+    add('cabman', 'GetIVDData', ['plate', 'captured_at', 'lat', 'lng', 'speed', 'status',
+      'seat_occupied', 'ignition', 'odometer'], 'realtime seat and position feed', async () => {
+      // Credentials go in HEADERS on this service, not in a JSON body — the
+      // collector has always done it this way and the probe must match it, or
+      // it describes a 401 instead of the feed.
+      const { data, status } = await http(config.cabman.url, {
+        timeoutMs: 60000, retries: 0,
+        headers: { InterfaceUniqueId: cab.interfaceId, InterfaceUserName: cab.user, InterfacePassword: cab.pass },
       });
-    }
+      return { data, status };
+    }, { VehicleID: 'plate', gmt: 'captured_at', state: 'ignition', SeatSensorValue: 'seat_occupied',
+      Status: 'status' });
   }
 
   /* Hotel — the corporate channel. */
-  if (config.hotel?.token) {
+  if (!config.hotel?.token) skip('hotel', 'HOTEL_TOKEN is not set, so the corporate channel cannot be probed');
+  else {
     const h = config.hotel;
     const get = async (path) => {
       const { data, status } = await http(`${h.base}${path}`, {
@@ -194,11 +260,13 @@ export function surfaces({ from, to }) {
     add('hotel', 'hotels', ['partner_id', 'partner_name'], 'the property list', () =>
       get('/api/operation-managers/hotels'));
     add('hotel', 'trip-report', TRIP_COLS, 'the bookings themselves', () =>
-      get(`/api/operation-managers/report/get-trip-report?startDate=${iso(new Date(from))}&endDate=${iso(new Date(to))}`));
+      get(`/api/operation-managers/report/get-trip-report?startDate=${iso(new Date(from))}&endDate=${iso(new Date(to))}`),
+      HOTEL_TRIP_ALIASES);
   }
 
   /* Yango — trips, drivers and the park ledger. */
-  if (config.yango?.apiKey) {
+  if (!config.yango?.apiKey) skip('yango', 'YANGO_API_KEY is not set, so no Yango surface can be probed');
+  else {
     const post = async (path, body) => {
       const { data, status } = await http(`${config.yango.base}${path}`, {
         method: 'POST', timeoutMs: 60000, retries: 0,
@@ -209,7 +277,8 @@ export function surfaces({ from, to }) {
     };
     const dubai = (d, end) => `${iso(new Date(d))}T${end ? '23:59:59' : '00:00:00'}+04:00`;
     add('yango', 'orders/list', TRIP_COLS, 'trips', () =>
-      post('/api/reports-api/v1/orders/list', { date_type: 'booked_at', date_from: dubai(from), date_to: dubai(to, true) }));
+      post('/api/reports-api/v1/orders/list', { date_type: 'booked_at', date_from: dubai(from), date_to: dubai(to, true) }),
+      YANGO_TRIP_ALIASES);
     add('yango', 'summary/drivers/list', DRIVER_COLS, 'per-driver period summary', () =>
       post('/api/reports-api/v2/summary/drivers/list', { date_from: dubai(from), date_to: dubai(to, true) }));
     add('yango', 'transactions/park/list', ['platform', 'external_id', 'occurred_at', 'category', 'amount'],
@@ -219,7 +288,8 @@ export function surfaces({ from, to }) {
   }
 
   /* Bolt — the fleet integration gateway. */
-  if (config.bolt?.clientId) {
+  if (!config.bolt?.clientId) skip('bolt', 'BOLT_CLIENT_ID is not set, so no Bolt surface can be probed');
+  else {
     const company = config.bolt.companies?.[0];
     add('bolt', 'getDrivers', DRIVER_COLS, 'driver roster and state', async () => {
       const t = await fiToken();
@@ -230,7 +300,7 @@ export function surfaces({ from, to }) {
           start_ts: Math.floor(new Date(from).getTime() / 1000),
           end_ts: Math.floor(new Date(to).getTime() / 1000) }) });
       return { data, status };
-    });
+    }, BOLT_DRIVER_ALIASES);
   }
 
   return list;
@@ -258,7 +328,7 @@ export async function probeAll({ days = 3 } = {}) {
         top_keys: data && typeof data === 'object' && !Array.isArray(data)
           ? Object.keys(data).slice(0, 25) : [],
         fields: JSON.stringify(fields),
-        unmapped: s.cols ? unmappedAgainst(fields, s.cols) : null,
+        unmapped: s.cols ? unmappedAgainst(fields, s.cols, s.aliases || {}) : null,
         error: null, note: s.note || null,
       };
     } catch (e) {

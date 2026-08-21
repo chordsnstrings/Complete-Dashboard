@@ -391,23 +391,45 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      act on rather than a percentage you can only worry about. */
   app.get('/api/corporate/leakage', wrap(async (req, res) => {
     const p = range(req);
+
+    /* A missing authorisation is only evidence of anything at a property whose
+       own workflow requires one. Without that qualifier this fired on 1,095 of
+       1,254 live bookings — 87% — because most properties do not use the
+       approval flow at all, and a finding that fires on seven bookings in eight
+       is not a finding. The property list carries the flag; the collector now
+       keeps it. Where no property has ever declared the flag, the category
+       reports zero and says why, rather than accusing everybody. */
+    const [approval] = await q(
+      `SELECT count(*) FILTER (WHERE approval_required)::int requiring,
+              count(*) FILTER (WHERE approval_required IS NOT NULL)::int declared,
+              count(*)::int properties
+       FROM partner WHERE platform = 'hotel'`);
+    const REQUIRES_APPROVAL = `partner_id IN (
+      SELECT partner_id FROM partner WHERE platform = 'hotel' AND approval_required)`;
+
     const kinds = {
       complimentary: `is_complimentary`,
       overrun: `over_run`,
       unpriced: `price IS NULL AND NOT is_complimentary`,
       zero_priced: `price = 0 AND NOT is_complimentary`,
-      unauthorized: `NOT has_authorization AND price IS NOT NULL AND price > 0`,
+      unauthorized: approval?.requiring
+        ? `NOT has_authorization AND price IS NOT NULL AND price > 0 AND ${REQUIRES_APPROVAL}`
+        : `false`,
       deadhead_exceeds_fare: `deadhead_km IS NOT NULL AND distance_km > 0 AND deadhead_km > distance_km`,
       missing: `coalesce(is_missing, false)`,
     };
     const only = kinds[req.query.kind] ? req.query.kind : null;
+
     const counts = await q(
       `SELECT ${Object.entries(kinds).map(([k, w]) => `count(*) FILTER (WHERE ${w})::int "${k}"`).join(', ')},
               count(*)::int total,
               sum(price) FILTER (WHERE ${kinds.overrun}) overrun_value,
               sum(cost)  FILTER (WHERE ${kinds.complimentary}) foc_cost,
+              sum(distance_km) FILTER (WHERE ${kinds.complimentary} AND has_distance) foc_km,
+              sum(duration_s)  FILTER (WHERE ${kinds.complimentary}) foc_seconds,
               sum(deadhead_km) FILTER (WHERE ${kinds.deadhead_exceeds_fare}) wasted_km
        FROM trip_ext WHERE ${F} AND platform = 'hotel'`, p);
+
     const rows = only ? await q(
       `SELECT external_id, requested_at, ended_at, driver_name, driver_ext_id, plate,
               coalesce(partner_name, partner_id) property, partner_id, product, payment_type,
@@ -415,15 +437,32 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               trip_purpose, over_run, has_authorization, guest_id
        FROM trip_ext WHERE ${F} AND platform = 'hotel' AND ${kinds[only]}
        ORDER BY requested_at DESC LIMIT 500`, p) : [];
+
     res.json({
       kinds: Object.keys(kinds).map((k) => ({
         kind: k, label: LEAK_LABEL[k], why: LEAK_WHY[k], n: counts[0]?.[k] ?? 0,
+        // A category that cannot fire is not the same as one that found nothing.
+        disabled: k === 'unauthorized' && !approval?.requiring
+          ? (approval?.declared
+            ? `None of the ${approval.properties} properties on this channel requires an authorisation, `
+              + 'so a missing one is not evidence of anything.'
+            : 'No property has declared whether it requires an authorisation, so a missing one cannot '
+              + 'be judged. The property list is read on every collection — if this persists, the '
+              + 'channel is not sending the flag.')
+          : null,
       })),
       summary: {
         total: counts[0]?.total ?? 0,
         overrun_value: round(counts[0]?.overrun_value, 0),
+        // Complimentary rides carry no cost figure on this channel, so what was
+        // given away is measured in the things that ARE recorded: distance and
+        // the driver's time.
         foc_cost: round(counts[0]?.foc_cost, 0),
+        foc_km: round(counts[0]?.foc_km, 1),
+        foc_hours: counts[0]?.foc_seconds ? round(counts[0].foc_seconds / 3600, 1) : null,
         wasted_km: round(counts[0]?.wasted_km, 1),
+        properties_requiring_approval: approval?.requiring ?? 0,
+        properties: approval?.properties ?? 0,
       },
       kind: only, rows,
     });
@@ -437,14 +476,16 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     missing: 'Flagged as a missing trip by the booking system',
   };
   const LEAK_WHY = {
-    complimentary: 'A driver-hour and the fuel were spent; nothing was billed.',
+    complimentary: 'A driver-hour and the fuel were spent; nothing was billed. This channel reports no '
+      + 'delivery cost, so what was given away is measured in distance and driver time.',
     overrun: 'An hourly charter that ran over its booked hours. Whether the extra time was billed '
       + 'is not in this record — it is worth checking against the invoice.',
     unpriced: 'The booking closed without a fare. Either it was never billed or the price never '
       + 'reached us; both are worth a query.',
     zero_priced: 'A completed booking with a fare of exactly zero that is not marked complimentary.',
-    unauthorized: 'A billed booking with no authorisation object attached. On this channel the '
-      + 'authorisation is the approval trail for a charge back to a property.',
+    unauthorized: 'A billed booking with no authorisation object attached, at a property whose own '
+      + 'workflow requires one. Properties that do not use the approval flow are excluded — without '
+      + 'that qualifier this category flagged 87% of every booking on the channel.',
     deadhead_exceeds_fare: 'The unpaid approach leg was longer than the paid ride. Repeated on the '
       + 'same property or daypart, this is a positioning problem, not bad luck.',
     missing: 'The booking system itself flagged this record as incomplete.',

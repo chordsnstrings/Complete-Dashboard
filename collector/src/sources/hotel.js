@@ -41,14 +41,33 @@ function parseLicenceDate(v) {
   return isNaN(d) ? null : d.toISOString().slice(0, 10);
 }
 
-// Property names, fetched once per run so partner trips carry a readable label.
+/* The property list, fetched once per run.
+   This used to keep the name and throw the rest away. The rest turns out to
+   decide whether a whole category of finding means anything: each property
+   carries `tripApprovalRequired`, and without it the leakage report "charged
+   with no authorisation on file" fired on 1,095 of 1,254 bookings, because most
+   properties do not use the approval workflow at all. */
 const hotelNames = new Map();
 async function loadHotels(c) {
   try {
     const { data } = await http(`${c.base}/api/operation-managers/hotels`, {
       timeoutMs: 30000, headers: { authorization: `Bearer ${c.token}`, 'x-domain': c.domain },
     });
-    for (const h of (data?.data || data || [])) if (h?._id) hotelNames.set(h._id, h.name || null);
+    const list = (data?.data || data || []).filter((h) => h?._id);
+    for (const h of list) hotelNames.set(h._id, h.name || null);
+    if (list.length) {
+      await upsertMany('partner', list.map((h) => ({
+        platform: SRC, partner_id: h._id, name: h.name || null,
+        active: h.active == null ? null : !!h.active,
+        address: h.address || null, phone: h.phone || null,
+        approval_required: h.tripApprovalRequired == null ? null : !!h.tripApprovalRequired,
+        purpose_required: h.tripPurposeRequired == null ? null : !!h.tripPurposeRequired,
+        editable_amount: h.canEditAmountOfTrip == null ? null : !!h.canEditAmountOfTrip,
+        raw: h,
+      })), ['platform', 'partner_id']);
+      log.info(SRC, 'properties', { n: list.length,
+        approval_required: list.filter((h) => h.tripApprovalRequired).length });
+    }
   } catch (e) { log.warn(SRC, 'hotel list failed', { err: String(e).slice(0, 80) }); }
 }
 
