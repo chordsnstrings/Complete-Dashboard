@@ -19,6 +19,7 @@ import { readFileSync } from 'node:fs';
 import { driverRoutes } from '../api/driver_routes.js';
 import { vehicleRoutes } from '../api/vehicle_routes.js';
 import { analyticsRoutes } from '../api/analytics_routes.js';
+import { rosterRoutes } from '../api/roster_routes.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -26,7 +27,7 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
 const SCHEMAS = ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql'];
+  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql'];
 for (const f of SCHEMAS) await db.exec(readFileSync(`sql/${f}`, 'utf8'));
 
 /* ── the one-time retraction must be exactly that ─────────────────────────
@@ -142,6 +143,7 @@ new Function('app', 'q', 'wrap', 'range', 'F', 'FB', 'W', 'endOfDay', 'requireAd
 driverRoutes(app, { q, wrap, endOfDay });
 vehicleRoutes(app, { q, wrap, endOfDay });
 analyticsRoutes(app, { q, wrap, range, F, FB });
+rosterRoutes(app, { q, wrap, range });
 
 const server = app.listen(0);
 const port = server.address().port;
@@ -177,8 +179,10 @@ const vehRoutes = [...readFileSync('api/vehicle_routes.js', 'utf8')
   .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
 const anaRoutes = [...readFileSync('api/analytics_routes.js', 'utf8')
   .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
+const rosRoutes = [...readFileSync('api/roster_routes.js', 'utf8')
+  .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
 
-const all = [...new Set([...routes, ...drvRoutes, ...vehRoutes, ...anaRoutes])];
+const all = [...new Set([...routes, ...drvRoutes, ...vehRoutes, ...anaRoutes, ...rosRoutes])];
 // `:param` routes need a real value substituted, not the literal placeholder.
 const SUB = { ':id': 'd0', ':plate': 'L100' };
 const resolved = all.map((r) => r.replace(/:(\w+)/g, (m) => SUB[m] || 'd0'));

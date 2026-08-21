@@ -8,6 +8,7 @@ import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
 import { analyticsRoutes, analystRoutes } from './analytics_routes.js';
+import { rosterRoutes } from './roster_routes.js';
 import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -922,6 +923,11 @@ analyticsRoutes(app, { q, wrap, range, F, FB });
    Read-only. A generation pass costs a model call and runs from the collector
    schedule, not from a page load. */
 analystRoutes(app, { q, wrap, range });
+
+/* ───────────────── the roster ─────────────────
+   Four providers' idea of a driver's standing, held together and joined
+   against what that person actually drove. */
+rosterRoutes(app, { q, wrap, range });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

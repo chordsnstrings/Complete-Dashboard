@@ -8,6 +8,7 @@ import { http } from '../http.js';
 import { upsertMany, logRun } from '../db.js';
 import { dateChunks, iso } from '../util.js';
 import { log } from '../log.js';
+import { stateRow } from '../roster.js';
 
 const SRC = 'hotel';
 
@@ -149,7 +150,15 @@ export async function collect({ from, to, mode }) {
           raw: { role: d.role, active: d.active },
         });
       }
-      if (seen.size) await upsertMany('driver_compliance', [...seen.values()], ['platform', 'driver_ext_id']);
+      if (seen.size) {
+        await upsertMany('driver_compliance', [...seen.values()], ['platform', 'driver_ext_id']);
+        // The same standing, in the one place every platform's version of it
+        // can be compared.
+        await upsertMany('driver_platform_state', [...seen.values()].map((d) => stateRow({
+          platform: SRC, driverExtId: d.driver_ext_id, fleetId: d.fleet_id,
+          name: d.full_name, rawState: d.state, raw: { licence_expires: d.licence_expires },
+        })), ['platform', 'driver_ext_id']);
+      }
       log.info(SRC, `trips ${iso(s)}..${iso(e)}`, { rows: rows.length });
     }
     await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to,

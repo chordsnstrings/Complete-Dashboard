@@ -8,6 +8,7 @@ import { http } from '../http.js';
 import { upsertMany, logRun } from '../db.js';
 import { unixS, iso } from '../util.js';
 import { log } from '../log.js';
+import { stateRow } from '../roster.js';
 
 const SRC = 'bolt';
 
@@ -39,6 +40,22 @@ async function pullFiRoster(from, to) {
       rating: d.driver_rating, raw: d,
     })).filter((r) => r.driver_ext_id);
     if (rows.length) total += await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+
+    /* Bolt is the only channel that reports WHY a driver is stopped, and it
+       reports the vehicle they still hold while stopped. A suspended driver
+       with a car attached is an asset earning nothing, which no page could see
+       while this sat inside a raw payload. */
+    const roster = (data.data?.drivers || []).map((d) => stateRow({
+      platform: SRC, driverExtId: d.driver_uuid, fleetId: c.fleet,
+      name: `${d.first_name || ''} ${d.last_name || ''}`.trim(),
+      rawState: d.state, reason: d.suspension_reason,
+      plate: d.active_vehicle?.reg_number ? normPlate(d.active_vehicle.reg_number) : null,
+      vehicleExtId: d.active_vehicle?.uuid || (d.active_vehicle?.id != null ? String(d.active_vehicle.id) : null),
+      score: d.driver_score,
+      raw: { state: d.state, categories: d.active_categories, inactive: d.inactive_categories,
+        has_cash_payment: d.has_cash_payment, eligible_for_scheduled_ride: d.eligible_for_scheduled_ride },
+    })).filter((r) => r.driver_ext_id && r.driver_ext_id !== 'undefined');
+    if (roster.length) await upsertMany('driver_platform_state', roster, ['platform', 'driver_ext_id']);
   }
   return total;
 }

@@ -14,6 +14,7 @@ import { renderCoverage } from './coverage.js';
 import { renderCorridors } from './corridors.js';
 import { renderAnalyst, ANALYST_TABS } from './analyst.js';
 import { renderProviders } from './providers.js';
+import { renderRoster, ROSTER_TABS } from './roster.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -43,6 +44,7 @@ const VIEWS = [
   { id: 'overview', label: 'Overview', ic: '◱', grp: 'Analyse', sub: 'Fleet-wide performance across every platform' },
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Analyse', sub: 'When trips happen — by day, hour and weekday' },
   { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'Analyse', sub: 'Per-driver output, quality and cross-platform activity' },
+  { id: 'roster', label: 'Roster & supply', ic: '☰', grp: 'Analyse', sub: 'Who is on the books across all four platforms, and who is earning nothing' },
   { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Analyse', sub: 'Utilisation and revenue per vehicle' },
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
   { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Analyse', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
@@ -314,6 +316,7 @@ V.settlement = async (root) => renderSettlement(root, SETTLE_TABS.some((t) => t.
 V.coverage = async (root) => renderCoverage(root);
 V.corridors = async (root) => renderCorridors(root);
 V.providers = async (root) => renderProviders(root);
+V.roster = async (root) => renderRoster(root);
 V.analyst = async (root) => renderAnalyst(root);
 
 V.vehicles = async (root) => {

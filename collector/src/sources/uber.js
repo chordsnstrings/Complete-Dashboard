@@ -9,6 +9,7 @@ import { http, qs, sleep } from '../http.js';
 import { upsertMany, logRun } from '../db.js';
 import { dateChunks, iso, unixMs } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
+import { stateRow } from '../roster.js';
 import { log } from '../log.js';
 
 const SRC = 'uber';
@@ -196,7 +197,30 @@ export async function pullLive() {
   const token = await uberOAuthToken();
   const { data } = await http(`https://api.uber.com/v1/vehicle-suppliers/drivers/actions?${qs({ org_id: config.uber.org })}`,
     { headers: { authorization: `Bearer ${token}` } });
-  const rows = (data?.driverStatusOverviews || []).map((d) => ({
+  const overviews = data?.driverStatusOverviews || [];
+
+  /* This response carries an `onboardingStatus` per driver — ACTIVE, WAITLIST,
+     and two more — and it was being discarded, along with everyone it describes.
+     The filter below keeps only drivers with a vehicle attached, which is
+     exactly the filter that removes every driver still waiting to start: the
+     supply pipeline was invisible because the one endpoint that reports it was
+     read for its position data and thrown away. */
+  const roster = overviews.map((d) => stateRow({
+    platform: SRC, driverExtId: d.driverInfo?.driverUuid, fleetId: config.uber.fleet,
+    name: [d.driverInfo?.firstName, d.driverInfo?.lastName].filter(Boolean).join(' '),
+    rawState: d.onboardingStatus,
+    reason: d.suspensionReason || d.statusEntries?.[0]?.reason,
+    plate: d.vehicleInfo?.licensePlate ? normPlate(d.vehicleInfo.licensePlate) : null,
+    vehicleExtId: d.vehicleInfo?.vehicleUuid || null,
+    raw: { onboardingStatus: d.onboardingStatus, vehicle: d.vehicleInfo?.licensePlate },
+  })).filter((r) => r.driver_ext_id && r.driver_ext_id !== 'undefined');
+  if (roster.length) {
+    await upsertMany('driver_platform_state', roster, ['platform', 'driver_ext_id']);
+    log.info(SRC, 'roster', { drivers: roster.length,
+      cannot_earn: roster.filter((r) => r.can_earn === false).length });
+  }
+
+  const rows = overviews.map((d) => ({
     source: SRC, fleet_id: config.uber.fleet, plate: normPlate(d.vehicleInfo?.licensePlate || 'UNKNOWN'),
     captured_at: d.statusEntries?.[0]?.timestamp || new Date().toISOString(),
     status: (d.statusEntries?.[0]?.status || '').replace('DRIVER_STATUS_', ''), raw: d,

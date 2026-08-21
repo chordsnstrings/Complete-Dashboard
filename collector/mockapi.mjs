@@ -952,6 +952,55 @@ app.get('/api/probe/results', (_, r) => {
     note: 'Each surface here is one the collectors already call, with the same credentials and the same read-only verb.' });
 });
 
+
+app.get('/api/roster', (_, r) => {
+  const cats = ['working', 'working', 'working', 'idle_this_window', 'never_started', 'in_pipeline', 'blocked', 'working'];
+  const people = drivers.map((name, i) => {
+    const category = cats[i % cats.length];
+    const blocked = category === 'blocked';
+    const pipeline = category === 'in_pipeline' || category === 'never_started';
+    return { person: name.toLowerCase(), name, accounts: 1 + (i % 3),
+      platforms: i % 3 === 0 ? ['uber', 'bolt'] : i % 3 === 1 ? ['uber'] : ['uber', 'yango', 'bolt'],
+      states: blocked ? ['suspended'] : pipeline ? ['waitlist'] : ['active'],
+      can_earn_anywhere: !blocked && !pipeline, blocked_everywhere: blocked,
+      score: 90 - i * 4, plates: blocked || i % 4 ? [plates[i % plates.length]] : [],
+      observed_at: new Date().toISOString(),
+      reason: blocked ? 'You can no longer take trips because your document expired.' : null,
+      trips: category === 'working' ? 120 - i * 9 : 0,
+      completed: category === 'working' ? 110 - i * 9 : 0,
+      revenue: category === 'working' ? (120 - i * 9) * 74 : null,
+      km: category === 'working' ? (120 - i * 9) * 12 : null,
+      last_trip: category === 'working' ? dayISO(i % 5) : null,
+      lifetime_trips: category === 'never_started' ? 0 : 900 - i * 60,
+      first_trip: category === 'never_started' ? null : dayISO(300),
+      last_ever: category === 'never_started' ? null : dayISO(category === 'working' ? i % 5 : 40 + i),
+      category, holding_vehicle_while_blocked: blocked,
+      days_since_last_trip: category === 'never_started' ? null : (category === 'working' ? i % 5 : 40 + i) };
+  });
+  const c = (k) => people.filter((x) => x.category === k).length;
+  r.json({ window: [dayISO(30), dayISO(0)], people,
+    totals: { people: people.length, working: c('working'), idle_this_window: c('idle_this_window'),
+      never_started: c('never_started'), in_pipeline: c('in_pipeline'), blocked: c('blocked'),
+      holding_vehicle_while_blocked: people.filter((x) => x.holding_vehicle_while_blocked).length,
+      multi_platform: people.filter((x) => x.platforms.length > 1).length },
+    caveat: 'Platform accounts are folded into one person by name, because no provider shares an id with another.' });
+});
+app.get('/api/roster/states', (_, r) => r.json({
+  by_state: [
+    { platform: 'uber', state: 'active', state_raw: 'ONBOARDING_STATUS_ACTIVE', n: 106, with_vehicle: 98 },
+    { platform: 'uber', state: 'waitlist', state_raw: 'ONBOARDING_STATUS_WAITLIST', n: 14, with_vehicle: 2 },
+    { platform: 'uber', state: 'onboarding', state_raw: 'ONBOARDING_STATUS_PENDING', n: 6, with_vehicle: 0 },
+    { platform: 'bolt', state: 'active', state_raw: 'active', n: 61, with_vehicle: 55 },
+    { platform: 'bolt', state: 'suspended', state_raw: 'suspended', n: 4, with_vehicle: 4 },
+    { platform: 'bolt', state: 'deactivated', state_raw: 'deactivated', n: 2, with_vehicle: 0 },
+    { platform: 'hotel', state: 'active', state_raw: 'active', n: 35, with_vehicle: 0 },
+    { platform: 'yango', state: 'unknown', state_raw: 'on_order', n: 3, with_vehicle: 1 },
+  ],
+  oldest_observation: new Date(Date.now() - 26 * 3600e3).toISOString(),
+  newest_observation: new Date().toISOString(), rows: 231,
+  unknown_states: [{ platform: 'yango', word: 'on_order', n: 3 }],
+}));
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 
 app.use(express.static(join(__dir, 'api', 'public')));

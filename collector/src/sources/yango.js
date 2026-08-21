@@ -7,6 +7,7 @@ import { http } from '../http.js';
 import { upsertMany, logRun } from '../db.js';
 import { iso } from '../util.js';
 import { log } from '../log.js';
+import { stateRow } from '../roster.js';
 
 const SRC = 'yango';
 const headers = () => ({
@@ -50,6 +51,15 @@ async function pullDrivers(from, to) {
     earnings: (Number(it.price_cash) || 0) + (Number(it.price_cashless) || 0),
     cash_earnings: it.price_cash, raw: it,
   })).filter((r) => r.driver_ext_id);
+  const roster = (data?.items || []).map((it) => stateRow({
+    platform: SRC, driverExtId: it.driver?.id, fleetId: config.yango.fleet,
+    name: `${it.driver?.first_name || ''} ${it.driver?.last_name || ''}`.trim(),
+    rawState: it.driver?.status || it.status || it.driver?.work_status,
+    reason: it.driver?.status_reason,
+    plate: it.car?.callsign ? normPlate(it.car.callsign) : null,
+    raw: { status: it.driver?.status, trips_per_hour: it.trips_per_hour },
+  })).filter((r) => r.driver_ext_id);
+  if (roster.length) await upsertMany('driver_platform_state', roster, ['platform', 'driver_ext_id']);
   return rows.length ? upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']) : 0;
 }
 

@@ -16,6 +16,7 @@ const ROUTES = [
   'overview', 'demand', 'drivers',
   'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/territory',
   'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',
+  'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked', 'roster/states',
   'vehicles', 'vehicle/L45235', 'vehicle/L45235/drivers', 'vehicle/L45235/movement',
   'vehicle/L45235/safety', 'vehicle/L45235/compliance', 'vehicle/L45235/trips',
   'platforms', 'platforms/tiers', 'platforms/funnel',
