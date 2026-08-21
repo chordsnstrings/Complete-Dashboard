@@ -12,6 +12,8 @@ const VIEWS = [
   { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Analyse', sub: 'Utilisation and revenue per vehicle' },
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share and mix' },
   { id: 'finance', label: 'Finance', ic: '◈', grp: 'Analyse', sub: 'Revenue, payment mix and the transaction ledger' },
+  { id: 'insights', label: 'Action list', ic: '✦', grp: 'Operate', sub: 'What needs doing, ranked by what it costs to ignore' },
+  { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'Operate', sub: 'Documents and licences with an expiry date attached' },
   { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Operate', sub: 'Seat occupied, vehicle moved — but no booking on any channel' },
   { id: 'safety', label: 'Safety', ic: '△', grp: 'Operate', sub: 'Harsh-driving events from the telematics layer' },
   { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Operate', sub: 'Realtime positions — CABMAN refreshes every 5 minutes' },
@@ -542,6 +544,144 @@ V.map = async (root) => {
   $('#mDay').onchange = showReplay;
 
   await showLive();
+};
+
+
+/* The action list. Everything here is something a person could do today, ordered by
+   what it costs to leave alone. Severity is a claim, so each row shows the evidence
+   that produced it — a dashboard that asserts without showing its working gets
+   ignored the first time it is wrong. */
+V.insights = async (root) => {
+  const kh = el('div', 'kpis'); root.append(kh); loading(kh);
+
+  const [sum, all] = await Promise.all([
+    api('/api/insights/summary').catch(() => null),
+    api('/api/insights').catch(() => []),
+  ]);
+
+  const bySev = Object.fromEntries((sum?.by_severity || []).map((r) => [r.severity, r.n]));
+  const impact = Number(sum?.total?.total_impact || 0);
+  kh.innerHTML = [
+    ['Open actions', fmt(sum?.total?.n ?? all.length), 'across every source'],
+    ['Critical', fmt(bySev.critical || 0), 'act today', bySev.critical ? 'err' : 'ok'],
+    ['Warnings', fmt(bySev.warning || 0), 'act this week', bySev.warning ? 'warn' : 'ok'],
+    ['Quantified cost', impact ? 'AED ' + fmt(Math.round(impact)) : '—', 'where it can be sized'],
+  ].map(([l, n, d, cls]) => `<div class="kpi ${cls || ''}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+
+  if (!all.length) {
+    const p0 = panel('Nothing to action', 'The engine runs after each collection'); root.append(p0.panel);
+    empty(p0.body, 'No findings yet — either the fleet is clean, or the collectors have not completed a cycle.');
+    return;
+  }
+
+  // category filter
+  const cats = [...new Set(all.map((r) => r.category))].sort();
+  const bar = el('div', 'panel');
+  bar.innerHTML = `<div class="btnrow"><button class="btn primary" data-cat="">All (${all.length})</button>` +
+    cats.map((c) => `<button class="btn" data-cat="${esc(c)}">${esc(c)} (${all.filter((r) => r.category === c).length})</button>`).join('') +
+    `</div>`;
+  root.append(bar);
+
+  const listPanel = panel('Ranked actions', 'Most consequential first — click any row for the evidence behind it');
+  root.append(listPanel.panel);
+
+  const SEV = { critical: 'err', warning: 'warn', info: 'info', good: 'ok' };
+  const draw = (cat) => {
+    const rows = cat ? all.filter((r) => r.category === cat) : all;
+    listPanel.body.innerHTML = '';
+    if (!rows.length) return empty(listPanel.body, 'Nothing in this category');
+    const list = el('div', 'hbars');
+    rows.forEach((r) => {
+      const item = el('div', 'insight-row');
+      item.innerHTML = `
+        <div class="insight-sev"><span class="tag ${SEV[r.severity] || ''}">${esc(r.severity)}</span></div>
+        <div class="insight-main">
+          <div class="insight-title">${esc(r.title)}</div>
+          <div class="insight-action">${esc(r.action || '')}</div>
+        </div>
+        <div class="insight-meta">
+          <span class="tag">${esc(r.category)}</span>
+          ${r.impact_aed ? `<span class="num" style="color:var(--critical);font-weight:600">AED ${fmt(Math.round(r.impact_aed))}</span>` : ''}
+        </div>`;
+      item.onclick = () => drill(r.title, `${r.category} · ${r.severity}`, (b) => {
+        b.innerHTML = '';
+        const why = panel('What we found', 'the evidence behind this flag'); b.append(why.panel);
+        why.body.innerHTML = `<p style="margin:0 0 12px">${esc(r.detail || '')}</p>`;
+        const act = panel('What to do', 'the smallest useful next step'); b.append(act.panel);
+        act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
+        const facts = [
+          ['Entity', `${r.entity_type || '—'} ${r.entity_id || ''}`],
+          ['Fleet', r.fleet_id || 'both'],
+          ['Window', r.window_start ? `${String(r.window_start).slice(0, 10)} → ${String(r.window_end || '').slice(0, 10)}` : 'current state'],
+          ['Estimated cost', r.impact_aed ? 'AED ' + fmt(Math.round(r.impact_aed)) : 'not quantifiable'],
+          ['Rule', r.code],
+          ['Computed', r.computed_at ? new Date(r.computed_at).toLocaleString() : '—'],
+        ];
+        const fp = panel('Details', ''); b.append(fp.panel);
+        fp.body.innerHTML = `<div class="kv">${facts.map(([k, v]) =>
+          `<div class="kv-k">${esc(k)}</div><div class="kv-v">${esc(v)}</div>`).join('')}</div>`;
+      });
+      list.append(item);
+    });
+    listPanel.body.append(list);
+  };
+  draw('');
+  bar.querySelectorAll('button').forEach((b) => {
+    b.onclick = () => {
+      bar.querySelectorAll('button').forEach((x) => x.classList.remove('primary'));
+      b.classList.add('primary'); draw(b.dataset.cat);
+    };
+  });
+};
+
+/* Compliance is the one place where the data is unambiguous: a date, and a vehicle
+   that is either legal or not. Sorted by urgency, not by plate. */
+V.compliance = async (root) => {
+  const kh = el('div', 'kpis'); root.append(kh); loading(kh);
+  const [veh, drv] = await Promise.all([
+    api('/api/compliance/vehicles').catch(() => []),
+    api('/api/compliance/drivers').catch(() => []),
+  ]);
+  const dl = (r) => Number(r.days_left);
+  const vExpired = veh.filter((r) => dl(r) < 0).length;
+  const vWeek = veh.filter((r) => dl(r) >= 0 && dl(r) <= 7).length;
+  const vMonth = veh.filter((r) => dl(r) > 7 && dl(r) <= 45).length;
+  const dExpired = drv.filter((r) => r.licence_expires && dl(r) < 0).length;
+
+  kh.innerHTML = [
+    ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
+    ['Expiring in 7 days', fmt(vWeek), 'renew now', vWeek ? 'err' : 'ok'],
+    ['Expiring in 45 days', fmt(vMonth), 'start the paperwork', vMonth ? 'warn' : 'ok'],
+    ['Driver licences expired', fmt(dExpired), 'stand down until renewed', dExpired ? 'err' : 'ok'],
+  ].map(([l, n, d, cls]) => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+
+  const vp = panel('Vehicle documents', 'registration, insurance and permits with an expiry date');
+  root.append(vp.panel);
+  if (!veh.length) empty(vp.body, 'No vehicle documents collected yet');
+  else vp.body.append(tableFrom(veh.slice(0, 120), [
+    { label: 'Due', key: 'days_left', num: true, render: (r) => {
+      const d = dl(r);
+      const cls = d < 0 ? 'err' : d <= 7 ? 'err' : d <= 45 ? 'warn' : 'ok';
+      return `<span class="tag ${cls}">${d < 0 ? Math.abs(d) + 'd ago' : d + 'd'}</span>`; } },
+    { label: 'Plate', key: 'plate', render: (r) => `<span class="plate">${esc(r.plate || '—')}</span>` },
+    { label: 'Vehicle', key: 'make', render: (r) => esc([r.make, r.model, r.year].filter(Boolean).join(' ') || '—') },
+    { label: 'Document', key: 'doc_type' },
+    { label: 'Expires', key: 'expires_at', render: (r) => String(r.expires_at || '').slice(0, 10) },
+    { label: 'Driver', key: 'driver_name', render: (r) => esc(r.driver_name || '—') },
+  ]));
+
+  const dp = panel('Driver licences', 'from the platforms that publish an expiry date');
+  root.append(dp.panel);
+  if (!drv.length) empty(dp.body, 'No driver licence dates collected yet — Hotel publishes these, Uber does not expose them to this role');
+  else dp.body.append(tableFrom(drv.slice(0, 120), [
+    { label: 'Due', key: 'days_left', num: true, render: (r) => r.licence_expires
+      ? `<span class="tag ${dl(r) < 0 ? 'err' : dl(r) <= 45 ? 'warn' : 'ok'}">${dl(r) < 0 ? Math.abs(dl(r)) + 'd ago' : dl(r) + 'd'}</span>` : '—' },
+    { label: 'Driver', key: 'full_name' },
+    { label: 'Platform', key: 'platform' },
+    { label: 'Licence', key: 'licence_no', render: (r) => `<span class="plate">${esc(r.licence_no || '—')}</span>` },
+    { label: 'Expires', key: 'licence_expires', render: (r) => String(r.licence_expires || '—').slice(0, 10) },
+    { label: 'State', key: 'state', render: (r) => `<span class="tag ${/suspend|deact/i.test(r.state || '') ? 'warn' : 'ok'}">${esc(r.state || '—')}</span>` },
+  ]));
 };
 
 V.sources = async (root) => {
