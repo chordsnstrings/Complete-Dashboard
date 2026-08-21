@@ -237,13 +237,48 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('an unknown property is a 404, not an empty page', missing.status === 404, String(missing.status));
 }
 
-/* ── guests ──────────────────────────────────────────────────────────────── */
+/* ── passengers ──────────────────────────────────────────────────────────
+   The live hotel channel issues a NEW client id per booking: 1,254 ids across
+   1,254 bookings, none repeated. A repeat rate computed over that is a fact
+   about the identifier and not about the customers, and reporting it as a KPI
+   would have been the most confidently wrong number on the page. The endpoint
+   has to detect the situation and say so. */
 {
   const g = await get(`/api/corporate/guests?${W}`);
-  check('guests are identified from the payload', g.total_guests >= 8, String(g.total_guests));
-  check('repeat guests are counted', g.repeat_guests > 0, String(g.repeat_guests));
-  check('the share of bookings that came from repeat guests is stated',
-    g.bookings_from_repeat_pct > 0);
+  check('passengers are identified from the payload', g.total_guests >= 8, String(g.total_guests));
+  check('with a reusable id, repeat bookings are counted', g.repeat_guests > 0, String(g.repeat_guests));
+  check('and the share of bookings from repeat passengers is stated', g.bookings_from_repeat_pct > 0);
+  check('a reusable id is not flagged as per-booking', g.id_is_per_booking === false,
+    String(g.id_is_per_booking));
+
+  // Now the live shape: one id per booking, and nothing repeated.
+  for (let i = 0; i < 40; i++) {
+    await trip({ platform: 'hotel', id: `uniq${i}`, plate: 'L104', drv: 'hd0', day: 25, km: 10,
+      price: 90, pay: 'pos-driver', partner: 'h3', partnerName: 'Solo House',
+      raw: { client: `booking-only-${i}`, roomNumber: String(700 + (i % 3)) } });
+  }
+  // A day of its own, so the detection is not diluted by the reusable-id rows above.
+  const g2 = await get('/api/corporate/guests?from=2026-08-25&to=2026-08-25');
+  check('an id that never repeats is reported as a per-booking record',
+    g2.id_is_per_booking === true, `${g2.total_guests} ids / ${g2.total_bookings} bookings`);
+  check('the caveat says the repeat rate describes the identifier, not the customers',
+    /about the identifier, not about the customers/.test(g2.caveat || ''), String(g2.caveat));
+  check('the room number is offered as the only thing that can recur',
+    Array.isArray(g2.rooms) && g2.rooms.length > 0, String(g2.rooms?.length));
+  check('a room is never described as a person',
+    !/guest/i.test(JSON.stringify(g2.rooms)));
+}
+
+/* ── a cost that is the fare is not a cost ────────────────────────────────
+   The hotel report returns one money figure per booking. The collector wrote
+   it to price AND cost, which made gross margin exactly zero on every property
+   across a full year — a claim about the business that was really a claim
+   about the column. */
+{
+  const s2 = await get(`/api/corporate/summary?${W}`);
+  check('a cost equal to the fare is not reported as a cost',
+    s2.cost == null || s2.has_cost === false || s2.cost !== s2.revenue,
+    `cost ${s2.cost} revenue ${s2.revenue} has_cost ${s2.has_cost}`);
 }
 
 /* ── leakage ─────────────────────────────────────────────────────────────── */

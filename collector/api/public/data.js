@@ -4,10 +4,22 @@
    `#<view>[/<param>[/<sub>]]` — so `#driver/7e96cb47.../territory` is a real,
    linkable address rather than a modal that vanishes on reload. */
 
+/* Storage access is guarded, not assumed. A browser with site data blocked
+   THROWS on the getter rather than returning null, and this module is also
+   imported by the Node test suite where there is no localStorage at all — in
+   both cases an unguarded read at module scope takes the whole app down before
+   a single view renders. */
+export const store = {
+  get(key, fallback = '') {
+    try { return localStorage.getItem(key) ?? fallback; } catch { return fallback; }
+  },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { /* not available */ } },
+};
+
 export const state = {
   view: 'overview', param: null, sub: null,
   days: 30, platform: '', fleet: '',
-  admin: localStorage.getItem('adminToken') || '',
+  admin: store.get('adminToken'),
 };
 
 export const api = async (path, opts) => {

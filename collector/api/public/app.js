@@ -4,7 +4,7 @@
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, tabBar, pill, note, entity, dayStr, dtStr, money, pct } from './ui.js';
-import { state, api, params, q, qAll, href, parseHash, navigate } from './data.js';
+import { state, api, params, q, qAll, href, parseHash, navigate, store } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCauses } from './causes.js';
@@ -12,6 +12,7 @@ import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './cor
 import { renderSettlement, SETTLE_TABS } from './settlement.js';
 import { renderCoverage } from './coverage.js';
 import { renderCorridors } from './corridors.js';
+import { renderAnalyst, ANALYST_TABS } from './analyst.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -49,6 +50,7 @@ const VIEWS = [
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Analyse', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
   { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Analyse', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
   { id: 'insights', label: 'Action list', ic: '✦', grp: 'Operate', sub: 'What needs doing, ranked by what it costs to ignore' },
+  { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Operate', sub: 'Claims a model proposed and the database judged — with the numbers that decided each one' },
   { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'Operate', sub: 'Documents and licences with an expiry date attached' },
   { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Operate', sub: 'Seat occupied, vehicle moved — but no booking on any channel' },
   { id: 'safety', label: 'Safety', ic: '△', grp: 'Operate', sub: 'Harsh-driving events from the telematics layer' },
@@ -309,6 +311,7 @@ V.property = async (root) => {
 V.settlement = async (root) => renderSettlement(root, SETTLE_TABS.some((t) => t.id === state.param) ? state.param : 'mix');
 V.coverage = async (root) => renderCoverage(root);
 V.corridors = async (root) => renderCorridors(root);
+V.analyst = async (root) => renderAnalyst(root);
 
 V.vehicles = async (root) => {
   // The directory is the way into the per-vehicle pages; the panel below it is
@@ -1204,7 +1207,7 @@ V.settings = async (root) => {
   auth.body.append(tokRow);
   tokRow.querySelector('#saveTok').onclick = () => {
     state.admin = tokRow.querySelector('#admTok').value.trim();
-    localStorage.setItem('adminToken', state.admin);
+    store.set('adminToken', state.admin);
     tokRow.querySelector('#tokNote').className = 'note ok';
     tokRow.querySelector('#tokNote').textContent = 'saved in this browser';
   };
@@ -1373,9 +1376,9 @@ $('#themeBtn').onclick = () => {
   const r = document.documentElement, cur = r.getAttribute('data-theme');
   const dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   r.setAttribute('data-theme', dark ? 'light' : 'dark');
-  localStorage.setItem('theme', dark ? 'light' : 'dark');
+  store.set('theme', dark ? 'light' : 'dark');
 };
-if (localStorage.getItem('theme')) document.documentElement.setAttribute('data-theme', localStorage.getItem('theme'));
+if (store.get('theme')) document.documentElement.setAttribute('data-theme', store.get('theme'));
 // Routes are `#<view>[/<param>[/<sub>]]`. An unknown view falls back to the
 // overview rather than rendering nothing.
 function applyRoute() {

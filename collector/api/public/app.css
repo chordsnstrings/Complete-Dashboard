@@ -797,3 +797,33 @@ b.warn-t{color:var(--warn)}
 .wv i.pm{background:var(--s2)}
 .wv .v{font-size:.74rem;text-align:right;color:var(--ink-2)}
 .wv .v .sep{color:var(--ink-3)}
+
+/* ── analyst findings ────────────────────────────────────────────────────
+   A claim, then immediately the four numbers that decided it. The numbers are
+   not a detail behind a disclosure — they are the reason the claim is on the
+   page at all, so they sit at the same level as the sentence. */
+.finding{
+  border:1px solid var(--rule);border-left:3px solid var(--rule-strong);
+  border-radius:var(--r-sm);background:var(--surface);padding:14px 16px;margin:0 0 12px;
+}
+.finding.t-ok{border-left-color:var(--good)}
+.finding.t-err{border-left-color:var(--critical)}
+.finding.t-warn{border-left-color:var(--warn)}
+.finding .fh{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+.finding .fh b{font-size:.94rem;line-height:1.4}
+.finding .fw{color:var(--ink-2);font-size:.78rem;line-height:1.5;margin:8px 0 12px}
+.fnums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;
+  border-top:1px solid var(--rule);padding-top:10px}
+.fnums > div{display:flex;flex-direction:column;gap:1px}
+.fnums span{font-size:.66rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3)}
+.fnums b{font-size:1.05rem}
+.fnums i{font-style:normal;font-size:.7rem;color:var(--ink-3)}
+.finding .fwhy,.finding .fact{font-size:.78rem;color:var(--ink-2);margin:10px 0 0;line-height:1.5}
+.finding .fwhy b,.finding .fact b{color:var(--ink);margin-right:6px}
+.finding .fcap{font-size:.72rem;color:var(--ink-3);margin:8px 0 0;font-style:italic}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:.72rem;
+  padding:3px 9px;border-radius:999px;border:1px solid var(--rule);
+  background:var(--surface-2);color:var(--ink-2);
+}

@@ -10,6 +10,7 @@ import * as external from './sources/external.js';
 import * as events from './sources/events.js';
 import { reconcile } from './reconcile.js';
 import { computeInsights } from './insights.js';
+import { runAnalyst } from './analyst.js';
 import { rebuildCustody } from './custody.js';
 import { config, loadSettings } from './config.js';
 import { monthsAgo, daysAgo } from './util.js';
@@ -37,6 +38,27 @@ export async function runWindow(mode, from, to) {
     await computeInsights({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
   } catch (e) { log.error('run', 'insights', { err: String(e) }); }
   await setState('collector', '-', 'last_' + mode, new Date().toISOString());
+}
+
+/* One analyst pass: build a brief of aggregates, ask the model for testable
+   claims, measure each against the rest of the fleet, keep the verdicts. Runs
+   on its own daily schedule rather than inside runWindow, because it costs a
+   model call and its input barely moves between two afternoons. */
+export async function analystPass({ days = 30 } = {}) {
+  await loadSettings(true);
+  const to = new Date();
+  const from = daysAgo(days);
+  const iso = (d) => d.toISOString().slice(0, 10);
+  try {
+    const r = await runAnalyst({ from: iso(from), to: iso(to) });
+    log.info('analyst', 'pass complete', {
+      run: r.run_id, proposed: r.proposed,
+      confirmed: r.findings.filter((f) => f.verdict === 'confirmed').length,
+      refuted: r.findings.filter((f) => f.verdict === 'refuted').length,
+      immaterial: r.findings.filter((f) => f.verdict === 'immaterial').length,
+    });
+    return r;
+  } catch (e) { log.error('analyst', 'pass failed', { err: String(e) }); return null; }
 }
 
 export const backfill = () => runWindow('backfill', monthsAgo(config.backfillMonths), new Date());

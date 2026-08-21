@@ -80,7 +80,14 @@ export async function collect({ from, to, mode }) {
         // Hotel is the only source that records where the driver started FROM, so it is
         // the only place we can measure the unpaid approach leg honestly.
         deadhead_km: deadheadKm(t),
-        cost: t.cost ?? null,
+        /* `cost` on this report is the charge for the ride, not what the ride
+           cost us to deliver — it is the same number as `price`, and storing it
+           in both columns produced a gross margin of exactly zero on every
+           property across a full year of live data. There is one money figure
+           on this channel; it is recorded once. A real cost only exists where
+           the API also returns computedPrice, which across 1,254 bookings it
+           never has. */
+        cost: (t.computedPrice != null && t.cost != null) ? Number(t.cost) : null,
         margin: (t.computedPrice != null && t.cost != null) ? Number(t.computedPrice) - Number(t.cost) : null,
         hours: t.hours ?? null,
         zone: t.tripZone || null,

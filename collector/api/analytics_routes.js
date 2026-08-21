@@ -212,7 +212,11 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     res.json({
       ...s,
       revenue: s.priced ? round(s.revenue, 0) : null,
+      // A cost figure only means something if it is a DIFFERENT number from the
+      // fare. The hotel report returns one money value per booking; recording
+      // it twice produced a gross margin of exactly zero on every property.
       cost: s.cost != null ? round(s.cost, 0) : null,
+      has_cost: s.cost != null && s.priced > 0 && round(s.cost, 0) !== round(s.revenue, 0),
       avg_fare: s.priced ? round(NUM(s.revenue) / s.priced, 2) : null,
       km: round(s.km, 0),
       revenue_per_km: s.priced && NUM(s.km) > 0 ? round(NUM(s.revenue) / NUM(s.km), 2) : null,
@@ -315,39 +319,70 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     });
   }));
 
-  /* Guests. The hotel channel is the only source with a stable customer id, so
-     it is the only place repeat business is measurable at all. */
+  /* Passengers. The hotel channel issues a NEW passenger record per booking —
+     checked against a year of live data, 1,254 bookings carry 1,254 distinct
+     client ids and no id appears twice. So this is not a customer table and
+     repeat business is not measurable from it. The endpoint says that in the
+     response rather than reporting a repeat rate of zero as if it were a
+     finding about the business. */
   app.get('/api/corporate/guests', wrap(async (req, res) => {
     const p = range(req);
     const rows = await q(
       `SELECT guest_id, count(*)::int bookings,
-              sum(price) FILTER (WHERE NOT is_complimentary) revenue,
+              sum(price) FILTER (WHERE NOT is_complimentary) AS revenue,
               count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int priced,
               count(DISTINCT partner_id)::int properties,
               max(coalesce(partner_name, partner_id)) property,
               max(room_no) room_no, max(trip_purpose) purpose,
               min(requested_at) first_at, max(requested_at) last_at,
-              sum(distance_km) FILTER (WHERE has_distance) km
+              sum(distance_km) FILTER (WHERE has_distance) AS km
        FROM trip_ext WHERE ${F} AND platform = 'hotel' AND guest_id IS NOT NULL
        GROUP BY 1 ORDER BY bookings DESC, revenue DESC NULLS LAST LIMIT 300`, p);
-    const all = await q(
-      `SELECT count(DISTINCT guest_id)::int guests, count(*)::int bookings
+    const [all] = await q(
+      `SELECT count(DISTINCT guest_id)::int guests, count(*)::int bookings,
+              count(*) FILTER (WHERE room_no IS NOT NULL)::int with_room,
+              count(DISTINCT room_no)::int rooms
        FROM trip_ext WHERE ${F} AND platform = 'hotel' AND guest_id IS NOT NULL`, p);
     const repeat = rows.filter((r) => r.bookings > 1);
+
+    // One id per booking means the id is a booking, whatever the field is called.
+    const idIsPerBooking = all && all.bookings > 20 && all.guests === all.bookings;
+
+    // Where a room number IS recorded, it is the only thing on this channel
+    // that can recur — so it is the only repeat signal available, and it is
+    // reported as what it is: a room, not a person.
+    const byRoom = await q(
+      `SELECT room_no, count(*)::int bookings,
+              count(DISTINCT coalesce(partner_name, partner_id))::int properties,
+              max(coalesce(partner_name, partner_id)) property,
+              sum(price) FILTER (WHERE NOT is_complimentary) AS revenue,
+              min(requested_at) first_at, max(requested_at) last_at
+       FROM trip_ext
+       WHERE ${F} AND platform = 'hotel' AND room_no IS NOT NULL AND room_no ~ '^[0-9]{2,5}$'
+       GROUP BY 1 HAVING count(*) > 1 ORDER BY bookings DESC LIMIT 80`, p);
+
     res.json({
       guests: rows.map((r) => ({
         ...r, revenue: r.priced ? round(r.revenue, 0) : null, km: round(r.km, 0),
         span_days: r.first_at && r.last_at
           ? Math.round((Date.parse(r.last_at) - Date.parse(r.first_at)) / 864e5) : null,
       })),
-      total_guests: all[0]?.guests ?? 0,
-      total_bookings: all[0]?.bookings ?? 0,
+      total_guests: all?.guests ?? 0,
+      total_bookings: all?.bookings ?? 0,
+      bookings_with_room: all?.with_room ?? 0,
+      distinct_rooms: all?.rooms ?? 0,
       repeat_guests: repeat.length,
-      // Of the guests visible in this window, how many booked more than once.
-      // Short windows understate this by construction, which the caption says.
       repeat_rate_pct: share(repeat.length, rows.length),
       bookings_from_repeat_pct: share(repeat.reduce((a, r) => a + r.bookings, 0),
         rows.reduce((a, r) => a + r.bookings, 0)),
+      // The single most important field in this response.
+      id_is_per_booking: idIsPerBooking,
+      caveat: idIsPerBooking
+        ? `This channel issues a new passenger record per booking — ${all.guests} ids across `
+          + `${all.bookings} bookings, none of them repeated. Repeat travel cannot be measured from it, `
+          + 'and a repeat rate of 0% here is a fact about the identifier, not about the customers.'
+        : null,
+      rooms: byRoom.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
     });
   }));
 
@@ -628,5 +663,60 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         ? round(((NUM(r.price_cash) || 0) / ((NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0))) * 100, 1)
         : null,
     })));
+  }));
+}
+
+/* ───────────────────────── the analyst ─────────────────────────
+   Findings a model proposed and the database then judged. Read-only here; the
+   generation pass is a collector job, because it costs a model call and must
+   not be triggerable by anyone who loads a page. */
+export function analystRoutes(app, { q, wrap, range }) {
+  app.get('/api/analyst/findings', wrap(async (req, res) => {
+    const [from, to] = range(req);
+    const verdicts = String(req.query.verdict || 'confirmed').split(',')
+      .filter((v) => ['confirmed', 'refuted', 'immaterial', 'unsupported'].includes(v));
+    const rows = await q(
+      `SELECT * FROM analyst_finding
+       WHERE window_start >= $1::date AND window_end <= $2::date
+         AND ($3::text[] IS NULL OR verdict = ANY($3))
+       ORDER BY created_at DESC,
+                CASE verdict WHEN 'confirmed' THEN 0 WHEN 'refuted' THEN 1
+                             WHEN 'immaterial' THEN 2 ELSE 3 END,
+                abs(coalesce(effect_pct, 0)) DESC
+       LIMIT 300`, [from, to, verdicts.length ? verdicts : null]);
+    // The unit belongs to the metric, not to a guess at the front end: a page
+    // deriving "%" from a column name printed a distance difference as a bare
+    // number and a fare difference as a percentage.
+    const { METRICS } = await import('../src/analyst.js');
+    for (const r of rows) {
+      r.unit = METRICS[r.metric]?.unit ?? '';
+      r.metric_label = METRICS[r.metric]?.label ?? r.metric;
+    }
+    const [counts] = await q(
+      `SELECT count(*) FILTER (WHERE verdict = 'confirmed')::int confirmed,
+              count(*) FILTER (WHERE verdict = 'refuted')::int refuted,
+              count(*) FILTER (WHERE verdict = 'immaterial')::int immaterial,
+              count(*) FILTER (WHERE verdict = 'unsupported')::int unsupported,
+              count(DISTINCT run_id)::int runs, max(created_at) last_run, max(model) model
+       FROM analyst_finding
+       WHERE window_start >= $1::date AND window_end <= $2::date`, [from, to]);
+    res.json({ ...counts, findings: rows });
+  }));
+
+  /* What the checker is allowed to check, published so the rules are readable
+     rather than folklore. A threshold nobody can see is a threshold nobody can
+     argue with. */
+  app.get('/api/analyst/rules', wrap(async (_req, res) => {
+    const { METRICS, DIMENSIONS, MATERIALITY } = await import('../src/analyst.js');
+    res.json({
+      metrics: Object.entries(METRICS).map(([k, m]) => ({
+        metric: k, label: m.label, kind: m.kind, unit: m.unit, defined_over: m.where })),
+      dimensions: Object.keys(DIMENSIONS),
+      materiality: MATERIALITY,
+      note: 'The model chooses a metric, a dimension and a segment from these lists. It never writes a '
+        + 'query. Each claim is measured against the rest of the fleet in the same window, and is only '
+        + 'shown as confirmed when it is true, large enough to act on, and larger than the sample size '
+        + 'would produce by chance.',
+    });
   }));
 }

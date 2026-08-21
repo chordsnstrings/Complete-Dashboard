@@ -679,7 +679,7 @@ app.get('/api/settlement/receivables', (_, r) => r.json({
   total: 8250, total_trips: 84,
 }));
 app.get('/api/corporate/summary', (_, r) => r.json({
-  bookings: 1253, priced: 1245, revenue: 138400, cost: 96200, avg_fare: 111.2, km: 18600,
+  bookings: 1253, priced: 1245, revenue: 138400, cost: 96200, has_cost: true, avg_fare: 111.2, km: 18600,
   revenue_per_km: 7.44, deadhead_km: 3120, deadhead_measured: 1140, deadhead_measured_pct: 91,
   deadhead_ratio_pct: 16.8, foc_trips: 10, overrun_trips: 7, scheduled_trips: 604, scheduled_pct: 48.2,
   authorized_trips: 155, authorized_pct: 12.4, missing_trips: 0, guests: 812, properties: 4,
@@ -724,7 +724,11 @@ app.get('/api/corporate/guests', (_, r) => r.json({
     purpose: i % 5 === 0 ? 'AIRPORT TRANSFER' : null, first_at: dayISO(90 - i), last_at: dayISO(i % 30),
     km: (8 - (i % 7)) * 14, span_days: 90 - i - (i % 30) })),
   total_guests: 812, total_bookings: 1253, repeat_guests: 214, repeat_rate_pct: 26.4,
-  bookings_from_repeat_pct: 48.1,
+  bookings_from_repeat_pct: 48.1, bookings_with_room: 168, distinct_rooms: 139,
+  id_is_per_booking: false, caveat: null,
+  rooms: Array.from({ length: 10 }, (_, i) => ({ room_no: String(1200 + i), bookings: 6 - (i % 5),
+    properties: 1, property: hotels[i % hotels.length].name, revenue: (6 - (i % 5)) * 110,
+    first_at: dayISO(50 - i), last_at: dayISO(i) })),
 }));
 app.get('/api/corporate/leakage', (req, r) => {
   const kinds = [
@@ -831,6 +835,65 @@ app.get('/api/funnel/drivers', (_, r) => r.json(drivers.map((d, i) => ({
   commission_cost: 800 - i * 50, gross: 4000 - i * 260, hours: Math.round((360000 - i * 20000) / 360) / 10,
   cash_pct: Math.round(((3000 - i * 200) / (4000 - i * 260)) * 1000) / 10,
 }))));
+
+
+/* ── analyst fixtures ────────────────────────────────────────────────────
+   Deliberately includes the three verdicts that are NOT findings, because the
+   page exists as much to show what the model got wrong as what it got right. */
+app.get('/api/analyst/findings', (req, r) => {
+  const all = [
+    { verdict: 'confirmed', claim: 'Cash-settled trips complete far less often than every other settlement route',
+      verdict_reason: 'completion rate for cash is 70.2% against 95.1% across the other 4,140 trips (p < 0.001)',
+      metric: 'completion_pct', segment: 'cash', measured_value: 70.2, baseline_value: 95.1,
+      segment_n: 430, baseline_n: 4140, effect: -24.9, effect_pct: -26.2, p_value: 0.0000004,
+      claimed_value: 72, why: 'A cancelled cash job costs the approach fuel and the slot with no fare at all.',
+      action: 'Pull the twenty worst cash cancellations and check whether the rider or the driver ended them.' },
+    { verdict: 'confirmed', claim: 'The Palm Grand account produces a much longer unpaid approach leg than other properties',
+      verdict_reason: 'unpaid approach distance for Palm Grand is 5.9 km against 2.1 km across the other 557 records',
+      metric: 'avg_deadhead_km', segment: 'Palm Grand', measured_value: 5.9, baseline_value: 2.1,
+      segment_n: 696, baseline_n: 557, effect: 3.8, effect_pct: 181.0, p_value: null,
+      claimed_value: null, why: 'Every approach kilometre is driven with nobody paying.',
+      action: 'Stage two cars at the property between 07:00 and 10:00 rather than dispatching from Business Bay.' },
+    { verdict: 'refuted', claim: 'Night trips are cancelled more often than the rest of the day',
+      verdict_reason: 'cancellation rate for night is 4.1%, lower than the 7.2% elsewhere — the claim says higher',
+      metric: 'cancel_pct', segment: 'night', measured_value: 4.1, baseline_value: 7.2,
+      segment_n: 880, baseline_n: 3690, effect: -3.1, effect_pct: -43.1, p_value: 0.0002,
+      claimed_value: 12, why: 'Night cancellations would point at driver availability after midnight.', action: null },
+    { verdict: 'immaterial', claim: 'Friday has a higher cancellation rate than other weekdays',
+      verdict_reason: 'the 1.4% difference is within what 620 and 3,950 rows would produce by chance (p = 0.214)',
+      metric: 'cancel_pct', segment: 'Friday', measured_value: 8.3, baseline_value: 6.9,
+      segment_n: 620, baseline_n: 3950, effect: 1.4, effect_pct: 20.3, p_value: 0.214,
+      claimed_value: 15, why: 'A weekday effect would be worth rostering around.', action: null },
+    { verdict: 'unsupported', claim: 'Uber Black trips earn a higher average fare than UberX',
+      verdict_reason: 'no rows for tier = Black where average fare is defined',
+      metric: 'avg_fare', segment: 'Black', measured_value: null, baseline_value: null,
+      segment_n: 0, baseline_n: 1245, effect: null, effect_pct: null, p_value: null,
+      claimed_value: 180, why: 'Tier pricing would be the clearest lever on revenue per kilometre.', action: null },
+  ].map((f, i) => ({ ...f, id: i + 1, run_id: 'an-20260821', dimension: 'settlement',
+    unit: f.metric === 'avg_deadhead_km' ? 'km' : f.metric === 'avg_fare' ? 'AED' : '%',
+    metric_label: f.metric,
+    direction: f.effect != null && f.effect < 0 ? 'lower' : 'higher', check_kind: 'rate_gap',
+    model: 'glm-5-2-260617', created_at: new Date().toISOString(),
+    window_start: dayISO(30), window_end: dayISO(0) }));
+  const want = String(req.query.verdict || 'confirmed').split(',');
+  r.json({ confirmed: 2, refuted: 1, immaterial: 1, unsupported: 1, runs: 3,
+    last_run: new Date().toISOString(), model: 'glm-5-2-260617',
+    findings: all.filter((f) => want.includes(f.verdict)) });
+});
+app.get('/api/analyst/rules', (_, r) => r.json({
+  metrics: [
+    { metric: 'completion_pct', label: 'completion rate', kind: 'rate', unit: '%', defined_over: 'is_booking AND outcome IS NOT NULL' },
+    { metric: 'cancel_pct', label: 'cancellation rate', kind: 'rate', unit: '%', defined_over: 'is_booking AND outcome IS NOT NULL' },
+    { metric: 'cash_pct', label: 'share settled in cash', kind: 'rate', unit: '%', defined_over: 'is_booking AND settlement_class IS NOT NULL' },
+    { metric: 'premium_pct', label: 'share on a premium Uber tier', kind: 'rate', unit: '%', defined_over: "platform = 'uber' AND is_premium_tier IS NOT NULL" },
+    { metric: 'avg_fare', label: 'average fare', kind: 'mean', unit: 'AED', defined_over: 'is_booking AND price IS NOT NULL AND NOT is_complimentary' },
+    { metric: 'avg_deadhead_km', label: 'unpaid approach distance', kind: 'mean', unit: 'km', defined_over: 'deadhead_km IS NOT NULL' },
+  ],
+  dimensions: ['platform', 'fleet', 'settlement', 'tier', 'daypart', 'weekday', 'hour', 'property', 'zone', 'booking_type', 'vehicle', 'driver'],
+  materiality: { minSegmentN: 30, minBaselineN: 30, minRelEffect: 0.15,
+    minAbsEffect: { '%': 3, AED: 5, km: 0.5, min: 2 }, maxP: 0.05 },
+  note: 'The model chooses a metric, a dimension and a segment from these lists. It never writes a query.',
+}));
 
 app.get(/^\/api\//, (_, r) => r.json([]));
 

@@ -7,7 +7,7 @@ import { describeSettings, setSetting, deleteSetting, loadSettings } from '../sr
 import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
-import { analyticsRoutes } from './analytics_routes.js';
+import { analyticsRoutes, analystRoutes } from './analytics_routes.js';
 import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -616,7 +616,9 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
 // trigger a collector run on demand (backfill/incremental) — the worker owns scheduling,
 // this just records intent the worker picks up on its next tick.
 app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
-  const mode = req.body?.mode === 'backfill' ? 'backfill' : 'incremental';
+  // An allowlist, not a pass-through: the value is written to source_state and
+  // read back by the collector as an instruction.
+  const mode = ['backfill', 'analyst'].includes(req.body?.mode) ? req.body.mode : 'incremental';
   await pool.query(
     `INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ('collector','-','trigger',$1, now())
      ON CONFLICT (source, fleet_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [mode]);
@@ -900,6 +902,11 @@ vehicleRoutes(app, { q, wrap, endOfDay });
    Settlement, the corporate channel, product tiers, coverage holes and
    corridors — all built on trip_ext, all registered before the catch-all. */
 analyticsRoutes(app, { q, wrap, range, F, FB });
+
+/* ───────────────── the analyst ─────────────────
+   Read-only. A generation pass costs a model call and runs from the collector
+   schedule, not from a page load. */
+analystRoutes(app, { q, wrap, range });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

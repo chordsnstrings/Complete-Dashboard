@@ -24,7 +24,9 @@ const ROUTES = [
   'corporate/leakage', 'corporate/leakage/complimentary',
   'corporate/approach', 'corporate/approach/daypart',
   'property/h-palm', 'property/h-palm/guests', 'property/h-palm/drivers',
-  'causes', 'insights', 'compliance', 'unauthorized',
+  'causes', 'insights',
+  'analyst', 'analyst/refuted', 'analyst/immaterial', 'analyst/unsupported', 'analyst/rules',
+  'compliance', 'unauthorized',
   'safety', 'live', 'map', 'sources', 'coverage', 'settings',
 ];
 const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';

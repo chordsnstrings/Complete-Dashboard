@@ -26,7 +26,7 @@ import { q, qAll, href, state } from './data.js';
 export const CORP_TABS = [
   { id: 'overview', label: 'Overview', ic: '◱' },
   { id: 'properties', label: 'Properties', ic: '❑' },
-  { id: 'guests', label: 'Guests', ic: '◧' },
+  { id: 'guests', label: 'Passengers', ic: '◧' },
   { id: 'leakage', label: 'Leakage', ic: '⚠' },
   { id: 'approach', label: 'Approach legs', ic: '◍' },
 ];
@@ -53,15 +53,23 @@ async function corpOverview(host) {
   const kpiHost = el('div'); host.append(kpiHost); loading(kpiHost);
   const s = await q('/api/corporate/summary');
   kpiHost.innerHTML = '';
-  const grossMargin = s.revenue != null && s.cost != null ? s.revenue - s.cost : null;
+  // A margin needs two different numbers. This channel returns one money value
+  // per booking; the API says whether what it stored as `cost` is genuinely a
+  // second figure, and if it is not there is no margin to show.
+  const grossMargin = s.has_cost ? s.revenue - s.cost : null;
   kpiHost.append(kpiRow([
     { label: 'Bookings', value: fmt(s.bookings), sub: `${s.properties} properties · ${s.guests} guests` },
     { label: 'Revenue', value: money(s.revenue), sub: `over ${fmt(s.priced)} priced bookings` },
     { label: 'Average fare', value: money(s.avg_fare, 'AED', 2), sub: 'complimentary rides excluded' },
-    { label: 'Cost of delivery', value: money(s.cost), sub: 'the only channel that reports one' },
-    { label: 'Gross margin', value: grossMargin == null ? '—' : money(grossMargin),
-      sub: s.revenue ? `${pct((grossMargin / s.revenue) * 100, 1)} of revenue` : null,
-      tone: grossMargin == null ? null : grossMargin > 0 ? 'good' : 'critical' },
+    s.has_cost
+      ? { label: 'Cost of delivery', value: money(s.cost), sub: 'reported per booking by this channel' }
+      : { label: 'Revenue per km', value: money(s.revenue_per_km, 'AED', 2), sub: 'over priced bookings only' },
+    s.has_cost
+      ? { label: 'Gross margin', value: money(grossMargin),
+          sub: s.revenue ? `${pct((grossMargin / s.revenue) * 100, 1)} of revenue` : null,
+          tone: grossMargin > 0 ? 'good' : 'critical' }
+      : { label: 'Booked in advance', value: pct(s.scheduled_pct, 1),
+          sub: `${fmt(s.scheduled_trips)} of ${fmt(s.bookings)} bookings` },
     { label: 'Unpaid approach', value: s.deadhead_km == null ? '—' : `${fmt(s.deadhead_km)} km`,
       sub: s.deadhead_ratio_pct != null ? `${pct(s.deadhead_ratio_pct, 1)} of paid distance` : null,
       tone: s.deadhead_ratio_pct > 20 ? 'warn' : null },
@@ -150,9 +158,12 @@ async function corpOverview(host) {
     ].filter(Boolean).join(' ') || 'Click any figure for the bookings behind it.'));
   });
 
-  host.append(note('This channel is the only source in the fleet that reports a cost, a property, '
-    + 'a guest and the driver’s starting point. Everything on this page comes from fields that were '
-    + 'being collected and stored but never read.'));
+  host.append(note('Everything on this page comes from fields that were being collected and stored but '
+    + 'never read: the property, the booking type, the payment route, the room, the authorisation, and '
+    + 'the driver’s starting point — which makes this the only channel in the fleet where the unpaid '
+    + 'approach leg is measurable at all.'
+    + (s.has_cost ? '' : ' It does not report a delivery cost: the report returns one money figure per '
+      + 'booking, so there is a fare and no margin, and nothing here pretends otherwise.')));
 }
 
 /* ── properties ───────────────────────────────────────────────────────── */
@@ -167,9 +178,11 @@ async function corpProperties(host) {
     { label: 'Bookings', key: 'bookings', num: true, render: (r) => `${fmt(r.bookings)} <small class="dim">${pct((r.bookings / totalB) * 100, 1)}</small>` },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
     { label: 'Avg fare', key: 'avg_fare', num: true, render: (r) => money(r.avg_fare, 'AED', 2) },
-    { label: 'Cost', key: 'cost', num: true, render: (r) => money(r.cost) },
-    { label: 'Margin', key: 'm', num: true, render: (r) => (r.revenue != null && r.cost != null
-      ? `${money(r.revenue - r.cost)} <small class="dim">${pct(((r.revenue - r.cost) / r.revenue) * 100, 0)}</small>` : '—') },
+    ...(rows.some((r) => r.cost != null && r.cost !== r.revenue) ? [
+      { label: 'Cost', key: 'cost', num: true, render: (r) => money(r.cost) },
+      { label: 'Margin', key: 'm', num: true, render: (r) => (r.revenue != null && r.cost != null
+        ? `${money(r.revenue - r.cost)} <small class="dim">${pct(((r.revenue - r.cost) / r.revenue) * 100, 0)}</small>` : '—') },
+    ] : []),
     { label: 'AED/km', key: 'revenue_per_km', num: true, render: (r) => money(r.revenue_per_km, 'AED', 2) },
     { label: 'Guests', key: 'guests', num: true },
     { label: 'Bookings/guest', key: 'bookings_per_guest', num: true, render: (r) => fmt(r.bookings_per_guest, 2) },
@@ -179,15 +192,56 @@ async function corpProperties(host) {
     { label: 'Given away', key: 'foc', num: true },
     { label: 'Last booking', key: 'last_at', render: (r) => dayStr(r.last_at) },
   ]));
-  host.append(note('Margin is revenue minus the cost this channel reports per booking — no other '
-    + 'channel reports one, so this is the only place a real margin can be computed rather than assumed.'));
+  host.append(note(rows.some((r) => r.cost != null && r.cost !== r.revenue)
+    ? 'Margin is revenue minus the cost this channel reports per booking.'
+    : 'There is no margin column because there is no cost: this report returns a single money figure per '
+      + 'booking. Not every row here is a hotel either — the booking system uses the same field for '
+      + 'internal categories such as office transport and self-managed rides, and they are shown as they '
+      + 'are labelled rather than quietly folded into a property.'));
 }
 
-/* ── guests ───────────────────────────────────────────────────────────── */
+/* ── passengers ───────────────────────────────────────────────────────── */
 async function corpGuests(host) {
   loading(host);
   const g = await q('/api/corporate/guests');
   host.innerHTML = '';
+
+  if (g.id_is_per_booking) {
+    // The honest version of this page. A repeat rate of 0% here would be a
+    // statement about the identifier, and displaying it as a KPI would be a
+    // statement about the customers — which is not the same thing and is not
+    // supported by anything in this data.
+    host.append(kpiRow([
+      { label: 'Passenger records', value: fmt(g.total_guests), sub: `across ${fmt(g.total_bookings)} bookings` },
+      { label: 'Bookings with a room number', value: fmt(g.bookings_with_room),
+        sub: g.total_bookings ? pct((g.bookings_with_room / g.total_bookings) * 100, 1) + ' of bookings' : null },
+      { label: 'Rooms seen more than once', value: fmt(g.rooms.length),
+        tone: g.rooms.length ? 'good' : null },
+      { label: 'Repeat travel', value: 'not measurable', tone: 'warn' },
+    ]));
+    host.append(note(g.caveat));
+    if (g.rooms.length) {
+      const { panel: p, body } = panel('Rooms that travelled more than once',
+        'The only thing on this channel that recurs. A room is not a person — a returning guest and two '
+        + 'different guests in the same room look identical here — but a room booking cars repeatedly is '
+        + 'still worth knowing about.');
+      body.append(tableFrom(g.rooms, [
+        { label: 'Room', key: 'room_no' },
+        { label: 'Property', key: 'property', render: (r) => esc(r.property || '—') },
+        { label: 'Bookings', key: 'bookings', num: true },
+        { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+        { label: 'First', key: 'first_at', render: (r) => dayStr(r.first_at) },
+        { label: 'Last', key: 'last_at', render: (r) => dayStr(r.last_at) },
+      ]));
+      host.append(p);
+    }
+    const { panel: p2, body: b2 } = panel('Every passenger record',
+      'One row per booking, because that is what this channel issues.');
+    b2.append(tableFrom(g.guests, GUEST_COLS));
+    host.append(p2);
+    return;
+  }
+
   host.append(kpiRow([
     { label: 'Guests', value: fmt(g.total_guests), sub: `across ${fmt(g.total_bookings)} bookings` },
     { label: 'Booked more than once', value: fmt(g.repeat_guests), sub: pct(g.repeat_rate_pct, 1) + ' of guests' },
@@ -195,24 +249,22 @@ async function corpGuests(host) {
       tone: g.bookings_from_repeat_pct > 40 ? 'good' : null },
     { label: 'Bookings per guest', value: g.total_guests ? fmt(g.total_bookings / g.total_guests, 2) : '—' },
   ]));
-  host.append(note('A short window understates repeat business by construction: a guest who books '
-    + 'once a quarter looks like a stranger inside a 30-day range. Widen the range above to see the '
-    + 'real pattern. The hotel channel is the only source with a stable customer id, so it is the '
-    + 'only place repeat business is measurable at all.'));
-  if (!g.guests.length) return empty(host, 'No guest identified in this window');
-  host.append(tableFrom(g.guests, [
-    { label: 'Guest', key: 'guest_id', render: (r) => `<code>${esc(String(r.guest_id).slice(-8))}</code>` },
-    { label: 'Property', key: 'property', render: (r) => esc(r.property || '—') },
-    { label: 'Room', key: 'room_no' },
-    { label: 'Bookings', key: 'bookings', num: true },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
-    { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'First', key: 'first_at', render: (r) => dayStr(r.first_at) },
-    { label: 'Last', key: 'last_at', render: (r) => dayStr(r.last_at) },
-    { label: 'Span', key: 'span_days', num: true, render: (r) => (r.span_days == null ? '—' : `${r.span_days}d`) },
-    { label: 'Purpose', key: 'purpose', render: (r) => esc((r.purpose || '').replace(/\s+/g, ' ').slice(0, 40) || '—') },
-  ]));
+  host.append(note('A short window understates repeat business by construction: a guest who books once a '
+    + 'quarter looks like a stranger inside a 30-day range. Widen the range above to see the real pattern.'));
+  if (!g.guests.length) return empty(host, 'No passenger identified in this window');
+  host.append(tableFrom(g.guests, GUEST_COLS));
 }
+
+const GUEST_COLS = [
+  { label: 'Record', key: 'guest_id', render: (r) => `<code>${esc(String(r.guest_id).slice(-8))}</code>` },
+  { label: 'Property', key: 'property', render: (r) => esc(r.property || '—') },
+  { label: 'Room', key: 'room_no' },
+  { label: 'Bookings', key: 'bookings', num: true },
+  { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+  { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
+  { label: 'When', key: 'first_at', render: (r) => dayStr(r.first_at) },
+  { label: 'Purpose', key: 'purpose', render: (r) => esc((r.purpose || '').replace(/\s+/g, ' ').slice(0, 40) || '—') },
+];
 
 /* ── leakage ──────────────────────────────────────────────────────────── */
 async function corpLeakage(host, kind = state.sub) {
@@ -298,7 +350,7 @@ async function corpApproach(host) {
 /* ── one property ─────────────────────────────────────────────────────── */
 export const PROPERTY_TABS = [
   { id: 'overview', label: 'Overview', ic: '◱' },
-  { id: 'guests', label: 'Guests', ic: '◧' },
+  { id: 'guests', label: 'Passengers', ic: '◧' },
   { id: 'drivers', label: 'Drivers', ic: '◨' },
 ];
 
