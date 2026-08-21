@@ -78,11 +78,24 @@ export const dayStr = (v) => (v ? new Date(v).toLocaleDateString(undefined, { da
 export const timeStr = (v) => (v ? new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—');
 export const dtStr = (v) => (v ? `${dayStr(v)} ${timeStr(v)}` : '—');
 // 7.5 → "07:30", which reads as a clock time rather than a decimal
-export const hourStr = (h) => (h == null || isNaN(h) ? '—'
-  : `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`);
+export const hourStr = (h) => {
+  const n = Number(h);
+  if (h == null || h === '' || !Number.isFinite(n)) return '—';
+  // Rounding minutes independently of hours produced "23:60" and "06:60".
+  const total = Math.round(n * 60);
+  const hh = ((Math.floor(total / 60) % 24) + 24) % 24, mm = ((total % 60) + 60) % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+};
 // `d` is decimals: whole dirhams for totals, two for rates like revenue-per-km
 // where rounding to the nearest dirham destroys the number.
-export const money = (v, cur = 'AED', d = 0) => (v == null || v === '' ? '—' : `${cur} ${fmt(v, d)}`);
-export const pct = (v, d = 0) => (v == null || isNaN(v) ? '—' : `${Number(v).toFixed(d)}%`);
+export const money = (v, cur = 'AED', d = 0) => {
+  const n = Number(v);
+  if (v == null || v === '' || !Number.isFinite(n)) return '—';
+  // A rate needs a FIXED number of decimals: `maximumFractionDigits` alone
+  // rendered 2.70 as "AED 2.7", and rounding to whole dirhams rendered it
+  // "AED 3" — which is a different number.
+  return `${cur} ${n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+};
+export const pct = (v, d = 0) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : `${Number(v).toFixed(d)}%`);
 export const note = (text) => el('div', 'note', esc(text));
 export { fmt, empty };

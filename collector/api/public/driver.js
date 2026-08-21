@@ -60,7 +60,7 @@ function percentileBars(host, metrics) {
    is a driver on a shift, a scattered column is someone working ad hoc. */
 function startScatter(host, days) {
   host.innerHTML = '';
-  const pts = days.filter((d) => d.first_hour != null);
+  const pts = days.filter((d) => Number.isFinite(+d.first_hour)).map((d) => ({ ...d, first_hour: +d.first_hour }));
   if (pts.length < 2) return empty(host, 'Not enough working days to show a pattern');
   const W = 760, H = 240, P = { l: 46, r: 12, t: 14, b: 26 };
   const xs = pts.map((d) => +new Date(d.day));
@@ -106,11 +106,16 @@ function startScatter(host, days) {
 /* ── the shift bar: first trip → last trip, one row per day ─────────────── */
 function shiftBars(host, days) {
   host.innerHTML = '';
-  const rows = days.filter((d) => d.first_hour != null).slice(-28);
+  /* Postgres returns `numeric` as a STRING. `first_hour + 0.25` therefore
+     concatenated ("6.5" + 0.25 = "6.50.25"), Math.max saw NaN, and every bar
+     rendered as width:NaN% with a "—" end time. The whole panel was dead on
+     every driver, and it looked like a styling problem. Coerce at the edge. */
+  const rows = days.filter((d) => Number.isFinite(+d.first_hour)).slice(-28);
   if (!rows.length) return empty(host);
   const wrap = el('div', 'shifts');
   rows.forEach((d, i) => {
-    const a = d.first_hour, b = Math.max(d.last_hour ?? a, a + 0.25);
+    const a = +d.first_hour;
+    const b = Math.max(Number.isFinite(+d.last_hour) ? +d.last_hour : a, a + 0.25);
     const r = el('div', 'shift');
     r.innerHTML = `<div class="sh-d">${dayStr(d.day)}</div>
       <div class="sh-track"><i style="left:${(a / 24) * 100}%;width:${((b - a) / 24) * 100}%;animation-delay:${i * 25}ms"></i></div>

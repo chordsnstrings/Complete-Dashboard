@@ -11,7 +11,13 @@ export function showTip(html, e) {
 }
 export function hideTip() { tt().style.opacity = 0; }
 const esc = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
-export const fmt = (n, d = 0) => n == null || isNaN(n) ? '—' : Number(n).toLocaleString(undefined, { maximumFractionDigits: d });
+/* `isNaN(Infinity)` is false and `Number('') === 0`, so the old guards let a
+   division by zero through as "∞" — and, where a tile colours by threshold,
+   Infinity clears every "good" bar and gets painted green. An empty string
+   rendered as a confident "0". Anything that is not a finite number is not a
+   number, and says so. */
+export const fmt = (n, d = 0) => (n == null || n === '' || !Number.isFinite(Number(n))
+  ? '—' : Number(n).toLocaleString(undefined, { maximumFractionDigits: d }));
 
 function interactive(el, label, onClick) {
   el.style.cursor = onClick ? 'pointer' : 'crosshair';

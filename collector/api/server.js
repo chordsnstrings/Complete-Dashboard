@@ -35,53 +35,226 @@ const requireAdmin = (req, res, next) => {
   next();
 };
 
-// filters: ?from=&to=&platform=&fleet=
-// A bare `to=YYYY-MM-DD` parses as midnight, which silently drops that day's trips.
-// Extend a date-only bound to the end of the day so ranges are inclusive as users expect.
+/* filters: ?from=&to=&platform=&fleet=
+   Bounds are Dubai-local calendar dates, matched against trip_norm.local_day.
+   Binding a bare date string against a timestamptz made it UTC, so every range
+   lost the Dubai day's 00:00-04:00 trips at one end and gained a phantom
+   partial day at the other — which for a fleet whose airport work starts at
+   03:00 is a material slice. `endOfDay` existed only to paper over that in UTC
+   and is no longer needed here; it is still exported for the detail routes,
+   which bind against raw timestamps. */
 const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
-const range = (req) => [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01'),
-  req.query.platform || null, req.query.fleet || null];
-const F = `requested_at BETWEEN $1 AND $2 AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`;
+
+// A date that is not a date must not reach Postgres as one: `?from=banana`
+// otherwise 500s with a driver error.
+const asDate = (v, fallback) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : fallback);
+const range = (req) => {
+  let from = asDate(req.query.from, '2000-01-01');
+  let to = asDate(req.query.to, '2100-01-01');
+  if (from > to) [from, to] = [to, from];      // an inverted range is a typo, not an empty set
+  return [from, to, req.query.platform || null, req.query.fleet || null];
+};
+const F = `local_day BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`;
+// Bookings only. A telematics row is a GPS-derived journey, and the same
+// physical trip is recorded by BOTH the ride platform and the tracker — summing
+// them counts it twice. See sql/schema_v7.sql.
+const FB = `${F} AND is_booking`;
 
 app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /* ───────────────────────── overview ───────────────────────── */
 app.get('/api/kpis', wrap(async (req, res) => {
   const p = range(req);
+  /* Three populations live in the `trip` table and they must not be added
+     together. See sql/schema_v7.sql for the evidence.
+
+     - BOOKINGS (uber, yango, bolt, hotel): a rider asked for a ride.
+     - TELEMATICS JOURNEYS (fms): the tracker saw the car move. The same
+       physical trip appears in BOTH, so `count(*)` across them double-counts.
+     - PRICED rows: the subset carrying a fare. The Uber trip export has no
+       fare column at all, so money describes roughly a fifth of the bookings.
+
+     Every ratio below names the base it was computed over, and the response
+     carries that base so the view can say so rather than imply the number
+     covers everything. */
   const [t] = await q(
-    `SELECT count(*)::int trips, round(sum(distance_km)::numeric,0) km,
-            round(avg(distance_km)::numeric,2) avg_km,
-            round(100.0*sum((status='completed')::int)/nullif(count(*),0),1) completion_pct,
-            round(100.0*sum((status ILIKE '%cancel%')::int)/nullif(count(*),0),1) cancel_pct,
-            count(distinct driver_ext_id)::int drivers, count(distinct plate)::int vehicles,
-            round(sum(price)::numeric,0) revenue
-     FROM trip WHERE ${F}`, p);
+    `SELECT
+       -- bookings: the number a fleet manager means by "trips"
+       count(*) FILTER (WHERE is_booking)::int trips,
+       count(*) FILTER (WHERE outcome = 'completed')::int completed_trips,
+       count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled_trips,
+       count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable_trips,
+       round(100.0*count(*) FILTER (WHERE outcome = 'completed')
+             / nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) completion_pct,
+       round(100.0*count(*) FILTER (WHERE outcome = 'not_completed')
+             / nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
+
+       -- telematics, reported separately: this is movement, not demand
+       count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+       round(sum(distance_km) FILTER (WHERE NOT is_booking AND has_distance)::numeric,0) telematics_km,
+
+       -- distance over bookings only, and only where it is plausible
+       round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+       round(avg(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,2) avg_km,
+       count(*) FILTER (WHERE is_booking AND has_distance)::int trips_with_distance,
+
+       -- money, and the rows it actually covers
+       round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+       count(*) FILTER (WHERE has_fare)::int priced_trips,
+       round(avg(price) FILTER (WHERE has_fare)::numeric,2) avg_fare,
+       round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
+       round((sum(price) FILTER (WHERE has_fare AND has_distance)
+              / nullif(sum(distance_km) FILTER (WHERE has_fare AND has_distance),0))::numeric,2) revenue_per_km,
+
+       -- who and what
+       count(DISTINCT driver_ext_id)::int drivers,
+       count(*) FILTER (WHERE driver_ext_id IS NOT NULL)::int attributed_trips,
+       count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL AND plate <> '')::int vehicles,
+       count(DISTINCT platform) FILTER (WHERE is_booking)::int platforms
+     FROM trip_norm WHERE ${F}`, p);
+
   const [v] = await q(`SELECT count(*)::int live_vehicles,
-      sum((now()-polled_at < interval '11 minutes')::int)::int fresh
+      count(*) FILTER (WHERE now()-polled_at < interval '11 minutes')::int fresh
       FROM (SELECT DISTINCT ON (plate) plate, polled_at FROM telemetry_snapshot ORDER BY plate, polled_at DESC) s`);
-  const [a] = await q(`SELECT count(*)::int alerts FROM alert WHERE occurred_at BETWEEN $1 AND $2`, [p[0], p[1]]);
-  res.json({ ...t, ...v, ...a });
+  // Alerts take the same fleet filter as the trips beside them; without it a
+  // single-fleet view showed one fleet's trips next to both fleets' alerts.
+  const [a] = await q(
+    `SELECT count(*)::int alerts FROM alert
+     WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+       AND ($3::text IS NULL OR fleet_id = $3)`, [p[0], p[1], p[3]]);
+
+  const share = (n, d) => (d ? +((n / d) * 100).toFixed(1) : null);
+  res.json({
+    ...t, ...v, ...a,
+    priced_pct: share(t.priced_trips, t.trips),
+    attributed_pct: share(t.attributed_trips, t.trips),
+  });
 }));
 
+/* Volume series. All three group in Dubai time and count BOOKINGS only.
+   Previously they grouped in UTC, which put the 19:00 Dubai peak at 15:00 and
+   pushed every trip between midnight and 04:00 onto the previous day; and they
+   counted telematics journeys alongside bookings, which double-counts the same
+   physical trip. Telematics volume is returned as its own series so movement
+   is still visible without being added to demand. */
 app.get('/api/trips/daily', wrap(async (req, res) => res.json(await q(
-  `SELECT date_trunc('day',requested_at)::date d, count(*)::int trips,
-          round(sum(distance_km)::numeric,0) km, round(sum(price)::numeric,0) revenue
-   FROM trip WHERE ${F} GROUP BY 1 ORDER BY 1`, range(req)))));
+  `SELECT local_day AS d,
+          count(*) FILTER (WHERE is_booking)::int trips,
+          count(*) FILTER (WHERE outcome = 'completed')::int completed,
+          count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled,
+          count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+          round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+          round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+          count(*) FILTER (WHERE has_fare)::int priced_trips
+   FROM trip_norm WHERE ${F} GROUP BY 1 ORDER BY 1`, range(req)))));
 
 app.get('/api/trips/hourly', wrap(async (req, res) => res.json(await q(
-  `SELECT extract(hour from requested_at)::int h, count(*)::int trips
-   FROM trip WHERE ${F} GROUP BY 1 ORDER BY 1`, range(req)))));
+  `SELECT local_hour AS h, count(*)::int trips
+   FROM trip_norm WHERE ${FB} GROUP BY 1 ORDER BY 1`, range(req)))));
 
-// day-of-week × hour heatmap
+// weekday x hour heatmap, in Dubai time
 app.get('/api/trips/heatmap', wrap(async (req, res) => res.json(await q(
-  `SELECT extract(dow from requested_at)::int dow, extract(hour from requested_at)::int h, count(*)::int trips
-   FROM trip WHERE ${F} GROUP BY 1,2 ORDER BY 1,2`, range(req)))));
+  `SELECT local_dow AS dow, local_hour AS h, count(*)::int trips
+   FROM trip_norm WHERE ${FB} GROUP BY 1,2 ORDER BY 1,2`, range(req)))));
+
+/* Breakdown by one dimension.
+   `product` is the trap: Uber's tiers (UberX, Black, Comfort, Electric) and the
+   hotel channel's booking types (pick_and_drop, drop_off, hourly) live in the
+   same column and mean nothing to each other. Grouping them together produced
+   a "service tier economics" table that compared an hourly hotel charter with
+   an Uber drop-off and concluded one earned 4.3x the other. So `product` is
+   returned qualified by platform, and the caller is told the dimension is
+   platform-specific and must not be read across platforms. */
+const MIX_DIMS = {
+  payment: { col: 'payment_type', per_platform: false },
+  status: { col: 'status', per_platform: false },
+  platform: { col: 'platform', per_platform: false },
+  fleet: { col: 'fleet_id', per_platform: false },
+  service: { col: 'service_type', per_platform: false },
+  product: { col: 'product', per_platform: true },
+};
 
 app.get('/api/mix', wrap(async (req, res) => {
-  const dim = { payment: 'payment_type', status: 'status', platform: 'platform',
-    fleet: 'fleet_id', service: 'service_type' }[req.query.by] || 'product';
-  res.json(await q(`SELECT coalesce(${dim},'unknown') label, count(*)::int n,
-      round(sum(price)::numeric,0) revenue FROM trip WHERE ${F} GROUP BY 1 ORDER BY 2 DESC`, range(req)));
+  const dim = MIX_DIMS[req.query.by] || MIX_DIMS.product;
+  const p = range(req);
+
+  const rows = await q(
+    `SELECT platform, ${dim.col} AS label, count(*)::int n,
+            round(sum(price)::numeric,0) revenue,
+            count(*) FILTER (WHERE price IS NOT NULL)::int priced_n,
+            round(sum(distance_km) FILTER (WHERE price IS NOT NULL)::numeric,0) priced_km,
+            round(avg(distance_km)::numeric,1) avg_km
+     FROM trip_norm WHERE ${dim.col === 'platform' ? F : FB}
+     GROUP BY platform, ${dim.col}
+     ORDER BY n DESC`, p);
+
+  // Rows the provider never labelled are dropped from the breakdown rather than
+  // charted as a category called "unknown": every telematics trip has a NULL
+  // payment type, which made an 80%-unknown donut that said nothing. The count
+  // is still available from /api/mix/detail so a view can caption the coverage.
+  const labelled = rows.filter((r) => r.label != null && r.label !== '');
+
+  const fold = (list, keyOf) => {
+    const m = new Map();
+    for (const r of list) {
+      const k = keyOf(r);
+      const cur = m.get(k) || { label: k, platform: dim.per_platform ? r.platform : null,
+        n: 0, revenue: 0, priced_n: 0, priced_km: 0, _kmw: 0, _km: 0 };
+      cur.n += r.n;
+      cur.revenue += +r.revenue || 0;
+      cur.priced_n += r.priced_n;
+      cur.priced_km += +r.priced_km || 0;
+      if (r.avg_km != null) { cur._km += +r.avg_km * r.n; cur._kmw += r.n; }
+      m.set(k, cur);
+    }
+    return [...m.values()].map((c) => ({
+      label: c.label, platform: c.platform, n: c.n,
+      revenue: c.priced_n ? c.revenue : null,
+      priced_n: c.priced_n, priced_km: c.priced_km || null,
+      avg_km: c._kmw ? +(c._km / c._kmw).toFixed(1) : null,
+      // Per-trip money is only meaningful over the priced rows.
+      revenue_per_trip: c.priced_n ? +(c.revenue / c.priced_n).toFixed(2) : null,
+      revenue_per_km: c.priced_km > 0 ? +(c.revenue / c.priced_km).toFixed(2) : null,
+    })).sort((a, b) => b.n - a.n);
+  };
+
+  const out = dim.per_platform
+    ? fold(labelled, (r) => `${r.platform}: ${r.label}`)
+    : fold(labelled, (r) => r.label);
+
+  res.json(out);
+}));
+
+/* The same breakdown with its metadata — what the dimension means, how much of
+   it is unlabelled, and whether it is safe to compare across platforms. The
+   bare array above is kept because several views already consume it. */
+app.get('/api/mix/detail', wrap(async (req, res) => {
+  const key = MIX_DIMS[req.query.by] ? req.query.by : 'product';
+  const dim = MIX_DIMS[key];
+  const p = range(req);
+  const rows = await q(
+    `SELECT platform, ${dim.col} AS label, count(*)::int n,
+            round(sum(price)::numeric,0) revenue,
+            count(*) FILTER (WHERE price IS NOT NULL)::int priced_n,
+            round(sum(distance_km) FILTER (WHERE price IS NOT NULL)::numeric,0) priced_km
+     FROM trip_norm WHERE ${dim.col === 'platform' ? F : FB} GROUP BY platform, ${dim.col} ORDER BY n DESC`, p);
+  const unlabelled = rows.filter((r) => r.label == null || r.label === '');
+  const labelled = rows.filter((r) => r.label != null && r.label !== '');
+  const total = rows.reduce((a, r) => a + r.n, 0);
+  res.json({
+    dimension: key,
+    per_platform: dim.per_platform,
+    total_trips: total,
+    unlabelled_trips: unlabelled.reduce((a, r) => a + r.n, 0),
+    unlabelled_platforms: [...new Set(unlabelled.map((r) => r.platform))],
+    groups: labelled.map((r) => ({
+      platform: r.platform, label: r.label, n: r.n,
+      revenue: r.priced_n ? +r.revenue : null,
+      priced_n: r.priced_n,
+      revenue_per_trip: r.priced_n ? +(r.revenue / r.priced_n).toFixed(2) : null,
+      revenue_per_km: r.priced_km > 0 ? +(r.revenue / r.priced_km).toFixed(2) : null,
+    })),
+  });
 }));
 
 /* ───────────────────────── drivers ───────────────────────── */
@@ -90,7 +263,7 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => res.json(await q(
           round(sum(distance_km)::numeric,0) km, round(avg(distance_km)::numeric,1) avg_km,
           round(sum(price)::numeric,0) revenue,
           round(100.0*sum((status='completed')::int)/nullif(count(*),0)) completion_pct
-   FROM trip WHERE ${F} AND driver_name IS NOT NULL
+   FROM trip_norm WHERE ${F} AND driver_name IS NOT NULL
    GROUP BY driver_name, driver_ext_id, platform ORDER BY trips DESC LIMIT 100`, range(req)))));
 
 // cross-platform view: one row per driver name, columns per platform
@@ -102,7 +275,7 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => res.json(await q
           sum((platform='fms')::int)::int fms_trips,
           count(*)::int total_trips, round(sum(distance_km)::numeric,0) km,
           round(sum(price)::numeric,0) revenue
-   FROM trip WHERE ${F} AND driver_name IS NOT NULL
+   FROM trip_norm WHERE ${F} AND driver_name IS NOT NULL
    GROUP BY driver_name ORDER BY total_trips DESC LIMIT 100`, range(req)))));
 
 app.get('/api/drivers/performance', wrap(async (req, res) => res.json(await q(
@@ -118,7 +291,7 @@ app.get('/api/vehicles', wrap(async (req, res) => res.json(await q(
           round(sum(t.price)::numeric,0) revenue, count(distinct t.driver_ext_id)::int drivers,
           count(distinct t.platform)::int platforms, max(t.requested_at) last_trip,
           cd.driver_name AS current_driver, cd.as_of AS driver_as_of
-   FROM trip t
+   FROM trip_norm t
    LEFT JOIN vehicle_current_driver cd ON cd.plate = upper(replace(t.plate,' ',''))
    WHERE ${F} AND t.plate IS NOT NULL AND t.plate<>''
    GROUP BY t.plate, cd.driver_name, cd.as_of ORDER BY trips DESC LIMIT 200`, range(req)))));
@@ -551,7 +724,7 @@ app.get('/api/earnings/tips', wrap(async (req, res) => res.json(await q(
 app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
   `SELECT plate, product, count(*)::int trips, round(sum(distance_km)::numeric,0) km,
           round(avg(distance_km)::numeric,1) avg_km
-   FROM trip WHERE ${F} AND plate IS NOT NULL AND product IS NOT NULL
+   FROM trip_norm WHERE ${F} AND plate IS NOT NULL AND product IS NOT NULL
    GROUP BY plate, product ORDER BY plate, trips DESC LIMIT 600`, range(req)))));
 
 /* ───────────────── world events + causal attribution ───────────────── */

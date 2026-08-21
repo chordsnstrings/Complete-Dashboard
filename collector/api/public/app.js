@@ -9,6 +9,30 @@ import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCauses } from './causes.js';
 
+/* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
+   "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
+   as a filter produced a zero-width range — every "click a day" drill opened an
+   empty modal titled with a raw timestamp. */
+const dayKey = (v) => String(v ?? '').slice(0, 10);
+
+/* A breakdown that quietly drops the rows a provider never labelled reads as a
+   complete picture of a subset. Telematics trips carry no payment type at all,
+   so the old donut was 80% "unknown" — and once that bucket was removed the
+   chart became honest about the categories but silent about the coverage. This
+   draws the labelled rows and states what is missing underneath. */
+function paymentDonut(host, detail) {
+  host.innerHTML = '';
+  const groups = (detail && detail.groups) || [];
+  if (!groups.length) { empty(host, 'No trip in this range records how it was paid'); return; }
+  donut(host, groups.map((g) => ({ label: g.label, n: g.n, revenue: g.revenue })));
+  if (detail.unlabelled_trips) {
+    host.append(el('p', 'cap',
+      `${fmt(detail.unlabelled_trips)} of ${fmt(detail.total_trips)} trips record no payment type` +
+      `${detail.unlabelled_platforms?.length ? ` (${esc(detail.unlabelled_platforms.join(', '))})` : ''}` +
+      ` and are left out rather than counted as cash.`));
+  }
+}
+
 const VIEWS = [
   { id: 'overview', label: 'Overview', ic: '◱', grp: 'Analyse', sub: 'Fleet-wide performance across every platform' },
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Analyse', sub: 'When trips happen — by day, hour and weekday' },
@@ -96,9 +120,9 @@ V.overview = async (root) => {
   const lead = panel('Top drivers', 'Ranked by completed trips — click for detail'); root.append(lead.panel);
   [kpiHost, trend.body, mix.body, prod.body, pay.body, out.body, lead.body].forEach(loading);
 
-  const [k, daily, byPlat, byProd, byPay, byStatus, drivers] = await Promise.all([
+  const [k, daily, byPlat, byProd, payDetail, byStatus, drivers] = await Promise.all([
     q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'platform' }), q('/api/mix'),
-    q('/api/mix', { by: 'payment' }), q('/api/mix', { by: 'status' }), q('/api/drivers/leaderboard'),
+    q('/api/mix/detail', { by: 'payment' }), q('/api/mix', { by: 'status' }), q('/api/drivers/leaderboard'),
   ]);
 
   kpiHost.innerHTML = [
@@ -111,10 +135,11 @@ V.overview = async (root) => {
   ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
 
   barChart(trend.body, daily, { x: 'd', y: 'trips', label: 'trips',
-    onClick: (d) => drillTrips(`Trips on ${d.d}`, 'Drivers active that day', { from: d.d, to: d.d }) });
+    onClick: (d) => drillTrips(`Trips on ${dayStr(d.d)}`, 'Drivers active that day',
+      { from: dayKey(d.d), to: dayKey(d.d) }) });
   donut(mix.body, byPlat, { onClick: (d) => drillTrips(`${d.label} trips`, 'Drivers on this platform', { platform: d.label }) });
   hbars(prod.body, byProd.slice(0, 6));
-  hbars(pay.body, byPay.slice(0, 6), { color: '--s2' });
+  paymentDonut(pay.body, payDetail);
   stackedBar(out.body, byStatus.slice(0, 5));
   lead.body.innerHTML = '';
   lead.body.append(tableFrom(drivers.slice(0, 12), [
@@ -141,7 +166,9 @@ V.demand = async (root) => {
     q('/api/context').catch(() => []),
   ]);
   areaChart(hourly.body, h.map((r) => ({ label: String(r.h).padStart(2, '0') + ':00', trips: r.trips })), { x: 'label', y: 'trips' });
-  barChart(daily.body, d, { x: 'd', y: 'trips', onClick: (r) => drillTrips(`Trips on ${r.d}`, 'Drivers active that day', { from: r.d, to: r.d }) });
+  barChart(daily.body, d, { x: 'd', y: 'trips',
+    onClick: (r) => drillTrips(`Trips on ${dayStr(r.d)}`, 'Drivers active that day',
+      { from: dayKey(r.d), to: dayKey(r.d) }) });
 
   /* Join the day's trips to that day's weather and calendar. Both sides are
      keyed on the calendar date, so a missing weather row leaves the trip row
@@ -344,61 +371,107 @@ V.finance = async (root) => {
   const led = panel('Ledger by category', 'Platform fees, bonuses and adjustments'); root.append(led.panel);
   [rev.body, pay.body, tier.body, comp.body, tips.body, led.body].forEach(loading);
 
-  const [k, daily, byPay, byProd, ledger, components, tipRows, bySvc] = await Promise.all([
-    q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'payment' }), q('/api/mix'),
+  const [k, daily, payDetail, byProd, ledger, components, tipRows, bySvc] = await Promise.all([
+    q('/api/kpis'), q('/api/trips/daily'), q('/api/mix/detail', { by: 'payment' }), q('/api/mix'),
     q('/api/finance/ledger'),
     q('/api/earnings/components').catch(() => []),
     q('/api/earnings/tips').catch(() => []),
     q('/api/mix', { by: 'service' }).catch(() => []),
   ]);
 
-  const cash = byPay.find((p) => /cash/i.test(p.label));
+  const cash = (payDetail.groups || []).find((p) => /cash/i.test(p.label));
   const tipTotal = tipRows.reduce((a, r) => a + (+r.tips || 0), 0);
   const fareTotal = tipRows.reduce((a, r) => a + (+r.fare || 0), 0);
-  kh.replaceWith(kpiRow([
-    { label: 'Revenue', value: money(k.revenue), sub: `${fmt(k.trips)} trips` },
-    { label: 'Average fare', value: k.revenue && k.trips ? money(k.revenue / k.trips, 'AED', 2) : '—', sub: 'per trip' },
-    { label: 'Revenue per km', value: k.revenue && k.km ? money(k.revenue / k.km, 'AED', 2) : '—', sub: `over ${fmt(k.km)} km` },
+
+  /* Every money figure here covers only the trips that carry a fare. The Uber
+     trip export has no fare column at all and telematics trips have none
+     either, so on this fleet that is roughly a fifth of the rows. Dividing by
+     everything showed an average fare of AED 6.98 against a real figure near
+     AED 125. Each tile now names the base it was computed over. */
+  const coverage = k.priced_pct != null
+    ? `${fmt(k.priced_trips)} of ${fmt(k.trips)} trips carry a fare (${pct(k.priced_pct, 1)})`
+    : 'no priced trips in this range';
+
+  const kpis = kpiRow([
+    { label: 'Revenue', value: money(k.revenue), sub: coverage,
+      tone: k.priced_pct != null && k.priced_pct < 40 ? 'warn' : null },
+    { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
+      sub: k.priced_trips ? `over ${fmt(k.priced_trips)} priced trips` : 'no fares in this range' },
+    { label: 'Revenue per km', value: money(k.revenue_per_km, 'AED', 2),
+      sub: k.priced_km ? `over ${fmt(k.priced_km)} priced km` : 'no priced distance' },
     { label: 'Cash to collect', value: cash ? money(cash.revenue) : money(0),
-      sub: cash ? `${fmt(cash.n)} cash trips` : 'card only',
-      tone: cash && k.revenue && cash.revenue / k.revenue > 0.25 ? 'warn' : null },
+      sub: cash ? `${fmt(cash.n)} cash trips` : 'no cash trips recorded',
+      tone: cash && k.revenue && +cash.revenue / +k.revenue > 0.25 ? 'warn' : null },
     { label: 'Tips', value: tipTotal ? money(tipTotal) : '—',
       sub: fareTotal ? `${((tipTotal / fareTotal) * 100).toFixed(2)}% of net fare` : 'no tip data collected yet',
       tone: fareTotal ? (tipTotal / fareTotal >= 0.03 ? 'good' : 'warn') : null },
-  ]));
+  ]);
+  kh.replaceWith(kpis);
+
+  // Say the coverage out loud once, under the tiles, so nobody reads the
+  // revenue line as the fleet's whole income.
+  if (k.priced_pct != null && k.priced_pct < 90) {
+    kpis.after(note(
+      `Money on this page covers ${pct(k.priced_pct, 1)} of trips — the other ${fmt(k.trips - k.priced_trips)} ` +
+      `carry no fare at all. Uber's trip export omits fares and telematics trips have none, so revenue here is ` +
+      `the hotel and Yango channels only. Trip counts cover everything; money does not.`));
+  }
 
   areaChart(rev.body, daily, { x: 'd', y: 'revenue', color: '--s3', valueFmt: (v) => money(v) });
-  donut(pay.body, byPay);
+  paymentDonut(pay.body, payDetail);
 
   /* Tier economics: the count alone hides the point, which is that a tier can
      be a small share of trips and a large share of revenue, or the reverse. */
   tier.body.innerHTML = '';
-  const withRev = byProd.filter((r) => r.revenue != null && +r.revenue > 0);
+  /* Per-trip revenue must divide by the PRICED trips, not by all of them. The
+     API already returns `priced_n` and `revenue_per_trip` for exactly this, and
+     the page was recomputing `revenue / n` instead — so a tier where 40 of
+     4,000 trips carried a fare reported AED 0.30 per trip against a real
+     AED 30, and the derived sentence claimed one tier earned 666x another. */
+  const perTrip = (r) => (r.revenue_per_trip != null ? +r.revenue_per_trip
+    : r.priced_n ? +r.revenue / r.priced_n : null);
+  const withRev = byProd.filter((r) => perTrip(r) != null);
   if (!withRev.length) {
-    tier.body.append(note('No fares attached to product tiers in this range. The Uber trip export names the tier but omits the fare, so this fills in from the hotel and telematics feeds, or once Uber payout components cover the window.'));
-    if (byProd.length) tier.body.append(tableFrom(byProd.slice(0, 8), [
+    tier.body.append(note('No fares attached to any product tier in this range. Uber\'s trip export names the tier but carries no fare column at all, so no Uber tier can appear here — this table fills from the hotel, Yango and Bolt channels.'));
+    if (byProd.length) tier.body.append(tableFrom(byProd.slice(0, 10), [
       { label: 'Tier', key: 'label' }, { label: 'Trips', key: 'n', num: true, render: (r) => fmt(r.n) },
     ], { compact: true }));
   } else {
     const totalTrips = withRev.reduce((a, r) => a + r.n, 0);
-    const totalRev = withRev.reduce((a, r) => a + +r.revenue, 0);
+    const totalRev = withRev.reduce((a, r) => a + (+r.revenue || 0), 0);
     tier.body.append(tableFrom(withRev.slice(0, 10), [
       { label: 'Tier', key: 'label' },
       { label: 'Trips', key: 'n', num: true, render: (r) => fmt(r.n) },
-      { label: 'Share of trips', key: '_st', num: true, render: (r) => pct((r.n / totalTrips) * 100, 1) },
+      { label: 'Priced', key: 'priced_n', num: true, render: (r) => `${fmt(r.priced_n)} of ${fmt(r.n)}` },
       { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
-      { label: 'Share of revenue', key: '_sr', num: true, render: (r) => pct((+r.revenue / totalRev) * 100, 1) },
-      { label: 'Per trip', key: '_pt', num: true, render: (r) => money(+r.revenue / r.n, 'AED', 2) },
+      { label: 'Share of revenue', key: '_sr', num: true, render: (r) => pct(((+r.revenue || 0) / totalRev) * 100, 1) },
+      { label: 'Per priced trip', key: '_pt', num: true, render: (r) => money(perTrip(r), 'AED', 2) },
     ], { compact: true }));
-    // The tier that punches above its trip share is the one worth steering toward.
-    const best = [...withRev].sort((a, b) => (+b.revenue / b.n) - (+a.revenue / a.n))[0];
-    const worst = [...withRev].sort((a, b) => (+a.revenue / a.n) - (+b.revenue / b.n))[0];
-    if (best && worst && best.label !== worst.label) {
-      const ratio = (+best.revenue / best.n) / (+worst.revenue / worst.n);
+    /* Compare only within one platform. An Uber tier and a hotel booking type
+       are not alternatives an operator can choose between, so a ratio across
+       them is not a finding — it is a category error with a number attached. */
+    const byPlatform = new Map();
+    for (const r of withRev) {
+      const list = byPlatform.get(r.platform) || [];
+      list.push(r); byPlatform.set(r.platform, list);
+    }
+    const comparable = [...byPlatform.entries()].filter(([, list]) => list.length > 1)
+      .sort((a, b) => b[1].length - a[1].length)[0];
+    if (comparable) {
+      const [platform, list] = comparable;
+      const sorted = [...list].sort((a, b) => perTrip(b) - perTrip(a));
+      const best = sorted[0], worst = sorted[sorted.length - 1];
+      const ratio = perTrip(worst) > 0 ? perTrip(best) / perTrip(worst) : null;
+      const strip = (l) => String(l).replace(/^[^:]+:\s*/, '');
       tier.body.append(el('p', 'cap',
-        `${esc(best.label)} earns ${ratio.toFixed(1)}× per trip what ${esc(worst.label)} does ` +
-        `(${money(+best.revenue / best.n, 'AED', 2)} vs ${money(+worst.revenue / worst.n, 'AED', 2)}). ` +
-        `Trip length differs between tiers, so compare per-kilometre before reallocating vehicles.`));
+        `On ${esc(platform)}, ${esc(strip(best.label))} earns ` +
+        (ratio ? `${ratio.toFixed(1)}x per priced trip what ${esc(strip(worst.label))} does ` : 'more per priced trip ') +
+        `(${money(perTrip(best), 'AED', 2)} vs ${money(perTrip(worst), 'AED', 2)}). ` +
+        `Trip length differs between tiers, so compare per-kilometre before reallocating vehicles. ` +
+        `Tiers are only compared within one platform — an Uber tier and a hotel booking type are not alternatives.`));
+    } else {
+      tier.body.append(el('p', 'cap',
+        'Only one priced tier per platform in this range, so there is nothing to compare against.'));
     }
   }
 
@@ -521,7 +594,7 @@ V.unauthorized = async (root) => {
 
   barChart(trend.body, daily, { x: 'd', y: 'unauthorized', color: '--s8', label: 'unexplained',
     onClick: (d) => drill(`Unexplained occupancy on ${d.d}`, 'Segments flagged that day', async (b) => {
-      const rs = await api(`/api/unauthorized/list?from=${d.d}&to=${d.d}&verdict=unauthorized`);
+      const rs = await api(`/api/unauthorized/list?from=${dayKey(d.d)}&to=${dayKey(d.d)}&verdict=unauthorized`);
       b.innerHTML = ''; b.append(segTable(rs));
     }) });
   donut(verdicts.body, (sum.byVerdict || []).map((r) => ({ label: r.verdict, n: r.n })),
@@ -927,6 +1000,45 @@ V.sources = async (root) => {
     { label: 'From', key: 'from', render: (r) => r.from ? String(r.from).slice(0, 10) : '—' },
     { label: 'Latest', key: 'to', render: (r) => r.to ? String(r.to).slice(0, 16).replace('T', ' ') : '—' },
   ]));
+  /* What each provider actually sends, versus what we keep. Every collector
+     stores the original record in `raw`; this reads it back, so "does Uber
+     segregate business trips?" is answerable from the dashboard instead of by
+     hand-querying the database. It is the difference between knowing what a
+     source gives us and guessing from the columns we happened to map. */
+  const rawP = panel('What each source actually sends',
+    'Fields present in the provider\'s original record, how often they are filled, and whether we already keep them as a column. A field with few distinct values is a dimension worth charting; a wide one is an identifier or free text.');
+  root.append(rawP.panel);
+  const rawBar = el('div', 'toolbar');
+  rawBar.innerHTML = `<select id="rawSrc" class="btn">
+      <option value="uber">Uber trips</option><option value="fms">FMS trips</option>
+      <option value="hotel">Hotel trips</option><option value="yango">Yango trips</option>
+      <option value="bolt">Bolt trips</option><option value="">All platforms</option>
+    </select>
+    <span class="cap">over the selected date range</span>`;
+  rawP.body.append(rawBar);
+  const rawHost = el('div'); rawP.body.append(rawHost);
+  const drawRaw = async (platform) => {
+    loading(rawHost);
+    try {
+      const d = await q('/api/schema/raw-fields', platform ? { platform } : {});
+      rawHost.innerHTML = '';
+      if (!d.fields?.length) { rawHost.append(note('No stored records for this source in the selected range.')); return; }
+      rawHost.append(tableFrom(d.fields, [
+        { label: 'Field', key: 'key' },
+        { label: 'Filled', key: 'fill_pct', num: true, render: (r) => pct(r.fill_pct) },
+        { label: 'Distinct values', key: 'distinct_values', num: true, render: (r) => fmt(r.distinct_values) },
+        { label: 'Kept as a column', key: '_m', render: (r) => (r.already_a_column
+          ? pill('yes', 'ok') : pill('raw only', 'warn')) },
+        { label: 'Examples', key: '_e', render: (r) => esc((r.examples || []).slice(0, 3).join(' · ')) },
+      ]));
+      rawHost.append(el('p', 'cap',
+        `${fmt(d.rows_with_raw)} stored records, ${fmt(d.sampled)} sampled. ` +
+        `Fields marked "raw only" arrive from the provider and are not promoted to a column — ` +
+        `if one is useful, that is the list to pick from.`));
+    } catch (e) { rawHost.innerHTML = ''; rawHost.append(note(`Could not read the field inventory: ${e.message}`)); }
+  };
+  await drawRaw('uber');
+  rawBar.querySelector('#rawSrc').onchange = (e) => drawRaw(e.target.value);
 };
 
 V.settings = async (root) => {

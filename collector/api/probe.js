@@ -1,0 +1,183 @@
+/* Live API probes — "what does this provider actually give us?"
+   ──────────────────────────────────────────────────────────────────────────
+   The collectors map a chosen subset of each provider's response into columns.
+   When a question comes up that the mapped data cannot answer — "does Uber
+   segregate business trips?" — the only honest way to settle it is to call the
+   provider and look, rather than reason from what we happened to keep.
+
+   Two rules make this safe to leave enabled:
+
+   1. Every upstream call is from a fixed allowlist below. There is no
+      pass-through of a caller-supplied URL, operation or body, so this cannot
+      be turned into an open proxy onto the fleet's credentials.
+   2. Responses are reduced to SHAPE before they are returned — field names,
+      value cardinality, and sample values only for fields with few enough
+      distinct values to be a dimension rather than personal data. Full records
+      never leave this module.
+
+   Nothing here writes. */
+
+import { config } from '../src/config.js';
+import { http } from '../src/http.js';
+import { uberOAuthToken, uberWebHeaders } from '../src/auth/uber.js';
+import { loadSettings } from '../src/settings.js';
+import { log } from '../src/log.js';
+
+const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
+
+/* Report types worth testing for existence. Uber answers an unknown name with
+   REPORT_TYPE_INVALID, so this enumerates the surface cheaply — the report is
+   never downloaded, only asked for. */
+const CANDIDATE_REPORTS = [
+  'REPORT_TYPE_TRIP_ACTIVITY',
+  'REPORT_TYPE_DRIVER_ACTIVITY',
+  'REPORT_TYPE_PAYMENT_DETAILS',
+  'REPORT_TYPE_PAYMENTS',
+  'REPORT_TYPE_EARNINGS',
+  'REPORT_TYPE_TRIP_DETAILS',
+  'REPORT_TYPE_VEHICLE_ACTIVITY',
+  'REPORT_TYPE_ORGANIZATION_TRIPS',
+  'REPORT_TYPE_BUSINESS_TRIPS',
+  'REPORT_TYPE_U4B_TRIPS',
+  'REPORT_TYPE_RIDER_ACTIVITY',
+  'REPORT_TYPE_INVOICE',
+  'REPORT_TYPE_TAX',
+  'REPORT_TYPE_FLEET_PERFORMANCE',
+];
+
+/* Reduce any JSON to a description of its shape. Values are only echoed for
+   fields with few distinct values — a product tier is a dimension worth seeing,
+   an address is not. */
+function describe(records, { maxValues = 12 } = {}) {
+  const rows = Array.isArray(records) ? records : [records];
+  const fields = new Map();
+  const walk = (obj, prefix = '') => {
+    if (obj == null || typeof obj !== 'object') return;
+    for (const [k, v] of Object.entries(obj)) {
+      const path = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === 'object' && !Array.isArray(v)) { walk(v, path); continue; }
+      const f = fields.get(path) || { key: path, present: 0, filled: 0, values: new Set(), type: null };
+      f.present++;
+      if (v !== null && v !== '' && !(Array.isArray(v) && !v.length)) f.filled++;
+      f.type = f.type || (Array.isArray(v) ? 'array' : typeof v);
+      if (f.values.size <= maxValues + 1 && !Array.isArray(v)) f.values.add(String(v).slice(0, 48));
+      fields.set(path, f);
+    }
+  };
+  rows.slice(0, 200).forEach((r) => walk(r));
+  return [...fields.values()].map((f) => ({
+    key: f.key, type: f.type,
+    fill_pct: f.present ? Math.round((f.filled / f.present) * 100) : 0,
+    distinct_seen: f.values.size,
+    // A field with a handful of values is a dimension; anything wider is
+    // free text or an identifier and its contents are not reported.
+    values: f.values.size <= maxValues ? [...f.values] : null,
+  })).sort((a, b) => b.fill_pct - a.fill_pct || a.key.localeCompare(b.key));
+}
+
+export function probeRoutes(app, { wrap }) {
+  /* Which report types this org can actually generate. */
+  app.get('/api/probe/uber/report-types', wrap(async (req, res) => {
+    await loadSettings();
+    if (!config.uber.orgUuid) return res.status(400).json({ error: 'no Uber org configured' });
+    const to = req.query.to || new Date().toISOString().slice(0, 10);
+    const from = req.query.from || new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+    const out = [];
+    for (const reportType of CANDIDATE_REPORTS) {
+      try {
+        const { data } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
+          method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(),
+          body: JSON.stringify({
+            orgId: { uuid: { value: config.uber.orgUuid } }, reportType,
+            startDate: { value: from }, endDate: { value: to },
+            childOrgUuids: [{ uuid: { value: config.uber.orgUuid } }],
+          }),
+        });
+        const ok = data?.status === 'success';
+        out.push({ reportType, valid: ok,
+          detail: ok ? 'accepted' : String(JSON.stringify(data?.data?.meta?.details || data?.data || data)).slice(0, 160) });
+      } catch (e) { out.push({ reportType, valid: false, detail: String(e).slice(0, 160) }); }
+    }
+    res.json({ window: [from, to], types: out });
+  }));
+
+  /* The shape of one generated report's CSV header — column names only. */
+  app.get('/api/probe/uber/report-columns', wrap(async (req, res) => {
+    await loadSettings();
+    const reportType = CANDIDATE_REPORTS.includes(req.query.type) ? req.query.type : 'REPORT_TYPE_TRIP_ACTIVITY';
+    const to = req.query.to || new Date().toISOString().slice(0, 10);
+    const from = req.query.from || new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+    const { data: gen } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
+      method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(),
+      body: JSON.stringify({
+        orgId: { uuid: { value: config.uber.orgUuid } }, reportType,
+        startDate: { value: from }, endDate: { value: to },
+        childOrgUuids: [{ uuid: { value: config.uber.orgUuid } }],
+      }),
+    });
+    if (gen?.status !== 'success') {
+      return res.json({ reportType, error: String(JSON.stringify(gen?.data?.meta?.details || gen)).slice(0, 300) });
+    }
+    const id = gen.data.reportId.uuid.value;
+    let url = null;
+    for (let i = 0; i < 30 && !url; i++) {
+      const { data } = await http(`${REPORTS}/DownloadReport?localeCode=en-GB`, {
+        method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(),
+        body: JSON.stringify({ orgId: { uuid: { value: config.uber.orgUuid } }, reportId: { uuid: { value: id } } }),
+      });
+      url = data?.data?.signedUrl?.value;
+      if (!url) await new Promise((r2) => setTimeout(r2, 5000));
+    }
+    if (!url) return res.json({ reportType, error: 'report did not finish generating within 150s' });
+    const { data: csv } = await http(url, { expect: 'text', timeoutMs: 120000 });
+    const lines = String(csv).split(/\r?\n/).filter(Boolean);
+    const header = (lines[0] || '').split(',').map((h) => h.replace(/^"|"$/g, ''));
+    // Cardinality per column, so a low-cardinality column (a dimension) is
+    // distinguishable from an identifier without echoing the rows.
+    const cells = lines.slice(1, 400).map((l) => l.split(','));
+    res.json({
+      reportType, window: [from, to], rows_sampled: cells.length,
+      columns: header.map((h, i) => {
+        const vals = new Set(cells.map((c) => (c[i] || '').replace(/^"|"$/g, '')).filter(Boolean));
+        return { column: h, distinct_seen: vals.size, values: vals.size <= 12 ? [...vals] : null };
+      }),
+    });
+  }));
+
+  /* Shape of the OAuth REST surfaces the trip report does not cover. */
+  const REST = {
+    'driver-actions': (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?org_id=${encodeURIComponent(org)}`,
+    transactions: (org) => `https://api.uber.com/v1/vehicle-suppliers/transactions?org_id=${encodeURIComponent(org)}&limit=50`,
+    'earner-payments': (org) => `https://api.uber.com/v1/vehicle-suppliers/earners/payments?org_id=${encodeURIComponent(org)}&limit=50`,
+    vehicles: (org) => `https://api.uber.com/v1/vehicle-suppliers/vehicles?org_id=${encodeURIComponent(org)}&limit=50`,
+    drivers: (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers?org_id=${encodeURIComponent(org)}&limit=50`,
+  };
+
+  app.get('/api/probe/uber/rest', wrap(async (req, res) => {
+    await loadSettings();
+    const only = req.query.endpoint;
+    const names = only && REST[only] ? [only] : Object.keys(REST);
+    const token = await uberOAuthToken();
+    const out = [];
+    for (const name of names) {
+      try {
+        const { data, status } = await http(REST[name](config.uber.org), {
+          timeoutMs: 30000, retries: 0, headers: { authorization: `Bearer ${token}` },
+        });
+        // Find the first array of objects in the response — providers wrap
+        // their lists under varying keys.
+        const arr = Array.isArray(data) ? data
+          : Object.values(data || {}).find((v) => Array.isArray(v) && v.length && typeof v[0] === 'object');
+        out.push({ endpoint: name, status: status || 200,
+          count: Array.isArray(arr) ? arr.length : 0,
+          top_level_keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 20) : [],
+          fields: arr ? describe(arr) : describe(data || {}) });
+      } catch (e) {
+        out.push({ endpoint: name, error: String(e).slice(0, 220) });
+      }
+    }
+    res.json({ endpoints: out });
+  }));
+
+  log.info('api', 'probe routes mounted (read-only, allowlisted)');
+}
