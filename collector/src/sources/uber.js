@@ -74,7 +74,12 @@ function csvToTrips(csv) {
     ended_at: r['Trip drop-off time'] ? r['Trip drop-off time'].replace(' ', 'T') + '+04:00' : null,
     pickup_addr: r['Pick-up address'], dropoff_addr: r['Drop-off address'],
     distance_km: parseFloat(r['Trip distance']) || null,
-    status: r['Trip status'], product: r['Product type'], payment_type: r['Payment type'],
+    status: r['Trip status'], product: r['Product type'],
+    // Uber sends "CASH" and "cash" for the same thing; grouping split them.
+    payment_type: r['Payment type'] ? String(r['Payment type']).trim().toLowerCase() : null,
+    // Uber's own personal-vs-business split, and its own id for the car.
+    service_type: r['Service type'] || null,
+    vehicle_ext_id: r['Vehicle UUID'] || null,
     raw: r,
   })).filter((t) => t.external_id);
 }

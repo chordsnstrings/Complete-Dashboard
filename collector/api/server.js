@@ -78,7 +78,8 @@ app.get('/api/trips/heatmap', wrap(async (req, res) => res.json(await q(
    FROM trip WHERE ${F} GROUP BY 1,2 ORDER BY 1,2`, range(req)))));
 
 app.get('/api/mix', wrap(async (req, res) => {
-  const dim = { payment: 'payment_type', status: 'status', platform: 'platform', fleet: 'fleet_id' }[req.query.by] || 'product';
+  const dim = { payment: 'payment_type', status: 'status', platform: 'platform',
+    fleet: 'fleet_id', service: 'service_type' }[req.query.by] || 'product';
   res.json(await q(`SELECT coalesce(${dim},'unknown') label, count(*)::int n,
       round(sum(price)::numeric,0) revenue FROM trip WHERE ${F} GROUP BY 1 ORDER BY 2 DESC`, range(req)));
 }));
@@ -599,11 +600,17 @@ app.get('/api/schema/raw-fields', wrap(async (req, res) => {
     .includes(req.query.table) ? req.query.table : 'trip';
   const platform = req.query.platform || null;
   const sample = Math.min(Math.max(+req.query.sample || 4000, 100), 20000);
+  const [from, to] = [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
 
+  // A field a provider only started sending recently is diluted to nothing by a
+  // year-wide random sample, so the window has to be selectable.
+  const tcol = { trip: 'requested_at', alert: 'occurred_at', telemetry_snapshot: 'captured_at',
+    driver_performance: 'period_start', vehicle_profile: 'updated_at' }[table];
   const rows = await q(
     `WITH s AS (
        SELECT raw FROM ${table}
        WHERE raw IS NOT NULL AND ($1::text IS NULL OR platform = $1)
+         AND ${tcol} BETWEEN $2 AND $3
        ORDER BY random() LIMIT ${sample}
      ),
      kv AS (SELECT key, value FROM s, jsonb_each(s.raw))
@@ -613,10 +620,12 @@ app.get('/api/schema/raw-fields', wrap(async (req, res) => {
             count(DISTINCT value)::int distinct_values,
             (array_agg(DISTINCT left(value #>> '{}', 60))
                FILTER (WHERE value NOT IN ('null'::jsonb, '""'::jsonb)))[1:5] examples
-     FROM kv GROUP BY key ORDER BY filled DESC, key`, [platform]);
+     FROM kv GROUP BY key ORDER BY filled DESC, key`, [platform, from, to]);
 
   const [{ n } = { n: 0 }] = await q(
-    `SELECT count(*)::int n FROM ${table} WHERE raw IS NOT NULL AND ($1::text IS NULL OR platform = $1)`, [platform]);
+    `SELECT count(*)::int n FROM ${table}
+     WHERE raw IS NOT NULL AND ($1::text IS NULL OR platform = $1) AND ${tcol} BETWEEN $2 AND $3`,
+    [platform, from, to]);
 
   // Which of these are already promoted to a real column, so the interesting
   // list is the rest.
@@ -647,11 +656,15 @@ app.get('/api/schema/raw-values', wrap(async (req, res) => {
   const table = ['trip', 'alert', 'telemetry_snapshot', 'driver_performance', 'vehicle_profile']
     .includes(req.query.table) ? req.query.table : 'trip';
   if (!req.query.key) return res.status(400).json({ error: 'key required' });
+  const tcol = { trip: 'requested_at', alert: 'occurred_at', telemetry_snapshot: 'captured_at',
+    driver_performance: 'period_start', vehicle_profile: 'updated_at' }[table];
   res.json(await q(
     `SELECT raw ->> $2 AS value, count(*)::int n
      FROM ${table}
-     WHERE raw ? $2 AND ($1::text IS NULL OR platform = $1)
-     GROUP BY 1 ORDER BY n DESC LIMIT 60`, [req.query.platform || null, req.query.key]));
+     WHERE raw ? $2 AND ($1::text IS NULL OR platform = $1) AND ${tcol} BETWEEN $3 AND $4
+     GROUP BY 1 ORDER BY n DESC LIMIT 60`,
+    [req.query.platform || null, req.query.key,
+     req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')]));
 }));
 
 /* ───────────────── per-driver detail pages ───────────────── */

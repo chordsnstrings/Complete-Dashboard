@@ -344,11 +344,12 @@ V.finance = async (root) => {
   const led = panel('Ledger by category', 'Platform fees, bonuses and adjustments'); root.append(led.panel);
   [rev.body, pay.body, tier.body, comp.body, tips.body, led.body].forEach(loading);
 
-  const [k, daily, byPay, byProd, ledger, components, tipRows] = await Promise.all([
+  const [k, daily, byPay, byProd, ledger, components, tipRows, bySvc] = await Promise.all([
     q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'payment' }), q('/api/mix'),
     q('/api/finance/ledger'),
     q('/api/earnings/components').catch(() => []),
     q('/api/earnings/tips').catch(() => []),
+    q('/api/mix', { by: 'service' }).catch(() => []),
   ]);
 
   const cash = byPay.find((p) => /cash/i.test(p.label));
@@ -399,6 +400,20 @@ V.finance = async (root) => {
         `(${money(+best.revenue / best.n, 'AED', 2)} vs ${money(+worst.revenue / worst.n, 'AED', 2)}). ` +
         `Trip length differs between tiers, so compare per-kilometre before reallocating vehicles.`));
     }
+  }
+
+  /* Uber's own personal-vs-business split. Worth stating even when it is
+     one-sided: "no business work at all" is a finding, and an empty panel
+     reads as a missing feature rather than an absent revenue line. */
+  const named = bySvc.filter((r) => r.label && r.label !== 'unknown');
+  if (named.length) {
+    const biz = named.filter((r) => /business|corporate|u4b/i.test(r.label));
+    const total = named.reduce((a, r) => a + r.n, 0);
+    tier.body.append(el('p', 'cap', biz.length
+      ? `Uber splits these into ${named.map((r) => `${esc(r.label.replace(/_/g, ' '))} ${fmt(r.n)}`).join(', ')} — ` +
+        `business work is ${pct((biz.reduce((a, r) => a + r.n, 0) / total) * 100, 1)} of trips.`
+      : `Uber labels every one of these ${fmt(total)} trips “${esc(named[0].label.replace(/_/g, ' '))}”. ` +
+        `There is no Uber for Business work in the record — that channel is either not enabled for this org or unused.`));
   }
 
   /* Components arrive signed: fares and tips add, cash already collected and
