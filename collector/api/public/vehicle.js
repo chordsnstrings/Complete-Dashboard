@@ -316,7 +316,7 @@ async function tabSafety(root, plate) {
   if (!sf.by_driver.length) drv.body.append(note('Nothing to attribute yet.'));
   else {
     drv.body.append(tableFrom(sf.by_driver, [
-      { label: 'Driver', key: 'driver_name' },
+      { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
       { label: 'Events', key: 'n', num: true },
       { label: 'Km that day', key: 'km', num: true, render: (r) => (r.km ? fmt(r.km) : '—') },
       { label: 'Per 100 km', key: '_r', num: true, render: (r) => (r.km > 0 ? fmt((r.n / r.km) * 100, 1) : '—') },

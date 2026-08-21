@@ -93,6 +93,11 @@ export function rosterRoutes(app, { q, wrap, range }) {
               -- files somebody who has not started yet under "suspended".
               bool_and(s.state IN ('suspended', 'deactivated')) AS stopped_everywhere,
               max(s.score) AS score,
+              -- Any one of the person's platform ids. The roster exists to find
+              -- people who are not earning, and every row was a name with
+              -- nowhere to go; /api/driver/* resolves one id to the whole
+              -- folded person, so one is enough to make the name a link.
+              (array_agg(DISTINCT s.driver_ext_id) FILTER (WHERE s.driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
               array_remove(array_agg(DISTINCT s.plate), NULL) AS plates,
               max(s.observed_at) AS observed_at,
               (array_agg(s.state_reason ORDER BY s.state_reason NULLS LAST))[1] AS reason,

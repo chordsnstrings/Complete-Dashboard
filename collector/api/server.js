@@ -450,6 +450,10 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
             count(*)::int total_trips,
             count(DISTINCT platform)::int platform_count,
             count(DISTINCT driver_ext_id)::int accounts,
+            -- Any one of the person's platform ids. /api/driver/* resolves an
+            -- id to the whole folded person, so one is enough to make the name
+            -- a link; without it the row named somebody you could not open.
+            (array_agg(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
             round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
             round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
             count(*) FILTER (WHERE has_fare)::int priced_trips
@@ -462,7 +466,8 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
 }));
 
 app.get('/api/drivers/performance', wrap(async (req, res) => res.json(await q(
-  `SELECT platform, driver_name, plate, period_start, period_end, trips, hours_online, hours_on_trip,
+  `SELECT platform, driver_name, driver_ext_id, plate, period_start, period_end, trips,
+          hours_online, hours_on_trip,
           acceptance_rate, cancellation_rate, distance_km, earnings, cash_earnings, rating
    FROM driver_performance WHERE period_start >= $1 AND period_end <= $2
      AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
@@ -526,20 +531,39 @@ app.get('/api/track', wrap(async (req, res) => {
 // Which plates have a replayable trail on a given day, and who was driving.
 app.get('/api/map/days', wrap(async (req, res) => {
   res.json(await q(
-    `SELECT (t.captured_at AT TIME ZONE 'Asia/Dubai')::date AS day,
-            t.plate, t.fleet_id, count(*)::int fixes,
-            min(t.captured_at) first_fix, max(t.captured_at) last_fix,
-            round(max(t.speed)::numeric,0) max_speed,
-            sum((t.seat_occupied)::int)::int occupied_fixes,
-            cd.driver_name
-     FROM telemetry_snapshot t
-     LEFT JOIN vehicle_current_driver cd ON cd.plate = t.plate
-     WHERE t.lat IS NOT NULL
-       AND ($1::text IS NULL OR t.plate = $1)
-       AND t.captured_at BETWEEN $2 AND $3
-     GROUP BY 1,2,3, cd.driver_name
-     HAVING count(*) >= 2
-     ORDER BY day DESC, fixes DESC LIMIT 400`,
+    /* The driver named against a day must be the driver who held the car ON
+       THAT DAY. This joined vehicle_current_driver — a view that is DISTINCT ON
+       (plate) ORDER BY day DESC, i.e. whoever holds the car NOW — so every
+       replayable day in the list, however far back, was labelled with today's
+       custodian. Picking a day in March and reading a name off it named
+       somebody who may not have driven the vehicle in months.
+
+       vehicle_driver_day is keyed on the Dubai-local day, which is the same key
+       this query groups by, so the correct answer is a join rather than a
+       lookup. as_of_today is kept so the map can still say who has it now, but
+       it is a separate, separately-labelled fact. */
+    `WITH d AS (
+       SELECT (t.captured_at AT TIME ZONE 'Asia/Dubai')::date AS day,
+              t.plate, t.fleet_id, count(*)::int fixes,
+              min(t.captured_at) first_fix, max(t.captured_at) last_fix,
+              round(max(t.speed)::numeric,0) max_speed,
+              sum((t.seat_occupied)::int)::int occupied_fixes
+       FROM telemetry_snapshot t
+       WHERE t.lat IS NOT NULL
+         AND ($1::text IS NULL OR t.plate = $1)
+         AND t.captured_at BETWEEN $2 AND $3
+       GROUP BY 1,2,3
+       HAVING count(*) >= 2)
+     SELECT d.*,
+            vdd.driver_name, vdd.driver_ext_id, vdd.trips AS driver_trips,
+            cd.driver_name AS current_driver_name
+     FROM d
+     LEFT JOIN LATERAL (
+       SELECT driver_name, driver_ext_id, trips FROM vehicle_driver_day v
+       WHERE v.plate = d.plate AND v.day = d.day
+       ORDER BY v.is_primary DESC, v.trips DESC NULLS LAST LIMIT 1) vdd ON true
+     LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
+     ORDER BY d.day DESC, d.fixes DESC LIMIT 400`,
     [req.query.plate ? req.query.plate.toUpperCase().replace(/[\s-]+/g, '') : null,
      req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')]));
 }));
@@ -1175,7 +1199,11 @@ app.get('/api/context', wrap(async (req, res) => {
 app.get('/api/compliance/vehicles', wrap(async (req, res) => res.json(await q(
   `SELECT d.plate, d.doc_type, d.status, d.expires_at,
           (d.expires_at::date - now()::date) AS days_left,
-          p.make, p.model, p.year, p.vin, p.image_url, cd.driver_name
+          p.make, p.model, p.year, p.vin, p.image_url,
+          -- Whoever holds the car NOW, which is the right person for a document
+          -- expiring next week — with the id, so the name can be a link rather
+          -- than a name somebody has to go and look up.
+          cd.driver_name, cd.driver_ext_id, cd.as_of AS driver_as_of
    FROM vehicle_document d
    LEFT JOIN vehicle_profile p ON p.platform=d.platform AND p.vehicle_ext_id=d.vehicle_ext_id
    LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate

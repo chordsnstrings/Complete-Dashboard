@@ -119,7 +119,10 @@ export async function renderRoster(root) {
   }
 
   host.append(tableFrom(shown, [
-    { label: 'Driver', key: 'name', render: (r) => esc(r.name || '—') },
+    /* The roster exists to find the people who are not earning. A row you
+       cannot open is a person you cannot look into. */
+    { label: 'Driver', key: 'name',
+      render: (r) => (r.driver_ext_id ? entity('driver', r.driver_ext_id, r.name || '(unnamed)') : esc(r.name || '—')) },
     { label: 'Standing', key: 'category',
       render: (r) => pill(CAT[r.category]?.label || r.category, CAT[r.category]?.tone) },
     { label: 'Platforms', key: 'platforms',

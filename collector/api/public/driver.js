@@ -285,7 +285,11 @@ async function tabActivity(root, id) {
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
     { label: 'Online', key: 'hours_online', num: true, render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
-    { label: 'Vehicle', key: 'plates' },
+    /* A day may span two vehicles — a handover — so this is a comma-joined
+       list, and each plate in it is its own page. */
+    { label: 'Vehicle', key: 'plates', render: (r) => (r.plates
+      ? String(r.plates).split(',').map((pl) => entity('vehicle', pl.trim(), pl.trim())).join(', ')
+      : '—') },
     { label: 'Context', key: '_c', render: (r) => [
       r.temp_max != null ? `${Math.round(r.temp_max)}°C` : null,
       r.precipitation > 0 ? 'rain' : null,

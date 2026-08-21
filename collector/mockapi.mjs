@@ -1033,7 +1033,7 @@ app.get('/api/roster', (_, r) => {
     const category = cats[i % cats.length];
     const blocked = category === 'blocked';
     const pipeline = category === 'in_pipeline' || category === 'never_started';
-    return { person: name.toLowerCase(), name, accounts: 1 + (i % 3),
+    return { person: name.toLowerCase(), name, driver_ext_id: `drv-${i}`, accounts: 1 + (i % 3),
       platforms: i % 3 === 0 ? ['uber', 'bolt'] : i % 3 === 1 ? ['uber'] : ['uber', 'yango', 'bolt'],
       states: blocked ? ['suspended'] : pipeline ? ['waitlist'] : ['active'],
       can_earn_anywhere: !blocked && !pipeline, blocked_everywhere: blocked,
@@ -1367,6 +1367,183 @@ app.get('/api/slot', (req, r) => {
     ],
   });
 });
+
+
+/* Cross-platform and platform-reported performance. Both fell through to the
+   empty-list catch-all, so the panels that read them rendered their empty state
+   and the smoke test never exercised the tables — including the driver links
+   that were dead text until the ids were added to the real queries. */
+app.get('/api/drivers/cross-platform', (_, r) => r.json({
+  platforms: ['uber', 'yango', 'bolt', 'hotel'],
+  drivers: drivers.map((name, i) => ({
+    person: name.toLowerCase(), driver_name: name, driver_ext_id: `drv-${i}`,
+    uber_trips: 40 - i * 3, yango_trips: i % 2 ? 12 - i : 0,
+    bolt_trips: i % 3 === 0 ? 9 : 0, hotel_trips: i % 4 === 0 ? 5 : 0,
+    fms_trips: 20 + i, booking_trips: 60 - i * 2, telematics_journeys: 20 + i,
+    total_trips: 80 - i, platform_count: i % 3 === 0 ? 3 : i % 2 ? 2 : 1,
+    accounts: 1 + (i % 2), km: 800 - i * 40, revenue: i % 2 ? 1400 - i * 90 : null,
+    priced_trips: i % 2 ? 20 : 0,
+  })),
+  multi_platform: 6,
+  note: 'One row per person: platform accounts are folded by name.',
+}));
+
+app.get('/api/drivers/performance', (_, r) => r.json(drivers.slice(0, 6).map((name, i) => ({
+  platform: ['uber', 'bolt', 'yango'][i % 3], driver_name: name, driver_ext_id: `drv-${i}`,
+  plate: plates[i], period_start: '2026-08-14', period_end: '2026-08-20',
+  trips: 44 - i * 4, hours_online: 52 - i * 3, hours_on_trip: 31 - i * 2,
+  acceptance_rate: 0.92 - i * 0.04, cancellation_rate: 0.03 + i * 0.01,
+  distance_km: 900 - i * 60, earnings: 2400 - i * 180, cash_earnings: 800 - i * 60,
+  rating: +(4.9 - i * 0.08).toFixed(2),
+}))));
+
+
+/* ── the fifteen routes that were falling through to the catch-all ────────
+   Every one of these was answered with `[]` by the catch-all below, so the
+   browser smoke test rendered these pages against nothing and passed. One of
+   them — /api/drivers/cross-platform, fixtured above — actually returns an
+   object, and the UI called .filter on it: the Drivers page threw in
+   production while the smoke run reported 76/76. A fixture that does not exist
+   is not a neutral omission; it is a fixture with the wrong shape. */
+
+app.get('/api/trips/hourly', (_, r) => r.json(
+  Array.from({ length: 24 }, (_, h) => ({
+    h, trips: Math.round(20 + 60 * Math.exp(-((h - 19) ** 2) / 18) + 25 * Math.exp(-((h - 8) ** 2) / 8)),
+  }))));
+
+app.get('/api/trips/heatmap', (_, r) => r.json(
+  Array.from({ length: 7 }, (_, dow) => Array.from({ length: 24 }, (_, h) => ({
+    dow, h, trips: Math.round(4 + 22 * Math.exp(-((h - 19) ** 2) / 20) * (dow === 5 || dow === 6 ? 1.5 : 1)),
+  }))).flat()));
+
+app.get('/api/vehicles', (_, r) => r.json(plates.map((p, i) => ({
+  plate: p, fleet_id: i % 3 ? 'ecosine' : 'egari',
+  // Never summed: an FMS row is the same physical journey a platform reported.
+  bookings: 120 - i * 11, telematics_journeys: 140 - i * 9,
+  has_distance_n: 100 - i * 9,
+  km: 3200 - i * 260, avg_km: +(14 - i * 0.4).toFixed(1),
+  revenue: i % 3 === 2 ? null : 4800 - i * 380,
+  priced_n: i % 3 === 2 ? 0 : 90 - i * 8,
+  drivers: 1 + (i % 3), platforms: 2 + (i % 2),
+  current_driver: drivers[i], current_driver_id: `drv-${i}`,
+  last_fix: new Date(Date.now() - i * 9e5).toISOString(), stale: i === 7,
+}))));
+
+app.get('/api/track', (req, r) => {
+  const n = 48; let lat = 25.11, lng = 55.2;
+  r.json(Array.from({ length: n }, (_, i) => {
+    lat += rnd(-0.004, 0.006); lng += rnd(-0.005, 0.006);
+    return { captured_at: new Date(Date.now() - (n - i) * 3e5).toISOString(),
+      lat: +lat.toFixed(5), lng: +lng.toFixed(5),
+      speed: i % 8 < 2 ? 0 : Math.round(rnd(15, 85)),
+      seat_occupied: i % 6 === 5 ? null : i % 3 !== 0,
+      ignition: i % 8 >= 1, status: i % 3 === 0 ? 'Engaged' : 'Active', source: 'cabman' };
+  }));
+});
+
+app.get('/api/finance/ledger', (_, r) => r.json([
+  { category: 'trip_fare', n: 812, amount: 96540.5, currency: 'AED' },
+  { category: 'commission', n: 812, amount: -21238.9, currency: 'AED' },
+  { category: 'tip', n: 96, amount: 1840, currency: 'AED' },
+  { category: 'cash_collected', n: 402, amount: -38210.25, currency: 'AED' },
+  { category: 'promotion', n: 44, amount: 2610, currency: 'AED' },
+  { category: 'toll', n: 233, amount: -932, currency: 'AED' },
+]));
+
+const UN_VERDICTS = [
+  { verdict: 'unauthorized', n: 21, km: 268, minutes: 640 },
+  { verdict: 'authorized', n: 190, km: 2480, minutes: 5120 },
+  { verdict: 'sensor_suspect', n: 12, km: 40, minutes: 1900 },
+  { verdict: 'partial', n: 9, km: 88, minutes: 210 },
+  { verdict: 'unverifiable', n: 6, km: 51, minutes: 130 },
+  { verdict: 'stationary', n: 31, km: 2, minutes: 900 },
+];
+app.get('/api/unauthorized/summary', (_, r) => {
+  const by = Object.fromEntries(UN_VERDICTS.map((v) => [v.verdict, v.n]));
+  r.json({
+    byVerdict: UN_VERDICTS,
+    totals: {
+      unauthorized: by.unauthorized, authorized: by.authorized,
+      unverifiable: by.unverifiable, pending: 0, partial: by.partial,
+      sensor_suspect: by.sensor_suspect, stationary: by.stationary,
+      unauth_km: 268, low_confidence: 6,
+    },
+  });
+});
+
+app.get('/api/unauthorized/list', (req, r) => {
+  const want = req.query.verdict && req.query.verdict !== 'all' ? req.query.verdict : null;
+  r.json(ALL_SEGS.filter((x) => !want || x.verdict === want).slice(0, 40));
+});
+
+app.get('/api/unauthorized/by-vehicle', (_, r) => r.json(plates.map((p, i) => ({
+  plate: p, unauthorized: Math.max(0, 6 - i), authorized: 20 + i,
+  sensor_suspect: i % 3, unauth_km: Math.max(0, 70 - i * 11),
+  drivers: i % 5 === 4 ? null : drivers[i],
+}))));
+
+app.get('/api/unauthorized/daily', (_, r) => r.json(
+  Array.from({ length: 21 }, (_, i) => ({
+    d: `2026-08-${String(i + 1).padStart(2, '0')}`,
+    unauthorized: i % 4 === 0 ? 3 : i % 3 === 0 ? 1 : 0,
+    authorized: 8 + (i % 5), total: 12 + (i % 6),
+  }))));
+
+app.get('/api/sensor-health', (_, r) => r.json(plates.map((p, i) => ({
+  plate: p, occupied_fixes: i === 2 ? 0 : 400 - i * 40,
+  unreported_fixes: i % 4 === 3 ? 900 : 0,
+  total_fixes: 2400 - i * 90,
+  occupied_pct: i === 2 ? 0 : +(18 - i).toFixed(1),
+  sensor_suspect_segments: i % 5 === 1 ? 4 : 0,
+}))));
+
+app.get('/api/platforms', (_, r) => r.json([
+  { platform: 'uber', fleet_id: 'ecosine', trips: 30410, earliest: '2025-08-21T04:00:00Z', latest: '2026-08-21T18:00:00Z' },
+  { platform: 'fms', fleet_id: 'ecosine', trips: 38970, earliest: '2025-08-21T02:00:00Z', latest: '2026-08-21T19:00:00Z' },
+  { platform: 'hotel', fleet_id: 'ecosine', trips: 1256, earliest: '2026-07-07T05:00:00Z', latest: '2026-08-21T16:00:00Z' },
+  { platform: 'bolt', fleet_id: 'egari', trips: 67, earliest: '2026-08-18T06:00:00Z', latest: '2026-08-21T17:00:00Z' },
+  { platform: 'yango', fleet_id: 'egari', trips: 4, earliest: '2026-08-18T09:00:00Z', latest: '2026-08-21T12:00:00Z' },
+]));
+
+app.get('/api/coverage', (_, r) => r.json({
+  trips: [
+    { platform: 'uber', n: 30410, from_ts: '2025-08-21T04:00:00Z', to_ts: '2026-08-21T18:00:00Z' },
+    { platform: 'fms', n: 38970, from_ts: '2025-08-21T02:00:00Z', to_ts: '2026-08-21T19:00:00Z' },
+    { platform: 'hotel', n: 1256, from_ts: '2026-07-07T05:00:00Z', to_ts: '2026-08-21T16:00:00Z' },
+  ],
+  telemetry: [{ source: 'cabman', n: 412880, last_poll: new Date().toISOString() }],
+  alerts: [{ n: 1904, latest: '2026-08-21T14:20:00Z' }],
+  ledger: [{ n: 2399, latest: '2026-08-20T21:00:00Z' }],
+}));
+
+app.get('/api/product/by-vehicle', (_, r) => r.json(
+  plates.flatMap((p, i) => ['UberX', 'Comfort', 'Black'].slice(0, 1 + (i % 3)).map((product, j) => ({
+    plate: p, product, trips: 60 - i * 4 - j * 12,
+    km: 900 - i * 60 - j * 100, avg_km: +(13 + j * 3).toFixed(1),
+  })))));
+
+app.get('/api/schema/raw-fields', (req, r) => r.json({
+  table: req.query.table || 'trip', platform: req.query.platform || null,
+  rows_with_raw: 30410, sampled: 4000,
+  fields: [
+    { key: 'Trip UUID', fill_pct: 100, distinct_values: 4000, examples: ['3f2a…'], already_a_column: true },
+    { key: 'Surge multiplier', fill_pct: 12, distinct_values: 7, examples: ['1.0', '1.4', '2.1'], already_a_column: false },
+    { key: 'Wait time (min)', fill_pct: 88, distinct_values: 40, examples: ['2', '5'], already_a_column: false },
+    { key: 'Number plate', fill_pct: 99, distinct_values: 96, examples: ['L46174'], already_a_column: true },
+    { key: 'Rider rating given', fill_pct: 61, distinct_values: 5, examples: ['5', '4'], already_a_column: false },
+  ],
+}));
+
+app.get('/api/settings', (_, r) => r.json([
+  { key: 'UBER_WEB_COOKIE', group: 'Uber', label: 'Supplier portal cookie', hint: 'Paste from a logged-in supplier.uber.com session',
+    secret: true, source: 'unset', configured: false, value: '', updated_at: null },
+  { key: 'CABMAN_PASS', group: 'CABMAN', label: 'Password', hint: null,
+    secret: true, source: 'environment', configured: true, value: '••••••••7f2a', updated_at: null },
+  { key: 'HOTEL_TOKEN', group: 'Hotel', label: 'Bearer token', hint: null,
+    secret: true, source: 'settings', configured: true, value: '••••••••b91c', updated_at: '2026-08-20T09:00:00Z' },
+  { key: 'BACKFILL_MONTHS', group: 'Collection', label: 'Months of history', hint: 'How far back a backfill reaches',
+    secret: false, source: 'environment', configured: true, value: '12', updated_at: null },
+]));
 
 // Anything not fixtured above answers with an empty list rather than a 404,
 // so a new page renders its own empty state instead of the view error box.

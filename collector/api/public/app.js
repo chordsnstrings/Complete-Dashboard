@@ -364,17 +364,45 @@ V.drivers = async (root) => {
     { x: 'trips', y: 'km', label: 'driver_name', xLabel: 'trips', yLabel: 'km',
       onClick: (r) => { location.hash = href('driver', r.driver_ext_id); } });
   xp.body.innerHTML = '';
-  const multi = cross.filter((r) => [r.uber_trips, r.yango_trips, r.bolt_trips, r.fms_trips].filter((n) => n > 0).length > 1);
-  xp.body.append(multi.length ? tableFrom(multi.slice(0, 15), [
-    { label: 'Driver', key: 'driver_name' },
-    { label: 'Uber', key: 'uber_trips', num: true }, { label: 'Yango', key: 'yango_trips', num: true },
-    { label: 'Bolt', key: 'bolt_trips', num: true }, { label: 'Telematics', key: 'fms_trips', num: true },
-    { label: 'Total', key: 'total_trips', num: true },
-  ]) : el('div', 'note', 'No driver in this window has trips on more than one platform.'));
+  /* This read `cross.filter(...)`. The endpoint returns
+     `{platforms, drivers, multi_platform, note}` and has since it was rewritten
+     to fold accounts by person — so `.filter` was being called on an object and
+     threw, which the view's catch-all turned into "Could not load this view"
+     across the WHOLE Drivers page, directory included. It went unnoticed
+     because the mock API had no fixture for this route and the catch-all
+     returned `[]`, on which `.filter` works.
+
+     The columns come from `cross.platforms` rather than a hardcoded list, which
+     is the same fix the endpoint itself already carries: the hardcoded list had
+     no `hotel`, one of only three platforms with trip data, so a driver working
+     Uber and the hotel channel scored one platform and this panel printed the
+     flat denial below — on a page whose own directory had just listed them. */
+  const people = cross.drivers || (Array.isArray(cross) ? cross : []);
+  const plats = cross.platforms || [];
+  const col = (pl) => `${pl}_trips`;
+  const multi = people.filter((r) => plats.filter((pl) => (r[col(pl)] || 0) > 0).length > 1);
+  if (!multi.length) {
+    xp.body.append(el('div', 'note', plats.length
+      ? `No driver in this window has trips on more than one of: ${plats.join(', ')}.`
+      : 'No platform has trips in this window, so there is nothing to compare.'));
+  } else {
+    xp.body.append(tableFrom(multi.slice(0, 15), [
+      { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+      ...plats.map((pl) => ({ label: pl, key: col(pl), num: true })),
+      { label: 'Telematics', key: 'telematics_journeys', num: true,
+        render: (r) => (r.telematics_journeys ? fmt(r.telematics_journeys) : '—') },
+      { label: 'Bookings', key: 'booking_trips', num: true },
+      { label: 'Accounts', key: 'accounts', num: true },
+    ]));
+    xp.body.append(el('p', 'cap',
+      `${fmt(multi.length)} of ${fmt(people.length)} people in this window work more than one channel. `
+      + 'Columns cover every platform with data, so the booking total is the sum of what is shown; '
+      + 'telematics journeys are counted apart because they are the same physical trips seen by the tracker.'));
+  }
   perf.body.innerHTML = '';
   perf.body.append(tableFrom(pf.slice(0, 25), [
     { label: 'Platform', key: 'platform' },
-    { label: 'Driver', key: 'driver_name' },
+    { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Period', key: 'period_start', render: (r) => dayStr(r.period_start) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Hrs online', key: 'hours_online', num: true, render: (x) => x.hours_online ? (+x.hours_online).toFixed(1) : '—' },
@@ -1088,7 +1116,7 @@ V.unauthorized = async (root) => {
     ratio: s2.total_fixes ? (s2.occupied_fixes / s2.total_fixes * 100).toFixed(1) : '0',
     verdict: s2.occupied_fixes === 0 ? 'never triggers' : (s2.sensor_suspect_segments > 0 ? 'suspect' : 'ok') }));
   health.body.append(tableFrom(flagged.slice(0, 20), [
-    { label: 'Plate', key: 'plate' },
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Occupied fixes', key: 'occupied_fixes', num: true },
     { label: 'Total fixes', key: 'total_fixes', num: true },
     { label: 'Occupied %', key: 'ratio', num: true, render: (r) => r.ratio + '%' },
@@ -1170,6 +1198,9 @@ V.map = async (root) => {
 
   const map = makeMap(node);
   let layer = null;
+  // Assigned once the day list exists, below; the live-map click handler is
+  // defined before that and calls it through this binding.
+  let refillDays = null;
   const clear = () => { if (layer) { map.removeLayer(layer); layer = null; } };
 
   const showLive = async () => {
@@ -1194,6 +1225,10 @@ V.map = async (root) => {
         if (![...sel.options].some((o) => o.value === r.plate)) sel.append(new Option(r.plate, r.plate));
         sel.value = r.plate;
       }
+      /* Refill the day list for the newly-chosen plate BEFORE replaying, or the
+         replay reads a date that belongs to the previous vehicle — the same
+         race the comment above already describes for the plate itself. */
+      refillDays?.();
       showReplay(r.plate);
     });
     if (!withGps.length) empty(stat, 'No GPS fixes stored yet — CABMAN populates this every 5 minutes');
@@ -1202,7 +1237,8 @@ V.map = async (root) => {
   /* `plate` is passed explicitly rather than re-read from the DOM, so a caller
      that has just set it cannot race the read. */
   const showReplay = async (plateArg) => {
-    const plate = plateArg || $('#mPlate').value, day = $('#mDay').value;
+    const plate = plateArg || $('#mPlate').value, day = $('#mDayList')?.value;
+    if (!day) { clear(); return empty(stat, `No stored trail for ${esc(plate || 'this vehicle')} — the replay list is built from days that have fixes.`); }
     if (!plate || !day) return;
     clear();
     const j = await api(`/api/map/journey?plate=${encodeURIComponent(plate)}&day=${day}`);
@@ -1229,13 +1265,41 @@ V.map = async (root) => {
     layer = renderJourney(map, j);
   };
 
-  // populate the replay pickers from days that actually have a trail
+  /* Populate the replay pickers from days that actually have a trail.
+     A free date input let you pick any day at all, most of which have no fixes,
+     so the commonest outcome of using this control was an empty map and no
+     explanation. The day list is now per-plate and names who held the car that
+     day — which is only correct because /api/map/days stopped joining
+     vehicle_current_driver, a view whose whole definition is "whoever has it
+     NOW", and started joining custody on the day itself. */
   const days = await api('/api/map/days').catch(() => []);
-  const plates = [...new Set(days.map((d) => d.plate))].sort();
+  const byPlate = new Map();
+  days.forEach((d) => {
+    const k = d.plate; if (!byPlate.has(k)) byPlate.set(k, []);
+    byPlate.get(k).push({ ...d, day: String(d.day).slice(0, 10) });
+  });
+  const plates = [...byPlate.keys()].sort();
   $('#mPlate').innerHTML = plates.map((p) => `<option>${esc(p)}</option>`).join('')
     || '<option value="">no trails yet</option>';
-  const latest = days[0]?.day ? String(days[0].day).slice(0, 10) : new Date().toISOString().slice(0, 10);
-  $('#mDay').value = latest;
+
+  const dayList = el('select', 'btn'); dayList.id = 'mDayList';
+  const dayNote = el('span', 'cap'); dayNote.id = 'mDayNote';
+  $('#mDay').replaceWith(dayList);
+  dayList.after(dayNote);
+  const fillDays = () => {
+    const rows = byPlate.get($('#mPlate').value) || [];
+    dayList.innerHTML = rows.map((r) => {
+      const who = r.driver_name ? ` · ${r.driver_name}` : '';
+      return `<option value="${esc(r.day)}">${esc(dayStr(r.day))} · ${r.fixes} fixes${esc(who)}</option>`;
+    }).join('') || '<option value="">no stored days for this vehicle</option>';
+    const cur = rows[0]?.current_driver_name;
+    dayNote.textContent = rows.length
+      ? `${rows.length} replayable day(s)` + (cur ? ` · held today by ${cur}` : '')
+      : 'This vehicle has no stored trail.';
+  };
+  refillDays = fillDays;
+  fillDays();
+  $('#mPlate').addEventListener('change', fillDays);
 
   $('#mLive').onclick = () => {
     $('#mLive').classList.add('primary'); $('#mReplay').classList.remove('primary');
@@ -1245,9 +1309,9 @@ V.map = async (root) => {
     $('#mReplay').classList.add('primary'); $('#mLive').classList.remove('primary');
     $('#mReplayCtl').style.display = 'flex'; showReplay();
   };
-  $('#mGo').onclick = showReplay;
-  $('#mPlate').onchange = showReplay;
-  $('#mDay').onchange = showReplay;
+  $('#mGo').onclick = () => showReplay();
+  $('#mPlate').addEventListener('change', () => showReplay());
+  dayList.onchange = () => showReplay();
 
   await showLive();
 };
@@ -1447,7 +1511,13 @@ V.compliance = async (root) => {
     { label: 'Vehicle', key: 'make', render: (r) => esc([r.make, r.model, r.year].filter(Boolean).join(' ') || '—') },
     { label: 'Document', key: 'doc_type' },
     { label: 'Expires', key: 'expires_at', render: (r) => String(r.expires_at || '').slice(0, 10) },
-    { label: 'Driver', key: 'driver_name', render: (r) => esc(r.driver_name || '—') },
+    /* Who holds the car now — a document expiring next week is that person's
+       problem, so the name is a link to them rather than a name to go and look
+       up somewhere else. */
+    { label: 'Held by', key: 'driver_name', render: (r) => (r.driver_name
+      ? entity('driver', r.driver_ext_id, r.driver_name)
+        + (r.driver_as_of ? ` <span class="dim">as of ${esc(String(r.driver_as_of).slice(0, 10))}</span>` : '')
+      : '<span class="dim">nobody currently attributed</span>') },
   ]));
 
   const dp = panel('Driver licences', placeholder

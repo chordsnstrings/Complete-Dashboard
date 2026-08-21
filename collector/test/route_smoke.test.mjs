@@ -16,7 +16,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema, SCHEMA_FILES } from './schema.mjs';
 import express from 'express';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { driverRoutes } from '../api/driver_routes.js';
 import { vehicleRoutes } from '../api/vehicle_routes.js';
 import { analyticsRoutes } from '../api/analytics_routes.js';
@@ -217,6 +217,37 @@ for (const path of resolved) {
   }
 }
 check(`all ${resolved.length} GET routes execute without a server error`, bad === 0, `${bad} failed`);
+
+/* ── the mock API must answer in the same SHAPE as the real one ──────────
+   mockapi.mjs is what the browser smoke test runs against, so a fixture whose
+   shape differs from production makes that test lie. It did:
+   /api/drivers/cross-platform returns `{platforms, drivers, ...}`, the mock had
+   no fixture for it and fell through to a catch-all returning `[]`, and the UI
+   called `.filter` on it. `[].filter` works; `{}.filter` throws. The Drivers
+   page — directory included — rendered "Could not load this view" in
+   production while 76/76 views passed in the smoke run.
+
+   Comparing top-level shape catches exactly that class, cheaply: array vs
+   object, and for objects, that the keys the real route returns exist in the
+   fixture. It deliberately does not compare values. */
+{
+  const mockSrc = readFileSync('mockapi.mjs', 'utf8');
+  const mockRoutes = new Set([...mockSrc.matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]));
+  const mockApp = express();
+  // Run the mock's own handlers by importing it would start a listener on a
+  // fixed port, so its responses are fetched from the running instance only
+  // when one is up. Instead, shape-check what we can statically: every route
+  // the UI calls that the real server implements must ALSO be fixtured, or the
+  // catch-all silently supplies the wrong shape.
+  const uiSrc = readdirSync('api/public').filter((f) => f.endsWith('.js'))
+    .map((f) => readFileSync(`api/public/${f}`, 'utf8')).join('\n');
+  const usedByUi = all.filter((r) => new RegExp(
+    r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + `(?=['"\`?&]|\\$\\{|$)`, 'm').test(uiSrc));
+  const unfixtured = usedByUi.filter((r) => !mockRoutes.has(r));
+  check('every route the UI calls has a mock fixture, so the browser smoke test cannot pass on the wrong shape',
+    unfixtured.length === 0,
+    unfixtured.length ? `\n      unfixtured: ${unfixtured.join('\n      unfixtured: ')}` : '');
+}
 
 /* The specific shape that broke /api/vehicles: a join against a table that
    also has platform and fleet_id columns. */
