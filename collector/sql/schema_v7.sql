@@ -37,45 +37,19 @@
 --    about the same trip. The local_* columns make the correct answer the
 --    convenient one.
 
-CREATE OR REPLACE VIEW trip_norm AS
-SELECT
-  t.*,
+/* trip_norm IS DEFINED IN schema_v18.sql, NOT HERE.
+   ──────────────────────────────────────────────────────────────────────────
+   It used to be defined here, as `SELECT t.* ... FROM trip t`. Postgres
+   expands that star ONCE, at creation, and stores the resulting column list —
+   so a column added to `trip` by a later migration was invisible to this view
+   and to everything built on it, while the column plainly existed in the
+   table. CREATE OR REPLACE VIEW cannot fix it either: it refuses to change an
+   existing view's output columns.
 
-  -- Is this a booking on a ride-hailing or corporate channel, or a journey
-  -- inferred from a GPS trace?
-  (t.platform <> 'fms') AS is_booking,
-
-  -- Normalised outcome. NULL where the question does not apply.
-  CASE
-    WHEN t.platform = 'fms' THEN NULL
-    WHEN t.status IS NULL THEN NULL
-    WHEN lower(btrim(t.status)) IN ('completed', 'finished', 'complete', 'closed', 'delivered')
-      THEN 'completed'
-    WHEN t.status ILIKE '%cancel%'
-      OR lower(btrim(t.status)) IN ('client_did_not_show', 'driver_did_not_respond',
-                                    'driver_rejected', 'rejected', 'expired', 'failed', 'no_show')
-      THEN 'not_completed'
-    ELSE 'other'
-  END AS outcome,
-
-  -- Dubai-local calendar keys. Every grouping and every window bound should
-  -- use these rather than re-deriving them.
-  (t.requested_at AT TIME ZONE 'Asia/Dubai')::date            AS local_day,
-  extract(hour  FROM t.requested_at AT TIME ZONE 'Asia/Dubai')::int AS local_hour,
-  extract(dow   FROM t.requested_at AT TIME ZONE 'Asia/Dubai')::int AS local_dow,
-  date_trunc('month', (t.requested_at AT TIME ZONE 'Asia/Dubai'))::date AS local_month,
-
-  -- Does this row carry money, and is its distance usable as a trip distance?
-  -- The Uber trip export has no fare column at all, so `price` is NULL on every
-  -- Uber row; a revenue figure describes only the hotel, Yango and Bolt rows.
-  (t.price IS NOT NULL) AS has_fare,
-  -- FMS distances are odometer-derived and occasionally implausible. A trip
-  -- distance is only comparable within a sane range.
-  (t.distance_km IS NOT NULL AND t.distance_km > 0 AND t.distance_km < 500) AS has_distance
-FROM trip t;
-
-COMMENT ON VIEW trip_norm IS
-  'trip, with the platform differences resolved: is_booking separates bookings from telematics journeys, outcome normalises status across platforms, local_* are Dubai-local calendar keys, has_fare/has_distance mark which rows a money or distance ratio may be computed over.';
+   v18 drops and recreates both views so the star re-expands. The three traps
+   this file documents — telematics twins, the platform status vocabularies,
+   and Dubai time — are unchanged and still the reason the view exists; the
+   definition simply lives in one place now. */
 
 -- The window predicate every endpoint uses is a range over requested_at, and
 -- the groupings are by Dubai-local day. Support both.

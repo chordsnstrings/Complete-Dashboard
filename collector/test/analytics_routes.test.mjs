@@ -15,6 +15,7 @@
      - calling a collection hole a quiet week;
      - and asserting, from a payment label alone, that a trip was corporate. */
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { analyticsRoutes } from '../api/analytics_routes.js';
@@ -24,9 +25,7 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-                 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql'])
-  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 const trip = (o) => q(
   `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,requested_at,
@@ -479,6 +478,77 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('a window stops being fleet-wide silence the moment anything is seen in it',
     !(cov2.shared_silence || []).some((g) => g.from <= '2026-06-11' && g.to >= '2026-06-11'),
     JSON.stringify(cov2.shared_silence));
+}
+
+
+/* ── the half of the empty running nobody was measuring ───────────────────
+   deadhead_km is the APPROACH leg: driver start to pickup. The hotel API also
+   returns driverEndLat/driverEndLon on most bookings — where the driver
+   actually was when the job closed — and it was never stored. So every
+   deadhead figure in this product described half the unpaid distance, and the
+   forgivable half: sending a car 5 km to collect somebody is the cost of doing
+   the job; leaving a driver 30 km from the next one is not.
+
+   The rule that matters here is that the two are never silently added. A
+   measured approach plus an unmeasured return, divided by every booking, is a
+   confident understatement — which is precisely what the single-leg version
+   was. */
+{
+  await q(`DELETE FROM trip`);
+  let dn = 0;
+  const leg = (partner, dist, out2, back) => q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_name, partner_name,
+       requested_at, status, distance_km, price, payment_type, deadhead_km, return_deadhead_km,
+       dropoff_addr)
+     VALUES ('hotel', $1, 'ecosine', 'L1', 'D', $2, '2026-08-10T10:00:00+04:00', 'completed',
+             $3, 100, 'room-charge', $4, $5, $6)`,
+    [`dh${dn++}`, partner, dist, out2, back, `${partner} Gate, Dubai - UAE`]);
+
+  // Alpha: both legs on every booking, and the return is the LARGER one.
+  for (let i = 0; i < 4; i++) await leg('Alpha', 20, 3, 9);
+  // Beta: approach measured, return never reported.
+  for (let i = 0; i < 4; i++) await leg('Beta', 20, 5, null);
+  // Gamma: one booking ends a very long way from anywhere.
+  await leg('Gamma', 10, 2, 42);
+  await leg('Gamma', 10, 2, 3);
+  await leg('Gamma', 10, 2, 3);
+
+  const rows = await get(`/api/corporate/approach?from=2026-08-01&to=2026-08-31&by=property`);
+  const alpha = rows.find((r) => r.label === 'Alpha');
+  const beta = rows.find((r) => r.label === 'Beta');
+
+  check('the return leg is reported as its own number',
+    Number(alpha.return_km) === 36, String(alpha.return_km));
+  check('and it can exceed the approach, which is why omitting it understated everything',
+    Number(alpha.return_km) > Number(alpha.deadhead_km),
+    `${alpha.return_km} vs ${alpha.deadhead_km}`);
+  check('a booking measured on only one leg is counted on that leg alone',
+    beta.measured === 4 && beta.measured_return === 0,
+    `${beta.measured} / ${beta.measured_return}`);
+  check('a combined total is only computed where BOTH legs were measured',
+    beta.measured_both === 0 && (beta.both_km == null || Number(beta.both_km) === 0),
+    `${beta.measured_both} / ${beta.both_km}`);
+  check('the combined ratio is null rather than an understatement when a leg is missing',
+    beta.both_ratio_pct == null, String(beta.both_ratio_pct));
+  check('where both legs exist the combined total is their sum',
+    Number(alpha.both_km) === 48, String(alpha.both_km));
+  check('the combined ratio is over paid distance on those same bookings',
+    Number(alpha.both_ratio_pct) === 60, String(alpha.both_ratio_pct));
+  check('a job that ends far from anywhere is counted, not averaged away',
+    rows.find((r) => r.label === 'Gamma').stranded_15km === 1,
+    String(rows.find((r) => r.label === 'Gamma').stranded_15km));
+
+  /* And the operational counterpart: which drop-off points cost the most to
+     walk away from. A short paid trip ending somewhere remote is worse than a
+     long one ending on a rank, and no per-property average can show it. */
+  const strand = await get(`/api/corporate/stranding?from=2026-08-01&to=2026-08-31`);
+  check('drop-off points are ranked by how far the driver had to go afterwards',
+    strand.length >= 1 && strand[0].place.startsWith('Gamma'),
+    JSON.stringify(strand.map((x) => x.place)));
+  check('the worst single return is kept, not just the average',
+    Number(strand[0].worst_km) === 42, String(strand[0].worst_km));
+  check('a drop-off area with too few measured returns is left out rather than ranked on one trip',
+    !strand.some((x) => x.measured < 3), JSON.stringify(strand.map((x) => x.measured)));
 }
 
 server.close();

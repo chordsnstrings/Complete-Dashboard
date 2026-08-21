@@ -16,6 +16,7 @@
 
    Every assertion here is one of those numbers. */
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 
@@ -24,8 +25,7 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql', 'schema_v6.sql', 'schema_v7.sql'])
-  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 const trip = (o) => q(
   `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,requested_at,

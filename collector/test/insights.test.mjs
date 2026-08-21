@@ -1,6 +1,7 @@
 // Validates schema v2 + the insight SQL against a real Postgres (PGlite, in-process).
 // Seeds a fleet with deliberately planted problems and asserts each rule finds them.
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import { readFileSync } from 'node:fs';
 
 const db = new PGlite();
@@ -8,9 +9,10 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (name, ok, extra = '') => { ok ? (pass++, console.log(`  ✓ ${name}`)) : (fail++, console.log(`  ✗ ${name} ${extra}`)); };
 
-await db.exec(readFileSync('sql/schema.sql', 'utf8'));
-await db.exec(readFileSync('sql/schema_v2.sql', 'utf8'));
-console.log('schema: applied v1 + v2');
+// The whole schema, read from src/db.js. Loading only v1+v2 meant this file
+// tested against a shape production has not had for a long time.
+const applied = await applySchema(db);
+console.log(`schema: applied ${applied.length} files`);
 
 // ── seed ──────────────────────────────────────────────────────────────────
 const now = new Date();

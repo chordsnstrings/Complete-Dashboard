@@ -1,6 +1,7 @@
 // Validates the world-event + break-attribution layer against the REAL Uber year
 // (160k trips pulled from the report pipeline), using an in-process Postgres.
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { parse } from 'csv-parse/sync';
 
@@ -9,7 +10,7 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql']) await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 // ── load the real year of Uber trips ─────────────────────────────────────
 const dir = '/tmp/yearpull';

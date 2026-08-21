@@ -1,13 +1,13 @@
 // Vehicle documents, platform recommendations and tip signal — the surfaces the
 // first pass missed. Uses the real expiry shape seen live (8 vehicles at 5 days).
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import { readFileSync } from 'node:fs';
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
-for (const f of ['schema.sql','schema_v2.sql','schema_v3.sql','schema_v4.sql','schema_v5.sql'])
-  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 const day = (n) => new Date(Date.now() + n * 864e5).toISOString();
 await q(`INSERT INTO vehicle_profile (platform,vehicle_ext_id,plate,fleet_id,make,model,year)

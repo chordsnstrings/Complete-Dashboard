@@ -4,6 +4,7 @@
    or January, and the comparison stepped straight over them. A confident wrong
    number is worse than no number, so this pins the behaviour. */
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 
@@ -12,14 +13,14 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-/* v6 and v7 are loaded because the route reads trip_norm, not trip: the cancel
-   ratio it reports was computed with ILIKE '%cancel%', which matches none of
-   Bolt's client_did_not_show, driver_did_not_respond or driver_rejected, and
-   its denominator counted FMS telematics rows that hardcode 'completed' and
-   cannot be cancelled at all. */
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-                 'schema_v6.sql', 'schema_v7.sql'])
-  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+/* The whole schema, read from src/db.js. This file used to load a hand-picked
+   subset ending at v5, which meant the route under test ran against a shape
+   production has not had for a long time — and the route reads trip_norm, not
+   trip: the cancel ratio it reports was computed with ILIKE '%cancel%', which
+   matches none of Bolt's client_did_not_show, driver_did_not_respond or
+   driver_rejected, and its denominator counted FMS telematics rows that
+   hardcode 'completed' and cannot be cancelled at all. */
+await applySchema(db);
 
 // Sep and Oct 2025 busy on Uber with named drivers; Nov–Jan absent entirely;
 // Feb 2026 back but only from the telematics feed, which carries no driver id.

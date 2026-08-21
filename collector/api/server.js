@@ -658,7 +658,7 @@ app.get('/api/alerts/summary', wrap(async (req, res) => res.json(await q(
    folded into somebody's total. */
 app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
   const [from, to] = range(req);
-  res.json(await q(
+  const rows = await q(
     `WITH ev AS (
        SELECT plate, alert_type,
               (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
@@ -689,14 +689,23 @@ app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
             (array_agg(c.driver_ext_id ORDER BY c.driver_name)
                FILTER (WHERE c.driver_ext_id IS NOT NULL))[1] AS top_driver_id
      FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
-     GROUP BY ev.plate ORDER BY alerts DESC LIMIT 100`, [from, to]));
+     GROUP BY ev.plate ORDER BY alerts DESC LIMIT 100`, [from, to]);
+  /* The page's "Vehicles involved" tile was the length of this list. The fleet
+     runs about 130 vehicles against a cap of 100 — under the cap today, over it
+     on any month where most of the fleet triggers something, and the tile would
+     read exactly 100 with nothing to say it had been cut. */
+  const [t] = await q(
+    `SELECT count(DISTINCT plate)::int vehicles, count(*)::int alerts
+     FROM alert WHERE ${DAYWIN('occurred_at')}`, [from, to]);
+  res.json({ rows, totals: t, shown: rows.length,
+    truncated: (t?.vehicles ?? 0) > rows.length });
 }));
 
 /* The same events, attributed to people rather than to plates. The safety page
    named nobody at all: it fetched a driver column and rendered only the plate. */
 app.get('/api/alerts/by-driver', wrap(async (req, res) => {
   const [from, to] = range(req);
-  res.json(await q(
+  const rows = await q(
     `WITH ev AS (
        SELECT plate, alert_type, (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
        FROM alert WHERE ${DAYWIN('occurred_at')}
@@ -734,7 +743,25 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
      FROM ev
      LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
      LEFT JOIN km ON km.person = ${CANON('c.driver_name')}
-     GROUP BY 1 ORDER BY alerts DESC LIMIT 100`, [from, to]));
+     GROUP BY 1 ORDER BY alerts DESC LIMIT 100`, [from, to]);
+  /* Named drivers, counted over the whole window rather than over the returned
+     rows, and counted the way the list groups: by custody name, excluding the
+     "(unattributed)" bucket, which is not a person. */
+  const [t] = await q(
+    `WITH ev AS (
+       SELECT plate, (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
+       FROM alert WHERE ${DAYWIN('occurred_at')}),
+     custody AS (
+       SELECT DISTINCT ON (plate, day) plate, day, driver_name
+       FROM vehicle_driver_day
+       WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
+       ORDER BY plate, day, trips DESC NULLS LAST, driver_name)
+     SELECT count(DISTINCT c.driver_name)::int drivers,
+            count(*)::int alerts,
+            count(*) FILTER (WHERE c.driver_name IS NULL)::int unattributed
+     FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day`, [from, to]);
+  res.json({ rows, totals: t, shown: rows.length,
+    truncated: (t?.drivers ?? 0) > rows.filter((r) => r.driver_name !== '(unattributed)').length });
 }));
 
 // Who was driving this plate, day by day (handovers included).
@@ -1371,6 +1398,23 @@ app.post('/api/events', requireAdmin, wrap(async (req, res) => {
    are what we chose to keep, not what arrived. This reports the keys present
    in `raw`, how often they are filled, and a few example values, so a field
    worth promoting to a real column can be found rather than guessed at. */
+/* Which column names the provider, per table.
+   telemetry_snapshot calls it `source`; every other table calls it `platform`.
+   Both raw-field endpoints hardcoded `platform`, so the raw explorer — whose
+   entire purpose is answering "what else could we be collecting" — returned a
+   500 for the telemetry table. That is the table carrying the seat-sensor
+   feed the whole unauthorized-trips analysis rests on, and CABMAN sends a
+   SeatSensorStatus field we do not store; the one tool that would have shown
+   it was the one that could not open that table.
+
+   A null entry means the table has no provider column at all and the filter
+   becomes a no-op rather than a syntax error. */
+const PROVIDER_COL = { trip: 'platform', alert: 'platform', telemetry_snapshot: 'source',
+  driver_performance: 'platform', vehicle_profile: 'platform' };
+const providerFilter = (table, n) => (PROVIDER_COL[table]
+  ? `($${n}::text IS NULL OR ${PROVIDER_COL[table]} = $${n})`
+  : `($${n}::text IS NULL OR TRUE)`);
+
 app.get('/api/schema/raw-fields', wrap(async (req, res) => {
   const table = ['trip', 'alert', 'telemetry_snapshot', 'driver_performance', 'vehicle_profile']
     .includes(req.query.table) ? req.query.table : 'trip';
@@ -1385,7 +1429,7 @@ app.get('/api/schema/raw-fields', wrap(async (req, res) => {
   const rows = await q(
     `WITH s AS (
        SELECT raw FROM ${table}
-       WHERE raw IS NOT NULL AND ($1::text IS NULL OR platform = $1)
+       WHERE raw IS NOT NULL AND ${providerFilter(table, 1)}
          AND ${tcol} BETWEEN $2 AND $3
        ORDER BY random() LIMIT ${sample}
      ),
@@ -1400,7 +1444,7 @@ app.get('/api/schema/raw-fields', wrap(async (req, res) => {
 
   const [{ n } = { n: 0 }] = await q(
     `SELECT count(*)::int n FROM ${table}
-     WHERE raw IS NOT NULL AND ($1::text IS NULL OR platform = $1) AND ${tcol} BETWEEN $2 AND $3`,
+     WHERE raw IS NOT NULL AND ${providerFilter(table, 1)} AND ${tcol} BETWEEN $2 AND $3`,
     [platform, from, to]);
 
   // Which of these are already promoted to a real column, so the interesting
@@ -1437,7 +1481,7 @@ app.get('/api/schema/raw-values', wrap(async (req, res) => {
   res.json(await q(
     `SELECT raw ->> $2 AS value, count(*)::int n
      FROM ${table}
-     WHERE raw ? $2 AND ($1::text IS NULL OR platform = $1) AND ${tcol} BETWEEN $3 AND $4
+     WHERE raw ? $2 AND ${providerFilter(table, 1)} AND ${tcol} BETWEEN $3 AND $4
      GROUP BY 1 ORDER BY n DESC LIMIT 60`,
     [req.query.platform || null, req.query.key,
      req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')]));

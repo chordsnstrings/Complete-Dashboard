@@ -822,6 +822,7 @@ app.get('/api/corporate/property', (req, res) => {
   });
 });
 app.get('/api/corporate/guests', (_, r) => r.json({
+  repeat_rooms: 37, repeat_bookings: 94, rooms_truncated: true,
   guests: Array.from({ length: 40 }, (_, i) => ({ guest_id: `guest-${2000 + i}`, bookings: 8 - (i % 7),
     revenue: (8 - (i % 7)) * 108, priced: 8 - (i % 7), properties: 1 + (i % 2),
     property: hotels[i % hotels.length].name, room_no: String(900 + i),
@@ -868,10 +869,36 @@ app.get('/api/corporate/approach', (req, r) => {
     const bookings = 300 - i * 40, measured = Math.round((300 - i * 40) * 0.9);
     const deadhead = Math.round((2.4 + i * 0.7) * measured * 10) / 10;
     const paid = Math.round(bookings * 14.2 * 10) / 10;
-    return { label, bookings, measured, deadhead_km: deadhead, avg_deadhead_km: 2.4 + i * 0.7,
-      paid_km: paid, ratio_pct: Math.round((deadhead / paid) * 1000) / 10 };
+    // The return leg is deliberately LARGER than the approach here, because
+    // that is what the live data shows and it is the whole point of measuring
+    // it: the leg this page used to omit is the bigger one.
+    const measuredReturn = Math.round(measured * 0.76);
+    const bothN = Math.round(measured * 0.7);
+    const ret = Math.round((3.9 + i * 1.1) * measuredReturn * 10) / 10;
+    const bothKm = Math.round((2.4 + i * 0.7 + 3.9 + i * 1.1) * bothN * 10) / 10;
+    return { label, bookings, measured, measured_return: measuredReturn, measured_both: bothN,
+      deadhead_km: deadhead, avg_deadhead_km: 2.4 + i * 0.7,
+      return_km: ret, avg_return_km: 3.9 + i * 1.1,
+      both_km: bothKm, avg_both_km: Math.round((6.3 + i * 1.8) * 100) / 100,
+      paid_km: paid, ratio_pct: Math.round((deadhead / paid) * 1000) / 10,
+      both_ratio_pct: Math.round((bothKm / paid) * 1000) / 10,
+      stranded_15km: i % 3 === 0 ? 4 + i : 0 };
   }).filter((x) => x.bookings > 0));
 });
+
+/* Which drop-off points leave a driver furthest from the next job. Not where
+   work happens — where it costs the most to walk away from. */
+app.get('/api/corporate/stranding', (_, r) => r.json(
+  ['Jebel Ali Free Zone', 'Al Qudra Rd', 'Dubai Investment Park', 'Hatta Rd',
+   'Al Maktoum Airport', 'Dubai Marina', 'DXB T3', 'Deira']
+    .map((place, i) => ({
+      place, drops: 40 - i * 4, measured: 34 - i * 3,
+      avg_return_km: Math.round((28 - i * 3.4) * 100) / 100,
+      return_km: Math.round((28 - i * 3.4) * (34 - i * 3) * 10) / 10,
+      worst_km: Math.round((46 - i * 4) * 10) / 10,
+      over_15km: Math.max(0, 12 - i * 2),
+      avg_paid_km: Math.round((9 + i * 1.6) * 10) / 10,
+    }))));
 app.get('/api/tiers/by-vehicle', (_, r) => r.json({
   fleet_premium_pct: 12.1,
   vehicles: plates.map((p, i) => {
@@ -926,6 +953,8 @@ app.get('/api/geo/corridors', (_, r) => {
   const areas = ['Al Thanyah Fifth', 'Business Bay', 'Dubai Airport', 'Palm Jumeirah', 'Al Barsha 1',
     'Marsa Dubai', 'Downtown Dubai', 'Al Nahda First', 'Jumeirah 1', 'Deira'];
   r.json({
+  totals: { corridors_3plus: 47, corridors_all: 210, origins_all: 63 },
+  shown: 60, truncated: true, origins_shown: 40, origins_truncated: true,
     note: 'Areas are parsed from the address text each provider returns, not from a place id.',
     corridors: areas.flatMap((a, i) => areas.slice(0, 4).map((b, j) => ({
       from_area: a, to_area: b, trips: Math.max(3, 90 - i * 6 - j * 9),
@@ -1189,7 +1218,7 @@ app.get('/api/day', (req, r) => {
 });
 
 
-app.get('/api/alerts/by-driver', (_, r) => r.json(drivers.map((name, i) => {
+app.get('/api/alerts/by-driver', (_, r) => r.json({ totals: { drivers: 74, alerts: 1904, unattributed: 212 }, shown: 8, truncated: true, rows: drivers.map((name, i) => {
   const brake = 22 - i * 2, accel = 12 - i, turn = i % 3, over = i % 2;
   const km = (900 - i * 90);
   return { driver_name: name, driver_ext_id: `drv-${i}`, alerts: brake + accel + turn + over,
@@ -1197,7 +1226,7 @@ app.get('/api/alerts/by-driver', (_, r) => r.json(drivers.map((name, i) => {
     plates: 1 + (i % 2), booked_km: km,
     per_100km: Math.round(((brake + accel + turn + over) * 100 / km) * 100) / 100 };
 }).concat([{ driver_name: '(unattributed)', driver_ext_id: null, alerts: 9, harsh_brake: 6,
-  harsh_accel: 2, sharp_turn: 1, overspeed: 0, plates: 4, booked_km: null, per_100km: null }])));
+  harsh_accel: 2, sharp_turn: 1, overspeed: 0, plates: 4, booked_km: null, per_100km: null }]) }));
 
 
 app.get('/api/alerts/summary', (_, r) => r.json([
@@ -1205,14 +1234,14 @@ app.get('/api/alerts/summary', (_, r) => r.json([
   { alert_type: 'Overspeed', n: 22 }, { alert_type: 'Sharp Turn', n: 9 },
   { alert_type: 'Main Power Lost', n: 31 },
 ]));
-app.get('/api/alerts/by-vehicle', (_, r) => r.json(plates.map((p2, i) => {
+app.get('/api/alerts/by-vehicle', (_, r) => r.json({ totals: { vehicles: 118, alerts: 1904 }, shown: 8, truncated: true, rows: plates.map((p2, i) => {
   const brake = 30 - i * 3, accel = 18 - i * 2, turn = i % 3, over = i % 2, other = i % 4 === 0 ? 5 : 0;
   return { plate: p2, alerts: brake + accel + turn + over + other,
     harsh_brake: brake, harsh_accel: accel, sharp_turn: turn, overspeed: over, other,
     unattributed: i === 3 ? 4 : 0, drivers: 1 + (i % 2),
     top_driver: i === 3 ? null : drivers[i % drivers.length],
     top_driver_id: i === 3 ? null : `drv-${i % drivers.length}` };
-})));
+}) }));
 
 
 app.get('/api/drivers/leaderboard', (_, r) => r.json(drivers.map((name, i) => ({

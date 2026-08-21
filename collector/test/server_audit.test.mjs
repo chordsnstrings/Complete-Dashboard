@@ -204,7 +204,8 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
                   ('L100',$1,'h1','KASHIF ALI AYYUB KHAN','hotel','ecosine',5),
                   ('L100',$2,'z9','Someone Else Entirely','uber','ecosine',9)`,
     [DAY, '2026-08-20']);
-  const byV = await get(`/api/alerts/by-vehicle?${WIN}`);
+  const byVPage = await get(`/api/alerts/by-vehicle?${WIN}`);
+  const byV = byVPage.rows;
   const row = byV.find((r) => r.plate === 'L100');
   check('two platform rows for one custody day do not double the alert count',
     row.alerts === 2, String(row.alerts));
@@ -212,7 +213,8 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
     row.other === 1 && row.harsh_brake === 1, JSON.stringify(row));
   check('the columns and the total can be reconciled',
     row.harsh_brake + row.harsh_accel + row.sharp_turn + row.overspeed + row.other === row.alerts);
-  const byD = await get(`/api/alerts/by-driver?${WIN}`);
+  const byDPage = await get(`/api/alerts/by-driver?${WIN}`);
+  const byD = byDPage.rows;
   const who = byD.find((r) => /Kashif/i.test(r.driver_name || ''));
   check('the events are attributed to whoever held the car that day',
     !!who && who.alerts === 2, JSON.stringify(byD.map((r) => [r.driver_name, r.alerts])));
@@ -223,6 +225,22 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
   // of this person's name. Grouping the denominator on the raw string gave 240.
   check('a per-100km rate is computed over the whole person, not one account',
     Number(who.booked_km) === 340, String(who.booked_km));
+
+  /* Both lists are capped at 100 rows and the Safety page turned their lengths
+     into "Vehicles involved" and "Drivers named" — labels that read as fleet
+     facts. The fleet runs about 130 vehicles, so the cap is one busy month
+     away from binding, and the tile would read exactly 100 with nothing
+     saying it had been cut. */
+  check('the vehicle count is its own number, not the length of a capped list',
+    byVPage.totals?.vehicles === new Set(byV.map((r) => r.plate)).size,
+    `${byVPage.totals?.vehicles} vs ${byV.length}`);
+  check('the named-driver count excludes the unattributed bucket, which is not a person',
+    byDPage.totals?.drivers === byD.filter((r) => r.driver_name !== '(unattributed)').length,
+    `${byDPage.totals?.drivers} vs ${byD.length}`);
+  check('unattributed events are totalled over the window, not over the page',
+    typeof byDPage.totals?.unattributed === 'number', String(byDPage.totals?.unattributed));
+  check('both responses say whether their list was cut',
+    'truncated' in byVPage && 'truncated' in byDPage);
 }
 
 /* ── a NULL seat sensor was rendered as an empty seat ────────────────── */

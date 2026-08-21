@@ -1,6 +1,7 @@
 // Vehicle→driver custody: every vehicle fact should be able to name a person.
 // Tested against real Postgres with a handover scenario (two drivers, one car, one day).
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import { readFileSync } from 'node:fs';
 
 const db = new PGlite();
@@ -8,8 +9,7 @@ const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql'])
-  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 const day = '2026-08-20';
 const mk = (id, plate, drv, name, hour, km = 10, price = 40) =>

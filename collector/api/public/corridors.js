@@ -50,13 +50,22 @@ export async function renderCorridors(root) {
   }
   const named = c.origins.filter((o) => o.area !== '(unrecorded)');
   const totalOrigin = named.reduce((a, o) => a + o.trips, 0);
+  /* The first two were lengths of lists the endpoint caps at 60 and 120 rows.
+     Both read as fleet facts and both silently become the cap once the fleet
+     works more corridors than that. Counted in the database now; the share
+     figures below are still over the visible rows and say so. */
+  const t = c.totals || {};
   root.append(kpiRow([
-    { label: 'Distinct pickup areas', value: fmt(named.length) },
-    { label: 'Corridors seen 3+ times', value: fmt(c.corridors.length) },
+    { label: 'Distinct pickup areas', value: fmt(t.origins_all ?? named.length),
+      sub: c.origins_truncated ? `${fmt(named.length)} shown below` : 'every one shown below' },
+    { label: 'Corridors seen 3+ times', value: fmt(t.corridors_3plus ?? c.corridors.length),
+      sub: t.corridors_all ? `of ${fmt(t.corridors_all)} distinct origin–destination pairs` : null },
     { label: 'Busiest pickup area', value: named[0]?.area || '—',
-      sub: named[0] ? `${pct((named[0].trips / totalOrigin) * 100, 1)} of addressed pickups` : null },
+      sub: named[0] ? `${pct((named[0].trips / totalOrigin) * 100, 1)} of the addressed pickups shown` : null },
     { label: 'Top 5 areas', value: pct((named.slice(0, 5).reduce((a, o) => a + o.trips, 0) / totalOrigin) * 100, 1),
-      sub: 'share of all addressed pickups' },
+      sub: c.origins_truncated
+        ? `share of the ${fmt(named.length)} areas shown, not of every area`
+        : 'share of all addressed pickups' },
   ]));
 
   const g = el('div', 'grid'); root.append(g);

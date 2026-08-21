@@ -2,13 +2,13 @@
 // Handovers matter here: if two people drove the plate, both are named rather than
 // silently attributing the flag to one of them.
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import { readFileSync } from 'node:fs';
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
-for (const f of ['schema.sql','schema_v2.sql','schema_v3.sql','schema_v4.sql','schema_v5.sql'])
-  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+await applySchema(db);
 
 // custody: L44305 driven by Alice on the 18th, Alice+Bob on the 19th; L82923 by Carl
 await q(`INSERT INTO vehicle_driver_day (plate,day,driver_ext_id,platform,driver_name,trips,is_primary) VALUES

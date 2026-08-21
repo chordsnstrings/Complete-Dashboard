@@ -951,8 +951,14 @@ V.safety = async (root) => {
   root.append(tabBar(SAFETY_TABS, tab, (id) => href('safety', id === 'people' ? null : id)));
   const host = el('div'); root.append(host);
   loading(host);
-  const [byType, byVeh, byDrv] = await Promise.all([
+  const [byType, vehPage, drvPage] = await Promise.all([
     q('/api/alerts/summary'), q('/api/alerts/by-vehicle'), q('/api/alerts/by-driver')]);
+  // Both now return {rows, totals}; the arrays are capped at 100 and the tiles
+  // that used to be their lengths read as fleet facts.
+  const byVeh = vehPage.rows || vehPage;
+  const byDrv = drvPage.rows || drvPage;
+  const vTot = vehPage.totals || {};
+  const dTot = drvPage.totals || {};
   host.innerHTML = '';
 
   const total = byType.reduce((a, r) => a + r.n, 0);
@@ -967,15 +973,19 @@ V.safety = async (root) => {
   const device = byType.filter((r) => DEVICE.test(r.alert_type));
   const driving = byType.filter((r) => !DEVICE.test(r.alert_type));
   const drivingN = driving.reduce((a, r) => a + r.n, 0);
-  const unattributed = byVeh.reduce((a, r) => a + (r.unattributed || 0), 0);
+  // Over the whole window, not over the returned rows.
+  const unattributed = dTot.unattributed ?? byVeh.reduce((a, r) => a + (r.unattributed || 0), 0);
 
   host.append(kpiRow([
     { label: 'Driving events', value: fmt(drivingN), sub: 'harsh braking, acceleration, turns, speed' },
     { label: 'Device faults', value: fmt(total - drivingN),
       sub: 'power loss and similar — a tracker problem, not a driver one',
       tone: total - drivingN ? 'warn' : null },
-    { label: 'Vehicles involved', value: fmt(byVeh.length) },
-    { label: 'Drivers named', value: fmt(byDrv.filter((r) => r.driver_name !== '(unattributed)').length) },
+    { label: 'Vehicles involved', value: fmt(vTot.vehicles ?? byVeh.length),
+      sub: vehPage.truncated ? `${fmt(byVeh.length)} shown` : 'every one of them listed below' },
+    { label: 'Drivers named', value: fmt(dTot.drivers
+      ?? byDrv.filter((r) => r.driver_name !== '(unattributed)').length),
+      sub: 'people custody could attribute an event to' },
     { label: 'Events nobody held the car for', value: fmt(unattributed),
       sub: unattributed ? 'no custody record for that plate on that day' : 'every event has a driver',
       tone: unattributed ? 'warn' : null },

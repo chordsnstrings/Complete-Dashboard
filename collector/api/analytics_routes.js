@@ -403,6 +403,15 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        WHERE ${F} AND platform = 'hotel' AND room_no IS NOT NULL AND room_no ~ '^[0-9]{2,5}$'
        GROUP BY 1 HAVING count(*) > 1 ORDER BY bookings DESC LIMIT 80`, p);
 
+    // The page's "Rooms seen more than once" tile was this list's length, and
+    // the list stops at 80. Counted properly, so the tile is a fact about the
+    // channel rather than about the query.
+    const [roomTot] = await q(
+      `SELECT count(*)::int repeat_rooms, sum(n)::int repeat_bookings FROM (
+         SELECT count(*)::int n FROM trip_ext
+         WHERE ${F} AND platform = 'hotel' AND room_no IS NOT NULL
+         GROUP BY room_no HAVING count(*) > 1) g`, p);
+
     res.json({
       guests: rows.map((r) => ({
         ...r, revenue: r.priced ? round(r.revenue, 0) : null, km: round(r.km, 0),
@@ -425,6 +434,9 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           + 'and a repeat rate of 0% here is a fact about the identifier, not about the customers.'
         : null,
       rooms: byRoom.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
+      repeat_rooms: roomTot?.repeat_rooms || 0,
+      repeat_bookings: roomTot?.repeat_bookings || 0,
+      rooms_truncated: (roomTot?.repeat_rooms || 0) > byRoom.length,
     });
   }));
 
@@ -540,17 +552,66 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       daypart: 'daypart', driver: `coalesce(driver_name, '(unnamed)')`,
       type: 'product', zone: `coalesce(zone, '(unrecorded)')` };
     const dim = by[req.query.by] || by.property;
+    /* BOTH unpaid legs, reported separately and never silently added.
+       This measured only the approach — driver start to pickup — and reported
+       it as "deadhead", which is half the empty running and the forgivable
+       half: sending a car 5 km to collect somebody is the cost of doing the
+       job. The expensive one is where the driver is LEFT. The hotel API has
+       reported driverEndLat/Lon all along, on most bookings, and it was never
+       stored.
+
+       `measured_both` is the only denominator a combined ratio may use.
+       Dividing a total that mixes measured approaches with unmeasured returns
+       by a booking count produces a confident understatement, which is exactly
+       the failure this endpoint already had. */
     res.json(await q(
       `SELECT ${dim} AS label, count(*)::int bookings,
               count(*) FILTER (WHERE deadhead_km IS NOT NULL)::int measured,
+              count(*) FILTER (WHERE return_deadhead_km IS NOT NULL)::int measured_return,
+              count(*) FILTER (WHERE both_legs_measured)::int measured_both,
               round(sum(deadhead_km)::numeric, 1) deadhead_km,
               round(avg(deadhead_km)::numeric, 2) avg_deadhead_km,
+              round(sum(return_deadhead_km)::numeric, 1) return_km,
+              round(avg(return_deadhead_km)::numeric, 2) avg_return_km,
+              -- Over the bookings where both legs exist, so the two halves of
+              -- the sum come from the same rows.
+              round(sum(total_deadhead_km) FILTER (WHERE both_legs_measured)::numeric, 1) both_km,
+              round(avg(total_deadhead_km) FILTER (WHERE both_legs_measured)::numeric, 2) avg_both_km,
               round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 1) paid_km,
               round((100.0 * sum(deadhead_km)
-                     / nullif(sum(distance_km) FILTER (WHERE has_distance), 0))::numeric, 1) ratio_pct
+                     / nullif(sum(distance_km) FILTER (WHERE has_distance), 0))::numeric, 1) ratio_pct,
+              round(avg(total_deadhead_pct) FILTER (WHERE both_legs_measured)::numeric, 1) both_ratio_pct,
+              -- Where the return leg is long, the driver finished somewhere
+              -- with nothing to pick up. That is a dispatch problem with a
+              -- location attached, not a driver problem.
+              count(*) FILTER (WHERE return_deadhead_km > 15)::int stranded_15km
        FROM trip_ext WHERE ${F} AND platform = 'hotel'
-       GROUP BY 1 HAVING count(*) FILTER (WHERE deadhead_km IS NOT NULL) > 0
-       ORDER BY deadhead_km DESC NULLS LAST LIMIT 60`, p));
+       GROUP BY 1 HAVING count(*) FILTER (WHERE deadhead_km IS NOT NULL
+                                             OR return_deadhead_km IS NOT NULL) > 0
+       ORDER BY coalesce(sum(total_deadhead_km), sum(deadhead_km)) DESC NULLS LAST LIMIT 60`, p));
+  }));
+
+  /* Where a job ENDS and leaves the driver with nothing.
+     The corridor view answers "where does work start and finish"; this answers
+     the operationally different question of which drop-off points cost the
+     most to leave, measured by how far the driver had to go afterwards. A
+     limousine fleet's controllable waste lives here rather than in the fare. */
+  app.get('/api/corporate/stranding', wrap(async (req, res) => {
+    const p = range(req);
+    res.json(await q(
+      `SELECT coalesce(nullif(btrim(split_part(dropoff_addr, ',', 1)), ''), '(no address)') AS place,
+              count(*)::int drops,
+              count(*) FILTER (WHERE return_deadhead_km IS NOT NULL)::int measured,
+              round(avg(return_deadhead_km)::numeric, 2) avg_return_km,
+              round(sum(return_deadhead_km)::numeric, 1) return_km,
+              round(max(return_deadhead_km)::numeric, 1) worst_km,
+              count(*) FILTER (WHERE return_deadhead_km > 15)::int over_15km,
+              round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_paid_km
+       FROM trip_ext
+       WHERE ${F} AND platform = 'hotel' AND dropoff_addr IS NOT NULL
+       GROUP BY 1
+       HAVING count(*) FILTER (WHERE return_deadhead_km IS NOT NULL) >= 3
+       ORDER BY avg_return_km DESC NULLS LAST LIMIT 30`, p));
   }));
 
   /* ───────────────────────── product tiers ─────────────────────────
@@ -765,10 +826,30 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km
        FROM trip_ext WHERE ${F} AND pickup_addr IS NOT NULL
        GROUP BY 1 ORDER BY trips DESC LIMIT 60`, p);
+    /* Counted in the database. The page's "Distinct pickup areas" and
+       "Corridors seen 3+ times" tiles were the lengths of lists capped at 60
+       and 120 rows — right until the fleet works more than 120 distinct
+       corridors, at which point both tiles quietly become the cap. */
+    const [t] = await q(
+      `SELECT (SELECT count(*)::int FROM (
+                 SELECT 1 FROM trip_ext WHERE ${F} AND pickup_addr IS NOT NULL
+                 GROUP BY ${areaOf('pickup_addr')}, ${areaOf('dropoff_addr')}
+                 HAVING count(*) >= 3) g) AS corridors_3plus,
+              (SELECT count(*)::int FROM (
+                 SELECT 1 FROM trip_ext WHERE ${F} AND pickup_addr IS NOT NULL
+                 GROUP BY ${areaOf('pickup_addr')}, ${areaOf('dropoff_addr')}) g) AS corridors_all,
+              (SELECT count(DISTINCT ${areaOf('pickup_addr')})::int
+                 FROM trip_ext WHERE ${F} AND pickup_addr IS NOT NULL) AS origins_all`, p);
+    const shown = rows.filter((r) => r.from_area !== '(unrecorded)' || r.to_area !== '(unrecorded)');
     res.json({
       note: 'Areas are parsed from the address text each provider returns, not from a place id.',
-      corridors: rows.filter((r) => r.from_area !== '(unrecorded)' || r.to_area !== '(unrecorded)'),
+      corridors: shown,
       origins,
+      totals: t,
+      shown: shown.length,
+      truncated: (t?.corridors_all ?? 0) > shown.length,
+      origins_shown: origins.length,
+      origins_truncated: (t?.origins_all ?? 0) > origins.length,
     });
   }));
 

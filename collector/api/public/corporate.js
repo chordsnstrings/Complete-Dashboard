@@ -215,8 +215,9 @@ async function corpGuests(host) {
       { label: 'Passenger records', value: fmt(g.total_guests), sub: `across ${fmt(g.total_bookings)} bookings` },
       { label: 'Bookings with a room number', value: fmt(g.bookings_with_room),
         sub: g.total_bookings ? pct((g.bookings_with_room / g.total_bookings) * 100, 1) + ' of bookings' : null },
-      { label: 'Rooms seen more than once', value: fmt(g.rooms.length),
-        tone: g.rooms.length ? 'good' : null },
+      { label: 'Rooms seen more than once', value: fmt(g.repeat_rooms ?? g.rooms.length),
+        sub: g.repeat_bookings ? `${fmt(g.repeat_bookings)} bookings between them` : null,
+        tone: (g.repeat_rooms ?? g.rooms.length) ? 'good' : null },
       { label: 'Repeat travel', value: 'not measurable', tone: 'warn' },
     ]));
     host.append(note(g.caveat));
@@ -225,6 +226,10 @@ async function corpGuests(host) {
         'The only thing on this channel that recurs. A room is not a person — a returning guest and two '
         + 'different guests in the same room look identical here — but a room booking cars repeatedly is '
         + 'still worth knowing about.');
+      if (g.rooms_truncated) {
+        body.append(note(`Showing the ${fmt(g.rooms.length)} busiest of ${fmt(g.repeat_rooms)} rooms `
+          + 'that travelled more than once. The tile above counts all of them.'));
+      }
       body.append(tableFrom(g.rooms, [
         { label: 'Room', key: 'room_no' },
         { label: 'Property', key: 'property', render: (r) => esc(r.property || '—') },
@@ -337,27 +342,99 @@ async function corpApproach(host) {
   const by = APPROACH_BY.some((b) => b.id === state.sub) ? state.sub : 'property';
   host.append(tabBar(APPROACH_BY, by, (id) => href('corporate', 'approach', id)));
   const body = el('div'); host.append(body); loading(body);
-  const rows = await q('/api/corporate/approach', { by });
+  const [rows, stranding] = await Promise.all([
+    q('/api/corporate/approach', { by }),
+    q('/api/corporate/stranding').catch(() => []),
+  ]);
   body.innerHTML = '';
   if (!rows.length) return empty(body, 'No booking in this range records where the driver set off from');
-  const { panel: p, body: chart } = panel('Unpaid kilometres',
-    'Total approach distance. A group with nothing measured is left out rather than drawn as zero.');
-  hbars(chart, rows.slice(0, 15).map((r) => ({ label: r.label, n: r.deadhead_km })),
-    { valueFmt: (v) => `${fmt(v, 1)} km` });
+
+  /* This page reported the approach leg alone and called it deadhead. That is
+     half the empty running, and the forgivable half — sending a car to collect
+     somebody is the cost of doing the job. The expensive half is where the
+     driver is LEFT, and the hotel API has been reporting it all along. */
+  const anyReturn = rows.some((r) => r.measured_return > 0);
+  const tot = rows.reduce((a, r) => ({
+    approach: a.approach + (+r.deadhead_km || 0),
+    ret: a.ret + (+r.return_km || 0),
+    both: a.both + (+r.both_km || 0),
+    bothN: a.bothN + (r.measured_both || 0),
+    stranded: a.stranded + (r.stranded_15km || 0),
+  }), { approach: 0, ret: 0, both: 0, bothN: 0, stranded: 0 });
+
+  body.append(kpiRow([
+    { label: 'Approach — driver to pickup', value: `${fmt(tot.approach, 1)} km`,
+      sub: 'the leg this page used to report on its own' },
+    { label: 'Return — drop-off to wherever they ended up',
+      value: anyReturn ? `${fmt(tot.ret, 1)} km` : '—',
+      sub: anyReturn ? 'never measured until now' : 'this channel reports no driver end position',
+      tone: tot.ret > tot.approach ? 'critical' : tot.ret > 0 ? 'warn' : null },
+    { label: 'Both legs, where both were measured',
+      value: tot.bothN ? `${fmt(tot.both, 1)} km` : '—',
+      sub: tot.bothN ? `over ${fmt(tot.bothN)} bookings that report both ends` : 'nothing reports both' },
+    { label: 'Ended more than 15 km from anywhere', value: fmt(tot.stranded),
+      sub: 'a dispatch problem with an address on it', tone: tot.stranded ? 'warn' : null },
+  ]));
+  if (anyReturn && tot.ret > tot.approach) {
+    body.append(note(`The return leg is larger than the approach — ${fmt(tot.ret, 1)} km against `
+      + `${fmt(tot.approach, 1)} km. Every previous version of this page reported only the smaller of `
+      + 'the two, so the fleet\u2019s unpaid running has been understated by more than half.'));
+  }
+
+  const { panel: p, body: chart } = panel('Unpaid kilometres, both directions',
+    'Approach and return side by side. A group with nothing measured is left out rather than drawn as zero.');
+  hbars(chart, rows.slice(0, 15).map((r) => ({ label: r.label, n: +r.deadhead_km || 0 })),
+    { valueFmt: (v) => `${fmt(v, 1)} km`, color: '--s3' });
+  if (anyReturn) {
+    chart.append(el('p', 'cap', 'Bars above are the approach leg; the return column in the table below is the other half.'));
+  }
   body.append(p);
   body.append(tableFrom(rows, [
     { label: APPROACH_BY.find((b) => b.id === by).label.replace('By ', ''), key: 'label',
-      render: (r) => (by === 'driver' ? esc(r.label) : esc(r.label)) },
+      render: (r) => (by === 'property' ? esc(r.label) : esc(r.label)) },
     { label: 'Bookings', key: 'bookings', num: true },
     { label: 'Measured', key: 'measured', num: true, render: (r) => `${fmt(r.measured)} <small class="dim">${pct((r.measured / r.bookings) * 100, 0)}</small>` },
     { label: 'Approach km', key: 'deadhead_km', num: true, render: (r) => fmt(r.deadhead_km, 1) },
-    { label: 'Avg per booking', key: 'avg_deadhead_km', num: true, render: (r) => `${fmt(r.avg_deadhead_km, 2)} km` },
+    { label: 'Return km', key: 'return_km', num: true,
+      render: (r) => (r.measured_return ? fmt(r.return_km, 1) : '<span class="dim">not reported</span>') },
+    { label: 'Avg both legs', key: 'avg_both_km', num: true,
+      render: (r) => (r.measured_both
+        ? `${fmt(r.avg_both_km, 2)} km <small class="dim">over ${fmt(r.measured_both)}</small>`
+        : '<span class="dim">—</span>') },
     { label: 'Paid km', key: 'paid_km', num: true, render: (r) => fmt(r.paid_km, 1) },
     { label: 'Approach ÷ paid', key: 'ratio_pct', num: true, render: (r) => pct(r.ratio_pct, 1) },
+    { label: 'Both ÷ paid', key: 'both_ratio_pct', num: true,
+      render: (r) => (r.measured_both ? pct(r.both_ratio_pct, 1) : '<span class="dim">—</span>') },
   ]));
-  body.append(note('Every approach kilometre is a kilometre driven with nobody paying. Repeated on '
-    + 'the same property or the same part of the day, it is a positioning problem with an address — '
-    + 'not bad luck.'));
+  body.append(note('Every one of these kilometres is driven with nobody paying. "Both ÷ paid" is '
+    + 'computed only over bookings that report BOTH ends — adding a measured approach to an '
+    + 'unmeasured return and dividing by every booking would produce a confident understatement, '
+    + 'which is what the single-leg version of this page was.'));
+
+  /* Where a job ends and leaves the driver with nothing. This is the
+     operational counterpart to the corridor view: not where work happens, but
+     which drop-off points cost the most to walk away from. */
+  if (stranding.length) {
+    const { panel: sp, body: sb } = panel('Drop-off points that leave a driver furthest from the next job',
+      'Ranked by how far the driver had to travel after the passenger got out. At least three measured drops each.');
+    body.append(sp);
+    hbars(sb, stranding.slice(0, 12).map((r) => ({ label: r.place, n: +r.avg_return_km || 0 })),
+      { valueFmt: (v) => `${fmt(v, 2)} km`, color: '--s8' });
+    sb.append(tableFrom(stranding, [
+      { label: 'Drop-off area', key: 'place' },
+      { label: 'Drops', key: 'drops', num: true },
+      { label: 'Measured', key: 'measured', num: true },
+      { label: 'Avg return', key: 'avg_return_km', num: true, render: (r) => `${fmt(r.avg_return_km, 2)} km` },
+      { label: 'Worst', key: 'worst_km', num: true, render: (r) => `${fmt(r.worst_km, 1)} km` },
+      { label: 'Over 15 km', key: 'over_15km', num: true,
+        render: (r) => (r.over_15km ? `<span class="pill warn">${fmt(r.over_15km)}</span>` : '—') },
+      { label: 'Avg paid trip', key: 'avg_paid_km', num: true, render: (r) => `${fmt(r.avg_paid_km, 1)} km` },
+    ], { compact: true }));
+    sb.append(el('p', 'cap',
+      'A short paid trip that ends somewhere with a long return is worse than a long one that ends '
+      + `on a rank. Compare the last two columns: ${esc(stranding[0].place)} averages `
+      + `${fmt(stranding[0].avg_paid_km, 1)} km paid and ${fmt(stranding[0].avg_return_km, 2)} km unpaid afterwards.`));
+  }
 }
 
 /* ── one property ─────────────────────────────────────────────────────── */

@@ -16,6 +16,7 @@
    carry the numbers that did the rejecting, because "the model said X and the
    data says otherwise" is worth being able to read. */
 import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './schema.mjs';
 import { readFileSync } from 'node:fs';
 import { adjudicate, parseProposals, twoProportionP, welchP, METRICS, DIMENSIONS, MATERIALITY }
   from '../src/analyst.js';
@@ -161,9 +162,7 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
 {
   const db = new PGlite();
   const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
-  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-    'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql'])
-    await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+  await applySchema(db);
 
   // 400 card trips completing 95% of the time, 400 cash trips completing 70%.
   let n = 0;

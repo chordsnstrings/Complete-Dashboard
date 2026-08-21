@@ -22,14 +22,25 @@ function haversine(aLat, aLng, bLat, bLng) {
   return 2 * R_KM * Math.asin(Math.sqrt(x));
 }
 
-// Straight-line distance from where the driver set off to where the passenger got in.
-// It understates real road distance, so treat it as a floor on deadhead, not a measure.
-function deadheadKm(t) {
-  const a = [t.driverStartLat, t.driverStartLon], b = [t.startLat, t.startLon];
-  if (a.some((v) => v == null) || b.some((v) => v == null)) return null;
-  const km = haversine(Number(a[0]), Number(a[1]), Number(b[0]), Number(b[1]));
+// Straight-line distance between two reported positions, discarding the
+// implausible. Understates real road distance, so treat any result as a floor
+// on empty running, not a measure of it.
+function legKm(aLat, aLng, bLat, bLng) {
+  if ([aLat, aLng, bLat, bLng].some((v) => v == null)) return null;
+  const km = haversine(Number(aLat), Number(aLng), Number(bLat), Number(bLng));
   return km > 200 || !isFinite(km) ? null : Math.round(km * 100) / 100;   // discard bad fixes
 }
+
+// The APPROACH leg: where the driver set off, to where the passenger got in.
+const deadheadKm = (t) => legKm(t.driverStartLat, t.driverStartLon, t.startLat, t.startLon);
+
+/* The RETURN leg: from the drop-off point to where the driver actually was
+   when the job closed. Reported on most bookings and never stored, so every
+   deadhead figure in this product has been describing half the empty running —
+   and the half that is easiest to accept, because a driver being sent a few
+   kilometres to a pickup is normal while being left somewhere with no return
+   work is the expensive kind. */
+const returnDeadheadKm = (t) => legKm(t.endLat, t.endLon, t.driverEndLat, t.driverEndLon);
 
 // Hotel licence dates arrive as "1/1/26" or "01/01/2026" — day-first, two- or four-digit year.
 function parseLicenceDate(v) {
@@ -113,6 +124,7 @@ export async function collect({ from, to, mode }) {
         // Hotel is the only source that records where the driver started FROM, so it is
         // the only place we can measure the unpaid approach leg honestly.
         deadhead_km: deadheadKm(t),
+        return_deadhead_km: returnDeadheadKm(t),
         /* `cost` on this report is the charge for the ride, not what the ride
            cost us to deliver — it is the same number as `price`, and storing it
            in both columns produced a gross margin of exactly zero on every

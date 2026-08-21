@@ -249,6 +249,111 @@ check(`all ${resolved.length} GET routes execute without a server error`, bad ==
     unfixtured.length ? `\n      unfixtured: ${unfixtured.join('\n      unfixtured: ')}` : '');
 }
 
+/* ── every schema file must survive being replayed ────────────────────────
+   Both containers run migrate() on every boot, which replays every file in
+   filename order. Two failures live in that loop and neither shows up on a
+   first install:
+
+   1. `SELECT t.*` in a view is expanded ONCE, at creation. trip_norm was
+      defined in v7 that way, so a column added to `trip` in v18 was invisible
+      to it and to trip_ext — while the column plainly existed in the table.
+      CREATE OR REPLACE VIEW cannot fix it: it refuses to change an existing
+      view's output columns.
+
+   2. Two files defining the same view is fine on install and fails on the
+      SECOND boot, when the older file runs first with the older column list
+      and Postgres answers "cannot drop columns from view". A migration that
+      errors on every boot trains everyone to ignore migration errors.
+
+   So: replay the whole schema three times and require silence. */
+{
+  const fresh = new PGlite();
+  const errs = [];
+  for (let boot = 1; boot <= 3; boot++) {
+    for (const f of SCHEMA_FILES) {
+      try { await fresh.exec(readFileSync(`sql/${f}`, 'utf8')); }
+      catch (e) { errs.push(`boot ${boot} ${f}: ${String(e.message || e).slice(0, 120)}`); }
+    }
+  }
+  check('every schema file replays cleanly on three consecutive boots',
+    errs.length === 0, errs.slice(0, 4).join(' | '));
+
+  const fq = (t) => fresh.query(t).then((r) => r.rows);
+  const extCols = (await fq(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'trip_ext'`))
+    .map((c) => c.column_name);
+  const tripCols = (await fq(
+    `SELECT column_name FROM information_schema.columns WHERE table_name = 'trip'`))
+    .map((c) => c.column_name);
+  /* The invariant behind trap 1, stated directly: trip_ext is built on
+     `SELECT t.*` twice over, so every column of `trip` must reach it. A column
+     that does not is one somebody added without rebuilding the views, and it
+     will be silently missing from every page rather than erroring. */
+  const missing = tripCols.filter((c) => !extCols.includes(c));
+  check('every column of trip reaches trip_ext, so a new column is not silently invisible',
+    missing.length === 0, missing.join(', '));
+
+  // And no view is defined in more than one schema file.
+  const defs = {};
+  for (const f of SCHEMA_FILES) {
+    // Comments first — these files explain the trap in prose, and "CREATE OR
+    // REPLACE VIEW cannot fix it" is not a view definition.
+    const body = readFileSync(`sql/${f}`, 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/^\s*--.*$/gm, '');
+    for (const m of body.matchAll(/CREATE (?:OR REPLACE )?VIEW (\w+)/g)) {
+      (defs[m[1]] ||= []).push(f);
+    }
+  }
+  const dup = Object.entries(defs).filter(([, fs]) => fs.length > 1);
+  check('no view is defined in two schema files, which fails only on the second boot',
+    dup.length === 0, dup.map(([v, fs]) => `${v}: ${fs.join(',')}`).join(' | '));
+  await fresh.close();
+}
+
+/* ── no test may keep its own copy of the schema list ─────────────────────
+   Nine test files each carried a hand-picked list, several stopping at v5 or
+   v12. Each one therefore ran against a schema production has not had for a
+   long time — and the failure mode is the quiet one: a test that happens not
+   to touch the newer columns PASSES, pinning behaviour that is not real. It
+   only became visible when moving trip_ext's definition to a newer file made
+   four of them error outright. */
+{
+  /* Naming a schema file literally is what makes a list hand-maintained.
+     Reading sql/ through SCHEMA_FILES is not — this file deliberately replays
+     the schema to prove it survives a second boot. */
+  const stragglers = readdirSync('test')
+    .filter((f) => f.endsWith('.test.mjs'))
+    .filter((f) => /['\`]schema(_v\d+)?\.sql['\`]/.test(readFileSync(`test/${f}`, 'utf8')));
+  check('no test names a schema file literally instead of reading the list from src/db.js',
+    stragglers.length === 0, stragglers.join(', '));
+}
+
+/* ── the raw explorer must be able to open every table it offers ──────────
+   Both raw-field endpoints filtered on `platform`. telemetry_snapshot calls
+   that column `source`, so the tool whose entire purpose is answering "what
+   else could we be collecting" returned a 500 for the table carrying the
+   seat-sensor feed — and CABMAN does send a SeatSensorStatus field we do not
+   store. The one tool that would have surfaced it could not open that table. */
+{
+  const TABLES = ['trip', 'alert', 'telemetry_snapshot', 'driver_performance', 'vehicle_profile'];
+  let broken = [];
+  for (const t of TABLES) {
+    const a = await fetch(`http://127.0.0.1:${port}/api/schema/raw-fields?table=${t}&${WINDOW}`);
+    const b = await fetch(`http://127.0.0.1:${port}/api/schema/raw-values?table=${t}&key=x&${WINDOW}`);
+    if (a.status >= 500 || b.status >= 500) broken.push(`${t} (${a.status}/${b.status})`);
+  }
+  check('every table the raw explorer offers can actually be opened',
+    broken.length === 0, broken.join(', '));
+
+  // And the provider filter still filters, rather than being silently dropped.
+  const filtered = await (await fetch(
+    `http://127.0.0.1:${port}/api/schema/raw-fields?table=trip&platform=uber&${WINDOW}`)).json();
+  check('the provider filter is applied where the table has one',
+    filtered.platform === 'uber' && typeof filtered.rows_with_raw === 'number',
+    JSON.stringify({ p: filtered.platform, n: filtered.rows_with_raw }));
+}
+
 /* The specific shape that broke /api/vehicles: a join against a table that
    also has platform and fleet_id columns. */
 {
