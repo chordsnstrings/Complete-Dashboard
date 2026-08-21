@@ -266,8 +266,6 @@ app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
 }));
 
 /* ───────────────────────── static dashboard ───────────────────────── */
-app.use(express.static(join(__dir, 'public'), { maxAge: '5m' }));
-app.get('*', (_, res) => res.sendFile(join(__dir, 'public', 'index.html')));
 
 
 /* ───────────────────────── actionable insights ───────────────────────── */
@@ -359,6 +357,11 @@ app.post('/api/events', requireAdmin, wrap(async (req, res) => {
      b.ends_on || b.starts_on, b.expected_effect || 'unknown', b.confidence ?? 0.5, b.summary || null]);
   res.json({ ok: true });
 }));
+
+// Static dashboard LAST: app.get('*') would otherwise shadow any API route
+// registered after it (this silently broke /api/insights once already).
+app.use(express.static(join(__dir, 'public'), { maxAge: '5m' }));
+app.get('*', (_, res) => res.sendFile(join(__dir, 'public', 'index.html')));
 
 const port = process.env.PORT || 8080;
 migrate().catch((e) => log.error('api', 'migrate failed', { err: String(e) }))
