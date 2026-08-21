@@ -834,3 +834,9 @@ span.dim{color:var(--ink-3);font-size:.72rem}
    in use — must not look like one that fired zero times. */
 .leak.off{opacity:.55;border-style:dashed;cursor:default}
 .leak.off b{color:var(--ink-3)}
+
+/* A day can be walked, not just landed on. */
+.daynav{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin:0 0 16px;flex-wrap:wrap}
+.daynav b{font-family:"Fraunces",Georgia,serif;font-size:1.15rem}
+.daynav a{color:var(--ink-2);text-decoration:none;font-size:.82rem;border-bottom:1px solid var(--rule)}
+.daynav a:hover{color:var(--accent-ink);border-bottom-color:currentColor}

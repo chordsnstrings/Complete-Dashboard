@@ -20,6 +20,7 @@ import { driverRoutes } from '../api/driver_routes.js';
 import { vehicleRoutes } from '../api/vehicle_routes.js';
 import { analyticsRoutes } from '../api/analytics_routes.js';
 import { rosterRoutes } from '../api/roster_routes.js';
+import { dayRoutes } from '../api/day_routes.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -144,6 +145,7 @@ driverRoutes(app, { q, wrap, endOfDay });
 vehicleRoutes(app, { q, wrap, endOfDay });
 analyticsRoutes(app, { q, wrap, range, F, FB });
 rosterRoutes(app, { q, wrap, range });
+dayRoutes(app, { q, wrap });
 
 const server = app.listen(0);
 const port = server.address().port;
@@ -164,6 +166,7 @@ const ARGS = {
   '/api/corporate/approach': 'by=driver',
   '/api/tiers/mix': 'by=daypart',
   '/api/geo/corridors': '',
+  '/api/day': 'day=2026-08-05',
 };
 const WINDOW = 'from=2026-08-01&to=2026-08-31';
 
@@ -181,8 +184,10 @@ const anaRoutes = [...readFileSync('api/analytics_routes.js', 'utf8')
   .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
 const rosRoutes = [...readFileSync('api/roster_routes.js', 'utf8')
   .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
+const dayRts = [...readFileSync('api/day_routes.js', 'utf8')
+  .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
 
-const all = [...new Set([...routes, ...drvRoutes, ...vehRoutes, ...anaRoutes, ...rosRoutes])];
+const all = [...new Set([...routes, ...drvRoutes, ...vehRoutes, ...anaRoutes, ...rosRoutes, ...dayRts])];
 // `:param` routes need a real value substituted, not the literal placeholder.
 const SUB = { ':id': 'd0', ':plate': 'L100' };
 const resolved = all.map((r) => r.replace(/:(\w+)/g, (m) => SUB[m] || 'd0'));

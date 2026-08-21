@@ -15,6 +15,7 @@ import { renderCorridors } from './corridors.js';
 import { renderAnalyst, ANALYST_TABS } from './analyst.js';
 import { renderProviders } from './providers.js';
 import { renderRoster, ROSTER_TABS } from './roster.js';
+import { renderDay } from './day.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -68,7 +69,7 @@ const VIEWS = [
 /* ─────────── shell ─────────── */
 // A detail page keeps its parent lit in the sidebar — `#driver/…` is a page
 // *within* Drivers, not a thirteenth top-level destination.
-const PARENT = { driver: 'drivers', vehicle: 'vehicles', property: 'corporate' };
+const PARENT = { driver: 'drivers', vehicle: 'vehicles', property: 'corporate', day: 'demand' };
 
 function renderNav() {
   const nav = $('#nav'); nav.innerHTML = '';
@@ -96,6 +97,15 @@ function setHeader(detail) {
     $('#viewSub').textContent = `${tab.label} — ${[spec.year, spec.make, spec.model].filter(Boolean).join(' ') || 'every source that describes this asset'}`;
     crumb.innerHTML = `<a href="${href('vehicles')}">Vehicles</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
     crumb.style.display = 'flex';
+  } else if (state.view === 'day') {
+    const label = /^\d{4}-\d{2}-\d{2}$/.test(state.param || '')
+      ? new Date(`${state.param}T12:00:00Z`).toLocaleDateString(undefined,
+        { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+      : 'Day';
+    $('#viewTitle').textContent = label;
+    $('#viewSub').textContent = 'Every source that saw this day — including whether each one was collecting';
+    crumb.innerHTML = `<a href="${href('demand')}">Demand</a><span>/</span><b>${esc(state.param || '')}</b>`;
+    crumb.style.display = 'flex';
   } else if (state.view === 'property') {
     const tab = PROPERTY_TABS.find((t) => t.id === (state.sub || 'overview')) || PROPERTY_TABS[0];
     $('#viewTitle').textContent = detail?.name || 'Property';
@@ -107,7 +117,7 @@ function setHeader(detail) {
     $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
     crumb.style.display = 'none';
   }
-  const noFilter = ['settings', 'live', 'sources'];
+  const noFilter = ['settings', 'live', 'sources', 'day', 'providers'];
   $('#filters').style.display = noFilter.includes(state.view) ? 'none' : 'flex';
 }
 // generic trip drill-down for any filter combination
@@ -155,8 +165,8 @@ V.overview = async (root) => {
   ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
 
   barChart(trend.body, daily, { x: 'd', y: 'trips', label: 'trips',
-    onClick: (d) => drillTrips(`Trips on ${dayStr(d.d)}`, 'Drivers active that day',
-      { from: dayKey(d.d), to: dayKey(d.d) }) });
+    // A day is an address now, not a modal containing a driver list.
+    onClick: (d) => { location.hash = href('day', dayKey(d.d)); } });
   donut(mix.body, byPlat, { onClick: (d) => drillTrips(`${d.label} trips`, 'Drivers on this platform', { platform: d.label }) });
   hbars(prod.body, byProd.slice(0, 6));
   paymentDonut(pay.body, payDetail);
@@ -187,8 +197,7 @@ V.demand = async (root) => {
   ]);
   areaChart(hourly.body, h.map((r) => ({ label: String(r.h).padStart(2, '0') + ':00', trips: r.trips })), { x: 'label', y: 'trips' });
   barChart(daily.body, d, { x: 'd', y: 'trips',
-    onClick: (r) => drillTrips(`Trips on ${dayStr(r.d)}`, 'Drivers active that day',
-      { from: dayKey(r.d), to: dayKey(r.d) }) });
+    onClick: (r) => { location.hash = href('day', dayKey(r.d)); } });
 
   /* Join the day's trips to that day's weather and calendar. Both sides are
      keyed on the calendar date, so a missing weather row leaves the trip row
@@ -315,6 +324,13 @@ V.property = async (root) => {
 V.settlement = async (root) => renderSettlement(root, SETTLE_TABS.some((t) => t.id === state.param) ? state.param : 'mix');
 V.coverage = async (root) => renderCoverage(root);
 V.corridors = async (root) => renderCorridors(root);
+/* A day is a page. It was a modal titled "Trips on 14 August" that contained a
+   driver leaderboard, and could not be linked to. */
+V.day = async (root) => {
+  let detail = null;
+  await renderDay(root, state.param, (d) => { detail = d; });
+  return detail;
+};
 V.providers = async (root) => renderProviders(root);
 V.roster = async (root) => renderRoster(root);
 V.analyst = async (root) => renderAnalyst(root);

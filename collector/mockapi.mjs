@@ -1021,6 +1021,74 @@ app.get('/api/settings/jobs', (_, r) => r.json({
   pending: 0, running: 1,
 }));
 
+
+app.get('/api/day', (req, r) => {
+  const day = req.query.day || dayISO(1).slice(0, 10);
+  const hours = Array.from({ length: 24 }, (_, h) => ({ hour: h,
+    bookings: Math.max(0, Math.round(30 * Math.exp(-((h - 19) ** 2) / 26) + 18 * Math.exp(-((h - 7) ** 2) / 9))),
+    telematics: Math.max(0, Math.round(20 * Math.exp(-((h - 19) ** 2) / 30))),
+    cancelled: h % 7 === 0 ? 2 : 0 }));
+  const bookings = hours.reduce((a, x) => a + x.bookings, 0);
+  r.json({
+    day,
+    // Kept internally consistent on purpose: a fixture whose headline and its
+    // own breakdowns disagree makes every review of the page harder than the
+    // real data would.
+    headline: { bookings: 215, telematics: 240, completed: 201, not_completed: 14,
+      bookable: 215, priced: 41, revenue: 4180, avg_fare: 101.95, booked_km: 3120,
+      telematics_km: 4210, drivers: 34, vehicles: 41, completion_pct: 93.5,
+      first_at: `${day}T02:14:00Z`, last_at: `${day}T20:41:00Z` },
+    versus_neighbours: { median_bookings: 241, delta_pct: -10.8,
+      series: Array.from({ length: 15 }, (_, i) => {
+        const dd = dayISO(14 - i).slice(0, 10);
+        return { day: dd, bookings: dd === day ? 215 : 210 + Math.round(Math.sin(i) * 40) };
+      }) },
+    hours: hours.map((x) => ({ ...x, bookings: Math.round(x.bookings * 215 / (bookings || 1)) })),
+    platforms: [
+      { platform: 'uber', n: 168, completed: 160, bookable: 168, revenue: null, km: 2100, completion_pct: 95.2 },
+      { platform: 'hotel', n: 41, completed: 41, bookable: 41, revenue: 4180, km: 690, completion_pct: 100 },
+      { platform: 'yango', n: 6, completed: 5, bookable: 6, revenue: 210, km: 90, completion_pct: 83.3 },
+    ],
+    drivers: drivers.map((name, i) => ({ driver_name: name, driver_ext_id: `drv-${i}`,
+      trips: 22 - i * 2, cancelled: i % 3, revenue: i % 2 ? (22 - i * 2) * 96 : null,
+      km: (22 - i * 2) * 13, platforms: i % 2 ? ['uber'] : ['uber', 'hotel'],
+      plates: [plates[i % plates.length]],
+      first_trip: `${day}T03:0${i}:00Z`, last_trip: `${day}T19:1${i}:00Z` })),
+    vehicles: plates.map((p2, i) => ({ plate: p2, bookings: 30 - i * 3, telematics: 34 - i * 3,
+      km: (30 - i * 3) * 14, drivers: 1 + (i % 2), revenue: i % 2 ? (30 - i * 3) * 88 : null })),
+    tiers: [{ tier: 'Electric', n: 78 }, { tier: 'UberX', n: 64 }, { tier: 'Comfort', n: 15 }, { tier: 'Black', n: 11 }],
+    settlement: [{ settlement_class: 'card', n: 96, revenue: 1180 }, { settlement_class: 'cash', n: 52, revenue: 900 },
+      { settlement_class: 'off_platform', n: 44, revenue: null }, { settlement_class: 'on_account', n: 12, revenue: 1310 }],
+    alerts: [{ alert_type: 'Harsh Brake', n: 14, plates: 9, on_plates: plates.slice(0, 9) },
+      { alert_type: 'Harsh Acceleration', n: 8, plates: 6, on_plates: plates.slice(0, 6) },
+      { alert_type: 'Main Power Lost', n: 1, plates: 1, on_plates: [plates[0]] }],
+    segments: [
+      { plate: plates[0], started_at: `${day}T05:38:00Z`, ended_at: `${day}T06:04:00Z`, duration_min: 26,
+        distance_km: 18.4, verdict: 'unauthorized', nearest_platform: 'uber', nearest_gap_min: 96,
+        verdict_reason: 'no completed booking overlaps; nearest is a uber trip 96 min away' },
+      { plate: plates[2], started_at: `${day}T11:02:00Z`, ended_at: `${day}T11:19:00Z`, duration_min: 17,
+        distance_km: 6.1, verdict: 'unverifiable', nearest_platform: null, nearest_gap_min: null,
+        verdict_reason: 'no bookings collected from bolt in this window, so a booking there cannot be ruled out' },
+    ],
+    corridors: [
+      { from_area: 'Al Thanyah Fifth', to_area: 'Dubai Airport', trips: 14 },
+      { from_area: 'Business Bay', to_area: 'Palm Jumeirah', trips: 11 },
+      { from_area: 'Marsa Dubai', to_area: 'Downtown Dubai', trips: 8 },
+    ],
+    coverage: [
+      { source: 'uber', rows: 168, median_rows: 430, first_day: dayISO(300).slice(0, 10), last_day: dayISO(0).slice(0, 10), inside_span: true },
+      { source: 'fms', rows: 240, median_rows: 260, first_day: dayISO(300).slice(0, 10), last_day: dayISO(0).slice(0, 10), inside_span: true },
+      { source: 'hotel', rows: 41, median_rows: 28, first_day: dayISO(45).slice(0, 10), last_day: dayISO(0).slice(0, 10), inside_span: true },
+      { source: 'bolt', rows: 0, median_rows: 40, first_day: dayISO(300).slice(0, 10), last_day: dayISO(0).slice(0, 10), inside_span: true },
+    ],
+    collection: { silent: [{ source: 'bolt', normally: 40 }], thin: [],
+      warning: 'bolt collected nothing on this day and normally report around 40 rows. Every figure on this page is over what did land, so all of them are understated.' },
+    context: { temp_max: 41.2, temp_min: 32.8, precipitation: 0, wind_max: 22,
+      hijri_date: '17 Safar 1448', hijri_month: 'Safar', is_ramadan: false, is_holiday: false,
+      holiday_name: null, sunrise: `${day}T01:53:00Z`, sunset: `${day}T14:52:00Z` },
+  });
+});
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 
 app.use(express.static(join(__dir, 'api', 'public')));

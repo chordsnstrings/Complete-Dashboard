@@ -1,0 +1,176 @@
+/* One day, from every source that saw it.
+   ──────────────────────────────────────────────────────────────────────────
+   Clicking a bar on the demand chart used to open a modal titled "Trips on
+   14 August" that contained a driver leaderboard — not trips, and not the day
+   in any sense a person would recognise. It also could not be linked to, which
+   for the one artefact somebody actually wants to send a colleague ("look at
+   what happened on the 14th") is the wrong shape entirely.
+
+   A day is now an address, and it holds what a day actually consisted of:
+   bookings and the telematics journeys behind them, the hours they fell in,
+   who drove and what they drove, the safety events, the unexplained occupancy,
+   the weather and the calendar — and, critically, WHETHER EVERY SOURCE WAS
+   COLLECTING. A quiet Tuesday and a Tuesday nobody fetched produce the same
+   chart, and only this page can tell them apart. */
+
+const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
+  : Math.round(Number(v) * 10 ** d) / 10 ** d);
+const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''))
+  && !Number.isNaN(new Date(`${v}T00:00:00Z`).getTime());
+
+export function dayRoutes(app, { q, wrap }) {
+  app.get('/api/day', wrap(async (req, res) => {
+    const day = req.query.day;
+    if (!isDay(day)) return res.status(400).json({ error: 'day must be YYYY-MM-DD' });
+    const p = [day];
+
+    // Dubai-local bounds for the tables that are keyed on a timestamp rather
+    // than on trip_ext's local_day.
+    const T0 = `($1::date::timestamp AT TIME ZONE 'Asia/Dubai')`;
+    const T1 = `(($1::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')`;
+    const D = `local_day = $1::date`;
+
+    const [
+      headline, hours, platforms, drivers, vehicles, tiers, settlement,
+      alerts, segments, coverage, context, neighbours, corridors,
+    ] = await Promise.all([
+      q(`SELECT count(*) FILTER (WHERE is_booking)::int bookings,
+                count(*) FILTER (WHERE NOT is_booking)::int telematics,
+                count(*) FILTER (WHERE outcome = 'completed')::int completed,
+                count(*) FILTER (WHERE outcome = 'not_completed')::int not_completed,
+                count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable,
+                count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int priced,
+                sum(price) FILTER (WHERE NOT is_complimentary) revenue,
+                sum(distance_km) FILTER (WHERE has_distance AND is_booking) booked_km,
+                sum(distance_km) FILTER (WHERE has_distance AND NOT is_booking) telematics_km,
+                count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int drivers,
+                count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL)::int vehicles,
+                min(requested_at) first_at, max(requested_at) last_at
+         FROM trip_ext WHERE ${D}`, p),
+      q(`SELECT local_hour AS hour, count(*) FILTER (WHERE is_booking)::int bookings,
+                count(*) FILTER (WHERE NOT is_booking)::int telematics,
+                count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled
+         FROM trip_ext WHERE ${D} GROUP BY 1 ORDER BY 1`, p),
+      q(`SELECT platform, count(*)::int n,
+                count(*) FILTER (WHERE outcome = 'completed')::int completed,
+                count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable,
+                sum(price) FILTER (WHERE NOT is_complimentary) revenue,
+                round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 0) km
+         FROM trip_ext WHERE ${D} GROUP BY 1 ORDER BY n DESC`, p),
+      q(`SELECT driver_name, max(driver_ext_id) driver_ext_id, count(*)::int trips,
+                count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled,
+                sum(price) FILTER (WHERE NOT is_complimentary) revenue,
+                round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 0) km,
+                array_agg(DISTINCT platform) platforms,
+                array_remove(array_agg(DISTINCT plate), NULL) plates,
+                min(requested_at) first_trip, max(requested_at) last_trip
+         FROM trip_ext WHERE ${D} AND is_booking AND driver_name IS NOT NULL
+         GROUP BY driver_name ORDER BY trips DESC LIMIT 120`, p),
+      q(`SELECT plate, count(*) FILTER (WHERE is_booking)::int bookings,
+                count(*) FILTER (WHERE NOT is_booking)::int telematics,
+                round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 0) km,
+                count(DISTINCT driver_name)::int drivers,
+                sum(price) FILTER (WHERE NOT is_complimentary) revenue
+         FROM trip_ext WHERE ${D} AND plate IS NOT NULL
+         GROUP BY plate ORDER BY bookings DESC, telematics DESC LIMIT 120`, p),
+      q(`SELECT uber_tier AS tier, count(*)::int n FROM trip_ext
+         WHERE ${D} AND uber_tier IS NOT NULL GROUP BY 1 ORDER BY n DESC`, p),
+      q(`SELECT settlement_class, count(*)::int n,
+                sum(price) FILTER (WHERE NOT is_complimentary) revenue
+         FROM trip_ext WHERE ${D} AND settlement_class IS NOT NULL GROUP BY 1 ORDER BY n DESC`, p),
+      q(`SELECT alert_type, count(*)::int n, count(DISTINCT plate)::int plates,
+                array_remove(array_agg(DISTINCT plate), NULL) AS on_plates
+         FROM alert WHERE occurred_at >= ${T0} AND occurred_at < ${T1}
+         GROUP BY 1 ORDER BY n DESC`, p),
+      q(`SELECT plate, started_at, ended_at, duration_min, distance_km, verdict,
+                verdict_reason, nearest_platform, nearest_gap_min
+         FROM occupancy_segment
+         WHERE started_at >= ${T0} AND started_at < ${T1}
+         ORDER BY CASE verdict WHEN 'unauthorized' THEN 0 WHEN 'unverifiable' THEN 1 ELSE 2 END,
+                  started_at LIMIT 60`, p),
+      // Did every source that normally reports actually report on this day?
+      q(`WITH normal AS (
+           SELECT source, percentile_cont(0.5) WITHIN GROUP (ORDER BY rows) AS median_rows,
+                  min(day) AS first_day, max(day) AS last_day
+           FROM source_day_coverage GROUP BY source
+         )
+         SELECT n.source, coalesce(c.rows, 0)::int rows, round(n.median_rows) AS median_rows,
+                n.first_day, n.last_day,
+                ($1::date BETWEEN n.first_day AND n.last_day) AS inside_span
+         FROM normal n LEFT JOIN source_day_coverage c
+           ON c.source = n.source AND c.day = $1::date
+         ORDER BY n.source`, p),
+      q(`SELECT w.temp_max, w.temp_min, w.precipitation, w.wind_max,
+                c.hijri_date, c.hijri_month, c.is_ramadan, c.is_holiday, c.holiday_name,
+                c.sunrise, c.sunset
+         FROM (SELECT $1::date AS d) x
+         LEFT JOIN weather_daily w ON w.day = x.d
+         LEFT JOIN calendar_day  c ON c.day = x.d`, p),
+      // The seven days around it, so the day has something to be read against.
+      q(`SELECT local_day AS day, count(*) FILTER (WHERE is_booking)::int bookings
+         FROM trip_ext WHERE local_day BETWEEN $1::date - 7 AND $1::date + 7
+         GROUP BY 1 ORDER BY 1`, p),
+      q(`SELECT coalesce(nullif(btrim(split_part(pickup_addr, ' - ', 2)), ''), '(unrecorded)') AS from_area,
+                coalesce(nullif(btrim(split_part(dropoff_addr, ' - ', 2)), ''), '(unrecorded)') AS to_area,
+                count(*)::int trips
+         FROM trip_ext WHERE ${D} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
+         GROUP BY 1, 2 ORDER BY trips DESC LIMIT 20`, p),
+    ]);
+
+    const h = headline[0] || {};
+    const near = neighbours.map((n) => ({ day: String(n.day).slice(0, 10), bookings: n.bookings }));
+    const others = near.filter((n) => n.day !== day).map((n) => n.bookings).sort((a, b) => a - b);
+    const median = others.length ? others[Math.floor(others.length / 2)] : null;
+
+    /* A source that normally reports and reported nothing today is the single
+       most important thing on this page: every rate below is computed over
+       whatever did land, and if a source is missing they are all understated.
+       Reported before the numbers, not as a footnote. */
+    const silent = coverage.filter((c) => c.inside_span && c.rows === 0 && Number(c.median_rows) > 0);
+    const thin = coverage.filter((c) => c.inside_span && c.rows > 0
+      && Number(c.median_rows) > 0 && c.rows < Number(c.median_rows) * 0.3);
+
+    res.json({
+      day,
+      headline: {
+        ...h,
+        revenue: h.priced ? round(h.revenue, 0) : null,
+        avg_fare: h.priced ? round(Number(h.revenue) / h.priced, 2) : null,
+        booked_km: round(h.booked_km, 0),
+        telematics_km: round(h.telematics_km, 0),
+        completion_pct: h.bookable ? round((h.completed / h.bookable) * 100, 1) : null,
+      },
+      // How this day sits against the fortnight around it.
+      versus_neighbours: {
+        median_bookings: median,
+        delta_pct: median ? round(((h.bookings - median) / median) * 100, 1) : null,
+        series: near,
+      },
+      hours,
+      platforms: platforms.map((r) => ({ ...r, revenue: round(r.revenue, 0),
+        completion_pct: r.bookable ? round((r.completed / r.bookable) * 100, 1) : null })),
+      drivers: drivers.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
+      vehicles: vehicles.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
+      tiers,
+      settlement: settlement.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
+      alerts,
+      segments,
+      corridors: corridors.filter((c) => c.from_area !== '(unrecorded)' || c.to_area !== '(unrecorded)'),
+      coverage,
+      collection: {
+        silent: silent.map((c) => ({ source: c.source, normally: Number(c.median_rows) })),
+        thin: thin.map((c) => ({ source: c.source, rows: c.rows, normally: Number(c.median_rows) })),
+        // The sentence a reader needs before they believe any number above it.
+        warning: silent.length
+          ? `${silent.map((c) => c.source).join(', ')} collected nothing on this day and normally `
+            + `report around ${silent.map((c) => Math.round(Number(c.median_rows))).join('/')} rows. `
+            + 'Every figure on this page is over what did land, so all of them are understated.'
+          : thin.length
+            ? `${thin.map((c) => c.source).join(', ')} reported far less than usual on this day, so the `
+              + 'figures here may be incomplete rather than low.'
+            : null,
+      },
+      context: context[0] || null,
+    });
+  }));
+}

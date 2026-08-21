@@ -45,7 +45,11 @@ function ticks(max, n = 3) {
   return Array.from({ length: n + 1 }, (_, i) => (max * i) / n);
 }
 
-export function barChart(host, data, { x, y, label, color = '--b400', onClick, valueFmt = (v) => fmt(v) } = {}) {
+/* `colorFor` picks a colour per bar. It exists so a series can mark ONE bar as
+   the subject — the day page draws the fortnight around a date and the date
+   itself was indistinguishable from its neighbours, which is the one thing the
+   chart is there to show. */
+export function barChart(host, data, { x, y, label, color = '--b400', colorFor, onClick, valueFmt = (v) => fmt(v) } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
@@ -61,7 +65,8 @@ export function barChart(host, data, { x, y, label, color = '--b400', onClick, v
   });
   data.forEach((d, i) => {
     const h = ih * (+d[y]) / max, bx = pl + step * i + (step - bw) / 2, by = pt + ih - h;
-    const r = mk('rect', { x: bx, y: by, width: bw, height: Math.max(h, 1), rx: 3, fill: `var(${color})`, 'data-rise': '' });
+    const fill = (colorFor && colorFor(d, i)) || color;
+    const r = mk('rect', { x: bx, y: by, width: bw, height: Math.max(h, 1), rx: 3, fill: `var(${fill})`, 'data-rise': '' });
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}`, onClick && (() => onClick(d)));
     svg.append(r);
     // Past ~16 bars the labels used to be dropped entirely, so the default

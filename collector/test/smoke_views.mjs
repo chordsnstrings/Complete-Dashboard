@@ -13,7 +13,7 @@
 import { chromium } from 'playwright';
 
 const ROUTES = [
-  'overview', 'demand', 'drivers',
+  'overview', 'demand', 'day/2026-08-14', 'day/not-a-date', 'drivers',
   'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/territory',
   'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',
   'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked', 'roster/states',
