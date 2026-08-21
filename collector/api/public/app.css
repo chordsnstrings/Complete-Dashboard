@@ -273,20 +273,25 @@ tbody tr[data-click]:hover{background:var(--accent-soft)}
 .dim{color:var(--ink-3)}
 
 /* ── bars, legends, chips ──────────────────────────────────────────────── */
+/* charts.js emits .k / .track / .fill / .v — these selectors must match that
+   markup exactly, or the bars render as bare text with no bar behind them. */
 .hbars{display:flex;flex-direction:column;gap:9px}
-.hb{display:grid;grid-template-columns:minmax(84px,150px) 1fr auto;align-items:center;gap:11px}
-.hb .lab{font-size:.81rem;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hb .bar-cell{background:var(--surface-2);border-radius:5px;height:15px;overflow:hidden}
-.hb .bar-cell>i{
-  display:block;height:100%;border-radius:5px;transform-origin:left;
+.hb{display:grid;grid-template-columns:minmax(84px,150px) 1fr auto;align-items:center;gap:11px;cursor:default}
+.hb .k{font-size:.81rem;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hb .track{background:var(--surface-2);border-radius:5px;height:15px;overflow:hidden}
+.hb .fill{
+  display:block;height:100%;border-radius:5px;transform-origin:left;min-width:2px;
   animation:growX .55s var(--ease-out) backwards;
 }
+.hb .v{font-family:"IBM Plex Mono",monospace;font-size:.78rem;font-weight:500;min-width:58px;text-align:right}
+.hb[data-click]{cursor:pointer}
+.hb[data-click]:hover .k{color:var(--ink)}
+.hb[data-click]:hover .track{box-shadow:0 0 0 2px var(--accent-soft)}
 @keyframes growX{from{transform:scaleX(0)}to{transform:scaleX(1)}}
-.hb .n{font-family:"IBM Plex Mono",monospace;font-size:.78rem;font-weight:500;min-width:58px;text-align:right}
 
 .legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:.77rem;color:var(--ink-2);margin-top:11px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
-.sw{width:10px;height:10px;border-radius:3px;flex:none}
+.sw,.legend i{width:10px;height:10px;border-radius:3px;flex:none;display:inline-block}
 
 .tag{
   display:inline-flex;align-items:center;gap:5px;font-family:"IBM Plex Mono",monospace;
@@ -366,6 +371,7 @@ tbody tr[data-click]:hover{background:var(--accent-soft)}
   padding:36px 20px;text-align:center;color:var(--ink-3);font-size:.87rem;
   border:1px dashed var(--rule-strong);border-radius:var(--r);background:var(--surface);
 }
+.empty b{display:block;color:var(--ink-2);font-weight:600;margin-bottom:3px}
 .note{
   font-size:.79rem;color:var(--ink-2);background:var(--surface-2);
   border-left:2px solid var(--accent);border-radius:0 var(--r-sm) var(--r-sm) 0;padding:9px 13px;
@@ -421,3 +427,152 @@ tbody tr[data-click]:hover{background:var(--accent-soft)}
 .kv{display:grid;grid-template-columns:minmax(110px,160px) 1fr;gap:7px 16px;font-size:.85rem}
 .kv-k{font-family:"IBM Plex Mono",monospace;font-size:.68rem;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);padding-top:2px}
 .kv-v{color:var(--ink)}
+
+/* ══ multipage: breadcrumbs, tabs and detail pages ══════════════════════════
+   The dashboard grew from one page per topic to pages *within* a topic. Three
+   pieces make that legible: a breadcrumb saying where you are, a tab bar for
+   the sibling pages, and an identity card so a driver page always says whose
+   page it is before any number appears. */
+
+.crumb{
+  display:flex;align-items:center;gap:8px;margin-bottom:5px;
+  font-family:"IBM Plex Mono",monospace;font-size:.66rem;letter-spacing:.09em;text-transform:uppercase;
+}
+.crumb a{color:var(--ink-3);text-decoration:none;transition:color .15s var(--ease)}
+.crumb a:hover{color:var(--accent-ink)}
+.crumb span{color:var(--rule-strong)}
+.crumb b{color:var(--ink-2);font-weight:500;text-transform:none;letter-spacing:.02em;font-size:.72rem}
+
+.tabs{display:flex;gap:3px;flex-wrap:wrap;border-bottom:1px solid var(--rule);margin:4px 0 2px}
+.tabs a{
+  display:inline-flex;align-items:center;gap:7px;padding:9px 14px;text-decoration:none;
+  font-size:.85rem;font-weight:500;color:var(--ink-2);border-radius:var(--r-sm) var(--r-sm) 0 0;
+  border:1px solid transparent;border-bottom:none;position:relative;top:1px;
+  transition:color .16s var(--ease),background .16s var(--ease);
+}
+.tabs a .ic{font-size:.9em;opacity:.65}
+.tabs a:hover{color:var(--ink);background:var(--surface-2)}
+.tabs a.on{
+  color:var(--accent-ink);background:var(--surface);border-color:var(--rule);
+  border-bottom:1px solid var(--surface);
+}
+.tabs a.on::after{
+  content:"";position:absolute;inset:auto 12px -1px 12px;height:2px;background:var(--accent);border-radius:2px;
+  animation:growX .3s var(--ease-out) backwards;
+}
+
+/* identity card ─ who this page is about */
+.idcard{
+  display:flex;gap:17px;align-items:flex-start;padding:17px 19px;
+  background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);box-shadow:var(--shadow-1);
+}
+.av{
+  flex:none;width:56px;height:56px;border-radius:14px;display:grid;place-items:center;
+  background:linear-gradient(145deg,var(--accent-soft),var(--surface-2));
+  border:1px solid var(--accent-line);color:var(--accent-ink);
+  font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.28rem;letter-spacing:.02em;
+}
+.av.sm{width:38px;height:38px;border-radius:10px;font-size:.92rem}
+.idmeta{min-width:0;flex:1}
+.idmeta h2{
+  font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.42rem;letter-spacing:-.015em;
+  line-height:1.2;margin:0 0 6px;
+}
+.idsub{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px}
+.idfacts{display:flex;flex-wrap:wrap;gap:5px 22px;font-size:.79rem;color:var(--ink-2)}
+.idfacts b{
+  font-family:"IBM Plex Mono",monospace;font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:500;margin-right:5px;
+}
+
+.pill{
+  display:inline-flex;align-items:center;font-family:"IBM Plex Mono",monospace;
+  font-size:.62rem;font-weight:500;letter-spacing:.06em;text-transform:uppercase;
+  padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--ink-2);white-space:nowrap;
+}
+.pill.plat{background:var(--accent-soft);color:var(--accent-ink)}
+.pill.ok{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--critical-bg);color:var(--critical)}
+
+.lnk{color:var(--accent-ink);text-decoration:none;border-bottom:1px solid var(--accent-line)}
+.lnk:hover{border-bottom-color:var(--accent)}
+
+/* KPI tones used by the shared kpiRow helper */
+.kpi .s{font-size:.75rem;color:var(--ink-2);margin-top:2px;line-height:1.35}
+.kpi.t-good .n{color:var(--good)} .kpi.t-good::after{background:var(--good)}
+.kpi.t-warn .n{color:var(--warn)} .kpi.t-warn::after{background:var(--warn)}
+.kpi.t-serious .n{color:var(--serious)} .kpi.t-serious::after{background:var(--serious)}
+.kpi.t-critical .n{color:var(--critical)} .kpi.t-critical::after{background:var(--critical)}
+
+/* percentile bars ─ standing against the rest of the fleet */
+.pbars{display:flex;flex-direction:column;gap:10px}
+.pbar{display:grid;grid-template-columns:minmax(96px,168px) 1fr 52px;align-items:center;gap:12px}
+.pb-l{font-size:.82rem;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pb-track{position:relative;height:15px;background:var(--surface-2);border-radius:5px;overflow:hidden}
+.pb-track>i{
+  display:block;height:100%;border-radius:5px;transform-origin:left;
+  animation:growX .55s var(--ease-out) backwards;
+}
+.pb-mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--rule-strong);opacity:.9}
+.pb-v{font-family:"IBM Plex Mono",monospace;font-size:.82rem;font-weight:500;text-align:right}
+.pb-v small{font-size:.6em;color:var(--ink-3);margin-left:1px}
+
+/* shift bars ─ first trip to last trip, one row per day */
+.shifts{display:flex;flex-direction:column;gap:5px}
+.shift{display:grid;grid-template-columns:62px 1fr 96px 38px;align-items:center;gap:11px;font-size:.79rem}
+.sh-d{color:var(--ink-3);font-family:"IBM Plex Mono",monospace;font-size:.7rem;white-space:nowrap}
+.sh-track{position:relative;height:11px;background:var(--surface-2);border-radius:4px}
+.sh-track>i{
+  position:absolute;top:0;bottom:0;border-radius:4px;background:var(--s1);opacity:.8;
+  transform-origin:left;animation:growX .5s var(--ease-out) backwards;
+}
+.sh-v{font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--ink-2);text-align:right}
+.sh-t{font-family:"IBM Plex Mono",monospace;font-size:.75rem;text-align:right;color:var(--ink)}
+
+/* directory cards ─ the top of the roster, read as a ranking */
+.dircards{display:grid;grid-template-columns:repeat(auto-fit,minmax(272px,1fr));gap:12px}
+.dircard{
+  display:flex;align-items:center;gap:12px;padding:13px 15px;text-decoration:none;color:inherit;
+  background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);box-shadow:var(--shadow-1);
+  transition:transform .2s var(--ease),box-shadow .2s var(--ease),border-color .2s var(--ease);
+}
+.dircard:hover{transform:translateY(-2px);box-shadow:var(--shadow-2);border-color:var(--rule-strong)}
+.dircard .rank{
+  font-family:"IBM Plex Mono",monospace;font-size:.68rem;color:var(--ink-3);
+  width:16px;flex:none;text-align:right;
+}
+.dc-meta{min-width:0;flex:1}
+.dc-meta b{display:block;font-size:.9rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dc-meta .cap{margin:1px 0 0;font-size:.72rem}
+.dc-n{text-align:right;flex:none}
+.dc-n .num{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.14rem;display:block;line-height:1.1}
+.dc-n small{font-size:.62rem;color:var(--ink-3);font-family:"IBM Plex Mono",monospace;letter-spacing:.08em;text-transform:uppercase}
+
+/* filter/search bar above a long table */
+.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:2px}
+.toolbar input[type=search]{
+  flex:1;min-width:210px;max-width:420px;background:var(--surface);border:1px solid var(--rule);
+  border-radius:99px;padding:8px 15px;font:inherit;font-size:.84rem;color:var(--ink);
+  transition:border-color .18s var(--ease),box-shadow .18s var(--ease);
+}
+.toolbar input[type=search]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.toolbar .cap{margin:0;white-space:nowrap}
+
+/* A map inside a detail page. Leaflet needs a concrete height to size against,
+   and the height is chosen so the panel stays near 3:2 — close to the shape of
+   a city working area, so a fitted set of points fills it instead of hugging a
+   band across the middle. */
+.mapnode{height:min(58vh,560px);min-height:400px;width:100%;border-radius:var(--r-sm);overflow:hidden}
+
+@media(max-width:760px){
+  .idcard{flex-direction:column;gap:12px}
+  .pbar{grid-template-columns:1fr 44px;grid-template-areas:"l l" "t v"}
+  .pb-l{grid-area:l} .pb-track{grid-area:t} .pb-v{grid-area:v}
+  .shift{grid-template-columns:54px 1fr 34px}
+  .sh-v{display:none}
+}
+
+/* A table inside a half-width panel: let it shrink rather than scroll. */
+table.compact{min-width:0}
+table.compact th,table.compact td{padding:8px 10px;font-size:.8rem}

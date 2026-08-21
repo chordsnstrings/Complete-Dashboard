@@ -21,18 +21,33 @@ function interactive(el, label, onClick) {
 }
 
 /* ── vertical bars (magnitude over time / category) ── */
+/* Gridline values for an axis. With a small integer maximum (a count of 0–3,
+   say) four evenly-spaced ticks round to the same number twice — "1, 1, 0, 0"
+   down the side, which reads as a broken chart. Fall back to integer steps
+   whenever the range is small enough for that to be exact. */
+function ticks(max, n = 3) {
+  if (max <= n) {
+    const out = [];
+    for (let v = 0; v <= Math.ceil(max); v++) out.push(v);
+    return out;
+  }
+  return Array.from({ length: n + 1 }, (_, i) => (max * i) / n);
+}
+
 export function barChart(host, data, { x, y, label, color = '--b400', onClick, valueFmt = (v) => fmt(v) } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
-  const max = Math.max(...data.map((d) => +d[y])) * 1.12 || 1;
+  const raw = Math.max(...data.map((d) => +d[y] || 0)) || 1;
+  const marks = ticks(raw <= 3 ? raw : raw * 1.12);
+  const max = marks[marks.length - 1] || 1;
   const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length, bw = Math.min(step * 0.62, 44);
   const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
-  for (let i = 0; i <= 3; i++) {
-    const gy = pt + ih - ih * i / 3;
+  marks.forEach((v) => {
+    const gy = pt + ih - ih * (v / max);
     svg.append(mk('line', { class: 'gl', x1: pl, y1: gy, x2: W - pr, y2: gy }),
-      txt(pl - 7, gy + 3, valueFmt(Math.round(max * i / 3)), 'axis', 'end'));
-  }
+      txt(pl - 7, gy + 3, valueFmt(v >= 10 ? Math.round(v) : +v.toFixed(1)), 'axis', 'end'));
+  });
   data.forEach((d, i) => {
     const h = ih * (+d[y]) / max, bx = pl + step * i + (step - bw) / 2, by = pt + ih - h;
     const r = mk('rect', { x: bx, y: by, width: bw, height: Math.max(h, 1), rx: 3, fill: `var(${color})` });

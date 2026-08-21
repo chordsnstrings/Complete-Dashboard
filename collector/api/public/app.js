@@ -1,9 +1,11 @@
-// Fleet Dashboard SPA — multi-angle analytics with click-to-expand drill-downs.
+// Fleet Dashboard — a multipage app behind a hash router.
+// Views live in this file; the per-driver detail pages live in driver.js, and
+// everything shared between them (panels, tables, modals, routing, fetching)
+// lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
-
-const $ = (s, r = document) => r.querySelector(s);
-const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
-const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
+import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, pill, dayStr, dtStr, money, pct } from './ui.js';
+import { state, api, params, q, qAll, href, parseHash, navigate } from './data.js';
+import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 
 const VIEWS = [
   { id: 'overview', label: 'Overview', ic: '◱', grp: 'Analyse', sub: 'Fleet-wide performance across every platform' },
@@ -22,67 +24,37 @@ const VIEWS = [
   { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Configure', sub: 'Credentials and collection schedule' },
 ];
 
-const state = { view: 'overview', days: 30, platform: '', fleet: '', admin: localStorage.getItem('adminToken') || '' };
-
-const api = async (path, opts) => {
-  const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 120)}`);
-  return r.json();
-};
-function params(extra = {}) {
-  const to = new Date(); const from = new Date(); from.setDate(from.getDate() - state.days);
-  const p = new URLSearchParams({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), ...extra });
-  if (state.platform) p.set('platform', state.platform);
-  if (state.fleet) p.set('fleet', state.fleet);
-  return p.toString();
-}
-const q = (path, extra) => api(`${path}?${params(extra)}`);
-
 /* ─────────── shell ─────────── */
+// A detail page keeps its parent lit in the sidebar — `#driver/…` is a page
+// *within* Drivers, not a thirteenth top-level destination.
+const PARENT = { driver: 'drivers', vehicle: 'vehicles' };
+
 function renderNav() {
   const nav = $('#nav'); nav.innerHTML = '';
+  const lit = PARENT[state.view] || state.view;
   let grp = null;
   VIEWS.forEach((v) => {
     if (v.grp !== grp) { grp = v.grp; nav.append(el('div', 'grp', grp)); }
-    const a = el('a', v.id === state.view ? 'on' : '', `<span class="ic">${v.ic}</span>${v.label}`);
-    a.onclick = () => { state.view = v.id; location.hash = v.id; render(); };
+    const a = el('a', v.id === lit ? 'on' : '', `<span class="ic">${v.ic}</span>${v.label}`);
+    a.href = href(v.id);
     nav.append(a);
   });
 }
-function setHeader() {
-  const v = VIEWS.find((x) => x.id === state.view);
-  $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
-  $('#filters').style.display = (state.view === 'settings' || state.view === 'live' || state.view === 'sources') ? 'none' : 'flex';
-}
-function panel(title, cap) {
-  const p = el('div', 'panel');
-  p.append(el('h3', null, title));
-  if (cap) p.append(el('p', 'cap', cap));
-  const body = el('div'); p.append(body);
-  return { panel: p, body };
-}
-const loading = (host) => { host.innerHTML = '<div class="skel">Loading…</div>'; };
-
-/* ─────────── drill-down modal ─────────── */
-function drill(title, subtitle, renderBody) {
-  const back = el('div', 'modal-back');
-  const box = el('div', 'modal');
-  box.innerHTML = `<div class="modal-head"><div><h3>${esc(title)}</h3><p class="cap">${esc(subtitle || '')}</p></div>
-    <button class="btn sec" id="mClose">Close</button></div>`;
-  const body = el('div', 'modal-body'); box.append(body); back.append(box); document.body.append(back);
-  const close = () => back.remove();
-  box.querySelector('#mClose').onclick = close;
-  back.onclick = (e) => { if (e.target === back) close(); };
-  document.addEventListener('keydown', function esc2(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc2); } });
-  loading(body); Promise.resolve(renderBody(body)).catch((e) => { body.innerHTML = `<div class="empty"><b>Could not load</b>${esc(e.message)}</div>`; });
-}
-function tableFrom(rows, cols) {
-  if (!rows.length) { const d = el('div'); empty(d); return d; }
-  const wrap = el('div', 'tscroll');
-  const t = el('table');
-  t.innerHTML = `<thead><tr>${cols.map((c) => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
-    <tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(r) : esc(r[c.key] ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody>`;
-  wrap.append(t); return wrap;
+function setHeader(detail) {
+  const crumb = $('#crumb');
+  if (state.view === 'driver') {
+    const tab = DRIVER_TABS.find((t) => t.id === (state.sub || 'overview')) || DRIVER_TABS[0];
+    $('#viewTitle').textContent = detail?.name || 'Driver';
+    $('#viewSub').textContent = `${tab.label} — every platform this person works on, combined`;
+    crumb.innerHTML = `<a href="${href('drivers')}">Drivers</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
+    crumb.style.display = 'flex';
+  } else {
+    const v = VIEWS.find((x) => x.id === state.view) || VIEWS[0];
+    $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
+    crumb.style.display = 'none';
+  }
+  const noFilter = ['settings', 'live', 'sources'];
+  $('#filters').style.display = noFilter.includes(state.view) ? 'none' : 'flex';
 }
 // generic trip drill-down for any filter combination
 function drillTrips(title, subtitle, extra) {
@@ -160,59 +132,41 @@ V.demand = async (root) => {
 };
 
 V.drivers = async (root) => {
-  const lead = panel('Driver leaderboard', 'Click a row for that driver’s full detail'); root.append(lead.panel);
+  // The directory is the way into the per-driver pages; the panels below it are
+  // the questions that only make sense across the whole roster.
+  await renderDriverDirectory(root);
   const g = el('div', 'grid g2'); root.append(g);
   const sc = panel('Trips vs distance', 'Each dot is a driver — spot high-trip/low-km and vice versa'); g.append(sc.panel);
-  const xp = panel('Cross-platform activity', 'Same driver across Uber / Yango / Bolt'); g.append(xp.panel);
+  const xp = panel('Cross-platform activity', 'The same person working more than one app'); g.append(xp.panel);
   const perf = panel('Platform performance records', 'Hours, acceptance and earnings as reported by each platform'); root.append(perf.panel);
-  [lead.body, sc.body, xp.body, perf.body].forEach(loading);
+  [sc.body, xp.body, perf.body].forEach(loading);
   const [rows, cross, pf] = await Promise.all([q('/api/drivers/leaderboard'), q('/api/drivers/cross-platform'), q('/api/drivers/performance')]);
 
-  lead.body.innerHTML = '';
-  const t = tableFrom(rows.slice(0, 40), [
-    { label: '#', key: '_', render: (r) => String(rows.indexOf(r) + 1) },
-    { label: 'Driver', key: 'driver_name' }, { label: 'Plate', key: 'plate' }, { label: 'Platform', key: 'platform' },
-    { label: 'Trips', key: 'trips', num: true }, { label: 'Km', key: 'km', num: true },
-    { label: 'Avg km', key: 'avg_km', num: true },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => r.revenue ? 'AED ' + fmt(r.revenue) : '—' },
-    { label: 'Completion', key: 'completion_pct', num: true, render: (r) => r.completion_pct != null ? `${r.completion_pct}%` : '—' },
-  ]);
-  t.querySelectorAll('tbody tr').forEach((tr, i) => {
-    tr.style.cursor = 'pointer';
-    tr.onclick = () => { const r = rows[i]; drill(r.driver_name || 'Driver', `${r.platform} · ${r.plate || 'no plate'}`, async (b) => {
-      b.innerHTML = '';
-      b.append(el('div', 'kpis', [['Trips', fmt(r.trips)], ['Distance', fmt(r.km) + ' km'], ['Avg trip', (r.avg_km ?? '—') + ' km'],
-        ['Revenue', r.revenue ? 'AED ' + fmt(r.revenue) : '—'], ['Completion', (r.completion_pct ?? '—') + '%']]
-        .map(([l, n]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div></div>`).join('')));
-      const mine = pf.filter((p) => p.driver_name === r.driver_name);
-      const ph = el('div', 'panel'); ph.append(el('h3', null, 'Platform-reported performance'));
-      ph.append(mine.length ? tableFrom(mine, [
-        { label: 'Platform', key: 'platform' }, { label: 'Period', key: 'period_start' },
-        { label: 'Trips', key: 'trips', num: true }, { label: 'Hrs online', key: 'hours_online', num: true, render: (x) => x.hours_online ? (+x.hours_online).toFixed(1) : '—' },
-        { label: 'Accept', key: 'acceptance_rate', num: true, render: (x) => x.acceptance_rate != null ? (x.acceptance_rate * 100).toFixed(0) + '%' : '—' },
-        { label: 'Earnings', key: 'earnings', num: true, render: (x) => x.earnings ? 'AED ' + fmt(x.earnings) : '—' },
-      ]) : el('div', 'note', 'No platform performance records in this range yet.'));
-      b.append(ph);
-    }); };
-  });
-  lead.body.append(t);
-
   scatter(sc.body, rows.slice(0, 60).map((r) => ({ ...r, trips: +r.trips, km: +(r.km || 0) })),
-    { x: 'trips', y: 'km', label: 'driver_name', xLabel: 'trips', yLabel: 'km' });
+    { x: 'trips', y: 'km', label: 'driver_name', xLabel: 'trips', yLabel: 'km',
+      onClick: (r) => { location.hash = href('driver', r.driver_ext_id); } });
   xp.body.innerHTML = '';
-  xp.body.append(tableFrom(cross.slice(0, 15), [
+  const multi = cross.filter((r) => [r.uber_trips, r.yango_trips, r.bolt_trips, r.fms_trips].filter((n) => n > 0).length > 1);
+  xp.body.append(multi.length ? tableFrom(multi.slice(0, 15), [
     { label: 'Driver', key: 'driver_name' },
     { label: 'Uber', key: 'uber_trips', num: true }, { label: 'Yango', key: 'yango_trips', num: true },
-    { label: 'Bolt', key: 'bolt_trips', num: true }, { label: 'Total', key: 'total_trips', num: true },
-  ]));
+    { label: 'Bolt', key: 'bolt_trips', num: true }, { label: 'Telematics', key: 'fms_trips', num: true },
+    { label: 'Total', key: 'total_trips', num: true },
+  ]) : el('div', 'note', 'No driver in this window has trips on more than one platform.'));
   perf.body.innerHTML = '';
   perf.body.append(tableFrom(pf.slice(0, 25), [
-    { label: 'Platform', key: 'platform' }, { label: 'Driver', key: 'driver_name' },
-    { label: 'Period', key: 'period_start' }, { label: 'Trips', key: 'trips', num: true },
+    { label: 'Platform', key: 'platform' },
+    { label: 'Driver', key: 'driver_name' },
+    { label: 'Period', key: 'period_start', render: (r) => dayStr(r.period_start) },
+    { label: 'Trips', key: 'trips', num: true },
     { label: 'Hrs online', key: 'hours_online', num: true, render: (x) => x.hours_online ? (+x.hours_online).toFixed(1) : '—' },
-    { label: 'Earnings', key: 'earnings', num: true, render: (x) => x.earnings ? 'AED ' + fmt(x.earnings) : '—' },
+    { label: 'Earnings', key: 'earnings', num: true, render: (x) => money(x.earnings) },
   ]));
 };
+
+// The per-driver pages themselves. `state.param` is the platform driver id and
+// `state.sub` is the tab — both come straight from the URL.
+V.driver = async (root) => renderDriver(root, state.param, state.sub || 'overview');
 
 V.vehicles = async (root) => {
   const g = el('div', 'grid g23'); root.append(g);
@@ -831,8 +785,14 @@ function animateView(root) {
 async function render() {
   renderNav(); setHeader();
   const root = $('#view'); root.innerHTML = '';
-  try { await (V[state.view] || V.overview)(root); animateView(root); }
-  catch (e) { root.innerHTML = `<div class="empty"><b>Could not load this view</b>${esc(e.message)}</div>`; }
+  root.scrollIntoView?.({ block: 'start' });
+  try {
+    const detail = await (V[state.view] || V.overview)(root);
+    setHeader(detail);                      // detail pages only know their title after fetching
+    animateView(root);
+  } catch (e) {
+    root.innerHTML = `<div class="empty"><b>Could not load this view</b>${esc(e.message)}</div>`;
+  }
   freshness();
 }
 async function freshness() {
@@ -860,7 +820,15 @@ $('#themeBtn').onclick = () => {
   localStorage.setItem('theme', dark ? 'light' : 'dark');
 };
 if (localStorage.getItem('theme')) document.documentElement.setAttribute('data-theme', localStorage.getItem('theme'));
-if (location.hash.slice(1) && VIEWS.some((v) => v.id === location.hash.slice(1))) state.view = location.hash.slice(1);
-window.addEventListener('hashchange', () => { const h = location.hash.slice(1); if (VIEWS.some((v) => v.id === h)) { state.view = h; render(); } });
+// Routes are `#<view>[/<param>[/<sub>]]`. An unknown view falls back to the
+// overview rather than rendering nothing.
+function applyRoute() {
+  const r = parseHash();
+  const known = VIEWS.some((v) => v.id === r.view) || !!V[r.view];
+  state.view = known ? r.view : 'overview';
+  state.param = r.param; state.sub = r.sub;
+}
+applyRoute();
+window.addEventListener('hashchange', () => { applyRoute(); render(); });
 render();
 setInterval(() => { if (state.view === 'live') render(); }, 60000);

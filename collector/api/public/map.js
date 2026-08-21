@@ -14,7 +14,14 @@ const DUBAI = [25.2048, 55.2708];
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
 export function makeMap(node, { zoom = 10 } = {}) {
-  const map = L.map(node, { zoomControl: true, attributionControl: true }).setView(DUBAI, zoom);
+  // zoomSnap:0 is what actually makes "fit the points" fit. By default Leaflet
+  // rounds the fitted zoom DOWN to a whole number, so a spread needing z=11.9
+  // renders at z=11 and the markers sit in the middle of a half-empty panel.
+  // Fractional zoom lets fitBounds use the level the data really needs; the
+  // +/- buttons then step by a half so they still feel like zoom controls.
+  const map = L.map(node, {
+    zoomControl: true, attributionControl: true, zoomSnap: 0, zoomDelta: 0.5, wheelPxPerZoomLevel: 90,
+  }).setView(DUBAI, zoom);
   L.tileLayer(OSM, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
 
   // Leaflet sizes itself — and its SVG overlay — from the container at creation time.
@@ -22,7 +29,13 @@ export function makeMap(node, { zoom = 10 } = {}) {
   // SVG pane ends up 0×0: polylines exist in the DOM with correct coordinates but are
   // clipped to nothing, which looks exactly like "the map is broken". A single
   // setTimeout is a race; observing the container is not.
-  const nudge = () => { if (node.clientWidth && node.clientHeight) map.invalidateSize({ animate: false }); };
+  const nudge = () => {
+    if (!node.clientWidth || !node.clientHeight) return;
+    map.invalidateSize({ animate: false });
+    // Re-frame after the size settles: a fit computed against a 0-height panel
+    // leaves the markers clustered in the middle at the wrong zoom.
+    if (map._fitAgain) map._fitAgain();
+  };
   requestAnimationFrame(nudge);
   if (typeof ResizeObserver !== 'undefined') {
     const ro = new ResizeObserver(nudge);
@@ -31,6 +44,31 @@ export function makeMap(node, { zoom = 10 } = {}) {
   }
   setTimeout(nudge, 250);      // belt and braces for slow font/layout settles
   return map;
+}
+
+
+/* Frame a set of points as tightly as the container allows.
+   `fitBounds(bounds.pad(n))` was wrong twice over: `pad` inflates the bounds in
+   *degrees*, so the framing loosened as the spread grew, and a fit computed
+   before the panel finished laying out picked a zoom for the wrong container
+   size. This keeps the padding in pixels, caps the zoom so a lone point doesn't
+   land on a rooftop, and re-fits whenever the container is resized. */
+export function fitTo(map, points, { maxZoom = 15, padding = [28, 28] } = {}) {
+  const pts = (points || []).filter((p) => p && p[0] != null && p[1] != null &&
+    isFinite(p[0]) && isFinite(p[1]));
+  if (!pts.length) { map.setView(DUBAI, 10); return; }
+  const b = L.latLngBounds(pts);
+  const apply = () => {
+    if (!map.getContainer().clientWidth) return;
+    // A single point (or several at the same spot) has no extent to fit, so
+    // fitBounds would zoom to maximum. Centre it at a readable scale instead.
+    if (b.getNorthEast().equals(b.getSouthWest())) map.setView(b.getCenter(), Math.min(maxZoom, 14));
+    else map.fitBounds(b, { padding, maxZoom, animate: false });
+  };
+  apply();
+  map._fitAgain = apply;                 // re-run once the container settles
+  requestAnimationFrame(apply);
+  setTimeout(apply, 300);
 }
 
 /* Live fleet: one dot per vehicle, coloured by what it is doing. */
@@ -54,7 +92,7 @@ export function renderLive(map, rows, onPick) {
     if (onPick) m.on('click', () => onPick(r));
     pts.push([r.lat, r.lng]);
   }
-  if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.15));
+  fitTo(map, pts, { maxZoom: 14 });
   return layer;
 }
 
@@ -102,6 +140,6 @@ export function renderJourney(map, journey) {
     radius: 8, color: css('--s2'), weight: 3, fillColor: css('--s2'), fillOpacity: .35,
   }).addTo(layer).bindTooltip(`Last fix ${new Date(last.t).toLocaleTimeString()}`, { direction: 'top' });
 
-  if (all.length) map.fitBounds(L.latLngBounds(all).pad(0.15));
+  fitTo(map, all, { maxZoom: 16 });
   return layer;
 }

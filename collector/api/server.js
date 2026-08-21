@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { pool, migrate } from '../src/db.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings } from '../src/settings.js';
 import { log } from '../src/log.js';
+import { driverRoutes } from './driver_routes.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
 
@@ -541,6 +542,10 @@ app.post('/api/events', requireAdmin, wrap(async (req, res) => {
      b.ends_on || b.starts_on, b.expected_effect || 'unknown', b.confidence ?? 0.5, b.summary || null]);
   res.json({ ok: true });
 }));
+
+/* ───────────────── per-driver detail pages ───────────────── */
+// Registered before the catch-all, like every other /api route.
+driverRoutes(app, { q, wrap, endOfDay });
 
 // Static dashboard LAST: app.get('*') would otherwise shadow any API route
 // registered after it (this silently broke /api/insights once already).
