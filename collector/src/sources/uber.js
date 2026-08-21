@@ -114,43 +114,58 @@ async function pullTrips(from, to) {
 }
 
 // Per-driver earnings + trip count + distance (7-day windows, GraphQL).
+//
+// The server caps this at ten drivers per call — "driver-uuids or page size
+// cannot be more than 10" — so a pageSize of 200 was rejected outright and the
+// fleet had no per-driver Uber earnings at all. Ten at a time, paged through.
+const EARNER_PAGE = 10;
+
 async function pullEarnerBreakdowns(from, to) {
   let total = 0;
   for (const [s, e] of dateChunks(from, to, 7)) {
-    const body = JSON.stringify({
-      operationName: 'getEarnerBreakdownsV2',
-      variables: {
-        supplierUuid: config.uber.orgUuid,
-        timeRange: { unixMilliOrDate: 'Unix_Time_Range', startTimeUnixMillis: unixMs(s), endTimeUnixMillis: unixMs(e) },
-        driverListOrPageOptions: 'Page_Options', pageOptions: { pageSize: 200, pageToken: '' },
-        driverList: null, excludeAdjustmentItems: true,
-      },
-      query: `query getEarnerBreakdownsV2($supplierUuid: ID!, $timeRange: OneOfTimeRange__Input, $driverListOrPageOptions: DriverListOrPagination, $driverList: [ID!], $pageOptions: PaginationOption__Input, $excludeAdjustmentItems: Boolean) {
-        getEarnerBreakdownsV2(supplierUuid: $supplierUuid, timeRange: $timeRange, driverList: $driverList, pageOptions: $pageOptions, driverListOrPageOptions: $driverListOrPageOptions, excludeAdjustmentItems: $excludeAdjustmentItems) {
-          earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode } }
-        } }`,
-    });
-    const { data } = await http('https://supplier.uber.com/graphql', { method: 'POST', headers: uberWebHeaders(), body });
-    // An expired web cookie answers with `errors` and no data, which is
-    // indistinguishable from "this fleet had no drivers" unless we say so.
-    if (data?.errors?.length) {
-      log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} rejected`,
-        { err: String(data.errors[0]?.message || data.errors[0]).slice(0, 200) });
-      continue;
-    }
-    const bd = data?.data?.getEarnerBreakdownsV2?.earnerEarningsBreakdowns || [];
-    const rows = bd.map((d) => {
-      const ti = Object.fromEntries((d.tripInfos || []).map((x) => [x.tripAttributeName, x.value]));
-      return {
-        platform: SRC, fleet_id: config.uber.fleet, driver_ext_id: d.earnerUuid,
-        driver_name: d.earnerMetadata?.name, period_start: iso(s), period_end: iso(e),
-        trips: parseInt(ti['TRIP_ATTRIBUTE_NAME_COUNT']) || null,
-        distance_km: parseFloat(ti['TRIP_ATTRIBUTE_NAME_DISTRANCE']) || null,
-        earnings: d.netOutstanding ? Number(d.netOutstanding.amountE5) / 1e5 : null,
-        currency: d.netOutstanding?.currencyCode || 'AED', raw: d,
-      };
-    });
-    if (rows.length) total += await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+    let pageToken = '', pages = 0;
+    do {
+      const body = JSON.stringify({
+        operationName: 'getEarnerBreakdownsV2',
+        variables: {
+          supplierUuid: config.uber.orgUuid,
+          timeRange: { unixMilliOrDate: 'Unix_Time_Range', startTimeUnixMillis: unixMs(s), endTimeUnixMillis: unixMs(e) },
+          driverListOrPageOptions: 'Page_Options', pageOptions: { pageSize: EARNER_PAGE, pageToken },
+          driverList: null, excludeAdjustmentItems: true,
+        },
+        query: `query getEarnerBreakdownsV2($supplierUuid: ID!, $timeRange: OneOfTimeRange__Input, $driverListOrPageOptions: DriverListOrPagination, $driverList: [ID!], $pageOptions: PaginationOption__Input, $excludeAdjustmentItems: Boolean) {
+          getEarnerBreakdownsV2(supplierUuid: $supplierUuid, timeRange: $timeRange, driverList: $driverList, pageOptions: $pageOptions, driverListOrPageOptions: $driverListOrPageOptions, excludeAdjustmentItems: $excludeAdjustmentItems) {
+            nextPageToken
+            earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode } }
+          } }`,
+      });
+      const { data } = await http('https://supplier.uber.com/graphql', { method: 'POST', headers: uberWebHeaders(), body });
+      // An expired web cookie answers with `errors` and no data, which is
+      // indistinguishable from "this fleet had no drivers" unless we say so.
+      if (data?.errors?.length) {
+        log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} rejected`,
+          { err: String(data.errors[0]?.message || data.errors[0]).slice(0, 200) });
+        break;
+      }
+      const page = data?.data?.getEarnerBreakdownsV2 || {};
+      const bd = page.earnerEarningsBreakdowns || [];
+      const rows = bd.map((d) => {
+        const ti = Object.fromEntries((d.tripInfos || []).map((x) => [x.tripAttributeName, x.value]));
+        return {
+          platform: SRC, fleet_id: config.uber.fleet, driver_ext_id: d.earnerUuid,
+          driver_name: d.earnerMetadata?.name, period_start: iso(s), period_end: iso(e),
+          trips: parseInt(ti['TRIP_ATTRIBUTE_NAME_COUNT']) || null,
+          distance_km: parseFloat(ti['TRIP_ATTRIBUTE_NAME_DISTRANCE']) || null,
+          earnings: d.netOutstanding ? Number(d.netOutstanding.amountE5) / 1e5 : null,
+          currency: d.netOutstanding?.currencyCode || 'AED', raw: d,
+        };
+      });
+      if (rows.length) total += await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+      pageToken = page.nextPageToken || '';
+      // A page cap the server does not honour would otherwise spin forever;
+      // 40 pages is 400 drivers, comfortably past this fleet's size.
+      if (++pages >= 40) { log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} stopped at ${pages} pages`); break; }
+    } while (pageToken);
   }
   return total;
 }

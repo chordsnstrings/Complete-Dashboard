@@ -426,25 +426,69 @@ app.get('/api/insights/summary', wrap(async (_, res) => {
 
 // monthly trend + automatic structural-break detection (what changed, and when)
 app.get('/api/trend/monthly', wrap(async (req, res) => {
-  const rows = await q(
-    `SELECT date_trunc('month', requested_at)::date m,
+  const observed = await q(
+    `SELECT date_trunc('month', requested_at)::date AS m,
             count(*)::int trips,
             count(distinct driver_ext_id)::int drivers,
+            count(*) FILTER (WHERE driver_ext_id IS NOT NULL)::int attributed_trips,
             count(distinct plate)::int vehicles,
             round(sum(distance_km)::numeric,0) km,
             round(sum(price)::numeric,0) revenue,
-            round(100.0*sum((status ILIKE '%cancel%')::int)/nullif(count(*),0),1) cancel_pct
+            round(100.0*sum((status ILIKE '%cancel%')::int)/nullif(count(*),0),1) cancel_pct,
+            array_agg(DISTINCT platform) platforms
      FROM trip WHERE ($1::text IS NULL OR platform=$1)
      GROUP BY 1 ORDER BY 1`, [req.query.platform || null]);
-  // flag month-over-month breaks > 30%
-  const breaks = [];
-  for (let i = 1; i < rows.length; i++) {
-    const a = rows[i - 1], b = rows[i];
-    const d = a.trips ? (b.trips - a.trips) / a.trips : 0;
-    if (Math.abs(d) >= 0.3) breaks.push({ from: a.m, to: b.m, change_pct: Math.round(d * 100),
-      trips_from: a.trips, trips_to: b.trips, drivers_from: a.drivers, drivers_to: b.drivers });
+  if (!observed.length) return res.json({ months: [], breaks: [], gaps: [] });
+
+  /* A month with no rows is ambiguous: the fleet may have stood still, or we
+     may simply hold no data for it. Treating the two the same produced a
+     headline "-82%, drivers 102 → 0" for a stretch where nothing had been
+     collected at all. Fill the calendar so the gap is visible as a gap. */
+  const key = (d) => new Date(d).toISOString().slice(0, 7);
+  const byMonth = new Map(observed.map((r) => [key(r.m), r]));
+  const first = new Date(observed[0].m), last = new Date(observed[observed.length - 1].m);
+  const months = [];
+  for (const d = new Date(first); d <= last; d.setUTCMonth(d.getUTCMonth() + 1)) {
+    const k = key(d);
+    const row = byMonth.get(k);
+    months.push(row
+      ? { ...row, m: k, no_data: false,
+          // FMS-derived trips carry no driver id, so "0 drivers" on a month
+          // that has trips means unattributable, not idle.
+          drivers_known: row.attributed_trips > 0 }
+      : { m: k, trips: 0, drivers: null, vehicles: 0, km: null, revenue: null,
+          cancel_pct: null, platforms: [], no_data: true, drivers_known: false });
   }
-  res.json({ months: rows, breaks });
+
+  // Month-over-month breaks, computed only between months we actually observed.
+  const breaks = [];
+  for (let i = 1; i < months.length; i++) {
+    const a = months[i - 1], b = months[i];
+    if (a.no_data || b.no_data || !a.trips) continue;   // never step across a hole
+    const d = (b.trips - a.trips) / a.trips;
+    if (Math.abs(d) < 0.3) continue;
+    breaks.push({
+      from: a.m, to: b.m, change_pct: Math.round(d * 100),
+      trips_from: a.trips, trips_to: b.trips,
+      drivers_from: a.drivers_known ? a.drivers : null,
+      drivers_to: b.drivers_known ? b.drivers : null,
+      // A swing that coincides with a platform appearing or disappearing is a
+      // change in what we collect, not necessarily in what the fleet did.
+      platform_shift: JSON.stringify([...(a.platforms || [])].sort()) !== JSON.stringify([...(b.platforms || [])].sort())
+        ? { from: a.platforms, to: b.platforms } : null,
+    });
+  }
+
+  // Contiguous runs of missing months, reported so the UI can draw them.
+  const gaps = [];
+  let run = null;
+  for (const mth of months) {
+    if (mth.no_data) { run = run || { from: mth.m, to: mth.m, months: 0 }; run.to = mth.m; run.months++; }
+    else if (run) { gaps.push(run); run = null; }
+  }
+  if (run) gaps.push(run);
+
+  res.json({ months, breaks, gaps });
 }));
 
 // external context joined to the day (weather + calendar) for causality overlays

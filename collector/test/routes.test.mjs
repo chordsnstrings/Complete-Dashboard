@@ -17,6 +17,13 @@ const apiRoutes = [...src.matchAll(/app\.(get|post)\((['"])(\/api\/[^'"]*)\2/g)]
   .map((m) => ({ path: m[3], at: m.index }));
 check('api routes found', apiRoutes.length > 10, String(apiRoutes.length));
 
+/* The trend endpoint must fill the calendar rather than returning only the
+   months it observed: comparing adjacent ROWS across a three-month hole is how
+   a "-82% collapse" that never happened reached the dashboard. */
+check('the trend endpoint fills missing months', /no_data: true/.test(src));
+check('the trend endpoint never breaks across a hole', /never step across a hole/.test(src));
+check('the trend endpoint reports gaps as runs', /const gaps = \[\]/.test(src));
+
 const shadowed = apiRoutes.filter((r) => r.at > catchAll).map((r) => r.path);
 check('no /api route is shadowed by the catch-all', shadowed.length === 0, shadowed.join(', '));
 
@@ -79,6 +86,23 @@ check('all six vehicle tabs registered', ['overview', 'drivers', 'movement', 'sa
   .every((t) => new RegExp(`id: '${t}'`).test(vehicleJs)), 'VEHICLE_TABS');
 check('every vehicle tab is a real route', /href\('vehicle', plate, t === 'overview' \? null : t\)/.test(vehicleJs));
 check('vehicle pages fetch unfiltered', !/[^A]\bq\('\/api\/vehicle\//.test(vehicleJs) && /qAll\('\/api\/vehicle\//.test(vehicleJs));
+
+/* ── "why it moved" ────────────────────────────────────────────────────────
+   The break decomposition and the world-event feed were built and then had no
+   home in the UI for weeks. This pins that they are actually reachable. */
+const causesJs = readFileSync('api/public/causes.js', 'utf8');
+check('the causes view is registered in the nav', /id: 'causes'/.test(jsTxt));
+check('the causes view is wired to a renderer', /V\.causes = /.test(jsTxt));
+check('it reads the trend, break and event endpoints',
+  ["/api/trend/monthly", "/api/breaks", "/api/events"].every((p) => causesJs.includes(p)));
+// A month with no data must never be drawn as a zero-height bar.
+check('months with no data are drawn as gaps', /m\.no_data/.test(causesJs) && /no data/.test(causesJs));
+// Same verdict, opposite meaning depending on direction — a rise once read
+// "the work stopped arriving".
+check('break copy is direction-aware', /rose \? a\.up : a\.down/.test(causesJs));
+check('an unattributable break has its own copy', /unattributable: \{/.test(causesJs));
+check('candidate events are labelled as candidates, not causes',
+  /Candidates, not proof/.test(causesJs));
 // The two detail views must link to each other, or the custody chain dead-ends.
 check('a vehicle page links to its drivers', /href\('driver', /.test(vehicleJs));
 check('a driver page links to the vehicles they held', /href\('vehicle', r\.plate\)/.test(driverJs));

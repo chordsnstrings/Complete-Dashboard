@@ -117,47 +117,97 @@ ${list}`;
 }
 
 /* ── break detection + attribution ─────────────────────────────────────── */
+/* ── break decisions, kept pure so they can be tested ──────────────────────
+   Everything here is arithmetic over two month summaries. The IO around it —
+   reading trips, looking up overlapping events, writing metric_break — lives in
+   detectBreaks below. The bug these functions exist to prevent was invisible
+   precisely because the only test reimplemented the logic instead of calling
+   it. */
+
+export const prevMonth = (m) => {
+  const [y, mm] = m.split('-').map(Number);
+  return mm === 1 ? `${y - 1}-12` : `${y}-${String(mm - 1).padStart(2, '0')}`;
+};
+
+// `a` and `b` are consecutive-month summaries: { m, trips, drivers, attributed }.
+// Returns null when the pair is not worth reporting as a break.
+export function breakBetween(a, b, { minChange = 0.30, minTrips = 20 } = {}) {
+  if (!a || !b) return null;                       // no observed neighbour: a gap, not a break
+  if (prevMonth(b.m) !== a.m) return null;         // never compare across missing months
+  if (a.trips < minTrips && b.trips < minTrips) return null;
+  const change = a.trips ? (b.trips - a.trips) / a.trips : 0;
+  if (Math.abs(change) < minChange) return null;
+
+  // Driver counts only compare when both months carry driver ids. The
+  // telematics feed does not, so an FMS-only month would otherwise read as
+  // "every driver left".
+  const comparable = a.attributed > 0 && b.attributed > 0;
+  const dChange = comparable && a.drivers ? (b.drivers - a.drivers) / a.drivers : null;
+  const prodA = a.trips / (a.drivers || 1), prodB = b.trips / (b.drivers || 1);
+  const pChange = comparable && prodA ? (prodB - prodA) / prodA : null;
+
+  // Fewer drivers (supply) versus each driver doing less (demand). Without
+  // comparable driver counts we cannot separate the two, and saying so beats
+  // picking one.
+  let attribution = 'unattributable';
+  if (comparable) {
+    attribution = 'mixed';
+    if (Math.abs(pChange) > Math.abs(dChange) * 2) attribution = 'demand';
+    else if (Math.abs(dChange) > Math.abs(pChange) * 2) attribution = 'supply';
+  }
+  return {
+    change_pct: change,
+    drivers_from: comparable ? a.drivers : null,
+    drivers_to: comparable ? b.drivers : null,
+    driver_change_pct: dChange, productivity_change_pct: pChange, attribution,
+  };
+}
+
 export async function detectBreaks() {
+  // `HAVING count(*) > 20` used to drop thin months from the series. Combined
+  // with comparing adjacent ROWS rather than adjacent MONTHS, that let October
+  // 2025 sit next to August 2026 and produce a confident "-91% break" spanning
+  // ten months in which nothing had been collected at all.
   const rows = await q(
-    `SELECT date_trunc('month', requested_at)::date m, platform,
-            count(*)::int trips, count(distinct driver_ext_id)::int drivers
-     FROM trip GROUP BY 1,2 HAVING count(*) > 20 ORDER BY 2,1`);
+    `SELECT to_char(date_trunc('month', requested_at), 'YYYY-MM') AS m, platform,
+            count(*)::int trips, count(distinct driver_ext_id)::int drivers,
+            count(*) FILTER (WHERE driver_ext_id IS NOT NULL)::int attributed
+     FROM trip GROUP BY 1,2 ORDER BY 2,1`);
   const byPlatform = {};
-  for (const r of rows) (byPlatform[r.platform] ||= []).push(r);
+  for (const r of rows) (byPlatform[r.platform] ||= new Map()).set(r.m, r);
 
   let n = 0;
   for (const [platform, series] of Object.entries(byPlatform)) {
-    for (let i = 1; i < series.length; i++) {
-      const a = series[i - 1], b = series[i];
-      const change = a.trips ? (b.trips - a.trips) / a.trips : 0;
-      if (Math.abs(change) < 0.30) continue;                   // only structural moves
-
-      const dChange = a.drivers ? (b.drivers - a.drivers) / a.drivers : 0;
-      const prodA = a.trips / (a.drivers || 1), prodB = b.trips / (b.drivers || 1);
-      const pChange = prodA ? (prodB - prodA) / prodA : 0;
-
-      // Decomposition: fewer drivers (supply) vs each driver doing less (demand//throttle)
-      let attribution = 'mixed';
-      if (Math.abs(pChange) > Math.abs(dChange) * 2) attribution = 'demand';
-      else if (Math.abs(dChange) > Math.abs(pChange) * 2) attribution = 'supply';
-
+    for (const [m, b] of series) {
+      const verdict = breakBetween(series.get(prevMonth(m)), b);
+      if (!verdict) continue;
+      const a = series.get(prevMonth(m));
+      const fromDate = `${a.m}-01`, toDate = `${b.m}-01`;
       const events = await q(
         `SELECT title, category, scope, starts_on, ends_on, expected_effect, confidence, summary
          FROM world_event
          WHERE starts_on <= $2 AND coalesce(ends_on, starts_on) >= $1
-         ORDER BY confidence DESC NULLS LAST LIMIT 8`, [a.m, b.m]);
+         ORDER BY confidence DESC NULLS LAST LIMIT 8`, [fromDate, toDate]);
 
       await upsert('metric_break', {
         metric: 'trips', grain: 'month', platform, fleet_id: null,
-        period_from: a.m, period_to: b.m,
-        value_from: a.trips, value_to: b.trips, change_pct: change,
-        drivers_from: a.drivers, drivers_to: b.drivers,
-        driver_change_pct: dChange, productivity_change_pct: pChange,
-        attribution, candidate_events: JSON.stringify(events),
+        period_from: fromDate, period_to: toDate,
+        value_from: a.trips, value_to: b.trips,
+        ...verdict, candidate_events: JSON.stringify(events),
       }, ['metric', 'grain', 'platform', 'period_from', 'period_to']);
       n++;
     }
   }
+
+  // Breaks written by the old row-adjacent logic span months we never observed.
+  // Their primary key includes the bogus period, so recomputation cannot
+  // overwrite them — they have to be deleted.
+  const { rowCount } = await pool.query(
+    `DELETE FROM metric_break
+     WHERE grain = 'month'
+       AND period_to <> (period_from + interval '1 month')::date`);
+  if (rowCount) log.info(SRC, 'cleared breaks spanning unobserved months', { removed: rowCount });
+
   return n;
 }
 

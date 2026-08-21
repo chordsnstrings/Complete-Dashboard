@@ -7,6 +7,7 @@ import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, pill, dayStr, dtS
 import { state, api, params, q, qAll, href, parseHash, navigate } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
+import { renderCauses } from './causes.js';
 
 const VIEWS = [
   { id: 'overview', label: 'Overview', ic: '◱', grp: 'Analyse', sub: 'Fleet-wide performance across every platform' },
@@ -15,6 +16,7 @@ const VIEWS = [
   { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Analyse', sub: 'Utilisation and revenue per vehicle' },
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share and mix' },
   { id: 'finance', label: 'Finance', ic: '◈', grp: 'Analyse', sub: 'Revenue, payment mix and the transaction ledger' },
+  { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Analyse', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
   { id: 'insights', label: 'Action list', ic: '✦', grp: 'Operate', sub: 'What needs doing, ranked by what it costs to ignore' },
   { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'Operate', sub: 'Documents and licences with an expiry date attached' },
   { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Operate', sub: 'Seat occupied, vehicle moved — but no booking on any channel' },
@@ -175,6 +177,10 @@ V.drivers = async (root) => {
 // The per-driver pages themselves. `state.param` is the platform driver id and
 // `state.sub` is the tab — both come straight from the URL.
 V.driver = async (root) => renderDriver(root, state.param, state.sub || 'overview');
+
+// Why the numbers moved: breaks decomposed into supply vs demand, coverage
+// gaps drawn as gaps, and the outside events that overlap them.
+V.causes = async (root) => renderCauses(root);
 
 V.vehicles = async (root) => {
   // The directory is the way into the per-vehicle pages; the panel below it is

@@ -467,6 +467,91 @@ app.get('/api/vehicle/trips', (req, r) => {
   })));
 });
 
+
+/* ── "why it moved" fixtures ──────────────────────────────────────────────
+   Deliberately mirrors the production shape, hole and all: Uber busy Aug–Oct
+   2025, nothing collected Nov–Jan, telematics-only (no driver ids) Feb–Jun,
+   Uber back in Aug. */
+const TREND = [
+  { m: '2025-08', trips: 5801, drivers: 80, vehicles: 71, revenue: 41200, platforms: ['uber'], attributed_trips: 5801 },
+  { m: '2025-09', trips: 15777, drivers: 101, vehicles: 82, revenue: 118400, platforms: ['uber', 'fms'], attributed_trips: 12886 },
+  { m: '2025-10', trips: 11800, drivers: 102, vehicles: 77, revenue: 89300, platforms: ['uber'], attributed_trips: 11800 },
+  null, null, null,                                     // 2025-11 .. 2026-01: no data
+  { m: '2026-02', trips: 2164, drivers: 0, vehicles: 43, revenue: null, platforms: ['fms'], attributed_trips: 0 },
+  { m: '2026-03', trips: 4449, drivers: 0, vehicles: 57, revenue: null, platforms: ['fms'], attributed_trips: 0 },
+  { m: '2026-04', trips: 5638, drivers: 0, vehicles: 58, revenue: null, platforms: ['fms'], attributed_trips: 0 },
+  { m: '2026-05', trips: 3576, drivers: 0, vehicles: 45, revenue: null, platforms: ['fms'], attributed_trips: 0 },
+  { m: '2026-06', trips: 7444, drivers: 0, vehicles: 59, revenue: null, platforms: ['fms'], attributed_trips: 0 },
+  { m: '2026-07', trips: 6817, drivers: 29, vehicles: 81, revenue: 9100, platforms: ['fms', 'hotel'], attributed_trips: 1250 },
+  { m: '2026-08', trips: 6975, drivers: 80, vehicles: 84, revenue: 102400, platforms: ['uber', 'fms', 'hotel'], attributed_trips: 2300 },
+];
+const MONTH_KEYS = ['2025-08','2025-09','2025-10','2025-11','2025-12','2026-01',
+  '2026-02','2026-03','2026-04','2026-05','2026-06','2026-07','2026-08'];
+
+app.get('/api/trend/monthly', (_, r) => {
+  const months = MONTH_KEYS.map((k, i) => {
+    const row = TREND[i];
+    return row
+      ? { ...row, m: k, cancel_pct: 3.2, km: row.trips * 12, no_data: false, drivers_known: row.attributed_trips > 0 }
+      : { m: k, trips: 0, drivers: null, vehicles: 0, km: null, revenue: null, cancel_pct: null,
+          platforms: [], no_data: true, drivers_known: false };
+  });
+  const breaks = [];
+  for (let i = 1; i < months.length; i++) {
+    const a = months[i - 1], b = months[i];
+    if (a.no_data || b.no_data || !a.trips) continue;
+    const d = (b.trips - a.trips) / a.trips;
+    if (Math.abs(d) < 0.3) continue;
+    breaks.push({ from: a.m, to: b.m, change_pct: Math.round(d * 100),
+      trips_from: a.trips, trips_to: b.trips,
+      drivers_from: a.drivers_known ? a.drivers : null,
+      drivers_to: b.drivers_known ? b.drivers : null,
+      platform_shift: JSON.stringify([...a.platforms].sort()) !== JSON.stringify([...b.platforms].sort())
+        ? { from: a.platforms, to: b.platforms } : null });
+  }
+  r.json({ months, breaks, gaps: [{ from: '2025-11', to: '2026-01', months: 3 }] });
+});
+
+const EV = [
+  { title: 'Ramadan 1447', category: 'holiday', scope: 'uae', starts_on: '2026-02-18', ends_on: '2026-03-19',
+    expected_effect: 'demand_down', confidence: 0.85,
+    summary: 'Daytime demand collapses and shifts to the hours after iftar; total volume typically falls.' },
+  { title: 'Eid al-Fitr 1447', category: 'holiday', scope: 'uae', starts_on: '2026-03-19', ends_on: '2026-03-22',
+    expected_effect: 'demand_up', confidence: 0.7, summary: 'Sharp short spike in evening and late-night trips.' },
+  { title: 'Dubai summer 2026', category: 'seasonal', scope: 'dubai', starts_on: '2026-06-15', ends_on: '2026-09-15',
+    expected_effect: 'demand_down', confidence: 0.75,
+    summary: 'Residents leave the country and outdoor activity stops; EV range also falls under continuous AC load.' },
+  { title: 'UAE school summer break 2026', category: 'seasonal', scope: 'uae', starts_on: '2026-07-01', ends_on: '2026-08-31',
+    expected_effect: 'demand_down', confidence: 0.6, summary: 'School-run and family trips disappear for two months.' },
+  { title: 'Dubai high season 2025-26', category: 'seasonal', scope: 'dubai', starts_on: '2025-11-01', ends_on: '2026-04-15',
+    expected_effect: 'demand_up', confidence: 0.8, summary: 'Tourist arrivals peak; airport and hotel transfers rise.' },
+  { title: 'Regional tension, Strait of Hormuz', category: 'geopolitical', scope: 'gulf', starts_on: '2026-05-02', ends_on: '2026-06-10',
+    expected_effect: 'demand_down', confidence: 0.45,
+    summary: 'Reduced inbound travel and cautious discretionary spend; effect on ride demand is indirect.' },
+  { title: 'UAE fuel price revision', category: 'economic', scope: 'uae', starts_on: '2026-08-01', ends_on: '2026-08-01',
+    expected_effect: 'cost_up', confidence: 0.5, summary: 'Affects the ICE portion of the fleet only; the EV fleet is unaffected.' },
+];
+app.get('/api/events', (_, r) => r.json(EV));
+
+app.get('/api/breaks', (_, r) => r.json([
+  { metric: 'trips', grain: 'month', platform: 'uber', period_from: '2025-09-01', period_to: '2025-10-01',
+    value_from: 15777, value_to: 11800, change_pct: -0.252, drivers_from: 101, drivers_to: 102,
+    driver_change_pct: 0.0099, productivity_change_pct: -0.2596, attribution: 'demand',
+    candidate_events: JSON.stringify([EV[4]]) },
+  { metric: 'trips', grain: 'month', platform: 'uber', period_from: '2025-08-01', period_to: '2025-09-01',
+    value_from: 5801, value_to: 15777, change_pct: 1.72, drivers_from: 80, drivers_to: 101,
+    driver_change_pct: 0.2625, productivity_change_pct: 1.155, attribution: 'demand',
+    candidate_events: JSON.stringify([]) },
+  { metric: 'trips', grain: 'month', platform: 'fms', period_from: '2026-02-01', period_to: '2026-03-01',
+    value_from: 2164, value_to: 4449, change_pct: 1.056, drivers_from: null, drivers_to: null,
+    driver_change_pct: null, productivity_change_pct: null, attribution: 'unattributable',
+    candidate_events: JSON.stringify([EV[0], EV[1]]) },
+  { metric: 'trips', grain: 'month', platform: 'fms', period_from: '2026-04-01', period_to: '2026-05-01',
+    value_from: 5638, value_to: 3576, change_pct: -0.366, drivers_from: null, drivers_to: null,
+    driver_change_pct: null, productivity_change_pct: null, attribution: 'unattributable',
+    candidate_events: JSON.stringify([EV[5]]) },
+]));
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 
 app.use(express.static(join(__dir, 'api', 'public')));

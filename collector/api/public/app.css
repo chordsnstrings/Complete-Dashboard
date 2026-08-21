@@ -586,3 +586,35 @@ table.compact th,table.compact td{padding:8px 10px;font-size:.8rem}
   font-family:"IBM Plex Mono",monospace;font-size:1.05rem;font-weight:600;letter-spacing:.06em;
   box-shadow:inset 0 1px 0 rgba(255,255,255,.35);
 }
+
+/* ── break cards: one structural move, decomposed ──────────────────────────
+   Supply and demand sit side by side because the whole point is that the same
+   headline drop needs opposite responses depending on which side moved. */
+.breakcard{
+  border:1px solid var(--rule);border-radius:var(--r);background:var(--surface);
+  padding:15px 17px;margin-bottom:12px;box-shadow:var(--shadow-1);
+  transition:border-color .18s var(--ease),box-shadow .18s var(--ease);
+}
+.breakcard:hover{border-color:var(--rule-strong);box-shadow:var(--shadow-2)}
+.bk-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.bk-head h4{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.02rem;margin:0;letter-spacing:-.01em}
+.bk-head .cap{margin:2px 0 0}
+.bk-split{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:13px 0 11px}
+.bk-half{background:var(--surface-2);border-radius:var(--r-sm);padding:10px 12px}
+.bk-k{
+  font-family:"IBM Plex Mono",monospace;font-size:.6rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);
+}
+.bk-v{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.2rem;margin-top:3px;line-height:1.2}
+.bk-d{font-size:.74rem;color:var(--ink-2);margin-top:1px}
+.bk-why{font-size:.85rem;color:var(--ink);margin:0 0 6px;line-height:1.5}
+.bk-fix{font-size:.82rem;color:var(--ink-2);margin:0;line-height:1.5}
+.bk-fix b{
+  font-family:"IBM Plex Mono",monospace;font-size:.6rem;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--ink-3);margin-right:7px;
+}
+.bk-ev{margin-top:13px;padding-top:11px;border-top:1px solid var(--rule)}
+.bk-evrow{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:7px}
+.bk-evt{font-size:.84rem;font-weight:500}
+.bk-ev .cap{margin:2px 0 0}
+@media(max-width:640px){ .bk-split{grid-template-columns:1fr} }

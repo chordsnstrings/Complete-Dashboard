@@ -100,5 +100,52 @@ if (febMar) {
   check('Ramadan surfaced as a candidate cause', febMar.events.some((t) => /ramadan/i.test(t)), JSON.stringify(febMar.events));
 }
 
+/* ── the real decision function, called rather than reimplemented ─────────
+   Everything above walks the same arithmetic by hand, which is why a genuine
+   bug — comparing adjacent ROWS instead of adjacent MONTHS — survived a green
+   suite and shipped a "-91% collapse" across three months of missing data.
+   These call src/sources/events.js directly. */
+const { breakBetween, prevMonth } = await import('../src/sources/events.js');
+
+check('prevMonth steps back within a year', prevMonth('2026-03') === '2026-02', prevMonth('2026-03'));
+check('prevMonth wraps across the year boundary', prevMonth('2026-01') === '2025-12', prevMonth('2026-01'));
+
+const M = (m, trips, drivers, attributed = trips) => ({ m, trips, drivers, attributed });
+
+// The production shape: October observed, then nothing until August.
+check('no break is reported across missing months',
+  breakBetween(M('2025-10', 11800, 102), M('2026-08', 1052, 53)) === null);
+check('a break needs its true calendar neighbour',
+  breakBetween(M('2026-01', 500, 20), M('2026-03', 100, 20)) === null);
+check('adjacent months do produce a break',
+  breakBetween(M('2026-02', 1000, 50), M('2026-03', 300, 42))?.change_pct < -0.6);
+
+// A move under the threshold is noise, not a structural break.
+check('a small month-over-month move is not a break',
+  breakBetween(M('2026-02', 1000, 50), M('2026-03', 900, 50)) === null);
+// Two thin months either side of a threshold crossing say nothing useful.
+check('two thin months are ignored',
+  breakBetween(M('2026-02', 5, 2), M('2026-03', 15, 3)) === null);
+check('a thin month against a busy one is still reported',
+  breakBetween(M('2026-02', 900, 40), M('2026-03', 5, 1)) !== null);
+
+/* ── supply versus demand ─────────────────────────────────────────────────
+   The whole point of the decomposition: same headline drop, different cause,
+   different fix. */
+const supply = breakBetween(M('2026-02', 1000, 100), M('2026-03', 500, 50));
+check('half the drivers doing the same each reads as supply', supply.attribution === 'supply', supply.attribution);
+const demand = breakBetween(M('2026-02', 1000, 100), M('2026-03', 400, 96));
+check('the same drivers doing far less reads as demand', demand.attribution === 'demand', demand.attribution);
+
+/* ── unattributable months ────────────────────────────────────────────────
+   Telematics trips carry no driver id. Counting that as "every driver left"
+   was how a data-shape change became a staffing crisis on the dashboard. */
+const noIds = breakBetween(M('2026-02', 1000, 50, 1000), M('2026-03', 200, 0, 0));
+check('a month with no driver ids is not read as zero drivers', noIds.drivers_to === null, String(noIds.drivers_to));
+check('an unattributable break says so rather than guessing a cause',
+  noIds.attribution === 'unattributable', noIds.attribution);
+check('an unattributable break still reports the size of the move',
+  noIds.change_pct < -0.7, String(noIds.change_pct));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
