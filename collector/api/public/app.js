@@ -15,6 +15,7 @@ const VIEWS = [
   { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Operate', sub: 'Seat occupied, vehicle moved — but no booking on any channel' },
   { id: 'safety', label: 'Safety', ic: '△', grp: 'Operate', sub: 'Harsh-driving events from the telematics layer' },
   { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Operate', sub: 'Realtime positions — CABMAN refreshes every 5 minutes' },
+  { id: 'map', label: 'Map & replay', ic: '◍', grp: 'Operate', sub: 'Where every vehicle is now, and where it went on any given day' },
   { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Operate', sub: 'Collector health, coverage and history depth' },
   { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Configure', sub: 'Credentials and collection schedule' },
 ];
@@ -450,6 +451,97 @@ V.live = async (root) => {
     }); };
   });
   p.body.append(t);
+};
+
+
+V.map = async (root) => {
+  const { makeMap, renderLive, renderJourney } = await import('/map.js');
+
+  // ── controls ──
+  const ctl = el('div', 'panel');
+  ctl.innerHTML = `
+    <div class="btnrow" style="justify-content:space-between">
+      <div class="btnrow">
+        <button class="btn primary" id="mLive">Live fleet</button>
+        <button class="btn" id="mReplay">Day replay</button>
+      </div>
+      <div class="btnrow" id="mReplayCtl" style="display:none">
+        <select id="mPlate" class="btn"></select>
+        <input id="mDay" type="date" class="btn" />
+        <button class="btn" id="mGo">Show route</button>
+      </div>
+    </div>`;
+  root.append(ctl);
+
+  const stat = el('div', 'kpis'); root.append(stat);
+  const wrap = el('div', 'panel mapwrap');   // mapwrap opts out of the chart svg rule
+  wrap.style.padding = '0'; wrap.style.overflow = 'hidden';
+  const node = el('div'); node.style.height = '560px'; node.style.width = '100%';
+  wrap.append(node); root.append(wrap);
+  const legend = el('div', 'legend'); root.append(legend);
+
+  const map = makeMap(node);
+  let layer = null;
+  const clear = () => { if (layer) { map.removeLayer(layer); layer = null; } };
+
+  const showLive = async () => {
+    clear();
+    const rows = await api('/api/live');
+    const withGps = rows.filter((r) => r.lat != null);
+    stat.innerHTML = [
+      ['On the map', fmt(withGps.length), 'vehicles with a fix'],
+      ['Engaged', fmt(withGps.filter((r) => r.seat_occupied || /engag/i.test(r.status || '')).length), 'passenger aboard'],
+      ['Moving', fmt(withGps.filter((r) => +r.speed > 3).length), 'above 3 km/h'],
+      ['Stale', fmt(withGps.filter((r) => r.stale).length), 'no fix in 11 min'],
+    ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
+    legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Moving, empty'], ['--s5', 'Stopped'], ['--ink-3', 'Stale fix']]
+      .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('');
+    layer = renderLive(map, withGps, (r) => {
+      $('#mReplay').click();
+      const sel = $('#mPlate'); if (sel) sel.value = r.plate;
+    });
+    if (!withGps.length) empty(stat, 'No GPS fixes stored yet — CABMAN populates this every 5 minutes');
+  };
+
+  const showReplay = async () => {
+    const plate = $('#mPlate').value, day = $('#mDay').value;
+    if (!plate || !day) return;
+    clear();
+    const j = await api(`/api/map/journey?plate=${encodeURIComponent(plate)}&day=${day}`);
+    stat.innerHTML = [
+      ['Fixes', fmt(j.fixes), `on ${day}`],
+      ['Distance', fmt(j.distance_km) + ' km', 'between fixes'],
+      ['With passenger', fmt(j.occupied_km) + ' km', j.distance_km ? Math.round(j.occupied_km / j.distance_km * 100) + '% of distance' : '—'],
+      ['Driver', j.driver || '—', j.driver_trips != null ? j.driver_trips + ' trips' : 'from trip records'],
+    ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
+    legend.innerHTML = [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
+      .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')
+      + `<span class="dim">Lines join consecutive 5-minute fixes; a gap over 20 minutes breaks the line rather than guessing the route.</span>`;
+    if (!j.fixes) { empty(stat, `No GPS fixes stored for ${plate} on ${day}`); return; }
+    layer = renderJourney(map, j);
+  };
+
+  // populate the replay pickers from days that actually have a trail
+  const days = await api('/api/map/days').catch(() => []);
+  const plates = [...new Set(days.map((d) => d.plate))].sort();
+  $('#mPlate').innerHTML = plates.map((p) => `<option>${esc(p)}</option>`).join('')
+    || '<option value="">no trails yet</option>';
+  const latest = days[0]?.day ? String(days[0].day).slice(0, 10) : new Date().toISOString().slice(0, 10);
+  $('#mDay').value = latest;
+
+  $('#mLive').onclick = () => {
+    $('#mLive').classList.add('primary'); $('#mReplay').classList.remove('primary');
+    $('#mReplayCtl').style.display = 'none'; showLive();
+  };
+  $('#mReplay').onclick = () => {
+    $('#mReplay').classList.add('primary'); $('#mLive').classList.remove('primary');
+    $('#mReplayCtl').style.display = 'flex'; showReplay();
+  };
+  $('#mGo').onclick = showReplay;
+  $('#mPlate').onchange = showReplay;
+  $('#mDay').onchange = showReplay;
+
+  await showLive();
 };
 
 V.sources = async (root) => {

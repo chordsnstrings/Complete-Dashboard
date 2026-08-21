@@ -23,7 +23,6 @@
 
   /* ── single accent, used sparingly ────────────────────────────────────── */
   --accent:#2f6f9f;
-  --accent-ink:#255madd;
   --accent-ink:#255b83;
   --accent-soft:#2f6f9f14;
   --accent-line:#2f6f9f33;
@@ -121,31 +120,37 @@ a{color:var(--accent-ink)}
 }
 @keyframes pulse{0%,100%{box-shadow:0 0 0 3px var(--accent-soft)}50%{box-shadow:0 0 0 6px var(--accent-soft)}}
 
-#nav{display:flex;flex-direction:column;gap:1px;flex:1;overflow-y:auto}
-#nav .sec{
-  font-family:"IBM Plex Mono",monospace;font-size:.62rem;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--ink-3);padding:14px 10px 5px;
+#nav{display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;margin:0 -4px}
+
+/* group heading — quiet, spaced, clearly not an item */
+#nav .grp{
+  font-family:"IBM Plex Mono",monospace;font-size:.6rem;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--ink-3);padding:16px 12px 6px;pointer-events:none;
 }
-#nav button{
-  display:flex;align-items:center;gap:9px;width:100%;text-align:left;
-  background:none;border:0;border-radius:var(--r-sm);padding:8px 10px;
-  color:var(--ink-2);font:inherit;font-size:.9rem;cursor:pointer;
-  transition:background .18s var(--ease), color .18s var(--ease), transform .18s var(--ease);
+#nav .grp:first-child{padding-top:2px}
+
+#nav a{
+  display:flex;align-items:center;gap:11px;
+  padding:8px 12px;margin:0 4px;border-radius:var(--r-sm);
+  color:var(--ink-2);font-size:.885rem;line-height:1.3;text-decoration:none;cursor:pointer;
+  position:relative;transition:background .16s var(--ease),color .16s var(--ease),transform .16s var(--ease);
 }
-#nav button .ic{width:15px;text-align:center;opacity:.62;font-size:.86rem;transition:opacity .18s}
-#nav button:hover{background:var(--surface-2);color:var(--ink);transform:translateX(2px)}
-#nav button:hover .ic{opacity:1}
-#nav button[aria-current="true"]{
-  background:var(--surface);color:var(--ink);font-weight:600;
-  box-shadow:var(--shadow-1); position:relative;
+#nav a .ic{
+  width:17px;min-width:17px;display:inline-flex;align-items:center;justify-content:center;
+  font-size:.82rem;opacity:.5;transition:opacity .16s var(--ease),transform .16s var(--ease);
 }
-#nav button[aria-current="true"]::before{
-  content:"";position:absolute;left:-14px;top:50%;transform:translateY(-50%);
-  width:3px;height:19px;border-radius:0 3px 3px 0;background:var(--accent);
-  animation:navIn .3s var(--ease-out);
+#nav a:hover{background:var(--surface-2);color:var(--ink);transform:translateX(2px)}
+#nav a:hover .ic{opacity:.85}
+#nav a.on{
+  background:var(--surface);color:var(--ink);font-weight:600;box-shadow:var(--shadow-1);
 }
-@keyframes navIn{from{height:0;opacity:0}to{height:19px;opacity:1}}
-#nav button[aria-current="true"] .ic{opacity:1}
+#nav a.on .ic{opacity:1;color:var(--accent)}
+#nav a.on::before{
+  content:"";position:absolute;left:-4px;top:50%;transform:translateY(-50%);
+  width:3px;height:18px;border-radius:0 3px 3px 0;background:var(--accent);
+  animation:navIn .28s var(--ease-out);
+}
+@keyframes navIn{from{height:0;opacity:0}to{height:18px;opacity:1}}
 
 .side-foot{display:flex;flex-direction:column;gap:9px;padding-top:12px;border-top:1px solid var(--rule)}
 #themeBtn{
@@ -305,7 +310,11 @@ tbody tr[data-click]:hover{background:var(--accent-soft)}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
 /* ── charts ────────────────────────────────────────────────────────────── */
-svg{display:block;width:100%;height:auto;overflow:visible}
+/* Charts only — never Leaflet. A blanket `svg{width:100%;height:auto}` collapses
+   Leaflet's overlay pane to zero height (polylines stay in the DOM but render
+   invisibly) and blows up its attribution flag. The map panel opts out by class. */
+.panel:not(.mapwrap) svg,
+#view > svg{display:block;width:100%;height:auto;overflow:visible}
 .axis{font-family:"IBM Plex Mono",monospace;font-size:10px;fill:var(--ink-3)}
 .gl{stroke:var(--rule);stroke-width:1}
 .vlab{font-family:"IBM Plex Mono",monospace;font-size:10px;fill:var(--ink-2);font-weight:500}

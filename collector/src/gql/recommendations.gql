@@ -1,0 +1,62 @@
+query getRecommendations($recommendationsRequest: GetRecommendationsRequest_Input!) {
+  getRecommendations(recommendationsRequest: $recommendationsRequest) {
+    recommendations {
+      uuid
+      type
+      data {
+        acceptanceRateRecommendationData {
+          orgAcceptanceRate
+          targetAcceptanceRate
+          belowTargetDrivers {
+            uuid
+            acceptanceRate
+            __typename
+          }
+          __typename
+        }
+        cancellationRateRecommendationData {
+          orgCancellationRate
+          targetCancellationRate
+          aboveTargetDrivers {
+            uuid
+            cancellationRate
+            __typename
+          }
+          __typename
+        }
+        tripCompletionRecommendationData {
+          belowTargetDrivers {
+            uuid
+            onlineDurationMillis
+            tripCount
+            __typename
+          }
+          __typename
+        }
+        __typename
+      }
+      userActionHistory {
+        userUuid
+        type
+        data {
+          feedbackRecommendationActionData {
+            isHelpful
+            __typename
+          }
+          __typename
+        }
+        createdAt
+        __typename
+      }
+      timeRange {
+        startsAt
+        endsAt
+        __typename
+      }
+      updatedAt
+      expiryTime
+      __typename
+    }
+    __typename
+  }
+}

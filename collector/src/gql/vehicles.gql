@@ -1,0 +1,69 @@
+query vehiclesTableVehicles($orgUUID: String, $pageToken: String, $pageSize: Int, $filters: SupplierVehiclesFilters, $withAssignments: Boolean!) {
+  getSupplierVehicles(
+    orgUUID: $orgUUID
+    pageToken: $pageToken
+    pageSize: $pageSize
+    filters: $filters
+  ) {
+    vehicles {
+      ...VehicleDetailsFields
+      __typename
+    }
+    nextPageToken
+    __typename
+  }
+}
+
+fragment VehicleDetailsFields on Vehicle {
+  uuid
+  ownerUUID
+  make
+  localizedMake
+  makeTranslationKey
+  model
+  localizedModel
+  modelTranslationKey
+  year
+  licensePlate
+  vin
+  color
+  colorNameTranslationKey
+  localizedColorName
+  colorHexCode
+  imageURL
+  compliance {
+    status
+    documents {
+      documentTypeUUID
+      documentTypeName
+      status
+      expiresAt
+      statusReasonName
+      isBlanketDocument
+      isOptionalDocument
+      onboardingStatus
+      onboardingStatusReasonName
+      documentGigBaseTypes {
+        gigBaseType
+        __typename
+      }
+      effectiveFrom
+      __typename
+    }
+    gigBaseTypeStatuses {
+      gigBaseType
+      gigUnifiedStatus
+      __typename
+    }
+    __typename
+  }
+  assignments @include(if: $withAssignments) {
+    entityUUID
+    __typename
+  }
+  labels {
+    value
+    __typename
+  }
+  __typename
+}

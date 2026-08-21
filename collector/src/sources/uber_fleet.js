@@ -1,6 +1,9 @@
 // Uber surfaces the first pass missed: vehicle compliance documents, the richer
 // vehicle master, Uber's own recommendations, and the earnings tree (which is where
 // tips actually live — the trip report has no tip column).
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
 import { upsertMany, logRun } from '../db.js';
@@ -9,6 +12,12 @@ import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { log } from '../log.js';
 
 const SRC = 'uber_fleet';
+// The real queries, captured verbatim from the portal. Hand-writing them against a
+// field list produced valid-looking GraphQL that the server rejected — the argument
+// names and input types differ (pageSize not limit, String not ID, a request object
+// for recommendations), so we ship the exact documents instead of a reconstruction.
+const __dir = dirname(fileURLToPath(import.meta.url));
+const Q = (f) => readFileSync(join(__dir, '..', 'gql', f), 'utf8');
 const GQL = 'https://supplier.uber.com/graphql';
 const FLEET = 'ecosine';
 
@@ -22,22 +31,16 @@ async function gql(operationName, query, variables) {
 }
 
 /* ── vehicles + compliance documents (registration/insurance expiry) ────── */
-const VEHICLES_Q = `query vehiclesTableVehicles($orgUUID: ID!, $limit: Int, $pageToken: String) {
-  getSupplierVehicles(orgUUID: $orgUUID, limit: $limit, pageToken: $pageToken) {
-    nextPageToken
-    vehicles {
-      uuid licensePlate make model year color colorHexCode vin imageURL ownerUUID
-      assignments { entityUUID }
-      compliance { status documents { documentTypeName documentTypeUUID status expiresAt } }
-    }
-  }
-}`;
 
 async function pullVehicles() {
   let pageToken = null, profiles = [], docs = [], guard = 0;
   do {
-    const d = await gql('vehiclesTableVehicles', VEHICLES_Q,
-      { orgUUID: config.uber.orgUuid, limit: 100, pageToken });
+    const d = await gql('vehiclesTableVehicles', Q('vehicles.gql'), {
+      orgUUID: config.uber.orgUuid, pageToken: pageToken || '', pageSize: 200,
+      filters: { vehicleComplianceStatus: null, vehicleAssignmentStatus: null,
+                 gigUnifiedStatus: null, gigBaseType: null, documentComplianceStatus: null },
+      withAssignments: true,
+    });
     const page = d?.getSupplierVehicles;
     for (const v of (page?.vehicles || [])) {
       const plate = normPlate(v.licensePlate);
@@ -65,30 +68,16 @@ async function pullVehicles() {
 }
 
 /* ── Uber's own recommendations: who is below target, per Uber's maths ──── */
-const RECS_Q = `query getRecommendations($orgUUID: ID!) {
-  getRecommendations(orgUUID: $orgUUID) {
-    recommendations {
-      uuid type updatedAt expiryTime
-      timeRange { startsAt endsAt }
-      data {
-        acceptanceRateRecommendationData {
-          orgAcceptanceRate targetAcceptanceRate
-          belowTargetDrivers { uuid acceptanceRate }
-        }
-        cancellationRateRecommendationData {
-          orgCancellationRate targetCancellationRate
-          aboveTargetDrivers { uuid cancellationRate }
-        }
-        tripCompletionRecommendationData {
-          belowTargetDrivers { uuid onlineDurationMillis tripCount }
-        }
-      }
-    }
-  }
-}`;
 
 async function pullRecommendations() {
-  const d = await gql('getRecommendations', RECS_Q, { orgUUID: config.uber.orgUuid });
+  // Recommendations are published for a trailing window; ask for the last 30 days.
+  const endsAt = Date.now(), startsAt = endsAt - 30 * 864e5;
+  const d = await gql('getRecommendations', Q('recommendations.gql'), {
+    recommendationsRequest: {
+      orgUuid: config.uber.orgUuid, userUuid: config.uber.orgUuid,
+      timeRange: { startsAt, endsAt }, tenancy: 'uber/production',
+    },
+  });
   const recs = d?.getRecommendations?.recommendations || [];
   const rows = recs.map((r) => {
     const dd = r.data || {};
