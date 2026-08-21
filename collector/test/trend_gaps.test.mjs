@@ -74,18 +74,73 @@ check('every break joins two adjacent observed months',
 const real = breaks.find((b) => b.from === '2025-09');
 check('a genuine month-over-month swing is still reported', real?.change_pct === -50, JSON.stringify(real));
 
-/* ── "0 drivers" on a telematics-only month means unattributable ─────────── */
+/* ── a telematics month has journeys, not bookings ────────────────────────
+   `trips` used to be count(*) over bookings AND the telematics twins of the
+   same journeys, so a month with FMS running counted each physical trip twice
+   and a month without it counted it once. That alone manufactures a
+   "structural break" on the date the telematics boxes came online — on the
+   page whose job is explaining what caused a break. The two are counted
+   separately now and never summed. */
 const feb = months.find((m) => m.m === '2026-02');
-check('a telematics-only month has trips', feb?.trips === 9, String(feb?.trips));
+check('a telematics-only month reports no bookings, because it has none',
+  feb?.trips === 0, String(feb?.trips));
+check('its journeys are carried separately rather than being dropped',
+  feb?.telematics_journeys === 9, String(feb?.telematics_journeys));
 check('a telematics-only month is marked as having no driver attribution',
   feb?.drivers_known === false, String(feb?.drivers_known));
+/* And the consequence that matters: with bookings at zero on both sides, there
+   is no month-over-month move to report at all. The old counting produced one
+   out of nothing. */
 const febBreak = breaks.find((b) => b.to === '2026-03');
-check('a break with no attribution reports null drivers rather than zero',
-  febBreak && febBreak.drivers_from === null && febBreak.drivers_to === null, JSON.stringify(febBreak));
+check('no break is manufactured between two months that had no bookings',
+  !febBreak, JSON.stringify(febBreak));
+check('and no break in the record claims a driver count it could not attribute',
+  breaks.every((b) => (b.drivers_from == null) === (b.drivers_to == null)
+    || b.drivers_from != null),
+  JSON.stringify(breaks.map((b) => [b.from, b.drivers_from, b.drivers_to])));
 check('a break where the platform mix changed says so',
   breaks.every((b) => b.platform_shift === null || (b.platform_shift.from && b.platform_shift.to)),
   JSON.stringify(breaks.map((b) => b.platform_shift)));
 
+/* ── one odometer row must not become a month's distance ──────────────────
+   FMS distances are odometer-derived and a single row can read 193,027 km.
+   This query summed distance_km unguarded, so April 2026 reported 12,681,536
+   km across 91 vehicles — 4,600 km per car per day, every day of the month.
+   The months that looked sane were exactly the months FMS happened to be dark,
+   which is why it survived: the number was only absurd where nobody had a
+   reason to look.
+
+   `has_distance` in trip_norm exists for this and was not being used. */
+{
+  await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+             requested_at,distance_km,status,price)
+           VALUES ('fms','odo1','ecosine','L1',NULL,NULL,'2026-03-05T10:00:00+04:00',193027,'completed',NULL),
+                  ('uber','real1','ecosine','L1','d1','Driver d1','2026-03-05T11:00:00+04:00',14,'completed',40),
+                  ('uber','real2','ecosine','L1','d1','Driver d1','2026-03-06T11:00:00+04:00',16,'completed',40)`);
+  const again = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+  const mar = (again.months || []).find((m) => m.m === '2026-03');
+  check('a 193,027 km odometer row is excluded from the month’s distance',
+    Number(mar.km) === 30, String(mar.km));
+  check('and it is not counted as a booking either',
+    mar.trips === 2, String(mar.trips));
+  check('the distance is reported alongside how many bookings it was measured over',
+    mar.measured_trips === 2, String(mar.measured_trips));
+  check('so km per booking is a number a person can sanity-check',
+    Math.round(mar.km / mar.measured_trips) === 15, String(mar.km / mar.measured_trips));
+
+  /* And the Dubai-month boundary. A 01:00 Dubai trip on the 1st is 21:00 UTC
+     on the last day of the previous month; date_trunc on the raw timestamp put
+     it in the wrong month, and this fleet's airport wave starts before dawn. */
+  await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+             requested_at,distance_km,status,price)
+           VALUES ('uber','tz1','ecosine','L1','d1','Driver d1','2026-04-01T01:00:00+04:00',10,'completed',40)`);
+  const tz = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+  const apr = (tz.months || []).find((m) => m.m === '2026-04');
+  check('a 01:00 Dubai booking counts in the Dubai month, not the UTC one',
+    apr?.trips === 1, `${apr?.trips} in April`);
+}
+
 server.close();
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

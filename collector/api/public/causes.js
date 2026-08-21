@@ -194,13 +194,89 @@ export async function renderCauses(root) {
       tone: Math.abs(biggest.change_pct) > 60 ? 'critical' : 'warn' } : null,
   ]));
 
+  /* ── the whole year at once, which was never possible before ───────────
+     The Uber history ran 56 days until the backfill finally landed a full
+     year. Thirteen unbroken months make one thing visible that no fragment
+     could: this fleet did not lose demand, it lost drivers. Trips per driver
+     barely moved while the driver count halved and the vehicle count did not.
+     Those are opposite problems with opposite fixes, and a trip-count chart
+     cannot tell them apart — which is the whole reason this page exists. */
+  const supply = observed.filter((m) => m.drivers_known && m.trips > 0);
+  if (supply.length >= 6) {
+    const per = (m) => (m.drivers ? m.trips / m.drivers : null);
+    const firstThird = supply.slice(0, Math.max(1, Math.floor(supply.length / 3)));
+    const lastThird = supply.slice(-Math.max(1, Math.floor(supply.length / 3)));
+    const mean = (rows, f) => {
+      const v = rows.map(f).filter((x) => x != null && Number.isFinite(x));
+      return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+    };
+    const t0 = mean(firstThird, (m) => m.trips), t1 = mean(lastThird, (m) => m.trips);
+    const d0 = mean(firstThird, (m) => m.drivers), d1 = mean(lastThird, (m) => m.drivers);
+    const v0 = mean(firstThird, (m) => m.earning_vehicles), v1 = mean(lastThird, (m) => m.earning_vehicles);
+    const p0 = mean(firstThird, per), p1 = mean(lastThird, per);
+    const move = (a, b) => (a ? Math.round(((b - a) / a) * 100) : null);
+
+    const { panel: sp, body: sb } = panel('Supply or demand, over the whole record',
+      `First ${firstThird.length} attributable months against the last ${lastThird.length}. `
+      + 'Trips per driver is the number that separates the two: it holds steady when the fleet '
+      + 'loses people and falls when the work stops arriving.');
+    root.append(sp);
+    sb.append(tableFrom([
+      { k: 'Bookings per month', a: t0, b: t1, d: move(t0, t1), fmtN: 0 },
+      { k: 'Drivers earning', a: d0, b: d1, d: move(d0, d1), fmtN: 0 },
+      { k: 'Vehicles earning', a: v0, b: v1, d: move(v0, v1), fmtN: 0 },
+      { k: 'Bookings per driver', a: p0, b: p1, d: move(p0, p1), fmtN: 1 },
+    ], [
+      { label: '', key: 'k' },
+      { label: `${MONTH(firstThird[0].m)}–${MONTH(firstThird[firstThird.length - 1].m)}`,
+        key: 'a', num: true, render: (r) => (r.a == null ? '—' : fmt(r.a, r.fmtN)) },
+      { label: `${MONTH(lastThird[0].m)}–${MONTH(lastThird[lastThird.length - 1].m)}`,
+        key: 'b', num: true, render: (r) => (r.b == null ? '—' : fmt(r.b, r.fmtN)) },
+      { label: 'Move', key: 'd', num: true, render: (r) => (r.d == null ? '—'
+        : `<span class="pill ${Math.abs(r.d) < 10 ? '' : r.d < 0 ? 'bad' : 'ok'}">${r.d > 0 ? '+' : ''}${r.d}%</span>`) },
+    ]));
+
+    /* State the reading, and state what would falsify it. A verdict with no
+       stated alternative is an assertion; one that names the number that would
+       change its mind is a finding. */
+    const dMove = move(d0, d1), pMove = move(p0, p1), tMove = move(t0, t1);
+    if (tMove != null && Math.abs(tMove) >= 15) {
+      const supplyLed = dMove != null && pMove != null
+        && Math.abs(dMove) > Math.abs(pMove) * 1.5;
+      const demandLed = pMove != null && dMove != null
+        && Math.abs(pMove) > Math.abs(dMove) * 1.5;
+      sb.append(el('p', 'note',
+        supplyLed
+          ? `Bookings moved ${tMove}% and the driver count moved ${dMove}%, while each driver's own `
+            + `output moved only ${pMove}%. That is a SUPPLY move: the people changed, the work per `
+            + 'person did not. Recruitment and retention, not marketing. It would be wrong if bookings '
+            + 'per driver were the thing that had moved — that number is in the table above and can be checked.'
+          : demandLed
+            ? `Each driver's output moved ${pMove}% while the driver count moved only ${dMove}%. That is a `
+              + 'DEMAND move: the same people are getting less work. Adding drivers would make it worse.'
+            : `Bookings moved ${tMove}%, drivers ${dMove}%, output per driver ${pMove}%. Both sides moved `
+              + 'together, so neither explains the other on this evidence alone.'));
+      if (v1 != null && v0 != null && Math.abs(move(v0, v1)) < 15 && dMove != null && dMove < -15) {
+        sb.append(el('p', 'note err',
+          `The vehicle count barely moved (${move(v0, v1)}%) while the driver count fell ${dMove}%. `
+          + 'The fleet is still holding the cars it is no longer staffing — that is idle capital with a '
+          + 'registration and an insurance policy attached, and it is on the balance sheet either way.'));
+      }
+    }
+    sb.append(el('p', 'cap',
+      'Attributable months only: a month sourced entirely from telematics carries no driver id and cannot '
+      + 'be compared on this axis. Bookings exclude telematics journeys, which are the same physical trips '
+      + 'seen by the tracker.'));
+  }
+
   trendChart(trend.body, months, (m) => {
     const row = months.find((x) => x.m === m);
     if (!row || row.no_data) return;
     const near = (t.breaks || []).filter((b) => b.from === m || b.to === m);
     trend.body.querySelectorAll('.picked').forEach((n) => n.remove());
     const d = el('div', 'note picked',
-      `${MONTH(m)}: ${fmt(row.trips)} trips on ${esc((row.platforms || []).join(', ') || 'unknown')}` +
+      `${MONTH(m)}: ${fmt(row.trips)} bookings on ${esc((row.booking_platforms || row.platforms || []).join(', ') || 'unknown')}` +
+      `${row.telematics_journeys ? `, ${fmt(row.telematics_journeys)} telematics journeys behind them` : ''}` +
       `${row.drivers_known ? `, ${row.drivers} drivers` : ', no driver attribution'}` +
       `${row.revenue ? `, AED ${fmt(row.revenue)} booked` : ''}` +
       `${near.length ? ` — ${near.length} break(s) touch this month.` : ''}`);
@@ -222,6 +298,15 @@ export async function renderCauses(root) {
       { label: 'Change', key: 'change_pct', num: true, render: (r) => `${r.change_pct > 0 ? '+' : ''}${r.change_pct}%` },
       { label: 'Trips', key: '_t', num: true, render: (r) => `${fmt(r.trips_from)} → ${fmt(r.trips_to)}` },
       { label: 'Drivers', key: '_d', num: true, render: (r) => (r.drivers_from == null ? 'not comparable' : `${r.drivers_from} → ${r.drivers_to}`) },
+      { label: 'Vehicles earning', key: '_v', num: true,
+        render: (r) => (r.vehicles_from == null ? '—' : `${fmt(r.vehicles_from)} → ${fmt(r.vehicles_to)}`) },
+      /* Distance per booking, over measured bookings only. A swing in trips
+         with a flat km-per-trip is a volume change; one where the trips also
+         got much shorter or longer is a change in the WORK, and the two need
+         different responses. */
+      { label: 'Km per booking', key: '_k', num: true,
+        render: (r) => (r.km_per_trip_from == null || r.km_per_trip_to == null ? '—'
+          : `${fmt(r.km_per_trip_from, 1)} → ${fmt(r.km_per_trip_to, 1)}`) },
       { label: 'Source mix changed', key: '_p', render: (r) => (r.platform_shift
         ? pill(`${(r.platform_shift.from || []).join('+')} → ${(r.platform_shift.to || []).join('+')}`, 'warn') : '—') },
     ]));

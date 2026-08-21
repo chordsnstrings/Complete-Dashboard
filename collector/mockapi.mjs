@@ -557,18 +557,29 @@ app.get('/api/vehicle/trips', (req, r) => {
    Deliberately mirrors the production shape, hole and all: Uber busy Aug–Oct
    2025, nothing collected Nov–Jan, telematics-only (no driver ids) Feb–Jun,
    Uber back in Aug. */
+/* Thirteen unbroken months, which is what the record looks like now that the
+   Uber backfill finally landed a full year. The shape is the live one and it
+   is the point of the causes page: bookings roughly halve, the driver count
+   roughly halves with them, and the vehicle count does not move. A fleet that
+   kept its cars and lost its people.
+
+   `trips` is bookings only. Telematics journeys are the same physical trips
+   seen by the tracker and are carried separately, because summing them made a
+   month with FMS running look 2-3x busier than the same month without it. */
 const TREND = [
-  { m: '2025-08', trips: 5801, drivers: 80, vehicles: 71, revenue: 41200, platforms: ['uber'], attributed_trips: 5801 },
-  { m: '2025-09', trips: 15777, drivers: 101, vehicles: 82, revenue: 118400, platforms: ['uber', 'fms'], attributed_trips: 12886 },
-  { m: '2025-10', trips: 11800, drivers: 102, vehicles: 77, revenue: 89300, platforms: ['uber'], attributed_trips: 11800 },
-  null, null, null,                                     // 2025-11 .. 2026-01: no data
-  { m: '2026-02', trips: 2164, drivers: 0, vehicles: 43, revenue: null, platforms: ['fms'], attributed_trips: 0 },
-  { m: '2026-03', trips: 4449, drivers: 0, vehicles: 57, revenue: null, platforms: ['fms'], attributed_trips: 0 },
-  { m: '2026-04', trips: 5638, drivers: 0, vehicles: 58, revenue: null, platforms: ['fms'], attributed_trips: 0 },
-  { m: '2026-05', trips: 3576, drivers: 0, vehicles: 45, revenue: null, platforms: ['fms'], attributed_trips: 0 },
-  { m: '2026-06', trips: 7444, drivers: 0, vehicles: 59, revenue: null, platforms: ['fms'], attributed_trips: 0 },
-  { m: '2026-07', trips: 6817, drivers: 29, vehicles: 81, revenue: 9100, platforms: ['fms', 'hotel'], attributed_trips: 1250 },
-  { m: '2026-08', trips: 6975, drivers: 80, vehicles: 84, revenue: 102400, platforms: ['uber', 'fms', 'hotel'], attributed_trips: 2300 },
+  { m: '2025-08', trips: 5801,  telematics_journeys: 4102, drivers: 80,  vehicles: 71, earning_vehicles: 68, revenue: 41200,  platforms: ['uber', 'fms'], booking_platforms: ['uber'], attributed_trips: 5801,  measured_trips: 5600 },
+  { m: '2025-09', trips: 22902, telematics_journeys: 3980, drivers: 102, vehicles: 82, earning_vehicles: 79, revenue: 118400, platforms: ['uber', 'fms'], booking_platforms: ['uber'], attributed_trips: 22902, measured_trips: 22100 },
+  { m: '2025-10', trips: 23898, telematics_journeys: 0,    drivers: 110, vehicles: 81, earning_vehicles: 80, revenue: 89300,  platforms: ['uber'], booking_platforms: ['uber'], attributed_trips: 23898, measured_trips: 23000 },
+  { m: '2025-11', trips: 24943, telematics_journeys: 0,    drivers: 108, vehicles: 87, earning_vehicles: 84, revenue: 91200,  platforms: ['uber'], booking_platforms: ['uber'], attributed_trips: 24943, measured_trips: 24100 },
+  { m: '2025-12', trips: 19229, telematics_journeys: 0,    drivers: 93,  vehicles: 83, earning_vehicles: 81, revenue: 74800,  platforms: ['uber'], booking_platforms: ['uber'], attributed_trips: 19229, measured_trips: 18600 },
+  { m: '2026-01', trips: 21890, telematics_journeys: 0,    drivers: 88,  vehicles: 78, earning_vehicles: 77, revenue: 82100,  platforms: ['uber'], booking_platforms: ['uber'], attributed_trips: 21890, measured_trips: 21200 },
+  { m: '2026-02', trips: 19511, telematics_journeys: 2164, drivers: 83,  vehicles: 97, earning_vehicles: 76, revenue: 79400,  platforms: ['uber', 'fms'], booking_platforms: ['uber'], attributed_trips: 19511, measured_trips: 18900 },
+  { m: '2026-03', trips: 8641,  telematics_journeys: 4449, drivers: 70,  vehicles: 94, earning_vehicles: 68, revenue: 36200,  platforms: ['uber', 'fms'], booking_platforms: ['uber'], attributed_trips: 8641,  measured_trips: 8400 },
+  { m: '2026-04', trips: 10204, telematics_journeys: 5638, drivers: 64,  vehicles: 91, earning_vehicles: 66, revenue: 41800,  platforms: ['uber', 'fms'], booking_platforms: ['uber'], attributed_trips: 10204, measured_trips: 9900 },
+  { m: '2026-05', trips: 10042, telematics_journeys: 3576, drivers: 57,  vehicles: 77, earning_vehicles: 61, revenue: 40100,  platforms: ['uber', 'fms'], booking_platforms: ['uber'], attributed_trips: 10042, measured_trips: 9700 },
+  { m: '2026-06', trips: 14033, telematics_journeys: 7444, drivers: 50,  vehicles: 79, earning_vehicles: 63, revenue: 55600,  platforms: ['uber', 'fms'], booking_platforms: ['uber'], attributed_trips: 14033, measured_trips: 13600 },
+  { m: '2026-07', trips: 13537, telematics_journeys: 6817, drivers: 86,  vehicles: 91, earning_vehicles: 74, revenue: 61300,  platforms: ['uber', 'fms', 'hotel'], booking_platforms: ['uber', 'hotel'], attributed_trips: 13537, measured_trips: 13100 },
+  { m: '2026-08', trips: 11278, telematics_journeys: 5901, drivers: 88,  vehicles: 89, earning_vehicles: 76, revenue: 52900,  platforms: ['uber', 'fms', 'hotel'], booking_platforms: ['uber', 'hotel'], attributed_trips: 11278, measured_trips: 10900 },
 ];
 const MONTH_KEYS = ['2025-08','2025-09','2025-10','2025-11','2025-12','2026-01',
   '2026-02','2026-03','2026-04','2026-05','2026-06','2026-07','2026-08'];
@@ -577,9 +588,14 @@ app.get('/api/trend/monthly', (_, r) => {
   const months = MONTH_KEYS.map((k, i) => {
     const row = TREND[i];
     return row
-      ? { ...row, m: k, cancel_pct: 3.2, km: row.trips * 12, no_data: false, drivers_known: row.attributed_trips > 0 }
-      : { m: k, trips: 0, drivers: null, vehicles: 0, km: null, revenue: null, cancel_pct: null,
-          platforms: [], no_data: true, drivers_known: false };
+      // km over MEASURED bookings only. Summing distance_km unguarded pulled in
+      // FMS odometer rows and reported 12,681,536 km in one month.
+      ? { ...row, m: k, cancel_pct: 3.2, km: Math.round(row.measured_trips * 11.8),
+          priced_trips: Math.round(row.trips * 0.35), no_data: false,
+          drivers_known: row.attributed_trips > 0 }
+      : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0, earning_vehicles: 0,
+          km: null, measured_trips: 0, revenue: null, priced_trips: 0, cancel_pct: null,
+          platforms: [], booking_platforms: [], no_data: true, drivers_known: false };
   });
   const breaks = [];
   for (let i = 1; i < months.length; i++) {
@@ -591,10 +607,15 @@ app.get('/api/trend/monthly', (_, r) => {
       trips_from: a.trips, trips_to: b.trips,
       drivers_from: a.drivers_known ? a.drivers : null,
       drivers_to: b.drivers_known ? b.drivers : null,
-      platform_shift: JSON.stringify([...a.platforms].sort()) !== JSON.stringify([...b.platforms].sort())
-        ? { from: a.platforms, to: b.platforms } : null });
+      vehicles_from: a.earning_vehicles, vehicles_to: b.earning_vehicles,
+      km_per_trip_from: a.measured_trips ? +(a.km / a.measured_trips).toFixed(1) : null,
+      km_per_trip_to: b.measured_trips ? +(b.km / b.measured_trips).toFixed(1) : null,
+      platform_shift: JSON.stringify([...a.booking_platforms].sort()) !== JSON.stringify([...b.booking_platforms].sort())
+        ? { from: a.booking_platforms, to: b.booking_platforms } : null });
   }
-  r.json({ months, breaks, gaps: [{ from: '2025-11', to: '2026-01', months: 3 }] });
+  // No gaps any more: the Uber backfill closed the 299-day hole, so every
+  // month between the first and last trip on record has data.
+  r.json({ months, breaks, gaps: [] });
 });
 
 const EV = [

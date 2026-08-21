@@ -1144,17 +1144,43 @@ app.get('/api/insights/summary', wrap(async (_, res) => {
 
 // monthly trend + automatic structural-break detection (what changed, and when)
 app.get('/api/trend/monthly', wrap(async (req, res) => {
+  /* Every trap trip_norm exists to resolve, all three of them live in this one
+     query, on the page whose entire job is explaining why the numbers moved.
+     With a full year of Uber finally collected they became visible at once:
+
+       km  — sum(distance_km) with no has_distance guard. FMS distances are
+             odometer-derived and one row can read 193,027 km. April 2026
+             reported 12,681,536 km across 91 vehicles: 4,600 km per car per
+             day, every day. The months that looked sane were exactly the
+             months FMS was dark.
+
+       trips — count(*) over bookings AND telematics twins of the same
+             journeys, so a month with FMS running counts the same physical
+             trip twice and a month without it does not. That alone produces a
+             "structural break" on the date the telematics boxes came online.
+
+       month — date_trunc on a UTC timestamp. The fleet works Dubai hours and
+             its airport wave starts before dawn, so every trip between
+             midnight and 04:00 landed in the previous month at the boundary.
+
+     Bookings and telematics are counted separately and never summed, distance
+     is guarded, and the month is the Dubai-local one. */
   const observed = await q(
-    `SELECT date_trunc('month', requested_at)::date AS m,
-            count(*)::int trips,
+    `SELECT local_month AS m,
+            count(*) FILTER (WHERE is_booking)::int trips,
+            count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
             count(distinct driver_ext_id)::int drivers,
-            count(*) FILTER (WHERE driver_ext_id IS NOT NULL)::int attributed_trips,
+            count(*) FILTER (WHERE driver_ext_id IS NOT NULL AND is_booking)::int attributed_trips,
             count(distinct plate)::int vehicles,
-            round(sum(distance_km)::numeric,0) km,
-            round(sum(price)::numeric,0) revenue,
+            count(distinct plate) FILTER (WHERE is_booking)::int earning_vehicles,
+            round(sum(distance_km) FILTER (WHERE has_distance AND is_booking)::numeric,0) km,
+            count(*) FILTER (WHERE has_distance AND is_booking)::int measured_trips,
+            round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+            count(*) FILTER (WHERE has_fare)::int priced_trips,
             round(100.0*count(*) FILTER (WHERE outcome='not_completed')
                   /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
-            array_agg(DISTINCT platform) platforms
+            array_agg(DISTINCT platform) platforms,
+            array_agg(DISTINCT platform) FILTER (WHERE is_booking) AS booking_platforms
      FROM trip_norm WHERE ($1::text IS NULL OR platform=$1)
      GROUP BY 1 ORDER BY 1`, [req.query.platform || null]);
   if (!observed.length) return res.json({ months: [], breaks: [], gaps: [] });
@@ -1175,8 +1201,10 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
           // FMS-derived trips carry no driver id, so "0 drivers" on a month
           // that has trips means unattributable, not idle.
           drivers_known: row.attributed_trips > 0 }
-      : { m: k, trips: 0, drivers: null, vehicles: 0, km: null, revenue: null,
-          cancel_pct: null, platforms: [], no_data: true, drivers_known: false });
+      : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0,
+          earning_vehicles: 0, km: null, measured_trips: 0, revenue: null, priced_trips: 0,
+          cancel_pct: null, platforms: [], booking_platforms: [],
+          no_data: true, drivers_known: false });
   }
 
   // Month-over-month breaks, computed only between months we actually observed.
@@ -1191,10 +1219,20 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
       trips_from: a.trips, trips_to: b.trips,
       drivers_from: a.drivers_known ? a.drivers : null,
       drivers_to: b.drivers_known ? b.drivers : null,
-      // A swing that coincides with a platform appearing or disappearing is a
-      // change in what we collect, not necessarily in what the fleet did.
-      platform_shift: JSON.stringify([...(a.platforms || [])].sort()) !== JSON.stringify([...(b.platforms || [])].sort())
-        ? { from: a.platforms, to: b.platforms } : null,
+      /* A swing that coincides with a platform appearing or disappearing is a
+         change in what we collect, not necessarily in what the fleet did.
+         Compared over BOOKING platforms only: `trips` no longer counts
+         telematics journeys, so a telematics feed coming online cannot move
+         this number and flagging it as the explanation would be wrong. It is
+         still reported separately below. */
+      platform_shift: JSON.stringify([...(a.booking_platforms || [])].sort())
+        !== JSON.stringify([...(b.booking_platforms || [])].sort())
+        ? { from: a.booking_platforms, to: b.booking_platforms } : null,
+      // The supply side of the same swing. A fleet that kept its vehicles and
+      // lost its drivers is a different problem from one that lost both.
+      vehicles_from: a.earning_vehicles, vehicles_to: b.earning_vehicles,
+      km_per_trip_from: a.measured_trips ? +(a.km / a.measured_trips).toFixed(1) : null,
+      km_per_trip_to: b.measured_trips ? +(b.km / b.measured_trips).toFixed(1) : null,
     });
   }
 
