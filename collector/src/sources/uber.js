@@ -14,7 +14,13 @@ import { log } from '../log.js';
 const SRC = 'uber';
 const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
 
-async function generateReport(start, end) {
+// Uber caps an org at three reports in flight. Abandoning a report does not
+// release its slot, so a run that gives up on three slow reports poisons every
+// later chunk: GenerateReport then fails instantly and the whole backfill
+// "succeeds" with zero rows. Wait the limit out rather than burning the run.
+const CONCURRENCY_HINT = /concurrent|too many|limit|in progress|rate/i;
+
+async function generateReport(start, end, attempt = 0) {
   const body = JSON.stringify({
     orgId: { uuid: { value: config.uber.orgUuid } },
     reportType: 'REPORT_TYPE_TRIP_ACTIVITY',
@@ -23,21 +29,38 @@ async function generateReport(start, end) {
   });
   const { data } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`,
     { method: 'POST', headers: uberWebHeaders(), body });
-  if (data.status !== 'success') throw new Error('generate: ' + JSON.stringify(data?.data?.meta?.details || data));
+  if (data.status !== 'success') {
+    const detail = JSON.stringify(data?.data?.meta?.details || data);
+    if (CONCURRENCY_HINT.test(detail) && attempt < 4) {
+      const wait = 60000 * (attempt + 1);
+      log.warn(SRC, `report slot busy, waiting ${wait / 1000}s`, { attempt: attempt + 1 });
+      await sleep(wait);
+      return generateReport(start, end, attempt + 1);
+    }
+    throw new Error('generate: ' + detail.slice(0, 300));
+  }
   return data.data.reportId.uuid.value;
 }
 
-async function downloadReport(reportId, tries = 12) {
-  for (let i = 0; i < tries; i++) {
+// A three-day report lands in seconds; a full month for ~90 vehicles routinely
+// takes several minutes. The old fixed 12x5s budget timed out on every monthly
+// chunk, which is why a year backfill returned nothing at all.
+async function downloadReport(reportId, budgetMs = 600000) {
+  const deadline = Date.now() + budgetMs;
+  let wait = 4000;
+  while (Date.now() < deadline) {
     const { data } = await http(`${REPORTS}/DownloadReport?localeCode=en-GB`, {
       method: 'POST', headers: uberWebHeaders(),
       body: JSON.stringify({ orgId: { uuid: { value: config.uber.orgUuid } }, reportId: { uuid: { value: reportId } } }),
     });
     const url = data?.data?.signedUrl?.value;
     if (url) return url;
-    await sleep(5000);           // report still generating
+    const status = JSON.stringify(data?.data?.status || data?.status || '');
+    if (/fail|error/i.test(status)) throw new Error(`report ${reportId} failed server-side: ${status.slice(0, 160)}`);
+    await sleep(wait);
+    wait = Math.min(wait * 1.4, 20000);       // back off, but keep checking
   }
-  throw new Error('download timed out for report ' + reportId);
+  throw new Error(`download timed out after ${Math.round(budgetMs / 1000)}s for report ${reportId}`);
 }
 
 function csvToTrips(csv) {
@@ -56,23 +79,37 @@ function csvToTrips(csv) {
   })).filter((t) => t.external_id);
 }
 
-// Pull historical trips one month at a time (sequential = never exceeds the 3-report limit).
+// Pull historical trips one month at a time. Sequential is necessary but not
+// sufficient: a report abandoned mid-generation keeps its slot, so pacing and a
+// realistic poll budget are what actually keep us under the three-report cap.
 async function pullTrips(from, to) {
   let total = 0;
-  for (const [s, e] of dateChunks(from, to, config.uber.reportRangeDays)) {
+  const chunks = [...dateChunks(from, to, config.uber.reportRangeDays)];
+  let consecutiveFailures = 0;
+  for (const [s, e] of chunks) {
     try {
       const id = await generateReport(s, e);
       const url = await downloadReport(id);
-      const { data: csv } = await http(url, { expect: 'text', timeoutMs: 120000 });
+      const { data: csv } = await http(url, { expect: 'text', timeoutMs: 180000 });
       const rows = csvToTrips(csv);
       if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
       log.info(SRC, `trips ${iso(s)}..${iso(e)}`, { rows: rows.length });
+      consecutiveFailures = 0;
     } catch (err) {
-      // "invalid date range" past retention (~12mo) is expected on the oldest chunks
-      log.warn(SRC, `trip chunk ${iso(s)}..${iso(e)} skipped`, { err: String(err).slice(0, 120) });
+      const msg = String(err);
+      // "invalid date range" past retention (~12mo) is expected on the oldest
+      // chunks; anything else is a real failure and is logged as one, because a
+      // silent skip turns a broken backfill into a successful empty one.
+      const expected = /invalid date range|retention|out of range/i.test(msg);
+      log[expected ? 'info' : 'error'](SRC, `trip chunk ${iso(s)}..${iso(e)} ${expected ? 'outside retention' : 'FAILED'}`,
+        { err: msg.slice(0, 300) });
+      if (!expected) consecutiveFailures++;
     }
-    await sleep(1500);
+    // Pause between chunks so the previous report's slot is released before the
+    // next GenerateReport, rather than racing the three-in-flight cap.
+    await sleep(consecutiveFailures ? 20000 : 4000);
   }
+  if (consecutiveFailures >= 3) log.error(SRC, 'trip backfill degraded', { consecutiveFailures, chunks: chunks.length });
   return total;
 }
 
@@ -94,6 +131,13 @@ async function pullEarnerBreakdowns(from, to) {
         } }`,
     });
     const { data } = await http('https://supplier.uber.com/graphql', { method: 'POST', headers: uberWebHeaders(), body });
+    // An expired web cookie answers with `errors` and no data, which is
+    // indistinguishable from "this fleet had no drivers" unless we say so.
+    if (data?.errors?.length) {
+      log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} rejected`,
+        { err: String(data.errors[0]?.message || data.errors[0]).slice(0, 200) });
+      continue;
+    }
     const bd = data?.data?.getEarnerBreakdownsV2?.earnerEarningsBreakdowns || [];
     const rows = bd.map((d) => {
       const ti = Object.fromEntries((d.tripInfos || []).map((x) => [x.tripAttributeName, x.value]));
