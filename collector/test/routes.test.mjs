@@ -52,8 +52,11 @@ check('map view is registered', /id: 'map'/.test(jsTxt));
    call site's position instead — registering it after app.get('*') would serve
    index.html for every /api/driver/* request. */
 const driverAt = src.indexOf('driverRoutes(app');
+const vehicleAt = src.indexOf('vehicleRoutes(app');
 check('driver routes are registered', driverAt > -1);
 check('driver routes register before the catch-all', driverAt > -1 && driverAt < catchAll);
+check('vehicle routes are registered', vehicleAt > -1);
+check('vehicle routes register before the catch-all', vehicleAt > -1 && vehicleAt < catchAll);
 
 /* ── multipage shell ────────────────────────────────────────────────────── */
 const driverJs = readFileSync('api/public/driver.js', 'utf8');
@@ -61,7 +64,8 @@ const dataJs = readFileSync('api/public/data.js', 'utf8');
 const mapJs = readFileSync('api/public/map.js', 'utf8');
 check('router parses view/param/sub', /export function parseHash/.test(dataJs));
 check('app applies the parsed route', /applyRoute\(\)/.test(jsTxt));
-check('a detail page keeps its parent lit in the nav', /const PARENT = \{ driver: 'drivers'/.test(jsTxt));
+check('a detail page keeps its parent lit in the nav',
+  /const PARENT = \{ driver: 'drivers', vehicle: 'vehicles' \}/.test(jsTxt));
 check('breadcrumb element exists', /id="crumb"/.test(htmlTxt));
 check('every driver tab is a real route', /href\('driver', id, t === 'overview' \? null : t\)/.test(driverJs));
 check('all six driver tabs registered', ['overview', 'activity', 'territory', 'earnings', 'quality', 'trips']
@@ -69,6 +73,15 @@ check('all six driver tabs registered', ['overview', 'activity', 'territory', 'e
 // Detail pages must ignore the platform/fleet filter: showing "everything about
 // this person" while a platform filter silently hides half their work is a lie.
 check('detail pages fetch unfiltered', !/[^A]\bq\('\/api\/driver\//.test(driverJs) && /qAll\('\/api\/driver\//.test(driverJs));
+
+const vehicleJs = readFileSync('api/public/vehicle.js', 'utf8');
+check('all six vehicle tabs registered', ['overview', 'drivers', 'movement', 'safety', 'compliance', 'trips']
+  .every((t) => new RegExp(`id: '${t}'`).test(vehicleJs)), 'VEHICLE_TABS');
+check('every vehicle tab is a real route', /href\('vehicle', plate, t === 'overview' \? null : t\)/.test(vehicleJs));
+check('vehicle pages fetch unfiltered', !/[^A]\bq\('\/api\/vehicle\//.test(vehicleJs) && /qAll\('\/api\/vehicle\//.test(vehicleJs));
+// The two detail views must link to each other, or the custody chain dead-ends.
+check('a vehicle page links to its drivers', /href\('driver', /.test(vehicleJs));
+check('a driver page links to the vehicles they held', /href\('vehicle', r\.plate\)/.test(driverJs));
 
 /* ── map framing ───────────────────────────────────────────────────────────
    Leaflet rounds a fitted zoom DOWN to a whole level unless zoomSnap is 0, so
@@ -81,6 +94,7 @@ check('no bounds are framed with degree padding',
   !/fitBounds\([^)]*\.pad\(/.test(strip(mapJs)) && !/\.pad\(/.test(strip(driverJs)));
 check('the fit is re-applied when the panel resizes', /_fitAgain/.test(mapJs));
 check('the territory map renders even with no points', /if \(!pts\.length\) \{\s*mapP\.body\.append/.test(driverJs));
+check('no vehicle map frames bounds with degree padding', !/\.pad\(/.test(strip(vehicleJs)));
 
 /* ── chart markup must match the stylesheet ───────────────────────────────
    charts.js emits .k/.track/.fill/.v; the CSS once styled .lab/.bar-cell, so

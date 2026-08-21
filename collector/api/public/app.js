@@ -6,6 +6,7 @@ import { barChart, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, e
 import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, pill, dayStr, dtStr, money, pct } from './ui.js';
 import { state, api, params, q, qAll, href, parseHash, navigate } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
+import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 
 const VIEWS = [
   { id: 'overview', label: 'Overview', ic: '◱', grp: 'Analyse', sub: 'Fleet-wide performance across every platform' },
@@ -47,6 +48,13 @@ function setHeader(detail) {
     $('#viewTitle').textContent = detail?.name || 'Driver';
     $('#viewSub').textContent = `${tab.label} — every platform this person works on, combined`;
     crumb.innerHTML = `<a href="${href('drivers')}">Drivers</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
+    crumb.style.display = 'flex';
+  } else if (state.view === 'vehicle') {
+    const tab = VEHICLE_TABS.find((t) => t.id === (state.sub || 'overview')) || VEHICLE_TABS[0];
+    const spec = detail?.spec || {};
+    $('#viewTitle').textContent = detail?.name || state.param || 'Vehicle';
+    $('#viewSub').textContent = `${tab.label} — ${[spec.year, spec.make, spec.model].filter(Boolean).join(' ') || 'every source that describes this asset'}`;
+    crumb.innerHTML = `<a href="${href('vehicles')}">Vehicles</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
     crumb.style.display = 'flex';
   } else {
     const v = VIEWS.find((x) => x.id === state.view) || VIEWS[0];
@@ -169,40 +177,18 @@ V.drivers = async (root) => {
 V.driver = async (root) => renderDriver(root, state.param, state.sub || 'overview');
 
 V.vehicles = async (root) => {
-  const g = el('div', 'grid g23'); root.append(g);
-  const top = panel('Trips per vehicle', 'Top vehicles by trip count — click to drill'); g.append(top.panel);
-  const util = panel('Fleet spread', 'How trips distribute across the fleet'); g.append(util.panel);
-  const tbl = panel('Vehicle table', 'Click a row for that vehicle’s activity'); root.append(tbl.panel);
-  [top.body, util.body, tbl.body].forEach(loading);
+  // The directory is the way into the per-vehicle pages; the panel below it is
+  // the only question that is about the fleet rather than about one asset.
+  await renderVehicleDirectory(root);
+  const spread = panel('Fleet spread', 'How trips distribute across the fleet — a long tail here means assets carrying no load');
+  root.append(spread.panel); loading(spread.body);
   const rows = await q('/api/vehicles');
-  hbars(top.body, rows.slice(0, 12).map((r) => ({ label: r.plate, n: r.trips })), { seq: true,
-    onClick: (d) => drillTrips(`Vehicle ${d.label}`, 'Drivers who operated this vehicle', {}) });
-  donut(util.body, rows.slice(0, 6).map((r) => ({ label: r.plate, n: r.trips })));
-  tbl.body.innerHTML = '';
-  const t = tableFrom(rows.slice(0, 40), [
-    { label: 'Plate', key: 'plate' }, { label: 'Trips', key: 'trips', num: true },
-    { label: 'Km', key: 'km', num: true },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => r.revenue ? 'AED ' + fmt(r.revenue) : '—' },
-    { label: 'Drivers', key: 'drivers', num: true }, { label: 'Platforms', key: 'platforms', num: true },
-    { label: 'Last trip', key: 'last_trip', render: (r) => r.last_trip ? String(r.last_trip).slice(0, 10) : '—' },
-  ]);
-  t.querySelectorAll('tbody tr').forEach((tr, i) => { tr.style.cursor = 'pointer';
-    tr.onclick = () => { const v = rows[i]; drill(`Vehicle ${v.plate}`, `${fmt(v.trips)} trips · ${fmt(v.km)} km`, async (b) => {
-      const track = await api(`/api/track?plate=${encodeURIComponent(v.plate)}`);
-      b.innerHTML = '';
-      b.append(el('div', 'kpis', [['Trips', fmt(v.trips)], ['Km', fmt(v.km)], ['Drivers', fmt(v.drivers)],
-        ['GPS points', fmt(track.length)]].map(([l, n]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div></div>`).join('')));
-      const p = el('div', 'panel'); p.append(el('h3', null, 'Recent GPS breadcrumb'), el('p', 'cap', 'CABMAN 5-minute telemetry'));
-      if (track.length) p.append(tableFrom(track.slice(-20).reverse(), [
-        { label: 'Time', key: 'captured_at', render: (r) => new Date(r.captured_at).toLocaleString() },
-        { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true },
-        { label: 'Speed', key: 'speed', num: true }, { label: 'Status', key: 'status' }]));
-      else p.append(el('div', 'note', 'No telemetry captured for this vehicle yet.'));
-      b.append(p);
-    }); };
-  });
-  tbl.body.append(t);
+  hbars(spread.body, rows.slice(0, 14).map((r) => ({ label: r.plate, n: r.trips })), { seq: true,
+    onClick: (d) => { location.hash = href('vehicle', d.label); } });
 };
+
+// The per-vehicle pages. `state.param` is the plate, `state.sub` is the tab.
+V.vehicle = async (root) => renderVehicle(root, state.param, state.sub || 'overview');
 
 V.platforms = async (root) => {
   const g = el('div', 'grid g2'); root.append(g);

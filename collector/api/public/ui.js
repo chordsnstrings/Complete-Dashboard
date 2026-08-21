@@ -80,7 +80,9 @@ export const dtStr = (v) => (v ? `${dayStr(v)} ${timeStr(v)}` : '—');
 // 7.5 → "07:30", which reads as a clock time rather than a decimal
 export const hourStr = (h) => (h == null || isNaN(h) ? '—'
   : `${String(Math.floor(h)).padStart(2, '0')}:${String(Math.round((h % 1) * 60)).padStart(2, '0')}`);
-export const money = (v, cur = 'AED') => (v == null || v === '' ? '—' : `${cur} ${fmt(v)}`);
+// `d` is decimals: whole dirhams for totals, two for rates like revenue-per-km
+// where rounding to the nearest dirham destroys the number.
+export const money = (v, cur = 'AED', d = 0) => (v == null || v === '' ? '—' : `${cur} ${fmt(v, d)}`);
 export const pct = (v, d = 0) => (v == null || isNaN(v) ? '—' : `${Number(v).toFixed(d)}%`);
 export const note = (text) => el('div', 'note', esc(text));
 export { fmt, empty };

@@ -296,6 +296,177 @@ app.get('/api/driver/custody', (req, r) => {
   })));
 });
 
+
+/* ── per-vehicle detail fixtures ─────────────────────────────────────────── */
+const vehSpec = [['Tesla','Model Y',2023,'White'],['BYD','Han EV',2024,'Black'],['Tesla','Model 3',2022,'Blue'],
+  ['Lexus','ES 300h',2023,'Silver'],['Tesla','Model Y',2023,'Grey'],['BYD','Han EV',2024,'White'],
+  ['Tesla','Model Y',2024,'Black'],['Toyota','Camry',2022,'White']];
+const pIndex = (pl) => Math.max(0, plates.indexOf(String(pl || '').toUpperCase().replace(/[\s-]+/g, '')));
+
+const vDaily = (plate) => {
+  const i = pIndex(plate), out = [];
+  for (let b = DAYS; b >= 0; b--) {
+    const idle = (b + i) % 9 === 0;                      // reports a fix, earns nothing
+    const trips = idle ? 0 : 8 + Math.round(rnd(0, 10));
+    const km = trips * rnd(8, 15);
+    out.push({ day: dayISO(b), trips, cancelled: trips && b % 6 === 0 ? 1 : 0,
+      km: trips ? +km.toFixed(1) : null, revenue: trips ? +(km * rnd(2.2, 3.2)).toFixed(2) : null,
+      drivers: trips ? 1 : 0, fixes: 200 + Math.round(rnd(0, 80)),
+      top_speed: Math.round(rnd(88, 132)), fuel_level: Math.round(rnd(35, 98)),
+      alerts: Math.round(rnd(0, 6)), drivers_named: drivers[(i + b) % drivers.length],
+      temp_max: +rnd(33, 44).toFixed(1), is_holiday: false, holiday_name: null });
+  }
+  return out;
+};
+
+app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
+  plate: pl, trips: i === 6 ? 0 : 470 - i * 44, days: i === 6 ? 0 : 27 - i,
+  km: i === 6 ? null : 6100 - i * 420, revenue: i === 6 ? null : 15800 - i * 1100,
+  drivers: i === 6 ? 0 : 1 + (i % 3), platforms: 1 + (i % 2),
+  last_trip: i === 6 ? null : new Date(Date.now() - i * 72e5).toISOString(),
+  fleet_id: i % 3 ? 'ecosine' : 'egari',
+  make: vehSpec[i][0], model: vehSpec[i][1], year: vehSpec[i][2],
+  last_fix: i === 7 ? new Date(Date.now() - 38 * 36e5).toISOString() : new Date(Date.now() - i * 6e4).toISOString(),
+  status: i % 3 === 0 ? 'Engaged' : 'Active', speed: i % 3 ? Math.round(rnd(0, 70)) : 0, stale: i === 7,
+  soonest_expiry: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
+  doc_days_left: i === 1 ? -12 : 5 + i * 14,
+  alerts: 120 - i * 11, current_driver: i === 6 ? null : drivers[i],
+  driver_as_of: new Date().toISOString(),
+}))));
+
+app.get('/api/vehicle/profile', (req, r) => {
+  const i = pIndex(req.query.plate), [make, model, year, colour] = vehSpec[i];
+  r.json({
+    plate: plates[i],
+    spec: { make, model, year, colour, vin: '5YJYGDEE' + (100000 + i), fuel_type: 'electric',
+      image_url: null, colour_hex: null, compliance_status: 'ACTIVE',
+      platform: 'uber', vehicle_ext_id: 'veh-' + i, fleet_id: i % 3 ? 'ecosine' : 'egari' },
+    span: { first_trip: dayISO(DAYS), last_trip: new Date().toISOString(), trips: 470 - i * 44,
+      days_worked: 27 - i, drivers: 1 + (i % 3) },
+    telemetry: { last_fix: new Date(Date.now() - i * 6e4).toISOString(), polled_at: new Date().toISOString(),
+      lat: 25.2 + i * 0.01, lng: 55.27 - i * 0.01, speed: i % 3 ? 41 : 0,
+      status: i % 3 === 0 ? 'Engaged' : 'Active', seat_occupied: i % 3 === 0,
+      odometer: 68000 + i * 2100, fuel_level: 74 - i * 3, ignition: true, source: 'cabman', stale: i === 7 },
+    documents: [
+      { platform: 'uber', doc_type: 'Vehicle Registration Form', status: 'ACTIVE',
+        expires_at: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
+        days_left: i === 1 ? -12 : 5 + i * 14 },
+      { platform: 'uber', doc_type: 'Insurance', status: 'ACTIVE',
+        expires_at: new Date(Date.now() + 220 * 864e5).toISOString(), days_left: 220 },
+      { platform: 'uber', doc_type: 'Vehicle Inspection', status: 'ACTIVE',
+        expires_at: new Date(Date.now() + 96 * 864e5).toISOString(), days_left: 96 },
+    ],
+    current_driver: { driver_name: drivers[i], driver_ext_id: `drv-${i}`, as_of: dayISO(0) },
+  });
+});
+
+app.get('/api/vehicle/kpis', (req, r) => {
+  const i = pIndex(req.query.plate), d = vDaily(req.query.plate);
+  const trips = d.reduce((a, x) => a + x.trips, 0);
+  const km = Math.round(d.reduce((a, x) => a + (x.km || 0), 0));
+  const alerts = d.reduce((a, x) => a + x.alerts, 0);
+  r.json({ trips, days_worked: d.filter((x) => x.trips).length, km, avg_km: 11.8,
+    revenue: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)), avg_fare: 36.4,
+    completion_pct: 96.1, cancel_pct: 3.4, drivers: 1 + (i % 3), platforms: 1 + (i % 2),
+    utilisation: 0.58 - i * 0.04, hours_online: 512.4, hours_on_trip: 297.2,
+    earnings_per_hour: 21.4, trips_per_online_hour: 0.41,
+    alerts, hours_since_fix: i === 7 ? 38.2 : 0.3, fixes: d.reduce((a, x) => a + x.fixes, 0),
+    idle_days: d.filter((x) => !x.trips).length,
+    alerts_per_100km: +((alerts / km) * 100).toFixed(1),
+    revenue_per_km: 2.7 });
+});
+
+app.get('/api/vehicle/daily', (req, r) => r.json(vDaily(req.query.plate)));
+
+app.get('/api/vehicle/drivers-detail', (req, r) => {
+  const i = pIndex(req.query.plate);
+  const who = [drivers[i], drivers[(i + 4) % drivers.length]];
+  const days = vDaily(req.query.plate).filter((d) => d.trips).slice().reverse().map((d, n) => ({
+    day: d.day, driver_ext_id: `drv-${n % 2 ? (i + 4) % drivers.length : i}`,
+    driver_name: who[n % 2], platform: 'uber', trips: d.trips, km: d.km, revenue: d.revenue,
+    first_trip_at: `${d.day}T06:30:00Z`, last_trip_at: `${d.day}T18:10:00Z`, is_primary: true,
+  }));
+  const totals = who.map((name, n) => {
+    const mine = days.filter((x) => x.driver_name === name);
+    return { driver_ext_id: `drv-${n ? (i + 4) % drivers.length : i}`, driver_name: name,
+      days: mine.length, trips: mine.reduce((a, x) => a + x.trips, 0),
+      km: Math.round(mine.reduce((a, x) => a + x.km, 0)),
+      revenue: Math.round(mine.reduce((a, x) => a + x.revenue, 0)),
+      first_day: mine[mine.length - 1]?.day, last_day: mine[0]?.day, primary_days: mine.length };
+  }).sort((a, b) => b.trips - a.trips);
+  r.json({ days, totals });
+});
+
+app.get('/api/vehicle/movement', (req, r) => {
+  const i = pIndex(req.query.plate);
+  r.json({
+    segments: Array.from({ length: 14 }, (_, n) => ({
+      started_at: new Date(Date.now() - n * 79e5).toISOString(),
+      ended_at: new Date(Date.now() - n * 79e5 + 24e5).toISOString(),
+      duration_min: 20 + Math.round(rnd(5, 50)), distance_km: +rnd(4, 32).toFixed(1),
+      top_speed: Math.round(rnd(60, 128)), fixes: Math.round(rnd(5, 20)),
+      verdict: n % 7 === 0 ? 'unauthorized' : n % 5 === 0 ? 'sensor_suspect' : 'authorized',
+      matched_platform: n % 7 === 0 ? null : 'uber', low_confidence: n % 5 === 0,
+      start_lat: 25.2, start_lng: 55.27, end_lat: 25.1, end_lng: 55.19,
+    })),
+    by_verdict: [{ verdict: 'authorized', n: 11, km: 214, minutes: 640 },
+      { verdict: 'unauthorized', n: 2, km: 41, minutes: 96 },
+      { verdict: 'sensor_suspect', n: 1, km: 12, minutes: 28 }],
+    days: Array.from({ length: 12 }, (_, n) => ({ day: dayISO(n), fixes: 220 - n * 6 })),
+    parked: [{ lat: 25.253, lng: 55.365, fixes: 142 }, { lat: 25.078, lng: 55.139, fixes: 71 },
+      { lat: 25.196, lng: 55.276, fixes: 44 }, { lat: 25.118, lng: 55.200, fixes: 21 }],
+  });
+});
+
+app.get('/api/vehicle/safety', (req, r) => {
+  const i = pIndex(req.query.plate);
+  r.json({
+    by_type: [{ alert_type: 'Overspeed', n: 61 - i * 4, latest: new Date().toISOString() },
+      { alert_type: 'Harsh Braking', n: 44 - i * 3, latest: new Date().toISOString() },
+      { alert_type: 'Harsh Acceleration', n: 18, latest: new Date().toISOString() },
+      { alert_type: 'Sharp Turn', n: 9, latest: new Date().toISOString() }],
+    by_driver: [{ driver_name: drivers[i], n: 78, km: 3400 },
+      { driver_name: drivers[(i + 4) % drivers.length], n: 41, km: 2100 },
+      { driver_name: 'unattributed', n: 13, km: null }],
+    daily: vDaily(req.query.plate).map((d) => ({ day: d.day, alerts: d.alerts })),
+    recent: Array.from({ length: 40 }, (_, n) => ({
+      alert_type: ['Overspeed', 'Harsh Braking', 'Harsh Acceleration', 'Sharp Turn'][n % 4],
+      occurred_at: new Date(Date.now() - n * 41e5).toISOString(),
+      location: ['Sheikh Zayed Road', 'Al Khail Road', 'Emirates Road', 'Jumeirah Beach Road'][n % 4],
+      lat: 25.1 + (n % 9) * 0.02, lng: 55.18 + (n % 7) * 0.02, video_url: n % 6 === 0 ? 'https://example.com/clip' : null,
+    })),
+  });
+});
+
+app.get('/api/vehicle/mix', (req, r) => r.json({
+  product: [{ label: 'UberX', n: 268, revenue: 8400, avg_km: 10.2 },
+    { label: 'Comfort', n: 92, revenue: 4600, avg_km: 14.1 },
+    { label: 'Uber Black', n: 24, revenue: 2800, avg_km: 22.4 }],
+  payment: [{ label: 'card', n: 320, revenue: 12800 }, { label: 'cash', n: 52, revenue: 2200 },
+    { label: 'corporate', n: 12, revenue: 800 }],
+  platform: [{ label: 'uber', n: 336, revenue: 13100 }, { label: 'yango', n: 34, revenue: 1400 },
+    { label: 'hotel', n: 14, revenue: 1300 }],
+  status: [{ label: 'completed', n: 371, revenue: 15800 }, { label: 'rider_cancelled', n: 13, revenue: 0 }],
+  hours: Array.from({ length: 19 }, (_, n) => ({ h: n + 5, trips: Math.round(rnd(4, 26)) })),
+}));
+
+app.get('/api/vehicle/trips', (req, r) => {
+  const i = pIndex(req.query.plate);
+  r.json(Array.from({ length: 140 }, (_, n) => ({
+    platform: n % 11 === 0 ? 'yango' : 'uber', external_id: `vt-${i}-${n}`,
+    requested_at: new Date(Date.now() - n * 24e5).toISOString(),
+    ended_at: new Date(Date.now() - n * 24e5 + 11e5).toISOString(),
+    driver_name: drivers[n % 2 ? i : (i + 4) % drivers.length],
+    driver_ext_id: `drv-${n % 2 ? i : (i + 4) % drivers.length}`,
+    pickup_addr: ['Dubai Marina - Marina Walk', 'Downtown Dubai - Burj Park', 'Deira - Al Rigga'][n % 3],
+    dropoff_addr: ['Business Bay - Bay Square', 'DXB Terminal 3', 'Al Barsha - MoE'][n % 3],
+    distance_km: +rnd(2, 34).toFixed(1), duration_s: Math.round(rnd(400, 2600)),
+    status: n % 19 === 0 ? 'rider_cancelled' : 'completed',
+    product: ['UberX', 'Comfort', 'Uber Black'][n % 3], payment_type: n % 5 === 0 ? 'cash' : 'card',
+    price: +rnd(18, 140).toFixed(2), currency: 'AED',
+  })));
+});
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 
 app.use(express.static(join(__dir, 'api', 'public')));

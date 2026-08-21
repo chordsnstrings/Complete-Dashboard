@@ -219,7 +219,7 @@ async function tabOverview(root, id, prof) {
   // Narrow panel — the date range rides in the row tooltip rather than forcing
   // a horizontal scrollbar onto four columns that matter more.
   const vt = tableFrom((prof.vehicles || []).slice(0, 8), [
-    { label: 'Plate', key: 'plate', render: (r) => `${esc(r.plate)}${r.ever_primary ? ' <span class="dim">●</span>' : ''}` },
+    { label: 'Plate', key: 'plate', render: (r) => `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>${r.ever_primary ? ' <span class="dim">●</span>' : ''}` },
     { label: 'Days', key: 'days', num: true },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
@@ -283,7 +283,7 @@ async function tabActivity(root, id) {
   cust.body.innerHTML = '';
   cust.body.append(tableFrom(custody.slice(0, 60), [
     { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
-    { label: 'Plate', key: 'plate' },
+    { label: 'Plate', key: 'plate', render: (r) => `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>` },
     { label: 'Platform', key: 'platform' },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
@@ -378,13 +378,13 @@ async function tabEarnings(root, id) {
   const cash = mix.payment.find((p) => /cash/i.test(p.label));
   kpiHost.replaceWith(kpiRow([
     { label: 'Booked revenue', value: money(k.revenue), sub: `${fmt(k.trips)} trips` },
-    { label: 'Average fare', value: money(k.avg_fare), sub: k.avg_km ? `over ${fmt(k.avg_km, 1)} km` : null },
+    { label: 'Average fare', value: money(k.avg_fare, 'AED', 2), sub: k.avg_km ? `over ${fmt(k.avg_km, 1)} km` : null },
     { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },
     { label: 'Tips', value: money(e.tips), sub: e.tip_pct != null ? `${pct(e.tip_pct, 1)} of net fare` : 'no tip data yet',
       tone: e.tip_pct == null ? null : e.tip_pct >= 3 ? 'good' : e.tip_pct >= 1 ? 'warn' : null },
     { label: 'Cash collected', value: money(k.cash_earnings ?? (cash ? cash.revenue : null)),
       sub: cash ? `${fmt(cash.n)} cash trips` : 'card only' },
-    { label: 'Revenue per km', value: k.km > 0 && k.revenue ? money((k.revenue / k.km).toFixed(2)) : '—', sub: 'booked fare ÷ distance' },
+    { label: 'Revenue per km', value: k.km > 0 && k.revenue ? money(k.revenue / k.km, 'AED', 2) : '—', sub: 'booked fare ÷ distance' },
   ]));
 
   comp.body.innerHTML = '';
@@ -495,7 +495,7 @@ async function tabTrips(root, id) {
   const cols = [
     { label: 'Requested', key: 'requested_at', render: (r) => dtStr(r.requested_at) },
     { label: 'Platform', key: 'platform' },
-    { label: 'Plate', key: 'plate' },
+    { label: 'Plate', key: 'plate', render: (r) => (r.plate ? `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>` : '—') },
     { label: 'From', key: 'pickup_addr' },
     { label: 'To', key: 'dropoff_addr' },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
