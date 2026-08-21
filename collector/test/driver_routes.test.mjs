@@ -64,8 +64,11 @@ await q(`INSERT INTO driver_earnings_component (platform,driver_ext_id,period_st
                 ('uber',$1,'2026-08-10','2026-08-16','tip','earnings',96,'Amina Rashid')`, [UBER]);
 
 // custody + alerts so the quality tab has vehicle-linked events to attribute
+// Two custody rows for L46174 on the 13th — one per platform. Alert and
+// telemetry joins must not multiply by that row count.
 await q(`INSERT INTO vehicle_driver_day (plate,day,driver_ext_id,platform,driver_name,trips,km,revenue,is_primary)
          VALUES ('L46174','2026-08-13',$1,'uber','Amina Rashid',9,120,400,true),
+                ('L46174','2026-08-13',$2,'yango','Amina Rashid Rashid',1,10,45,false),
                 ('L36397','2026-08-15',$2,'yango','Amina Rashid Rashid',5,60,275,true)`, [UBER, YANGO]);
 await q(`INSERT INTO alert (platform,external_id,plate,alert_type,occurred_at)
          VALUES ('fms','a1','L46174','Harsh Braking','2026-08-13T09:00:00+04:00'),
@@ -144,6 +147,8 @@ check('pickup clusters returned', terr.pickups.length >= 2, String(terr.pickups.
 check('busiest pickup first', terr.pickups[0].n >= terr.pickups[terr.pickups.length - 1].n);
 check('named areas extracted from the address', terr.areas.some((a) => a.area === 'Dubai Marina'), JSON.stringify(terr.areas.slice(0, 2)));
 check('waiting spots come from stationary fixes', terr.idle.length === 1, String(terr.idle.length));
+// Three fixes at that spot, and two custody rows for the day — still three.
+check('a stationary fix is counted once per custody day', terr.idle[0]?.fixes === 3, String(terr.idle[0]?.fixes));
 
 /* ── mix ────────────────────────────────────────────────────────────────── */
 const mix = (await get(`/api/driver/mix?id=${UBER}&${W}`)).body;
@@ -161,6 +166,8 @@ check('platform periods listed', e.periods.length === 1);
 /* ── quality ────────────────────────────────────────────────────────────── */
 const qy = (await get(`/api/driver/quality?id=${UBER}&${W}`)).body;
 check('cancellations broken out', qy.cancels.some((c) => c.status === 'rider_cancelled'));
+// L46174 has two alerts on the 13th and two custody rows for that day; L41435's
+// alert belongs to someone else. Two events, counted once each.
 check('only alerts for vehicles they held that day', qy.alerts.reduce((a, r) => a + r.n, 0) === 2, JSON.stringify(qy.alerts));
 check('harsh events normalised per 100km', qy.alerts_per_100km > 0, String(qy.alerts_per_100km));
 
@@ -169,7 +176,10 @@ const tr = (await get(`/api/driver/trips?id=${UBER}&${W}&limit=10`)).body;
 check('trip list honours the limit', tr.length === 10, String(tr.length));
 check('trips come back newest first', new Date(tr[0].requested_at) >= new Date(tr[1].requested_at));
 const cust = (await get(`/api/driver/custody?id=${UBER}&${W}`)).body;
-check('custody covers both vehicles', cust.length === 2, String(cust.length));
+// Three rows for two vehicles: L46174 twice on the 13th (uber + yango), L36397 once.
+check('custody lists every platform row', cust.length === 3, String(cust.length));
+check('custody covers both vehicles', new Set(cust.map((c) => c.plate)).size === 2,
+  [...new Set(cust.map((c) => c.plate))].join(','));
 
 /* ── directory ──────────────────────────────────────────────────────────── */
 const dir = (await get(`/api/drivers/directory?${W}`)).body;

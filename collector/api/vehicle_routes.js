@@ -201,11 +201,12 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        FROM vehicle_driver_day WHERE plate = $3 AND day BETWEEN $1::date AND $2::date
        ORDER BY day DESC, trips DESC`, p);
     const totals = await q(
-      `SELECT driver_ext_id, max(driver_name) driver_name, count(*)::int days,
+      `SELECT driver_ext_id, max(driver_name) driver_name,
+              count(DISTINCT day)::int days,
               sum(trips)::int trips, round(sum(km)::numeric,0) km,
               round(sum(revenue)::numeric,0) revenue,
               min(day) first_day, max(day) last_day,
-              sum(is_primary::int)::int primary_days
+              count(DISTINCT day) FILTER (WHERE is_primary)::int primary_days
        FROM vehicle_driver_day WHERE plate = $3 AND day BETWEEN $1::date AND $2::date
        GROUP BY driver_ext_id ORDER BY trips DESC`, p);
     res.json({ days, totals });
@@ -245,13 +246,29 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);
     // Attributed to whoever held the vehicle that day, so a harsh-driving
     // pattern points at a person rather than at an inanimate object.
+    //
+    // vehicle_driver_day holds one row per (plate, day, driver, PLATFORM), so a
+    // driver working two apps on one day has two rows. Joining alerts straight
+    // to it multiplies every event by that row count — the fleet's busiest car
+    // reported its 584 events twice, once under each spelling of the same
+    // driver's name, and the km column summed a day's distance once per alert.
+    // Collapse custody to one row per day first, then count each day's alerts
+    // once against it.
     const byDriver = await q(
-      `SELECT coalesce(vd.driver_name,'unattributed') driver_name, count(*)::int n,
-              round(sum(vd.km)::numeric,0) km
-       FROM alert a
-       LEFT JOIN vehicle_driver_day vd
-         ON vd.plate = a.plate AND vd.day = (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date
-       WHERE a.plate = $3 AND a.occurred_at BETWEEN $1 AND $2
+      `WITH custody AS (
+         SELECT DISTINCT ON (day) day, driver_ext_id, driver_name, km
+         FROM vehicle_driver_day
+         WHERE plate = $3 AND day BETWEEN $1::date AND $2::date
+         ORDER BY day, is_primary DESC, trips DESC NULLS LAST
+       ),
+       per_day AS (
+         SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int n
+         FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2 GROUP BY 1
+       )
+       SELECT coalesce(c.driver_name,'unattributed') driver_name,
+              max(c.driver_ext_id) driver_ext_id,
+              sum(pd.n)::int n, round(sum(c.km)::numeric,0) km
+       FROM per_day pd LEFT JOIN custody c ON c.day = pd.day
        GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);
     const daily = await q(
       `SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int alerts

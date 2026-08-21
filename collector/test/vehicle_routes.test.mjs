@@ -48,11 +48,16 @@ await q(`INSERT INTO telemetry_snapshot (source,plate,captured_at,lat,lng,speed,
                 ('cabman',$1,'2026-08-14T09:10:00+04:00',25.10,55.18,0,'Idle',87),
                 ('cabman',$1,'2026-08-13T09:00:00+04:00',25.20,55.27,54,'Active',90)`, [PLATE]);
 
+// Note the 13th: Ali holds the car on Uber AND Yango that day, so custody has
+// TWO rows for one (plate, day). Joining alerts straight to this table would
+// count each of that day's events twice — which is exactly what production did
+// before this fixture existed.
 await q(`INSERT INTO vehicle_driver_day (plate,day,driver_ext_id,platform,driver_name,trips,km,revenue,is_primary)
          VALUES ($1,'2026-08-10','d-ali','uber','Ali Rahman',6,66,252,true),
                 ($1,'2026-08-11','d-ali','uber','Ali Rahman',6,66,252,true),
                 ($1,'2026-08-12','d-sara','uber','Sara Iqbal',4,44,168,true),
-                ($1,'2026-08-13','d-ali','uber','Ali Rahman',8,88,354,true)`, [PLATE]);
+                ($1,'2026-08-13','d-ali','uber','Ali Rahman',8,88,354,true),
+                ($1,'2026-08-13','d-ali','yango','Ali Rahman',1,12,60,false)`, [PLATE]);
 
 await q(`INSERT INTO alert (platform,external_id,plate,alert_type,occurred_at,location)
          VALUES ('fms','a1',$1,'Harsh Braking','2026-08-13T09:30:00+04:00','Sheikh Zayed Rd'),
@@ -118,10 +123,13 @@ check('alerts join onto the day', busy?.alerts === 2, String(busy?.alerts));
 
 /* ── custody ────────────────────────────────────────────────────────────── */
 const dd = (await get(`/api/vehicle/drivers-detail?plate=${PLATE}&${W}`)).body;
-check('custody covers every day', dd.days.length === 4, String(dd.days.length));
+check('custody covers every row, including the second platform', dd.days.length === 5, String(dd.days.length));
+check('a day on two platforms counts as one day worked',
+  dd.totals.find((t) => t.driver_name === 'Ali Rahman')?.days === 3,
+  String(dd.totals.find((t) => t.driver_name === 'Ali Rahman')?.days));
 check('per-driver totals rank by trips', dd.totals[0]?.driver_name === 'Ali Rahman', dd.totals[0]?.driver_name);
 check('the handover driver appears too', dd.totals.some((t) => t.driver_name === 'Sara Iqbal'));
-check('primary days counted', dd.totals[0]?.primary_days === 3, String(dd.totals[0]?.primary_days));
+check('primary days counted once per day', dd.totals[0]?.primary_days === 3, String(dd.totals[0]?.primary_days));
 
 /* ── movement ───────────────────────────────────────────────────────────── */
 const mv = (await get(`/api/vehicle/movement?plate=${PLATE}&${W}`)).body;
@@ -138,6 +146,16 @@ check('alerts attributed to the driver holding the car that day',
   sf.by_driver.find((d) => d.driver_name === 'Ali Rahman')?.n === 2, JSON.stringify(sf.by_driver));
 check('the handover day\'s alert goes to the other driver',
   sf.by_driver.find((d) => d.driver_name === 'Sara Iqbal')?.n === 1, JSON.stringify(sf.by_driver));
+// The 13th has two custody rows and two alerts. Attribution must total three
+// events, not five: no alert may be counted once per platform row.
+check('an alert is counted once even with two custody rows that day',
+  sf.by_driver.reduce((a, r) => a + r.n, 0) === 3, JSON.stringify(sf.by_driver));
+check('attributed events never exceed the events that exist',
+  sf.by_driver.reduce((a, r) => a + r.n, 0) === sf.by_type.reduce((a, r) => a + r.n, 0),
+  `${sf.by_driver.reduce((a, r) => a + r.n, 0)} vs ${sf.by_type.reduce((a, r) => a + r.n, 0)}`);
+// km is the distance driven on those days, not the distance re-added per alert
+check('attributed km is per day, not per alert',
+  +sf.by_driver.find((d) => d.driver_name === 'Ali Rahman').km === 88, String(sf.by_driver[0]?.km));
 check('recent alerts carry a location', sf.recent[0]?.location != null);
 
 /* ── mix ────────────────────────────────────────────────────────────────── */

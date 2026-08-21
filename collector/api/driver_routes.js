@@ -319,8 +319,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     // Where the vehicle sat still between jobs — telemetry, not trips, so it is
     // only available for plates this driver held on days we have GPS for.
     const idle = await q(
-      `WITH days AS (SELECT plate, day FROM vehicle_driver_day WHERE driver_ext_id = ANY($3)
-                       AND day BETWEEN $1::date AND $2::date)
+      `WITH days AS (SELECT DISTINCT plate, day FROM vehicle_driver_day
+                     WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date)
        SELECT round(s.lat::numeric,3) lat, round(s.lng::numeric,3) lng, count(*)::int fixes
        FROM telemetry_snapshot s JOIN days ON days.plate = s.plate
             AND (s.captured_at AT TIME ZONE 'Asia/Dubai')::date = days.day
@@ -387,9 +387,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        FROM trip WHERE ${TW} GROUP BY 1 ORDER BY 1`, p);
     // Harsh-driving events are recorded against the vehicle, so they are only
     // this driver's when they held the vehicle that day.
+    // DISTINCT matters: vehicle_driver_day carries one row per platform, so a
+    // driver who ran Uber and Yango on the same plate the same day would have
+    // every harsh-driving event on that day counted twice.
     const alerts = await q(
-      `WITH days AS (SELECT plate, day FROM vehicle_driver_day WHERE driver_ext_id = ANY($3)
-                       AND day BETWEEN $1::date AND $2::date)
+      `WITH days AS (SELECT DISTINCT plate, day FROM vehicle_driver_day
+                     WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date)
        SELECT a.alert_type, count(*)::int n, max(a.occurred_at) latest
        FROM alert a JOIN days ON days.plate = a.plate
             AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = days.day
