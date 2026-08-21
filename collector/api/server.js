@@ -129,12 +129,91 @@ app.get('/api/live', wrap(async (_, res) => res.json(await q(
    LEFT JOIN vehicle_current_driver cd ON cd.plate = s.plate
    ORDER BY s.plate`))));
 
+// Breadcrumb trail. Only GPS-bearing sources: Uber writes driver-status rows into
+// the same table with no coordinates, and those would otherwise punch holes in a path.
 app.get('/api/track', wrap(async (req, res) => {
   if (!req.query.plate) return res.status(400).json({ error: 'plate required' });
   res.json(await q(
-    `SELECT captured_at, lat, lng, speed, status, seat_occupied FROM telemetry_snapshot
-     WHERE plate=$1 AND captured_at BETWEEN $2 AND $3 ORDER BY captured_at`,
-    [req.query.plate.toUpperCase().replace(/[\s-]+/g, ''), req.query.from || '2000-01-01', req.query.to || '2100-01-01']));
+    `SELECT captured_at, lat, lng, speed, status, seat_occupied, ignition, source
+     FROM telemetry_snapshot
+     WHERE plate=$1 AND lat IS NOT NULL AND lng IS NOT NULL
+       AND captured_at BETWEEN $2 AND $3
+     ORDER BY captured_at`,
+    [req.query.plate.toUpperCase().replace(/[\s-]+/g, ''), req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')]));
+}));
+
+/* ───────────────────── map: where was the fleet, when ───────────────────── */
+// Which plates have a replayable trail on a given day, and who was driving.
+app.get('/api/map/days', wrap(async (req, res) => {
+  res.json(await q(
+    `SELECT (t.captured_at AT TIME ZONE 'Asia/Dubai')::date AS day,
+            t.plate, t.fleet_id, count(*)::int fixes,
+            min(t.captured_at) first_fix, max(t.captured_at) last_fix,
+            round(max(t.speed)::numeric,0) max_speed,
+            sum((t.seat_occupied)::int)::int occupied_fixes,
+            cd.driver_name
+     FROM telemetry_snapshot t
+     LEFT JOIN vehicle_current_driver cd ON cd.plate = t.plate
+     WHERE t.lat IS NOT NULL
+       AND ($1::text IS NULL OR t.plate = $1)
+       AND t.captured_at BETWEEN $2 AND $3
+     GROUP BY 1,2,3, cd.driver_name
+     HAVING count(*) >= 2
+     ORDER BY day DESC, fixes DESC LIMIT 400`,
+    [req.query.plate ? req.query.plate.toUpperCase().replace(/[\s-]+/g, '') : null,
+     req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')]));
+}));
+
+// A day's journey for one vehicle, split into segments wherever the car stopped
+// or the gap between fixes is too long to draw a straight line through honestly.
+app.get('/api/map/journey', wrap(async (req, res) => {
+  if (!req.query.plate) return res.status(400).json({ error: 'plate required' });
+  const plate = req.query.plate.toUpperCase().replace(/[\s-]+/g, '');
+  const day = req.query.day || new Date().toISOString().slice(0, 10);
+  const fixes = await q(
+    `SELECT captured_at, lat, lng, speed, status, seat_occupied, ignition
+     FROM telemetry_snapshot
+     WHERE plate=$1 AND lat IS NOT NULL
+       AND captured_at >= ($2::date)::timestamptz - interval '4 hours'
+       AND captured_at <  ($2::date + 1)::timestamptz - interval '4 hours'
+     ORDER BY captured_at`, [plate, day]);
+
+  // haversine, km
+  const R = 6371, rad = (d) => d * Math.PI / 180;
+  const dist = (a, b) => {
+    const dLat = rad(b.lat - a.lat), dLng = rad(b.lng - a.lng);
+    const x = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(x));
+  };
+
+  const GAP_MIN = 20;          // a longer silence than this is not a straight line
+  const segments = [];
+  let cur = null, km = 0, movingKm = 0, occupiedKm = 0;
+  for (let i = 0; i < fixes.length; i++) {
+    const f = fixes[i], prev = fixes[i - 1];
+    const gapMin = prev ? (new Date(f.captured_at) - new Date(prev.captured_at)) / 6e4 : 0;
+    const step = prev ? dist(prev, f) : 0;
+    if (prev && gapMin <= GAP_MIN && step < 60) {           // 60km in one hop = bad fix
+      km += step;
+      if ((prev.speed || 0) > 0) movingKm += step;
+      if (prev.seat_occupied) occupiedKm += step;
+    }
+    if (!cur || gapMin > GAP_MIN) { cur = { points: [], occupied: !!f.seat_occupied }; segments.push(cur); }
+    cur.points.push({ t: f.captured_at, lat: f.lat, lng: f.lng, speed: f.speed,
+                      status: f.status, occupied: !!f.seat_occupied });
+  }
+  const [drv] = await q(
+    `SELECT driver_name, trips FROM vehicle_driver_day
+     WHERE plate=$1 AND day=$2 ORDER BY trips DESC LIMIT 1`, [plate, day]);
+  res.json({
+    plate, day, fixes: fixes.length, segments,
+    driver: drv?.driver_name || null, driver_trips: drv?.trips ?? null,
+    distance_km: Math.round(km * 10) / 10,
+    moving_km: Math.round(movingKm * 10) / 10,
+    occupied_km: Math.round(occupiedKm * 10) / 10,
+    first_fix: fixes[0]?.captured_at || null,
+    last_fix: fixes[fixes.length - 1]?.captured_at || null,
+  });
 }));
 
 /* ───────────────────────── safety ───────────────────────── */
@@ -355,6 +434,57 @@ app.get('/api/context', wrap(async (req, res) => {
      WHERE w.day BETWEEN $1 AND $2 ORDER BY w.day`, [from, to]));
 }));
 
+
+
+/* ────────────────── compliance & platform verdicts ────────────────── */
+app.get('/api/compliance/vehicles', wrap(async (req, res) => res.json(await q(
+  `SELECT d.plate, d.doc_type, d.status, d.expires_at,
+          (d.expires_at::date - now()::date) AS days_left,
+          p.make, p.model, p.year, p.vin, p.image_url, cd.driver_name
+   FROM vehicle_document d
+   LEFT JOIN vehicle_profile p ON p.platform=d.platform AND p.vehicle_ext_id=d.vehicle_ext_id
+   LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
+   WHERE d.expires_at IS NOT NULL
+   ORDER BY d.expires_at ASC LIMIT 300`))));
+
+app.get('/api/compliance/drivers', wrap(async (_, res) => res.json(await q(
+  `SELECT platform, driver_ext_id, full_name, phone, licence_no, licence_expires,
+          (licence_expires - now()::date) AS days_left, state, suspension_reason, rating
+   FROM driver_compliance ORDER BY licence_expires ASC NULLS LAST LIMIT 300`))));
+
+app.get('/api/recommendations', wrap(async (_, res) => res.json(await q(
+  `SELECT platform, rec_type, period_start, period_end, org_value, target_value,
+          flagged_count, flagged, updated_at
+   FROM platform_recommendation ORDER BY period_end DESC NULLS LAST LIMIT 30`))));
+
+// earnings components — tips are the interesting one; they never appear in the trip feed
+app.get('/api/earnings/components', wrap(async (req, res) => res.json(await q(
+  `SELECT driver_ext_id, driver_name, category, parent,
+          round(sum(amount)::numeric,2) amount, currency
+   FROM driver_earnings_component
+   WHERE period_start >= $1 AND period_end <= $2
+   GROUP BY 1,2,3,4,6 ORDER BY abs(sum(amount)) DESC LIMIT 400`,
+  [req.query.from || '2000-01-01', req.query.to || '2100-01-01']))));
+
+// per-driver tip rate — service quality expressed in money
+app.get('/api/earnings/tips', wrap(async (req, res) => res.json(await q(
+  `SELECT driver_ext_id, max(driver_name) driver_name,
+          round(sum(amount) FILTER (WHERE category='tip')::numeric,2) tips,
+          round(sum(amount) FILTER (WHERE category='net_fare')::numeric,2) fare,
+          round((sum(amount) FILTER (WHERE category='tip')
+                 / nullif(sum(amount) FILTER (WHERE category='net_fare'),0) * 100)::numeric,2) tip_pct
+   FROM driver_earnings_component
+   WHERE period_start >= $1 AND period_end <= $2
+   GROUP BY driver_ext_id HAVING sum(amount) FILTER (WHERE category='net_fare') > 0
+   ORDER BY tip_pct DESC NULLS LAST LIMIT 200`,
+  [req.query.from || '2000-01-01', req.query.to || '2100-01-01']))));
+
+// product-tier economics: which assets serve which tier
+app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
+  `SELECT plate, product, count(*)::int trips, round(sum(distance_km)::numeric,0) km,
+          round(avg(distance_km)::numeric,1) avg_km
+   FROM trip WHERE ${F} AND plate IS NOT NULL AND product IS NOT NULL
+   GROUP BY plate, product ORDER BY plate, trips DESC LIMIT 600`, range(req)))));
 
 /* ───────────────── world events + causal attribution ───────────────── */
 // "What was happening when the numbers moved" — candidates, not proof.

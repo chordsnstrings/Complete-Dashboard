@@ -22,7 +22,7 @@ function poolConfig() {
 export const pool = new pg.Pool(poolConfig());
 
 export async function migrate() {
-  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql']) {
+  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql']) {
     try {
       const sql = readFileSync(join(__dir, '..', 'sql', f), 'utf8');
       await pool.query(sql);

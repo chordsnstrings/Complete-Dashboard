@@ -534,11 +534,65 @@ V.settings = async (root) => {
   actions.querySelector('#runBack').onclick = async () => { const j = await post('/api/settings/trigger', { mode: 'backfill' }); if (j) note.textContent = 'backfill queued — this pulls up to 12 months and takes a while'; };
 };
 
+
+/* ─────────── motion: settle, don't slam ───────────
+   Numbers count up, sections stagger in, charts draw themselves. All of it is
+   decoration on top of content that is already correct and readable — and all of
+   it collapses to nothing under prefers-reduced-motion (handled in CSS). */
+const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function countUp(node) {
+  const raw = node.textContent.trim();
+  const m = raw.match(/^([^\d-]*)(-?[\d,]*\.?\d+)(.*)$/);   // prefix, number, suffix
+  if (!m) return;
+  const [, pre, numStr, post] = m;
+  const target = parseFloat(numStr.replace(/,/g, ''));
+  if (!isFinite(target) || Math.abs(target) > 1e12) return;
+  const decimals = (numStr.split('.')[1] || '').length;
+  const hasComma = numStr.includes(',');
+  const fmtN = (v) => {
+    const f = v.toFixed(decimals);
+    return hasComma ? Number(f).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals }) : f;
+  };
+  const dur = 620, t0 = performance.now();
+  const tick = (now) => {
+    const p = Math.min(1, (now - t0) / dur);
+    const eased = 1 - Math.pow(1 - p, 3);                 // ease-out cubic
+    node.textContent = pre + fmtN(target * eased) + post;
+    if (p < 1) requestAnimationFrame(tick);
+    else node.textContent = raw;                          // land exactly on the real value
+  };
+  requestAnimationFrame(tick);
+}
+
+function animateView(root) {
+  if (REDUCED) return;
+  // stagger direct children and any grid/kpi groups
+  root.classList.add('stagger');
+  root.querySelectorAll('.kpis, .grid, .hbars, .tscroll tbody').forEach((g) => g.classList.add('stagger'));
+  // count up the hero numbers
+  root.querySelectorAll('.kpi .n').forEach(countUp);
+  // give each horizontal bar its own small delay
+  root.querySelectorAll('.hb .bar-cell > i').forEach((b, i) => { b.style.animationDelay = (i * 45) + 'ms'; });
+  // line charts draw themselves in
+  root.querySelectorAll('svg path[data-draw]').forEach((path) => {
+    try {
+      const len = path.getTotalLength();
+      path.style.setProperty('--len', Math.ceil(len));
+      path.classList.add('draw');
+    } catch { /* non-path geometry */ }
+  });
+  root.querySelectorAll('svg [data-rise]').forEach((r, i) => {
+    r.classList.add('rise'); r.style.animationDelay = (i * 22) + 'ms';
+  });
+  root.querySelectorAll('svg [data-fade]').forEach((r) => r.classList.add('fade'));
+}
+
 /* ─────────── render loop ─────────── */
 async function render() {
   renderNav(); setHeader();
   const root = $('#view'); root.innerHTML = '';
-  try { await (V[state.view] || V.overview)(root); }
+  try { await (V[state.view] || V.overview)(root); animateView(root); }
   catch (e) { root.innerHTML = `<div class="empty"><b>Could not load this view</b>${esc(e.message)}</div>`; }
   freshness();
 }
@@ -556,7 +610,10 @@ async function freshness() {
 $('#fRange').onchange = (e) => { state.days = +e.target.value; render(); };
 $('#fPlatform').onchange = (e) => { state.platform = e.target.value; render(); };
 $('#fFleet').onchange = (e) => { state.fleet = e.target.value; render(); };
-$('#refreshBtn').onclick = () => render();
+$('#refreshBtn').onclick = (e) => {
+  const b = e.currentTarget; b.classList.remove('spin'); void b.offsetWidth; b.classList.add('spin');
+  render();
+};
 $('#themeBtn').onclick = () => {
   const r = document.documentElement, cur = r.getAttribute('data-theme');
   const dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;

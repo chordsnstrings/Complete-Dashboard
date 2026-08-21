@@ -1,6 +1,7 @@
 // Shared runner: fan out a window to every historical source.
 import * as fms from './sources/fms.js';
 import * as uber from './sources/uber.js';
+import * as uberFleet from './sources/uber_fleet.js';
 import * as yango from './sources/yango.js';
 import * as bolt from './sources/bolt.js';
 import * as cabman from './sources/cabman.js';
@@ -15,7 +16,7 @@ import { monthsAgo, daysAgo } from './util.js';
 import { setState } from './db.js';
 import { log } from './log.js';
 
-const HISTORICAL = { fms, uber, yango, bolt, hotel, external, events };
+const HISTORICAL = { fms, uber, uberFleet, yango, bolt, hotel, external, events };
 
 export async function runWindow(mode, from, to) {
   await loadSettings(true);   // pick up Settings-page credential changes without a redeploy

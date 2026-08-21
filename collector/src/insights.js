@@ -321,6 +321,126 @@ async function partnerMix(from, to) {
   return 1;
 }
 
+
+/* ─────────────────── 11. Vehicle documents: a car that cannot legally work ───────────────────
+   Registration/insurance expiry is the highest-consequence, lowest-ambiguity signal in
+   the whole dataset: it is a date, and on the wrong side of it the vehicle is off the road. */
+async function vehicleDocuments() {
+  const rows = await q(
+    `SELECT d.plate, d.doc_type, d.expires_at, d.status, d.fleet_id,
+            p.make, p.model, cd.driver_name
+     FROM vehicle_document d
+     LEFT JOIN vehicle_profile p ON p.platform=d.platform AND p.vehicle_ext_id=d.vehicle_ext_id
+     LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
+     WHERE d.expires_at IS NOT NULL AND d.expires_at < now() + interval '45 days'
+     ORDER BY d.expires_at ASC LIMIT 200`);
+  for (const r of rows) {
+    const days = Math.round((new Date(r.expires_at) - Date.now()) / 864e5);
+    const gone = days < 0;
+    const who = r.driver_name ? ` Currently driven by ${r.driver_name}.` : '';
+    await put({
+      code: gone ? 'vehicle_doc_expired' : 'vehicle_doc_expiring',
+      severity: gone || days <= 7 ? 'critical' : 'warning', category: 'compliance',
+      entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
+      title: gone
+        ? `${r.plate}: ${r.doc_type} expired ${Math.abs(days)} days ago`
+        : `${r.plate}: ${r.doc_type} expires in ${days} days`,
+      detail: `${r.make || ''} ${r.model || ''}`.trim()
+        + ` — ${r.doc_type} valid until ${new Date(r.expires_at).toISOString().slice(0, 10)}.${who}`
+        + (gone ? ' A vehicle working on expired documents is uninsured and un-hireable if stopped.'
+                : ' Renewal in the UAE is not same-day; leaving it to the last week risks losing the car from service.'),
+      action: gone ? `Take it off dispatch until the renewed document is on file.`
+                   : `Start the renewal now and re-check before the expiry date.`,
+      impact_aed: null, metric: days, window_start: null, window_end: null,
+    });
+  }
+  return rows.length;
+}
+
+/* ─────────────────── 12. Platform's own verdict on our drivers ───────────────────
+   Uber computes acceptance/cancellation/completion against its own targets and names
+   the drivers who miss. That is a second opinion on data we cannot see ourselves. */
+async function platformFlags() {
+  const rows = await q(
+    `SELECT rec_type, period_start, period_end, org_value, target_value, flagged_count, flagged, fleet_id
+     FROM platform_recommendation ORDER BY period_end DESC NULLS LAST LIMIT 20`);
+  let n = 0;
+  for (const r of rows) {
+    let flagged = [];
+    try { flagged = typeof r.flagged === 'string' ? JSON.parse(r.flagged) : (r.flagged || []); } catch { /* ignore */ }
+    if (!flagged.length) continue;
+    const kind = r.rec_type || '';
+    const pct = (v) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`);
+
+    if (/TRIP_COMPLETION/.test(kind)) {
+      // online, but produced nothing — the sharpest supply-side waste signal there is
+      const idle = flagged.filter((f) => Number(f.value) === 0);
+      if (!idle.length) continue;
+      const hours = idle.reduce((a, f) => a + (f.online_hours || 0), 0);
+      await put({
+        code: 'drivers_online_no_trips', severity: 'critical', category: 'utilisation',
+        entity_type: 'fleet', entity_id: 'all', fleet_id: r.fleet_id,
+        title: `${idle.length} drivers were online but completed no trips`,
+        detail: `Uber flagged ${idle.length} driver(s) logged in for about ${hours.toFixed(1)} hours in total with zero completed trips (${r.period_start}). Paid-for supply that produced nothing.`,
+        action: `Check whether they were genuinely available, sitting in a dead zone, or logged in without intending to work.`,
+        impact_aed: null, metric: idle.length,
+        window_start: r.period_start, window_end: r.period_end,
+      });
+      n++; continue;
+    }
+
+    const isAcc = /ACCEPTANCE/.test(kind);
+    await put({
+      code: isAcc ? 'below_target_acceptance' : 'above_target_cancellation',
+      severity: 'warning', category: 'revenue',
+      entity_type: 'fleet', entity_id: 'all', fleet_id: r.fleet_id,
+      title: isAcc
+        ? `${flagged.length} drivers below Uber's acceptance target`
+        : `${flagged.length} drivers above Uber's cancellation target`,
+      detail: `Fleet sits at ${pct(r.org_value)} against a target of ${pct(r.target_value)} for ${r.period_start} → ${r.period_end}. Uber names ${flagged.length} driver(s) on the wrong side of it — these are the accounts that drag dispatch priority for everyone.`,
+      action: isAcc
+        ? `Review why they decline: vehicle mismatch, positioning, or app left on while unavailable.`
+        : `Cancellations after acceptance hurt rider trust and cost the approach drive. Coach the named drivers.`,
+      impact_aed: null, metric: flagged.length,
+      window_start: r.period_start, window_end: r.period_end,
+    });
+    n++;
+  }
+  return n;
+}
+
+/* ─────────────────── 13. Tips: service quality that shows up in cash ─────────────────── */
+async function tipSignal() {
+  const rows = await q(
+    `WITH t AS (
+       SELECT driver_ext_id, driver_name, period_start, period_end,
+              sum(amount) FILTER (WHERE category='tip')      AS tips,
+              sum(amount) FILTER (WHERE category='net_fare') AS fare
+       FROM driver_earnings_component
+       GROUP BY 1,2,3,4)
+     SELECT * FROM t WHERE fare > 200 ORDER BY (coalesce(tips,0)/nullif(fare,0)) ASC LIMIT 40`);
+  if (rows.length < 4) return 0;
+  const rates = rows.map((r) => Number(r.tips || 0) / Number(r.fare || 1));
+  const median = rates.sort((a, b) => a - b)[Math.floor(rates.length / 2)];
+  if (median <= 0) return 0;
+  let n = 0;
+  for (const r of rows) {
+    const rate = Number(r.tips || 0) / Number(r.fare || 1);
+    if (rate >= median * 0.4) continue;       // only the clear bottom
+    await put({
+      code: 'low_tip_rate', severity: 'info', category: 'safety',
+      entity_type: 'driver', entity_id: r.driver_ext_id,
+      title: `${r.driver_name || r.driver_ext_id} earns tips at ${(rate * 100).toFixed(1)}% of fare`,
+      detail: `AED ${Number(r.tips || 0).toFixed(0)} tipped on AED ${Number(r.fare).toFixed(0)} of fares, against a fleet median of ${(median * 100).toFixed(1)}%. Tipping is a rider-satisfaction signal that arrives before ratings do, and it is money the fleet never has to share.`,
+      action: `Worth a look at vehicle cleanliness and rider interaction before it turns into a ratings problem.`,
+      impact_aed: null, metric: rate,
+      window_start: r.period_start, window_end: r.period_end,
+    });
+    n++;
+  }
+  return n;
+}
+
 /* ─────────────────── runner ─────────────────── */
 export async function computeInsights({ from, to } = {}) {
   const end = to || new Date().toISOString().slice(0, 10);
@@ -337,6 +457,9 @@ export async function computeInsights({ from, to } = {}) {
     ['cancellations', () => cancellations(start, end)],
     ['weather', () => weatherOutlook()],
     ['partner_mix', () => partnerMix(start, end)],
+    ['vehicle_documents', () => vehicleDocuments()],
+    ['platform_flags', () => platformFlags()],
+    ['tip_signal', () => tipSignal()],
   ];
   const out = {};
   for (const [name, fn] of jobs) {
