@@ -14,11 +14,13 @@ export async function pullLive() {
     const { data } = await http(config.cabman.url, {
       headers: { InterfaceUniqueId: f.interfaceId, InterfaceUserName: f.user, InterfacePassword: f.pass },
     });
+    const now = new Date().toISOString();
     const rows = (data?.IVDDataResult || []).map((v) => ({
       source: SRC, fleet_id: f.fleet, plate: normPlate(v.VehicleID),
       captured_at: (v.gmt || '').replace(' ', 'T') + '+04:00',
       lat: v.lat, lng: v.lng, speed: v.speed, ignition: !!v.state,
-      status: v.Status, seat_occupied: !!v.SeatSensorValue, odometer: v.odometer, raw: v,
+      status: v.Status, seat_occupied: !!v.SeatSensorValue, odometer: v.odometer,
+      polled_at: now, raw: v,
     })).filter((r) => r.captured_at && r.plate);
     if (rows.length) total += await upsertMany('telemetry_snapshot', rows, ['source', 'plate', 'captured_at']);
   }

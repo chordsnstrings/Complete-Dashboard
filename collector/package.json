@@ -4,7 +4,9 @@
   "private": true,
   "type": "module",
   "description": "Collector agents that backfill and auto-update Ecosine/Egari fleet data from Uber, Yango, Bolt, FMS and CABMAN into Postgres.",
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "migrate": "node src/index.js migrate",
     "backfill": "node src/index.js backfill",
@@ -19,5 +21,8 @@
     "express": "^4.19.2",
     "node-cron": "^3.0.3",
     "pg": "^8.12.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.5"
   }
 }

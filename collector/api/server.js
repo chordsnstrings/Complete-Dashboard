@@ -70,11 +70,23 @@ app.get('/api/platforms', async (_, res) => {
      FROM trip GROUP BY platform, fleet_id ORDER BY trips DESC`));
 });
 
-// latest realtime position per vehicle
+// latest realtime position per vehicle (CABMAN 5-min refresh). polled_at = freshness of last observation.
 app.get('/api/live', async (_, res) => {
   res.json(await q(
-    `SELECT DISTINCT ON (plate) plate, fleet_id, source, captured_at, lat, lng, speed, status, seat_occupied
-     FROM telemetry_snapshot ORDER BY plate, captured_at DESC`));
+    `SELECT DISTINCT ON (plate) plate, fleet_id, source, captured_at, polled_at,
+            lat, lng, speed, status, seat_occupied,
+            (now() - polled_at > interval '11 minutes') AS stale
+     FROM telemetry_snapshot ORDER BY plate, polled_at DESC`));
+});
+
+// CABMAN breadcrumb history for one vehicle: /api/track?plate=L45235&from=...&to=...
+app.get('/api/track', async (req, res) => {
+  const { plate } = req.query;
+  if (!plate) return res.status(400).json({ error: 'plate required' });
+  res.json(await q(
+    `SELECT captured_at, lat, lng, speed, status, seat_occupied FROM telemetry_snapshot
+     WHERE source='cabman' AND plate=$1 AND captured_at BETWEEN $2 AND $3
+     ORDER BY captured_at`, [plate.toUpperCase().replace(/[\s-]+/g, ''), req.query.from || '2000-01-01', req.query.to || '2100-01-01']));
 });
 
 const port = process.env.PORT || 8080;

@@ -13,7 +13,10 @@ export const config = {
   // How far back to backfill, and the trailing window each incremental run re-pulls.
   backfillMonths: parseInt(req('BACKFILL_MONTHS', '12'), 10),
   incrementalDays: parseInt(req('INCREMENTAL_DAYS', '3'), 10),
-  cabmanPollSeconds: parseInt(req('CABMAN_POLL_SECONDS', '45'), 10),
+  // CABMAN realtime GPS: fixed 5-minute refresh saved to telemetry_snapshot.
+  cabmanCron: req('CABMAN_CRON', '*/5 * * * *'),
+  // Other live pollers (Uber online/on-trip status, FMS live) — lighter cadence.
+  liveStatusSeconds: parseInt(req('LIVE_STATUS_SECONDS', '120'), 10),
 
   fms: {
     base: req('FMS_BASE', 'http://103.185.74.197/currentinfotest/ItlService.svc'),

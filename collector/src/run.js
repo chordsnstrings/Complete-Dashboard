@@ -17,18 +17,24 @@ export async function runWindow(mode, from, to) {
     try { await mod.collect({ from, to, mode }); }
     catch (e) { log.error('run', `${name} threw`, { err: String(e) }); }
   }
-  // CABMAN is realtime-only — capture one snapshot per run too
-  try { await cabman.collect({ mode: 'realtime' }); } catch (e) { log.error('run', 'cabman', { err: String(e) }); }
+  // CABMAN is not part of the historical window — it runs on its own 5-minute schedule.
   await setState('collector', '-', 'last_' + mode, new Date().toISOString());
 }
 
 export const backfill = () => runWindow('backfill', monthsAgo(config.backfillMonths), new Date());
 export const incremental = () => runWindow('incremental', daysAgo(config.incrementalDays), new Date());
 
-// Fast realtime pollers (positions / live status only)
-export async function realtimeTick() {
-  const jobs = [cabman.pullLive(), uber.pullLive(), ...config.fms.fleets.map((f) => fms.pullLive(f))];
+// CABMAN realtime GPS — fixed 5-minute refresh, persisted to telemetry_snapshot (via cabman.collect,
+// which upserts snapshots and writes a collection_run row). This is the owner of CABMAN data.
+export async function cabmanTick() {
+  try { await cabman.collect({ mode: 'realtime' }); }
+  catch (e) { log.error('cabman', 'tick failed', { err: String(e) }); }
+}
+
+// Other live pollers (Uber online/on-trip status, FMS live telemetry).
+export async function liveStatusTick() {
+  const jobs = [uber.pullLive().catch(() => 0), ...config.fms.fleets.map((f) => fms.pullLive(f).catch(() => 0))];
   const res = await Promise.allSettled(jobs);
-  const n = res.filter((r) => r.status === 'fulfilled').reduce((a, r) => a + (r.value || 0), 0);
-  log.info('realtime', 'tick', { snapshots: n });
+  const n = res.reduce((a, r) => a + (r.status === 'fulfilled' ? (r.value || 0) : 0), 0);
+  log.info('live', 'status tick', { snapshots: n });
 }

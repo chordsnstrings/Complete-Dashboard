@@ -28,10 +28,14 @@ Local (no Docker): `npm install && npm run migrate && npm run backfill && npm st
 ## How it stays up to date
 
 - **backfill** (once): walks back `BACKFILL_MONTHS` months per source.
-- **scheduler** (container default): a cron **incremental** every 30 min re-pulls the trailing
-  `INCREMENTAL_DAYS`; a realtime tick every `CABMAN_POLL_SECONDS` captures live positions/status.
+- **scheduler** (container default):
+  - **CABMAN every 5 minutes** (`CABMAN_CRON=*/5 * * * *`) — pulls `GetIVDData` and saves each snapshot
+    to `telemetry_snapshot`. `polled_at` advances every poll (so "last seen" is never >5 min stale),
+    while position rows dedupe on the device fix time so idle vehicles don't create fake movement.
+  - Uber/FMS live status every `LIVE_STATUS_SECONDS` (default 120s).
+  - a cron **incremental** every 30 min re-pulls the trailing `INCREMENTAL_DAYS` of trips/earnings.
 - All writes are **idempotent upserts** keyed on the source's natural id (Uber Trip UUID, Yango order
-  id, FMS `plate|start`), so re-runs never duplicate.
+  id, FMS `plate|start`, CABMAN `plate|fix-time`), so re-runs never duplicate.
 
 ## The supervisory ("AI agent") layer — where an LLM earns its place
 

@@ -164,10 +164,14 @@ CREATE TABLE IF NOT EXISTS telemetry_snapshot (
   fuel_level   DOUBLE PRECISION,
   ac_on        BOOLEAN,
   odometer     DOUBLE PRECISION,
+  polled_at    TIMESTAMPTZ DEFAULT now(),   -- when the collector last observed this fix (advances every poll)
   raw          JSONB,
   UNIQUE (source, plate, captured_at)
 );
+-- keep existing installs in sync (CREATE TABLE IF NOT EXISTS won't add new columns)
+ALTER TABLE telemetry_snapshot ADD COLUMN IF NOT EXISTS polled_at TIMESTAMPTZ DEFAULT now();
 CREATE INDEX IF NOT EXISTS telem_plate_time_idx ON telemetry_snapshot (plate, captured_at DESC);
+CREATE INDEX IF NOT EXISTS telem_polled_idx     ON telemetry_snapshot (source, polled_at DESC);
 
 -- ---------------------------------------------------------------------------
 -- ETL bookkeeping: run log + incremental watermarks / cursors

@@ -5,7 +5,7 @@
 //   node src/index.js schedule      — long-running: cron incrementals + realtime polling (container default)
 import cron from 'node-cron';
 import { migrate, pool } from './db.js';
-import { backfill, incremental, realtimeTick } from './run.js';
+import { backfill, incremental, cabmanTick, liveStatusTick } from './run.js';
 import { config } from './config.js';
 import { log } from './log.js';
 
@@ -18,12 +18,17 @@ async function main() {
   if (cmd === 'incremental') return incremental();
 
   if (cmd === 'schedule') {
-    log.info('scheduler', 'starting', { incrementalDays: config.incrementalDays, cabmanPollSeconds: config.cabmanPollSeconds });
+    log.info('scheduler', 'starting', {
+      cabmanCron: config.cabmanCron, liveStatusSeconds: config.liveStatusSeconds, incrementalDays: config.incrementalDays,
+    });
+    // CABMAN realtime GPS — every 5 minutes, saved to the database
+    cron.schedule(config.cabmanCron, () => cabmanTick());
+    // Uber/FMS live status — lighter interval
+    setInterval(() => liveStatusTick(), config.liveStatusSeconds * 1000);
     // historical/aggregate refresh every 30 minutes
     cron.schedule('*/30 * * * *', () => incremental().catch((e) => log.error('scheduler', 'incremental', { err: String(e) })));
-    // realtime positions / live status
-    setInterval(() => realtimeTick().catch((e) => log.error('scheduler', 'realtime', { err: String(e) })), config.cabmanPollSeconds * 1000);
-    // kick one incremental at boot so the dashboard has fresh data immediately
+    // kick one of each at boot so the dashboard has fresh data immediately
+    cabmanTick();
     incremental().catch((e) => log.error('scheduler', 'boot-incremental', { err: String(e) }));
     return new Promise(() => {}); // run forever
   }
