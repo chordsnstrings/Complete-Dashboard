@@ -30,7 +30,7 @@ export const pool = new pg.Pool(poolConfig());
 pool.on('error', (err) => log.error('db', 'idle client error', { err: err.message, code: err.code }));
 
 export async function migrate() {
-  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql', 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql']) {
+  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql', 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql']) {
     try {
       const sql = readFileSync(join(__dir, '..', 'sql', f), 'utf8');
       await pool.query(sql);
@@ -81,11 +81,30 @@ export async function upsertMany(table, rows, conflict, chunk = 200) {
   return n;
 }
 
+/* Record a run, and — where the source chunked its window — which chunks
+   landed. A run that wrote rows while most of its windows failed reported
+   status='ok' for months while the Uber trip history had a 299-day hole in it;
+   `chunks` is what makes that impossible to miss. Passing chunks is optional,
+   so a source that does not chunk is unaffected. */
 export async function logRun(run) {
+  const chunks = Array.isArray(run.chunks) ? run.chunks : null;
+  const failed = chunks ? chunks.filter((c) => c.error).length : null;
+  // A source that succeeded on some windows and failed on others is not 'ok',
+  // whatever it managed to write.
+  const status = run.status === 'error' ? 'error'
+    : (failed ? 'partial' : (run.status || 'ok'));
   const { rows } = await pool.query(
-    `INSERT INTO collection_run (source,fleet_id,mode,window_start,window_end,status,rows_written,finished_at,error)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,now(),$8) RETURNING id`,
-    [run.source, run.fleet_id, run.mode, run.window_start, run.window_end, run.status, run.rows_written || 0, run.error || null]);
+    `INSERT INTO collection_run
+       (source,fleet_id,mode,window_start,window_end,status,rows_written,finished_at,error,
+        chunks_total,chunks_failed,detail)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,now(),$8,$9,$10,$11) RETURNING id`,
+    [run.source, run.fleet_id, run.mode, run.window_start, run.window_end, status,
+     run.rows_written || 0, run.error || null,
+     chunks ? chunks.length : null, failed,
+     chunks ? JSON.stringify(chunks.map((c) => ({
+       from: c.from, to: c.to, rows: c.rows ?? 0,
+       error: c.error ? String(c.error).slice(0, 300) : null,
+     }))) : null]);
   return rows[0].id;
 }
 

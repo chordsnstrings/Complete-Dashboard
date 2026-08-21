@@ -26,7 +26,7 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
 const SCHEMAS = ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
-  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql'];
+  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql'];
 for (const f of SCHEMAS) await db.exec(readFileSync(`sql/${f}`, 'utf8'));
 
 /* ── the one-time retraction must be exactly that ─────────────────────────
@@ -215,6 +215,45 @@ for (const bad2 of ['from=banana&to=2026-08-31', 'from=2026-08-31&to=2026-08-01'
 }
 check('the trip table survived the injection attempt',
   (await q('SELECT count(*)::int n FROM trip'))[0].n > 0);
+
+/* ── a run that wrote rows is not a run that worked ───────────────────────
+   The Uber collector chunks a backfill into twelve monthly windows. When nine
+   failed, the tenth still wrote rows and collection_run recorded
+   status='ok', rows_written=1129 — which is what the Data sources page showed
+   for months while the trip history had a 299-day hole in it. */
+{
+  const { logRun } = await import('../src/db.js');
+  // logRun talks to the shared pool, so the rule it encodes is asserted from
+  // the source and the behaviour is asserted directly below against PGlite.
+  const dbSrc = readFileSync('src/db.js', 'utf8');
+  check('a run with a failed window cannot report ok',
+    /const status = run\.status === 'error' \? 'error'/.test(dbSrc)
+    && /failed \? 'partial'/.test(dbSrc), 'logRun must downgrade to partial');
+  check('the failed windows are stored, not just counted',
+    /detail/.test(dbSrc) && /chunks\.map/.test(dbSrc));
+  await q(`INSERT INTO collection_run (source,mode,status,rows_written,chunks_total,chunks_failed,detail,finished_at)
+           VALUES ('uber','backfill','partial',1129,12,9,$1,now())`,
+    [JSON.stringify([{ from: '2025-10-23', to: '2025-11-22', rows: 0, error: 'timed out' },
+      { from: '2026-07-22', to: '2026-08-21', rows: 1129, error: null }])]);
+  const st = await (await fetch(`http://127.0.0.1:${port}/api/status`)).json();
+  const uber = st.find((r) => r.source === 'uber');
+  check('the status endpoint reports partial rather than ok',
+    uber && uber.status === 'partial', JSON.stringify(uber && uber.status));
+  check('and names the dates of the windows that did not land',
+    uber && uber.failed_windows.length === 1 && uber.failed_windows[0].from === '2025-10-23',
+    JSON.stringify(uber && uber.failed_windows));
+  check('a successful window is not listed as failed',
+    uber && uber.windows.filter((w) => w.ok).length === 1);
+  check('the raw detail blob is not echoed alongside the parsed one',
+    uber && uber.detail === undefined);
+  // A source that does not chunk must be unaffected.
+  await q(`INSERT INTO collection_run (source,mode,status,rows_written,finished_at)
+           VALUES ('cabman','realtime','ok',48,now())`);
+  const st2 = await (await fetch(`http://127.0.0.1:${port}/api/status`)).json();
+  const cab = st2.find((r) => r.source === 'cabman');
+  check('a source that does not chunk still reports ok with no windows',
+    cab && cab.status === 'ok' && cab.failed_windows.length === 0, JSON.stringify(cab && cab.status));
+}
 
 /* A 500 body must not hand an unauthenticated caller the storage engine. */
 check('the error handler returns a reference, not the driver message',

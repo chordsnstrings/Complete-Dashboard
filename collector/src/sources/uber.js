@@ -89,33 +89,49 @@ function csvToTrips(csv) {
 // realistic poll budget are what actually keep us under the three-report cap.
 async function pullTrips(from, to) {
   let total = 0;
-  const chunks = [...dateChunks(from, to, config.uber.reportRangeDays)];
+  const windows = [...dateChunks(from, to, config.uber.reportRangeDays)];
+  // Newest first. A backfill that starts twelve months ago spends its first
+  // hour on windows that are already collected, and if it dies partway — a
+  // container restart, a session that expires mid-run — it dies before ever
+  // reaching the recent months anyone is looking at. Ordering by recency means
+  // the most valuable windows land first and a truncated run is still useful.
+  windows.reverse();
+  const chunks = [];
   let consecutiveFailures = 0;
-  for (const [s, e] of chunks) {
+  for (const [s, e] of windows) {
+    const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
     try {
       const id = await generateReport(s, e);
       const url = await downloadReport(id);
       const { data: csv } = await http(url, { expect: 'text', timeoutMs: 180000 });
       const rows = csvToTrips(csv);
       if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
+      chunk.rows = rows.length;
       log.info(SRC, `trips ${iso(s)}..${iso(e)}`, { rows: rows.length });
       consecutiveFailures = 0;
     } catch (err) {
       const msg = String(err);
       // "invalid date range" past retention (~12mo) is expected on the oldest
-      // chunks; anything else is a real failure and is logged as one, because a
-      // silent skip turns a broken backfill into a successful empty one.
+      // windows; anything else is a real failure and is recorded as one,
+      // because a silent skip turns a broken backfill into a successful empty
+      // one — which is exactly how a 299-day hole survived for months behind a
+      // run that reported status='ok'.
       const expected = /invalid date range|retention|out of range/i.test(msg);
+      chunk.error = expected ? `outside retention: ${msg.slice(0, 160)}` : msg.slice(0, 300);
+      chunk.expected = expected;
       log[expected ? 'info' : 'error'](SRC, `trip chunk ${iso(s)}..${iso(e)} ${expected ? 'outside retention' : 'FAILED'}`,
         { err: msg.slice(0, 300) });
       if (!expected) consecutiveFailures++;
     }
+    chunks.push(chunk);
     // Pause between chunks so the previous report's slot is released before the
     // next GenerateReport, rather than racing the three-in-flight cap.
     await sleep(consecutiveFailures ? 20000 : 4000);
   }
-  if (consecutiveFailures >= 3) log.error(SRC, 'trip backfill degraded', { consecutiveFailures, chunks: chunks.length });
-  return total;
+  const failed = chunks.filter((c) => c.error && !c.expected).length;
+  if (failed) log.error(SRC, 'trip backfill left holes', { failed, of: chunks.length,
+    windows: chunks.filter((c) => c.error && !c.expected).map((c) => `${c.from}..${c.to}`).join(', ') });
+  return { total, chunks };
 }
 
 // Per-driver earnings + trip count + distance (7-day windows, GraphQL).
@@ -192,8 +208,14 @@ export async function collect({ from, to, mode }) {
   try {
     const trips = await pullTrips(from, to);
     const perf = await pullEarnerBreakdowns(from, to);
-    await logRun({ source: SRC, fleet_id: config.uber.fleet, mode, window_start: from, window_end: to, status: 'ok', rows_written: trips + perf });
-    log.info(SRC, 'done', { trips, perf });
+    // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
+    // are still missing", and it is the difference between a hole that is
+    // visible and one that is not.
+    await logRun({ source: SRC, fleet_id: config.uber.fleet, mode,
+      window_start: from, window_end: to, rows_written: trips.total + perf,
+      chunks: trips.chunks });
+    log.info(SRC, 'done', { trips: trips.total, perf,
+      windows_failed: trips.chunks.filter((c) => c.error).length, of: trips.chunks.length });
   } catch (e) {
     await logRun({ source: SRC, fleet_id: config.uber.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
     log.error(SRC, 'failed', { err: String(e) });

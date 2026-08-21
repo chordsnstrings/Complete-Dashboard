@@ -1137,18 +1137,45 @@ V.compliance = async (root) => {
 };
 
 V.sources = async (root) => {
-  const st = panel('Collector health', 'Last run per source — errors usually mean a credential needs updating'); root.append(st.panel);
+  const st = panel('Collector health',
+    'Last run per source. "partial" means the run wrote rows AND left windows unfetched — which is how '
+    + 'a 299-day hole in the Uber trip history survived for months behind a run that said ok.');
+  root.append(st.panel);
   const cv = panel('Data coverage', 'What has actually landed in the database'); root.append(cv.panel);
   [st.body, cv.body].forEach(loading);
   const [status, coverage] = await Promise.all([api('/api/status'), api('/api/coverage')]);
   st.body.innerHTML = '';
+  const TAG = { ok: 'ok', partial: 'warn', error: 'bad' };
   st.body.append(tableFrom(status, [
     { label: 'Source', key: 'source' }, { label: 'Mode', key: 'mode' },
-    { label: 'Status', key: 'status', render: (r) => `<span class="tag ${r.status === 'ok' ? 'ok' : 'bad'}">${esc(r.status)}</span>` },
+    { label: 'Status', key: 'status', render: (r) => `<span class="tag ${TAG[r.status] || 'bad'}">${esc(r.status || '—')}</span>` },
     { label: 'Rows', key: 'rows_written', num: true },
+    { label: 'Windows', key: 'chunks_total', num: true, render: (r) => (r.chunks_total == null ? '—'
+      : `${fmt(r.chunks_total - (r.chunks_failed || 0))} of ${fmt(r.chunks_total)}`) },
     { label: 'Last run', key: 'finished_at', render: (r) => r.finished_at ? new Date(r.finished_at).toLocaleString() : '—' },
-    { label: 'Detail', key: 'error', render: (r) => r.error ? `<span class="note err">${esc(String(r.error).slice(0, 90))}</span>` : '<span class="note ok">healthy</span>' },
+    { label: 'Detail', key: 'error', render: (r) => (r.error
+      ? `<span class="note err">${esc(String(r.error).slice(0, 90))}</span>`
+      : r.chunks_failed
+        ? `<span class="note warn">${fmt(r.chunks_failed)} window(s) did not land — see below</span>`
+        : '<span class="note ok">healthy</span>') },
   ]));
+  /* The dates of the windows that failed. Without them a gap is visible but not
+     fixable — you can see the hole and not know what to re-fetch. */
+  const holes = status.flatMap((r) => (r.failed_windows || [])
+    .map((w) => ({ source: r.source, mode: r.mode, ...w })));
+  if (holes.length) {
+    const hp = panel('Windows that did not land',
+      'Each of these is a range with no data behind it. Every rate computed across one is wrong.');
+    hp.body.append(tableFrom(holes, [
+      { label: 'Source', key: 'source' }, { label: 'Mode', key: 'mode' },
+      { label: 'From', key: 'from' }, { label: 'To', key: 'to' },
+      { label: 'What came back', key: 'error', render: (h) => esc(String(h.error).slice(0, 140)) },
+    ]));
+    hp.body.append(note('Re-run a backfill from Settings to attempt these again. If the same window keeps '
+      + 'failing, the reason in this table is the thing to fix — usually a credential, or a range past '
+      + 'the provider’s retention.'));
+    root.append(hp.panel);
+  }
   cv.body.innerHTML = '';
   const cov = [
     ...(coverage.trips || []).map((r) => ({ what: `trips · ${r.platform}`, n: r.n, from: r.from_ts, to: r.to_ts })),

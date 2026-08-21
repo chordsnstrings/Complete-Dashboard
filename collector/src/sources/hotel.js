@@ -77,13 +77,26 @@ export async function collect({ from, to, mode }) {
   try {
     await loadHotels(c);          // property names, so partner trips carry a label
     let total = 0;
+    const chunks = [];
     for (const [s, e] of dateChunks(from, to, 31)) {
-      const url = `${c.base}/api/operation-managers/report/get-trip-report?startDate=${iso(s)}&endDate=${iso(e)}`;
-      const { data } = await http(url, {
-        timeoutMs: 120000,
-        headers: { authorization: `Bearer ${c.token}`, 'x-domain': c.domain },
-      });
-      const trips = data?.data?.trips || [];
+      const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
+      chunks.push(chunk);
+      let trips = [];
+      try {
+        const url = `${c.base}/api/operation-managers/report/get-trip-report?startDate=${iso(s)}&endDate=${iso(e)}`;
+        const { data } = await http(url, {
+          timeoutMs: 120000,
+          headers: { authorization: `Bearer ${c.token}`, 'x-domain': c.domain },
+        });
+        trips = data?.data?.trips || [];
+      } catch (err) {
+        // One window failing must not abandon the rest — and must not be
+        // invisible either. A run that skipped a month while succeeding on the
+        // others is exactly the shape that hides a gap.
+        chunk.error = String(err).slice(0, 300);
+        log.error(SRC, `trip window ${iso(s)}..${iso(e)} FAILED`, { err: chunk.error });
+        continue;
+      }
       const rows = trips.map((t) => ({
         platform: SRC, external_id: t._id, fleet_id: c.fleet,
         plate: normPlate(t.car?.licenseNumber),
@@ -119,6 +132,7 @@ export async function collect({ from, to, mode }) {
         raw: t,
       })).filter((r) => r.external_id && r.requested_at);
       if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
+      chunk.rows = rows.length;
 
       // Driver licence expiry rides along on every trip record — the only place we get it.
       const seen = new Map();
@@ -138,7 +152,8 @@ export async function collect({ from, to, mode }) {
       if (seen.size) await upsertMany('driver_compliance', [...seen.values()], ['platform', 'driver_ext_id']);
       log.info(SRC, `trips ${iso(s)}..${iso(e)}`, { rows: rows.length });
     }
-    await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to, status: 'ok', rows_written: total });
+    await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to,
+      rows_written: total, chunks });
   } catch (e) {
     await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
     log.error(SRC, 'failed', { err: String(e) });

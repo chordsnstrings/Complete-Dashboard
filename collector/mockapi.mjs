@@ -37,8 +37,22 @@ app.get('/api/map/journey', (req, res) => {
 });
 
 app.get('/api/status', (_, r) => r.json([
-  { source: 'cabman', status: 'ok', finished_at: new Date().toISOString(), rows_written: 48 },
-  { source: 'uber', status: 'ok', finished_at: new Date().toISOString(), rows_written: 999 },
+  { source: 'cabman', mode: 'realtime', status: 'ok', finished_at: new Date().toISOString(),
+    rows_written: 48, chunks_total: null, chunks_failed: null, failed_windows: [], windows: [] },
+  // The shape that hid a 299-day hole: rows written, and most windows missing.
+  { source: 'uber', mode: 'backfill', status: 'partial', finished_at: new Date().toISOString(),
+    rows_written: 1129, chunks_total: 12, chunks_failed: 9,
+    failed_windows: [
+      { from: '2025-10-23', to: '2025-11-22', error: 'download timed out after 600s for report 9f2c…' },
+      { from: '2025-11-23', to: '2025-12-23', error: 'generate: {"code":"CONCURRENT_REPORT_LIMIT"}' },
+      { from: '2025-12-24', to: '2026-01-23', error: 'download timed out after 600s for report 41ab…' },
+    ],
+    windows: [{ from: '2026-07-22', to: '2026-08-21', rows: 1129, ok: true },
+      { from: '2025-10-23', to: '2025-11-22', rows: 0, ok: false }] },
+  { source: 'hotel', mode: 'incremental', status: 'ok', finished_at: new Date().toISOString(),
+    rows_written: 135, chunks_total: 1, chunks_failed: 0, failed_windows: [], windows: [] },
+  { source: 'fms', mode: 'incremental', status: 'ok', finished_at: new Date().toISOString(),
+    rows_written: 416, chunks_total: 1, chunks_failed: 0, failed_windows: [], windows: [] },
 ]));
 app.get('/api/kpis', (_, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, completion_pct: 89,
   cancel_pct: 10.7, drivers: 56, vehicles: 52, revenue: 41188, live_vehicles: 48, fresh: 44, alerts: 8863 }));

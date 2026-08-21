@@ -588,9 +588,24 @@ app.get('/api/platforms', wrap(async (_, res) => res.json(await q(
   `SELECT platform, fleet_id, count(*)::int trips, min(requested_at) earliest, max(requested_at) latest
    FROM trip GROUP BY platform, fleet_id ORDER BY trips DESC`))));
 
-app.get('/api/status', wrap(async (_, res) => res.json(await q(
-  `SELECT DISTINCT ON (source, mode) source, mode, status, rows_written, window_start, window_end, finished_at, error
-   FROM collection_run ORDER BY source, mode, finished_at DESC`))));
+/* The latest run per source and mode — including which of its windows failed.
+   A run that wrote rows while most of its windows failed reported status='ok'
+   for months while the Uber trip history had a 299-day hole in it. `status`
+   now distinguishes them, and `failed_windows` names the dates, which is what
+   makes a hole fixable rather than merely visible. */
+app.get('/api/status', wrap(async (_, res) => res.json((await q(
+  `SELECT DISTINCT ON (source, mode) source, mode, status, rows_written, window_start, window_end,
+          finished_at, error, chunks_total, chunks_failed, detail
+   FROM collection_run ORDER BY source, mode, finished_at DESC`)).map((r) => {
+  const detail = typeof r.detail === 'string' ? JSON.parse(r.detail) : r.detail;
+  return {
+    ...r,
+    detail: undefined,
+    failed_windows: (detail || []).filter((c) => c.error)
+      .map((c) => ({ from: c.from, to: c.to, error: c.error })),
+    windows: (detail || []).map((c) => ({ from: c.from, to: c.to, rows: c.rows, ok: !c.error })),
+  };
+}))));
 
 app.get('/api/coverage', wrap(async (_, res) => res.json({
   trips: await q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts FROM trip GROUP BY 1`),

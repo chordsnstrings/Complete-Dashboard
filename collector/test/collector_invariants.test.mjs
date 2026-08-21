@@ -23,7 +23,17 @@ check('the concurrency cap is waited out, not skipped', /CONCURRENCY_HINT/.test(
 // A silent skip is what turned a broken backfill into a successful empty one.
 check('an unexpected chunk failure logs as an error, not a warning',
   /log\[expected \? 'info' : 'error'\]/.test(uber));
-check('repeated chunk failures are reported at the end of the run', /trip backfill degraded/.test(uber));
+// A run that wrote rows while nine of its twelve windows failed recorded
+// status='ok', which is how a 299-day hole in the trip history stayed hidden.
+check('failed windows are named at the end of the run', /trip backfill left holes/.test(uber));
+check('the run records every window it attempted, not just a total',
+  /return \{ total, chunks \}/.test(uber) && /chunks: trips\.chunks/.test(uber));
+check('a window that fails is recorded with the dates that would let it be re-fetched',
+  /chunk\.error =/.test(uber) && /from: iso\(s\), to: iso\(e\)/.test(uber));
+// A backfill that starts twelve months ago and dies partway never reaches the
+// months anyone is looking at.
+check('windows are fetched newest first so a truncated run is still useful',
+  /windows\.reverse\(\)/.test(uber));
 check('chunks are paced between reports', /await sleep\(consecutiveFailures \? /.test(uber));
 // An expired web cookie answers with `errors` and no data, which read as
 // "this fleet has no drivers" and quietly zeroed every performance record.
