@@ -3,10 +3,11 @@
 //   node src/index.js backfill      — pull the last N months (one-off)
 //   node src/index.js incremental   — pull the trailing window (one-off)
 //   node src/index.js analyst       — one analyst pass over the last 30 days (costs a model call)
+//   node src/index.js probe         — describe every provider surface the collectors call
 //   node src/index.js schedule      — long-running: cron incrementals + realtime polling (container default)
 import cron from 'node-cron';
 import { migrate, pool } from './db.js';
-import { backfill, incremental, cabmanTick, liveStatusTick, analystPass } from './run.js';
+import { backfill, incremental, cabmanTick, liveStatusTick, analystPass, probePass } from './run.js';
 import { config } from './config.js';
 import { log } from './log.js';
 
@@ -18,6 +19,7 @@ async function main() {
   if (cmd === 'backfill') return backfill();
   if (cmd === 'incremental') return incremental();
   if (cmd === 'analyst') return analystPass();
+  if (cmd === 'probe') return probePass();
 
   if (cmd === 'schedule') {
     log.info('scheduler', 'starting', {
@@ -34,6 +36,9 @@ async function main() {
        Once a day, at 03:10 Dubai (23:10 UTC), after the overnight incremental
        has landed the previous day in full. */
     cron.schedule('10 23 * * *', () => analystPass().catch((e) => log.error('scheduler', 'analyst', { err: String(e) })));
+    /* A provider changes what it sends without telling anyone, and an expired
+       credential looks like a quiet week. Describe every surface daily. */
+    cron.schedule('40 22 * * *', () => probePass());
     // honour on-demand runs queued from the Settings page (POST /api/settings/trigger)
     setInterval(async () => {
       try {
@@ -44,12 +49,14 @@ async function main() {
         log.info('scheduler', `on-demand ${mode} requested`);
         if (mode === 'backfill') await backfill();
         else if (mode === 'analyst') await analystPass();
+        else if (mode === 'probe') await probePass();
         else await incremental();
       } catch (e) { log.error('scheduler', 'trigger poll', { err: String(e) }); }
     }, 20000);
 
     // kick one of each at boot so the dashboard has fresh data immediately
     cabmanTick();
+    probePass();
     incremental().catch((e) => log.error('scheduler', 'boot-incremental', { err: String(e) }));
     return new Promise(() => {}); // run forever
   }

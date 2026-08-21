@@ -671,6 +671,27 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
    generation pass is a collector job, because it costs a model call and must
    not be triggerable by anyone who loads a page. */
 export function analystRoutes(app, { q, wrap, range }) {
+  /* What every provider surface actually sends, and which of those fields we
+     have nowhere to put. Read from the stored probe rather than run live: the
+     credentials live in the collector, and a page load must never be able to
+     spend somebody else's API quota. */
+  app.get('/api/probe/results', wrap(async (_req, res) => {
+    const rows = await q(
+      `SELECT provider, surface, ok, http_status, record_count, top_keys, fields,
+              unmapped, error, note, probed_at
+       FROM provider_probe ORDER BY provider, surface`);
+    res.json({
+      surfaces: rows.map((r) => ({ ...r,
+        fields: typeof r.fields === 'string' ? JSON.parse(r.fields) : r.fields,
+        unmapped_n: r.unmapped?.length ?? null })),
+      last_probe: rows.reduce((a, r) => (!a || r.probed_at > a ? r.probed_at : a), null),
+      failing: rows.filter((r) => !r.ok).map((r) => ({ provider: r.provider, surface: r.surface, error: r.error })),
+      note: 'Each surface here is one the collectors already call, with the same credentials and the '
+        + 'same read-only verb. Values are shown only for fields narrow enough to be a dimension; '
+        + 'anything wider is an identifier, an address or free text and its contents are not recorded.',
+    });
+  }));
+
   app.get('/api/analyst/findings', wrap(async (req, res) => {
     const [from, to] = range(req);
     const verdicts = String(req.query.verdict || 'confirmed').split(',')

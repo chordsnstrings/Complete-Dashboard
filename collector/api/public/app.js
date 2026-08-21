@@ -13,6 +13,7 @@ import { renderSettlement, SETTLE_TABS } from './settlement.js';
 import { renderCoverage } from './coverage.js';
 import { renderCorridors } from './corridors.js';
 import { renderAnalyst, ANALYST_TABS } from './analyst.js';
+import { renderProviders } from './providers.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -58,6 +59,7 @@ const VIEWS = [
   { id: 'map', label: 'Map & replay', ic: '◍', grp: 'Operate', sub: 'Where every vehicle is now, and where it went on any given day' },
   { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Operate', sub: 'Collector health, coverage and history depth' },
   { id: 'coverage', label: 'Collection gaps', ic: '▦', grp: 'Operate', sub: 'Which days each source actually collected — a hole here makes every rate across it wrong' },
+  { id: 'providers', label: 'What each API offers', ic: '⌗', grp: 'Operate', sub: 'Every field each provider sends, and the ones we currently have nowhere to put' },
   { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Configure', sub: 'Credentials and collection schedule' },
 ];
 
@@ -311,6 +313,7 @@ V.property = async (root) => {
 V.settlement = async (root) => renderSettlement(root, SETTLE_TABS.some((t) => t.id === state.param) ? state.param : 'mix');
 V.coverage = async (root) => renderCoverage(root);
 V.corridors = async (root) => renderCorridors(root);
+V.providers = async (root) => renderProviders(root);
 V.analyst = async (root) => renderAnalyst(root);
 
 V.vehicles = async (root) => {

@@ -27,7 +27,7 @@ const ROUTES = [
   'causes', 'insights',
   'analyst', 'analyst/refuted', 'analyst/immaterial', 'analyst/unsupported', 'analyst/rules',
   'compliance', 'unauthorized',
-  'safety', 'live', 'map', 'sources', 'coverage', 'settings',
+  'safety', 'live', 'map', 'sources', 'coverage', 'providers', 'settings',
 ];
 const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';
 

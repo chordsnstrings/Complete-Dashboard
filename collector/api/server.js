@@ -618,7 +618,7 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
 app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
   // An allowlist, not a pass-through: the value is written to source_state and
   // read back by the collector as an instruction.
-  const mode = ['backfill', 'analyst'].includes(req.body?.mode) ? req.body.mode : 'incremental';
+  const mode = ['backfill', 'analyst', 'probe'].includes(req.body?.mode) ? req.body.mode : 'incremental';
   await pool.query(
     `INSERT INTO source_state (source, fleet_id, key, value, updated_at) VALUES ('collector','-','trigger',$1, now())
      ON CONFLICT (source, fleet_id, key) DO UPDATE SET value=EXCLUDED.value, updated_at=now()`, [mode]);

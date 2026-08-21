@@ -11,7 +11,9 @@ import { log } from '../log.js';
 
 const SRC = 'bolt';
 
-async function fiToken() {
+// Exported so the provider probe can describe the FI gateway's shape without
+// duplicating the OAuth dance.
+export async function fiToken() {
   const body = new URLSearchParams({
     client_id: config.bolt.clientId, client_secret: config.bolt.clientSecret,
     grant_type: 'client_credentials', scope: 'fleet-integration:api',

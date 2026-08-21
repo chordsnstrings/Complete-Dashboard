@@ -895,6 +895,47 @@ app.get('/api/analyst/rules', (_, r) => r.json({
   note: 'The model chooses a metric, a dimension and a segment from these lists. It never writes a query.',
 }));
 
+
+app.get('/api/probe/results', (_, r) => {
+  const f = (key, fill, distinct, values, type = 'string') => ({ key, type, fill_pct: fill, distinct_seen: distinct, values });
+  const surfaces = [
+    { provider: 'uber', surface: 'drivers', ok: true, http_status: 200, record_count: 50,
+      top_keys: ['driverInformation', 'paginationResult'], note: 'OAuth REST',
+      fields: [f('driverId', 100, 50, null), f('email', 100, 50, null), f('firstName', 100, 48, null),
+        f('phoneNumber.countryCode', 100, 1, ['+971']), f('status', 100, 3, ['ACTIVE', 'WAITLIST', 'INACTIVE'])],
+      unmapped: ['driverIdEncrypted', 'phoneNumber.countryCode'] },
+    { provider: 'uber', surface: 'driver-actions', ok: true, http_status: 200, record_count: 50,
+      top_keys: ['driverStatusOverviews'], note: 'OAuth REST',
+      fields: [f('onboardingStatus', 100, 4, ['ONBOARDING_STATUS_ACTIVE', 'ONBOARDING_STATUS_WAITLIST', 'ONBOARDING_STATUS_INACTIVE', 'ONBOARDING_STATUS_PENDING']),
+        f('vehicleInfo.licensePlate', 100, 40, null), f('statusEntries', 52, 1, [null])],
+      unmapped: ['onboardingStatus', 'statusEntries'] },
+    { provider: 'uber', surface: 'trip-report-session', ok: false, http_status: null, record_count: null,
+      top_keys: null, fields: null, unmapped: null,
+      note: 'The trip export needs a supplier.uber.com session cookie, which expires and has to be re-pasted',
+      error: 'Error: UBER_WEB_COOKIE not set (session expired?)' },
+    { provider: 'hotel', surface: 'trip-report', ok: true, http_status: 200, record_count: 135,
+      top_keys: ['data'], note: 'the bookings themselves',
+      fields: [f('paymentMethod', 100, 8, ['cash-driver', 'pos-driver', 'room-charge', 'posted-for-salary', 'hotel-charge', 'cash-supervisor', 'pos-supervisor', 'foc-complimentary']),
+        f('tripZone', 56, 2, ['inside-dubai', 'outside-dubai']), f('type', 100, 3, ['pick_and_drop', 'drop_off', 'hourly']),
+        f('overRun', 100, 2, ['false', 'true']), f('driverStartLat', 97, 654, null), f('roomNumber', 13, 139, null)],
+      unmapped: ['roomNumber', 'tripPurpose', 'stops', 'hotelOperator'] },
+    { provider: 'fms', surface: 'ecosine:GetAlertData', ok: true, http_status: 200, record_count: 220,
+      top_keys: ['Data'], note: 'harsh-driving and power events',
+      fields: [f('Alert Name', 100, 5, ['Harsh Acceleration', 'Harsh Brake', 'Main Power Lost', 'Overspeed', 'Idle']),
+        f('Start Location', 98, 573, null), f('Plate No', 100, 52, null)],
+      unmapped: ['Start Location'] },
+    { provider: 'yango', surface: 'transactions/park/list', ok: true, http_status: 200, record_count: 50,
+      top_keys: ['transactions', 'cursor'], note: 'the park ledger',
+      fields: [f('category_id', 100, 6, ['platform_commission', 'cash_collected', 'partner_service_manual', 'tip', 'fee', 'bonus']),
+        f('amount', 100, 44, null), f('event_at', 100, 50, null)],
+      unmapped: ['category_id', 'event_at'] },
+  ].map((s) => ({ ...s, unmapped_n: s.unmapped ? s.unmapped.length : null,
+    probed_at: new Date(Date.now() - 3600e3).toISOString(), error: s.error || null }));
+  r.json({ surfaces, last_probe: new Date(Date.now() - 3600e3).toISOString(),
+    failing: surfaces.filter((s) => !s.ok).map((s) => ({ provider: s.provider, surface: s.surface, error: s.error })),
+    note: 'Each surface here is one the collectors already call, with the same credentials and the same read-only verb.' });
+});
+
 app.get(/^\/api\//, (_, r) => r.json([]));
 
 app.use(express.static(join(__dir, 'api', 'public')));

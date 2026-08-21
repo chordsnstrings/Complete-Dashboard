@@ -827,3 +827,6 @@ b.warn-t{color:var(--warn)}
   padding:3px 9px;border-radius:999px;border:1px solid var(--rule);
   background:var(--surface-2);color:var(--ink-2);
 }
+.chips-l{font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-3);margin-right:6px}
+.chip.warn{border-color:var(--warn);color:var(--ink);background:var(--warn-bg)}
+span.dim{color:var(--ink-3);font-size:.72rem}

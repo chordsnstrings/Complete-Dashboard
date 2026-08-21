@@ -11,6 +11,7 @@ import * as events from './sources/events.js';
 import { reconcile } from './reconcile.js';
 import { computeInsights } from './insights.js';
 import { runAnalyst } from './analyst.js';
+import { probeAll } from './probe.js';
 import { rebuildCustody } from './custody.js';
 import { config, loadSettings } from './config.js';
 import { monthsAgo, daysAgo } from './util.js';
@@ -59,6 +60,16 @@ export async function analystPass({ days = 30 } = {}) {
     });
     return r;
   } catch (e) { log.error('analyst', 'pass failed', { err: String(e) }); return null; }
+}
+
+/* Describe every provider surface the collectors call, so "what else could we
+   be collecting" is answerable from evidence rather than from memory. Cheap —
+   one small request per surface — but it runs on its own schedule rather than
+   inside runWindow, because a failing probe must never be able to delay or
+   fail a collection. */
+export async function probePass() {
+  try { return await probeAll({ days: 3 }); }
+  catch (e) { log.error('probe', 'pass failed', { err: String(e) }); return null; }
 }
 
 export const backfill = () => runWindow('backfill', monthsAgo(config.backfillMonths), new Date());
