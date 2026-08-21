@@ -6,7 +6,7 @@
 import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
 import { upsertMany, logRun } from '../db.js';
-import { dateChunks, dotDate, parseFmsTime } from '../util.js';
+import { dateChunks, dotDate, iso, parseFmsTime } from '../util.js';
 import { log } from '../log.js';
 
 const SRC = 'fms';
@@ -18,21 +18,42 @@ async function call(op, params) {
 }
 
 // ---- historical trips ----
+/* This loop had no per-window error handling at all: a throw on window 3
+   abandoned windows 4 through 12 and surfaced as ONE error against the whole
+   fleet, with no record of which months were never attempted. That is the
+   exact shape that hid a 299-day hole in the Uber history for months, and FMS
+   currently has a 155-day hole of its own — over a period Uber, now fully
+   collected, shows as busy. So the fleet was working and this source has been
+   quietly failing, and nothing recorded where.
+
+   Newest first, for the same reason Uber is: a backfill that dies partway
+   should have landed the months anybody is actually looking at. */
 async function pullTrips(fleet, from, to, onStep) {
   let total = 0;
   /* The longest step in the whole collection sequence: 130 vehicles across
      twelve monthly windows of five-minute telematics, four and a half hours
      end to end. Reporting only on completion makes that indistinguishable from
      a hung process for the entire afternoon. */
-  const windows = [...dateChunks(from, to, 31)];
+  const windows = [...dateChunks(from, to, 31)].reverse();
+  const chunks = [];
   let wi = 0;
   for (const [s, e] of windows) {
     await onStep?.({ window: `${dotDate(s)}..${dotDate(e)}`, index: wi++, of: windows.length,
       rows_so_far: total, fleet: fleet.fleet });
-    const { data } = await call('GetTripPassenger', {
-      username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
-      fromdate: dotDate(s), todate: dotDate(e),
-    });
+    const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
+    chunks.push(chunk);
+    let data;
+    try {
+      ({ data } = await call('GetTripPassenger', {
+        username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
+        fromdate: dotDate(s), todate: dotDate(e),
+      }));
+    } catch (err) {
+      chunk.error = String(err).slice(0, 300);
+      log.error(SRC, `trip window ${dotDate(s)}..${dotDate(e)} FAILED`,
+        { fleet: fleet.fleet, err: chunk.error });
+      continue;
+    }
     const rows = (data?.Data || []).map((t) => {
       const plate = normPlate(t['Plate No']);
       const start = parseFmsTime(t['Start Time']);
@@ -46,19 +67,40 @@ async function pullTrips(fleet, from, to, onStep) {
       };
     }).filter((r) => r.requested_at);
     if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
+    chunk.rows = rows.length;
     log.info(SRC, `trips ${fleet.fleet} ${dotDate(s)}..${dotDate(e)}`, { rows: rows.length });
   }
-  return total;
+  const failed = chunks.filter((c) => c.error).length;
+  if (failed) {
+    log.error(SRC, 'trip backfill left holes', { fleet: fleet.fleet, failed, of: chunks.length,
+      windows: chunks.filter((c) => c.error).map((c) => `${c.from}..${c.to}`).join(', ') });
+  }
+  /* A window that succeeded and returned nothing is recorded too. FMS has
+     months that come back empty while Uber shows the same days busy, and the
+     difference between "asked and got nothing" and "never asked" is the whole
+     question — one is the provider's answer, the other is our bug. */
+  return { total, chunks };
 }
 
 // ---- historical driver-behaviour alerts ----
 async function pullAlerts(fleet, from, to) {
   let total = 0;
-  for (const [s, e] of dateChunks(from, to, 31)) {
-    const { data } = await call('GetAlertData', {
-      username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
-      fromdate: dotDate(s), todate: dotDate(e),
-    });
+  const chunks = [];
+  for (const [s, e] of [...dateChunks(from, to, 31)].reverse()) {
+    const chunk = { from: iso(s), to: iso(e), rows: 0, error: null, kind: 'alerts' };
+    chunks.push(chunk);
+    let data;
+    try {
+      ({ data } = await call('GetAlertData', {
+        username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
+        fromdate: dotDate(s), todate: dotDate(e),
+      }));
+    } catch (err) {
+      chunk.error = String(err).slice(0, 300);
+      log.error(SRC, `alert window ${dotDate(s)}..${dotDate(e)} FAILED`,
+        { fleet: fleet.fleet, err: chunk.error });
+      continue;
+    }
     const rows = (data?.Data || []).map((a) => {
       const plate = normPlate(a['Plate No']);
       const at = parseFmsTime(a['Alert Date Time']);
@@ -68,8 +110,9 @@ async function pullAlerts(fleet, from, to) {
       };
     }).filter((r) => r.occurred_at);
     if (rows.length) total += await upsertMany('alert', rows, ['platform', 'external_id']);
+    chunk.rows = rows.length;
   }
-  return total;
+  return { total, chunks };
 }
 
 // ---- live snapshot (also usable as a realtime poller) ----
@@ -95,8 +138,12 @@ export async function collect({ from, to, mode, onStep }) {
     try {
       const trips = await pullTrips(fleet, from, to, onStep);
       const alerts = await pullAlerts(fleet, from, to);
-      await logRun({ source: SRC, fleet_id: fleet.fleet, mode, window_start: from, window_end: to, status: 'ok', rows_written: trips + alerts });
-      log.info(SRC, `done ${fleet.fleet}`, { trips, alerts });
+      // logRun downgrades a run to 'partial' when any chunk failed, so a run
+      // that wrote rows AND left windows unfetched cannot report 'ok'.
+      await logRun({ source: SRC, fleet_id: fleet.fleet, mode, window_start: from, window_end: to,
+        rows_written: trips.total + alerts.total, chunks: [...trips.chunks, ...alerts.chunks] });
+      log.info(SRC, `done ${fleet.fleet}`, { trips: trips.total, alerts: alerts.total,
+        windows_failed: [...trips.chunks, ...alerts.chunks].filter((c) => c.error).length });
     } catch (e) {
       await logRun({ source: SRC, fleet_id: fleet.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
       log.error(SRC, `failed ${fleet.fleet}`, { err: String(e) });

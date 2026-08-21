@@ -159,6 +159,27 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
     String((idx.match(/\$\{ADVANCED\}/g) || []).length));
   check('the abandonment message names both kinds of progress',
     /without completing a single source /.test(idx) && /or collection window/.test(idx));
+
+  /* ── FMS had the exact failure shape that hid the Uber hole ───────────────
+     Its window loop had no try/catch at all, so a throw on window 3 abandoned
+     windows 4 through 12 and surfaced as one error against the whole fleet,
+     with no record of which months were never attempted. FMS is currently dark
+     for 155 days over a period Uber — now fully collected — shows as busy, so
+     the fleet was working and this source has been quietly failing. */
+  const fmsSrc = (await import('node:fs')).readFileSync('src/sources/fms.js', 'utf8');
+  check('an FMS window that fails does not abandon the windows after it',
+    /trip window \$\{dotDate\(s\)\}\.\.\$\{dotDate\(e\)\} FAILED/.test(fmsSrc)
+    && /continue;/.test(fmsSrc));
+  check('the alert loop is protected the same way',
+    /alert window \$\{dotDate\(s\)\}\.\.\$\{dotDate\(e\)\} FAILED/.test(fmsSrc));
+  check('FMS records every window it attempted, not just a total',
+    /return \{ total, chunks \};/.test(fmsSrc)
+    && /chunks: \[\.\.\.trips\.chunks, \.\.\.alerts\.chunks\]/.test(fmsSrc));
+  check('an FMS run that left windows unfetched cannot report ok',
+    !/status: 'ok', rows_written: trips \+ alerts/.test(fmsSrc));
+  check('FMS windows are fetched newest first, so a truncated run is still useful',
+    (fmsSrc.match(/dateChunks\(from, to, 31\)\]\.reverse\(\)/g) || []).length === 2,
+    String((fmsSrc.match(/\.reverse\(\)/g) || []).length));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
