@@ -18,7 +18,8 @@ const iso = (d) => d.toISOString();
 const daysAgo = (n) => new Date(now.getTime() - n * 864e5);
 
 // IDLE-1 has telemetry but no trips; BUSY-1 works normally
-for (const [plate, hoursAgo] of [['IDLE1', 2], ['BUSY1', 1], ['DARK1', 100]]) {
+// IDLE1: reporting now, not earning. BUSY1: working. STALE1: dark 4 days. DARK1: dark 400 days.
+for (const [plate, hoursAgo] of [['IDLE1', 2], ['BUSY1', 1], ['STALE1', 100], ['DARK1', 400 * 24]]) {
   await q(`INSERT INTO telemetry_snapshot (source,fleet_id,plate,captured_at,polled_at,lat,lng,speed,status)
            VALUES ('cabman','ecosine',$1,$2,$2,25.2,55.3,0,'Active')`, [plate, iso(new Date(now - hoursAgo * 36e5))]);
 }
@@ -98,7 +99,28 @@ check('endOfDay bound includes same-day trips', cancFull[0].n === 60 && Math.abs
 // ── rule 7: stale tracker ────────────────────────────────────────────────
 const stale = await q(`SELECT DISTINCT ON (plate) plate, captured_at FROM telemetry_snapshot ORDER BY plate, polled_at DESC`);
 const staleOnes = stale.filter((r) => (Date.now() - new Date(r.captured_at)) / 36e5 >= 24).map((r) => r.plate);
-check('stale_tracker finds the dark vehicle', staleOnes.includes('DARK1') && !staleOnes.includes('BUSY1'), JSON.stringify(staleOnes));
+check('stale_tracker finds recently-dark vehicles', staleOnes.includes('STALE1') && !staleOnes.includes('BUSY1'), JSON.stringify(staleOnes));
+
+
+// ── regression: idle vs dormant must not overlap, and "reporting" must be true ──
+// A vehicle dark since 2024 was previously reported as "the tracker is alive".
+const idleRecent = await q(
+  `WITH seen AS (SELECT plate,max(captured_at) last_seen FROM telemetry_snapshot GROUP BY plate),
+        earned AS (SELECT plate,count(*)::int trips FROM trip WHERE requested_at > now() - interval '14 days' GROUP BY plate)
+   SELECT s.plate FROM seen s LEFT JOIN earned e USING (plate)
+   WHERE coalesce(e.trips,0)=0 AND s.last_seen > now() - interval '48 hours'`);
+const dormant = await q(
+  `SELECT plate FROM telemetry_snapshot GROUP BY plate HAVING max(captured_at) < now() - interval '30 days'`);
+const idleSet = new Set(idleRecent.map(r=>r.plate)), dormSet = new Set(dormant.map(r=>r.plate));
+const overlap = [...idleSet].filter(p=>dormSet.has(p));
+check('idle excludes long-dark vehicles', !idleSet.has('DARK1'), JSON.stringify([...idleSet]));
+check('dormant catches the long-dark vehicle', dormSet.has('DARK1'), JSON.stringify([...dormSet]));
+check('idle and dormant never overlap', overlap.length === 0, JSON.stringify(overlap));
+
+// stale_tracker is scoped 24h..30d so it cannot double-report a dormant vehicle
+const staleScoped = stale.filter((r) => {
+  const h = (Date.now() - new Date(r.captured_at)) / 36e5; return h >= 24 && h <= 24*30; }).map(r=>r.plate);
+check('stale_tracker window excludes dormant', !staleScoped.some(p=>dormSet.has(p)), JSON.stringify(staleScoped));
 
 // ── rule 8: weather outlook ──────────────────────────────────────────────
 const wx = await q(`SELECT day,temp_max,precipitation FROM weather_daily WHERE is_forecast`);

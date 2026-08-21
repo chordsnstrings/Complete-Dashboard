@@ -17,30 +17,62 @@ async function put(row) {
     ['code', 'entity_type', 'entity_id', 'window_start', 'window_end']);
 }
 
-/* ─────────────────── 1. Idle vehicles: capital earning nothing ─────────────────── */
-async function idleVehicles(from, to) {
+/* ─────────────────── 1. Idle vehicles: capital earning nothing ───────────────────
+   Only counts a vehicle as "idle" when its tracker is genuinely reporting now.
+   A vehicle dark for weeks is a different problem (see dormantVehicles) and saying
+   "the tracker is alive" about a two-year-old fix would be plainly untrue. Uses a
+   fixed 14-day earning lookback rather than the collection window, so a 3-day
+   incremental run cannot label a car idle after one quiet weekend. */
+const IDLE_LOOKBACK_DAYS = 14;
+
+async function idleVehicles() {
   const rows = await q(
     `WITH seen AS (
        SELECT plate, fleet_id, max(captured_at) last_seen
        FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, fleet_id),
      earned AS (
-       SELECT plate, count(*)::int trips, coalesce(sum(price),0) revenue, max(requested_at) last_trip
-       FROM trip WHERE requested_at BETWEEN $1 AND $2 AND plate IS NOT NULL GROUP BY plate)
-     SELECT s.plate, s.fleet_id, s.last_seen, coalesce(e.trips,0) trips,
-            coalesce(e.revenue,0) revenue, e.last_trip
+       SELECT plate, count(*)::int trips, max(requested_at) last_trip
+       FROM trip WHERE requested_at > now() - ($1 || ' days')::interval AND plate IS NOT NULL
+       GROUP BY plate)
+     SELECT s.plate, s.fleet_id, s.last_seen, coalesce(e.trips,0) trips, e.last_trip
      FROM seen s LEFT JOIN earned e USING (plate)
      WHERE coalesce(e.trips,0) = 0
-     ORDER BY s.last_seen DESC`, [from, to]);
-  const days = Math.max(1, Math.round((new Date(to) - new Date(from)) / 864e5));
+       AND s.last_seen > now() - interval '48 hours'     -- tracker genuinely reporting
+     ORDER BY s.last_seen DESC`, [String(IDLE_LOOKBACK_DAYS)]);
   for (const r of rows) {
+    const lastTrip = r.last_trip
+      ? `Its last recorded trip was ${new Date(r.last_trip).toISOString().slice(0, 10)}.`
+      : `No trip has ever been recorded for this plate in the collected data.`;
     await put({
       code: 'idle_vehicle', severity: 'critical', category: 'utilisation',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
-      title: `${r.plate} earned nothing in ${days} days`,
-      detail: `The tracker is alive (last fix ${new Date(r.last_seen).toISOString().slice(0, 16).replace('T', ' ')}) but no trip on any platform in this window. The car exists, is being paid for, and is not producing.`,
-      action: `Confirm it is not in workshop//reserve. If roadworthy, assign a driver or take it off the fleet cost base.`,
-      impact_aed: money(days * VEHICLE_DAY_COST_AED), metric: 0,
-      window_start: from, window_end: to,
+      title: `${r.plate} is reporting but has not earned in ${IDLE_LOOKBACK_DAYS} days`,
+      detail: `The tracker reported as recently as ${new Date(r.last_seen).toISOString().slice(0, 16).replace('T', ' ')}, so the vehicle is present and powered — but no trip on any platform in the last ${IDLE_LOOKBACK_DAYS} days. ${lastTrip}`,
+      action: `Confirm it is not in workshop or reserve. If roadworthy, assign a driver — otherwise take it off the active cost base.`,
+      impact_aed: money(IDLE_LOOKBACK_DAYS * VEHICLE_DAY_COST_AED), metric: 0,
+      window_start: null, window_end: null,
+    });
+  }
+  return rows.length;
+}
+
+/* ─────────────────── 1b. Dormant vehicles: is this still our car? ─────────────────── */
+async function dormantVehicles() {
+  const rows = await q(
+    `SELECT plate, fleet_id, max(captured_at) last_seen
+     FROM telemetry_snapshot WHERE plate IS NOT NULL
+     GROUP BY plate, fleet_id
+     HAVING max(captured_at) < now() - interval '30 days'
+     ORDER BY 3 DESC`);
+  for (const r of rows) {
+    const days = Math.round((Date.now() - new Date(r.last_seen)) / 864e5);
+    await put({
+      code: 'vehicle_dormant', severity: 'warning', category: 'data',
+      entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
+      title: `${r.plate} has sent no signal for ${days} days`,
+      detail: `Last position ${new Date(r.last_seen).toISOString().slice(0, 10)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is still carried in the vehicle list, so it quietly inflates every per-vehicle average.`,
+      action: `Reconcile against the asset register: retire it, or refit the tracker if the car is still ours.`,
+      impact_aed: null, metric: days, window_start: null, window_end: null,
     });
   }
   return rows.length;
@@ -187,15 +219,17 @@ async function volumeTrend() {
   return 1;
 }
 
-/* ─────────────────── 7. Stale trackers: blind spots in the fleet ─────────────────── */
+/* ─────────────────── 7. Stale trackers: recently went dark ───────────────────
+   Scoped to 24h–30d. Beyond 30 days it is reported once as `vehicle_dormant`
+   (an asset-register question), so the same plate is never flagged twice. */
 async function staleTelemetry() {
   const rows = await q(
-    `SELECT DISTINCT ON (plate) plate, fleet_id, source, captured_at, polled_at
+    `SELECT DISTINCT ON (plate) plate, fleet_id, source, captured_at
      FROM telemetry_snapshot ORDER BY plate, polled_at DESC`);
   let n = 0;
   for (const r of rows) {
     const ageH = (Date.now() - new Date(r.captured_at)) / 36e5;
-    if (ageH < 24) continue;
+    if (ageH < 24 || ageH > 24 * 30) continue;            // dormant handled separately
     await put({
       code: 'stale_tracker', severity: ageH > 72 ? 'critical' : 'warning', category: 'data',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
@@ -292,7 +326,8 @@ export async function computeInsights({ from, to } = {}) {
   const end = to || new Date().toISOString().slice(0, 10);
   const start = from || new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
   const jobs = [
-    ['idle_vehicle', () => idleVehicles(start, end)],
+    ['idle_vehicle', () => idleVehicles()],
+    ['vehicle_dormant', () => dormantVehicles()],
     ['low_utilisation', () => lowUtilisation(start, end)],
     ['licence', () => licenceRisk()],
     ['unsafe_driving', () => unsafeDriving(start, end)],
