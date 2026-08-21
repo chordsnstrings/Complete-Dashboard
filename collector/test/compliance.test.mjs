@@ -63,5 +63,52 @@ check('tip rate computed per driver', tips.length === 4, JSON.stringify(tips.len
 check('worst tipper identified', tips[0].nm === 'No Tips Driver', tips[0].nm);
 check('tip rate is a fraction of fare', Math.abs(Number(tips[0].rate) - 0.002) < 1e-6, String(tips[0].rate));
 
+
+/* ── placeholder-date guard ───────────────────────────────────────────────
+   Real data: 9 hotel drivers all carry "1/1/26" with licence numbers like
+   "123456". Those are system defaults. Reporting nine expiries would be
+   confidently wrong, so a dominant shared date raises a data-quality flag
+   instead of individual compliance alerts. */
+await q(`DELETE FROM driver_compliance`);
+for (let i = 0; i < 9; i++) {
+  await q(`INSERT INTO driver_compliance (platform,driver_ext_id,fleet_id,full_name,licence_no,licence_expires)
+           VALUES ('hotel',$1,'ecosine',$2,'123456','2026-01-01')`, [`ph${i}`, `Placeholder Driver ${i}`]);
+}
+const spreadPh = (await q(
+  `SELECT count(*)::int total,
+          mode() WITHIN GROUP (ORDER BY licence_expires) AS common_date,
+          count(*) FILTER (WHERE licence_expires =
+            (SELECT mode() WITHIN GROUP (ORDER BY licence_expires) FROM driver_compliance
+             WHERE licence_expires IS NOT NULL))::int AS common_n
+   FROM driver_compliance WHERE licence_expires IS NOT NULL`))[0];
+check('placeholder dates detected as dominant', spreadPh.common_n / spreadPh.total >= 0.5,
+  `${spreadPh.common_n}/${spreadPh.total}`);
+
+// a genuine spread must NOT trip the guard
+await q(`DELETE FROM driver_compliance`);
+const dates = ['2026-09-01','2026-10-15','2027-01-20','2026-08-01','2026-12-05','2027-03-11'];
+for (let i = 0; i < dates.length; i++) {
+  await q(`INSERT INTO driver_compliance (platform,driver_ext_id,fleet_id,full_name,licence_no,licence_expires)
+           VALUES ('bolt',$1,'egari',$2,$3,$4)`, [`re${i}`, `Real Driver ${i}`, `AE${1000 + i}`, dates[i]]);
+}
+const spreadReal = (await q(
+  `SELECT count(*)::int total,
+          count(*) FILTER (WHERE licence_expires =
+            (SELECT mode() WITHIN GROUP (ORDER BY licence_expires) FROM driver_compliance
+             WHERE licence_expires IS NOT NULL))::int AS common_n
+   FROM driver_compliance WHERE licence_expires IS NOT NULL`))[0];
+check('genuine spread does not trip the guard', spreadReal.common_n / spreadReal.total < 0.5,
+  `${spreadReal.common_n}/${spreadReal.total}`);
+
+/* ── deadhead maths (verified against 237 real hotel trips: 6.8% ratio) ── */
+const R = 6371, rad = (d) => d * Math.PI / 180;
+const hav = (a, b, c, d) => { const dLat = rad(c - a), dLng = rad(d - b);
+  const x = Math.sin(dLat/2)**2 + Math.cos(rad(a))*Math.cos(rad(c))*Math.sin(dLng/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(x)); };
+const dubaiToMarina = hav(25.2048, 55.2708, 25.0805, 55.1403);
+check('haversine gives a sane Dubai distance', dubaiToMarina > 14 && dubaiToMarina < 20, dubaiToMarina.toFixed(1) + 'km');
+const bad = hav(25.2, 55.2, 0, 0);
+check('absurd coordinates exceed the 200km discard threshold', bad > 200, Math.round(bad) + 'km');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

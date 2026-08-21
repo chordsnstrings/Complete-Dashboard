@@ -109,6 +109,33 @@ async function lowUtilisation(from, to) {
 
 /* ─────────────────── 3. Licence expiry: a driver who legally cannot drive ─────────────────── */
 async function licenceRisk() {
+  // Guard against placeholder data. One operator's records carry an identical
+  // "1/1/26" on every driver alongside licence numbers like "123456" — a system
+  // default, not nine genuine expiries. Reporting those as compliance breaches
+  // would send someone chasing drivers who are probably fine, and would burn the
+  // credibility of every real expiry on this page. If one date dominates the
+  // population, we raise a data-quality flag instead.
+  const [spread] = await q(
+    `SELECT count(*)::int total,
+            mode() WITHIN GROUP (ORDER BY licence_expires) AS common_date,
+            count(*) FILTER (WHERE licence_expires =
+              (SELECT mode() WITHIN GROUP (ORDER BY licence_expires) FROM driver_compliance
+               WHERE licence_expires IS NOT NULL))::int AS common_n
+     FROM driver_compliance WHERE licence_expires IS NOT NULL`);
+  const placeholderish = spread && spread.total >= 4 && spread.common_n / spread.total >= 0.5;
+  if (placeholderish) {
+    await put({
+      code: 'licence_data_unreliable', severity: 'warning', category: 'data',
+      entity_type: 'fleet', entity_id: 'all',
+      title: `Licence expiry dates look like a default, not real records`,
+      detail: `${spread.common_n} of ${spread.total} drivers carry the identical expiry ${spread.common_date}. That pattern is a system default rather than ${spread.common_n} genuine expiries, so we are not raising individual compliance alerts against it.`,
+      action: `Get real licence dates into the source system — until then this fleet has no working licence-expiry check at all, which is the actual risk.`,
+      impact_aed: null, metric: spread.common_n / spread.total,
+      window_start: null, window_end: null,
+    });
+    return 1;
+  }
+
   const rows = await q(
     `SELECT platform, driver_ext_id, full_name, phone, licence_no, licence_expires, fleet_id
      FROM driver_compliance
