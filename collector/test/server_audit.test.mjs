@@ -1,0 +1,268 @@
+/* The findings a page-by-page audit confirmed against production, held here so
+   they cannot come back.
+   ──────────────────────────────────────────────────────────────────────────
+   Every scenario below was reproduced on the live fleet before it was fixed.
+   They share one shape: a number rendered to a human that was not true, and in
+   most cases a SECOND number on the same screen that contradicted it. */
+import { PGlite } from '@electric-sql/pglite';
+import express from 'express';
+import { readFileSync } from 'node:fs';
+
+const db = new PGlite();
+const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
+let pass = 0, fail = 0;
+const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
+
+for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql',
+  'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql',
+  'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql'])
+  await db.exec(readFileSync(`sql/${f}`, 'utf8'));
+
+let n = 0;
+const trip = (o) => q(
+  `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,requested_at,
+     distance_km,status,product,payment_type,price)
+   VALUES ($1,$2,'ecosine',$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+  [o.platform, `a${n++}`, o.plate ?? null, o.drv ?? null, o.name ?? null, o.at,
+   o.km ?? null, o.status ?? 'completed', o.product ?? null, o.pay ?? null, o.price ?? null]);
+
+const DAY = '2026-08-14';
+// 20 Uber bookings and their 20 FMS telematics twins — the same physical trips.
+for (let i = 0; i < 20; i++) {
+  await trip({ platform: 'uber', plate: 'L100', drv: 'u1', name: 'Kashif Ali Ayyub khan',
+    at: `${DAY}T10:00:00+04:00`, km: 12, pay: 'braintree', product: 'UberX' });
+  await trip({ platform: 'fms', plate: 'L100', at: `${DAY}T10:04:00+04:00`, km: 13 });
+}
+// One FMS row with an odometer-derived absurdity, which schema_v7 warns about.
+await trip({ platform: 'fms', plate: 'L100', at: `${DAY}T11:00:00+04:00`, km: 193027 });
+// The same human on the hotel channel, spelled differently.
+for (let i = 0; i < 5; i++) {
+  await trip({ platform: 'hotel', plate: 'L100', drv: 'h1', name: 'KASHIF ALI AYYUB KHAN',
+    at: `${DAY}T14:00:00+04:00`, km: 20, price: 100, pay: 'room-charge', product: 'pick_and_drop' });
+}
+
+const app = express();
+const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
+const asDate = (v, f) => {
+  const x = String(v || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(x)) return f;
+  const d = new Date(`${x}T00:00:00Z`);
+  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== x ? f : x;
+};
+const range = (req) => {
+  let from = asDate(req.query.from, '2000-01-01'); let to = asDate(req.query.to, '2100-01-01');
+  if (from > to) [from, to] = [to, from];
+  return [from, to, req.query.platform || null, req.query.fleet || null];
+};
+const W = (a = '') => { const c = a ? `${a}.` : '';
+  return `${c}local_day BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR ${c}platform=$3)`
+    + ` AND ($4::text IS NULL OR ${c}fleet_id=$4)`; };
+const F = W();
+const FB = `${F} AND is_booking`;
+const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`;
+const CANON = (col) => `regexp_replace(
+    btrim(regexp_replace(lower(${col}), '\\s+', ' ', 'g')),
+    '(\\m\\w+)( \\1)+', '\\1', 'g')`;
+
+const quote = (v) => {
+  if (!/^[a-z0-9_]{1,32}$/i.test(String(v))) throw new Error(`unexpected platform name: ${v}`);
+  return `'${v}'`;
+};
+const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
+const stub = async () => ({});
+const src = readFileSync('api/server.js', 'utf8');
+const body = src.slice(src.indexOf("/* ───────────────────────── overview ───────────────────────── */"),
+  src.indexOf('/* ───────────────── per-driver detail pages ───────────────── */'));
+// eslint-disable-next-line no-new-func
+new Function('app', 'q', 'wrap', 'range', 'F', 'FB', 'W', 'DAYWIN', 'CANON', 'quote', 'endOfDay',
+  'requireAdmin', 'describeSettings', 'setSetting', 'deleteSetting', 'loadSettings', 'insights', 'pool',
+  body)(app, q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, (_a, _b, next) => next(),
+  stub, stub, stub, stub, { run: stub }, { query: db.query.bind(db) });
+const server = app.listen(0);
+const port = server.address().port;
+const get = async (p) => (await fetch(`http://127.0.0.1:${port}${p}`)).json();
+const WIN = 'from=2026-08-01&to=2026-08-31';
+
+/* ── the platform donut contradicted the Trips KPI six inches above it ───
+   /api/mix dropped the is_booking filter for the platform dimension only, so
+   FMS telematics twins became a slice and donut() printed the sum of every
+   slice as the ring's centre. Live: the ring said "7,167 total" while the
+   Trips card on the same screen said 1,768. */
+{
+  const mix = await get(`/api/mix?by=platform&${WIN}`);
+  const k = await get(`/api/kpis?${WIN}`);
+  const ringTotal = mix.reduce((a, r) => a + r.n, 0);
+  check('the platform donut totals the same population as the Trips KPI',
+    ringTotal === k.trips, `${ringTotal} in the ring vs ${k.trips} in the KPI`);
+  check('telematics is not a slice of the trips ring',
+    !mix.some((r) => r.label === 'fms'), JSON.stringify(mix.map((r) => r.label)));
+  check('but the telematics count is still reported, just not summed in',
+    Object.getOwnPropertyDescriptor(mix, 'telematics_journeys') === undefined
+    || mix.telematics_journeys > 0);
+}
+
+/* ── the same double-count on the vehicle list ───────────────────────── */
+{
+  const v = await get(`/api/vehicles?${WIN}`);
+  const row = v.find((r) => r.plate === 'L100');
+  check('a vehicle’s trips are bookings only', row.trips === 25, String(row.trips));
+  check('its telematics journeys are counted separately', row.telematics_journeys === 21,
+    String(row.telematics_journeys));
+  check('the two are never summed into one column', row.trips !== 46);
+  // 20 uber x 12km + 5 hotel x 20km = 340. The 193,027 km odometer row must not
+  // reach any distance a human reads.
+  // Postgres numeric arrives as a STRING over JSON. Comparing it with === is
+  // itself a bug this product has shipped twice, so the assertions coerce.
+  check('an odometer-derived 193,027 km row is excluded from distance',
+    Number(row.km) === 340, String(row.km));
+  check('and from the telematics distance too', Number(row.telematics_km) === 260,
+    String(row.telematics_km));
+}
+
+/* ── cross-platform said nobody worked two platforms ─────────────────── */
+{
+  const x = await get(`/api/drivers/cross-platform?${WIN}`);
+  check('the platform columns cover every platform with data',
+    x.platforms.includes('hotel') && x.platforms.includes('uber'), JSON.stringify(x.platforms));
+  check('two spellings of one name are one person', x.drivers.length === 1,
+    JSON.stringify(x.drivers.map((d) => d.driver_name)));
+  const d0 = x.drivers[0];
+  check('that person is recognised as cross-platform',
+    d0.platform_count > 1 && x.multi_platform === 1, `${d0.platform_count} platforms`);
+  check('the total equals the sum of the columns beside it',
+    x.platforms.reduce((a, p) => a + (d0[`${p}_trips`] || 0), 0) === d0.total_trips,
+    `${x.platforms.map((p) => `${p}=${d0[`${p}_trips`]}`).join(' ')} vs total ${d0.total_trips}`);
+  check('the fold reports how many accounts it combined', d0.accounts === 2, String(d0.accounts));
+}
+
+/* ── the last day of the window was silently dropped ─────────────────── */
+{
+  await q(`INSERT INTO occupancy_segment (plate, fleet_id, started_at, ended_at, duration_min,
+             distance_km, verdict, verdict_reason, low_confidence)
+           VALUES ('L100','ecosine',$1,$2,26,18,'unauthorized','no completed booking overlaps',false),
+                  ('L100','ecosine',$3,$4,10,4,'unverifiable','a channel was missing',true),
+                  ('L101','ecosine',$5,$6,5,0.2,'stationary','did not travel far enough',false)`,
+    [`${DAY}T22:30:00+04:00`, `${DAY}T22:56:00+04:00`,
+     `${DAY}T23:30:00+04:00`, `${DAY}T23:40:00+04:00`,
+     `${DAY}T12:00:00+04:00`, `${DAY}T12:05:00+04:00`]);
+  // A window ENDING on the day itself must include its evening.
+  const s = await get(`/api/unauthorized/summary?from=${DAY}&to=${DAY}`);
+  check('a 22:30 Dubai segment is inside a window ending that day',
+    s.totals.unauthorized === 1, JSON.stringify(s.totals));
+  check('a 23:30 Dubai segment is too', s.totals.unverifiable === 1, JSON.stringify(s.totals));
+
+  /* ── and the KPI strip omitted two of the seven verdicts ───────────── */
+  check('every verdict the schema defines has a total',
+    ['unauthorized', 'authorized', 'unverifiable', 'pending', 'partial', 'sensor_suspect', 'stationary']
+      .every((v) => v in s.totals), Object.keys(s.totals).join(','));
+  check('the totals sum to the same number the donut shows',
+    s.totals.segments === s.byVerdict.reduce((a, r) => a + r.n, 0), String(s.totals.segments));
+  check('nothing vanishes between the strip and the chart',
+    ['unauthorized', 'authorized', 'unverifiable', 'pending', 'partial', 'sensor_suspect', 'stationary']
+      .reduce((a, v) => a + s.totals[v], 0) === s.totals.segments);
+  check('segments needing a human are counted', s.totals.needs_a_human === 1, String(s.totals.needs_a_human));
+
+  /* ── the evidence trail was never selected ─────────────────────────── */
+  const list = await get(`/api/unauthorized/list?from=${DAY}&to=${DAY}&verdict=all`);
+  check('the verdict carries its reason', list.every((r) => 'verdict_reason' in r));
+  check('and the fields that make a clock skew self-evident',
+    list.every((r) => 'nearest_gap_min' in r && 'nearest_platform' in r && 'channels_checked' in r),
+    Object.keys(list[0] || {}).join(','));
+
+  /* ── the daily chart bucketed in UTC while the drill filtered in Dubai ── */
+  const daily = await get(`/api/unauthorized/daily?from=${DAY}&to=${DAY}`);
+  check('a 23:30 Dubai segment is on the Dubai day, not the next one',
+    daily.length === 1 && String(daily[0].d).slice(0, 10) === DAY,
+    JSON.stringify(daily.map((r) => String(r.d).slice(0, 10))));
+  check('the daily row counts the segments that need a human too',
+    daily[0].needs_a_human === 1 && daily[0].segments === 3, JSON.stringify(daily[0]));
+}
+
+/* ── "stale" was measured from our poll, not from the fix ────────────── */
+{
+  await q(`INSERT INTO telemetry_snapshot (plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, seat_occupied)
+           VALUES ('L100','ecosine','cabman', now() - interval '2 minutes', now(), 25.1, 55.2, 40, true),
+                  ('L101','ecosine','cabman', now() - interval '400 days', now(), 25.1, 55.2, 0, NULL)`);
+  const live = await get('/api/live');
+  const dead = live.find((r) => r.plate === 'L101');
+  const alive = live.find((r) => r.plate === 'L100');
+  check('a tracker silent for 400 days is stale however recently we polled',
+    dead.stale === true, JSON.stringify({ stale: dead.stale, fix: dead.fix_age_min }));
+  check('a tracker reporting two minutes ago is not stale', alive.stale === false);
+  check('the fix age and the poll age are two different numbers',
+    dead.fix_age_min > 500000 && dead.poll_age_min < 5,
+    `fix ${dead.fix_age_min} / poll ${dead.poll_age_min}`);
+}
+
+/* ── harsh driving was attributed to whoever holds the car TODAY ─────── */
+{
+  await q(`INSERT INTO alert (platform, external_id, plate, fleet_id, alert_type, occurred_at)
+           VALUES ('fms','x1','L100','ecosine','Harsh Brake', $1),
+                  ('fms','x2','L100','ecosine','Main Power Lost', $2)`,
+    [`${DAY}T09:00:00+04:00`, `${DAY}T09:30:00+04:00`]);
+  // Two platforms held the car that day — the fan-out that once doubled counts.
+  await q(`INSERT INTO vehicle_driver_day (plate, day, driver_ext_id, driver_name, platform, fleet_id, trips)
+           VALUES ('L100',$1,'u1','Kashif Ali Ayyub khan','uber','ecosine',20),
+                  ('L100',$1,'h1','KASHIF ALI AYYUB KHAN','hotel','ecosine',5),
+                  ('L100',$2,'z9','Someone Else Entirely','uber','ecosine',9)`,
+    [DAY, '2026-08-20']);
+  const byV = await get(`/api/alerts/by-vehicle?${WIN}`);
+  const row = byV.find((r) => r.plate === 'L100');
+  check('two platform rows for one custody day do not double the alert count',
+    row.alerts === 2, String(row.alerts));
+  check('an event type outside the four buckets is counted, not lost',
+    row.other === 1 && row.harsh_brake === 1, JSON.stringify(row));
+  check('the columns and the total can be reconciled',
+    row.harsh_brake + row.harsh_accel + row.sharp_turn + row.overspeed + row.other === row.alerts);
+  const byD = await get(`/api/alerts/by-driver?${WIN}`);
+  const who = byD.find((r) => /Kashif/i.test(r.driver_name || ''));
+  check('the events are attributed to whoever held the car that day',
+    !!who && who.alerts === 2, JSON.stringify(byD.map((r) => [r.driver_name, r.alerts])));
+  check('and not to whoever holds it now',
+    !byD.some((r) => /Someone Else Entirely/.test(r.driver_name || '')),
+    JSON.stringify(byD.map((r) => r.driver_name)));
+  // 20 Uber trips x 12 km + 5 hotel trips x 20 km = 340, across BOTH spellings
+  // of this person's name. Grouping the denominator on the raw string gave 240.
+  check('a per-100km rate is computed over the whole person, not one account',
+    Number(who.booked_km) === 340, String(who.booked_km));
+}
+
+/* ── a NULL seat sensor was rendered as an empty seat ────────────────── */
+{
+  await q(`INSERT INTO telemetry_snapshot (plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, seat_occupied)
+           SELECT 'L200','ecosine','fms', ($1::date)::timestamptz + (g || ' minutes')::interval, now(),
+                  25.1 + g*0.002, 55.2 + g*0.002, 40, NULL
+           FROM generate_series(1,20) g`, [DAY]);
+  const j = await get(`/api/map/journey?plate=L200&day=${DAY}`);
+  check('a feed that never reports occupancy yields null, not 0 km',
+    j.occupied_km === null, JSON.stringify({ occupied_km: j.occupied_km }));
+  check('and says so explicitly', j.occupancy_reported === false && j.occupancy_reported_fixes === 0);
+  check('the trail is still drawn — distance is measured normally', j.distance_km > 0);
+  check('a segment marks occupancy as unknown rather than false',
+    j.segments.every((s) => s.occupied === null));
+}
+
+/* ── the sensor-health panel could not show the failure it warns about ── */
+{
+  // A pad stuck ON: 40 of 40 fixes occupied. Under the old ascending sort this
+  // was the last row of a hundred and never rendered.
+  await q(`INSERT INTO telemetry_snapshot (plate, fleet_id, source, captured_at, polled_at, lat, lng, seat_occupied)
+           SELECT 'L300','ecosine','cabman', ($1::date)::timestamptz + (g || ' minutes')::interval, now(),
+                  25.1, 55.2, true FROM generate_series(1,40) g`, [DAY]);
+  await q(`INSERT INTO telemetry_snapshot (plate, fleet_id, source, captured_at, polled_at, lat, lng, seat_occupied)
+           SELECT 'L400','ecosine','cabman', ($1::date)::timestamptz + (g || ' minutes')::interval, now(),
+                  25.1, 55.2, (g % 3 = 0) FROM generate_series(1,40) g`, [DAY]);
+  const health = await get(`/api/sensor-health?from=${DAY}&to=${DAY}`);
+  check('a pad stuck on is at the top of the list, not the bottom',
+    health[0].plate === 'L300', JSON.stringify(health.map((r) => [r.plate, r.occupied_pct])));
+  check('a plausible pad ranks below both extremes',
+    health.findIndex((r) => r.plate === 'L400') > 0);
+  check('a pad with too few observations is marked unjudgeable rather than accused',
+    health.every((r) => typeof r.judgeable === 'boolean'));
+  check('the occupancy ratio is reported, not just a raw count',
+    Number(health[0].occupied_pct) === 100, String(health[0].occupied_pct));
+}
+
+server.close();
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

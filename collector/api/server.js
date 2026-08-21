@@ -61,6 +61,14 @@ const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d
    straight through, and 500s inside Postgres with "date/time field value out of
    range". The round-trip through Date is what actually distinguishes a
    well-formed string from a real day. */
+/* Platform names come from our own `trip.platform` column, but they are being
+   interpolated into SQL rather than bound, so they are quoted explicitly. A
+   value that is not a plain identifier is rejected rather than escaped. */
+const quote = (v) => {
+  if (!/^[a-z0-9_]{1,32}$/i.test(String(v))) throw new Error(`unexpected platform name: ${v}`);
+  return `'${v}'`;
+};
+
 const asDate = (v, fallback) => {
   const s = String(v || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return fallback;
@@ -86,6 +94,26 @@ const W = (alias = '') => {
     + ` AND ($4::text IS NULL OR ${c}fleet_id=$4)`;
 };
 const F = W();
+
+/* A Dubai-local day window for the tables that are keyed on a raw timestamp
+   rather than on trip_norm's local_day: alert, occupancy_segment,
+   telemetry_snapshot, ledger_entry.
+
+   These bound `col BETWEEN $1 AND $2` with bare calendar strings, so
+   to='2026-08-21' meant 2026-08-21T00:00:00Z — 04:00 Dubai — and everything
+   after 4am on the last requested day was silently dropped. Since the front
+   end's default window ends on today, the live Unauthorized page was rendering
+   all zeros for the current day, every day. */
+const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`;
+
+/* Collapse a driver name to one key per person: lower-cased, whitespace
+   normalised, and with a repeated surname folded ("Asad Khan Khan" is one
+   human). No provider shares a driver id with another, so the name is the only
+   key that spans platforms — and grouping on the raw string split people
+   across their own spellings on three separate pages. */
+const CANON = (col) => `regexp_replace(
+    btrim(regexp_replace(lower(${col}), '\\s+', ' ', 'g')),
+    '(\\m\\w+)( \\1)+', '\\1', 'g')`;
 // Bookings only. A telematics row is a GPS-derived journey, and the same
 // physical trip is recorded by BOTH the ride platform and the tracker — summing
 // them counts it twice. See sql/schema_v7.sql.
@@ -188,16 +216,69 @@ app.get('/api/kpis', wrap(async (req, res) => {
    counted telematics journeys alongside bookings, which double-counts the same
    physical trip. Telematics volume is returned as its own series so movement
    is still visible without being added to demand. */
-app.get('/api/trips/daily', wrap(async (req, res) => res.json(await q(
-  `SELECT local_day AS d,
-          count(*) FILTER (WHERE is_booking)::int trips,
-          count(*) FILTER (WHERE outcome = 'completed')::int completed,
-          count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled,
-          count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
-          round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
-          round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-          count(*) FILTER (WHERE has_fare)::int priced_trips
-   FROM trip_norm WHERE ${F} GROUP BY 1 ORDER BY 1`, range(req)))));
+app.get('/api/trips/daily', wrap(async (req, res) => {
+  const p = range(req);
+  /* Every day in the window, whether or not anything landed on it — and, per
+     day, whether each source that normally reports actually did.
+
+     This used to emit one row per day that had ANY row. barChart plots by
+     array index, so a 124-day collection hole was drawn as two touching bars,
+     and days where only the FMS collector ran came back as trips:0 and were
+     drawn as a collapse to zero. Live, 45 of 91 days showed "0 trips" on days
+     the fleet ran 9,712 telematics journeys, and the default 30-day view showed
+     a 10x growth step that was only the Uber export resuming.
+
+     A day nobody collected and a day nobody drove are different facts and this
+     is where they stop looking the same. */
+  const rows = await q(
+    `WITH cal AS (SELECT generate_series($1::date, $2::date, interval '1 day')::date AS d),
+     agg AS (
+       SELECT local_day AS d,
+              count(*) FILTER (WHERE is_booking)::int trips,
+              count(*) FILTER (WHERE outcome = 'completed')::int completed,
+              count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled,
+              count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+              round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+              round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+              count(*) FILTER (WHERE has_fare)::int priced_trips,
+              count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int drivers
+       FROM trip_norm WHERE ${F} GROUP BY 1
+     ),
+     -- What each source normally does, so "nothing today" can be judged.
+     norm AS (
+       SELECT source, percentile_cont(0.5) WITHIN GROUP (ORDER BY rows) AS median_rows,
+              min(day) AS first_day, max(day) AS last_day
+       FROM source_day_coverage GROUP BY source
+     ),
+     silent AS (
+       SELECT cal.d,
+              count(*) FILTER (WHERE coalesce(c.rows, 0) = 0)::int sources_silent,
+              count(*)::int sources_expected,
+              array_agg(n.source ORDER BY n.source) FILTER (WHERE coalesce(c.rows, 0) = 0) AS silent_sources
+       FROM cal
+       JOIN norm n ON cal.d BETWEEN n.first_day AND n.last_day AND n.median_rows > 0
+       LEFT JOIN source_day_coverage c ON c.source = n.source AND c.day = cal.d
+       GROUP BY cal.d
+     )
+     SELECT to_char(cal.d, 'YYYY-MM-DD') AS d,
+            coalesce(agg.trips, 0) AS trips,
+            coalesce(agg.completed, 0) AS completed,
+            coalesce(agg.cancelled, 0) AS cancelled,
+            coalesce(agg.telematics_journeys, 0) AS telematics_journeys,
+            agg.km, agg.revenue, coalesce(agg.priced_trips, 0) AS priced_trips,
+            coalesce(agg.drivers, 0) AS drivers,
+            coalesce(silent.sources_silent, 0)::int AS sources_silent,
+            coalesce(silent.sources_expected, 0)::int AS sources_expected,
+            silent.silent_sources,
+            -- true when NO source that normally reports reported anything.
+            (silent.sources_expected IS NOT NULL
+             AND silent.sources_silent = silent.sources_expected) AS uncollected
+     FROM cal
+     LEFT JOIN agg ON agg.d = cal.d
+     LEFT JOIN silent ON silent.d = cal.d
+     ORDER BY cal.d`, p);
+  res.json(rows);
+}));
 
 app.get('/api/trips/hourly', wrap(async (req, res) => res.json(await q(
   `SELECT local_hour AS h, count(*)::int trips
@@ -235,9 +316,20 @@ app.get('/api/mix', wrap(async (req, res) => {
             count(*) FILTER (WHERE price IS NOT NULL)::int priced_n,
             round(sum(distance_km) FILTER (WHERE price IS NOT NULL)::numeric,0) priced_km,
             round(avg(distance_km)::numeric,1) avg_km
-     FROM trip_norm WHERE ${dim.col === 'platform' ? F : FB}
+     -- FB, not F, for EVERY dimension including platform. The exception used
+     -- to be here so the platform donut could show FMS as a slice — but FMS
+     -- rows are telematics twins of journeys uber and hotel already report, so
+     -- the ring's centre total became the fleet's trips plus a second copy of
+     -- most of them. Live, that donut printed "7,167 total" six inches under a
+     -- Trips KPI reading 1,768 on the identical window. Telematics volume is
+     -- returned as its own field below rather than as a slice of the same ring.
+     FROM trip_norm WHERE ${FB}
      GROUP BY platform, ${dim.col}
      ORDER BY n DESC`, p);
+
+  const [tele] = await q(
+    `SELECT count(*)::int n, round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 0) km
+     FROM trip_norm WHERE ${F} AND NOT is_booking`, p);
 
   // Rows the provider never labelled are dropped from the breakdown rather than
   // charted as a category called "unknown": every telematics trip has a NULL
@@ -273,6 +365,11 @@ app.get('/api/mix', wrap(async (req, res) => {
     ? fold(labelled, (r) => `${r.platform}: ${r.label}`)
     : fold(labelled, (r) => r.label);
 
+  // The bare array is what several views already consume. The telematics count
+  // rides along as a non-enumerable-ish extra property so a caller that wants
+  // to caption the coverage can, without it becoming a slice.
+  Object.defineProperty(out, 'telematics_journeys', { value: tele?.n ?? 0, enumerable: false });
+  res.set('x-telematics-journeys', String(tele?.n ?? 0));
   res.json(out);
 }));
 
@@ -317,17 +414,44 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => res.json(await q(
    FROM trip_norm WHERE ${F} AND driver_name IS NOT NULL
    GROUP BY driver_name, driver_ext_id, platform ORDER BY trips DESC LIMIT 100`, range(req)))));
 
-// cross-platform view: one row per driver name, columns per platform
-app.get('/api/drivers/cross-platform', wrap(async (req, res) => res.json(await q(
-  `SELECT driver_name,
-          sum((platform='uber')::int)::int uber_trips,
-          sum((platform='yango')::int)::int yango_trips,
-          sum((platform='bolt')::int)::int bolt_trips,
-          sum((platform='fms')::int)::int fms_trips,
-          count(*)::int total_trips, round(sum(distance_km)::numeric,0) km,
-          round(sum(price)::numeric,0) revenue
-   FROM trip_norm WHERE ${F} AND driver_name IS NOT NULL
-   GROUP BY driver_name ORDER BY total_trips DESC LIMIT 100`, range(req)))));
+/* One row per PERSON, with a column per platform that actually has data.
+   Three things were wrong here at once and they compounded:
+     - the hard-coded column list had no `hotel`, which is one of only three
+       platforms with trip data, so a driver working Uber and the hotel channel
+       scored one platform and the panel printed the flat denial "No driver in
+       this window has trips on more than one platform" — on a page whose own
+       directory had already listed five of them;
+     - total_trips was count(*) over ALL platforms while the columns covered
+       four, so a row could show four zeros beside a three-digit total;
+     - the grouping key was the raw name string, so "Kashif Ali Ayyub khan" and
+       "KASHIF ALI AYYUB KHAN" were two people, neither of whom looked
+       cross-platform.
+   The fold is the same one the driver directory uses. */
+app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
+  const p = range(req);
+  const platforms = (await q(
+    `SELECT DISTINCT platform FROM trip_norm WHERE ${F} AND driver_name IS NOT NULL ORDER BY 1`, p))
+    .map((r) => r.platform);
+  const cols = platforms.map((pl) =>
+    `count(*) FILTER (WHERE platform = ${quote(pl)})::int "${pl}_trips"`).join(',\n          ');
+  const rows = await q(
+    `SELECT ${CANON('driver_name')} AS person, max(driver_name) driver_name,
+            ${cols}${cols ? ',' : ''}
+            count(*) FILTER (WHERE is_booking)::int booking_trips,
+            count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+            count(*)::int total_trips,
+            count(DISTINCT platform)::int platform_count,
+            count(DISTINCT driver_ext_id)::int accounts,
+            round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
+            round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+            count(*) FILTER (WHERE has_fare)::int priced_trips
+     FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
+     GROUP BY 1 ORDER BY total_trips DESC LIMIT 150`, p);
+  res.json({ platforms, drivers: rows,
+    multi_platform: rows.filter((r) => r.platform_count > 1).length,
+    note: 'One row per person: platform accounts are folded by name, and the columns cover every '
+      + 'platform with data in this window, so the total is the sum of what is shown.' });
+}));
 
 app.get('/api/drivers/performance', wrap(async (req, res) => res.json(await q(
   `SELECT platform, driver_name, plate, period_start, period_end, trips, hours_online, hours_on_trip,
@@ -338,19 +462,40 @@ app.get('/api/drivers/performance', wrap(async (req, res) => res.json(await q(
 
 /* ───────────────────────── vehicles / fleet ───────────────────────── */
 app.get('/api/vehicles', wrap(async (req, res) => res.json(await q(
-  `SELECT t.plate, count(*)::int trips, round(sum(t.distance_km)::numeric,0) km,
-          round(sum(t.price)::numeric,0) revenue, count(distinct t.driver_ext_id)::int drivers,
+  /* Bookings and telematics journeys are counted separately and never summed:
+     an FMS row is the same physical journey the ride platform already reported,
+     so adding them showed a 2–3.5x overcount as "trips". Distance is guarded by
+     has_distance for the same reason the schema documents — one odometer-derived
+     FMS row carries 193,027 km and put 1.6 million km against a single car. */
+  `SELECT t.plate,
+          count(*) FILTER (WHERE t.is_booking)::int trips,
+          count(*) FILTER (WHERE NOT t.is_booking)::int telematics_journeys,
+          round(sum(t.distance_km) FILTER (WHERE t.is_booking AND t.has_distance)::numeric,0) km,
+          round(sum(t.distance_km) FILTER (WHERE NOT t.is_booking AND t.has_distance)::numeric,0) telematics_km,
+          round(sum(t.price) FILTER (WHERE t.has_fare)::numeric,0) revenue,
+          count(*) FILTER (WHERE t.has_fare)::int priced_trips,
+          count(distinct t.driver_ext_id)::int drivers,
           count(distinct t.platform)::int platforms, max(t.requested_at) last_trip,
           cd.driver_name AS current_driver, cd.as_of AS driver_as_of
    FROM trip_norm t
    LEFT JOIN vehicle_current_driver cd ON cd.plate = t.plate
    WHERE ${W('t')} AND t.plate IS NOT NULL AND t.plate<>''
-   GROUP BY t.plate, cd.driver_name, cd.as_of ORDER BY trips DESC LIMIT 200`, range(req)))));
+   GROUP BY t.plate, cd.driver_name, cd.as_of
+   ORDER BY trips DESC, telematics_journeys DESC LIMIT 200`, range(req)))));
 
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
   `SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
           s.seat_occupied, s.fuel_level, s.ac_on, s.odometer,
-          (now()-s.polled_at > interval '11 minutes') AS stale,
+          /* Staleness is a property of the FIX, not of our poll. CABMAN returns
+             the last known position of every vehicle on every cycle, so a
+             tracker that died in April 2024 still gets a fresh polled_at every
+             five minutes — and 55 of 130 vehicles were being shown as live with
+             no actual fix in over eleven minutes. The poll age is returned
+             separately so "our collector is down" and "this tracker stopped
+             reporting" stay two different states. */
+          (now() - s.captured_at > interval '11 minutes') AS stale,
+          round(extract(epoch FROM now() - s.captured_at) / 60)::int AS fix_age_min,
+          round(extract(epoch FROM now() - s.polled_at) / 60)::int AS poll_age_min,
           cd.driver_name AS current_driver, cd.as_of AS driver_as_of
    FROM (SELECT DISTINCT ON (plate) * FROM telemetry_snapshot ORDER BY plate, polled_at DESC) s
    LEFT JOIN vehicle_current_driver cd ON cd.plate = s.plate
@@ -415,7 +560,7 @@ app.get('/api/map/journey', wrap(async (req, res) => {
 
   const GAP_MIN = 20;          // a longer silence than this is not a straight line
   const segments = [];
-  let cur = null, km = 0, movingKm = 0, occupiedKm = 0;
+  let cur = null, km = 0, movingKm = 0, occupiedKm = 0, measuredKm = 0, occupiedFixes = 0;
   for (let i = 0; i < fixes.length; i++) {
     const f = fixes[i], prev = fixes[i - 1];
     const gapMin = prev ? (new Date(f.captured_at) - new Date(prev.captured_at)) / 6e4 : 0;
@@ -423,11 +568,24 @@ app.get('/api/map/journey', wrap(async (req, res) => {
     if (prev && gapMin <= GAP_MIN && step < 60) {           // 60km in one hop = bad fix
       km += step;
       if ((prev.speed || 0) > 0) movingKm += step;
-      if (prev.seat_occupied) occupiedKm += step;
+      /* A NULL seat sensor is NOT an empty seat. FMS never reports occupancy at
+         all, so treating NULL as false gave every FMS-tracked vehicle a hard
+         "With passenger 0 km · 0% of distance" — including one that ran fifteen
+         bookings and 101.9 km that day — and drew its whole trail dashed in the
+         "Running empty" colour, which is a positive claim rather than an
+         absence. Only fixes that actually reported are measured. */
+      if (prev.seat_occupied !== null && prev.seat_occupied !== undefined) {
+        measuredKm += step;
+        if (prev.seat_occupied) occupiedKm += step;
+      }
     }
-    if (!cur || gapMin > GAP_MIN) { cur = { points: [], occupied: !!f.seat_occupied }; segments.push(cur); }
+    if (f.seat_occupied !== null && f.seat_occupied !== undefined) occupiedFixes++;
+    // `occupied` is tri-state on the wire: true, false, or null for "this feed
+    // does not report it". The map colours the third case neutrally.
+    const occ = f.seat_occupied === null || f.seat_occupied === undefined ? null : !!f.seat_occupied;
+    if (!cur || gapMin > GAP_MIN) { cur = { points: [], occupied: occ }; segments.push(cur); }
     cur.points.push({ t: f.captured_at, lat: f.lat, lng: f.lng, speed: f.speed,
-                      status: f.status, occupied: !!f.seat_occupied });
+                      status: f.status, occupied: occ });
   }
   const [drv] = await q(
     `SELECT driver_name, trips FROM vehicle_driver_day
@@ -437,7 +595,11 @@ app.get('/api/map/journey', wrap(async (req, res) => {
     driver: drv?.driver_name || null, driver_trips: drv?.trips ?? null,
     distance_km: Math.round(km * 10) / 10,
     moving_km: Math.round(movingKm * 10) / 10,
-    occupied_km: Math.round(occupiedKm * 10) / 10,
+    // null, not 0, when no fix on this day reported occupancy at all.
+    occupied_km: occupiedFixes ? Math.round(occupiedKm * 10) / 10 : null,
+    occupancy_measured_km: occupiedFixes ? Math.round(measuredKm * 10) / 10 : 0,
+    occupancy_reported_fixes: occupiedFixes,
+    occupancy_reported: occupiedFixes > 0,
     first_fix: fixes[0]?.captured_at || null,
     last_fix: fixes[fixes.length - 1]?.captured_at || null,
   });
@@ -445,21 +607,103 @@ app.get('/api/map/journey', wrap(async (req, res) => {
 
 /* ───────────────────────── safety ───────────────────────── */
 app.get('/api/alerts/summary', wrap(async (req, res) => res.json(await q(
-  `SELECT alert_type, count(*)::int n FROM alert WHERE occurred_at BETWEEN $1 AND $2
+  `SELECT alert_type, count(*)::int n FROM alert WHERE ${DAYWIN('occurred_at')}
    GROUP BY 1 ORDER BY 2 DESC`, [range(req)[0], range(req)[1]]))));
 
-// Harsh-driving is a person's behaviour, not a plate's — name whoever held the car.
-app.get('/api/alerts/by-vehicle', wrap(async (req, res) => res.json(await q(
-  `SELECT a.plate, cd.driver_name AS current_driver, count(*)::int alerts,
-          sum((a.alert_type ILIKE '%brake%')::int)::int harsh_brake,
-          sum((a.alert_type ILIKE '%accel%')::int)::int harsh_accel,
-          sum((a.alert_type ILIKE '%turn%')::int)::int sharp_turn,
-          sum((a.alert_type ILIKE '%speed%')::int)::int overspeed
-   FROM alert a
-   LEFT JOIN vehicle_current_driver cd ON cd.plate = a.plate
-   WHERE a.occurred_at BETWEEN $1 AND $2
-   GROUP BY a.plate, cd.driver_name ORDER BY alerts DESC LIMIT 100`,
-  [range(req)[0], range(req)[1]]))));
+/* Harsh driving is a person's behaviour, not a plate's — so name whoever held
+   the car ON THE DAY OF THE EVENT.
+
+   This used to join `vehicle_current_driver`, which is DISTINCT ON (plate)
+   ORDER BY day DESC — today's holder. Every alert from every earlier day was
+   therefore attributed to whoever has the car now, which on a fleet with
+   handovers means coaching the wrong person from a year-old event.
+
+   vehicle_driver_day has ONE ROW PER PLATFORM per plate per day, so it is
+   collapsed with DISTINCT ON (plate, day) before the join. Joining it directly
+   multiplied alert counts by the number of platforms a driver worked — the
+   same fan-out that once showed 584 events twice under two spellings of one
+   name. Unattributed events are counted and reported as such rather than being
+   folded into somebody's total. */
+app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
+  const [from, to] = range(req);
+  res.json(await q(
+    `WITH ev AS (
+       SELECT plate, alert_type,
+              (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
+       FROM alert WHERE ${DAYWIN('occurred_at')}
+     ),
+     custody AS (
+       SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id
+       FROM vehicle_driver_day
+       WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
+       ORDER BY plate, day, trips DESC NULLS LAST, driver_name
+     )
+     SELECT ev.plate,
+            count(*)::int alerts,
+            sum((ev.alert_type ILIKE '%brake%')::int)::int harsh_brake,
+            sum((ev.alert_type ILIKE '%accel%')::int)::int harsh_accel,
+            sum((ev.alert_type ILIKE '%turn%')::int)::int sharp_turn,
+            sum((ev.alert_type ILIKE '%speed%')::int)::int overspeed,
+            -- Everything the four buckets above do not catch, so the columns
+            -- and the total can be reconciled instead of silently disagreeing.
+            count(*) FILTER (WHERE ev.alert_type NOT ILIKE '%brake%'
+                               AND ev.alert_type NOT ILIKE '%accel%'
+                               AND ev.alert_type NOT ILIKE '%turn%'
+                               AND ev.alert_type NOT ILIKE '%speed%')::int other,
+            count(*) FILTER (WHERE c.driver_name IS NULL)::int unattributed,
+            count(DISTINCT c.driver_name)::int drivers,
+            (array_agg(c.driver_name ORDER BY c.driver_name)
+               FILTER (WHERE c.driver_name IS NOT NULL))[1] AS top_driver,
+            (array_agg(c.driver_ext_id ORDER BY c.driver_name)
+               FILTER (WHERE c.driver_ext_id IS NOT NULL))[1] AS top_driver_id
+     FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
+     GROUP BY ev.plate ORDER BY alerts DESC LIMIT 100`, [from, to]));
+}));
+
+/* The same events, attributed to people rather than to plates. The safety page
+   named nobody at all: it fetched a driver column and rendered only the plate. */
+app.get('/api/alerts/by-driver', wrap(async (req, res) => {
+  const [from, to] = range(req);
+  res.json(await q(
+    `WITH ev AS (
+       SELECT plate, alert_type, (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
+       FROM alert WHERE ${DAYWIN('occurred_at')}
+     ),
+     custody AS (
+       SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id
+       FROM vehicle_driver_day
+       WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
+       ORDER BY plate, day, trips DESC NULLS LAST, driver_name
+     ),
+     /* Distance driven by that PERSON on those days, so a rate can be computed
+        over bookings rather than over bookings plus their telematics twins.
+
+        Grouped on the folded name, not the raw one. Grouping on the raw string
+        split one human across their platform spellings and gave the rate a
+        denominator covering only one of their accounts — 240 km for somebody
+        who drove 340. This is the same fold the driver directory uses. */
+     km AS (
+       SELECT ${CANON('driver_name')} AS person, sum(distance_km) AS km
+       FROM trip_norm
+       WHERE local_day BETWEEN $1::date AND $2::date AND is_booking AND has_distance
+         AND coalesce(btrim(driver_name), '') <> ''
+       GROUP BY 1
+     )
+     SELECT coalesce(c.driver_name, '(unattributed)') AS driver_name,
+            max(c.driver_ext_id) AS driver_ext_id,
+            count(*)::int alerts,
+            sum((ev.alert_type ILIKE '%brake%')::int)::int harsh_brake,
+            sum((ev.alert_type ILIKE '%accel%')::int)::int harsh_accel,
+            sum((ev.alert_type ILIKE '%turn%')::int)::int sharp_turn,
+            sum((ev.alert_type ILIKE '%speed%')::int)::int overspeed,
+            count(DISTINCT ev.plate)::int plates,
+            round(max(km.km)::numeric, 0) AS booked_km,
+            round((count(*) * 100.0 / nullif(max(km.km), 0))::numeric, 2) AS per_100km
+     FROM ev
+     LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
+     LEFT JOIN km ON km.person = ${CANON('c.driver_name')}
+     GROUP BY 1 ORDER BY alerts DESC LIMIT 100`, [from, to]));
+}));
 
 // Who was driving this plate, day by day (handovers included).
 app.get('/api/vehicle/drivers', wrap(async (req, res) => {
@@ -487,13 +731,13 @@ app.get('/api/driver/vehicles', wrap(async (req, res) => {
 /* ───────────────────────── finance ───────────────────────── */
 app.get('/api/finance/ledger', wrap(async (req, res) => res.json(await q(
   `SELECT category, count(*)::int n, round(sum(amount)::numeric,2) amount, currency
-   FROM ledger_entry WHERE event_at BETWEEN $1 AND $2 AND ($3::text IS NULL OR platform=$3)
+   FROM ledger_entry WHERE ${DAYWIN('event_at')} AND ($3::text IS NULL OR platform=$3)
    GROUP BY category, currency ORDER BY abs(sum(amount)) DESC LIMIT 60`,
   [range(req)[0], range(req)[1], range(req)[2]]))));
 
 app.get('/api/finance/daily', wrap(async (req, res) => res.json(await q(
   `SELECT date_trunc('day',event_at)::date d, round(sum(amount)::numeric,2) amount
-   FROM ledger_entry WHERE event_at BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 1`,
+   FROM ledger_entry WHERE ${DAYWIN('event_at')} GROUP BY 1 ORDER BY 1`,
   [range(req)[0], range(req)[1]]))));
 
 /* ───────────────────────── unauthorized trips ───────────────────────── */
@@ -503,25 +747,58 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
   const rows = await q(
     `SELECT verdict, count(*)::int n, round(sum(distance_km)::numeric,0) km,
             round(sum(duration_min)::numeric,0) minutes
-     FROM occupancy_segment WHERE started_at BETWEEN $1 AND $2 GROUP BY verdict ORDER BY n DESC`, [from, to]);
-  const [tot] = await q(
-    `SELECT count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
-            count(*) FILTER (WHERE verdict='authorized')::int authorized,
-            count(*) FILTER (WHERE verdict='sensor_suspect')::int sensor_suspect,
-            count(*) FILTER (WHERE verdict='partial')::int partial,
-            round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,0) unauth_km,
-            count(*) FILTER (WHERE verdict='unauthorized' AND low_confidence)::int low_confidence
-     FROM occupancy_segment WHERE started_at BETWEEN $1 AND $2`, [from, to]);
-  res.json({ byVerdict: rows, totals: tot });
+     FROM occupancy_segment WHERE ${DAYWIN('started_at')} GROUP BY verdict ORDER BY n DESC`, [from, to]);
+  /* Built FROM the same rows as the donut, not from a second query with its
+     own hand-written verdict list. That list named four of the seven verdicts
+     schema_v8 documents, so `unverifiable` and `stationary` were counted
+     nowhere: the KPI tiles summed to 36 while the donut beneath them showed 52,
+     and the eight missing rows were precisely the ones the reconciler flagged
+     as needing a human. A strip that cannot drift from the chart under it
+     cannot disagree with it. */
+  const [extra] = await q(
+    `SELECT round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,0) unauth_km,
+            count(*) FILTER (WHERE verdict='unauthorized' AND low_confidence)::int low_confidence,
+            count(*) FILTER (WHERE low_confidence)::int needs_a_human
+     FROM occupancy_segment WHERE ${DAYWIN('started_at')}`, [from, to]);
+  const byVerdict = Object.fromEntries(rows.map((r) => [r.verdict, r.n]));
+  res.json({
+    byVerdict: rows,
+    totals: {
+      // Every verdict the schema defines, whether or not it occurred, so a
+      // category dropping to zero is visible rather than absent.
+      unauthorized: byVerdict.unauthorized || 0,
+      authorized: byVerdict.authorized || 0,
+      unverifiable: byVerdict.unverifiable || 0,
+      pending: byVerdict.pending || 0,
+      partial: byVerdict.partial || 0,
+      sensor_suspect: byVerdict.sensor_suspect || 0,
+      stationary: byVerdict.stationary || 0,
+      segments: rows.reduce((a, r) => a + r.n, 0),
+      unauth_km: extra?.unauth_km ?? null,
+      low_confidence: extra?.low_confidence ?? 0,
+      needs_a_human: extra?.needs_a_human ?? 0,
+    },
+  });
 }));
 
 app.get('/api/unauthorized/list', wrap(async (req, res) => {
   const [from, to] = range(req);
   const verdict = req.query.verdict || 'unauthorized';
   res.json(await q(
+    /* schema_v8 added verdict_reason, nearest_platform, nearest_trip_id,
+       nearest_gap_min, channels_checked and boundary_gap_min for one purpose:
+       to make a verdict falsifiable. Its own header says nearest_gap_min is
+       "the field that makes a clock skew self-evident — thirteen accusations
+       each showing a nearest booking exactly 240 minutes away is one bug, not
+       thirteen dishonest drivers". None of it was being selected, and the UI
+       printed a hardcoded English sentence keyed on the verdict instead — with
+       no entry for `unverifiable` or `pending`, so eight of fifty-two segments
+       opened a blank "Why this verdict". */
     `SELECT o.plate, o.fleet_id, o.started_at, o.ended_at, o.duration_min, o.distance_km,
             o.top_speed, o.fixes, o.max_gap_min, o.ignition_ratio, o.verdict,
             o.matched_platform, o.matched_trip_id, o.low_confidence, o.unavailable_sources,
+            o.verdict_reason, o.nearest_platform, o.nearest_trip_id, o.nearest_gap_min,
+            o.channels_checked, o.boundary_gap_min,
             o.start_lat, o.start_lng, o.end_lat, o.end_lng,
             -- the driver who held the car that day, not whoever has it now
             (SELECT string_agg(DISTINCT v.driver_name, ', ')
@@ -529,7 +806,7 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
               WHERE v.plate = o.plate
                 AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
                 AND v.driver_name IS NOT NULL) AS drivers
-     FROM occupancy_segment o WHERE o.started_at BETWEEN $1 AND $2 AND ($3='all' OR o.verdict=$3)
+     FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')} AND ($3='all' OR o.verdict=$3)
      ORDER BY o.started_at DESC LIMIT 300`, [from, to, verdict]));
 }));
 
@@ -544,7 +821,7 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
               count(*) FILTER (WHERE verdict='authorized')::int authorized,
               count(*) FILTER (WHERE verdict='sensor_suspect')::int sensor_suspect,
               round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
-       FROM occupancy_segment WHERE started_at BETWEEN $1 AND $2
+       FROM occupancy_segment WHERE ${DAYWIN('started_at')}
        GROUP BY plate HAVING count(*) FILTER (WHERE verdict='unauthorized') > 0),
      who AS (
        SELECT o.plate, string_agg(DISTINCT v.driver_name, ', ') AS drivers
@@ -552,7 +829,7 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
        JOIN vehicle_driver_day v
          ON v.plate = o.plate
         AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
-       WHERE o.started_at BETWEEN $1 AND $2 AND o.verdict='unauthorized'
+       WHERE ${DAYWIN('o.started_at')} AND o.verdict='unauthorized'
          AND v.driver_name IS NOT NULL
        GROUP BY o.plate)
      SELECT seg.*, who.drivers
@@ -564,25 +841,55 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
 app.get('/api/unauthorized/daily', wrap(async (req, res) => {
   const [from, to] = range(req);
   res.json(await q(
-    `SELECT date_trunc('day',started_at)::date d,
+    /* Dubai-local, like every other daily grouping in this product. Bucketing
+       by UTC day put segments between midnight and 04:00 on the previous day,
+       while the drill that opened from a bar filtered by Dubai day — so a bar
+       could open onto an empty list. */
+    `SELECT (started_at AT TIME ZONE 'Asia/Dubai')::date AS d,
             count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
-            count(*) FILTER (WHERE verdict='authorized')::int authorized
-     FROM occupancy_segment WHERE started_at BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 1`, [from, to]));
+            count(*) FILTER (WHERE verdict='authorized')::int authorized,
+            count(*) FILTER (WHERE verdict IN ('unverifiable','pending'))::int needs_a_human,
+            count(*)::int segments
+     FROM occupancy_segment WHERE ${DAYWIN('started_at')} GROUP BY 1 ORDER BY 1`, [from, to]));
 }));
 
 // sensor health per vehicle — dead/stuck pads make leakage numbers unreliable
+/* Sensor health, ordered by how far a pad is from behaving plausibly.
+   It used to sort ascending by occupied_fixes and the page showed the first
+   twenty — so the list was the QUIETEST pads, and a stuck-on pad, which is the
+   failure mode that manufactures false accusations, sorted to the very bottom
+   and was cut off. The panel's own caption said "a dead or stuck pad makes the
+   numbers above unreliable" while being structurally incapable of showing a
+   stuck one.
+
+   The suspect-segment count was also computed over all time, ignoring the
+   page's window, and was 0 or NULL for every plate — so the client-side
+   "suspect" verdict keyed on it could never fire. */
 app.get('/api/sensor-health', wrap(async (req, res) => {
   const [from, to] = range(req);
   res.json(await q(
     `SELECT t.plate,
             count(*) FILTER (WHERE t.seat_occupied)::int occupied_fixes,
+            count(*) FILTER (WHERE t.seat_occupied IS NULL)::int unreported_fixes,
             count(*)::int total_fixes,
-            max(o.suspect)::int sensor_suspect_segments
+            round(100.0 * count(*) FILTER (WHERE t.seat_occupied)
+                  / nullif(count(*) FILTER (WHERE t.seat_occupied IS NOT NULL), 0), 1) occupied_pct,
+            coalesce(max(o.suspect), 0)::int sensor_suspect_segments,
+            -- Below this many observations a pad is not being judged at all: a
+            -- verdict on two fixes is an accusation about hardware from noise.
+            (count(*) FILTER (WHERE t.seat_occupied IS NOT NULL) >= 20) AS judgeable
      FROM telemetry_snapshot t
      LEFT JOIN (SELECT plate, count(*) FILTER (WHERE verdict='sensor_suspect') suspect
-                FROM occupancy_segment GROUP BY plate) o ON o.plate=t.plate
-     WHERE t.source='cabman' AND t.captured_at BETWEEN $1 AND $2
-     GROUP BY t.plate ORDER BY occupied_fixes ASC LIMIT 100`, [from, to]));
+                FROM occupancy_segment
+                WHERE ${DAYWIN('started_at')} GROUP BY plate) o ON o.plate = t.plate
+     WHERE t.source='cabman' AND ${DAYWIN('t.captured_at')}
+     GROUP BY t.plate
+     -- Distance from a plausible occupancy band, so BOTH tails surface: a pad
+     -- that never triggers and a pad that never releases are equally broken.
+     ORDER BY abs(coalesce(count(*) FILTER (WHERE t.seat_occupied)::float
+                           / nullif(count(*) FILTER (WHERE t.seat_occupied IS NOT NULL), 0), 0.35) - 0.35) DESC,
+              total_fixes DESC
+     LIMIT 100`, [from, to]));
 }));
 
 /* ───────────────────────── ops / meta ───────────────────────── */

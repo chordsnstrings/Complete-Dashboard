@@ -15,7 +15,7 @@
     "api": "node api/server.js",
     "check": "node --check src/index.js",
     "smoke": "node test/smoke_views.mjs",
-    "test": "node test/routes.test.mjs && node test/insights.test.mjs && node test/events.test.mjs && node test/custody.test.mjs && node test/compliance.test.mjs && node test/unauth_driver.test.mjs && node test/driver_routes.test.mjs && node test/vehicle_routes.test.mjs && node test/collector_invariants.test.mjs && node test/trend_gaps.test.mjs && node test/endpoint_coverage.test.mjs && node test/aggregates.test.mjs && node test/unauthorized_safety.test.mjs && node test/formatters.test.mjs && node test/analytics_routes.test.mjs && node test/route_smoke.test.mjs && node test/analyst.test.mjs && node test/probe.test.mjs && node test/roster.test.mjs && node test/day_routes.test.mjs"
+    "test": "node test/routes.test.mjs && node test/insights.test.mjs && node test/events.test.mjs && node test/custody.test.mjs && node test/compliance.test.mjs && node test/unauth_driver.test.mjs && node test/driver_routes.test.mjs && node test/vehicle_routes.test.mjs && node test/collector_invariants.test.mjs && node test/trend_gaps.test.mjs && node test/endpoint_coverage.test.mjs && node test/aggregates.test.mjs && node test/unauthorized_safety.test.mjs && node test/formatters.test.mjs && node test/analytics_routes.test.mjs && node test/route_smoke.test.mjs && node test/analyst.test.mjs && node test/probe.test.mjs && node test/roster.test.mjs && node test/day_routes.test.mjs && node test/server_audit.test.mjs"
   },
   "dependencies": {
     "csv-parse": "^5.5.6",

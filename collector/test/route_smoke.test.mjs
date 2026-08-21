@@ -134,12 +134,23 @@ const W = (alias = '') => {
 };
 const F = W();
 const FB = `${F} AND is_booking`;
+// Mirrors the server's helpers exactly; the assertions below check the shipped
+// source still defines them the same way.
+const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`;
+const CANON = (col) => `regexp_replace(
+    btrim(regexp_replace(lower(${col}), '\\s+', ' ', 'g')),
+    '(\\m\\w+)( \\1)+', '\\1', 'g')`;
+
+const quote = (v) => {
+  if (!/^[a-z0-9_]{1,32}$/i.test(String(v))) throw new Error(`unexpected platform name: ${v}`);
+  return `'${v}'`;
+};
 const requireAdmin = (_req, _res, next) => next();
 const stub = async () => ({});
 // eslint-disable-next-line no-new-func
-new Function('app', 'q', 'wrap', 'range', 'F', 'FB', 'W', 'endOfDay', 'requireAdmin',
-  'describeSettings', 'setSetting', 'deleteSetting', 'loadSettings', 'insights', 'pool',
-  body)(app, q, wrap, range, F, FB, W, endOfDay, requireAdmin,
+new Function('app', 'q', 'wrap', 'range', 'F', 'FB', 'W', 'DAYWIN', 'CANON', 'quote', 'endOfDay',
+  'requireAdmin', 'describeSettings', 'setSetting', 'deleteSetting', 'loadSettings', 'insights', 'pool',
+  body)(app, q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin,
   stub, stub, stub, stub, { run: stub }, { query: db.query.bind(db) });
 driverRoutes(app, { q, wrap, endOfDay });
 vehicleRoutes(app, { q, wrap, endOfDay });

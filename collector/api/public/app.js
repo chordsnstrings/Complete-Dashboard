@@ -2,7 +2,7 @@
 // Views live in this file; the per-driver detail pages live in driver.js, and
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
-import { barChart, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
+import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, drill, kpiRow, tabBar, pill, note, entity, dayStr, dtStr, money, pct } from './ui.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
@@ -32,13 +32,46 @@ function paymentDonut(host, detail) {
   host.innerHTML = '';
   const groups = (detail && detail.groups) || [];
   if (!groups.length) { empty(host, 'No trip in this range records how it was paid'); return; }
-  donut(host, groups.map((g) => ({ label: g.label, n: g.n, revenue: g.revenue })));
-  if (detail.unlabelled_trips) {
-    host.append(el('p', 'cap',
-      `${fmt(detail.unlabelled_trips)} of ${fmt(detail.total_trips)} trips record no payment type` +
-      `${detail.unlabelled_platforms?.length ? ` (${esc(detail.unlabelled_platforms.join(', '))})` : ''}` +
-      ` and are left out rather than counted as cash.`));
-  }
+  /* Grouped by SETTLEMENT ROUTE, not by the processor's name. Charted raw this
+     was a nineteen-slice donut whose largest slice was `braintree` — the name
+     of a payment integration, sitting beside `zaakpay` and `kcp_pg` as if the
+     three were different kinds of business, while `room-charge` and
+     `posted-for-salary` (money somebody owes us) were folded away past the
+     eighth slice. The classes are the same ones the Settlement page uses, so
+     the two pages cannot disagree. */
+  const CLASS = {
+    cash: 'Cash', 'cash-driver': 'Cash', 'cash-supervisor': 'Cash',
+    'pos-driver': 'Card', 'pos-supervisor': 'Card', braintree: 'Card', zaakpay: 'Card',
+    kcp_pg: 'Card', card: 'Card', credit_card: 'Card',
+    apple_pay: 'Wallet', google_pay: 'Wallet', paypal: 'Wallet', alipay2: 'Wallet',
+    digital: 'Wallet', wallet: 'Wallet', cashless: 'Wallet',
+    'room-charge': 'On account', 'hotel-charge': 'On account', company: 'On account',
+    corporate: 'On account', invoice: 'On account',
+    'posted-for-salary': 'Salary deduction', salary: 'Salary deduction',
+    'foc-complimentary': 'Complimentary', foc: 'Complimentary', complimentary: 'Complimentary',
+    offline: 'Settled off-platform', derivative: 'Adjustment',
+  };
+  const folded = new Map();
+  groups.forEach((g) => {
+    const k = CLASS[String(g.label || '').toLowerCase()] || 'Other';
+    const cur = folded.get(k) || { label: k, n: 0, revenue: 0, priced: 0, labels: [] };
+    cur.n += g.n; cur.revenue += Number(g.revenue) || 0; cur.priced += g.priced_n || 0;
+    cur.labels.push(g.label);
+    folded.set(k, cur);
+  });
+  const rows = [...folded.values()].sort((a, b) => b.n - a.n);
+  donut(host, rows, { onClick: () => { location.hash = href('settlement'); } });
+  const owed = rows.filter((r) => ['On account', 'Salary deduction'].includes(r.label));
+  host.append(el('p', 'cap', [
+    detail.unlabelled_trips
+      ? `${fmt(detail.unlabelled_trips)} of ${fmt(detail.total_trips)} trips record no payment type`
+        + `${detail.unlabelled_platforms?.length ? ` (${esc(detail.unlabelled_platforms.join(', '))})` : ''}`
+        + ' and are left out rather than counted as cash.'
+      : '',
+    owed.length
+      ? `${fmt(owed.reduce((a, r) => a + r.n, 0))} settled after the ride — see Settlement for what is outstanding.`
+      : '',
+  ].filter(Boolean).join(' ')));
 }
 
 const VIEWS = [
@@ -126,7 +159,9 @@ function drillTrips(title, subtitle, extra) {
     const rows = await q('/api/drivers/leaderboard', extra);
     body.innerHTML = '';
     body.append(tableFrom(rows.slice(0, 60), [
-      { label: 'Driver', key: 'driver_name' }, { label: 'Plate', key: 'plate' },
+      { label: 'Driver', key: 'driver_name',
+      render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
       { label: 'Platform', key: 'platform' },
       { label: 'Trips', key: 'trips', num: true }, { label: 'Km', key: 'km', num: true },
       { label: 'Revenue', key: 'revenue', num: true, render: (r) => r.revenue ? 'AED ' + fmt(r.revenue) : '—' },
@@ -141,11 +176,19 @@ const V = {};
 V.overview = async (root) => {
   const kpiHost = el('div', 'kpis'); root.append(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
-  const trend = panel('Trips per day', 'Click a bar to see the drivers behind that day'); g1.append(trend.panel);
-  const mix = panel('Platform share', 'Trips by platform — click a slice to drill in'); g1.append(mix.panel);
+  const trend = panel('Trips per day',
+    'Bookings only. Telematics journeys are drawn behind them in grey — the same physical trips, seen '
+    + 'by the trackers. A day nobody collected is hatched, not zero. Click a bar to open that day.');
+  g1.append(trend.panel);
+  const mix = panel('Platform share',
+    'Bookings by channel. Telematics rows are excluded: they are the same journeys, and adding them '
+    + 'made this ring total four times the Trips figure above.');
+  g1.append(mix.panel);
   const g2 = el('div', 'grid g3'); root.append(g2);
   const prod = panel('Product mix', 'Which service tiers the fleet runs'); g2.append(prod.panel);
-  const pay = panel('Payment method', 'How riders pay'); g2.append(pay.panel);
+  const pay = panel('How fares settle',
+    'Grouped by settlement route rather than by the processor\'s name — click for the detail.');
+  g2.append(pay.panel);
   const out = panel('Trip outcome', 'Completed vs cancelled'); g2.append(out.panel);
   const lead = panel('Top drivers', 'Ranked by completed trips — click for detail'); root.append(lead.panel);
   [kpiHost, trend.body, mix.body, prod.body, pay.body, out.body, lead.body].forEach(loading);
@@ -156,25 +199,33 @@ V.overview = async (root) => {
   ]);
 
   kpiHost.innerHTML = [
-    ['Trips', fmt(k.trips), `${fmt(k.drivers)} drivers`],
+    ['Trips', fmt(k.trips), `${fmt(k.drivers)} drivers · ${fmt(k.telematics_journeys || 0)} telematics journeys`],
     ['Distance', fmt(k.km) + ' km', `avg ${k.avg_km ?? '—'} km/trip`],
-    ['Revenue', k.revenue ? 'AED ' + fmt(k.revenue) : '—', 'from trip fares'],
+    // Revenue over the trips that CARRY a fare. Presenting it as the fleet's
+    // revenue while it covers 4% of the trips beside it is the single most
+    // misread number on this page.
+    ['Revenue', k.revenue ? 'AED ' + fmt(k.revenue) : '—',
+      k.priced_trips && k.trips
+        ? `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} trips (${Math.round(k.priced_trips / k.trips * 100)}%) that report one`
+        : 'no trip in this range reports a fare'],
     ['Completion', k.completion_pct != null ? k.completion_pct + '%' : '—', `${k.cancel_pct ?? 0}% cancelled`],
-    ['Vehicles', fmt(k.vehicles), `${fmt(k.live_vehicles || 0)} tracked live`],
+    ['Vehicles', fmt(k.vehicles), 'with a trip in this range'],
     ['Safety alerts', fmt(k.alerts), 'harsh-driving events'],
   ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
 
-  barChart(trend.body, daily, { x: 'd', y: 'trips', label: 'trips',
+  gapBars(trend.body, daily, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
     // A day is an address now, not a modal containing a driver list.
     onClick: (d) => { location.hash = href('day', dayKey(d.d)); } });
-  donut(mix.body, byPlat, { onClick: (d) => drillTrips(`${d.label} trips`, 'Drivers on this platform', { platform: d.label }) });
+  donut(mix.body, byPlat, { onClick: (d) => { location.hash = href('platforms'); } });
   hbars(prod.body, byProd.slice(0, 6));
   paymentDonut(pay.body, payDetail);
   stackedBar(out.body, byStatus.slice(0, 5));
   lead.body.innerHTML = '';
   lead.body.append(tableFrom(drivers.slice(0, 12), [
     { label: '#', key: '_i', render: (r) => String(drivers.indexOf(r) + 1) },
-    { label: 'Driver', key: 'driver_name' }, { label: 'Plate', key: 'plate' },
+    { label: 'Driver', key: 'driver_name',
+      render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => r.completion_pct != null ? r.completion_pct + '%' : '—' },
@@ -184,7 +235,10 @@ V.overview = async (root) => {
 V.demand = async (root) => {
   const g = el('div', 'grid g2'); root.append(g);
   const hourly = panel('Hourly demand curve', 'Trip requests by hour of day'); g.append(hourly.panel);
-  const daily = panel('Daily volume', 'Click a bar to drill into that day'); g.append(daily.panel);
+  const daily = panel('Daily volume',
+    'Bookings per Dubai-local day, with telematics journeys behind them. A day nobody collected is '
+    + 'hatched rather than drawn as zero. Click a bar to open that day.');
+  g.append(daily.panel);
   const ctxP = panel('Volume against the weather and the calendar',
     'Dubai demand is weather- and calendar-driven: heat empties the streets, rain floods them, and Ramadan moves the whole day. This puts the two side by side so a dip has a candidate explanation rather than a shrug.');
   root.append(ctxP.panel);
@@ -196,7 +250,7 @@ V.demand = async (root) => {
     q('/api/context').catch(() => []),
   ]);
   areaChart(hourly.body, h.map((r) => ({ label: String(r.h).padStart(2, '0') + ':00', trips: r.trips })), { x: 'label', y: 'trips' });
-  barChart(daily.body, d, { x: 'd', y: 'trips',
+  gapBars(daily.body, d, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
     onClick: (r) => { location.hash = href('day', dayKey(r.d)); } });
 
   /* Join the day's trips to that day's weather and calendar. Both sides are
@@ -725,22 +779,129 @@ V.finance = async (root) => {
   else empty(led.body, 'Ledger fills once Yango/Bolt credentials are set');
 };
 
+/* Safety — three pages, because "which car" and "which person" and "what kind
+   of event" are three different questions and the page answered only the first.
+
+   Four things were wrong here and they compounded: the endpoint fetched a
+   driver and the view rendered only the plate, so the safety page named nobody;
+   the driver it fetched was whoever holds the car TODAY, so a year-old event
+   was attributed to the current holder; the four category columns did not add
+   up to the Total beside them, with no residual column to explain the gap; and
+   a device power fault was charted as harsh driving. */
+const SAFETY_TABS = [
+  { id: 'people', label: 'By driver', ic: '◧' },
+  { id: 'vehicles', label: 'By vehicle', ic: '▤' },
+  { id: 'events', label: 'By event type', ic: '△' },
+];
 V.safety = async (root) => {
-  const g = el('div', 'grid g2'); root.append(g);
-  const types = panel('Events by type', 'Harsh braking, acceleration, sharp turns, overspeed'); g.append(types.panel);
-  const veh = panel('Worst vehicles', 'Most harsh-driving events — click to drill'); g.append(veh.panel);
-  const tbl = panel('Per-vehicle breakdown', 'Event counts by category'); root.append(tbl.panel);
-  [types.body, veh.body, tbl.body].forEach(loading);
-  const [byType, byVeh] = await Promise.all([q('/api/alerts/summary'), q('/api/alerts/by-vehicle')]);
-  if (byType.length) donut(types.body, byType.map((r) => ({ label: r.alert_type, n: r.n })));
-  else empty(types.body, 'Safety events arrive with FMS credentials');
-  hbars(veh.body, byVeh.slice(0, 10).map((r) => ({ label: r.plate, n: r.alerts })), { color: '--s8' });
-  tbl.body.innerHTML = '';
-  tbl.body.append(tableFrom(byVeh.slice(0, 30), [
-    { label: 'Plate', key: 'plate' }, { label: 'Total', key: 'alerts', num: true },
-    { label: 'Harsh brake', key: 'harsh_brake', num: true }, { label: 'Harsh accel', key: 'harsh_accel', num: true },
-    { label: 'Sharp turn', key: 'sharp_turn', num: true }, { label: 'Overspeed', key: 'overspeed', num: true },
+  const tab = SAFETY_TABS.some((t) => t.id === state.param) ? state.param : 'people';
+  root.append(tabBar(SAFETY_TABS, tab, (id) => href('safety', id === 'people' ? null : id)));
+  const host = el('div'); root.append(host);
+  loading(host);
+  const [byType, byVeh, byDrv] = await Promise.all([
+    q('/api/alerts/summary'), q('/api/alerts/by-vehicle'), q('/api/alerts/by-driver')]);
+  host.innerHTML = '';
+
+  const total = byType.reduce((a, r) => a + r.n, 0);
+  if (!total) {
+    host.append(note('No harsh-driving event landed in this window. These come from the FMS '
+      + 'telematics layer — check Collection gaps before reading that as good news.'));
+    return;
+  }
+  /* A tracker losing power is a hardware fault, not a driving style. Charted
+     together they were one number under a heading about harsh driving. */
+  const DEVICE = /power|battery|tamper|disconnect|gps/i;
+  const device = byType.filter((r) => DEVICE.test(r.alert_type));
+  const driving = byType.filter((r) => !DEVICE.test(r.alert_type));
+  const drivingN = driving.reduce((a, r) => a + r.n, 0);
+  const unattributed = byVeh.reduce((a, r) => a + (r.unattributed || 0), 0);
+
+  host.append(kpiRow([
+    { label: 'Driving events', value: fmt(drivingN), sub: 'harsh braking, acceleration, turns, speed' },
+    { label: 'Device faults', value: fmt(total - drivingN),
+      sub: 'power loss and similar — a tracker problem, not a driver one',
+      tone: total - drivingN ? 'warn' : null },
+    { label: 'Vehicles involved', value: fmt(byVeh.length) },
+    { label: 'Drivers named', value: fmt(byDrv.filter((r) => r.driver_name !== '(unattributed)').length) },
+    { label: 'Events nobody held the car for', value: fmt(unattributed),
+      sub: unattributed ? 'no custody record for that plate on that day' : 'every event has a driver',
+      tone: unattributed ? 'warn' : null },
   ]));
+
+  if (tab === 'events') {
+    const g = el('div', 'grid g2'); host.append(g);
+    const dp = panel('Driving events', 'Behaviour the fleet can coach.');
+    donut(dp.body, driving.map((r) => ({ label: r.alert_type, n: r.n })));
+    g.append(dp.panel);
+    const fp = panel('Device faults', 'A tracker losing power is a hardware ticket, not a coaching conversation.');
+    if (device.length) donut(fp.body, device.map((r) => ({ label: r.alert_type, n: r.n })));
+    else empty(fp.body, 'No device fault in this window');
+    g.append(fp.panel);
+    host.append(note('These were one donut, totalled as a single figure under a heading about harsh '
+      + 'driving. They are two different problems with two different owners.'));
+    return;
+  }
+
+  if (tab === 'vehicles') {
+    const vp = panel('Worst vehicles', 'Click a bar to open that vehicle.');
+    hbars(vp.body, byVeh.slice(0, 12).map((r) => ({ label: r.plate, n: r.alerts })), {
+      color: '--s8', onClick: (d) => { location.hash = href('vehicle', d.label, 'safety'); } });
+    host.append(vp.panel);
+    host.append(tableFrom(byVeh, [
+      { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+      { label: 'Total', key: 'alerts', num: true },
+      { label: 'Harsh brake', key: 'harsh_brake', num: true },
+      { label: 'Harsh accel', key: 'harsh_accel', num: true },
+      { label: 'Sharp turn', key: 'sharp_turn', num: true },
+      { label: 'Overspeed', key: 'overspeed', num: true },
+      // The residual, so the columns and the total reconcile instead of
+      // silently disagreeing by however many event types are not in the four.
+      { label: 'Other', key: 'other', num: true },
+      { label: 'Drivers that window', key: 'drivers', num: true },
+      { label: 'Most often', key: 'top_driver',
+        render: (r) => (r.top_driver ? entity('driver', r.top_driver_id, r.top_driver)
+          : '<span class="ent-off">unattributed</span>') },
+    ]));
+    host.append(note('Each event is attributed to whoever held the car ON THE DAY it happened, not to '
+      + 'whoever holds it now — and vehicle_driver_day carries one row per platform, so custody is '
+      + 'collapsed to one driver per plate-day before counting. Joining it directly once showed 584 '
+      + 'events twice under two spellings of one name.'));
+    return;
+  }
+
+  // people
+  const named = byDrv.filter((r) => r.driver_name !== '(unattributed)');
+  const dp = panel('Who drives hardest', 'Events per 100 km of booked distance, where that distance is known.');
+  const rated = named.filter((r) => r.per_100km != null).slice(0, 12);
+  if (rated.length) {
+    hbars(dp.body, rated.map((r) => ({ label: r.driver_name, n: Number(r.per_100km), id: r.driver_ext_id })), {
+      color: '--s8', valueFmt: (v) => `${fmt(v, 2)} / 100km`,
+      onClick: (d) => { if (d.id) location.hash = href('driver', d.id, 'quality'); } });
+    dp.body.append(el('p', 'cap', 'The rate is over BOOKED kilometres. Dividing by every trip in the '
+      + 'table would include each journey twice — once as a booking and once as its telematics twin.'));
+  } else {
+    empty(dp.body, 'No driver in this window has both events and a known distance');
+  }
+  host.append(dp.panel);
+  host.append(tableFrom(byDrv, [
+    { label: 'Driver', key: 'driver_name',
+      render: (r) => (r.driver_ext_id ? entity('driver', r.driver_ext_id, r.driver_name)
+        : `<span class="ent-off">${esc(r.driver_name)}</span>`) },
+    { label: 'Events', key: 'alerts', num: true },
+    { label: 'Harsh brake', key: 'harsh_brake', num: true },
+    { label: 'Harsh accel', key: 'harsh_accel', num: true },
+    { label: 'Sharp turn', key: 'sharp_turn', num: true },
+    { label: 'Overspeed', key: 'overspeed', num: true },
+    { label: 'Vehicles', key: 'plates', num: true },
+    { label: 'Booked km', key: 'booked_km', num: true, render: (r) => fmt(r.booked_km) },
+    { label: 'Per 100 km', key: 'per_100km', num: true,
+      render: (r) => (r.per_100km == null ? '<span class="ent-off">distance unknown</span>'
+        : fmt(r.per_100km, 2)) },
+  ]));
+  if (byDrv.some((r) => r.driver_name === '(unattributed)')) {
+    host.append(note('"(unattributed)" is not a person. It is every event on a plate-day with no '
+      + 'custody record — shown rather than folded into somebody else\'s total.'));
+  }
 };
 
 V.unauthorized = async (root) => {

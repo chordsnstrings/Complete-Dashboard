@@ -80,6 +80,83 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
   host.append(svg);
 }
 
+/* ── a bar chart that can say "we did not look" ──────────────────────────
+   A bar chart plots by array index, so a series that omits uncollected days
+   draws a 124-day hole as two touching bars, and a series that returns 0 for
+   them draws a collapse that never happened. Live, the Overview showed 45 of
+   91 days at zero on days the fleet ran 9,712 telematics journeys, and the
+   default 30-day view showed a 10x growth step that was only the Uber export
+   resuming after a gap.
+
+   `gapKey` marks a datum as uncollected. Those days are drawn as a hatched
+   void across the full height of the plot — an absence, not a low value — and
+   the caption states how many there were. */
+export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'uncollected',
+  onClick, valueFmt = (v) => fmt(v), secondary } = {}) {
+  host.innerHTML = '';
+  if (!data.length) return empty(host);
+  const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
+  const vals = data.filter((d) => !d[gapKey]).map((d) => +d[y] || 0);
+  const raw = Math.max(...vals, secondary ? Math.max(...data.map((d) => +d[secondary] || 0)) : 0) || 1;
+  const marks = ticks(raw <= 3 ? raw : raw * 1.12);
+  const max = marks[marks.length - 1] || 1;
+  const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length, bw = Math.min(step * 0.62, 44);
+  const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+
+  // One hatch pattern, reused by every void band.
+  const defs = mk('defs');
+  const pat = mk('pattern', { id: 'gapHatch', width: 6, height: 6, patternUnits: 'userSpaceOnUse',
+    patternTransform: 'rotate(45)' });
+  pat.append(mk('rect', { width: 6, height: 6, fill: 'var(--surface-2)' }),
+    mk('line', { x1: 0, y1: 0, x2: 0, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 2 }));
+  defs.append(pat); svg.append(defs);
+
+  marks.forEach((v) => {
+    const gy = pt + ih - ih * (v / max);
+    svg.append(mk('line', { class: 'gl', x1: pl, y1: gy, x2: W - pr, y2: gy }),
+      txt(pl - 7, gy + 3, valueFmt(v >= 10 ? Math.round(v) : +v.toFixed(1)), 'axis', 'end'));
+  });
+
+  data.forEach((d, i) => {
+    const bx = pl + step * i;
+    if (d[gapKey]) {
+      const band = mk('rect', { x: bx, y: pt, width: Math.max(step, 1), height: ih, fill: 'url(#gapHatch)' });
+      interactive(band, `${esc(d[x])} — <b>nothing was collected</b>${
+        d.silent_sources ? `<br>silent: ${esc([].concat(d.silent_sources).join(', '))}` : ''}`);
+      svg.append(band);
+      return;
+    }
+    if (secondary && +d[secondary] > 0) {
+      const sh = ih * (+d[secondary]) / max;
+      svg.append(mk('rect', { x: bx + (step - bw) / 2 - 2, y: pt + ih - sh, width: bw + 4,
+        height: Math.max(sh, 1), rx: 3, fill: 'var(--surface-3)' }));
+    }
+    const h = ih * (+d[y]) / max, cx = bx + (step - bw) / 2, by = pt + ih - h;
+    const r = mk('rect', { x: cx, y: by, width: bw, height: Math.max(h, 1), rx: 3,
+      fill: `var(${color})`, 'data-rise': '' });
+    interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}${
+      secondary && +d[secondary] ? `<br>${fmt(d[secondary])} telematics journeys` : ''}`,
+    onClick && (() => onClick(d)));
+    svg.append(r);
+    const every = Math.max(1, Math.ceil(data.length / 12));
+    if (i % every === 0 || i === data.length - 1) {
+      svg.append(txt(bx + step / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
+    }
+  });
+  host.append(svg);
+
+  const gaps = data.filter((d) => d[gapKey]).length;
+  const partial = data.filter((d) => !d[gapKey] && d.sources_silent > 0).length;
+  if (gaps || partial) {
+    const c = document.createElement('p'); c.className = 'cap';
+    c.innerHTML = [
+      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} days collected nothing at all</b> and are drawn as a hatched band, not as zero.` : '',
+      partial ? `${fmt(partial)} more had at least one source silent, so their bars are understated.` : '',
+    ].filter(Boolean).join(' ');
+    host.append(c);
+  }
+}
+
 /* ── line / area (trend) ── */
 export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) => fmt(v), onClick } = {}) {
   host.innerHTML = '';
@@ -116,27 +193,39 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
 }
 
 /* ── donut (composition, few slices) ── */
-export function donut(host, data, { label = 'label', value = 'n', onClick } = {}) {
+export function donut(host, data, { label = 'label', value = 'n', onClick, max = 8 } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
-  const tot = data.reduce((a, d) => a + +d[value], 0) || 1;
+  /* The tail is FOLDED, never dropped. This used to render the first eight
+     slices and print the total of ALL of them in the ring's centre, so a
+     nineteen-category payment mix showed eight slices whose visible values
+     could not add up to the number between them — and every hotel payment
+     route but one was invisible while its revenue stayed inside the total. */
+  const sorted = [...data].sort((a, b) => (+b[value] || 0) - (+a[value] || 0));
+  const shown = sorted.slice(0, max);
+  const tail = sorted.slice(max);
+  if (tail.length) {
+    shown.push({ [label]: `Other (${tail.length})`, [value]: tail.reduce((a, d) => a + (+d[value] || 0), 0),
+      _tail: tail.map((d) => `${d[label]} ${fmt(d[value])}`) });
+  }
+  const tot = shown.reduce((a, d) => a + +d[value], 0) || 1;
   const S = 190, r = 74, ir = 47, cx = S / 2, cy = S / 2;
-  // The width used to be hard-capped at 190px, which left three quarters of a
-  // wide panel blank. The cap now lives in CSS so it can respond to the panel.
   const svg = mk('svg', { viewBox: `0 0 ${S} ${S}`, role: 'img', class: 'donut', style: 'margin:0 auto;display:block' });
   let a0 = -Math.PI / 2;
-  data.slice(0, 8).forEach((d, i) => {
+  shown.forEach((d, i) => {
     const frac = +d[value] / tot, a1 = a0 + frac * Math.PI * 2, gap = 0.016;
     const p = arc(cx, cy, r, ir, a0 + gap, Math.max(a1 - gap, a0 + gap));
     const path = mk('path', { d: p, fill: `var(${CAT[i % CAT.length]})`, 'data-fade': '' });
-    interactive(path, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(frac * 100).toFixed(1)}%)`, onClick && (() => onClick(d)));
+    interactive(path, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(frac * 100).toFixed(1)}%)${
+      d._tail ? `<br><span style="opacity:.8">${esc(d._tail.slice(0, 10).join(' · '))}</span>` : ''}`,
+    onClick && !d._tail && (() => onClick(d)));
     svg.append(path); a0 = a1;
   });
   svg.append(txt(cx, cy - 2, fmt(tot), 'vlab', 'middle', 'font-size:19px;font-weight:600;fill:var(--ink)'),
     txt(cx, cy + 14, 'total', 'axis', 'middle'));
   host.append(svg);
   const leg = document.createElement('div'); leg.className = 'legend';
-  leg.innerHTML = data.slice(0, 8).map((d, i) =>
+  leg.innerHTML = shown.map((d, i) =>
     `<span><i class="sw" style="background:var(${CAT[i % CAT.length]})"></i>${esc(d[label])} · <b class="num">${fmt(d[value])}</b></span>`).join('');
   host.append(leg);
 }

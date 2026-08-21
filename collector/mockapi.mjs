@@ -55,7 +55,10 @@ app.get('/api/status', (_, r) => r.json([
     rows_written: 416, chunks_total: 1, chunks_failed: 0, failed_windows: [], windows: [] },
 ]));
 app.get('/api/kpis', (_, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, completion_pct: 89,
-  cancel_pct: 10.7, drivers: 56, vehicles: 52, revenue: 41188, live_vehicles: 48, fresh: 44, alerts: 8863 }));
+  cancel_pct: 10.7, drivers: 56, vehicles: 52, revenue: 41188, live_vehicles: 48, fresh: 44, alerts: 8863,
+  // The two fields that stop the Trips and Revenue tiles overstating themselves.
+  telematics_journeys: 2657, telematics_km: 31840, priced_trips: 187, avg_fare: 220.3,
+  bookable_trips: 2043, priced_km: 3990, revenue_per_km: 10.32 }));
 app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800' },
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
   by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }] }));
@@ -580,9 +583,12 @@ app.get('/api/mix', (req, r) => {
   if (by === 'payment') return r.json([
     { label: 'card', n: 1642, revenue: 61200 }, { label: 'cash', n: 318, revenue: 14800 },
     { label: 'uber_wallet', n: 83, revenue: 2900 }, { label: 'corporate', n: 41, revenue: 3400 }]);
+  // Bookings only: fms rows are telematics twins of these same journeys and are
+  // reported as their own figure, never as a slice of this ring.
   if (by === 'platform') return r.json([
-    { label: 'uber', n: 1508, revenue: 52100 }, { label: 'fms', n: 402, revenue: null },
-    { label: 'hotel', n: 131, revenue: 9073 }, { label: 'yango', n: 43, revenue: 1900 }]);
+    { label: 'uber', n: 1508, revenue: null, priced_n: 0 },
+    { label: 'hotel', n: 131, revenue: 9073, priced_n: 131 },
+    { label: 'yango', n: 43, revenue: 1900, priced_n: 43 }]);
   if (by === 'status') return r.json([
     { label: 'completed', n: 1962, revenue: 78400 }, { label: 'rider_cancelled', n: 91, revenue: 0 },
     { label: 'driver_cancelled', n: 31, revenue: 0 }]);
@@ -627,11 +633,25 @@ app.get('/api/context', (_, r) => {
 });
 
 app.get('/api/trips/daily', (_, r) => {
+  /* Deliberately includes a collection hole and a partially-silent stretch:
+     the whole point of this series is that a day nobody collected must not be
+     drawn as a day nobody drove. */
   const out = [];
   for (let b = 30; b >= 0; b--) {
-    const d = new Date(Date.now() - b * 864e5).toISOString().slice(0, 10);
-    const trips = Math.round(60 + Math.sin(b / 3) * 18 + rnd(0, 22) - (b === 14 ? 25 : 0));
-    out.push({ d, trips, km: Math.round(trips * rnd(9, 14)), revenue: Math.round(trips * rnd(28, 42)) });
+    const d = dayISO(b).slice(0, 10);
+    const uncollected = b >= 12 && b <= 17;
+    const partial = !uncollected && b >= 18 && b <= 21;
+    const trips = uncollected ? 0 : Math.round(60 + Math.sin(b / 3) * 18 + rnd(0, 22) - (partial ? 30 : 0));
+    out.push({ d, trips, completed: Math.round(trips * 0.94), cancelled: Math.round(trips * 0.06),
+      telematics_journeys: uncollected ? 0 : Math.round(trips * 1.3),
+      km: uncollected ? null : Math.round(trips * rnd(9, 14)),
+      revenue: uncollected ? null : Math.round(trips * rnd(28, 42)),
+      priced_trips: uncollected ? 0 : Math.round(trips * 0.15),
+      drivers: uncollected ? 0 : 30 + Math.round(rnd(0, 8)),
+      sources_silent: uncollected ? 4 : partial ? 1 : 0,
+      sources_expected: 4,
+      silent_sources: uncollected ? ['uber', 'fms', 'hotel', 'yango'] : partial ? ['uber'] : null,
+      uncollected });
   }
   r.json(out);
 });
@@ -1087,6 +1107,60 @@ app.get('/api/day', (req, r) => {
       hijri_date: '17 Safar 1448', hijri_month: 'Safar', is_ramadan: false, is_holiday: false,
       holiday_name: null, sunrise: `${day}T01:53:00Z`, sunset: `${day}T14:52:00Z` },
   });
+});
+
+
+app.get('/api/alerts/by-driver', (_, r) => r.json(drivers.map((name, i) => {
+  const brake = 22 - i * 2, accel = 12 - i, turn = i % 3, over = i % 2;
+  const km = (900 - i * 90);
+  return { driver_name: name, driver_ext_id: `drv-${i}`, alerts: brake + accel + turn + over,
+    harsh_brake: brake, harsh_accel: accel, sharp_turn: turn, overspeed: over,
+    plates: 1 + (i % 2), booked_km: km,
+    per_100km: Math.round(((brake + accel + turn + over) * 100 / km) * 100) / 100 };
+}).concat([{ driver_name: '(unattributed)', driver_ext_id: null, alerts: 9, harsh_brake: 6,
+  harsh_accel: 2, sharp_turn: 1, overspeed: 0, plates: 4, booked_km: null, per_100km: null }])));
+
+
+app.get('/api/alerts/summary', (_, r) => r.json([
+  { alert_type: 'Harsh Brake', n: 148 }, { alert_type: 'Harsh Acceleration', n: 86 },
+  { alert_type: 'Overspeed', n: 22 }, { alert_type: 'Sharp Turn', n: 9 },
+  { alert_type: 'Main Power Lost', n: 31 },
+]));
+app.get('/api/alerts/by-vehicle', (_, r) => r.json(plates.map((p2, i) => {
+  const brake = 30 - i * 3, accel = 18 - i * 2, turn = i % 3, over = i % 2, other = i % 4 === 0 ? 5 : 0;
+  return { plate: p2, alerts: brake + accel + turn + over + other,
+    harsh_brake: brake, harsh_accel: accel, sharp_turn: turn, overspeed: over, other,
+    unattributed: i === 3 ? 4 : 0, drivers: 1 + (i % 2),
+    top_driver: i === 3 ? null : drivers[i % drivers.length],
+    top_driver_id: i === 3 ? null : `drv-${i % drivers.length}` };
+})));
+
+
+app.get('/api/drivers/leaderboard', (_, r) => r.json(drivers.map((name, i) => ({
+  driver_name: name, driver_ext_id: `drv-${i}`, platform: i % 3 ? 'uber' : 'hotel',
+  plate: plates[i % plates.length], trips: 180 - i * 14, km: (180 - i * 14) * 12,
+  avg_km: 12 + i * 0.3, revenue: i % 3 ? null : (180 - i * 14) * 96,
+  completion_pct: 96 - i }))));
+app.get('/api/mix/detail', (req, r) => {
+  if (req.query.by === 'payment') {
+    return r.json({ dimension: 'payment', per_platform: false, total_trips: 2043,
+      unlabelled_trips: 402, unlabelled_platforms: ['fms'],
+      groups: [
+        { platform: null, label: 'braintree', n: 620, revenue: null, priced_n: 0 },
+        { platform: null, label: 'apple_pay', n: 402, revenue: null, priced_n: 0 },
+        { platform: null, label: 'offline', n: 349, revenue: null, priced_n: 0 },
+        { platform: null, label: 'cash', n: 270, revenue: null, priced_n: 0 },
+        { platform: null, label: 'room-charge', n: 96, revenue: 9600, priced_n: 96, revenue_per_trip: 100 },
+        { platform: null, label: 'cash-driver', n: 58, revenue: 5220, priced_n: 58, revenue_per_trip: 90 },
+        { platform: null, label: 'posted-for-salary', n: 33, revenue: 6270, priced_n: 33, revenue_per_trip: 190 },
+        { platform: null, label: 'pos-driver', n: 29, revenue: 2610, priced_n: 29, revenue_per_trip: 90 },
+        { platform: null, label: 'paypal', n: 12, revenue: null, priced_n: 0 },
+        { platform: null, label: 'zaakpay', n: 9, revenue: null, priced_n: 0 },
+        { platform: null, label: 'foc-complimentary', n: 3, revenue: null, priced_n: 0 },
+      ] });
+  }
+  r.json({ dimension: req.query.by || 'product', per_platform: true, total_trips: 2043,
+    unlabelled_trips: 0, unlabelled_platforms: [], groups: [] });
 });
 
 app.get(/^\/api\//, (_, r) => r.json([]));
