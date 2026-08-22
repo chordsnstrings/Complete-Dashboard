@@ -102,7 +102,21 @@ const SEG = await (async () => {
     return rows[0] ? { plate: rows[0].plate, at: rows[0].started_at } : null;
   } catch { return null; }
 })();
+/* The platforms this fleet actually has, read from the data rather than listed
+   here: a hard-coded set would report Bolt as missing for ever, and would miss a
+   seventh channel the day one is added. */
+const FLEET_PLATFORMS = await (async () => {
+  try {
+    const r = await fetch(`${B}/api/coverage?from=2000-01-01&to=2100-01-01`);
+    const j = await r.json();
+    const set = new Set((j.trips || []).filter((t) => Number(t.n) > 0)
+      .map((t) => String(t.platform).toLowerCase()));
+    return set.size ? set : new Set();
+  } catch { return new Set(); }
+})();
+
 console.log(`windows: ${WINDOWS.join(', ')}  (today ${TO})`
+  + `\n  fleet platforms: ${[...FLEET_PLATFORMS].join(', ') || '(unknown)'}`
   + `\n  plate=${PLATE}  driver=${DRIVER}  property=${PROPERTY}`
   + `  segment=${SEG ? `${SEG.plate}@${String(SEG.at).slice(0, 19)}` : 'none'}\n`);
 
@@ -167,6 +181,63 @@ function emptiness(json) {
   return null;
 }
 
+/* Is this panel showing the whole fleet, or one source standing in for it?
+   ─────────────────────────────────────────────────────────────────────────
+   This product's entire purpose is combining CABMAN, FMS, Uber, Yango, Bolt and
+   the hotel channel into one view, and the failure it keeps having is a panel
+   that renders perfectly while describing one of them. Uber's export carries no
+   fare, so a revenue panel silently became "the hotel channel"; the driver
+   ranking folded names differently from the directory, so one page counted 90
+   people and the next 89.
+
+   A panel that names its platforms is checked against the platforms the fleet
+   actually has. It is not an error to show one — a Bolt-only panel is right
+   when only Bolt has that kind of row — so this reports rather than fails, and
+   names which are missing so the reader can judge. */
+const platformsIn = (json) => {
+  const found = new Set();
+  const walk = (v, key) => {
+    if (v == null) return;
+    if (typeof v === 'string' && /^(platform|source)$/i.test(key || '')) found.add(v.toLowerCase());
+    if (Array.isArray(v)) {
+      if (/^(platforms|booking_platforms|platforms_worked)$/i.test(key || '')) {
+        v.filter((x) => typeof x === 'string').forEach((x) => found.add(x.toLowerCase()));
+      }
+      v.slice(0, 200).forEach((x) => walk(x, key));
+    } else if (typeof v === 'object') {
+      Object.entries(v).forEach(([k, x]) => walk(x, k));
+    }
+  };
+  walk(json, null);
+  /* Only values that are actually platform names. `platform` is not always a
+     platform: /api/events carries "seasonal" under that key, and counting it
+     reported the world-event feed as a channel missing five others. */
+  return new Set([...found].filter((v) => FLEET_PLATFORMS.has(v)));
+};
+
+/* FMS is telematics, not a channel: is_booking is literally platform <> 'fms',
+   so every booking-scoped panel excludes it by definition and reporting that as
+   a gap would flag most of the product for working correctly. */
+const BOOKING_PLATFORMS = () => new Set([...FLEET_PLATFORMS].filter((p) => p !== 'fms'));
+
+/* The panels whose JOB is combining channels.
+   ─────────────────────────────────────────────────────────────────────────
+   Scoped deliberately. Checking every panel that mentions a platform produced
+   thirteen findings and all thirteen were correct behaviour: /api/live and
+   /api/track are position feeds so their source is a tracker, compliance comes
+   from one provider, and Yango has eight trips in the record so it is legitimately
+   absent from a corridor map. A check that prints thirteen expected lines every
+   run is a check people learn to scroll past.
+
+   These are the ones where a single source IS the bug, and each has been that
+   bug: the revenue headline was the hotel channel alone for the life of the
+   project, because Uber's export carries no fare and nothing said so. */
+const MUST_COMBINE = new Set([
+  '/api/kpis', '/api/mix', '/api/mix/detail', '/api/revenue',
+  '/api/trips/daily', '/api/drivers/directory', '/api/drivers/leaderboard',
+  '/api/vehicles/directory', '/api/vehicles', '/api/coverage', '/api/status',
+]);
+
 // Numbers that render as text a reader should never see.
 function junk(json) {
   const bad = [];
@@ -209,7 +280,23 @@ for (const view of VIEWS) {
   const refused = results.filter((r) => r.status >= 400 && r.status < 500);
   const blank = results.map((r) => ({ path: r.path, why: emptiness(r.json) })).filter((r) => r.why);
   const junky = results.flatMap((r) => junk(r.json).map((j) => `${r.path} ${j}`));
-  report.push({ view, endpoints: ps.length, broken, refused, blank, junky });
+  /* Only panels that name a platform at all — most do not, and demanding one of
+     a KPI row would be noise rather than a finding. */
+  const partial = results
+    .filter((r) => MUST_COMBINE.has(r.path.split('?')[0]))
+    /* A truncated list is allowed to be missing a channel: it is a ranking, and
+       a platform with eight trips in the record falls below the cut at a wide
+       window. Seen for real — the leaderboard shows Yango over thirty days and
+       not over a year, which is the list working rather than a gap in it. The
+       envelope says so, so this can tell the two apart instead of reporting the
+       cut as an absence. */
+    .filter((r) => !(r.json && r.json.truncated === true))
+    .map((r) => ({ path: r.path, have: platformsIn(r.json) }))
+    .map((r) => ({ ...r, want: BOOKING_PLATFORMS() }))
+    .filter((r) => r.have.size > 0 && [...r.want].some((p) => !r.have.has(p)))
+    .map((r) => `${r.path} — ${[...r.have].join('+')} only, missing `
+      + `${[...r.want].filter((p) => !r.have.has(p)).join(', ')}`);
+  report.push({ view, endpoints: ps.length, broken, refused, blank, junky, partial });
 }
 
 let bad = 0;
@@ -226,6 +313,7 @@ for (const r of report) {
   if (r.broken.length) issues.push(`${r.broken.length} ERROR`);
   if (r.refused.length) issues.push(`${r.refused.length} refused`);
   if (r.blank.length) issues.push(`${r.blank.length} empty`);
+  if (r.partial?.length) issues.push(`${r.partial.length} single-source`);
   if (r.junky.length) issues.push(`${r.junky.length} junk`);
   const ok = !r.broken.length && !r.junky.length && !r.refused.length;
   if (!ok) bad++;
@@ -233,6 +321,7 @@ for (const r of report) {
   for (const b of r.broken) console.log(`  ✗ ${b.path} → ${b.status} ${b.raw}`);
   for (const j of r.junky) console.log(`  ✗ ${j}`);
   for (const b of r.blank) console.log(`  · ${b.path} — ${b.why}`);
+  for (const b of (r.partial || [])) console.log(`  ~ ${b}`);
   for (const b of r.refused) console.log(`  ✗ UNREACHED ${b.path} → ${b.status} ${b.raw.slice(0, 60)}`);
 }
 console.log('─'.repeat(78));
