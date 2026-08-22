@@ -36,7 +36,7 @@ app.get('/api/map/journey', (req, res) => {
   res.json({
     occupancy_reported: true, occupancy_measured_km: 78.4, occupancy_reported_fixes: 44, plate: req.query.plate, day: req.query.day, fixes: pts.length,
     segments: [{ points: pts.slice(0, 22), occupied: false }, { points: pts.slice(24), occupied: true }],
-    driver: 'Ahmed Tarig Mohamed', driver_trips: 7,
+    driver: 'Ahmed Tarig Mohamed', driver_id: 'drv-0', driver_trips: 7,
     distance_km: 83.4, moving_km: 78.1, occupied_km: 31.2 });
 });
 
@@ -814,7 +814,7 @@ app.get('/api/corporate/summary', (_, r) => r.json({
   deadhead_ratio_pct: 16.8, foc_trips: 10, overrun_trips: 7, scheduled_trips: 604, scheduled_pct: 48.2,
   authorized_trips: 155, authorized_pct: 12.4, missing_trips: 0, guests: 812, properties: 4,
   drivers: 35, vehicles: 35, outside_dubai: 9, zoned: 707, outside_dubai_pct: 1.3,
-  concentration_hhi: 3480, top_property: 'Palm Grand', top_property_share_pct: 55.5,
+  concentration_hhi: 3480, top_property: 'Palm Grand', partner_id: 'h-palm', top_property_share_pct: 55.5,
 }));
 app.get('/api/corporate/properties', (_, r) => r.json(hotels.map((h, i) => ({
   partner_id: h.id, name: h.name, bookings: 696 - i * 180, priced: 690 - i * 180,
@@ -851,14 +851,14 @@ app.get('/api/corporate/guests', (_, r) => r.json({
   repeat_rooms: 37, repeat_bookings: 94, rooms_truncated: true,
   guests: Array.from({ length: 40 }, (_, i) => ({ guest_id: `guest-${2000 + i}`, bookings: 8 - (i % 7),
     revenue: (8 - (i % 7)) * 108, priced: 8 - (i % 7), properties: 1 + (i % 2),
-    property: hotels[i % hotels.length].name, room_no: String(900 + i),
+    property: hotels[i % hotels.length].name, partner_id: 'h-palm', room_no: String(900 + i),
     purpose: i % 5 === 0 ? 'AIRPORT TRANSFER' : null, first_at: dayISO(90 - i), last_at: dayISO(i % 30),
     km: (8 - (i % 7)) * 14, span_days: 90 - i - (i % 30) })),
   total_guests: 812, total_bookings: 1253, repeat_guests: 214, repeat_rate_pct: 26.4,
   bookings_from_repeat_pct: 48.1, bookings_with_room: 168, distinct_rooms: 139,
   id_is_per_booking: false, caveat: null,
   rooms: Array.from({ length: 10 }, (_, i) => ({ room_no: String(1200 + i), bookings: 6 - (i % 5),
-    properties: 1, property: hotels[i % hotels.length].name, revenue: (6 - (i % 5)) * 110,
+    properties: 1, property: hotels[i % hotels.length].name, partner_id: 'h-palm', revenue: (6 - (i % 5)) * 110,
     first_at: dayISO(50 - i), last_at: dayISO(i) })),
 }));
 app.get('/api/corporate/leakage', (req, r) => {
@@ -875,7 +875,7 @@ app.get('/api/corporate/leakage', (req, r) => {
     external_id: `bk-${i}`, requested_at: new Date(Date.now() - i * 72e5).toISOString(),
     ended_at: new Date(Date.now() - i * 72e5 + 18e5).toISOString(), driver_name: drivers[i % drivers.length],
     driver_ext_id: `drv-${i % drivers.length}`, plate: plates[i % plates.length],
-    property: hotels[i % hotels.length].name, partner_id: hotels[i % hotels.length].id,
+    property: hotels[i % hotels.length].name, partner_id: 'h-palm', partner_id: hotels[i % hotels.length].id,
     product: ['pick_and_drop', 'hourly', 'drop_off'][i % 3], payment_type: 'room-charge',
     settlement_class: 'on_account', price: 120 - i * 4, cost: 80 - i * 3, distance_km: 3 + i,
     deadhead_km: 12 - i * 0.4, hours: null, room_no: String(1100 + i), trip_purpose: null,
@@ -1333,6 +1333,12 @@ const mkSeg = (i) => ({
   end_lat: rnd(25.05, 25.3), end_lng: rnd(55.1, 55.42),
   local_day: segAt(i).slice(0, 10),
   drivers: i % 6 === 0 ? null : drivers[i % drivers.length],
+  // Name-and-id pairs: a handover day names two people and both must open.
+  driver_refs: i % 6 === 0 ? null
+    : i % 5 === 4
+      ? [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}` },
+        { name: drivers[(i + 1) % drivers.length], id: `drv-${(i + 1) % drivers.length}` }]
+      : [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}` }],
 });
 const ALL_SEGS = Array.from({ length: 64 }, (_, i) => mkSeg(i));
 

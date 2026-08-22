@@ -232,7 +232,9 @@ async function corpGuests(host) {
       }
       body.append(tableFrom(g.rooms, [
         { label: 'Room', key: 'room_no' },
-        { label: 'Property', key: 'property', render: (r) => esc(r.property || '—') },
+        { label: 'Property', key: 'property',
+          render: (r) => entity('property', r.partner_id, r.property)
+            + (r.properties > 1 ? ` <span class="dim">+${r.properties - 1} more</span>` : '') },
         { label: 'Bookings', key: 'bookings', num: true },
         { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
         { label: 'First', key: 'first_at', render: (r) => dayStr(r.first_at) },
@@ -262,7 +264,7 @@ async function corpGuests(host) {
 
 const GUEST_COLS = [
   { label: 'Record', key: 'guest_id', render: (r) => `<code>${esc(String(r.guest_id).slice(-8))}</code>` },
-  { label: 'Property', key: 'property', render: (r) => esc(r.property || '—') },
+  { label: 'Property', key: 'property', render: (r) => entity('property', r.partner_id, r.property) },
   { label: 'Room', key: 'room_no' },
   { label: 'Bookings', key: 'bookings', num: true },
   { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },

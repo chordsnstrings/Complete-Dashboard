@@ -145,7 +145,8 @@ async function tabDrivers(root, plate) {
   if (!dd.totals.length) { tot.body.append(note('No custody records for this vehicle in this window.')); }
   else {
     const t = tableFrom(dd.totals, [
-      { label: 'Driver', key: 'driver_name', render: (r) => `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name || r.driver_ext_id)}</a>` },
+      { label: 'Driver', key: 'driver_name',
+        render: (r) => entity('driver', r.driver_ext_id, r.driver_name || r.driver_ext_id) },
       { label: 'Days', key: 'days', num: true },
       { label: 'As primary', key: 'primary_days', num: true },
       { label: 'Trips', key: 'trips', num: true },
@@ -159,7 +160,8 @@ async function tabDrivers(root, plate) {
   tl.body.innerHTML = '';
   tl.body.append(tableFrom(dd.days.slice(0, 120), [
     { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
-    { label: 'Driver', key: 'driver_name', render: (r) => `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name || r.driver_ext_id)}</a>` },
+    { label: 'Driver', key: 'driver_name',
+      render: (r) => entity('driver', r.driver_ext_id, r.driver_name || r.driver_ext_id) },
     { label: 'Platform', key: 'platform' },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
@@ -482,8 +484,11 @@ export async function renderVehicleDirectory(root) {
   ]));
 
   const cols = [
-    { label: 'Plate', key: 'plate', render: (r) => `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>` },
-    { label: 'Vehicle', key: '_v', render: (r) => esc([r.year, r.make, r.model].filter(Boolean).join(' ') || '—') },
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+    // Not the vehicle's identity — that is the plate beside it. A column
+    // labelled "Vehicle" that prints a make and model and links nowhere reads
+    // as a dead end when it is really a description.
+    { label: 'Make & model', key: '_v', render: (r) => esc([r.year, r.make, r.model].filter(Boolean).join(' ') || '—') },
     { label: 'Current driver', key: 'current_driver',
       render: (r) => (r.current_driver_id
         ? entity('driver', r.current_driver_id, r.current_driver)

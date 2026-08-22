@@ -233,7 +233,12 @@ async function tabOverview(root, id, prof) {
   // Narrow panel — the date range rides in the row tooltip rather than forcing
   // a horizontal scrollbar onto four columns that matter more.
   const vt = tableFrom((prof.vehicles || []).slice(0, 8), [
-    { label: 'Plate', key: 'plate', render: (r) => `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>${r.ever_primary ? ' <span class="dim">●</span>' : ''}` },
+    /* entity(), not a hand-rolled anchor: href() drops falsy parts, so a null
+       plate produced `#vehicle` — a link with empty text that silently opened
+       the whole vehicle directory instead of saying there was nothing to open. */
+    { label: 'Plate', key: 'plate',
+      render: (r) => entity('vehicle', r.plate, r.plate)
+        + (r.ever_primary ? ' <span class="dim">●</span>' : '') },
     { label: 'Days', key: 'days', num: true },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
@@ -301,7 +306,7 @@ async function tabActivity(root, id) {
   cust.body.innerHTML = '';
   cust.body.append(tableFrom(custody.slice(0, 60), [
     { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
-    { label: 'Plate', key: 'plate', render: (r) => `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>` },
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Platform', key: 'platform' },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
@@ -533,7 +538,7 @@ async function tabTrips(root, id) {
   const cols = [
     { label: 'Requested', key: 'requested_at', render: (r) => dtStr(r.requested_at) },
     { label: 'Platform', key: 'platform' },
-    { label: 'Plate', key: 'plate', render: (r) => (r.plate ? `<a class="lnk" href="${href('vehicle', r.plate)}">${esc(r.plate)}</a>` : '—') },
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'From', key: 'pickup_addr' },
     { label: 'To', key: 'dropoff_addr' },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
@@ -636,7 +641,8 @@ export async function renderDriverDirectory(root) {
     { label: 'In this window', key: '_a', render: (r) => (r.active_in_window
       ? pill('drove', 'ok')
       : r.ever_driven ? pill('no trip', 'warn') : pill('never driven', 'bad')) },
-    { label: 'Driver', key: 'driver_name', render: (r) => `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name)}</a>` },
+    { label: 'Driver', key: 'driver_name',
+      render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Platforms', key: '_p', render: (r) => (r.platforms || []).map((p) => pill(p, 'plat')).join('') },
     { label: 'Usual vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },

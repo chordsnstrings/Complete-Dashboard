@@ -124,9 +124,17 @@ check('break copy is direction-aware', /rose \? a\.up : a\.down/.test(causesJs))
 check('an unattributable break has its own copy', /unattributable: \{/.test(causesJs));
 check('candidate events are labelled as candidates, not causes',
   /Candidates, not proof/.test(causesJs));
-// The two detail views must link to each other, or the custody chain dead-ends.
-check('a vehicle page links to its drivers', /href\('driver', /.test(vehicleJs));
-check('a driver page links to the vehicles they held', /href\('vehicle', r\.plate\)/.test(driverJs));
+/* The two detail views must link to each other, or the custody chain dead-ends.
+   Checked for the DESTINATION, not for one spelling of it: this pinned the
+   exact string `href('vehicle', r.plate)` and broke when those anchors became
+   entity() calls — which was the improvement, since href() drops falsy parts
+   and a null plate produced `#vehicle`, a link with empty text that silently
+   opened the whole directory. A test that fails when the code gets better is
+   testing the wrong thing. */
+const linksTo = (src, view) => new RegExp(
+  `entity\\(\\s*'${view}'|href\\(\\s*'${view}'`).test(src);
+check('a vehicle page links to its drivers', linksTo(vehicleJs, 'driver'));
+check('a driver page links to the vehicles they held', linksTo(driverJs, 'vehicle'));
 
 /* ── map framing ───────────────────────────────────────────────────────────
    Leaflet rounds a fitted zoom DOWN to a whole level unless zoomSnap is 0, so

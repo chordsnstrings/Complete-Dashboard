@@ -624,11 +624,14 @@ app.get('/api/map/journey', wrap(async (req, res) => {
                       status: f.status, occupied: occ });
   }
   const [drv] = await q(
-    `SELECT driver_name, trips FROM vehicle_driver_day
+    // The id too. The map's KPI row printed this person's name and linked
+    // nowhere, on the page most likely to raise a question about them.
+    `SELECT driver_name, driver_ext_id, trips FROM vehicle_driver_day
      WHERE plate=$1 AND day=$2 ORDER BY trips DESC LIMIT 1`, [plate, day]);
   res.json({
     plate, day, fixes: fixes.length, segments,
-    driver: drv?.driver_name || null, driver_trips: drv?.trips ?? null,
+    driver: drv?.driver_name || null, driver_id: drv?.driver_ext_id || null,
+    driver_trips: drv?.trips ?? null,
     distance_km: Math.round(km * 10) / 10,
     moving_km: Math.round(movingKm * 10) / 10,
     // null, not 0, when no fix on this day reported occupancy at all.
@@ -885,7 +888,16 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
             o.verdict_reason, o.nearest_platform, o.nearest_trip_id, o.nearest_gap_min,
             o.channels_checked, o.boundary_gap_min,
             o.start_lat, o.start_lng, o.end_lat, o.end_lng,
-            -- the driver who held the car that day, not whoever has it now
+            -- The driver who held the car that day, not whoever has it now —
+            -- as name-and-id pairs, because a comma-joined string of names is
+            -- a dead end by construction and a handover day names two people
+            -- who must both be openable.
+            (SELECT jsonb_agg(DISTINCT jsonb_build_object(
+                      'name', v2.driver_name, 'id', v2.driver_ext_id))
+               FROM vehicle_driver_day v2
+              WHERE v2.plate = o.plate
+                AND v2.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
+                AND v2.driver_name IS NOT NULL) AS driver_refs,
             (SELECT string_agg(DISTINCT v.driver_name, ', ')
                FROM vehicle_driver_day v
               WHERE v.plate = o.plate

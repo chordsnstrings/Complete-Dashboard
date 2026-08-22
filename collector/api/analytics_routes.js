@@ -375,6 +375,11 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int priced,
               count(DISTINCT partner_id)::int properties,
               max(coalesce(partner_name, partner_id)) property,
+              -- The id, so the property name is openable. Where a guest or a
+              -- room has used more than one property the name is the busiest
+              -- one and this is its id; the properties count above says when
+              -- that is a simplification.
+              (array_agg(partner_id ORDER BY partner_id) FILTER (WHERE partner_id IS NOT NULL))[1] AS partner_id,
               max(room_no) room_no, max(trip_purpose) purpose,
               min(requested_at) first_at, max(requested_at) last_at,
               sum(distance_km) FILTER (WHERE has_distance) AS km
@@ -397,6 +402,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       `SELECT room_no, count(*)::int bookings,
               count(DISTINCT coalesce(partner_name, partner_id))::int properties,
               max(coalesce(partner_name, partner_id)) property,
+              (array_agg(partner_id ORDER BY partner_id) FILTER (WHERE partner_id IS NOT NULL))[1] AS partner_id,
               sum(price) FILTER (WHERE NOT is_complimentary) AS revenue,
               min(requested_at) first_at, max(requested_at) last_at
        FROM trip_ext

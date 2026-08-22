@@ -37,6 +37,18 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
                       AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
                       AND v.driver_name IS NOT NULL)`;
 
+  /* The same people, as name-and-id pairs.
+     A comma-joined string of names is a dead end by construction: the page can
+     print it and nothing more, so the most serious accusation this product
+     makes named somebody you could not open. A handover day names two people
+     and both must be openable, which rules out returning a single id. */
+  const CUSTODY_IDS = `(SELECT jsonb_agg(DISTINCT jsonb_build_object(
+                            'name', v.driver_name, 'id', v.driver_ext_id))
+                          FROM vehicle_driver_day v
+                         WHERE v.plate = o.plate
+                           AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
+                           AND v.driver_name IS NOT NULL)`;
+
   /* ── the list, with the facets that make the next click obvious ────────── */
   app.get('/api/segments', wrap(async (req, res) => {
     const [from, to] = range(req);
@@ -57,7 +69,7 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
        AND ($6::text IS NULL OR ${CUSTODY} ILIKE '%' || $6 || '%')`;
 
     const [rows, byVerdict, byPlate, byDay, byReason, [tot]] = await Promise.all([
-      q(`SELECT ${SEG_COLS}, ${CUSTODY} AS drivers
+      q(`SELECT ${SEG_COLS}, ${CUSTODY} AS drivers, ${CUSTODY_IDS} AS driver_refs
           FROM occupancy_segment o WHERE ${WHERE}
           ORDER BY o.started_at DESC LIMIT ${limit}`, p),
       // Facets are computed over the WINDOW, not over the current filter —
@@ -112,7 +124,7 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
     if (!Number.isFinite(t)) return res.status(400).json({ error: 'at must be a timestamp' });
 
     const [seg] = await q(
-      `SELECT ${SEG_COLS}, ${CUSTODY} AS drivers
+      `SELECT ${SEG_COLS}, ${CUSTODY} AS drivers, ${CUSTODY_IDS} AS driver_refs
        FROM occupancy_segment o WHERE o.plate = $1 AND o.started_at = $2::timestamptz`, [plate, at]);
     if (!seg) return res.status(404).json({ error: 'no segment starts at that instant for that plate' });
 
@@ -146,8 +158,8 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
       /* And the same question asked of the PERSON rather than the car. A
          driver who was demonstrably on a booking in someone else's vehicle at
          that moment did not take this one, and no per-plate query can see it. */
-      q(`SELECT t.platform, t.external_id, t.plate, t.driver_name, t.requested_at, t.ended_at,
-                t.status, t.outcome, t.price,
+      q(`SELECT t.platform, t.external_id, t.plate, t.driver_name, t.driver_ext_id,
+                t.requested_at, t.ended_at, t.status, t.outcome, t.price,
                 round(extract(epoch from (t.requested_at - $2::timestamptz))/60)::int gap_min
           FROM trip_norm t
           WHERE t.driver_name IS NOT NULL

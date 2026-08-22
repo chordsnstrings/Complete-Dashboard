@@ -1283,7 +1283,11 @@ V.map = async (root) => {
         ? ['With passenger', fmt(j.occupied_km) + ' km',
           j.occupancy_measured_km ? Math.round(j.occupied_km / j.occupancy_measured_km * 100) + '% of measured distance' : '—']
         : ['With passenger', 'not measured', 'this vehicle\'s feed carries no seat sensor'],
-      ['Driver', j.driver || '—', j.driver_trips != null ? j.driver_trips + ' trips' : 'from trip records'],
+      /* The name is a link. This tile named the person who drove the route on
+         screen and led nowhere, on the page most likely to raise a question
+         about them. */
+      ['Driver', j.driver ? entity('driver', j.driver_id, j.driver) : '—',
+        j.driver_trips != null ? j.driver_trips + ' trips that day' : 'from the trip record'],
     ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
     legend.innerHTML = (j.occupancy_reported
       ? [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
@@ -1554,7 +1558,8 @@ V.compliance = async (root) => {
       const cls = d < 0 ? 'err' : d <= 7 ? 'err' : d <= 45 ? 'warn' : 'ok';
       return `<span class="tag ${cls}">${d < 0 ? Math.abs(d) + 'd ago' : d + 'd'}</span>`; } },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
-    { label: 'Vehicle', key: 'make', render: (r) => esc([r.make, r.model, r.year].filter(Boolean).join(' ') || '—') },
+    // A description, not an identity — the plate beside it is the link.
+    { label: 'Make & model', key: 'make', render: (r) => esc([r.make, r.model, r.year].filter(Boolean).join(' ') || '—') },
     { label: 'Document', key: 'doc_type' },
     { label: 'Expires', key: 'expires_at', render: (r) => String(r.expires_at || '').slice(0, 10) },
     /* Who holds the car now — a document expiring next week is that person's

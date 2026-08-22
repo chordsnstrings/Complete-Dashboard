@@ -143,9 +143,20 @@ export function segmentTable(rows) {
   if (!rows.length) { const d = el('div'); empty(d, 'Nothing flagged here'); return d; }
   const t = tableFrom(rows, [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
-    { label: 'Driver that day', key: 'drivers', render: (r) => (r.drivers
-      ? `<a href="${href('segments', 'driver', r.drivers.split(',')[0].trim())}">${esc(r.drivers)}</a>`
-      : '<span class="dim">unknown</span>') },
+    /* Both destinations, because they answer different questions and the row
+       previously offered only one. The name opens the PERSON — which is what
+       somebody reading an accusation wants — and the funnel opens this
+       driver's other flagged segments. A handover day names two people and
+       both are openable, which is why the endpoint returns name-and-id pairs
+       rather than a comma-joined string it could only print. */
+    { label: 'Driver that day', key: 'drivers', render: (r) => {
+      const refs = r.driver_refs || (r.drivers
+        ? r.drivers.split(',').map((x) => ({ name: x.trim(), id: null })) : []);
+      if (!refs.length) return '<span class="dim">unknown</span>';
+      return refs.map((d) => entity('driver', d.id, d.name)).join(', ')
+        + ` <a class="dim" title="This driver’s other flagged segments"
+             href="${href('segments', 'driver', refs[0].name)}">⌕</a>`;
+    } },
     { label: 'Started', key: 'started_at', render: (r) => `<a href="${href('segment', r.plate, r.started_at)}">${esc(dtStr(r.started_at))}</a>` },
     { label: 'Duration', key: 'duration_min', num: true, render: (r) => (r.duration_min ?? '—') + ' min' },
     { label: 'Distance', key: 'distance_km', num: true, render: (r) => (r.distance_km ?? 0) + ' km' },
