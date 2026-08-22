@@ -201,7 +201,15 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          SELECT DISTINCT coalesce(nullif(btrim(driver_ext_id), ''),
                                   'name:' || person_key) AS driver_ext_id,
                 driver_name FROM trip
-           WHERE person_key IS NOT NULL AND person_key <> ''
+           -- A seq-scan predicate on purpose. Written as
+          --   WHERE person_key IS NOT NULL AND person_key <> ''
+          -- it matches the partial index's own predicate exactly, so the
+          -- planner chose an index scan and then fetched the heap row for
+          -- essentially every row in the table. /api/drivers/directory went
+          -- from 4.3s to 41s. The projection still uses person_key, which is
+          -- where the saving actually was; the filter goes back to the column
+          -- the scan is reading anyway.
+           WHERE driver_name IS NOT NULL AND btrim(driver_name) <> ''
          UNION
          SELECT coalesce(nullif(btrim(driver_ext_id), ''),
                          'name:' || ${CANON('full_name')}), full_name FROM driver_compliance
@@ -247,7 +255,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          SELECT coalesce(nullif(btrim(driver_ext_id), ''),
                          'name:' || person_key) AS driver_ext_id,
                 max(requested_at) last_ever, count(*)::int lifetime
-         FROM trip WHERE person_key IS NOT NULL AND person_key <> '' GROUP BY 1
+         FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1
        )
        SELECT who.driver_ext_id, who.driver_name,
               coalesce(t.trips, 0) AS trips, coalesce(t.completed, 0) AS completed,

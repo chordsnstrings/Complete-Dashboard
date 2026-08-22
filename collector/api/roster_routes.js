@@ -83,7 +83,7 @@ export function rosterRoutes(app, { q, wrap, range }) {
          SELECT person_key AS person,
                 min(requested_at) AS first_trip, max(requested_at) AS last_ever,
                 count(*)::int lifetime_trips
-         FROM trip WHERE person_key IS NOT NULL AND person_key <> '' GROUP BY 1
+         FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1
        )
        SELECT s.person,
               max(s.full_name) AS name,

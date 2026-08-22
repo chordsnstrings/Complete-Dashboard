@@ -167,7 +167,12 @@ async function refreshPersonMonth(db, since) {
             array_agg(DISTINCT n.platform),
             now()
      ${FROM_TRIPS}
-     WHERE n.is_booking AND t.person_key IS NOT NULL AND t.person_key <> ''
+     /* Not a person_key IS NOT NULL predicate here: that matches the partial
+        index's own predicate exactly and tips the planner into an index
+        scan with a heap fetch per row. It cost /api/drivers/directory a
+        tenfold regression when written that way. Same set of rows, read the
+        way this query is reading them anyway. */
+     WHERE n.is_booking AND t.driver_name IS NOT NULL AND btrim(t.driver_name) <> ''
        ${from ? 'AND n.local_day >= $1::date' : ''}
      GROUP BY 1, 2
      ON CONFLICT (person_key, month) DO UPDATE
