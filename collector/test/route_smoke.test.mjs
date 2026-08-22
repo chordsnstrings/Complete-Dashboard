@@ -204,12 +204,6 @@ check('every route the source declares is actually registered on the app',
 {
   const mockSrc = readFileSync('mockapi.mjs', 'utf8');
   const mockRoutes = new Set([...mockSrc.matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]));
-  const mockApp = express();
-  // Run the mock's own handlers by importing it would start a listener on a
-  // fixed port, so its responses are fetched from the running instance only
-  // when one is up. Instead, shape-check what we can statically: every route
-  // the UI calls that the real server implements must ALSO be fixtured, or the
-  // catch-all silently supplies the wrong shape.
   const uiSrc = readdirSync('api/public').filter((f) => f.endsWith('.js'))
     .map((f) => readFileSync(`api/public/${f}`, 'utf8')).join('\n');
   const usedByUi = all.filter((r) => new RegExp(
@@ -218,6 +212,75 @@ check('every route the source declares is actually registered on the app',
   check('every route the UI calls has a mock fixture, so the browser smoke test cannot pass on the wrong shape',
     unfixtured.length === 0,
     unfixtured.length ? `\n      unfixtured: ${unfixtured.join('\n      unfixtured: ')}` : '');
+
+  /* And the SHAPE, actually compared rather than asserted in a comment.
+     The previous version of this block explained that comparing top-level shape
+     catches the cross-platform class of bug, and then only checked that a
+     fixture existed — which would not have caught it, because the fixture was
+     added at the same time as the check. The mock is mounted on an ephemeral
+     port and both are called.
+
+     Deliberately shallow: array vs object, and for objects, every key the real
+     route returns must exist in the fixture. Values are not compared — the mock
+     is meant to differ in values, that is the point of it. */
+  const { app: mockApp } = await import('../mockapi.mjs');
+  const mockServer = mockApp.listen(0);
+  const mockPort = mockServer.address().port;
+  const shapeOf = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
+  const drift = [];
+  for (const path of resolved) {
+    const route = all[resolved.indexOf(path)];
+    if (!mockRoutes.has(route) || !usedByUi.includes(route)) continue;
+    const extra = ARGS[path] ?? ARGS[route] ?? '';
+    const url = (base) => `${base}${path}?${WINDOW}${extra ? `&${extra}` : ''}`;
+    const [realRes, mockRes] = await Promise.all([
+      fetch(url(`http://127.0.0.1:${port}`)), fetch(url(`http://127.0.0.1:${mockPort}`)),
+    ]);
+    const [realTxt, mockTxt] = await Promise.all([realRes.text(), mockRes.text()]);
+    // A 404 body is a different response shape by design ({error}), and this
+    // file's fixture is small enough that several detail routes legitimately
+    // 404. Comparing those would report the refusal shape as fixture drift.
+    if (realRes.status >= 400) continue;
+    let real; let mock;
+    try { real = JSON.parse(realTxt); mock = JSON.parse(mockTxt); } catch { continue; }
+    /* Same for a deliberate refusal: /api/forecast and /api/retention answer
+       {reason} when there is not enough history to say anything, and the mock
+       fixtures the happy path on purpose. */
+    if (real && typeof real === 'object' && ('error' in real || 'reason' in real)) continue;
+    if (shapeOf(real) !== shapeOf(mock)) {
+      drift.push(`${route}: real is ${shapeOf(real)}, mock is ${shapeOf(mock)}`);
+      continue;
+    }
+    /* One level into rows as well as at the top. Everything a table renders
+       lives in a row, so a fixture whose ROWS lack a field is exactly as
+       misleading as one whose top level does — and top-level-only comparison
+       reported agreement while six fixtures were missing the driver attribution
+       the pages had just started rendering.
+
+       The real row keys are the contract; a fixture may carry extra. Compared
+       against the union of the real rows' keys, because a column is legitimately
+       absent from an individual row (a null that Postgres omits). */
+    const rowDrift = (realArr, mockArr, at) => {
+      const realKeys = new Set(realArr.filter((x) => x && typeof x === 'object' && !Array.isArray(x))
+        .flatMap(Object.keys));
+      if (!realKeys.size) return;
+      const mockRows = (mockArr || []).filter((x) => x && typeof x === 'object' && !Array.isArray(x));
+      if (!mockRows.length) return;                      // an empty fixture list says nothing
+      const mockKeys = new Set(mockRows.flatMap(Object.keys));
+      const missing = [...realKeys].filter((k) => !mockKeys.has(k));
+      if (missing.length) drift.push(`${route}${at}: fixture rows lack ${missing.join(', ')}`);
+    };
+    if (shapeOf(real) === 'array') { rowDrift(real, mock, '[]'); continue; }
+    if (shapeOf(real) !== 'object') continue;
+    const missingKeys = Object.keys(real).filter((k) => !(k in mock));
+    if (missingKeys.length) drift.push(`${route}: fixture lacks ${missingKeys.join(', ')}`);
+    for (const [k, v] of Object.entries(real)) {
+      if (Array.isArray(v) && Array.isArray(mock[k])) rowDrift(v, mock[k], `.${k}`);
+    }
+  }
+  check('the mock answers in the same top-level shape as the real API',
+    drift.length === 0, drift.length ? `\n      ${drift.join('\n      ')}` : '');
+  mockServer.close();
 }
 
 /* ── every schema file must survive being replayed ────────────────────────
@@ -387,9 +450,10 @@ check('every route the source declares is actually registered on the app',
    also has platform and fleet_id columns. */
 {
   const r = await fetch(`http://127.0.0.1:${port}/api/vehicles?${WINDOW}`);
-  const rows = await r.json();
+  const body = await r.json();
+  const rows = body.rows || body;
   check('the vehicle list joins current-driver without an ambiguous column',
-    r.status === 200 && Array.isArray(rows) && rows.length > 0, `${r.status} ${JSON.stringify(rows).slice(0, 120)}`);
+    r.status === 200 && Array.isArray(rows) && rows.length > 0, `${r.status} ${JSON.stringify(body).slice(0, 120)}`);
   check('the window predicate can be table-qualified', /const W = \(alias/.test(src));
 }
 

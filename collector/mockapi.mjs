@@ -19,11 +19,16 @@ app.get('/api/live', (_, r) => r.json(plates.map((p, i) => ({
   // Tri-state: only the CABMAN feed carries a seat sensor.
   seat_occupied: i % 4 === 3 ? null : i % 3 === 0, stale: i === 7,
   fix_age_min: i === 7 ? 581000 : i, poll_age_min: 1,
-  current_driver: drivers[i],
+  fuel_level: i % 3 === 2 ? null : 40 + i * 5, ac_on: i % 2 === 0, odometer: 190000 + i * 1400,
+  current_driver: drivers[i], driver_as_of: '2026-08-21',
 }))));
 
 app.get('/api/map/days', (_, r) => r.json(plates.map((p, i) => ({
   day: '2026-08-21', plate: p, fixes: 40 - i, driver_name: drivers[i], fleet_id: 'ecosine',
+  first_fix: '2026-08-21T02:10:00Z', last_fix: '2026-08-21T19:40:00Z',
+  max_speed: 90 - i * 3, occupied_fixes: 20 - i,
+  // The id, so the day list can open the person rather than only name them.
+  driver_ext_id: `drv-${i}`, driver_trips: 12 - i, current_driver_name: drivers[i],
 }))));
 
 app.get('/api/map/journey', (req, res) => {
@@ -37,12 +42,15 @@ app.get('/api/map/journey', (req, res) => {
     occupancy_reported: true, occupancy_measured_km: 78.4, occupancy_reported_fixes: 44, plate: req.query.plate, day: req.query.day, fixes: pts.length,
     segments: [{ points: pts.slice(0, 22), occupied: false }, { points: pts.slice(24), occupied: true }],
     driver: 'Ahmed Tarig Mohamed', driver_id: 'drv-0', driver_trips: 7,
+    // Bounds of the track, so the page can say what window it is showing.
+    first_fix: pts[0].t, last_fix: pts[pts.length - 1].t,
     distance_km: 83.4, moving_km: 78.1, occupied_km: 31.2 });
 });
 
 app.get('/api/status', (_, r) => r.json([
   { source: 'cabman', mode: 'realtime', status: 'ok', finished_at: new Date().toISOString(),
-    rows_written: 48, chunks_total: null, chunks_failed: null, failed_windows: [], windows: [] },
+    rows_written: 48, chunks_total: null, chunks_failed: null, failed_windows: [], windows: [],
+    window_start: null, window_end: null, error: null },
   // The shape that hid a 299-day hole: rows written, and most windows missing.
   { source: 'uber', mode: 'backfill', status: 'partial', finished_at: new Date().toISOString(),
     rows_written: 1129, chunks_total: 12, chunks_failed: 9,
@@ -52,20 +60,33 @@ app.get('/api/status', (_, r) => r.json([
       { from: '2025-12-24', to: '2026-01-23', error: 'download timed out after 600s for report 41ab…' },
     ],
     windows: [{ from: '2026-07-22', to: '2026-08-21', rows: 1129, ok: true },
-      { from: '2025-10-23', to: '2025-11-22', rows: 0, ok: false }] },
+      { from: '2025-10-23', to: '2025-11-22', rows: 0, ok: false }],
+    window_start: '2025-08-21', window_end: '2026-08-21', error: null },
   { source: 'hotel', mode: 'incremental', status: 'ok', finished_at: new Date().toISOString(),
-    rows_written: 135, chunks_total: 1, chunks_failed: 0, failed_windows: [], windows: [] },
+    rows_written: 135, chunks_total: 1, chunks_failed: 0, failed_windows: [], windows: [],
+    window_start: '2026-08-14', window_end: '2026-08-21', error: null },
   { source: 'fms', mode: 'incremental', status: 'ok', finished_at: new Date().toISOString(),
-    rows_written: 416, chunks_total: 1, chunks_failed: 0, failed_windows: [], windows: [] },
+    rows_written: 416, chunks_total: 1, chunks_failed: 0, failed_windows: [], windows: [],
+    window_start: '2026-08-14', window_end: '2026-08-21', error: null },
+  // A source that failed outright, with the driver message the page shows.
+  { source: 'bolt', mode: 'incremental', status: 'error', finished_at: new Date().toISOString(),
+    rows_written: 0, chunks_total: 1, chunks_failed: 1, failed_windows: [], windows: [],
+    window_start: '2026-08-14', window_end: '2026-08-21',
+    error: 'bolt: refresh token rejected (401) — re-paste from the fleet portal' },
 ]));
 app.get('/api/kpis', (_, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, completion_pct: 89,
   cancel_pct: 10.7, drivers: 56, vehicles: 52, revenue: 41188, live_vehicles: 48, fresh: 44, alerts: 8863,
   // The two fields that stop the Trips and Revenue tiles overstating themselves.
   telematics_journeys: 2657, telematics_km: 31840, priced_trips: 187, avg_fare: 220.3,
-  bookable_trips: 2043, priced_km: 3990, revenue_per_km: 10.32 }));
+  bookable_trips: 2043, priced_km: 3990, revenue_per_km: 10.32,
+  // Coverage: how much of the headline each figure was actually measured over.
+  completed_trips: 1818, cancelled_trips: 225, trips_with_distance: 1996, attributed_trips: 1930,
+  platforms: 4, priced_pct: 9.2, attributed_pct: 94.5 }));
 app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800' },
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
-  by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }] }));
+  by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }],
+  // Modelled vs stored: the page must not present a projection as a record.
+  modelled: false, stored_rows: 93, duplicates_suppressed: 4 }));
 
 const insights = [
   { code:'vehicle_doc_expiring', severity:'critical', category:'compliance', entity_type:'vehicle', entity_id:'L20048',
@@ -119,8 +140,18 @@ app.get('/api/insights/summary', (_, r) => r.json({
   by_category: [{ category: 'utilisation', n: 2 }, { category: 'compliance', n: 1 },
     { category: 'demand', n: 2 }, { category: 'safety', n: 1 }, { category: 'data', n: 1 }],
 }));
-const mkDoc=(plate,make,model,days,drv)=>({plate,make,model,year:2023,doc_type:'Vehicle Registration Form',
-  status:'ACTIVE', expires_at:new Date(Date.now()+days*864e5).toISOString(), days_left:days, driver_name:drv});
+let _doc = 0;
+const mkDoc = (plate, make, model, days, drv) => ({
+  plate, make, model, year: 2023, doc_type: 'Vehicle Registration Form',
+  status: 'ACTIVE', expires_at: new Date(Date.now() + days * 864e5).toISOString(),
+  days_left: days, driver_name: drv,
+  // The id, so a document about to expire names somebody you can open rather
+  // than only somebody you can read; and the day that custody is drawn from,
+  // because "held by X" means something different if it is eleven weeks old.
+  driver_ext_id: drv ? `drv-${_doc++ % 8}` : null,
+  driver_as_of: drv ? '2026-08-21' : null,
+  vin: `VIN${String(1000 + _doc)}`, image_url: null,
+});
 app.get('/api/compliance/vehicles', (_, r) => {
   const rows = [
   mkDoc('L40924','Tesla','Model Y',5,'Ahmed Tarig Mohamed'), mkDoc('L37810','Tesla','Model Y',5,'Aliyan Khalil'),
@@ -146,12 +177,20 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
     // Six rows carrying the identical placeholder the source writes when the
     // field was never filled in, plus two real dates.
     ...Array.from({ length: 6 }, (_, i) => ({ platform: 'hotel', driver_ext_id: `d${10 + i}`,
-      full_name: drivers[i], licence_no: '123456', licence_expires: '2026-01-01',
-      days_left: -232, state: 'active' })),
-    { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', licence_no: 'AE1802580',
-      licence_expires: '2026-09-20', days_left: 30, state: 'suspended' },
-    { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', licence_no: 'AE9911',
-      licence_expires: '2026-08-01', days_left: -20, state: 'active' },
+      full_name: drivers[i], phone: '+9715000000', licence_no: '123456',
+      licence_expires: '2026-01-01', days_left: -232, state: 'active',
+      suspension_reason: null, rating: 4.8 - i * 0.05,
+      // A licence expiring is a CAR that stops earning. The row names it.
+      vehicle: { plate: plates[i % plates.length], day: '2026-08-21' } })),
+    { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', phone: '+9715000001',
+      licence_no: 'AE1802580', licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
+      suspension_reason: 'documents under review', rating: 4.71,
+      vehicle: { plate: plates[2], day: '2026-08-19' } },
+    { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', phone: null,
+      licence_no: 'AE9911', licence_expires: '2026-08-01', days_left: -20, state: 'active',
+      suspension_reason: null, rating: null,
+      // Nobody has held this person's car in the window we have custody for.
+      vehicle: null },
   ],
   placeholder_date: '2026-01-01', placeholder_rows: 6, rows_with_a_date: 8,
   caveat: '6 of 8 licence dates are the identical value 2026-01-01, which is what this source writes '
@@ -201,6 +240,9 @@ app.get('/api/drivers/directory', (_, r) => r.json([
     last_trip: new Date(Date.now() - i * 36e5).toISOString(),
     last_ever: new Date(Date.now() - i * 36e5).toISOString(), lifetime_trips: 900 - i * 60,
     first_trip: dayISO(DAYS), completion_pct: 97 - i, platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
+    // What the PROVIDER says about them, which is not the same as whether they
+    // drove: somebody can be waitlisted and still have last month's trips.
+    platform_state: i === 3 ? 'suspended' : 'active', can_earn: i !== 3,
     plate: plates[i % plates.length], state: i === 3 ? 'suspended' : 'active',
     licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9, rating: 4.9 - i * 0.06,
     active_in_window: true, ever_driven: true,
@@ -406,6 +448,8 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   days_moved: i === 6 ? 12 : 27 - i, priced_trips: i === 6 ? 0 : 40 - i * 3,
   last_movement: new Date(Date.now() - i * 72e5).toISOString(),
   current_driver_id: i === 6 ? null : `drv-${i}`,
+  // How stale the last fix is, so "no movement" and "no tracker" read apart.
+  fix_age_min: i === 6 ? 41000 : i * 7,
   km: i === 6 ? null : 6100 - i * 420, revenue: i === 6 ? null : 15800 - i * 1100,
   drivers: i === 6 ? 0 : 1 + (i % 3), platforms: 1 + (i % 2),
   last_trip: i === 6 ? null : new Date(Date.now() - i * 72e5).toISOString(),
@@ -674,8 +718,14 @@ app.get('/api/mix', (req, r) => {
     { label: 'hotel: pick_and_drop', platform: 'hotel', n: 708, revenue: 78600, priced_n: 708, revenue_per_trip: 111.0 },
     { label: 'hotel: drop_off', platform: 'hotel', n: 492, revenue: 51200, revenue_per_trip: 104.1, priced_n: 492 },
     { label: 'hotel: hourly', platform: 'hotel', n: 53, revenue: 8600, revenue_per_trip: 162.3, priced_n: 53 }]);
+  /* Every mix row carries the coverage fields, because the page divides by
+     them: revenue over priced_n, not over n. A fixture missing priced_n makes
+     the per-trip figures render as em-dashes in the smoke run and look fine. */
   if (by === 'payment') return r.json([
-    { label: 'card', n: 1642, revenue: 61200 }, { label: 'cash', n: 318, revenue: 14800 },
+    { label: 'card', platform: null, n: 1642, revenue: 61200, priced_n: 1642, priced_km: 19800,
+      avg_km: 12.1, revenue_per_trip: 37.3, revenue_per_km: 3.09 },
+    { label: 'cash', platform: null, n: 318, revenue: 14800, priced_n: 318, priced_km: 3900,
+      avg_km: 12.3, revenue_per_trip: 46.5, revenue_per_km: 3.79 },
     { label: 'uber_wallet', n: 83, revenue: 2900 }, { label: 'corporate', n: 41, revenue: 3400 }]);
   // Bookings only: fms rows are telematics twins of these same journeys and are
   // reported as their own figure, never as a slice of this ring.
@@ -750,14 +800,18 @@ app.get('/api/trips/daily', (_, r) => {
   r.json(out);
 });
 
-app.get('/api/recommendations', (_, r) => r.json([
+/* {rows, shown, history} — the endpoint returns the CURRENT target per platform
+   and type, not a page of history. The mock returned a bare array, which is the
+   shape the browser smoke test would then be validating against something the
+   server no longer sends. */
+app.get('/api/recommendations', (_, r) => r.json({ shown: 3, truncated: false, history: 42, rows: [
   { platform: 'uber', rec_type: 'acceptance_rate', period_start: dayISO(28), period_end: dayISO(0),
     org_value: 0.79, target_value: 0.85, flagged_count: 14, flagged: true, updated_at: new Date().toISOString() },
   { platform: 'uber', rec_type: 'cancellation_rate', period_start: dayISO(28), period_end: dayISO(0),
     org_value: 0.11, target_value: 0.06, flagged_count: 9, flagged: true, updated_at: new Date().toISOString() },
   { platform: 'uber', rec_type: 'driver_rating', period_start: dayISO(28), period_end: dayISO(0),
     org_value: 4.82, target_value: 4.7, flagged_count: 2, flagged: false, updated_at: new Date().toISOString() },
-]));
+] }));
 
 
 /* ── commercial analytics fixtures ───────────────────────────────────────
@@ -937,6 +991,9 @@ app.get('/api/tiers/by-vehicle', (_, r) => r.json({
       premium_pct: Math.round((premium / trips) * 1000) / 10,
       model_key: i % 2 ? 'Lexus ES' : 'BYD Han EV', model_premium_pct: i % 2 ? 11.2 : 8.4,
       model_best_pct: i % 2 ? 14.2 : 10.1,
+      driver_refs: [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}`, days: 24 },
+        { name: drivers[(i + 1) % drivers.length], id: `drv-${(i + 1) % drivers.length}`, days: 4 }],
+      driver_n: 2 + (i % 2),
       // The shortfall is against the same MODEL's best, never the fleet's — a
       // BYD compared against a Lexus is a spec sheet, not a finding.
       premium_gap_pct: (() => {
@@ -1142,6 +1199,9 @@ app.get('/api/roster', (_, r) => {
   });
   const c = (k) => people.filter((x) => x.category === k).length;
   r.json({ window: [dayISO(30), dayISO(0)], people,
+    // Which channels actually had trips in this window, so "idle" can mean
+    // "did not work" rather than "the channel they work was not collected".
+    platforms_with_trips: ['uber', 'yango', 'bolt', 'hotel'],
     totals: { people: people.length, working: c('working'), idle_this_window: c('idle_this_window'),
       never_started: c('never_started'), in_pipeline: c('in_pipeline'), blocked: c('blocked'),
       holding_vehicle_while_blocked: people.filter((x) => x.holding_vehicle_while_blocked).length,
@@ -1221,19 +1281,36 @@ app.get('/api/day', (req, r) => {
       plates: [plates[i % plates.length]],
       first_trip: `${day}T03:0${i}:00Z`, last_trip: `${day}T19:1${i}:00Z` })),
     vehicles: plates.map((p2, i) => ({ plate: p2, bookings: 30 - i * 3, telematics: 34 - i * 3,
-      km: (30 - i * 3) * 14, drivers: 1 + (i % 2), revenue: i % 2 ? (30 - i * 3) * 88 : null })),
+      km: (30 - i * 3) * 14, drivers: 1 + (i % 2), revenue: i % 2 ? (30 - i * 3) * 88 : null,
+      // Named, not counted — the plate alone is not somebody you can ring.
+      driver_names: i % 2 ? drivers[i % drivers.length] : `${drivers[i % drivers.length]}, ${drivers[(i + 1) % drivers.length]}`,
+      driver_refs: (i % 2 ? [i] : [i, i + 1]).map((j) => ({
+        name: drivers[j % drivers.length], id: `drv-${j % drivers.length}` })) })),
     tiers: [{ tier: 'Electric', n: 78 }, { tier: 'UberX', n: 64 }, { tier: 'Comfort', n: 15 }, { tier: 'Black', n: 11 }],
     settlement: [{ settlement_class: 'card', n: 96, revenue: 1180 }, { settlement_class: 'cash', n: 52, revenue: 900 },
       { settlement_class: 'off_platform', n: 44, revenue: null }, { settlement_class: 'on_account', n: 12, revenue: 1310 }],
     alerts: [{ alert_type: 'Harsh Brake', n: 14, plates: 9, on_plates: plates.slice(0, 9) },
       { alert_type: 'Harsh Acceleration', n: 8, plates: 6, on_plates: plates.slice(0, 6) },
       { alert_type: 'Main Power Lost', n: 1, plates: 1, on_plates: [plates[0]] }],
+    /* The same events against the person driving. Grouped by type it is the
+       shape of the day; grouped by vehicle with custody attached it is a list
+       of conversations to have tomorrow. */
+    alertsByVehicle: plates.slice(0, 6).map((p2, i) => ({
+      plate: p2, n: 14 - i * 2, harsh_brake: 6 - i, harsh_accel: 4 - i,
+      sharp_turn: 3, overspeed: 1 + i,
+      drivers: drivers[i % drivers.length],
+      driver_refs: [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}` }] })),
     segments: [
       { plate: plates[0], started_at: `${day}T05:38:00Z`, ended_at: `${day}T06:04:00Z`, duration_min: 26,
         distance_km: 18.4, verdict: 'unauthorized', nearest_platform: 'uber', nearest_gap_min: 96,
+        drivers: drivers[0], driver_refs: [{ name: drivers[0], id: 'drv-0' }],
         verdict_reason: 'no completed booking overlaps; nearest is a uber trip 96 min away' },
       { plate: plates[2], started_at: `${day}T11:02:00Z`, ended_at: `${day}T11:19:00Z`, duration_min: 17,
         distance_km: 6.1, verdict: 'unverifiable', nearest_platform: null, nearest_gap_min: null,
+        // A handover day: both people must be openable, which is why the pairs
+        // form exists at all.
+        drivers: `${drivers[1]}, ${drivers[2]}`,
+        driver_refs: [{ name: drivers[1], id: 'drv-1' }, { name: drivers[2], id: 'drv-2' }],
         verdict_reason: 'no bookings collected from bolt in this window, so a booking there cannot be ruled out' },
     ],
     corridors: [
@@ -1261,10 +1338,14 @@ app.get('/api/alerts/by-driver', (_, r) => r.json({ totals: { drivers: 74, alert
   const km = (900 - i * 90);
   return { driver_name: name, driver_ext_id: `drv-${i}`, alerts: brake + accel + turn + over,
     harsh_brake: brake, harsh_accel: accel, sharp_turn: turn, overspeed: over,
-    plates: 1 + (i % 2), booked_km: km,
+    // WHICH cars, not just how many — "4 plates" is not something you can open.
+    plates: 1 + (i % 2), plate_list: [plates[i % plates.length]].concat(
+      i % 2 ? [plates[(i + 1) % plates.length]] : []),
+    booked_km: km,
     per_100km: Math.round(((brake + accel + turn + over) * 100 / km) * 100) / 100 };
 }).concat([{ driver_name: '(unattributed)', driver_ext_id: null, alerts: 9, harsh_brake: 6,
-  harsh_accel: 2, sharp_turn: 1, overspeed: 0, plates: 4, booked_km: null, per_100km: null }]) }));
+  harsh_accel: 2, sharp_turn: 1, overspeed: 0, plates: 4,
+  plate_list: plates.slice(0, 3), booked_km: null, per_100km: null }]) }));
 
 
 app.get('/api/alerts/summary', (_, r) => r.json([
@@ -1282,11 +1363,20 @@ app.get('/api/alerts/by-vehicle', (_, r) => r.json({ totals: { vehicles: 118, al
 }) }));
 
 
-app.get('/api/drivers/leaderboard', (_, r) => r.json(drivers.map((name, i) => ({
-  driver_name: name, driver_ext_id: `drv-${i}`, platform: i % 3 ? 'uber' : 'hotel',
-  plate: plates[i % plates.length], trips: 180 - i * 14, km: (180 - i * 14) * 12,
-  avg_km: 12 + i * 0.3, revenue: i % 3 ? null : (180 - i * 14) * 96,
-  completion_pct: 96 - i }))));
+/* {rows, people, shown, truncated} — one row per PERSON. It used to be a bare
+   array of one row per platform ACCOUNT, which ranked a two-app driver below a
+   one-app driver who did less. */
+app.get('/api/drivers/leaderboard', (_, r) => r.json({
+  people: 74, shown: drivers.length, truncated: true,
+  rows: drivers.map((name, i) => ({
+    person: name.toLowerCase(), driver_name: name, driver_ext_id: `drv-${i}`,
+    platforms: i % 3 ? ['uber'] : ['uber', 'hotel'], accounts: i % 3 ? 1 : 2,
+    plate: plates[i % plates.length], trips: 180 - i * 14, km: (180 - i * 14) * 12,
+    avg_km: 12 + i * 0.3, revenue: i % 3 ? null : (180 - i * 14) * 96,
+    // The denominator the completion rate is over — a percentage whose base is
+    // missing cannot be checked, and Bolt's four failure states make it matter.
+    outcome_n: 180 - i * 14,
+    completion_pct: 96 - i })) }));
 app.get('/api/mix/detail', (req, r) => {
   if (req.query.by === 'payment') {
     return r.json({ dimension: 'payment', per_platform: false, total_trips: 2043,
@@ -1374,6 +1464,10 @@ app.get('/api/segments', (req, r) => {
         { key: '(no reason recorded)', n: 7, verdict: 'partial' },
       ],
     },
+    /* Facet lists are capped at 40 plates and 20 reasons. A truncated facet is
+       not a shorter menu — the vehicle you want is simply absent from it — so
+       the page needs to know how many there really are. */
+    facet_totals: { plate: 23, plate_shown: by('plate').length, reason: 9, reason_shown: 3 },
     known_verdicts: SEG_VERDICTS,
   });
 });
@@ -1479,8 +1573,17 @@ app.get('/api/drivers/cross-platform', (_, r) => r.json({
     total_trips: 80 - i, platform_count: i % 3 === 0 ? 3 : i % 2 ? 2 : 1,
     accounts: 1 + (i % 2), km: 800 - i * 40, revenue: i % 2 ? 1400 - i * 90 : null,
     priced_trips: i % 2 ? 20 : 0,
+    /* What they drove. Somebody working three platforms is usually working
+       them from ONE car, and that is the fact this table could not show. */
+    plates: [plates[i % plates.length], plates[(i + 2) % plates.length]].slice(0, 1 + (i % 2)),
+    plate_n: 1 + (i % 2), main_plate: plates[i % plates.length],
   })),
   multi_platform: 6,
+  // Counted over every person in the window, not over the rows returned — the
+  // panel prints "N of M work more than one channel" from these two.
+  people: 14,
+  shown: 10,
+  truncated: true,
   note: 'One row per person: platform accounts are folded by name.',
 }));
 
@@ -1512,7 +1615,10 @@ app.get('/api/trips/heatmap', (_, r) => r.json(
     dow, h, trips: Math.round(4 + 22 * Math.exp(-((h - 19) ** 2) / 20) * (dow === 5 || dow === 6 ? 1.5 : 1)),
   }))).flat()));
 
-app.get('/api/vehicles', (_, r) => r.json(plates.map((p, i) => ({
+/* {rows, total, shown, truncated} — the busiest 200, which on a larger fleet
+   is a slice and used to be presented as the whole of it. */
+app.get('/api/vehicles', (_, r) => r.json({ total: 96, shown: plates.length, truncated: true,
+  rows: plates.map((p, i) => ({
   plate: p, fleet_id: i % 3 ? 'ecosine' : 'egari',
   // Never summed: an FMS row is the same physical journey a platform reported.
   bookings: 120 - i * 11, telematics_journeys: 140 - i * 9,
@@ -1521,9 +1627,14 @@ app.get('/api/vehicles', (_, r) => r.json(plates.map((p, i) => ({
   revenue: i % 3 === 2 ? null : 4800 - i * 380,
   priced_n: i % 3 === 2 ? 0 : 90 - i * 8,
   drivers: 1 + (i % 3), platforms: 2 + (i % 2),
-  current_driver: drivers[i], current_driver_id: `drv-${i}`,
+  // Bookings and telematics journeys are separate counts and `trips` is the
+  // booking one — the table's own column. Priced trips are the denominator the
+  // fare figures divide by.
+  trips: 120 - i * 11, telematics_km: (140 - i * 9) * 11, priced_trips: i % 3 === 2 ? 0 : 90 - i * 8,
+  last_trip: new Date(Date.now() - i * 36e5).toISOString(),
+  current_driver: drivers[i], current_driver_id: `drv-${i}`, driver_as_of: '2026-08-21',
   last_fix: new Date(Date.now() - i * 9e5).toISOString(), stale: i === 7,
-}))));
+})) }));
 
 app.get('/api/track', (req, r) => {
   const n = 48; let lat = 25.11, lng = 55.2;
@@ -1572,17 +1683,25 @@ app.get('/api/unauthorized/list', (req, r) => {
   r.json(ALL_SEGS.filter((x) => !want || x.verdict === want).slice(0, 40));
 });
 
-app.get('/api/unauthorized/by-vehicle', (_, r) => r.json(plates.map((p, i) => ({
-  plate: p, unauthorized: Math.max(0, 6 - i), authorized: 20 + i,
-  sensor_suspect: i % 3, unauth_km: Math.max(0, 70 - i * 11),
-  drivers: i % 5 === 4 ? null : drivers[i],
-}))));
+/* {rows, total, segments, shown, truncated} — the "Vehicles involved" tile
+   reads `total`, not the length of the list, which is the worst hundred. */
+app.get('/api/unauthorized/by-vehicle', (_, r) => r.json({
+  total: 23, segments: 61, shown: plates.length, truncated: true,
+  rows: plates.map((p, i) => ({
+    plate: p, unauthorized: Math.max(0, 6 - i), authorized: 20 + i,
+    sensor_suspect: i % 3, unauth_km: Math.max(0, 70 - i * 11),
+    drivers: i % 5 === 4 ? null : drivers[i],
+  })) }));
 
 app.get('/api/unauthorized/daily', (_, r) => r.json(
   Array.from({ length: 21 }, (_, i) => ({
     d: `2026-08-${String(i + 1).padStart(2, '0')}`,
     unauthorized: i % 4 === 0 ? 3 : i % 3 === 0 ? 1 : 0,
     authorized: 8 + (i % 5), total: 12 + (i % 6),
+    // "Needs a human" is the actionable count: unauthorised plus unverifiable,
+    // which is not the same as unauthorised alone.
+    needs_a_human: (i % 4 === 0 ? 3 : i % 3 === 0 ? 1 : 0) + (i % 5 === 0 ? 2 : 0),
+    segments: 12 + (i % 6),
   }))));
 
 app.get('/api/sensor-health', (_, r) => r.json(plates.map((p, i) => ({
@@ -1591,6 +1710,9 @@ app.get('/api/sensor-health', (_, r) => r.json(plates.map((p, i) => ({
   total_fixes: 2400 - i * 90,
   occupied_pct: i === 2 ? 0 : +(18 - i).toFixed(1),
   sensor_suspect_segments: i % 5 === 1 ? 4 : 0,
+  // Whether there is enough signal to judge the sensor at all — a car with
+  // forty fixes is not evidence of a broken seat sensor.
+  judgeable: i !== 5,
 }))));
 
 app.get('/api/platforms', (_, r) => r.json([
@@ -1616,6 +1738,10 @@ app.get('/api/product/by-vehicle', (_, r) => r.json(
   plates.flatMap((p, i) => ['UberX', 'Comfort', 'Black'].slice(0, 1 + (i % 3)).map((product, j) => ({
     plate: p, product, trips: 60 - i * 4 - j * 12,
     km: 900 - i * 60 - j * 100, avg_km: +(13 + j * 3).toFixed(1),
+    // Who ran the car over the window: a tier mix is a finding about
+    // dispatch and driving, not only about the asset.
+    driver_refs: [{ name: drivers[i % drivers.length], id: `drv-${i % drivers.length}`, days: 21 }],
+    driver_n: 1 + (i % 3),
   })))));
 
 app.get('/api/schema/raw-fields', (req, r) => r.json({
@@ -1897,4 +2023,11 @@ app.get('/api/capacity', (_, r) => {
 app.get(/^\/api\//, (_, r) => r.json([]));
 app.use(express.static(join(__dir, 'api', 'public')));
 app.get('*', (_, r) => r.sendFile(join(__dir, 'api', 'public', 'index.html')));
-app.listen(8099, () => console.log('mock api on http://localhost:8099'));
+/* Exported so a test can mount it on an ephemeral port and compare its shape
+   against the real API, rather than only checking that a fixture exists.
+   Started directly when run as a script, which is how the browser smoke test
+   uses it. */
+export { app };
+export const serve = (port = Number(process.env.PORT) || 8099) =>
+  app.listen(port, () => console.log(`mock api on http://localhost:${port}`));
+if (process.argv[1] && process.argv[1].endsWith('mockapi.mjs')) serve();

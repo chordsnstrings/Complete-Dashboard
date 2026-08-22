@@ -165,10 +165,20 @@ const get = async (p) => {
     prof.ids.length === 2 && kpi.trips === 22, `${prof.ids.length} ids, ${kpi.trips} trips`);
 
   const lb = await get(`/api/drivers/leaderboard?${WIN}`);
-  const annRows = lb.filter((r) => /Ann/.test(r.driver_name || ''));
+  const annRows = (lb.rows || []).filter((r) => /Ann/.test(r.driver_name || ''));
   const lbTotal = annRows.reduce((a, r) => a + r.trips, 0);
   check('the leaderboard’s rows for that person sum to the same total',
     lbTotal === kpi.trips, `${lbTotal} vs ${kpi.trips}`);
+  /* And there is exactly ONE of them. Grouped per platform account, Ann was two
+     rows carrying half her work each — so she ranked below a single-platform
+     driver who did less, which is the one thing a ranking must not do. */
+  check('and a person working two platforms is one row on the ranking, not two',
+    annRows.length === 1, `${annRows.length} rows: ${JSON.stringify(annRows.map((r) => [r.driver_ext_id, r.trips]))}`);
+  check('which names every channel they worked',
+    (annRows[0]?.platforms || []).length === 2, JSON.stringify(annRows[0]?.platforms));
+  check('and the response says how many people there are, not just how many it returned',
+    typeof lb.people === 'number' && lb.people >= (lb.rows || []).length,
+    `${lb.people} people, ${lb.shown} shown`);
   /* Bolt's 'finished' is a completion and 'client_did_not_show' is not. A page
      testing the raw string scores the first as a failure, so completion must
      agree between the driver page and the leaderboard. */
@@ -320,7 +330,7 @@ const get = async (p) => {
     Array.isArray(rows[0]?.driver_ids) && rows[0].driver_ids.length === 2,
     JSON.stringify(rows[0]?.driver_ids));
   const veh = await get(`/api/vehicles?${WIN}`);
-  const l100 = (veh || []).find((r) => r.plate === 'L100');
+  const l100 = (veh.rows || veh || []).find((r) => r.plate === 'L100');
   check('and the fleet table counts them once as well',
     l100 && l100.drivers === new Set((det.totals || []).map((r) => r.driver_name)).size,
     `${l100?.drivers} vs ${new Set((det.totals || []).map((r) => r.driver_name)).size}`);

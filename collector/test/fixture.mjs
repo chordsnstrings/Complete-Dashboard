@@ -15,6 +15,13 @@ export const PLATES = ['L45240', 'L46174', 'L40965', 'L36395', 'L94178'];
 export const DAY0 = '2026-08-01';
 export const DAY1 = '2026-08-31';
 
+/* A fleet deliberately WIDER than every LIMIT in the API, for the tests that
+   ask what a page says when its list is truncated. Every cap in api/ is 600 or
+   below, so 240 plates and 240 people overflow the widest per-entity list while
+   staying small enough to seed in a few seconds. */
+export const WIDE_PLATES = 240;
+export const WIDE_PEOPLE = 240;
+
 const PEOPLE = [
   { name: 'Muhammad Khalid', ids: { uber: 'u-khalid', yango: 'y-khalid' } },
   { name: 'Nauman Hassan', ids: { uber: 'u-nauman' } },
@@ -27,9 +34,10 @@ let seed = 20260801;
 const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 const pick = (a) => a[Math.floor(rnd() * a.length)];
 
-export async function seedFleet(db) {
+export async function seedFleet(db, { wide = false } = {}) {
   const q = (t, p = []) => db.query(t, p);
   let n = 0;
+  if (wide) return seedWide(db);
   for (let d = 0; d < 31; d++) {
     const day = `2026-08-${String(d + 1).padStart(2, '0')}`;
     for (let i = 0; i < 12; i++) {
@@ -131,5 +139,60 @@ export async function seedFleet(db) {
                window_start, window_end)
              VALUES ($1,'ecosine','incremental','ok',100,'2026-08-31T20:00:00Z','2026-08-01','2026-08-31')`, [s]);
 
+  return n;
+}
+
+
+/* One month, many plates and many people, one trip each per day for a slice of
+   them. Shaped only for the truncation questions: does a capped list say it is
+   capped, and is every total on the page computed over the population rather
+   than over the rows that happened to come back. */
+async function seedWide(db) {
+  const q = (t, p = []) => db.query(t, p);
+  let n = 0;
+  const plate = (i) => `W${String(i).padStart(5, '0')}`;
+  const person = (i) => ({ id: `w-${i}`, name: `Wide Driver ${String(i).padStart(3, '0')}` });
+  for (let d = 0; d < 28; d++) {
+    const day = `2026-08-${String(d + 1).padStart(2, '0')}`;
+    for (let i = 0; i < WIDE_PLATES; i++) {
+      const p = person((i + d) % WIDE_PEOPLE);
+      const km = 4 + ((i * 7 + d) % 20);
+      await q(
+        `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+           requested_at, ended_at, distance_km, status, product, payment_type, price,
+           pickup_addr, dropoff_addr)
+         VALUES ($1,$2,'ecosine',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,
+                 'Deira - Dubai - UAE','Marina - Dubai - UAE') ON CONFLICT DO NOTHING`,
+        [['uber', 'yango', 'bolt', 'hotel'][i % 4], `w-${d}-${i}`, plate(i), p.id, p.name,
+          `${day}T${String(7 + (i % 14)).padStart(2, '0')}:00:00+04:00`,
+          `${day}T${String(8 + (i % 14)).padStart(2, '0')}:00:00+04:00`,
+          km, i % 9 === 0 ? 'rider_cancelled' : 'completed',
+          'Comfort', i % 3 === 0 ? 'cash' : 'cashless', i % 4 === 0 ? null : 20 + (i % 40)]);
+      n++;
+    }
+  }
+  for (let i = 0; i < WIDE_PLATES; i++) {
+    await q(`INSERT INTO vehicle_document (platform, vehicle_ext_id, fleet_id, plate, doc_type,
+               expires_at, status)
+             VALUES ('fms',$1,'ecosine',$2,'registration',$3,'valid') ON CONFLICT DO NOTHING`,
+      [`veh-${i}`, plate(i), `2026-09-${String((i % 28) + 1).padStart(2, '0')}T00:00:00Z`]);
+    await q(`INSERT INTO alert (platform, external_id, fleet_id, plate, alert_type, occurred_at)
+             VALUES ('fms',$1,'ecosine',$2,$3,$4) ON CONFLICT DO NOTHING`,
+      [`wal-${i}`, plate(i), ['Harsh Brake', 'OverSpeed', 'Sharp Turn'][i % 3],
+        `2026-08-${String((i % 28) + 1).padStart(2, '0')}T09:00:00+04:00`]);
+    await q(`INSERT INTO occupancy_segment (plate, started_at, ended_at, fleet_id, duration_min,
+               distance_km, top_speed, fixes, max_gap_min, ignition_ratio, verdict)
+             VALUES ($1,$2,$3,'ecosine',25,9,60,5,5,0.9,'unauthorized') ON CONFLICT DO NOTHING`,
+      [plate(i), `2026-08-${String((i % 28) + 1).padStart(2, '0')}T13:00:00+04:00`,
+        `2026-08-${String((i % 28) + 1).padStart(2, '0')}T13:25:00+04:00`]);
+  }
+  for (let i = 0; i < WIDE_PEOPLE; i++) {
+    const p = person(i);
+    await q(`INSERT INTO driver_compliance (platform, fleet_id, driver_ext_id, full_name, phone,
+               licence_no, licence_expires, state, rating)
+             VALUES ('uber','ecosine',$1,$2,'+9715000000',$3,$4,'working',4.6)
+             ON CONFLICT DO NOTHING`,
+      [p.id, p.name, `L${p.id}`, `2026-${String(9 + (i % 3)).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`]);
+  }
   return n;
 }

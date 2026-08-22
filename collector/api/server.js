@@ -412,20 +412,48 @@ app.get('/api/mix/detail', wrap(async (req, res) => {
 }));
 
 /* ───────────────────────── drivers ───────────────────────── */
-app.get('/api/drivers/leaderboard', wrap(async (req, res) => res.json(await q(
-  `SELECT driver_name, driver_ext_id, platform, max(plate) plate, count(*)::int trips,
-          round(sum(distance_km)::numeric,0) km, round(avg(distance_km)::numeric,1) avg_km,
-          round(sum(price)::numeric,0) revenue,
-          -- Testing status = 'completed' scored every completed Bolt trip as a
-          -- failure (Bolt says 'finished'), and FMS telematics rows, which
-          -- hardcode 'completed' and cannot be cancelled at all, padded the
-          -- denominator. outcome is NULL on telematics, so FILTER drops them
-          -- from both sides rather than counting them as successes.
-          round(100.0*count(*) FILTER (WHERE outcome='completed')
-                /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0)) completion_pct,
-          count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n
-   FROM trip_norm WHERE ${F} AND driver_name IS NOT NULL
-   GROUP BY driver_name, driver_ext_id, platform ORDER BY trips DESC LIMIT 100`, range(req)))));
+/* One row per PERSON, ranked.
+   ─────────────────────────────────────────────────────────────────────────
+   This grouped by (driver_name, driver_ext_id, platform) — one row per
+   ACCOUNT. A ranking is a comparison, and comparing accounts ranks the fleet
+   wrongly in a specific direction: somebody working Uber and Bolt appeared
+   twice, each row carrying a fraction of their work, so they placed BELOW a
+   single-platform driver who did less in total. The same fold used everywhere
+   else puts each human on one row carrying all of it.
+
+   Still capped, so the response says how many people there are and how many of
+   them are shown; the page prints that rather than implying the list is the
+   roster. */
+app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
+  const p = range(req);
+  const rows = await q(
+    `SELECT ${CANON('driver_name')} AS person,
+            max(driver_name) AS driver_name,
+            (array_agg(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
+            array_remove(array_agg(DISTINCT platform), NULL) AS platforms,
+            count(DISTINCT driver_ext_id)::int accounts,
+            mode() WITHIN GROUP (ORDER BY plate) AS plate,
+            count(*)::int trips,
+            round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
+            round(avg(distance_km) FILTER (WHERE has_distance)::numeric,1) avg_km,
+            round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+            -- Testing status = 'completed' scored every completed Bolt trip as a
+            -- failure (Bolt says 'finished'), and FMS telematics rows, which
+            -- hardcode 'completed' and cannot be cancelled at all, padded the
+            -- denominator. outcome is NULL on telematics, so FILTER drops them
+            -- from both sides rather than counting them as successes.
+            round(100.0*count(*) FILTER (WHERE outcome='completed')
+                  /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0)) completion_pct,
+            count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n
+     FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
+     GROUP BY 1 ORDER BY trips DESC LIMIT 100`, p);
+  const [t] = await q(
+    `SELECT count(*)::int people FROM (
+       SELECT 1 FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
+       GROUP BY ${CANON('driver_name')}) s`, p);
+  res.json({ rows, people: t?.people ?? rows.length, shown: rows.length,
+    truncated: (t?.people ?? 0) > rows.length });
+}));
 
 /* One row per PERSON, with a column per platform that actually has data.
    Three things were wrong here at once and they compounded:
@@ -473,8 +501,22 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
             mode() WITHIN GROUP (ORDER BY plate) AS main_plate
      FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
      GROUP BY 1 ORDER BY total_trips DESC LIMIT 150`, p);
+  /* Counted in the database over every person, not over the 150 rows this
+     page happened to receive. The panel prints "N of M people work more than
+     one channel", and with more than 150 drivers in the window M was the cap —
+     so the sentence understated the fleet and the share it implies was wrong.
+     A count is cheap; a truncated denominator is a false statement. */
+  const [pop] = await q(
+    `SELECT count(*)::int people, count(*) FILTER (WHERE platforms > 1)::int multi
+     FROM (SELECT ${CANON('driver_name')} AS person,
+                  count(DISTINCT platform)::int platforms
+           FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
+           GROUP BY 1) s`, p);
   res.json({ platforms, drivers: rows,
-    multi_platform: rows.filter((r) => r.platform_count > 1).length,
+    people: pop?.people ?? rows.length,
+    multi_platform: pop?.multi ?? 0,
+    shown: rows.length,
+    truncated: (pop?.people ?? 0) > rows.length,
     note: 'One row per person: platform accounts are folded by name, and the columns cover every '
       + 'platform with data in this window, so the total is the sum of what is shown.' });
 }));
@@ -488,7 +530,8 @@ app.get('/api/drivers/performance', wrap(async (req, res) => res.json(await q(
    ORDER BY period_start DESC, trips DESC NULLS LAST LIMIT 300`, range(req)))));
 
 /* ───────────────────────── vehicles / fleet ───────────────────────── */
-app.get('/api/vehicles', wrap(async (req, res) => res.json(await q(
+app.get('/api/vehicles', wrap(async (req, res) => {
+  const rows = await q(
   /* Bookings and telematics journeys are counted separately and never summed:
      an FMS row is the same physical journey the ride platform already reported,
      so adding them showed a 2–3.5x overcount as "trips". Distance is guarded by
@@ -509,7 +552,16 @@ app.get('/api/vehicles', wrap(async (req, res) => res.json(await q(
    LEFT JOIN vehicle_current_driver cd ON cd.plate = t.plate
    WHERE ${W('t')} AND t.plate IS NOT NULL AND t.plate<>''
    GROUP BY t.plate, cd.driver_name, cd.driver_ext_id, cd.as_of
-   ORDER BY trips DESC, telematics_journeys DESC LIMIT 200`, range(req)))));
+   ORDER BY trips DESC, telematics_journeys DESC LIMIT 200`, range(req));
+  /* How many vehicles there ARE, so the busiest 200 cannot be read as the
+     fleet. /api/vehicles/directory is the complete register; this endpoint is
+     the ranked slice, and a slice that does not say so is a wrong total. */
+  const [t] = await q(
+    `SELECT count(DISTINCT t.plate)::int vehicles FROM trip_norm t
+     WHERE ${W('t')} AND t.plate IS NOT NULL AND t.plate<>''`, range(req));
+  res.json({ rows, total: t?.vehicles ?? rows.length, shown: rows.length,
+    truncated: (t?.vehicles ?? 0) > rows.length });
+}));
 
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
   `SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
@@ -928,7 +980,7 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
 // "L44305 had two unexplained trips" is a fact about a person, not a plate.
 app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
   const [from, to] = range(req);
-  res.json(await q(
+  const rows = await q(
     `WITH seg AS (
        SELECT plate,
               count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
@@ -948,7 +1000,17 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
        GROUP BY o.plate)
      SELECT seg.*, who.drivers
      FROM seg LEFT JOIN who USING (plate)
-     ORDER BY seg.unauthorized DESC LIMIT 100`, [from, to]));
+     ORDER BY seg.unauthorized DESC LIMIT 100`, [from, to]);
+  /* How many vehicles are flagged in total. The page's "Vehicles involved" tile
+     already prefers a measured figure; this is where it comes from, and without
+     it the tile falls back to counting the hundred rows it received. */
+  const [t] = await q(
+    `SELECT count(DISTINCT plate)::int vehicles,
+            count(*) FILTER (WHERE verdict='unauthorized')::int segments
+     FROM occupancy_segment
+     WHERE ${DAYWIN('started_at')} AND verdict='unauthorized'`, [from, to]);
+  res.json({ rows, total: t?.vehicles ?? rows.length, segments: t?.segments ?? null,
+    shown: rows.length, truncated: (t?.vehicles ?? 0) > rows.length });
 }));
 
 // daily trend of unauthorized vs authorized occupancy
@@ -1434,10 +1496,28 @@ app.get('/api/compliance/drivers', wrap(async (_, res) => {
   });
 }));
 
-app.get('/api/recommendations', wrap(async (_, res) => res.json(await q(
-  `SELECT platform, rec_type, period_start, period_end, org_value, target_value,
-          flagged_count, flagged, updated_at
-   FROM platform_recommendation ORDER BY period_end DESC NULLS LAST LIMIT 30`))));
+/* The CURRENT target per platform and type, not the most recent thirty rows.
+   Providers republish a recommendation every period, so a flat list ordered by
+   period_end is a mixture of platforms at different depths of history — and the
+   page prints "N of M targets are not being met" over it. With four platforms
+   and three types republished monthly, thirty rows is under a year: M was the
+   cap, the share it implies was wrong, and the same platform could appear
+   several times with contradicting verdicts.
+
+   DISTINCT ON gives exactly one row per (platform, type) — the live one — so
+   the list IS the population and the sentence over it cannot be truncated.
+   History is still in the table for anyone who wants it; this endpoint answers
+   "what are we being asked for now". */
+app.get('/api/recommendations', wrap(async (_, res) => {
+  const rows = await q(
+    `SELECT DISTINCT ON (platform, rec_type)
+            platform, rec_type, period_start, period_end, org_value, target_value,
+            flagged_count, flagged, updated_at
+     FROM platform_recommendation
+     ORDER BY platform, rec_type, period_end DESC NULLS LAST`);
+  const [n] = await q('SELECT count(*)::int history FROM platform_recommendation');
+  res.json({ rows, shown: rows.length, truncated: false, history: n?.history ?? rows.length });
+}));
 
 // earnings components — tips are the interesting one; they never appear in the trip feed
 app.get('/api/earnings/components', wrap(async (req, res) => res.json(await q(

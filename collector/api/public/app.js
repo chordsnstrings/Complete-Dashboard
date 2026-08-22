@@ -240,15 +240,26 @@ V.overview = async (root) => {
   paymentDonut(pay.body, payDetail);
   stackedBar(out.body, byStatus.slice(0, 5));
   lead.body.innerHTML = '';
-  lead.body.append(tableFrom(drivers.slice(0, 12), [
-    { label: '#', key: '_i', render: (r) => String(drivers.indexOf(r) + 1) },
+  /* One row per person now, not per platform account — a person working two
+     apps used to appear twice with half their work on each row, and therefore
+     rank below somebody who did less. Tolerant of the old bare-array shape so
+     a stale cached bundle does not blank the panel. */
+  const lbRows = Array.isArray(drivers) ? drivers : (drivers.rows || []);
+  lead.body.append(tableFrom(lbRows.slice(0, 12), [
+    { label: '#', key: '_i', render: (r) => String(lbRows.indexOf(r) + 1) },
     { label: 'Driver', key: 'driver_name',
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+    { label: 'Channels', key: 'platforms',
+      render: (r) => esc((r.platforms || (r.platform ? [r.platform] : [])).join(', ')) },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => r.completion_pct != null ? r.completion_pct + '%' : '—' },
   ]));
+  if (drivers.truncated) {
+    lead.body.append(el('p', 'cap',
+      `The 12 busiest of ${fmt(drivers.people)} people who drove in this window.`));
+  }
 };
 
 V.demand = async (root) => {
@@ -371,11 +382,30 @@ V.drivers = async (root) => {
   const xp = panel('Cross-platform activity', 'The same person working more than one app'); g.append(xp.panel);
   const perf = panel('Platform performance records', 'Hours, acceptance and earnings as reported by each platform'); root.append(perf.panel);
   [sc.body, xp.body, perf.body].forEach(loading);
-  const [rows, cross, pf] = await Promise.all([q('/api/drivers/leaderboard'), q('/api/drivers/cross-platform'), q('/api/drivers/performance')]);
+  const [, cross, pf, dir] = await Promise.all([q('/api/drivers/leaderboard'),
+    q('/api/drivers/cross-platform'), q('/api/drivers/performance'), q('/api/drivers/directory')]);
 
-  scatter(sc.body, rows.slice(0, 60).map((r) => ({ ...r, trips: +r.trips, km: +(r.km || 0) })),
+  /* Plotted from the DIRECTORY, not the leaderboard.
+     The caption says "each dot is a driver" and the leaderboard is one row per
+     ACCOUNT — grouped by (name, id, platform) — so a person working two apps
+     was two dots, each showing a fraction of their work, and the dot you
+     clicked opened a page whose totals did not match it. The leaderboard is
+     also capped at 100 accounts, which on a fleet this size is a sample of the
+     roster presented as the roster. The directory is one row per person and
+     covers everyone. */
+  const dots = (Array.isArray(dir) ? dir : [])
+    .filter((r) => (r.trips || 0) > 0)
+    .map((r) => ({ ...r, driver_ext_id: r.ids?.[0] || r.driver_ext_id,
+      trips: +r.trips, km: +(r.km || 0) }))
+    .sort((a, b) => b.trips - a.trips);
+  scatter(sc.body, dots.slice(0, 80),
     { x: 'trips', y: 'km', label: 'driver_name', xLabel: 'trips', yLabel: 'km',
       onClick: (r) => { location.hash = href('driver', r.driver_ext_id); } });
+  sc.body.append(el('p', 'cap', dots.length > 80
+    ? `The 80 busiest of ${fmt(dots.length)} people who drove in this window. One dot per person: `
+      + 'platform accounts are folded, so somebody working two apps is one dot carrying both.'
+    : 'One dot per person: platform accounts are folded, so somebody working two apps is one '
+      + 'dot carrying both.'));
   xp.body.innerHTML = '';
   /* This read `cross.filter(...)`. The endpoint returns
      `{platforms, drivers, multi_platform, note}` and has since it was rewritten
@@ -394,7 +424,13 @@ V.drivers = async (root) => {
   const plats = cross.platforms || [];
   const col = (pl) => `${pl}_trips`;
   const multi = people.filter((r) => plats.filter((pl) => (r[col(pl)] || 0) > 0).length > 1);
-  if (!multi.length) {
+  /* The headline counts come from the endpoint, which computes them over every
+     person in the window. `people` is capped at 150 rows, so counting them here
+     printed "N of 150" for a fleet of 240 — a sentence that is simply false,
+     and false in the direction that makes the fleet look smaller than it is. */
+  const popN = cross.people ?? people.length;
+  const multiN = cross.multi_platform ?? multi.length;
+  if (!multiN) {
     xp.body.append(el('div', 'note', plats.length
       ? `No driver in this window has trips on more than one of: ${plats.join(', ')}.`
       : 'No platform has trips in this window, so there is nothing to compare.'));
@@ -408,7 +444,8 @@ V.drivers = async (root) => {
       { label: 'Accounts', key: 'accounts', num: true },
     ]));
     xp.body.append(el('p', 'cap',
-      `${fmt(multi.length)} of ${fmt(people.length)} people in this window work more than one channel. `
+      `${fmt(multiN)} of ${fmt(popN)} people in this window work more than one channel`
+      + (cross.truncated ? `, from the ${fmt(people.length)} busiest shown here. ` : '. ')
       + 'Columns cover every platform with data, so the booking total is the sum of what is shown; '
       + 'telematics journeys are counted apart because they are the same physical trips seen by the tracker.'));
   }
@@ -548,9 +585,16 @@ V.vehicles = async (root) => {
     'Uber Black and Comfort earn several times what UberX does per trip, so tier is an allocation decision. This is which cars are actually taking that work.');
   root.append(tierP.panel); loading(tierP.body);
 
-  const [rows, byTier] = await Promise.all([q('/api/vehicles'), q('/api/product/by-vehicle').catch(() => [])]);
+  const [vehPage, byTier] = await Promise.all([q('/api/vehicles'), q('/api/product/by-vehicle').catch(() => [])]);
+  // {rows, total, shown, truncated} — it used to be a bare array of the busiest
+  // 200, which on a larger fleet reads as the whole of it.
+  const rows = vehPage.rows || (Array.isArray(vehPage) ? vehPage : []);
   hbars(spread.body, rows.slice(0, 14).map((r) => ({ label: r.plate, n: r.trips })), { seq: true,
     onClick: (d) => { location.hash = href('vehicle', d.label); } });
+  spread.body.append(el('p', 'cap', vehPage.total > 14
+    ? `The 14 busiest of ${fmt(vehPage.total)} vehicles with a trip in this range. `
+      + 'Every one of them is on the vehicle directory.'
+    : 'Every vehicle with a trip in this range.'));
 
   tierP.body.innerHTML = '';
   if (!byTier.length) {
@@ -1121,6 +1165,8 @@ V.unauthorized = async (root) => {
     q('/api/unauthorized/summary'), q('/api/unauthorized/daily'), q('/api/unauthorized/by-vehicle'),
     q('/api/unauthorized/list', { verdict: 'unauthorized' }), q('/api/sensor-health'),
   ]);
+  // {rows, total, shown, truncated} — tolerant of the old bare array.
+  const vehRows = byVeh.rows || (Array.isArray(byVeh) ? byVeh : []);
   const t = sum.totals || {};
   kh.innerHTML = [
     ['Unexplained trips', fmt(t.unauthorized || 0), 'no booking on any channel'],
@@ -1148,11 +1194,15 @@ V.unauthorized = async (root) => {
   veh.body.innerHTML = '';
   // Show who was driving, not just which plate — a flag against a car nobody can
   // name is not something anyone can act on.
-  if (byVeh.length) hbars(veh.body, byVeh.slice(0, 12).map((r) => ({
+  if (vehRows.length) {
+    hbars(veh.body, vehRows.slice(0, 12).map((r) => ({
       label: r.drivers ? `${r.plate} · ${r.drivers}` : `${r.plate} · driver unknown`,
       plate: r.plate, n: r.unauthorized })), { color: '--s8',
-    onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } });
-  else empty(veh.body, 'No unexplained trips detected in this range');
+      onClick: (d) => { location.hash = href('segments', 'plate', d.plate || d.label); } });
+    veh.body.append(el('p', 'cap', byVeh.total > 12
+      ? `The 12 worst of ${fmt(byVeh.total)} vehicles with an unexplained trip in this range.`
+      : 'Every vehicle with an unexplained trip in this range.'));
+  } else empty(veh.body, 'No unexplained trips detected in this range');
 
   /* The evidence table lives in segments.js now. This page and that one were
      two implementations of the same table and had drifted: this one printed a
@@ -1480,7 +1530,12 @@ V.insights = async (root) => {
   const rec = panel('What Uber is asking the fleet to fix',
     'Targets the platform sets for the org. Falling short affects trip allocation, so these are not advisory.');
   root.append(rec.panel); loading(rec.body);
-  const recs = await api('/api/recommendations').catch(() => []);
+  /* The endpoint returns {rows, shown, history} now — it used to return a bare
+     array of the most recent thirty rows across all platforms, and the sentence
+     below counted over that cap. Tolerant of both shapes so a stale cached
+     bundle does not blank the panel. */
+  const recRes = await api('/api/recommendations').catch(() => ({ rows: [] }));
+  const recs = Array.isArray(recRes) ? recRes : (recRes.rows || []);
   rec.body.innerHTML = '';
   if (!recs.length) {
     rec.body.append(note('No platform recommendations collected. Uber publishes these per org; they appear once the fleet-portal collector has run against an account that can see them.'));
@@ -1505,10 +1560,12 @@ V.insights = async (root) => {
         render: (r) => (r.flagged_count != null ? fmt(r.flagged_count) : '—') },
     ]));
     const behind = recs.filter((r) => missingTarget(r) === true);
+    // One row per platform and target type — the live one — so this count is
+    // over the whole population rather than over a page of it.
     rec.body.append(el('p', 'cap', behind.length
-      ? `${behind.length} of ${recs.length} targets are not being met. Each names the drivers behind it — `
+      ? `${behind.length} of ${recs.length} current targets are not being met. Each names the drivers behind it — `
         + `open a driver's Quality page to see their own acceptance and cancellation figures.`
-      : `All ${recs.length} published targets are being met.`));
+      : `All ${recs.length} current targets are being met.`));
   }
 };
 

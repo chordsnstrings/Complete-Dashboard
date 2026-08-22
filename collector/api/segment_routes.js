@@ -56,7 +56,7 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
        AND ($5::text IS NULL OR (o.started_at AT TIME ZONE 'Asia/Dubai')::date = $5::date)
        AND ($6::text IS NULL OR ${CUSTODY} ILIKE '%' || $6 || '%')`;
 
-    const [rows, byVerdict, byPlate, byDay, byReason, [tot]] = await Promise.all([
+    const [rows, byVerdict, byPlate, byDay, byReason, [tot], [facetN]] = await Promise.all([
       q(`SELECT ${SEG_COLS}, ${CUSTODY} AS drivers, ${CUSTODY_IDS} AS driver_refs
           FROM occupancy_segment o WHERE ${WHERE}
           ORDER BY o.started_at DESC LIMIT ${limit}`, p),
@@ -89,6 +89,10 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
                 count(*) FILTER (WHERE o.low_confidence)::int low_confidence,
                 count(*) FILTER (WHERE o.verdict_reason IS NULL)::int unreasoned
           FROM occupancy_segment o WHERE ${WHERE}`, p),
+      // How many facet values exist, against how many the lists above show.
+      q(`SELECT count(DISTINCT o.plate)::int plates,
+                count(DISTINCT coalesce(o.verdict_reason,'(no reason recorded)'))::int reasons
+          FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}`, [from, to]),
     ]);
 
     res.json({
@@ -99,6 +103,19 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
       unreasoned: tot?.unreasoned ?? 0,
       filter: { verdict, plate, day, driver },
       facets: { verdict: byVerdict, plate: byPlate, day: byDay, reason: byReason },
+      /* A facet list is a set of filters somebody can choose. Two of these are
+         capped — the 40 busiest plates and the 20 commonest reasons — and a
+         truncated facet list is not a shorter menu, it is a filter that cannot
+         be selected at all: the plate you are looking for is simply absent and
+         the page gives no hint that it exists. The counts say how many there
+         are so the page can offer a search rather than implying the menu is
+         complete. */
+      facet_totals: {
+        plate: facetN?.plates ?? (byPlate || []).length,
+        reason: facetN?.reasons ?? (byReason || []).length,
+        plate_shown: (byPlate || []).length,
+        reason_shown: (byReason || []).length,
+      },
       known_verdicts: VERDICTS,
     });
   }));

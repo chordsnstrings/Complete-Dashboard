@@ -85,8 +85,16 @@ export async function renderSegments(root, kind, value) {
   if (plates.length) {
     hbars(pp.body, plates.slice(0, 12).map((r) => ({ label: r.key, n: r.unauthorized })),
       { color: '--s8', onClick: (s) => { location.hash = href('segments', 'plate', s.label); } });
+    /* The facet list is capped at the 40 busiest plates, so this count is over
+       what came back. A truncated facet is not a shorter menu — the vehicle
+       you are looking for is simply absent from it — so the page says how many
+       there are rather than implying the list is all of them. */
+    const ft = d.facet_totals || {};
     pp.body.append(el('p', 'cap',
-      `${fmt(plates.length)} vehicle(s) carry at least one flag. A bar is a link to that vehicle’s segments.`));
+      `${fmt(plates.length)} vehicle(s) shown carry at least one flag. A bar is a link to that vehicle’s segments.`
+      + (ft.plate > ft.plate_shown
+        ? ` ${fmt(ft.plate)} vehicles appear in this range in total — open a vehicle directly if it is not listed.`
+        : '')));
   } else empty(pp.body, 'No vehicle carries an unexplained segment in this range');
 
   // ── what the reconciler actually said ───────────────────────────────────
@@ -99,6 +107,9 @@ export async function renderSegments(root, kind, value) {
       { label: 'Verdict', key: 'verdict', render: (r) => vTag(r.verdict) },
       { label: 'Segments', key: 'n', num: true },
     ], { compact: true }));
+    const rt = d.facet_totals || {};
+    if (rt.reason > rt.reason_shown) rp.body.append(el('p', 'cap',
+      `The ${fmt(rt.reason_shown)} commonest of ${fmt(rt.reason)} distinct reasons recorded in this range.`));
     if (d.unreasoned) rp.body.append(el('p', 'cap',
       `${fmt(d.unreasoned)} of the segments matching this filter carry no recorded reason at all — `
       + 'they were judged by a version of the reconciler that did not write one down.'));

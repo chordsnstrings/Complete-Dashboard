@@ -98,8 +98,13 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
 
 /* ── the same double-count on the vehicle list ───────────────────────── */
 {
+  // {rows, total, shown, truncated} — the busiest 200 with the fleet size beside
+  // them, so the list cannot be read as the whole register.
   const v = await get(`/api/vehicles?${WIN}`);
-  const row = v.find((r) => r.plate === 'L100');
+  const row = (v.rows || []).find((r) => r.plate === 'L100');
+  check('the vehicle list says how many vehicles there are, not just how many it returned',
+    typeof v.total === 'number' && v.total >= (v.rows || []).length,
+    `${v.total} total, ${v.shown} shown`);
   check('a vehicle’s trips are bookings only', row.trips === 25, String(row.trips));
   check('its telematics journeys are counted separately', row.telematics_journeys === 21,
     String(row.telematics_journeys));

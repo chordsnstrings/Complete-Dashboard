@@ -57,11 +57,15 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   };
   const requireAdmin = (_req, _res, next) => next();
   const stub = async () => ({});
+  /* describeSettings returns an ARRAY of setting descriptors. Stubbed as {} it
+     made /api/settings answer an object, which then read as a shape difference
+     against the mock — a finding about the harness, not about the code. */
+  const stubList = async () => [];
 
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin,
-    describeSettings: stub, setSetting: stub, deleteSetting: stub, loadSettings: stub,
+    describeSettings: stubList, setSetting: stub, deleteSetting: stub, loadSettings: stub,
     insights: { run: stub }, pool: { query: db.query.bind(db) },
     ...(await import('../api/custody_sql.js')),
   };

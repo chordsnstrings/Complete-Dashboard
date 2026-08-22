@@ -197,6 +197,12 @@ export async function renderDay(root, day, onDetail) {
     { label: 'On the road', key: 'first_trip',
       render: (r) => `${timeStr(r.first_trip)} – ${timeStr(r.last_trip)}` },
   ]));
+  /* The list is capped; the headline counts are measured over the whole day.
+     A table that shows 120 of 180 people and says nothing reads as the roster. */
+  if (h.drivers > d.drivers.length) {
+    dp.body.append(el('p', 'cap',
+      `Showing the ${fmt(d.drivers.length)} busiest of ${fmt(h.drivers)} people who drove on this day.`));
+  }
   root.append(dp.panel);
 
   const vp = panel('What moved', 'Bookings and telematics journeys per vehicle. A vehicle with journeys and no bookings drove without a fare behind it.');
@@ -211,6 +217,10 @@ export async function renderDay(root, day, onDetail) {
     { label: 'Driver that day', key: 'driver_refs', render: (r) => custody(r) },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
   ]));
+  if (h.vehicles > d.vehicles.length) {
+    vp.body.append(el('p', 'cap',
+      `Showing the ${fmt(d.vehicles.length)} busiest of ${fmt(h.vehicles)} vehicles that moved.`));
+  }
   root.append(vp.panel);
 
   /* Context and coverage last: the reader has the day by now, and these say how
