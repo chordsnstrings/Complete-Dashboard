@@ -91,7 +91,19 @@ async function tabOverview(root, plate, prof) {
       sub: k.measured_trips
         ? `avg ${fmt(k.avg_km, 1)} km over ${fmt(k.measured_trips)} measured bookings`
         : 'no booking on this vehicle carries a usable distance' },
-    { label: 'Revenue', value: money(k.revenue), sub: k.revenue_per_km ? `${money(k.revenue_per_km, 'AED', 2)} per km` : 'from trip fares' },
+    /* Revenue, with the share of bookings it was actually measured over.
+       This card read "AED 525 · AED 0.14 per km" against 277 bookings, and both
+       numbers are true of the eleven trips that carry a fare and of nothing
+       else. Uber's trip export has no fare column at all, so on a car that
+       works mostly Uber this figure covers a few per cent of its work — and
+       presented bare it reads as what the vehicle earned. The fleet page has
+       carried this caveat for a while; the vehicle page had not. */
+    { label: 'Revenue', value: k.priced_trips ? money(k.revenue) : '—',
+      sub: !k.priced_trips
+        ? 'no booking on this vehicle carries a fare'
+        : `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings (${pct(100 * k.priced_trips / k.trips, 0)}) that report one`
+          + (k.revenue_per_km ? ` · ${money(k.revenue_per_km, 'AED', 2)} per km over those` : ''),
+      tone: k.priced_trips && k.trips && k.priced_trips / k.trips < 0.5 ? 'warn' : null },
     { label: 'Utilisation', value: k.utilisation != null ? pct(k.utilisation * 100, 1) : '—', sub: 'platform-reported, share of online time earning',
       tone: k.utilisation == null ? null : k.utilisation >= 0.5 ? 'good' : k.utilisation >= 0.3 ? 'warn' : 'critical' },
     { label: 'Idle days', value: fmt(k.idle_days), sub: 'reported a position, earned nothing',

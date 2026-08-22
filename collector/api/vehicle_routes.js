@@ -177,6 +177,13 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               round(sum(price) FILTER (WHERE has_fare)::numeric,2) revenue,
               round(avg(price) FILTER (WHERE has_fare)::numeric,2) avg_fare,
               count(*) FILTER (WHERE has_fare)::int priced_trips,
+              /* The distance of the PRICED trips, which is the only denominator
+                 revenue per km can honestly have. Dividing the revenue of the
+                 eleven trips that carry a fare by the distance of all 232
+                 measured ones produced "AED 0.14 per km" on a car earning
+                 normally — a number that is not wrong about anything, because
+                 its two halves describe different populations. */
+              round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
               -- outcome, not status: Bolt reports a completed trip as
               -- 'finished', and FMS telematics rows hardcode 'completed' on
               -- journeys that cannot be cancelled, so a bare status test both
@@ -219,7 +226,9 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        SELECT count(*)::int idle_days FROM seen WHERE day NOT IN (SELECT day FROM earned)`, p);
     res.json({ ...t, ...u, ...a, ...gap, ...idle,
       alerts_per_100km: t.km > 0 ? +((a.alerts / t.km) * 100).toFixed(1) : null,
-      revenue_per_km: t.km > 0 && t.revenue ? +(t.revenue / t.km).toFixed(2) : null });
+      // Over the priced distance, not the whole of it — see priced_km above.
+      revenue_per_km: t.priced_km > 0 && t.revenue
+        ? +(t.revenue / t.priced_km).toFixed(2) : null });
   }));
 
   /* ── the daily spine ──────────────────────────────────────────────────── */

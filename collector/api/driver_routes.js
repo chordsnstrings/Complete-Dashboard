@@ -378,6 +378,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               count(*) FILTER (WHERE is_booking)::int bookings,
               count(*) FILTER (WHERE has_fare)::int priced_trips,
               count(*) FILTER (WHERE has_distance)::int trips_with_distance,
+              /* The distance of the PRICED trips. Revenue per km divided the
+                 fares of the few trips that carry one by the distance of ALL of
+                 them, which is a ratio between two different populations and
+                 comes out an order of magnitude too low on any driver working
+                 mostly Uber — whose trip export has no fare column at all. */
+              round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
               round(avg(duration_s)::numeric/60,1) avg_minutes,
               count(DISTINCT plate)::int vehicles, count(DISTINCT platform)::int platforms
        FROM trip_norm WHERE ${TW}`, p);

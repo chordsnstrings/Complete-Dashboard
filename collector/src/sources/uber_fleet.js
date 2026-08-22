@@ -108,32 +108,81 @@ async function pullRecommendations() {
   return rows.length ? upsertMany('platform_recommendation', rows, ['platform', 'rec_type', 'rec_uuid']) : 0;
 }
 
-/* ── earnings components: tips, taxes, cash collected, clawbacks ────────── */
+/* ── earnings components: tips, taxes, cash collected, clawbacks ──────────
+   This is the only surface that carries Uber money. The trip export has no fare
+   column at all, so without this the fleet's largest channel — 165,000 trips —
+   contributes nothing to any revenue figure in the product.
+
+   It returned zero rows for its entire life, and reported success while doing
+   so. The earner id was read as `earnerUuid` or `earnerMetadata.uuid`; the
+   response carries `earnerInfo.uuid`. Every record therefore hit the `continue`
+   and the collector wrote nothing, logged nothing, and the run said ok.
+
+   Two lessons are built in below. Field names are read from a list of the
+   spellings this API is known to use rather than from one guess. And when
+   records come back but none of them map, that is reported as a FAILURE with
+   the keys that were actually present — a shape change should read as "we can
+   no longer parse this", never as "there was no money this week". */
+const pick = (obj, ...paths) => {
+  for (const p of paths) {
+    const v = p.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
+    if (v != null && v !== '') return v;
+  }
+  return null;
+};
+
+/** amountE5 is Uber's fixed-point money; some surfaces send a plain number. */
+const money = (a) => {
+  if (a == null) return null;
+  if (typeof a === 'number') return a;
+  if (a.amountE5 != null) return Number(a.amountE5) / 1e5;
+  if (a.amount != null) return Number(a.amount);
+  return null;
+};
+
 async function pullEarningsComponents(from, to) {
   const token = await uberOAuthToken();
   const url = `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({
     org_id: config.uber.org, start_time: new Date(from).getTime(), end_time: new Date(to).getTime(), page_size: 200,
   })}`;
   const { data } = await http(url, { headers: { authorization: `Bearer ${token}` }, timeoutMs: 45000 });
+  const breakdowns = data?.earnerPaymentBreakdowns || [];
   const rows = [];
   const ps = iso(new Date(from)), pe = iso(new Date(to));
-  for (const b of (data?.earnerPaymentBreakdowns || [])) {
-    const driver = b.earnerUuid || b.earnerMetadata?.uuid;
-    if (!driver) continue;
-    const walk = (arr, parent) => {
+  const skipped = [];
+  for (const b of breakdowns) {
+    const driver = pick(b, 'earnerInfo.uuid', 'earnerUuid', 'earnerMetadata.uuid', 'earner.uuid', 'uuid');
+    if (!driver) { skipped.push(Object.keys(b).join(',')); continue; }
+    const first = pick(b, 'earnerInfo.firstName', 'earnerMetadata.firstName');
+    const last = pick(b, 'earnerInfo.lastName', 'earnerMetadata.lastName');
+    const name = pick(b, 'earnerMetadata.name', 'earnerInfo.name')
+      || [first, last].filter(Boolean).join(' ') || null;
+    const walk = (arr, parent, depth = 0) => {
+      if (depth > 6) return;
       for (const c of (arr || [])) {
-        if (c.categoryName && c.amount) {
+        const category = pick(c, 'categoryName', 'category', 'name', 'label', 'type');
+        const amount = money(pick(c, 'amount', 'value', 'total'));
+        if (category && amount != null) {
           rows.push({
             platform: 'uber', driver_ext_id: driver, period_start: ps, period_end: pe,
-            category: c.categoryName, parent: parent || null,
-            amount: Number(c.amount.amountE5 || 0) / 1e5, currency: c.amount.currencyCode || 'AED',
-            driver_name: b.earnerMetadata?.name || null, fleet_id: FLEET,
+            category, parent: parent || null, amount,
+            currency: pick(c, 'amount.currencyCode', 'currency') || 'AED',
+            driver_name: name, fleet_id: FLEET,
           });
         }
-        if (c.children?.length) walk(c.children, c.categoryName);
+        const kids = c.children || c.breakdowns || c.items || c.subCategories;
+        if (kids?.length) walk(kids, category || parent, depth + 1);
       }
     };
-    walk(b.paymentBreakdowns, null);
+    walk(b.paymentBreakdowns || b.breakdowns || b.payments, null);
+  }
+  /* Records came back and not one of them yielded a row. That is a parse
+     failure, not an empty week, and it is exactly the state this collector sat
+     in for its whole life while reporting success. */
+  if (breakdowns.length && !rows.length) {
+    const shape = [...new Set(breakdowns.slice(0, 3).flatMap((b) => Object.keys(b)))].join(', ');
+    throw new Error(`earner payments: ${breakdowns.length} earner record(s) and no parsable component. `
+      + `Top-level keys seen: ${shape}. Skipped for want of an id: ${skipped.length}.`);
   }
   // de-dup on the PK (a category can appear at two depths)
   const seen = new Set();
@@ -141,23 +190,46 @@ async function pullEarningsComponents(from, to) {
     const k = `${r.driver_ext_id}|${r.category}`;
     if (seen.has(k)) return false; seen.add(k); return true;
   });
+  log.info(SRC, 'earner payments', { earners: breakdowns.length, components: uniq.length });
   return uniq.length ? upsertMany('driver_earnings_component', uniq,
     ['platform', 'driver_ext_id', 'period_start', 'period_end', 'category']) : 0;
 }
 
 export async function collect({ from, to, mode }) {
   let vehicles = 0, documents = 0, recs = 0, earnings = 0;
-  // Each surface is independent — one failing must not cost us the others.
-  try { ({ vehicles, documents } = await pullVehicles()); }
-  catch (e) { log.warn(SRC, 'vehicles/compliance failed', { err: String(e).slice(0, 120) }); }
-  try { recs = await pullRecommendations(); }
-  catch (e) { log.warn(SRC, 'recommendations failed', { err: String(e).slice(0, 120) }); }
-  try { earnings = await pullEarningsComponents(from, to); }
-  catch (e) { log.warn(SRC, 'earnings components failed', { err: String(e).slice(0, 120) }); }
+  /* Each surface is independent — one failing must not cost us the others. But
+     "independent" was doing too much work: a surface that threw was written to
+     the log and nowhere else, and the run still reported ok as long as ANY of
+     the four returned something. Uber earnings failed on every run for the
+     collector's whole life and /api/status said "uber_fleet ok" throughout.
+
+     Each failure is now a recorded window, which is what /api/status already
+     renders for the sources that chunk — so a surface that stops parsing shows
+     up on the Data sources page as a named failure with its reason. */
+  const failed = [];
+  const surface = async (name, fn) => {
+    try { return await fn(); }
+    catch (e) {
+      const err = String(e?.message || e).slice(0, 300);
+      log.warn(SRC, `${name} failed`, { err });
+      failed.push({ from: iso(new Date(from)), to: iso(new Date(to)), error: `${name}: ${err}` });
+      return null;
+    }
+  };
+  const veh = await surface('vehicles/compliance', pullVehicles);
+  if (veh) ({ vehicles, documents } = veh);
+  recs = (await surface('recommendations', pullRecommendations)) || 0;
+  earnings = (await surface('earnings components', () => pullEarningsComponents(from, to))) || 0;
 
   await logRun({ source: SRC, fleet_id: FLEET, mode,
     window_start: iso(new Date(from)), window_end: iso(new Date(to)),
-    status: (vehicles || recs || earnings) ? 'ok' : 'error',
+    // Four surfaces: all four working is ok, some working is partial, none is
+    // an error. "ok" used to cover three of the four being broken.
+    status: failed.length === 0 ? 'ok' : (vehicles || recs || earnings) ? 'partial' : 'error',
+    error: failed.length ? failed.map((f) => f.error).join(' | ').slice(0, 500) : null,
+    chunks: failed.length
+      ? [{ from: iso(new Date(from)), to: iso(new Date(to)), ok: false, rows: 0, error: failed[0].error }]
+      : undefined,
     rows_written: vehicles + documents + recs + earnings });
-  log.info(SRC, 'done', { vehicles, documents, recs, earnings });
+  log.info(SRC, 'done', { vehicles, documents, recs, earnings, failed: failed.length });
 }

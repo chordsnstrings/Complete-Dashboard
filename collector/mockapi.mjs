@@ -310,6 +310,9 @@ app.get('/api/driver/kpis', (req, r) => {
     not_completed: trips - Math.round(trips * (96.4 - i * 0.4) / 100),
     bookings: trips, priced_trips: Math.round(trips * 0.4),
     trips_with_distance: trips,
+    // The distance of the PRICED trips, which is the only denominator revenue
+    // per km can honestly have.
+    priced_km: Math.round(d.reduce((a, x) => a + x.km, 0) * 0.4),
     vehicles: 2, platforms: i % 3 === 0 ? 2 : 1,
     median_start_h: 6.5 + (i % 3), median_end_h: 18.4, avg_span_h: 10.6, start_consistency_h: 0.8 + i * 0.15,
     hours_online: +d.reduce((a, x) => a + x.hours_online, 0).toFixed(1),
@@ -527,6 +530,7 @@ app.get('/api/vehicle/kpis', (req, r) => {
        numbers the completion rate is made of. */
     telematics_journeys: Math.round(trips * 1.2), days_earning: d.filter((x) => x.trips).length,
     measured_trips: trips, priced_trips: Math.round(trips * 0.42),
+    priced_km: Math.round(km * 0.42),
     outcome_n: trips, completed: Math.round(trips * 0.961),
     not_completed: trips - Math.round(trips * 0.961),
     completion_pct: 96.1, cancel_pct: 3.4, drivers: 1 + (i % 3), platforms: 1 + (i % 2),

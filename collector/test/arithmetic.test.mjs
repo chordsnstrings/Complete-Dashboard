@@ -110,6 +110,14 @@ check('the weekday-hour heatmap sums to the trip count',
   check('their average distance is over the trips that reported one',
     near(N(kpi.avg_km), N(kpi.km) / kpi.trips_with_distance, 0.06),
     `${kpi.avg_km} vs ${N(kpi.km)}/${kpi.trips_with_distance}`);
+  /* A ratio between two populations is not a ratio. Revenue per km divided the
+     fares of the trips that carry one by the distance of ALL of them, which on
+     a driver working mostly Uber — whose export has no fare column — came out
+     an order of magnitude low. Both halves must describe the priced trips. */
+  check('the driver page reports the distance its revenue was earned over',
+    typeof kpi.priced_km !== 'undefined', JSON.stringify({ priced_km: kpi.priced_km }));
+  check('and that distance is no larger than the distance of every trip',
+    N(kpi.priced_km) <= N(kpi.km) + 1, `${kpi.priced_km} vs ${kpi.km}`);
 }
 
 /* ── 4. a vehicle's own page adds up ────────────────────────────────────── */
@@ -125,6 +133,17 @@ check('the weekday-hour heatmap sums to the trip count',
   const rows = Array.isArray(daily) ? daily : daily.rows || [];
   check('its daily rows sum to its headline', sum(rows, 'trips') === kpi.trips,
     `${sum(rows, 'trips')} vs ${kpi.trips}`);
+  check('a vehicle’s revenue per km is fares over the distance of the priced trips',
+    near(N(kpi.revenue_per_km), N(kpi.revenue) / N(kpi.priced_km), 0.02),
+    `${kpi.revenue_per_km} vs ${N(kpi.revenue)}/${N(kpi.priced_km)}`);
+  /* Coerced, and deliberately so: `kpi.priced_km <= kpi.km + 1` on the raw
+     values is "829" <= "11641", a lexical comparison that is false. Postgres
+     numeric arrives as a JS string and the first version of this very check
+     shipped the bug it was written to catch. */
+  check('and not over the distance of every booking, which is a different population',
+    N(kpi.priced_km) <= N(kpi.km) + 1
+    && (kpi.priced_trips === kpi.trips || N(kpi.priced_km) < N(kpi.km)),
+    `${kpi.priced_km} priced km of ${kpi.km} total, over ${kpi.priced_trips} of ${kpi.trips} trips`);
   const dd = (await get(`/api/vehicle/drivers-detail?plate=${PLATES[0]}&${W}`)).body;
   check('and the custody totals sum to the same number of trips as the day rows',
     sum(dd.totals, 'trips') === sum(dd.days, 'trips'),

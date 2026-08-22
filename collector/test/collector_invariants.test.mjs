@@ -27,7 +27,17 @@ check('an unexpected chunk failure logs as an error, not a warning',
 // status='ok', which is how a 299-day hole in the trip history stayed hidden.
 check('failed windows are named at the end of the run', /trip backfill left holes/.test(uber));
 check('the run records every window it attempted, not just a total',
-  /return \{ total, chunks \}/.test(uber) && /chunks: trips\.chunks/.test(uber));
+  (uber.match(/return \{ total, chunks \}/g) || []).length >= 2
+  && /const chunks = \[\.\.\.trips\.chunks, \.\.\.perf\.chunks\]/.test(uber));
+/* BOTH sub-sources, not just the trip report. The earner-breakdown query asked
+   for a field the response type does not have, so Uber rejected it on every
+   window for the life of the collector — and because only the trip windows were
+   recorded, the run said ok while the fleet's per-driver Uber earnings, the one
+   place Uber money exists at all, stayed empty. */
+check('and both of the uber sub-sources contribute their windows to the run',
+  /perf\.chunks/.test(uber) && /rows_written: trips\.total \+ perf\.total/.test(uber));
+check('the earner breakdown does not ask for a field the response has no room for',
+  !/nextPageToken\n/.test(uber) && /paginationResult\?\.nextPageToken/.test(uber));
 check('a window that fails is recorded with the dates that would let it be re-fetched',
   /chunk\.error =/.test(uber) && /from: iso\(s\), to: iso\(e\)/.test(uber));
 // A backfill that starts twelve months ago and dies partway never reaches the

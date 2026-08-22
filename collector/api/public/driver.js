@@ -405,14 +405,29 @@ async function tabEarnings(root, id) {
 
   const cash = mix.payment.find((p) => /cash/i.test(p.label));
   kpiHost.replaceWith(kpiRow([
-    { label: 'Booked revenue', value: money(k.revenue), sub: `${fmt(k.trips)} trips` },
-    { label: 'Average fare', value: money(k.avg_fare, 'AED', 2), sub: k.avg_km ? `over ${fmt(k.avg_km, 1)} km` : null },
+    /* Every money figure here is over the trips that CARRY a fare, which on a
+       driver working mostly Uber is a small fraction of their work — the Uber
+       trip export has no fare column at all. Presented against the trip count
+       it reads as what they earned, which is the single most misread number in
+       this product. */
+    { label: 'Booked revenue', value: k.priced_trips ? money(k.revenue) : '—',
+      sub: k.priced_trips
+        ? `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} trips that report a fare`
+        : 'no trip of theirs reports a fare',
+      tone: k.priced_trips && k.trips && k.priced_trips / k.trips < 0.5 ? 'warn' : null },
+    { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
+      sub: k.priced_trips ? `over the ${fmt(k.priced_trips)} priced trips` : null },
     { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },
     { label: 'Tips', value: money(e.tips), sub: e.tip_pct != null ? `${pct(e.tip_pct, 1)} of net fare` : 'no tip data yet',
       tone: e.tip_pct == null ? null : e.tip_pct >= 3 ? 'good' : e.tip_pct >= 1 ? 'warn' : null },
     { label: 'Cash collected', value: money(k.cash_earnings ?? (cash ? cash.revenue : null)),
       sub: cash ? `${fmt(cash.n)} cash trips` : 'card only' },
-    { label: 'Revenue per km', value: k.km > 0 && k.revenue ? money(k.revenue / k.km, 'AED', 2) : '—', sub: 'booked fare ÷ distance' },
+    // Priced fares over the distance of the priced trips. Dividing by the whole
+    // distance mixes two populations and understates it by however much of the
+    // work carries no fare.
+    { label: 'Revenue per km', value: k.priced_km > 0 && k.revenue
+      ? money(Number(k.revenue) / Number(k.priced_km), 'AED', 2) : '—',
+      sub: k.priced_km ? `over the ${fmt(k.priced_km)} km those trips covered` : 'no priced distance' },
   ]));
 
   comp.body.innerHTML = '';

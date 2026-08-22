@@ -153,8 +153,9 @@ const EARNER_PAGE = 10;
 
 async function pullEarnerBreakdowns(from, to) {
   let total = 0;
+  const chunks = [];
   for (const [s, e] of dateChunks(from, to, 7)) {
-    let pageToken = '', pages = 0;
+    let pageToken = '', pages = 0, got = 0, err = null;
     do {
       const body = JSON.stringify({
         operationName: 'getEarnerBreakdownsV2',
@@ -166,7 +167,6 @@ async function pullEarnerBreakdowns(from, to) {
         },
         query: `query getEarnerBreakdownsV2($supplierUuid: ID!, $timeRange: OneOfTimeRange__Input, $driverListOrPageOptions: DriverListOrPagination, $driverList: [ID!], $pageOptions: PaginationOption__Input, $excludeAdjustmentItems: Boolean) {
           getEarnerBreakdownsV2(supplierUuid: $supplierUuid, timeRange: $timeRange, driverList: $driverList, pageOptions: $pageOptions, driverListOrPageOptions: $driverListOrPageOptions, excludeAdjustmentItems: $excludeAdjustmentItems) {
-            nextPageToken
             earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode } }
           } }`,
       });
@@ -174,8 +174,8 @@ async function pullEarnerBreakdowns(from, to) {
       // An expired web cookie answers with `errors` and no data, which is
       // indistinguishable from "this fleet had no drivers" unless we say so.
       if (data?.errors?.length) {
-        log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} rejected`,
-          { err: String(data.errors[0]?.message || data.errors[0]).slice(0, 200) });
+        err = String(data.errors[0]?.message || data.errors[0]).slice(0, 250);
+        log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} rejected`, { err });
         break;
       }
       const page = data?.data?.getEarnerBreakdownsV2 || {};
@@ -191,14 +191,27 @@ async function pullEarnerBreakdowns(from, to) {
           currency: d.netOutstanding?.currencyCode || 'AED', raw: d,
         };
       });
-      if (rows.length) total += await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
-      pageToken = page.nextPageToken || '';
+      if (rows.length) {
+        got += rows.length;
+        total += await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+      }
+      /* The response type has no nextPageToken — asking for it made the server
+         reject the whole query with "Cannot query field", on every window, for
+         the life of this collector. It was a warning in the log and nothing
+         else, so /api/status reported uber ok while the fleet's per-driver
+         Uber earnings were empty. paginationResult is where a token would be
+         if this surface paginates; absent, one page is the answer. */
+      pageToken = page.paginationResult?.nextPageToken || '';
       // A page cap the server does not honour would otherwise spin forever;
       // 40 pages is 400 drivers, comfortably past this fleet's size.
       if (++pages >= 40) { log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} stopped at ${pages} pages`); break; }
     } while (pageToken);
+    /* Recorded per window, like the trip chunks beside it. A sub-source that
+       fails silently is the shape that hid a 299-day hole in the trip feed;
+       this one hid every Uber earning the fleet has ever made. */
+    chunks.push({ from: iso(s), to: iso(e), rows: got, error: err });
   }
-  return total;
+  return { total, chunks };
 }
 
 // Live driver status snapshot (OAuth).
@@ -241,12 +254,15 @@ export async function collect({ from, to, mode, onStep }) {
   try {
     const trips = await pullTrips(from, to, onStep);
     const perf = await pullEarnerBreakdowns(from, to);
+    // Both sub-sources' windows, so a run that fetched every trip and no
+    // earnings reads as partial rather than as ok.
+    const chunks = [...trips.chunks, ...perf.chunks];
     // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
     // are still missing", and it is the difference between a hole that is
     // visible and one that is not.
     await logRun({ source: SRC, fleet_id: config.uber.fleet, mode,
-      window_start: from, window_end: to, rows_written: trips.total + perf,
-      chunks: trips.chunks });
+      window_start: from, window_end: to, rows_written: trips.total + perf.total,
+      chunks });
     log.info(SRC, 'done', { trips: trips.total, perf,
       windows_failed: trips.chunks.filter((c) => c.error).length, of: trips.chunks.length });
   } catch (e) {
