@@ -158,7 +158,63 @@ console.log('\ncache: it is bounded and observable');
 for (let i = 0; i < 450; i++) await get(`/api/thing?days=${i}`);
 const st = cache.stats();
 check('the store stops growing at its cap rather than until the process dies',
-  st.entries <= 400, `entries=${st.entries}`);
+  st.bytes <= st.bytes_cap, `${st.bytes} of ${st.bytes_cap}`);
+
+/* Eviction, actually exercised. Against the real 64MB cap, 450 tiny bodies
+   never come close and the assertion above passes without the eviction path
+   ever running — which is a test reporting coverage it does not have. A cache
+   with a cap of a few hundred bytes evicts on nearly every write. */
+{
+  // A cap small enough that nearly every write evicts. Passed in rather than
+  // set through the environment, which is read once at module load and so had
+  // no effect at all on a cache already constructed.
+  const tiny = responseCache({ pool, ttlMs: 0, port, maxBytes: 2000 });
+  const app3 = express();
+  app3.use('/api', tiny);
+  app3.get('/api/thing', (req, res) => res.json({ pad: 'x'.repeat(200), q: req.query.n }));
+  const s3 = app3.listen(0);
+  const p3 = s3.address().port;
+  for (let i = 0; i < 60; i++) await (await fetch(`http://127.0.0.1:${p3}/api/thing?n=${i}`)).text();
+  const a = tiny.audit();
+  check('eviction actually ran, rather than the cap never being reached',
+    a.entries < 60 && a.entries > 0, JSON.stringify(a));
+  check('and a cache that must evict keeps its counter in step with its contents',
+    a.counted === a.actual, JSON.stringify(a));
+  check('and stays under the cap it was given',
+    a.counted <= 2000, JSON.stringify(a));
+  s3.close();
+}
+
+/* The byte counter has to stay in step with what is actually held, and the
+   place it drifts is a REPLACED key — which is what every refresh does. The
+   first version subtracted nothing when overwriting, so the total only ever
+   rose, and the cache would have ended up evicting everything while holding
+   almost nothing. Slow, silent, and indistinguishable from a cache that simply
+   is not working. */
+{
+  const before = cache.stats().bytes;
+  const sameKey = '/api/thing?accounting=1';
+  await get(sameKey);
+  const afterFirst = cache.stats().bytes;
+  for (let i = 0; i < 20; i++) {
+    await db.query(`INSERT INTO collection_run (source, mode, status, finished_at)
+                    VALUES ('uber','incremental','ok', now())`);
+    await get(sameKey);                       // stale: served from cache
+    await new Promise((r) => setTimeout(r, 60));   // let the refresh land
+  }
+  const afterMany = cache.stats().bytes;
+  const oneEntry = afterFirst - before;
+  check('rewriting one key twenty times does not grow the byte count by twenty entries',
+    afterMany - afterFirst < oneEntry * 3,
+    `one entry ≈ ${oneEntry}B, twenty rewrites added ${afterMany - afterFirst}B`);
+  /* Recomputed from the store rather than asserted against itself. The first
+     version of this line compared the counter with a constant and could not
+     fail — the same vacuous shape that let an earlier test in this suite pass
+     while exercising nothing. */
+  const a = cache.audit();
+  check('and the counter equals the bytes actually held',
+    a.counted === a.actual, JSON.stringify(a));
+}
 check('and the hit rate is visible, so a cache that stopped working can be seen',
   st.hit > 0 && st.miss > 0, JSON.stringify(st));
 

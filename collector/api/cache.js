@@ -23,7 +23,19 @@
        sharing a path.
      - grow without bound. */
 
-const MAX_ENTRIES = 400;
+/* Bounded by bytes, not by entry count.
+   400 entries was the first guess and it was wrong in both directions: the
+   product has 35 views and offers five windows, so a single person exploring it
+   passes 400 keys and starts evicting entries they are still using — measured
+   at 4,852 misses against 810 hits, which is a cache paying its costs and
+   returning almost nothing. And an entry is not a unit of anything: the driver
+   directory is 172kb and a KPI row is under 1kb, so counting them treats two
+   hundredfold different things as equal.
+
+   64MB of JSON is a few thousand of the small ones or a few hundred of the
+   large, which is the whole product across every window with room to spare, and
+   is nothing next to the memory a Node process already holds. */
+const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 64 * 1024 * 1024);
 
 /* Never cached, by prefix. /api/live and /api/track are realtime positions, and
    a minute old is simply wrong. /api/settings reads credential state.
@@ -32,12 +44,14 @@ const MAX_ENTRIES = 400;
 const NEVER = ['/api/live', '/api/track', '/api/settings', '/api/rollups',
   '/api/status', '/api/health', '/api/ready', '/api/probe', '/api/cache-stats'];
 
-export function responseCache({ pool, ttlMs = 30000, enabled = true, port } = {}) {
+export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
+  maxBytes = MAX_BYTES } = {}) {
   /* The port to re-request a stale key on. Set after listen, because with
      PORT=0 the real one does not exist until then. */
   let boundPort = port || null;
   const selfPort = () => boundPort;
-  const store = new Map();          // url -> { version, body, type }
+  const store = new Map();          // url -> { version, at, body, type }
+  let bytes = 0;                    // total held, kept in step with the store
   let version = 'boot';
   let checkedAt = 0;
   const stats = { hit: 0, stale: 0, miss: 0, skip: 0 };
@@ -142,9 +156,22 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port } = {}
       if (res.statusCode === 200) {
         try {
           const text = JSON.stringify(body);
-          // Bounded, oldest first: a Map iterates in insertion order.
-          if (store.size >= MAX_ENTRIES) store.delete(store.keys().next().value);
+          /* Oldest first — a Map iterates in insertion order — and evicting
+             until the new entry fits rather than one per write, or a single
+             large response never makes room for itself. */
+          /* Subtract before deleting. Replacing a key — which is what every
+             refresh does — dropped the entry without crediting its bytes back,
+             so the counter only ever rose and the cache would eventually evict
+             everything while holding almost nothing. */
+          const replacing = store.get(key);
+          if (replacing) { bytes -= replacing.body.length; store.delete(key); }
+          while (bytes + text.length > maxBytes && store.size) {
+            const oldest = store.keys().next().value;
+            bytes -= store.get(oldest).body.length;
+            store.delete(oldest);
+          }
           store.set(key, { version: v, at: Date.now(), body: text, type: 'application/json; charset=utf-8' });
+          bytes += text.length;
         } catch { /* a body that will not serialise is one we cannot cache */ }
       }
       return origJson(body);
@@ -153,8 +180,18 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port } = {}
   };
 
   // For /api/cache-stats and for the tests, which need to see inside.
-  middleware.stats = () => ({ ...stats, entries: store.size, version });
+  middleware.stats = () => ({ ...stats, entries: store.size, bytes,
+    bytes_cap: maxBytes, version });
   middleware.setPort = (p) => { boundPort = p; };
-  middleware.clear = () => { store.clear(); checkedAt = 0; };
+  middleware.clear = () => { store.clear(); bytes = 0; checkedAt = 0; };
+  /* The counter recomputed from what is actually held. A running total that
+     drifts from the store is the failure this cache already had once, and it is
+     silent: the cache slowly evicts everything while reporting a size it does
+     not have. */
+  middleware.audit = () => {
+    let real = 0;
+    for (const v of store.values()) real += v.body.length;
+    return { counted: bytes, actual: real, entries: store.size };
+  };
   return middleware;
 }

@@ -51,6 +51,7 @@ app.get('/api/map/journey', (req, res) => {
    branch is exercised by the browser smoke test rather than only existing. */
 app.get('/api/cache-stats', (_q, r) => r.json(
   { hit: 1840, stale: 310, miss: 260, skip: 92, entries: 214,
+    bytes: 18_400_000, bytes_cap: 67_108_864,
     version: '2026-08-22T13:30:00.000Z|2026-08-22T13:31:00.000Z' }));
 
 app.get('/api/rollups', (_q, r) => r.json([

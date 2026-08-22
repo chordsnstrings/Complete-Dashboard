@@ -1758,7 +1758,9 @@ V.sources = async (root) => {
       ru.body.append(el('p', 'cap',
         `Response cache: ${fmt(served)} of ${fmt(total)} requests answered without re-running the query`
         + `${total ? ` (${Math.round((served / total) * 100)}%)` : ''}, `
-        + `${fmt(cacheStats.entries)} entries held. `
+        + `${fmt(cacheStats.entries)} entries`
+        + `${cacheStats.bytes != null ? ` (${fmt(Math.round(cacheStats.bytes / 1048576))} of `
+          + `${fmt(Math.round(cacheStats.bytes_cap / 1048576))} MB)` : ''} held. `
         + `${fmt(cacheStats.stale || 0)} were served from the previous collection while the `
         + 'new one was computed behind the reader — so a page never waits for a refresh, and is '
         + 'at most one collection cycle behind. Nothing is cached on a timer.'));
