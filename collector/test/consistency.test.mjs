@@ -292,14 +292,23 @@ const get = async (p) => {
 {
   const { readFileSync } = await import('node:fs');
   const src = readFileSync('api/server.js', 'utf8');
-  const m = src.match(/const CANON = \(col\) => `[\s\S]*?`;/);
-  check('api/server.js still declares CANON where this test can find it', !!m);
-  if (m) {
-    // eslint-disable-next-line no-new-func
-    const CANON = new Function(`return ${m[0].replace(/^const CANON = /, '').replace(/;$/, '')}`)();
+  /* This used to extract server.js's own copy of the fold and compare it with
+     personFold. There is nothing left to compare: server.js imports the shared
+     one, so the two cannot disagree by construction. The check that remains is
+     the stronger one — that the duplicate has not come back. A copy is not
+     wrong on the day it is made; it is wrong on the day one of them is edited. */
+  check('api/server.js imports the shared fold instead of keeping its own copy',
+    /const CANON = personFold;/.test(src) && !/const CANON = \(col\) => `/.test(src));
+  check('and no other route file redeclares it either',
+    (await import('node:fs')).readdirSync('api')
+      .filter((f) => f.endsWith('.js'))
+      .every((f) => !/const CANON = `regexp_replace/.test(readFileSync(`api/${f}`, 'utf8'))),
+    (await import('node:fs')).readdirSync('api')
+      .filter((f) => f.endsWith('.js') && /const CANON = `regexp_replace/.test(readFileSync(`api/${f}`, 'utf8'))).join(', '));
+  {
     const { personFold, personKey, peopleCount } = await import('../api/custody_sql.js');
-    check('the shared person fold is byte for byte the one server.js uses',
-      CANON('x') === personFold('x'), `${CANON('x')}\n      ${personFold('x')}`);
+    // The fold server.js now uses, under the name the rest of this block knows it by.
+    const CANON = personFold;
     check('the person key prefers the name and falls back to the id',
       personKey('i', 'n').includes('coalesce') && personKey('i', 'n').endsWith('i)'),
       personKey('i', 'n'));

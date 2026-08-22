@@ -1,3 +1,4 @@
+import { personFold } from './custody_sql.js';
 /* The roster: who is on the books, and who is actually earning.
    ──────────────────────────────────────────────────────────────────────────
    Four providers each report a driver's standing and none of them knows what
@@ -24,9 +25,11 @@ const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
 
 /* Two spellings of one person. The same collapse the driver pages use: a
    doubled surname ("Asad Khan Khan") is one человек, not two. */
-const CANON = `regexp_replace(
-  btrim(regexp_replace(lower(coalesce(full_name, '')), '\\s+', ' ', 'g')),
-  '(\\m\\w+)( \\1)+', '\\1', 'g')`;
+/* The fold, imported rather than repeated. This file held a fourth copy of it
+   — api/server.js had a third, api/custody_sql.js exports the original, and
+   sql/schema_v20.sql stores it as a generated column. Four definitions of "the
+   same human" is how one person becomes two on a page nobody is looking at. */
+const CANON = personFold('full_name');
 
 export function rosterRoutes(app, { q, wrap, range }) {
   /* One row per person, with every platform standing they hold and what they
@@ -68,11 +71,19 @@ export function rosterRoutes(app, { q, wrap, range }) {
        ),
        -- Has this person EVER driven, on any platform, at any time? The
        -- difference between "quiet this month" and "never started".
+       /* person_key, not the fold. This question has no window — "ever, on any
+          platform, at any time" reads the whole trip table by definition — so
+          there is no index that can narrow it and the fold was being evaluated
+          on all 175,000 rows per request. Measured at that row count it is
+          2,434ms folded against 142ms on the stored column, and this endpoint
+          took twenty-one seconds. sql/schema_v20.sql stores the same
+          expression as a generated column, so the value is identical and
+          Postgres maintains it. */
        ever AS (
-         SELECT ${CANON.replace(/full_name/g, 'driver_name')} AS person,
+         SELECT person_key AS person,
                 min(requested_at) AS first_trip, max(requested_at) AS last_ever,
                 count(*)::int lifetime_trips
-         FROM trip WHERE coalesce(btrim(driver_name), '') <> '' GROUP BY 1
+         FROM trip WHERE person_key IS NOT NULL AND person_key <> '' GROUP BY 1
        )
        SELECT s.person,
               max(s.full_name) AS name,

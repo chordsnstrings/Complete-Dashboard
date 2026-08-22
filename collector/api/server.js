@@ -31,7 +31,7 @@ const q = (text, params) => pool.query(text, params).then((r) => r.rows);
    with time zone"). The full error is logged; the caller gets a reference to
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
-import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount } from './custody_sql.js';
+import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, personFold } from './custody_sql.js';
 let errSeq = 0;
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   const ref = `e${Date.now().toString(36)}-${(++errSeq).toString(36)}`;
@@ -121,9 +121,14 @@ const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::da
    human). No provider shares a driver id with another, so the name is the only
    key that spans platforms — and grouping on the raw string split people
    across their own spellings on three separate pages. */
-const CANON = (col) => `regexp_replace(
-    btrim(regexp_replace(lower(${col}), '\\s+', ' ', 'g')),
-    '(\\m\\w+)( \\1)+', '\\1', 'g')`;
+/* The one definition, imported rather than repeated. This was a second copy of
+   personFold, character for character, and sql/schema_v20.sql now stores a
+   third as a generated column. Three copies of "what makes two records the same
+   human" is how one person quietly becomes two on a page nobody was looking at,
+   so there are two left — the JS one here and the stored one — and
+   test/person_key.test.mjs asserts they agree on the names that made the fold
+   necessary. */
+const CANON = personFold;
 // Bookings only. A telematics row is a GPS-derived journey, and the same
 // physical trip is recorded by BOTH the ride platform and the tracker — summing
 // them counts it twice. See sql/schema_v7.sql.
