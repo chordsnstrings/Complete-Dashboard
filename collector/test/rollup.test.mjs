@@ -162,6 +162,84 @@ check('a new trip appears in the rollup after the next refresh',
 check('and a new person raises the folded driver count by exactly one',
   N(grown.drivers) === N(aug.drivers) + 1, `${aug.drivers} -> ${grown.drivers}`);
 
+console.log('\nrollup: incremental equals full');
+
+/* A full rebuild reads every trip ever collected — about eighty seconds on this
+   fleet — and running it every fifteen minutes on the database the API reads
+   from was measurable at the other end: /api/playbook went from 9.3s to 11.1s
+   while a refresh was in flight. Making pages faster by starving them is not
+   making them faster, so the frequent pass only recomputes recent buckets.
+
+   That is only safe if a narrow pass agrees with a wide one about the buckets
+   it touches, and leaves the rest exactly as they were. */
+{
+  // A day inside the narrow window, and one well outside it.
+  await trip({ at: '2026-08-20T09:00:00+04:00', plate: 'L600', drv: 'd-20', name: 'Recent Person' });
+  await trip({ at: '2026-01-05T09:00:00+04:00', plate: 'L700', drv: 'd-21', name: 'Ancient Person' });
+  await refreshRollups({ db });                       // full, so both land
+
+  const fullSnapshot = await q(
+    `SELECT month, platform, fleet_id, trips, drivers, revenue FROM rollup_month ORDER BY 1,2,3`);
+
+  /* Now change history on both sides of the window and refresh narrowly. The
+     recent change must appear; the ancient one must not — because a narrow
+     pass that silently rewrote old buckets from a partial scan would zero
+     them, which is the worst possible failure here. */
+  await trip({ at: '2026-08-21T09:00:00+04:00', plate: 'L601', drv: 'd-22', name: 'Newer Person' });
+  const daysBack = Math.ceil((Date.now() - Date.parse('2026-08-01')) / 864e5) + 1;
+  await refreshRollups({ db, days: daysBack });
+
+  const jan = (await q(
+    `SELECT trips FROM rollup_month WHERE month='2026-01-01' AND platform='*' AND fleet_id='*'`))[0];
+  const janBefore = fullSnapshot.find((r) => ym(r.month) === '2026-01' && r.platform === '*' && r.fleet_id === '*');
+  check('a bucket outside the window is left exactly as it was, not rebuilt from a partial scan',
+    N(jan?.trips) === N(janBefore?.trips), `${janBefore?.trips} -> ${jan?.trips}`);
+
+  const augNarrow = (await q(
+    `SELECT trips, drivers FROM rollup_month WHERE month='2026-08-01' AND platform='*' AND fleet_id='*'`))[0];
+  await refreshRollups({ db });   // full
+  const augFull = (await q(
+    `SELECT trips, drivers FROM rollup_month WHERE month='2026-08-01' AND platform='*' AND fleet_id='*'`))[0];
+  check('and a bucket inside the window gets the same answer either way',
+    N(augNarrow.trips) === N(augFull.trips) && N(augNarrow.drivers) === N(augFull.drivers),
+    `narrow trips=${augNarrow.trips}/drivers=${augNarrow.drivers} full trips=${augFull.trips}/drivers=${augFull.drivers}`);
+
+  /* The distinct count is the one that a narrow pass could get wrong in a way
+     a sum would not: it must be recomputed over the whole bucket, not over the
+     window's slice of it. */
+  /* The trap this nearly shipped with. The narrow pass filters on local_day,
+     but the MONTH grain groups by month — so a window starting mid-month
+     rebuilds the whole August bucket from the fortnight inside the window and
+     silently halves it. The window above happened to cover all of August,
+     which is exactly why it passed and proved nothing. */
+  await refreshRollups({ db, days: 5 });
+  const augPartial = (await q(
+    `SELECT trips FROM rollup_month WHERE month='2026-08-01' AND platform='*' AND fleet_id='*'`))[0];
+  check('a window starting mid-month still rebuilds the whole month, not its tail',
+    N(augPartial.trips) === N(augFull.trips),
+    `5-day window gave ${augPartial.trips}, whole month is ${augFull.trips}`);
+
+  /* And the person grain, which is month-keyed too: a person's August row
+     rebuilt from five days of August is a person who worked five days. */
+  const aliAug = (await q(
+    `SELECT bookings FROM rollup_person_month WHERE person_key='ali rahman' AND month='2026-08-01'`))[0];
+  await refreshRollups({ db });
+  const aliFull = (await q(
+    `SELECT bookings FROM rollup_person_month WHERE person_key='ali rahman' AND month='2026-08-01'`))[0];
+  check('a person-month row survives a narrow pass with its whole month intact',
+    N(aliAug?.bookings) === N(aliFull?.bookings),
+    `narrow=${aliAug?.bookings} full=${aliFull?.bookings}`);
+
+  const [liveAug] = await q(
+    `SELECT count(DISTINCT t.person_key)::int drivers
+     FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
+     WHERE n.is_booking AND date_trunc('month', n.local_day)::date = '2026-08-01'
+       AND t.person_key IS NOT NULL AND t.person_key <> ''`);
+  check('the folded driver count is over the whole bucket, not the window\'s slice of it',
+    N(augNarrow.drivers) === N(liveAug.drivers),
+    `narrow=${augNarrow.drivers} live=${liveAug.drivers}`);
+}
+
 console.log('\nrollup: it says how old it is');
 
 const state = await rollupState(db);

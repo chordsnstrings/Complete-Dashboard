@@ -104,7 +104,10 @@ async function runWindowInner(mode, from, to, onProgress) {
      Before insights, because insights reads aggregates too and there is no
      reason for it to recompute what was just materialised. */
   try {
-    await refreshRollups();
+    /* The run's own window, widened. A backfill rewrites a year and must roll
+       up a year; an incremental touches days and need only roll up days. */
+    const spanDays = Math.ceil((to - from) / 864e5) + 3;
+    await refreshRollups({ days: mode === 'backfill' ? null : spanDays });
   } catch (e) { log.error('run', 'rollup', { err: String(e) }); }
   // Turn the freshly-landed data into ranked, actionable findings.
   try {

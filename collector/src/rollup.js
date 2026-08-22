@@ -78,13 +78,13 @@ const FROM_TRIPS = `FROM trip_norm n JOIN trip t ON t.platform = n.platform AND 
    cannot tell those apart — it would file every unattributed trip under "all
    fleets" and double the totals — so the sets are labelled with GROUPING() and
    '*' is applied from the label, leaving the real NULLs as 'unknown'. */
-const grainSql = (bucketExpr, bucketName) => `
+const grainSql = (bucketExpr, bucketName, sinceParam = '') => `
   SELECT ${bucketExpr} AS ${bucketName},
          CASE WHEN GROUPING(n.platform) = 1 THEN '*' ELSE coalesce(n.platform, 'unknown') END AS platform,
          CASE WHEN GROUPING(n.fleet_id) = 1 THEN '*' ELSE coalesce(n.fleet_id, 'unknown') END AS fleet_id,
          ${MEASURES}
   ${FROM_TRIPS}
-  WHERE n.requested_at IS NOT NULL
+  WHERE n.requested_at IS NOT NULL ${sinceParam}
   GROUP BY GROUPING SETS (
     (${bucketExpr}, n.platform, n.fleet_id),
     (${bucketExpr}, n.platform),
@@ -107,21 +107,37 @@ const COLS = ['trips', 'bookings', 'telematics', 'drivers', 'vehicles', 'earning
   'attributed_trips', 'revenue', 'priced_trips', 'km', 'measured_trips',
   'completed', 'not_completed', 'outcome_n'];
 
-async function refreshGrain(db, { table, bucket, expr }) {
+/* A partial pass must never rebuild a bucket from part of it.
+   The narrow refresh filters on local_day, but the month grain GROUPS by
+   month — so a window starting mid-month rebuilt the whole August row from the
+   fortnight inside the window and halved it. Measured: a five-day window
+   reported August as 2 trips against 18. The chart would simply have been
+   wrong, with nothing failing and nothing to notice.
+
+   So the cutoff is snapped back to the start of the bucket that contains it.
+   The pass then reads a few more days than asked and every bucket it writes is
+   whole. */
+const snapToBucket = (since, bucket) =>
+  (bucket === 'month' ? `${since.slice(0, 7)}-01` : since);
+
+async function refreshGrain(db, { table, bucket, expr, since }) {
   const set = COLS.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
+  const from = since ? snapToBucket(since, bucket) : null;
+  const where = from ? 'AND n.local_day >= $1::date' : '';
   const { rowCount } = await db.query(
     `INSERT INTO ${table} (${bucket}, platform, fleet_id, ${COLS.join(', ')}, computed_at)
      SELECT ${bucket}, platform, fleet_id, ${COLS.join(', ')}, now()
-     FROM (${grainSql(expr, bucket)}) g
+     FROM (${grainSql(expr, bucket, where)}) g
      ON CONFLICT (${bucket}, platform, fleet_id) DO UPDATE
-       SET ${set}, computed_at = now()`);
+       SET ${set}, computed_at = now()`, from ? [from] : []);
   return rowCount || 0;
 }
 
 /* Month bounds and the platform list, which the month grain also carries. Kept
    out of MEASURES because array_agg of a column the set is grouping by is
    meaningless in the sets that do not group by it. */
-async function refreshMonthExtras(db) {
+async function refreshMonthExtras(db, since) {
+  const from = since ? snapToBucket(since, 'month') : null;
   await db.query(
     `UPDATE rollup_month m SET first_day = x.a, last_day = x.b,
             platforms = x.p, booking_platforms = x.bp
@@ -130,12 +146,15 @@ async function refreshMonthExtras(db) {
               min(n.local_day) a, max(n.local_day) b,
               array_agg(DISTINCT n.platform) p,
               array_agg(DISTINCT n.platform) FILTER (WHERE n.is_booking) bp
-       FROM trip_norm n GROUP BY 1
+       FROM trip_norm n ${from ? 'WHERE n.local_day >= $1::date' : ''} GROUP BY 1
      ) x
-     WHERE m.month = x.month AND m.platform = '*' AND m.fleet_id = '*'`);
+     WHERE m.month = x.month AND m.platform = '*' AND m.fleet_id = '*'`, from ? [from] : []);
 }
 
-async function refreshPersonMonth(db) {
+async function refreshPersonMonth(db, since) {
+  // Month-grained as well, so the same snap applies: a person's August row
+  // rebuilt from five days of August is a person who worked five days.
+  const from = since ? snapToBucket(since, 'month') : null;
   const { rowCount } = await db.query(
     `INSERT INTO rollup_person_month (person_key, month, name, driver_ext_id, bookings, revenue, km, platforms, computed_at)
      SELECT t.person_key,
@@ -149,11 +168,12 @@ async function refreshPersonMonth(db) {
             now()
      ${FROM_TRIPS}
      WHERE n.is_booking AND t.person_key IS NOT NULL AND t.person_key <> ''
+       ${from ? 'AND n.local_day >= $1::date' : ''}
      GROUP BY 1, 2
      ON CONFLICT (person_key, month) DO UPDATE
        SET name = EXCLUDED.name, driver_ext_id = EXCLUDED.driver_ext_id,
            bookings = EXCLUDED.bookings, revenue = EXCLUDED.revenue, km = EXCLUDED.km,
-           platforms = EXCLUDED.platforms, computed_at = now()`);
+           platforms = EXCLUDED.platforms, computed_at = now()`, from ? [from] : []);
   return rowCount || 0;
 }
 
@@ -185,20 +205,38 @@ async function runOne(db, name, fn) {
   }
 }
 
-export async function refreshRollups({ db = pool } = {}) {
+/* A full rebuild reads every trip ever collected, and on this fleet that is
+   about eighty seconds of database work across the three rollups. Running it
+   every fifteen minutes on the same managed Postgres the API reads from was
+   measurable at the other end: /api/playbook went from 9.3s to 11.1s and
+   /api/capacity from 2.4s to 5.9s while a refresh was in flight. Making the
+   pages faster by starving them is not making them faster.
+
+   So the frequent refresh only recomputes recent buckets. Yesterday's numbers
+   do not change when today's trips land; only a backfill rewrites history, and
+   the daily full rebuild is what catches that.
+
+   `days` is how far back to recompute. Deliberately wider than the collector's
+   incremental window: a late-arriving trip, a corrected fare, or a run that
+   fell behind all land days after the fact, and a rollup that only looked at
+   today would miss every one of them. */
+export async function refreshRollups({ db = pool, days = null } = {}) {
   const t0 = Date.now();
+  const since = days
+    ? new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
+    : null;
   const out = [];
   out.push(await runOne(db, 'rollup_day', () =>
-    refreshGrain(db, { table: 'rollup_day', bucket: 'day', expr: 'n.local_day' })));
+    refreshGrain(db, { table: 'rollup_day', bucket: 'day', expr: 'n.local_day', since })));
   out.push(await runOne(db, 'rollup_month', async () => {
     const n = await refreshGrain(db, {
-      table: 'rollup_month', bucket: 'month', expr: "date_trunc('month', n.local_day)::date" });
-    await refreshMonthExtras(db);
+      table: 'rollup_month', bucket: 'month', expr: "date_trunc('month', n.local_day)::date", since });
+    await refreshMonthExtras(db, since);
     return n;
   }));
-  out.push(await runOne(db, 'rollup_person_month', () => refreshPersonMonth(db)));
+  out.push(await runOne(db, 'rollup_person_month', () => refreshPersonMonth(db, since)));
   const failed = out.filter((o) => o.error);
-  log[failed.length ? 'warn' : 'info'](SRC, 'refreshed', {
+  log[failed.length ? 'warn' : 'info'](SRC, since ? `refreshed since ${since}` : 'refreshed in full', {
     ms: Date.now() - t0,
     rows: out.reduce((a, o) => a + (o.rows || 0), 0),
     failed: failed.length || undefined,

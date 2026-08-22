@@ -39,8 +39,15 @@ async function main() {
        a number that is wrong in a way nothing about it reveals. Fifteen minutes
        is well inside the thirty-minute collection cycle, so the pages are never
        more than one tick behind what has actually landed. */
-    cron.schedule('*/15 * * * *', () => refreshRollups()
+    cron.schedule('*/15 * * * *', () => refreshRollups({ days: 14 })
       .catch((e) => log.error('scheduler', 'rollup', { err: String(e) })));
+    /* And the whole history once a day. The quarter-hourly refresh only touches
+       the last fortnight, which is right for new trips and blind to a backfill
+       — a twelve-month re-collection rewrites months the incremental pass never
+       looks at. 02:40 Dubai (22:40 UTC), before the analyst reads the same
+       aggregates at 03:10. */
+    cron.schedule('40 22 * * *', () => refreshRollups()
+      .catch((e) => log.error('scheduler', 'rollup full', { err: String(e) })));
     /* And once at boot. A fresh database, or a deploy that lands before the
        first collection, would otherwise serve empty months on every page that
        reads a rollup until the quarter hour came round. */
