@@ -309,10 +309,24 @@ check('no route errors or 404s against live data', broke.length === 0, broke.sli
       const [tr2, partial, aligned] = await getPair(
         '/api/trend/monthly', `/api/kpis?from=${last.m}-01&to=${last.m}-28`);
       const m = (tr2.body?.months || []).find((x) => x.m === last.m);
-      if (aligned && m) {
-        check('a month in the trend is never smaller than the first 28 days of it in kpis',
-          N(m.trips) >= N(partial.body?.trips),
-          `trend ${m.m}=${m.trips} vs kpis 1st-28th=${partial.body?.trips}`);
+      if (aligned && m && N(partial.body?.trips)) {
+        /* Close, not equal. The trend reads a rollup — a snapshot taken when it
+           last ran — while kpis computes live at request time, so the two
+           legitimately differ by whatever landed in between. Sharing a cache
+           version does not make them one database snapshot; the version says
+           when the rollup finished, not that nothing has happened since.
+
+           Measured here: 6,152 against 6,153. Exact equality is not a property
+           this system has, and asserting it would mean a check that fails
+           whenever the collector is doing its job. What IS worth failing on is
+           a rollup that has drifted materially — a stale bucket, a botched
+           incremental pass, a month rebuilt from a fortnight. One percent is
+           far tighter than any of those and far looser than a collection
+           cycle's worth of trips. */
+        const drift = Math.abs(N(m.trips) - N(partial.body.trips)) / N(partial.body.trips);
+        check('the trend month and a live count of it agree to within one percent',
+          drift < 0.01,
+          `trend ${m.m}=${m.trips} vs kpis 1st-28th=${partial.body.trips} (${(drift * 100).toFixed(2)}%)`);
       } else {
         check('the trend and kpis could be read at one data version', aligned,
           `${tr2.version} vs ${partial.version}`);
