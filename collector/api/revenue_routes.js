@@ -35,6 +35,8 @@ export function revenueRoutes(app, { q, wrap, range }) {
   app.get('/api/revenue', wrap(async (req, res) => {
     const p = range(req);
     const [from, to] = p;
+    const windowDays = Math.max(1,
+      Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1);
 
     const [fares, payouts, components, tips] = await Promise.all([
       /* Per platform, over BOOKINGS only — a telematics journey is the same
@@ -56,16 +58,32 @@ export function revenueRoutes(app, { q, wrap, range }) {
       /* What each platform says it paid. Periods overlap between platforms and
          a driver can appear in several, so this is summed per platform and
          never across them without saying so. */
-      q(`SELECT platform,
-                round(sum(earnings)::numeric,2) payouts,
-                round(sum(cash_earnings)::numeric,2) cash,
+      q(`WITH pay AS (
+           SELECT * FROM driver_performance
+            WHERE period_start >= $1::date AND period_end <= $2::date
+              AND ($3::text IS NULL OR platform=$3)
+         ),
+         /* Which DAYS of the window the payout periods actually cover.
+            Without this, three days of payout on a thirty-day window made a
+            channel read as fully accounted for — the payout was real, the
+            coverage was 10%, and the difference is a month of missing money
+            presented as a month of measured money. */
+         covered AS (
+           SELECT p2.platform, count(DISTINCT d)::int days
+             FROM pay p2
+             CROSS JOIN LATERAL generate_series(
+               greatest(p2.period_start, $1::date), least(p2.period_end, $2::date), interval '1 day') d
+            GROUP BY 1
+         )
+         SELECT pay.platform,
+                round(sum(pay.earnings)::numeric,2) payouts,
+                round(sum(pay.cash_earnings)::numeric,2) cash,
                 count(*)::int periods,
-                count(DISTINCT driver_ext_id)::int drivers,
-                min(period_start) first_period, max(period_end) last_period
-         FROM driver_performance
-         WHERE period_start >= $1::date AND period_end <= $2::date
-           AND ($3::text IS NULL OR platform=$3)
-         GROUP BY 1`, [from, to, p[2]]),
+                count(DISTINCT pay.driver_ext_id)::int drivers,
+                min(pay.period_start) first_period, max(pay.period_end) last_period,
+                max(covered.days) AS payout_days
+           FROM pay LEFT JOIN covered ON covered.platform = pay.platform
+          GROUP BY 1`, [from, to, p[2]]),
 
       /* The payout tree. `parent IS NULL` are the top-level categories; summing
          every row would count a category and its children twice. */
@@ -101,6 +119,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
     for (const y of payouts) Object.assign(row(y.platform), {
       payouts: num(y.payouts), cash: num(y.cash), payout_periods: y.periods,
       payout_drivers: y.drivers, first_period: y.first_period, last_period: y.last_period,
+      payout_days: y.payout_days ?? 0,
     });
     for (const c of components) {
       const r = row(c.platform);
@@ -117,16 +136,29 @@ export function revenueRoutes(app, { q, wrap, range }) {
         ? Math.round((r.priced_bookings / r.bookings) * 1000) / 10 : null;
       r.revenue_per_km = r.fares != null && r.priced_km
         ? Math.round((r.fares / r.priced_km) * 100) / 100 : null;
+      /* A payout covers DAYS, and a fare covers BOOKINGS. Both have to be
+         measured against the window or a figure drawn from three of its thirty
+         days reads as the whole month. */
+      r.payout_coverage_pct = r.payout_days
+        ? Math.round((Math.min(r.payout_days, windowDays) / windowDays) * 1000) / 10 : null;
       if (r.priced_bookings && r.fare_coverage_pct >= 80) {
         r.basis = 'fares';
         r.best = r.fares;
         r.basis_note = `fares reported on ${r.priced_bookings} of ${r.bookings} bookings`;
-      } else if (r.payouts != null) {
+      } else if (r.payouts != null && r.payout_coverage_pct >= 80) {
         r.basis = 'payout';
         r.best = r.payouts;
         r.basis_note = r.priced_bookings
           ? `net payout — only ${r.fare_coverage_pct}% of bookings report a fare`
           : 'net payout, after the platform’s commission — this channel reports no fare at all';
+      } else if (r.payouts != null) {
+        /* The payout is real and covers a fraction of the window. Reporting it
+           as the channel's revenue would understate the month by however much
+           of it was never collected — which is the whole gap, not a rounding. */
+        r.basis = 'partial_payout';
+        r.best = r.payouts;
+        r.basis_note = `net payout covering only ${r.payout_days} of the window’s ${windowDays} days `
+          + `(${r.payout_coverage_pct}%) — the rest of this channel’s money has not been collected yet`;
       } else if (r.priced_bookings) {
         r.basis = 'partial_fares';
         r.best = r.fares;
@@ -140,14 +172,16 @@ export function revenueRoutes(app, { q, wrap, range }) {
     }
 
     const rows = [...byPlatform.values()].sort((a, b) => (b.bookings || 0) - (a.bookings || 0));
-    const measured = rows.filter((r) => r.basis === 'fares');
-    const dark = rows.filter((r) => r.basis === 'none' || r.basis === 'partial_fares');
+    const measured = rows.filter((r) => r.basis === 'fares' || r.basis === 'payout');
+    const dark = rows.filter((r) => r.basis === 'none' || r.basis === 'partial_fares'
+      || r.basis === 'partial_payout');
     const totalBookings = rows.reduce((a, r) => a + (r.bookings || 0), 0);
     const darkBookings = dark.reduce((a, r) => a + (r.bookings || 0), 0);
 
     res.json({
       window: [from, to],
       platforms: rows,
+      window_days: windowDays,
       totals: {
         bookings: totalBookings,
         priced_bookings: rows.reduce((a, r) => a + (r.priced_bookings || 0), 0),
@@ -171,7 +205,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
       /* The sentence a reader needs before believing any figure above it. */
       caveat: darkBookings
         ? `${dark.map((r) => r.platform).join(', ')} account for ${darkBookings} of `
-          + `${totalBookings} bookings in this window and report little or no money. `
+          + `${totalBookings} bookings in this window and report little or no money over it. `
           + 'Every fleet-wide revenue figure in this product is over what did land, so all of '
           + 'them understate what the fleet took.'
         : null,

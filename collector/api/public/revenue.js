@@ -26,6 +26,9 @@ const BASIS = {
       + 'after its commission, and therefore smaller than what riders paid' },
   partial_fares: { label: 'partial', tone: 'warn',
     means: 'a fare on some bookings and nothing on the rest — this figure covers only the priced ones' },
+  partial_payout: { label: 'part-window', tone: 'warn',
+    means: 'a real payout covering only part of the window — the rest of this channel’s money has not '
+      + 'been collected yet, so the figure is right about the days it covers and silent about the others' },
   none: { label: 'dark', tone: 'critical',
     means: 'no fare on any booking and no payout reported: this channel’s money is not collected at all' },
 };
@@ -72,7 +75,10 @@ export async function renderRevenue(root) {
     { label: 'Fares (gross)', key: 'fares', num: true,
       render: (r) => (r.fares != null ? money(r.fares) : '<span class="dim">none reported</span>') },
     { label: 'Payout (net)', key: 'payouts', num: true,
-      render: (r) => (r.payouts != null ? money(r.payouts) : '<span class="dim">not reported</span>') },
+      // With the share of the WINDOW it covers. A payout is over days, not over
+      // bookings, and three days of it on a thirty-day window is not the month.
+      render: (r) => (r.payouts == null ? '<span class="dim">not reported</span>'
+        : `${money(r.payouts)}<span class="dim"> · ${r.payout_days || 0} of ${d.window_days} days</span>`) },
     { label: 'Per km', key: 'revenue_per_km', num: true,
       render: (r) => (r.revenue_per_km != null
         ? `${money(r.revenue_per_km, 'AED', 2)}<span class="dim"> over ${fmt(r.priced_km)} km</span>`
