@@ -33,12 +33,28 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
     const [
       [fleet], idle, blocked, thinSlots, [recv], [cash], expiring, [cancel], strand, [licence],
     ] = await Promise.all([
-      /* The reference numbers every size below is expressed against. */
-      q(`WITH v AS (
-           SELECT plate,
-                  count(*) FILTER (WHERE is_booking)::int bookings,
-                  count(*) FILTER (WHERE NOT is_booking)::int journeys
-           FROM trip_norm WHERE ${DAYWIN('requested_at')} AND plate IS NOT NULL
+      /* The reference numbers every size below is expressed against.
+
+         The vehicle universe is the same union the vehicles directory uses —
+         every plate that has ever appeared in a trip, a telemetry fix or a
+         document. Counting only plates seen in THIS window reported 93
+         vehicles where the directory reported 131, which understates idle
+         capacity by exactly the vehicles that are most idle: a car that
+         produced nothing and did not even move is invisible to a query
+         scoped to the window's own rows. */
+      q(`WITH plates AS (
+           SELECT DISTINCT plate FROM (
+             SELECT plate FROM trip WHERE plate IS NOT NULL AND plate <> ''
+             UNION SELECT plate FROM telemetry_snapshot
+             UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL
+           ) s
+         ),
+         v AS (
+           SELECT p.plate,
+                  count(t.*) FILTER (WHERE t.is_booking)::int bookings,
+                  count(t.*) FILTER (WHERE NOT t.is_booking)::int journeys
+           FROM plates p
+           LEFT JOIN trip_norm t ON t.plate = p.plate AND ${DAYWIN('t.requested_at')}
            GROUP BY 1)
          SELECT count(*)::int vehicles_seen,
                 count(*) FILTER (WHERE bookings > 0)::int earning,
@@ -49,12 +65,19 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
           FROM v`, [from, to]),
 
       // Vehicles on the books that took no booking in the window.
-      q(`WITH v AS (
+      q(`WITH plates AS (
+           SELECT DISTINCT plate FROM (
+             SELECT plate FROM trip WHERE plate IS NOT NULL AND plate <> ''
+             UNION SELECT plate FROM telemetry_snapshot
+             UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL
+           ) s
+         ),
+         v AS (
            SELECT p.plate,
                   count(t.*) FILTER (WHERE t.is_booking)::int bookings,
                   count(t.*) FILTER (WHERE NOT t.is_booking)::int journeys,
                   max(t.local_day) FILTER (WHERE t.is_booking) AS last_booking
-           FROM (SELECT DISTINCT plate FROM vehicle_profile WHERE plate IS NOT NULL) p
+           FROM plates p
            LEFT JOIN trip_norm t ON t.plate = p.plate AND ${DAYWIN('t.requested_at')}
            GROUP BY 1)
          SELECT plate, bookings, journeys, to_char(last_booking,'YYYY-MM-DD') AS last_booking
@@ -134,15 +157,30 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
     ]);
 
     const median = Number(fleet?.median_bookings) || 0;
-    const acts = [];
-    const money = (measured, ceilingTrips) => ({
-      aed_measured: measured ?? null,
-      aed_modelled: rate && ceilingTrips ? Math.round(ceilingTrips * rate) : null,
-    });
+    const raw = [];
+
+    /* One place that decides an action's numbers, so no action can quietly
+       omit a field or model from a different figure than it displays.
+
+       Both were real: some actions carried no aed_* keys at all, so "nothing is
+       modelled unless a rate is supplied" was true of the value and false of
+       the shape; and one modelled from an unrounded ceiling while displaying a
+       rounded one, printing AED 13 of upside against a ceiling of 0. A modelled
+       figure has to be the rate times THE NUMBER ON SCREEN. */
+    const act = (a) => {
+      const ceiling = a.ceiling == null ? null : Math.round(a.ceiling);
+      const modelable = ceiling != null && /bookings/.test(a.ceiling_unit || '');
+      raw.push({
+        ...a,
+        ceiling,
+        aed_measured: a.aed_measured == null ? null : Math.round(a.aed_measured),
+        aed_modelled: rate && modelable && ceiling > 0 ? Math.round(ceiling * rate) : null,
+      });
+    };
 
     /* ── COLLECT: money already earned ─────────────────────────────────── */
     if (Number(recv?.amount) > 0) {
-      acts.push({
+      act({
         id: 'collect_receivables', group: 'Collect', horizon: 'this week',
         title: `Chase AED ${Math.round(recv.amount).toLocaleString()} owed across ${recv.counterparties} counterparties`,
         why: `${recv.trips} bookings in this window settle on account or against salary rather than at the kerb. `
@@ -150,13 +188,13 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         basis: 'Sum of price over trip_ext rows flagged is_receivable — room charges, company accounts and '
           + 'salary postings. Measured, because these are the channels that report a fare.',
         size: recv.counterparties, size_unit: 'counterparties',
-        ...money(Math.round(recv.amount), null),
+        aed_measured: Number(recv.amount),
         certainty: 'measured', effort: 'low',
         link: '#settlement/receivables',
       });
     }
     if (Number(cash?.trips) > 0) {
-      acts.push({
+      act({
         id: 'reconcile_cash', group: 'Collect', horizon: 'this week',
         title: `Reconcile cash held by ${cash.drivers} drivers across ${cash.trips} bookings`,
         why: cash.priced < cash.trips
@@ -166,7 +204,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         basis: 'trip_ext rows where the driver personally holds the money — a supervisor-collected fare is '
           + 'deliberately excluded, because it is not what a cash-handling control is sized on.',
         size: cash.drivers, size_unit: 'drivers holding cash',
-        ...money(Number(cash.amount) || null, null),
+        aed_measured: Number(cash.amount) || null,
         certainty: cash.priced < cash.trips ? 'partly measured' : 'measured', effort: 'low',
         link: '#settlement/cash',
       });
@@ -175,7 +213,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
     /* ── DEPLOY: capacity the fleet already owns ───────────────────────── */
     if (idle.length && median > 0) {
       const neverMoved = idle.filter((v) => !v.journeys).length;
-      acts.push({
+      act({
         id: 'redeploy_idle_vehicles', group: 'Deploy', horizon: 'this month',
         title: `Put ${idle.length} vehicles back to work — they took no booking at all this window`,
         why: `${fleet.earning} of ${fleet.vehicles_seen} vehicles earned. ${neverMoved} of the idle ones did not `
@@ -186,14 +224,14 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
           + 'very busy cars would otherwise set the target for every idle one.',
         size: idle.length, size_unit: 'vehicles',
         ceiling: Math.round(idle.length * median), ceiling_unit: 'bookings/month',
-        ...money(null, idle.length * median),
+        aed_measured: null,
         certainty: 'ceiling', effort: 'high',
         link: '#vehicles',
         detail: idle.slice(0, 12).map((v) => ({ plate: v.plate, journeys: v.journeys, last_booking: v.last_booking })),
       });
     }
     if (blocked.length) {
-      acts.push({
+      act({
         id: 'recover_blocked_vehicles', group: 'Deploy', horizon: 'this week',
         title: `Reassign ${blocked.length} vehicles held by drivers who cannot earn on them`,
         why: 'Each of these people is suspended or deactivated on the platform whose vehicle they are holding. '
@@ -202,7 +240,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
           + 'attached. This is the provider’s assertion, not an inference from quiet weeks.',
         size: blocked.length, size_unit: 'vehicles',
         ceiling: Math.round(blocked.length * median), ceiling_unit: 'bookings/month',
-        ...money(null, blocked.length * median),
+        aed_measured: null,
         certainty: 'ceiling', effort: 'low',
         link: '#roster/blocked',
         detail: blocked.slice(0, 12).map((b) => ({ plate: b.plate, driver: b.full_name, state: b.state })),
@@ -213,7 +251,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
     if (thinSlots.length) {
       const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
       const top = thinSlots[0];
-      acts.push({
+      act({
         id: 'staff_thin_slots', group: 'Cover', horizon: 'next rota',
         title: `Roster ${thinSlots.length} hours that reliably carry work and have three drivers or fewer`,
         why: `The worst is ${DOW[top.dow]} at ${String(top.hour).padStart(2, '0')}:00 — ${top.trips} bookings `
@@ -233,7 +271,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
 
     /* ── IMPROVE: more out of what is already running ──────────────────── */
     if (Number(cancel?.lost) > 0) {
-      acts.push({
+      act({
         id: 'reduce_cancellations', group: 'Improve', horizon: 'this month',
         title: `Recover some of ${cancel.lost} bookings lost at the door (${cancel.pct}%)`,
         why: 'These were offered and did not complete — a rider no-show, a driver rejection, or a cancellation. '
@@ -243,14 +281,14 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
           + `${cancel.judged} bookings whose platform reports an outcome at all.`,
         size: cancel.lost, size_unit: 'lost bookings',
         ceiling: Math.round(cancel.lost * 0.25), ceiling_unit: 'bookings/month if a quarter are recoverable',
-        ...money(null, cancel.lost * 0.25),
+        aed_measured: null,
         certainty: 'ceiling', effort: 'medium',
         link: '#platforms/funnel',
       });
     }
     if (strand.length) {
       const totalKm = strand.reduce((a, s) => a + Number(s.return_km || 0), 0);
-      acts.push({
+      act({
         id: 'cut_return_deadhead', group: 'Improve', horizon: 'this month',
         title: `Cut ${Math.round(totalKm).toLocaleString()} km of unpaid return running from ${strand.length} drop-off areas`,
         why: `The worst is ${strand[0].place}: ${strand[0].drops} drops averaging ${strand[0].avg_return_km} km `
@@ -269,7 +307,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
     /* ── PROTECT: capacity about to stop being legal ───────────────────── */
     const soon = expiring.filter((d) => d.days_left <= 7);
     if (expiring.length) {
-      acts.push({
+      act({
         id: 'renew_documents', group: 'Protect', horizon: soon.length ? 'today' : 'this month',
         title: soon.length
           ? `Renew ${soon.length} vehicle documents expiring within 7 days`
@@ -282,14 +320,14 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
           + 'from a capped list, because this tile makes a claim about whether a car may legally drive.',
         size: soon.length || expiring.length, size_unit: 'vehicles',
         ceiling: Math.round((soon.length || 0) * median), ceiling_unit: 'bookings/month protected',
-        ...money(null, (soon.length || 0) * median),
+        aed_measured: null,
         certainty: 'measured', effort: 'low',
         link: '#compliance',
         detail: expiring.slice(0, 12).map((d) => ({ plate: d.plate, expires_at: d.expires_at, days_left: d.days_left })),
       });
     }
     if (Number(licence?.expiring) > 0) {
-      acts.push({
+      act({
         id: 'renew_licences', group: 'Protect', horizon: 'this month',
         title: `${licence.expiring} driver licences expire within 45 days`,
         why: 'A driver whose licence lapses stops working on the day it does, whatever the rota says.',
@@ -306,6 +344,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
        amount is not thereby more valuable — it is less certain. */
     const CERT = { measured: 0, 'partly measured': 1, observed: 2, ceiling: 3 };
     const HORIZON = { today: 0, 'this week': 1, 'next rota': 2, 'this month': 3 };
+    const acts = raw;
     acts.sort((a, b) => (HORIZON[a.horizon] ?? 9) - (HORIZON[b.horizon] ?? 9)
       || (CERT[a.certainty] ?? 9) - (CERT[b.certainty] ?? 9)
       || (b.aed_measured ?? 0) - (a.aed_measured ?? 0)

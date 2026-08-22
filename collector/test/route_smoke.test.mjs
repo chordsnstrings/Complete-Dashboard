@@ -335,6 +335,64 @@ check(`all ${resolved.length} GET routes execute without a server error`, bad ==
     stragglers.length === 0, stragglers.join(', '));
 }
 
+/* ── two pages must not disagree about how big the fleet is ───────────────
+   The playbook sized "put idle vehicles back to work" from plates seen in the
+   window's own rows, and reported 93 vehicles where the directory reported
+   131. That understates idle capacity by exactly the vehicles that are most
+   idle: a car that produced nothing and did not even move has no rows in the
+   window, so a query scoped to those rows cannot see it — and it is precisely
+   the car the action exists to find.
+
+   Both now build from the same union: every plate that ever appeared in a
+   trip, a telemetry fix, or a document. */
+{
+  const dir = await (await fetch(`http://127.0.0.1:${port}/api/vehicles/directory?${WINDOW}`)).json();
+  const pb = await (await fetch(`http://127.0.0.1:${port}/api/playbook?${WINDOW}`)).json();
+  check('the playbook and the vehicle directory count the same fleet',
+    pb.fleet.vehicles_seen === dir.length, `playbook ${pb.fleet.vehicles_seen} vs directory ${dir.length}`);
+  check('and agree on how many of them earned',
+    pb.fleet.earning === dir.filter((v) => (v.trips || 0) > 0).length,
+    `${pb.fleet.earning} vs ${dir.filter((v) => (v.trips || 0) > 0).length}`);
+  check('the three vehicle states account for every vehicle, with none double-counted',
+    pb.fleet.earning + pb.fleet.moved_only + pb.fleet.still === pb.fleet.vehicles_seen,
+    `${pb.fleet.earning}+${pb.fleet.moved_only}+${pb.fleet.still} vs ${pb.fleet.vehicles_seen}`);
+
+  /* Money and ceilings must never be added. A ceiling is what would happen if
+     everything went right; a measured amount already happened. */
+  check('measured money and modelled ceilings are reported apart',
+    'aed_measured' in pb.totals && 'bookings_ceiling' in pb.totals
+    && pb.totals.aed_modelled === null,
+    JSON.stringify(pb.totals));
+  check('nothing is converted to money until a rate is supplied',
+    pb.actions.every((a) => a.aed_modelled === null), 
+    JSON.stringify(pb.actions.filter((a) => a.aed_modelled !== null).map((a) => a.id)));
+  const withRate = await (await fetch(
+    `http://127.0.0.1:${port}/api/playbook?${WINDOW}&aed_per_trip=50`)).json();
+  check('supplying a rate is echoed back with the figures it produced',
+    withRate.assumption.aed_per_trip === 50, JSON.stringify(withRate.assumption));
+  /* The rule, stated as an implication so it holds whether or not this
+     fixture happens to contain a modelable action: an action with a bookings
+     ceiling above zero gets a modelled figure, and one without gets none. A
+     bare "something is modelled" would pass or fail on the fixture's shape
+     rather than on the behaviour. */
+  const modelable = withRate.actions.filter((a) => /bookings/.test(a.ceiling_unit || '') && a.ceiling > 0);
+  check('every action with a bookings ceiling is modelled, and only those are',
+    modelable.every((a) => a.aed_modelled > 0)
+    && withRate.actions.filter((a) => !modelable.includes(a)).every((a) => a.aed_modelled === null),
+    JSON.stringify(withRate.actions.map((a) => [a.id, a.ceiling, a.ceiling_unit, a.aed_modelled])));
+  check('a modelled figure is exactly the rate times the ceiling, not a blend',
+    withRate.actions.filter((a) => a.aed_modelled).every((a) => a.aed_modelled === Math.round(a.ceiling * 50)),
+    JSON.stringify(withRate.actions.filter((a) => a.aed_modelled).map((a) => [a.id, a.ceiling, a.aed_modelled])));
+  check('a measured amount is never turned into a modelled one',
+    withRate.actions.filter((a) => a.aed_measured).every((a) => a.aed_measured === pb.actions.find((x) => x.id === a.id).aed_measured));
+  check('every action carries the arithmetic that sized it',
+    pb.actions.every((a) => a.basis && a.basis.length > 40),
+    JSON.stringify(pb.actions.filter((a) => !a.basis || a.basis.length <= 40).map((a) => a.id)));
+  check('and a link to the evidence behind it',
+    pb.actions.every((a) => /^#/.test(a.link || '')),
+    JSON.stringify(pb.actions.map((a) => a.link)));
+}
+
 /* ── the raw explorer must be able to open every table it offers ──────────
    Both raw-field endpoints filtered on `platform`. telemetry_snapshot calls
    that column `source`, so the tool whose entire purpose is answering "what
