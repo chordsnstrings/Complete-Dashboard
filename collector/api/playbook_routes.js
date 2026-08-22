@@ -176,25 +176,30 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
        figure beside it, and the action says which applies. Sizing a
        redeployment plan on the median when new capacity delivers a third of it
        is how a plan misses by 3x while looking arithmetically sound. */
+    /* From rollup_person_month, which is exactly this shape already: one row
+       per person per month, with their bookings.
+
+       What was here self-joined trip_norm to itself over the WHOLE history, on
+       a regex-folded name, twice — 175,000 rows folded on each side and joined
+       on the computed key. It was most of this endpoint's eleven seconds.
+
+       It also folded names its own way — lowercase and whitespace, but NOT a
+       repeated word — which made it the fifth definition of "the same person"
+       in this codebase and the second that disagreed with the others. So
+       "Najeeb Ullah Khan Khan" was a separate hire here, with his own ramp.
+       The rollup is keyed on person_key, the one stored fold. */
     const [ramp] = await q(
       `WITH first_month AS (
-         SELECT lower(regexp_replace(btrim(driver_name), '\s+', ' ', 'g')) AS person,
-                min(local_month) AS joined
-         FROM trip_norm WHERE is_booking AND coalesce(btrim(driver_name), '') <> ''
-         GROUP BY 1),
+         SELECT person_key, min(month) AS joined FROM rollup_person_month GROUP BY 1),
+       last_day AS (SELECT max(covers_to) AS d FROM rollup_state),
        output AS (
-         SELECT f.person, count(*)::int bookings
-         FROM trip_norm t
-         JOIN first_month f
-           ON f.person = lower(regexp_replace(btrim(t.driver_name), '\s+', ' ', 'g'))
-          AND t.local_month = f.joined
-         WHERE t.is_booking
-           -- Their first month must be a WHOLE month, or a driver who started
-           -- on the 28th looks like a bad hire.
-           AND f.joined < date_trunc('month', (SELECT max(local_day) FROM trip_norm WHERE is_booking))
-           AND f.joined >= date_trunc('month',
-                 (SELECT max(local_day) FROM trip_norm WHERE is_booking)) - interval '6 months'
-         GROUP BY 1)
+         SELECT r.person_key, r.bookings
+         FROM rollup_person_month r
+         JOIN first_month f ON f.person_key = r.person_key AND r.month = f.joined
+         -- Their first month must be a WHOLE month, or a driver who started on
+         -- the 28th looks like a bad hire.
+         WHERE f.joined < date_trunc('month', (SELECT d FROM last_day))
+           AND f.joined >= date_trunc('month', (SELECT d FROM last_day)) - interval '6 months')
        SELECT count(*)::int n,
               percentile_cont(0.5) WITHIN GROUP (ORDER BY bookings) AS median_first_month
         FROM output`);
