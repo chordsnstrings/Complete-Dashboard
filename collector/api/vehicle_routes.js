@@ -184,6 +184,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
                  normally — a number that is not wrong about anything, because
                  its two halves describe different populations. */
               round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
+              -- The matching numerator: revenue over the trips that report BOTH
+              -- a fare and a distance, so the per-km figure is checkable.
+              round(sum(price) FILTER (WHERE has_fare AND has_distance)::numeric,2) priced_measured_revenue,
+              count(*) FILTER (WHERE has_fare AND has_distance)::int priced_measured_trips,
               -- outcome, not status: Bolt reports a completed trip as
               -- 'finished', and FMS telematics rows hardcode 'completed' on
               -- journeys that cannot be cancelled, so a bare status test both
@@ -226,9 +230,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        SELECT count(*)::int idle_days FROM seen WHERE day NOT IN (SELECT day FROM earned)`, p);
     res.json({ ...t, ...u, ...a, ...gap, ...idle,
       alerts_per_100km: t.km > 0 ? +((a.alerts / t.km) * 100).toFixed(1) : null,
-      // Over the priced distance, not the whole of it — see priced_km above.
-      revenue_per_km: t.priced_km > 0 && t.revenue
-        ? +(t.revenue / t.priced_km).toFixed(2) : null });
+      // Over the priced distance, and from the revenue of the same trips —
+      // see priced_measured_revenue above.
+      revenue_per_km: t.priced_km > 0 && t.priced_measured_revenue
+        ? +(t.priced_measured_revenue / t.priced_km).toFixed(2) : null });
   }));
 
   /* ── the daily spine ──────────────────────────────────────────────────── */

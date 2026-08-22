@@ -189,6 +189,14 @@ app.get('/api/kpis', wrap(async (req, res) => {
        count(*) FILTER (WHERE has_fare)::int priced_trips,
        round(avg(price) FILTER (WHERE has_fare)::numeric,2) avg_fare,
        round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
+       /* The numerator of revenue_per_km, reported so the ratio can be checked.
+          The revenue column covers every trip with a FARE; priced_km covers
+          those that also report a DISTANCE. Dividing the first by the second is
+          a ratio between two populations: live it came out 3.93 where
+          revenue/priced_km is 5.28, and neither figure was derivable from the
+          two printed beside it. */
+       round(sum(price) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_measured_revenue,
+       count(*) FILTER (WHERE has_fare AND has_distance)::int priced_measured_trips,
        round((sum(price) FILTER (WHERE has_fare AND has_distance)
               / nullif(sum(distance_km) FILTER (WHERE has_fare AND has_distance),0))::numeric,2) revenue_per_km,
 
@@ -196,6 +204,12 @@ app.get('/api/kpis', wrap(async (req, res) => {
        ${peopleCount()}::int drivers,
        count(*) FILTER (WHERE driver_ext_id IS NOT NULL)::int attributed_trips,
        count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL AND plate <> '')::int vehicles,
+       /* Bookings with no vehicle recorded against them. They appear on no
+          vehicle page and in no per-vehicle total, so the vehicle directory
+          sums to fifteen fewer trips than the fleet does — a difference that
+          previously had no home and read as one of the two numbers being
+          wrong. Reported, so the two reconcile. */
+       count(*) FILTER (WHERE is_booking AND coalesce(btrim(plate), '') = '')::int trips_without_vehicle,
        count(DISTINCT platform) FILTER (WHERE is_booking)::int platforms
      FROM trip_norm WHERE ${F}`, p);
 

@@ -61,9 +61,19 @@ check('average distance is over the trips that reported one, not over all of the
 check('average fare is over the trips that carry a fare',
   near(N(k.avg_fare), N(k.revenue) / k.priced_trips, 0.05),
   `${k.avg_fare} vs ${N(k.revenue)}/${k.priced_trips}`);
-check('revenue per km uses the distance of the priced trips only',
-  near(N(k.revenue_per_km), N(k.revenue) / N(k.priced_km), 0.02),
-  `${k.revenue_per_km} vs ${N(k.revenue)}/${N(k.priced_km)}`);
+/* Both halves over the SAME trips. `revenue` covers every trip with a fare;
+   `priced_km` covers those that also report a distance. Dividing the first by
+   the second is a ratio between two populations, and live it gave 3.93 where
+   revenue/priced_km is 5.28 — neither figure derivable from the two printed
+   beside it. priced_measured_revenue is the matching numerator. */
+check('revenue per km is the revenue of the priced trips over the distance of those same trips',
+  near(N(k.revenue_per_km), N(k.priced_measured_revenue) / N(k.priced_km), 0.02),
+  `${k.revenue_per_km} vs ${N(k.priced_measured_revenue)}/${N(k.priced_km)}`);
+check('and that numerator is no larger than the revenue it is drawn from',
+  N(k.priced_measured_revenue) <= N(k.revenue) + 1,
+  `${k.priced_measured_revenue} vs ${k.revenue}`);
+check('the fleet accounts for the bookings that belong to no vehicle',
+  typeof k.trips_without_vehicle === 'number', String(k.trips_without_vehicle));
 check('the coverage percentages are what they claim to be',
   near(N(k.priced_pct), 100 * k.priced_trips / k.trips)
   && near(N(k.attributed_pct), 100 * k.attributed_trips / k.trips),
@@ -133,9 +143,9 @@ check('the weekday-hour heatmap sums to the trip count',
   const rows = Array.isArray(daily) ? daily : daily.rows || [];
   check('its daily rows sum to its headline', sum(rows, 'trips') === kpi.trips,
     `${sum(rows, 'trips')} vs ${kpi.trips}`);
-  check('a vehicle’s revenue per km is fares over the distance of the priced trips',
-    near(N(kpi.revenue_per_km), N(kpi.revenue) / N(kpi.priced_km), 0.02),
-    `${kpi.revenue_per_km} vs ${N(kpi.revenue)}/${N(kpi.priced_km)}`);
+  check('a vehicle’s revenue per km is fares over the distance of those same trips',
+    near(N(kpi.revenue_per_km), N(kpi.priced_measured_revenue) / N(kpi.priced_km), 0.02),
+    `${kpi.revenue_per_km} vs ${N(kpi.priced_measured_revenue)}/${N(kpi.priced_km)}`);
   /* Coerced, and deliberately so: `kpi.priced_km <= kpi.km + 1` on the raw
      values is "829" <= "11641", a lexical comparison that is false. Postgres
      numeric arrives as a JS string and the first version of this very check
@@ -186,8 +196,13 @@ check('the weekday-hour heatmap sums to the trip count',
   check('the vehicle directory and the vehicle list agree about the work',
     sum(vdir, 'trips') === sum(veh.rows, 'trips'),
     `${sum(vdir, 'trips')} vs ${sum(veh.rows, 'trips')}`);
-  check('and the fleet headline agrees with both',
-    sum(vdir, 'trips') === k.trips, `${sum(vdir, 'trips')} vs ${k.trips}`);
+  /* The vehicle table cannot hold a booking with no vehicle on it, so it sums
+     to fewer trips than the fleet — by exactly the number the fleet reports as
+     unassigned. Live that difference was 15 and had no home, which reads as one
+     of the two figures being wrong. */
+  check('and the fleet headline agrees once the bookings with no vehicle are added back',
+    sum(vdir, 'trips') + (k.trips_without_vehicle || 0) === k.trips,
+    `${sum(vdir, 'trips')} + ${k.trips_without_vehicle} vs ${k.trips}`);
 }
 
 /* ── 7. and all of it again at a scale where every list is truncated ────── */

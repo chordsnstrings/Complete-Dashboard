@@ -488,7 +488,9 @@ export async function renderVehicleDirectory(root) {
   const tblP = panel('Every vehicle', 'Including assets with no trips in this window — those are the ones worth finding'); root.append(tblP.panel);
   loading(tblP.body);
 
-  const rows = await qAll('/api/vehicles/directory');
+  const [rows, fleet] = await Promise.all([
+    qAll('/api/vehicles/directory'), qAll('/api/kpis').catch(() => ({})),
+  ]);
   bar.querySelector('#vdn').textContent = `${rows.length} vehicles`;
 
   /* `trips` used to include telematics journeys, so a car that drove all month
@@ -515,6 +517,15 @@ export async function renderVehicleDirectory(root) {
     { label: 'Documents due', value: fmt(expiring), sub: 'expiring within 30 days',
       tone: expiring === 0 ? 'good' : 'critical' },
   ]));
+  /* Bookings with no vehicle recorded appear on no vehicle page, so this table
+     sums to fewer trips than the fleet does. Said plainly, because a reader who
+     adds the column up and gets a different number to the overview has no way
+     to tell which of the two is wrong. */
+  if (fleet.trips_without_vehicle) {
+    tblP.body.append(note(`${fmt(fleet.trips_without_vehicle)} booking(s) in this window carry no `
+      + 'vehicle at all, so they appear on no row here — this table sums to that many fewer trips '
+      + 'than the fleet total on the overview.'));
+  }
 
   const cols = [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },

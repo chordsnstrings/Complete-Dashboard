@@ -111,7 +111,32 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
     try { execFileSync(process.execPath, ['--check', f], { stdio: 'pipe' }); return false; }
     catch { return true; }
   });
-  check(`all ${files.length} shipped source files parse`, broken.length === 0, broken.join(', '));
+  /* When one does not, say WHERE the backtick is.
+     node --check reports "missing ) after argument list" pointing at the top of
+     the statement, which on a 40-line SQL template is tens of lines from the
+     cause — and working back from it has cost an hour more than once across the
+     seven times this has happened. A comment line inside a template that quotes
+     an identifier in backticks is the cause every time, so when a file fails to
+     parse, the likely lines are named. */
+  const hint = broken.flatMap((f) => {
+    const text = readFileSync(f, 'utf8');
+    const at = [];
+    // Every comment in the file, block or line, and every backtick inside one.
+    const lines = text.split('\n');
+    for (const c of text.matchAll(/\/\*[\s\S]*?\*\/|--[^\n]*/g)) {
+      if (!/`/.test(c[0])) continue;
+      const line = text.slice(0, c.index).split('\n').length;
+      /* Only comments sitting inside SQL. A backtick in this file's own header
+         prose is not the bug; one in a comment surrounded by a SELECT is. The
+         window is generous because these templates are long. */
+      const near = lines.slice(Math.max(0, line - 25), line + 25).join('\n');
+      if (!/\b(SELECT|INSERT INTO|UPDATE|WITH)\b/.test(near)) continue;
+      at.push(`${f}:${line}`);
+    }
+    return [...new Set(at)];
+  });
+  check(`all ${files.length} shipped source files parse`, broken.length === 0,
+    `${broken.join(', ')}${hint.length ? `\n      a backtick in a comment ends the template literal — look at ${hint.slice(0, 6).join(', ')}` : ''}`);
 }
 
 /* ── two historical collections must not overlap ──────────────────────────

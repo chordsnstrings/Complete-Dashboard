@@ -13,12 +13,22 @@
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
-// Some feeds duplicate the surname ("Khan Khan", "Afzal Afzal"). Collapsing an
-// immediately-repeated final word is safe — it never merges distinct names.
+/* Some feeds duplicate a name part ("Khan Khan", "Gul Gul"). Collapsing an
+   immediately-repeated word is safe — it never merges distinct names.
+
+   ANY repeated adjacent word, not only the final pair. This collapsed the last
+   two words only, while the SQL fold in api/server.js collapses every repeat
+   wherever it falls — so "Sajid Gul Gul Muhammad" folded to itself here and to
+   "Sajid Gul Muhammad" there, and the driver directory and the driver ranking
+   reported different headcounts for the same fleet on the same window. Two
+   implementations of one identity rule is two answers to "how many drivers do
+   we have"; test/consistency.test.mjs now runs both folds over the same names
+   and requires the same answer. */
 function canonName(s) {
   const parts = norm(s).split(' ').filter(Boolean);
-  while (parts.length > 2 && parts[parts.length - 1] === parts[parts.length - 2]) parts.pop();
-  return parts.join(' ');
+  const out = [];
+  for (const w of parts) if (out[out.length - 1] !== w) out.push(w);
+  return out.join(' ');
 }
 
 /* Two folds, deliberately different, and it matters which is which.
@@ -384,6 +394,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                  comes out an order of magnitude too low on any driver working
                  mostly Uber — whose trip export has no fare column at all. */
               round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
+              -- and the revenue of exactly those trips, so per-km is a ratio
+              -- between one population rather than two
+              round(sum(price) FILTER (WHERE has_fare AND has_distance)::numeric,2) priced_measured_revenue,
+              count(*) FILTER (WHERE has_fare AND has_distance)::int priced_measured_trips,
               round(avg(duration_s)::numeric/60,1) avg_minutes,
               count(DISTINCT plate)::int vehicles, count(DISTINCT platform)::int platforms
        FROM trip_norm WHERE ${TW}`, p);

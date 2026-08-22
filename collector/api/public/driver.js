@@ -425,9 +425,12 @@ async function tabEarnings(root, id) {
     // Priced fares over the distance of the priced trips. Dividing by the whole
     // distance mixes two populations and understates it by however much of the
     // work carries no fare.
-    { label: 'Revenue per km', value: k.priced_km > 0 && k.revenue
-      ? money(Number(k.revenue) / Number(k.priced_km), 'AED', 2) : '—',
-      sub: k.priced_km ? `over the ${fmt(k.priced_km)} km those trips covered` : 'no priced distance' },
+    { label: 'Revenue per km', value: k.priced_km > 0 && k.priced_measured_revenue
+      ? money(Number(k.priced_measured_revenue) / Number(k.priced_km), 'AED', 2) : '—',
+      sub: k.priced_km
+        ? `${money(k.priced_measured_revenue)} over ${fmt(k.priced_km)} km, on the `
+          + `${fmt(k.priced_measured_trips)} trips reporting both`
+        : 'no trip reports both a fare and a distance' },
   ]));
 
   comp.body.innerHTML = '';

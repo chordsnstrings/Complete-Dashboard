@@ -81,7 +81,11 @@ app.get('/api/kpis', (_, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, c
   bookable_trips: 2043, priced_km: 3990, revenue_per_km: 10.32,
   // Coverage: how much of the headline each figure was actually measured over.
   completed_trips: 1818, cancelled_trips: 225, trips_with_distance: 1996, attributed_trips: 1930,
-  platforms: 4, priced_pct: 9.2, attributed_pct: 94.5 }));
+  platforms: 4, priced_pct: 9.2, attributed_pct: 94.5,
+  // The numerator revenue_per_km is actually over, and the bookings that
+  // belong to no vehicle at all — without which the vehicle table sums to
+  // fewer trips than the fleet and nothing says why.
+  priced_measured_revenue: 39200, priced_measured_trips: 178, trips_without_vehicle: 15 }));
 app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800' },
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
   by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }],
@@ -313,6 +317,8 @@ app.get('/api/driver/kpis', (req, r) => {
     // The distance of the PRICED trips, which is the only denominator revenue
     // per km can honestly have.
     priced_km: Math.round(d.reduce((a, x) => a + x.km, 0) * 0.4),
+    priced_measured_revenue: Math.round(d.reduce((a, x) => a + x.revenue, 0) * 0.4),
+    priced_measured_trips: Math.round(trips * 0.38),
     vehicles: 2, platforms: i % 3 === 0 ? 2 : 1,
     median_start_h: 6.5 + (i % 3), median_end_h: 18.4, avg_span_h: 10.6, start_consistency_h: 0.8 + i * 0.15,
     hours_online: +d.reduce((a, x) => a + x.hours_online, 0).toFixed(1),
@@ -531,6 +537,8 @@ app.get('/api/vehicle/kpis', (req, r) => {
     telematics_journeys: Math.round(trips * 1.2), days_earning: d.filter((x) => x.trips).length,
     measured_trips: trips, priced_trips: Math.round(trips * 0.42),
     priced_km: Math.round(km * 0.42),
+    priced_measured_revenue: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0) * 0.42),
+    priced_measured_trips: Math.round(trips * 0.4),
     outcome_n: trips, completed: Math.round(trips * 0.961),
     not_completed: trips - Math.round(trips * 0.961),
     completion_pct: 96.1, cancel_pct: 3.4, drivers: 1 + (i % 3), platforms: 1 + (i % 2),

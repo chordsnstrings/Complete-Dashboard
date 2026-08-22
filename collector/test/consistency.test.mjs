@@ -305,6 +305,30 @@ const get = async (p) => {
       personKey('i', 'n'));
     check('counting people counts distinct person keys, not distinct records',
       peopleCount('i', 'n').startsWith('count(DISTINCT coalesce('), peopleCount('i', 'n'));
+
+    /* And the JS fold must agree with the SQL one on real names.
+       api/driver_routes.js folds people in Node for the directory; server.js
+       folds them in Postgres for the ranking. Both collapse a repeated name
+       part, and they disagreed about WHICH repeats: the JS version collapsed
+       only the final pair, so "Sajid Gul Gul Muhammad" folded to itself there
+       and to "Sajid Gul Muhammad" in SQL — and the two pages reported 90 and 89
+       drivers for the same fleet on the same window. Run both over the same
+       list rather than reading them and hoping. */
+    const NAMES = ['Asad Khan Khan', 'Sajid Gul Gul Muhammad', 'Najeeb Ullah Khan Khan',
+      'Tariq Afzal Said Afzal', '  Ann   Ahmed ', 'Gul Gul', 'Bob Bakr',
+      'MUHAMMAD ASIF ZADA', 'Muhammad  Asif Asif Zada'];
+    const drvSrc = readFileSync('api/driver_routes.js', 'utf8');
+    const fn = drvSrc.slice(drvSrc.indexOf('function canonName(s) {'),
+      drvSrc.indexOf('\n}', drvSrc.indexOf('function canonName(s) {')) + 2);
+    // eslint-disable-next-line no-new-func
+    const canonName = new Function('norm', `${fn}; return canonName;`)(
+      (x) => String(x || '').trim().replace(/\s+/g, ' ').toLowerCase());
+    const sqlFolded = await q(
+      `SELECT n, ${CANON('n')} AS folded FROM unnest($1::text[]) AS n`, [NAMES]);
+    const drift = sqlFolded.filter((r) => canonName(r.n) !== r.folded)
+      .map((r) => `${JSON.stringify(r.n)}: js ${JSON.stringify(canonName(r.n))} vs sql ${JSON.stringify(r.folded)}`);
+    check('the JS and SQL name folds agree on every name, not just the easy ones',
+      drift.length === 0, `\n      ${drift.join('\n      ')}`);
   }
 }
 
