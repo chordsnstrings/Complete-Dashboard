@@ -457,5 +457,48 @@ check('and a thrown bolt run still reports what had already failed',
     offenders.length ? `\n      ${offenders.join('\n      ')}` : '');
 }
 
+/* ── a gap has to heal without somebody noticing it ────────────────────────
+   The incremental window is three days and it runs every half hour. Nothing
+   else revisited anything: a backfill only ran when a person triggered one, so
+   a day that failed to collect, or that a provider finalised late, stayed wrong
+   until it was found. Uber settles driver earnings weekly — longer than the
+   window that would pick them up — and FMS is silent on 154 of the last 366
+   days. A collection gap in this product has never been self-healing. */
+{
+  const { readFileSync: rf3, readdirSync: rd3 } = await import('node:fs');
+  const run = rf3('src/run.js', 'utf8');
+  const idx = rf3('src/index.js', 'utf8');
+  check('there is a catch-up that re-walks more than the incremental window',
+    /export const catchUp = \(days = 30/.test(run));
+  check('and it is wider than the incremental it exists to backstop',
+    /daysAgo\(days\)/.test(run) && /incrementalDays/.test(run));
+  check('the catch-up runs nightly without anyone asking',
+    /cron\.schedule\('0 21 \* \* \*', \(\) => catchUp\(30\)/.test(idx));
+  /* Thirty days nightly cannot repair the year behind it, which is exactly the
+     shape of the hole that has been sitting in this data. */
+  check('and the whole history is re-collected weekly, since a month cannot repair a year',
+    /cron\.schedule\('0 22 \* \* 0', \(\) => backfill\(\)/.test(idx));
+  /* The schedules must not land on top of each other: the probe is at 22:40 and
+     the analyst at 23:10, and three heavy passes at once on a small managed
+     database is the contention that was already measured on the rollups. */
+  {
+    const hours = [...idx.matchAll(/cron\.schedule\('(\d+) (\d+) [^']*'/g)]
+      .map((m) => `${m[2]}:${m[1].padStart(2, '0')}`);
+    check('no two scheduled heavy passes share a start time',
+      new Set(hours).size === hours.length, hours.join(' '));
+  }
+  /* And the reason re-collecting is safe to do on a timer at all: every write
+     is an upsert keyed on the provider's own id, so a day already correct is
+     rewritten to the same values rather than duplicated. */
+  const srcs = rd3('src/sources').filter((f) => f.endsWith('.js'));
+  const appending = srcs.filter((f) => {
+    const t = rf3(`src/sources/${f}`, 'utf8');
+    return /INSERT INTO (trip|driver_performance|telemetry_snapshot|alert)\b/i.test(t)
+      && !/ON CONFLICT/i.test(t);
+  });
+  check('no collector inserts without an upsert key, or a re-run would duplicate',
+    appending.length === 0, appending.join(', '));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

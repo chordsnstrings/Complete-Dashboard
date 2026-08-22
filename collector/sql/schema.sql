@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS collection_run (
   id           BIGSERIAL PRIMARY KEY,
   source       TEXT NOT NULL,
   fleet_id     TEXT,
-  mode         TEXT,                   -- backfill | incremental | realtime
+  mode         TEXT,                   -- backfill | catchup | incremental | realtime
   window_start DATE,
   window_end   DATE,
   started_at   TIMESTAMPTZ DEFAULT now(),

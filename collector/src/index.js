@@ -9,7 +9,7 @@ import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility } from './settings.js';
-import { backfill, incremental, cabmanTick, liveStatusTick, analystPass, probePass } from './run.js';
+import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass } from './run.js';
 import { config } from './config.js';
 import { log } from './log.js';
 
@@ -63,6 +63,21 @@ async function main() {
       .catch((e) => log.warn('scheduler', 'credential visibility', { err: String(e).slice(0, 120) }));
     cron.schedule('5 * * * *', () => recordCredentialVisibility('collector')
       .catch((e) => log.warn('scheduler', 'credential visibility', { err: String(e).slice(0, 120) })));
+    /* Nightly catch-up over thirty days, and the full history weekly.
+       The half-hourly incremental looks back three days; nothing else revisited
+       anything, so a day that failed to collect or that a provider finalised
+       late stayed wrong until a person noticed. Uber settles earnings weekly —
+       longer than the window that would catch them — and FMS is silent on 154
+       of the last 366 days.
+
+       01:00 Dubai (21:00 UTC) nightly, and Sunday 02:00 Dubai for the year:
+       both outside the working day, and clear of the 22:40 probe and the 23:10
+       analyst so three heavy passes do not land together. */
+    cron.schedule('0 21 * * *', () => catchUp(30)
+      .catch((e) => log.error('scheduler', 'catch-up', { err: String(e) })));
+    cron.schedule('0 22 * * 0', () => backfill()
+      .catch((e) => log.error('scheduler', 'weekly backfill', { err: String(e) })));
+
     /* The analyst costs a model call per pass, and its input is a month of
        aggregates that does not meaningfully change between two afternoons.
        Once a day, at 03:10 Dubai (23:10 UTC), after the overnight incremental
@@ -70,7 +85,12 @@ async function main() {
     cron.schedule('10 23 * * *', () => analystPass().catch((e) => log.error('scheduler', 'analyst', { err: String(e) })));
     /* A provider changes what it sends without telling anyone, and an expired
        credential looks like a quiet week. Describe every surface daily. */
-    cron.schedule('40 22 * * *', () => probePass());
+    /* 22:20, not 22:40: that was the same minute as the nightly full rollup,
+       and two heavy passes landing together on a small managed Postgres is the
+       contention already measured when the rollups ran against live traffic.
+       Found by the check that asserts no two scheduled passes share a start
+       time, which is the sort of thing nobody notices by reading a list. */
+    cron.schedule('20 22 * * *', () => probePass());
     /* Honour on-demand runs queued from the Settings page.
        One job at a time, claimed atomically. The previous version read a
        single source_state key, so two requests arriving close together meant

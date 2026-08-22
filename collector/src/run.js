@@ -152,6 +152,28 @@ export const backfill = (onProgress) =>
 export const incremental = (onProgress) =>
   runWindow('incremental', daysAgo(config.incrementalDays), new Date(), onProgress);
 
+/* ── the catch-up ──────────────────────────────────────────────────────────
+   The incremental window is three days and it runs every half hour. Nothing
+   else revisits anything, and until now a backfill only ran when a person
+   triggered one — so any day that failed to collect, or that a provider
+   finalised late, stayed wrong until somebody noticed and asked.
+
+   That is not hypothetical here. Uber settles driver earnings weekly, which is
+   longer than the window that would pick them up. FMS is silent on 154 of the
+   last 366 days. A collection gap in this product has never been self-healing;
+   it has been waiting to be found.
+
+   So the window is re-walked on a schedule. Thirty days nightly is wide enough
+   for any provider's settlement lag and cheap enough to run unattended;
+   the full history weekly, because a re-collection that only ever looks at the
+   last month cannot repair the year behind it.
+
+   Every write is an upsert keyed on the provider's own id, so re-collecting a
+   day that is already correct changes nothing — which is what makes running
+   this on a timer safe rather than merely convenient. */
+export const catchUp = (days = 30, onProgress) =>
+  runWindow('catchup', daysAgo(days), new Date(), onProgress);
+
 // CABMAN realtime GPS — fixed 5-minute refresh, persisted to telemetry_snapshot (via cabman.collect,
 // which upserts snapshots and writes a collection_run row). This is the owner of CABMAN data.
 export async function cabmanTick() {
