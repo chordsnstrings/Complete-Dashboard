@@ -1,4 +1,4 @@
-import { personFold } from './custody_sql.js';
+import { personFold, JOIN_TRIP } from './custody_sql.js';
 /* The roster: who is on the books, and who is actually earning.
    ──────────────────────────────────────────────────────────────────────────
    Four providers each report a driver's standing and none of them knows what
@@ -55,18 +55,22 @@ export function rosterRoutes(app, { q, wrap, range }) {
            AND coalesce(btrim(full_name), '') <> ''
        ),
        -- Work inside the window, by the same folded name.
+       /* The stored fold, via the base table. Computed per row this was the
+          roster's cost over a wide window — 37 seconds across the full record —
+          and it is the same expression, so the same answer. Every column is
+          qualified because the join puts two of each in scope. */
        w AS (
-         SELECT ${CANON.replace(/full_name/g, 'driver_name')} AS person,
+         SELECT t.person_key AS person,
                 count(*)::int trips,
-                count(*) FILTER (WHERE outcome = 'completed')::int completed,
-                sum(price) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary) AS revenue,
-                sum(distance_km) FILTER (WHERE has_distance) AS km,
-                max(requested_at) AS last_trip,
-                array_agg(DISTINCT platform) AS platforms_worked
-         FROM trip_ext
-         WHERE local_day BETWEEN $1::date AND $2::date AND is_booking
-           AND ($4::text IS NULL OR fleet_id = $4)
-           AND coalesce(btrim(driver_name), '') <> ''
+                count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
+                sum(n.price) FILTER (WHERE n.price IS NOT NULL AND NOT n.is_complimentary) AS revenue,
+                sum(n.distance_km) FILTER (WHERE n.has_distance) AS km,
+                max(n.requested_at) AS last_trip,
+                array_agg(DISTINCT n.platform) AS platforms_worked
+         FROM trip_ext n ${JOIN_TRIP}
+         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
+           AND ($4::text IS NULL OR n.fleet_id = $4)
+           AND t.person_key IS NOT NULL AND t.person_key <> ''
          GROUP BY 1
        ),
        -- Has this person EVER driven, on any platform, at any time? The

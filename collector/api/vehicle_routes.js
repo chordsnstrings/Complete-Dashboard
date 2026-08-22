@@ -12,7 +12,7 @@
    the fleet portal knows its documents, and only the combination answers
    "is this asset earning, and is it legal to be on the road". */
 
-import { peopleCount, personKey } from './custody_sql.js';
+import { peopleCount, personKey, peopleCountStored, JOIN_TRIP } from './custody_sql.js';
 import { win, winDays } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 
@@ -54,23 +54,30 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          /* Bookings and telematics journeys counted apart, and distance guarded.
             Summing them showed a 2-3.5x overcount as "trips" and rendered a
             193,027 km odometer row as 1.6 million km against one car. */
-         SELECT plate,
-                count(*) FILTER (WHERE is_booking)::int trips,
-                count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
-                count(DISTINCT local_day) FILTER (WHERE is_booking)::int days,
-                count(DISTINCT local_day)::int days_moved,
-                round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
-                round(sum(distance_km) FILTER (WHERE NOT is_booking AND has_distance)::numeric,0) telematics_km,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-                count(*) FILTER (WHERE has_fare)::int priced_trips,
-                ${peopleCount()}::int drivers,
-                count(DISTINCT platform)::int platforms,
-                max(requested_at) FILTER (WHERE is_booking) last_trip,
-                max(requested_at) last_movement,
-                min(fleet_id) fleet_id
-         FROM trip_norm
-         WHERE local_day BETWEEN $1::date AND $2::date AND plate IS NOT NULL AND plate <> ''
-         GROUP BY plate
+         /* Every column qualified: trip_norm is SELECT t.* over trip, so the
+            join puts two of each base column in scope and an unqualified one is
+            ambiguous. Postgres rejects the statement rather than choosing, which
+            is the good outcome and how this was caught. */
+         SELECT n.plate,
+                count(*) FILTER (WHERE n.is_booking)::int trips,
+                count(*) FILTER (WHERE NOT n.is_booking)::int telematics_journeys,
+                count(DISTINCT n.local_day) FILTER (WHERE n.is_booking)::int days,
+                count(DISTINCT n.local_day)::int days_moved,
+                round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
+                round(sum(n.distance_km) FILTER (WHERE NOT n.is_booking AND n.has_distance)::numeric,0) telematics_km,
+                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+                count(*) FILTER (WHERE n.has_fare)::int priced_trips,
+                /* The stored fold, via the base table. Computed per row this
+                   was the directory's whole cost over a wide window: 76 seconds
+                   across the full record. See peopleCountStored. */
+                ${peopleCountStored()}::int drivers,
+                count(DISTINCT n.platform)::int platforms,
+                max(n.requested_at) FILTER (WHERE n.is_booking) last_trip,
+                max(n.requested_at) last_movement,
+                min(n.fleet_id) fleet_id
+         FROM trip_norm n ${JOIN_TRIP}
+         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.plate IS NOT NULL AND n.plate <> ''
+         GROUP BY n.plate
        ),
        tel AS (
          SELECT DISTINCT ON (plate) plate, captured_at last_fix, polled_at, status, speed

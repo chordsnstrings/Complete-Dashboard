@@ -881,7 +881,7 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
        FROM alert WHERE ${DAYWIN('occurred_at')}
      ),
      custody AS (
-       SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id
+       SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id, person_key
        FROM vehicle_driver_day
        WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
        ORDER BY plate, day, trips DESC NULLS LAST, driver_name
@@ -894,10 +894,18 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
         denominator covering only one of their accounts — 240 km for somebody
         who drove 340. This is the same fold the driver directory uses. */
      km AS (
-       SELECT ${CANON('driver_name')} AS person, sum(distance_km) AS km
-       FROM trip_norm
-       WHERE local_day BETWEEN $1::date AND $2::date AND is_booking AND has_distance
-         AND coalesce(btrim(driver_name), '') <> ''
+       /* person_key on both sides, not the fold. This grouped 175,000 trip rows
+          through two nested regexp_replace calls, and the join below then
+          computed the same fold again for every custody row it matched. Over a
+          window covering the whole record the endpoint took 93 seconds, while
+          /api/kpis scans the same trips in 0.67 — the difference was entirely
+          the regex. sql/schema_v20.sql stores the identical expression on both
+          trip and vehicle_driver_day, so this is the same answer as an index
+          lookup rather than a computation. */
+       SELECT t.person_key AS person, sum(n.distance_km) AS km
+       FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
+       WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.has_distance
+         AND n.driver_name IS NOT NULL AND btrim(n.driver_name) <> ''
        GROUP BY 1
      )
      SELECT coalesce(c.driver_name, '(unattributed)') AS driver_name,
@@ -918,7 +926,7 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
             round((count(*) * 100.0 / nullif(max(km.km), 0))::numeric, 2) AS per_100km
      FROM ev
      LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
-     LEFT JOIN km ON km.person = ${CANON('c.driver_name')}
+     LEFT JOIN km ON km.person = c.person_key
      GROUP BY 1 ORDER BY alerts DESC LIMIT 100`, [from, to]);
   /* Named drivers, counted over the whole window rather than over the returned
      rows, and counted the way the list groups: by custody name, excluding the

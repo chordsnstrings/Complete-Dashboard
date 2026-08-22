@@ -118,5 +118,23 @@ export const personKey = (idCol = 'driver_ext_id', nameCol = 'driver_name') =>
   `coalesce(nullif(${personFold(nameCol)}, ''), ${idCol})`;
 
 /** How many DISTINCT PEOPLE, as opposed to how many platform records. */
+/* Counting people from the STORED fold, for a query that can reach it.
+   ─────────────────────────────────────────────────────────────────────────
+   peopleCount() below computes the fold per row, which is right for a query
+   over trip_norm alone — the view cannot expose person_key, because a view's
+   SELECT t.* is frozen at creation. But a query willing to join the base table
+   can have the stored column instead, and over a wide window that is the
+   difference between a page and a timeout: /api/alerts/by-driver took 93
+   seconds over the whole record and /api/kpis scans the same trips in 0.67,
+   with the regex being the entire difference.
+
+   JOIN_TRIP is the join that makes it available, written once because it has
+   now been needed in four places and each copy is a chance to join on the wrong
+   pair of columns. */
+export const JOIN_TRIP = 'JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id';
+
+export const peopleCountStored = (keyCol = 't.person_key', idCol = 'n.driver_ext_id') =>
+  `count(DISTINCT coalesce(nullif(${keyCol}, ''), ${idCol}))`;
+
 export const peopleCount = (idCol = 'driver_ext_id', nameCol = 'driver_name') =>
   `count(DISTINCT ${personKey(idCol, nameCol)})`;
