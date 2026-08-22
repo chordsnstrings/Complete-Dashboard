@@ -61,6 +61,19 @@ export async function renderPlaybook(root) {
     { label: 'Vehicles earning', value: `${fmt(fleet.earning)} of ${fmt(fleet.vehicles_seen)}`,
       sub: fleet.median_bookings ? `median ${fmt(fleet.median_bookings)} bookings each` : null,
       tone: fleet.earning < fleet.vehicles_seen * 0.6 ? 'critical' : 'warn' },
+    /* The benchmark that decides whether the ceiling above is a plan or a
+       fantasy. Every ceiling is n × the fleet median, which assumes an
+       experienced driver takes each car — and this fleet has just run the
+       experiment on what genuinely new capacity delivers. */
+    fleet.new_driver_first_month != null
+      ? { label: 'What a new driver produces', value: fmt(fleet.new_driver_first_month),
+        sub: `bookings in their first whole month, over ${fmt(fleet.new_drivers_measured)} recent joiners`
+          + (fleet.median_bookings
+            ? ` — ${Math.round((fleet.new_driver_first_month / fleet.median_bookings) * 100)}% of the median`
+            : ''),
+        tone: fleet.median_bookings && fleet.new_driver_first_month < fleet.median_bookings * 0.6
+          ? 'critical' : null }
+      : null,
     t.aed_modelled != null
       ? { label: 'Modelled upside', value: money(t.aed_modelled),
         sub: `at AED ${d.assumption.aed_per_trip}/booking — an assumption`, tone: 'warn' }
@@ -90,6 +103,19 @@ export async function renderPlaybook(root) {
     const { panel: p, body } = panel(g.id, g.blurb);
     root.append(p);
     rows.forEach((a) => body.append(actionCard(a, d)));
+  }
+
+  if (fleet.new_driver_first_month != null && fleet.median_bookings
+      && fleet.new_driver_first_month < fleet.median_bookings * 0.6) {
+    root.append(el('div', 'note err',
+      `Every ceiling on this page is a count times the fleet's median earning vehicle `
+      + `(${fmt(fleet.median_bookings)} bookings). That benchmark assumes an experienced driver takes each `
+      + `car. This fleet's last ${fmt(fleet.new_drivers_measured)} genuinely new drivers produced a median of `
+      + `${fmt(fleet.new_driver_first_month)} bookings in their first whole month — about `
+      + `${Math.round((fleet.new_driver_first_month / fleet.median_bookings) * 100)}% of it. Where an action `
+      + 'needs NEW people rather than existing ones, expect roughly a third of the ceiling. That is why '
+      + 'reassigning cars from drivers who cannot use them sits above putting idle cars back on the road, '
+      + 'despite being the smaller number.'));
   }
 
   root.append(note('Sorted by when it needs doing, then by how certain the size is — never by the size '

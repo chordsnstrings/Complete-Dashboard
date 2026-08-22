@@ -14,6 +14,7 @@ import { segmentRoutes, slotRoutes } from './segment_routes.js';
 import { forecastRoutes } from './forecast_routes.js';
 import { playbookRoutes } from './playbook_routes.js';
 import { retentionRoutes } from './retention_routes.js';
+import { capacityRoutes } from './capacity_routes.js';
 import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -1609,6 +1610,10 @@ playbookRoutes(app, { q, wrap, range, DAYWIN });
 /* Whether a falling driver count is people leaving or nobody arriving. The
    headcount cannot tell those apart and they need opposite remedies. */
 retentionRoutes(app, { q, wrap });
+
+/* Where next month's forecast work lands against who currently covers it —
+   the join between the forecast and the rota. */
+capacityRoutes(app, { q, wrap });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

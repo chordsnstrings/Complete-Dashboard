@@ -21,6 +21,7 @@ import { renderSlot } from './slot.js';
 import { renderPlaybook } from './playbook.js';
 import { renderForecast } from './forecast.js';
 import { renderRetention } from './retention.js';
+import { renderCapacity } from './capacity.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -110,6 +111,7 @@ const VIEWS = [
   { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Analyse', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
   { id: 'forecast', label: 'Forecast', ic: '◠', grp: 'Analyse', sub: 'What next month looks like, day by day, and how much of that is a guess' },
   { id: 'playbook', label: 'To-do list', ic: '☑', grp: 'Operate', sub: 'What to do this month to earn more — each item with the arithmetic that sized it' },
+  { id: 'capacity', label: 'Rota gaps', ic: '◫', grp: 'Operate', sub: 'Where next month’s forecast work lands, against who currently covers that hour' },
   { id: 'insights', label: 'Action list', ic: '✦', grp: 'Operate', sub: 'What needs doing, ranked by what it costs to ignore' },
   { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Operate', sub: 'Claims a model proposed and the database judged — with the numbers that decided each one' },
   { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'Operate', sub: 'Documents and licences with an expiry date attached' },
@@ -184,7 +186,7 @@ function setHeader(detail) {
      did. The playbook DOES respect the window: "idle this month" is a
      different list from "idle this year". */
   const noFilter = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
-    'compliance', 'forecast', 'retention'];
+    'compliance', 'forecast', 'retention', 'capacity'];
   $('#filters').style.display = noFilter.includes(state.view) ? 'none' : 'flex';
 }
 /* ─────────── views ─────────── */
@@ -516,6 +518,7 @@ V.segment = async (root) => renderSegment(root, state.param, state.sub);
 V.playbook = async (root) => renderPlaybook(root);
 V.forecast = async (root) => renderForecast(root);
 V.retention = async (root) => renderRetention(root);
+V.capacity = async (root) => renderCapacity(root);
 
 /* One weekday-hour cell of the demand heatmap: `#slot/<dow>/<hour>`. */
 V.slot = async (root) => {

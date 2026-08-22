@@ -156,6 +156,41 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
            AND licence_expires BETWEEN now()::date AND now()::date + 45`),
     ]);
 
+    /* ── what capacity ADDED to this fleet actually produces ─────────────
+       Every ceiling below is "n × the fleet's median earning vehicle". That is
+       the right benchmark for reactivating a car an experienced driver will
+       take, and the wrong one for capacity that is genuinely new — and this
+       fleet has just run the experiment. It recruited 26 drivers in July after
+       six months of almost no intake, and they did not produce anything like
+       the median.
+
+       So the median is reported as the ceiling and the observed first-month
+       figure beside it, and the action says which applies. Sizing a
+       redeployment plan on the median when new capacity delivers a third of it
+       is how a plan misses by 3x while looking arithmetically sound. */
+    const [ramp] = await q(
+      `WITH first_month AS (
+         SELECT lower(regexp_replace(btrim(driver_name), '\s+', ' ', 'g')) AS person,
+                min(local_month) AS joined
+         FROM trip_norm WHERE is_booking AND coalesce(btrim(driver_name), '') <> ''
+         GROUP BY 1),
+       output AS (
+         SELECT f.person, count(*)::int bookings
+         FROM trip_norm t
+         JOIN first_month f
+           ON f.person = lower(regexp_replace(btrim(t.driver_name), '\s+', ' ', 'g'))
+          AND t.local_month = f.joined
+         WHERE t.is_booking
+           -- Their first month must be a WHOLE month, or a driver who started
+           -- on the 28th looks like a bad hire.
+           AND f.joined < date_trunc('month', (SELECT max(local_day) FROM trip_norm WHERE is_booking))
+           AND f.joined >= date_trunc('month',
+                 (SELECT max(local_day) FROM trip_norm WHERE is_booking)) - interval '6 months'
+         GROUP BY 1)
+       SELECT count(*)::int n,
+              percentile_cont(0.5) WITHIN GROUP (ORDER BY bookings) AS median_first_month
+        FROM output`);
+
     const median = Number(fleet?.median_bookings) || 0;
     const raw = [];
 
@@ -219,9 +254,17 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         why: `${fleet.earning} of ${fleet.vehicles_seen} vehicles earned. ${neverMoved} of the idle ones did not `
           + `move either; ${idle.length - neverMoved} drove without a booking behind them, which is a different `
           + 'problem with a different fix.',
-        basis: `Every vehicle in vehicle_profile with zero bookings in the window. The ceiling is ${idle.length} `
-          + `× the fleet's MEDIAN earning vehicle (${Math.round(median)} bookings), not its mean — a handful of `
-          + 'very busy cars would otherwise set the target for every idle one.',
+        basis: `The ceiling is ${idle.length} × the fleet's MEDIAN earning vehicle (${Math.round(median)} `
+          + 'bookings), not its mean — a handful of very busy cars would otherwise set the target for every '
+          + 'idle one. That benchmark assumes an experienced driver takes each car.'
+          + (ramp?.median_first_month
+            ? ` This fleet's last ${ramp.n} genuinely new drivers produced a median of `
+              + `${Math.round(ramp.median_first_month)} bookings in their first whole month — `
+              + `${Math.round((ramp.median_first_month / median) * 100)}% of the fleet median. Where these `
+              + `cars need NEW drivers rather than existing ones, the realistic figure is nearer `
+              + `${Math.round(idle.length * Number(ramp.median_first_month))} bookings, and the ceiling above `
+              + 'is roughly three times it.'
+            : ''),
         size: idle.length, size_unit: 'vehicles',
         ceiling: Math.round(idle.length * median), ceiling_unit: 'bookings/month',
         aed_measured: null,
@@ -237,7 +280,9 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         why: 'Each of these people is suspended or deactivated on the platform whose vehicle they are holding. '
           + 'The car is the constraint in this business, not the person, so this is the cheapest capacity in it.',
         basis: 'driver_platform_state rows where the provider itself reports the driver stopped AND a plate is '
-          + 'attached. This is the provider’s assertion, not an inference from quiet weeks.',
+          + 'attached. This is the provider’s assertion, not an inference from quiet weeks. The ceiling uses '
+          + 'the fleet median because these cars go to drivers already working, not to new hires — which is '
+          + 'the reason this action sits above the idle-vehicle one despite being smaller.',
         size: blocked.length, size_unit: 'vehicles',
         ceiling: Math.round(blocked.length * median), ceiling_unit: 'bookings/month',
         aed_measured: null,
@@ -353,7 +398,13 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
     res.json({
       window: [from, to],
       actions: acts,
-      fleet: { ...fleet, median_bookings: median ? Math.round(median) : null },
+      fleet: { ...fleet, median_bookings: median ? Math.round(median) : null,
+        /* What capacity genuinely ADDED to this fleet produces in its first
+           whole month, measured. Reported beside the median because the two
+           differ by about 3x here and using the wrong one misses a plan by
+           that factor while looking arithmetically sound. */
+        new_driver_first_month: ramp?.median_first_month ? Math.round(ramp.median_first_month) : null,
+        new_drivers_measured: ramp?.n || 0 },
       /* Totals kept apart on purpose. Adding a measured receivable to a
          modelled ceiling produces a number that is neither. */
       totals: {

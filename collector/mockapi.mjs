@@ -1777,7 +1777,11 @@ app.get('/api/playbook', (req, r) => {
   ];
   r.json({
     window: ['2026-07-22', '2026-08-21'], actions,
-    fleet: { vehicles_seen: 131, earning: 64, moved_only: 28, still: 39, median_bookings: median },
+    fleet: { vehicles_seen: 131, earning: 64, moved_only: 28, still: 39, median_bookings: median,
+      // What capacity genuinely ADDED produces — about a third of the median
+      // on this fleet, which is the live figure and the whole reason it is
+      // reported beside the ceiling rather than folded into it.
+      new_driver_first_month: 31, new_drivers_measured: 26 },
     totals: {
       aed_measured: actions.reduce((a, x) => a + (x.aed_measured || 0), 0),
       aed_modelled: rate ? actions.reduce((a, x) => a + (x.aed_modelled || 0), 0) : null,
@@ -1837,6 +1841,48 @@ app.get('/api/retention', (_, r) => {
     caveat: 'A driver counts as active in a month when they took at least one booking in it. Platform '
       + '"active" status is deliberately not used: a platform can keep somebody nominally active for a year '
       + 'after their last trip, and on this fleet it does.',
+  });
+});
+
+
+/* ── rota gaps: where next month's work lands against who covers it ────── */
+app.get('/api/capacity', (_, r) => {
+  const cells = [];
+  for (let dow = 0; dow < 7; dow++) {
+    for (let h = 0; h < 24; h++) {
+      // Evening peak, a pre-dawn airport wave, and busier weekends.
+      const base = 4 + 26 * Math.exp(-((h - 19) ** 2) / 18) + 9 * Math.exp(-((h - 4) ** 2) / 6);
+      const wk = dow === 5 || dow === 6 ? 1.45 : 1;
+      const occ = Math.round(base * wk * 10) / 10;
+      const drivers = Math.max(1, Math.round(occ / 3.4 * 10) / 10);
+      const perDriver = Math.round((occ / drivers) * 100) / 100;
+      // The projection runs a little ahead of the trailing window, so some
+      // hours come out short and some spare.
+      const expected = Math.round(occ * (1 + (dow === 6 || h === 19 ? 0.34 : h === 3 ? 0.22 : -0.06)) * 10) / 10;
+      const needed = Math.round((expected / perDriver) * 10) / 10;
+      cells.push({ dow, hour: h,
+        observed_bookings: Math.round(occ * 12), occurrences_observed: h < 2 ? 3 : 12,
+        bookings_per_occurrence: occ, drivers_per_occurrence: drivers,
+        most_drivers_seen: Math.ceil(drivers) + 2, bookings_per_driver: perDriver,
+        share_pct: +(occ / 900 * 100).toFixed(2),
+        expected_month: Math.round(expected * 4.3), occurrences_next: 4,
+        expected_per_occurrence: expected, drivers_needed: needed,
+        driver_gap: Math.round((needed - drivers) * 10) / 10,
+        thin: h < 2 });
+    }
+  }
+  const short = cells.filter((c) => c.driver_gap >= 0.5 && !c.thin).sort((a, b) => b.driver_gap - a.driver_gap);
+  const spare = cells.filter((c) => c.driver_gap <= -0.5 && !c.thin).sort((a, b) => a.driver_gap - b.driver_gap);
+  r.json({
+    ok: true, target_month: '2026-09', target_bookings: 9200, target_low: 6800, target_high: 11600,
+    forecast_kind: 'forecast', window_days: 84,
+    observed_bookings: cells.reduce((a, c) => a + c.observed_bookings, 0),
+    cells, shortfall: short.slice(0, 20), surplus: spare.slice(0, 20),
+    totals: { drivers_needed_peak: Math.max(...cells.map((c) => c.drivers_needed)).toFixed(1),
+      cells_short: short.length, cells_spare: spare.length, cells_thin: cells.filter((c) => c.thin).length },
+    caveat: 'A driver’s throughput in an hour is a MEASUREMENT of what happened under whatever demand there '
+      + 'was, not a capacity. A quiet hour makes its drivers look unproductive and a frantic one makes them '
+      + 'look heroic, so "drivers needed" is the division and nothing more.',
   });
 });
 
