@@ -79,6 +79,42 @@ check('the coverage percentages are what they claim to be',
   && near(N(k.attributed_pct), 100 * k.attributed_trips / k.trips),
   `${k.priced_pct} / ${k.attributed_pct}`);
 
+/* ── 1b. a ride nobody paid for is not revenue ─────────────────────────── */
+/* A complimentary ride carries a price that is not a price. has_fare tested
+   `price IS NOT NULL` alone, so the fleet headline counted rides given away
+   while the settlement page — which excludes them explicitly — reported a
+   figure AED 320 smaller over the same live window. Two pages, two answers.
+   Excluded in the view now, so every one of the fifty call sites inherits it. */
+{
+  await db.query(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+       requested_at, status, distance_km, price, payment_type)
+     VALUES ('hotel','foc1','ecosine','L45240','u-khalid','Muhammad Khalid',
+             '2026-08-09T10:00:00+04:00','completed',20,180,'foc-complimentary'),
+            ('hotel','foc2','ecosine','L45240','u-khalid','Muhammad Khalid',
+             '2026-08-09T12:00:00+04:00','completed',20,180,'complimentary')`);
+  const k2 = (await get(`/api/kpis?${W}`)).body;
+  const settle = (await get(`/api/settlement/mix?${W}`)).body;
+  const classSum = (settle.classes || []).reduce((a, c) => a + (Number(c.revenue) || 0), 0);
+  /* Within rounding, not to the dirham: the headline is rounded once and the
+     settlement page rounds each class before they are added, so N classes can
+     drift by up to N/2. The point of the check is that they describe the same
+     MONEY — a complimentary ride in one and not the other moved them by 320. */
+  const tol = (settle.classes || []).length / 2 + 1;
+  check('the fleet revenue headline and the settlement page describe the same money',
+    Math.abs(N(k2.revenue) - classSum) <= tol,
+    `${k2.revenue} vs ${classSum} (tolerance ${tol})`);
+  const foc = (settle.classes || []).find((c) => c.settlement_class === 'complimentary');
+  check('the complimentary rides are still counted as trips',
+    foc && foc.trips === 2, JSON.stringify(foc && { trips: foc.trips, revenue: foc.revenue }));
+  check('and contribute no revenue to either page',
+    !foc?.revenue && foc?.priced_trips === 0, JSON.stringify(foc));
+  check('and are not in the priced-trip denominator the average fare divides by',
+    near(N(k2.avg_fare), N(k2.revenue) / k2.priced_trips, 0.05),
+    `${k2.avg_fare} vs ${N(k2.revenue)}/${k2.priced_trips}`);
+  await db.query(`DELETE FROM trip WHERE external_id IN ('foc1','foc2')`);
+}
+
 /* ── 2. every breakdown sums to the headline it sits under ──────────────── */
 for (const by of ['platform', 'status', 'payment', '']) {
   const rows = (await get(`/api/mix?${W}${by ? `&by=${by}` : ''}`)).body || [];

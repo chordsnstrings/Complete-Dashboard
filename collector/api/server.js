@@ -184,21 +184,24 @@ app.get('/api/kpis', wrap(async (req, res) => {
        round(avg(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,2) avg_km,
        count(*) FILTER (WHERE is_booking AND has_distance)::int trips_with_distance,
 
-       -- money, and the rows it actually covers
-       round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-       count(*) FILTER (WHERE has_fare)::int priced_trips,
-       round(avg(price) FILTER (WHERE has_fare)::numeric,2) avg_fare,
-       round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
+       /* Money, and the rows it actually covers. Every filter here carries
+          is_booking as well as has_fare: a telematics row is the same physical
+          journey a ride platform already reported, and if one ever arrives
+          carrying a price it would be counted a second time. */
+       round(sum(price) FILTER (WHERE is_booking AND has_fare)::numeric,0) revenue,
+       count(*) FILTER (WHERE is_booking AND has_fare)::int priced_trips,
+       round(avg(price) FILTER (WHERE is_booking AND has_fare)::numeric,2) avg_fare,
+       round(sum(distance_km) FILTER (WHERE is_booking AND has_fare AND has_distance)::numeric,0) priced_km,
        /* The numerator of revenue_per_km, reported so the ratio can be checked.
           The revenue column covers every trip with a FARE; priced_km covers
           those that also report a DISTANCE. Dividing the first by the second is
           a ratio between two populations: live it came out 3.93 where
           revenue/priced_km is 5.28, and neither figure was derivable from the
           two printed beside it. */
-       round(sum(price) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_measured_revenue,
-       count(*) FILTER (WHERE has_fare AND has_distance)::int priced_measured_trips,
-       round((sum(price) FILTER (WHERE has_fare AND has_distance)
-              / nullif(sum(distance_km) FILTER (WHERE has_fare AND has_distance),0))::numeric,2) revenue_per_km,
+       round(sum(price) FILTER (WHERE is_booking AND has_fare AND has_distance)::numeric,0) priced_measured_revenue,
+       count(*) FILTER (WHERE is_booking AND has_fare AND has_distance)::int priced_measured_trips,
+       round((sum(price) FILTER (WHERE is_booking AND has_fare AND has_distance)
+              / nullif(sum(distance_km) FILTER (WHERE is_booking AND has_fare AND has_distance),0))::numeric,2) revenue_per_km,
 
        -- who and what
        ${peopleCount()}::int drivers,

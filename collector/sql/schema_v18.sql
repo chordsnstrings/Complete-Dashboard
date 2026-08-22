@@ -70,9 +70,19 @@ SELECT
   date_trunc('month', (t.requested_at AT TIME ZONE 'Asia/Dubai'))::date AS local_month,
 
   -- Does this row carry money, and is its distance usable as a trip distance?
-  -- The Uber trip export has no fare column at all, so `price` is NULL on every
+  -- The Uber trip export has no fare column at all, so price is NULL on every
   -- Uber row; a revenue figure describes only the hotel, Yango and Bolt rows.
-  (t.price IS NOT NULL) AS has_fare,
+  --
+  -- A complimentary ride carries a price that is not a price: nobody paid it.
+  -- This tested price IS NOT NULL alone, so the fleet's revenue headline
+  -- included rides given away — while the settlement page, which excludes them
+  -- explicitly, reported a figure AED 320 smaller over the same window. Two
+  -- pages, two answers, and the one that was wrong is the one everybody reads.
+  -- Excluded here rather than at each of the fifty call sites, because a rule
+  -- applied in fifty places is applied in forty-nine.
+  (t.price IS NOT NULL
+   AND lower(coalesce(t.payment_type, '')) NOT IN ('foc-complimentary', 'foc', 'complimentary'))
+    AS has_fare,
   -- FMS distances are odometer-derived and occasionally implausible. A trip
   -- distance is only comparable within a sane range.
   (t.distance_km IS NOT NULL AND t.distance_km > 0 AND t.distance_km < 500) AS has_distance
