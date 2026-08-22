@@ -7,6 +7,7 @@ import { describeSettings, setSetting, deleteSetting, loadSettings } from '../sr
 import { win, winDays } from './window.js';
 import { rollupGrainSql, rollupState } from '../src/rollup.js';
 import { responseCache } from './cache.js';
+import { startWarmer } from './warm.js';
 import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
@@ -1872,6 +1873,21 @@ const port = process.env.PORT || 8080;
    on a half-built schema behind a health check that returned ok unconditionally
    — so a failed schema_v7 meant `trip_norm` did not exist and eleven endpoints
    500'd while the platform reported the app healthy and routed users to it. */
+let server;
 migrate()
-  .then(() => app.listen(port, () => log.info('api', `listening on :${port}`)))
+  .then(() => { server = app.listen(port, () => {
+    log.info('api', `listening on :${port}`);
+    /* Warm the cache in the background as soon as the data moves, so the first
+       reader after a collection is not the one who pays for the aggregate.
+       See api/warm.js. WARM=off to leave it cold. */
+    startWarmer({
+      // From the listening socket, not the configured value: with PORT=0 the
+      // real one only exists once the server is up, and warming the wrong port
+      // fails silently and looks like a cache that never fills.
+      port: server.address().port,
+      pool,
+      enabled: String(process.env.WARM || '').toLowerCase() !== 'off'
+        && String(process.env.CACHE || '').toLowerCase() !== 'off',
+    });
+  }); })
   .catch((e) => { log.error('api', 'migrate failed — refusing to serve', { err: String(e) }); process.exit(1); });
