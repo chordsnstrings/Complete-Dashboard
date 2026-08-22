@@ -240,6 +240,26 @@ console.log('\nrollup: incremental equals full');
     `narrow=${augNarrow.drivers} live=${liveAug.drivers}`);
 }
 
+console.log('\nrollup: the planner is told what changed');
+
+/* A generated column arrives with NO statistics — Postgres has never seen its
+   distribution — so every plan touching person_key was chosen blind, and one
+   of them picked an index scan over most of the table and cost
+   /api/drivers/directory a tenfold regression. Autovacuum gets there
+   eventually; eventually is an hour of slow pages after a deploy. */
+{
+  const src = (await import('node:fs')).readFileSync('src/rollup.js', 'utf8');
+  check('the refresh analyzes the tables it just rewrote, and trip with them',
+    /ANALYZE trip, rollup_day, rollup_month, rollup_person_month/.test(src));
+  check('and a failed analyze is a warning, not a failed rollup — stale plans are slow, not wrong',
+    /analyze failed — plans may be stale/.test(src));
+  // It must actually run, not merely be present in a string.
+  const [stats] = await q(
+    `SELECT count(*)::int n FROM pg_stats WHERE tablename = 'trip' AND attname = 'person_key'`);
+  check('and person_key has statistics after a refresh, rather than none at all',
+    N(stats.n) > 0, `pg_stats rows for trip.person_key: ${stats.n}`);
+}
+
 console.log('\nrollup: two refreshes do not race');
 
 /* Three things start a refresh — the boot pass, the quarter-hourly cron, and

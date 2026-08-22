@@ -282,6 +282,20 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
     return n;
   }));
   out.push(await runOne(db, 'rollup_person_month', () => refreshPersonMonth(db, since)));
+  /* Refresh the planner's statistics on the tables this just rewrote, and on
+     trip itself. A generated column arrives with NO statistics — Postgres has
+     never seen its distribution — so every plan touching person_key was being
+     chosen blind, and one of them chose an index scan over most of the table.
+     Autovacuum gets there eventually; "eventually" is a page that is slow for
+     an hour after a deploy.
+
+     ANALYZE takes a light lock and reads a sample, not the table, so it is
+     cheap next to the rollup that just ran. Failure is not fatal: stale
+     statistics are a slow query, not a wrong one. */
+  try {
+    await db.query('ANALYZE trip, rollup_day, rollup_month, rollup_person_month');
+  } catch (e) { log.warn(SRC, 'analyze failed — plans may be stale', { err: String(e).slice(0, 120) }); }
+
   const failed = out.filter((o) => o.error);
   log[failed.length ? 'warn' : 'info'](SRC, since ? `refreshed since ${since}` : 'refreshed in full', {
     ms: Date.now() - t0,
