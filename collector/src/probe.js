@@ -188,6 +188,31 @@ export function surfaces({ from, to }) {
         return { data, status };
       });
     }
+
+    /* Does the provider still hold what we are missing?
+       ─────────────────────────────────────────────────────────────────────
+       Uber earnings are absent for every month before about March 2026 —
+       20,016 bookings in September 2025 with no payout row against any of them.
+       The backfill asked for those windows, none failed, and all came back
+       empty. Either the provider will not serve data that old, in which case
+       the half-year is gone and the product should say so, or we asked wrongly
+       and re-collecting recovers it.
+
+       An API route was written for this first and could not answer: it runs in
+       the web service, and UBER_WEB_COOKIE is set on the collector alone. This
+       is the process that holds it. Two windows — one known to be present and
+       one known to be missing — because "the old window returned nothing" only
+       means anything beside a window that returns something. */
+    for (const [label, w] of Object.entries(HISTORY_PROBE)) {
+      add('uber', `earner-history:${label}`, ['earnerUuid', 'netOutstanding'],
+        'does the provider still serve this window', async () => {
+          const r = await probeEarnerWindow(new Date(w.from), new Date(w.to));
+          if (r.err) throw new Error(r.err);
+          return { data: { window: [w.from, w.to], ...r },
+            status: 200, count: r.rows_with_money };
+        });
+    }
+
     add('uber', 'trip-report-session', null,
       'The trip export needs a supplier.uber.com session cookie, which expires and has to be re-pasted',
       async () => {
@@ -308,6 +333,16 @@ export function surfaces({ from, to }) {
 
 /* Run every surface, store the shape. One surface failing never stops the
    others: a provider being down is itself a result worth recording. */
+/* One window the record has and one it does not. A window returning nothing
+   says nothing on its own — it has to be read beside one that returns
+   something, or "the provider is empty" and "our request is wrong" look
+   identical. Dates rather than offsets: these name specific known facts about
+   this fleet's history, and a rolling window would stop meaning them. */
+const HISTORY_PROBE = {
+  present: { from: '2026-08-01', to: '2026-08-07' },
+  missing: { from: '2025-11-01', to: '2025-11-07' },
+};
+
 export async function probeAll({ days = 3 } = {}) {
   await loadSettings(true);
   const to = new Date();
