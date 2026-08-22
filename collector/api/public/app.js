@@ -1722,8 +1722,9 @@ V.sources = async (root) => {
   // over the full observed history rather than over an invisible window.
   // The Dubai day, not the UTC one — see api/public/tz.js.
   const [from, to] = ['2000-01-01', dubaiDay()];
-  const [status, coverage, rollups] = await Promise.all([
-    api('/api/status'), api('/api/coverage'), api('/api/rollups').catch(() => [])]);
+  const [status, coverage, rollups, cacheStats] = await Promise.all([
+    api('/api/status'), api('/api/coverage'), api('/api/rollups').catch(() => []),
+    api('/api/cache-stats').catch(() => null)]);
 
   ru.body.innerHTML = '';
   if (!rollups.length) {
@@ -1746,6 +1747,19 @@ V.sources = async (root) => {
       { label: 'Covers', key: 'covers_from',
         render: (r) => (r.covers_from ? `${dayStr(r.covers_from)} → ${dayStr(r.covers_to)}` : '—') },
     ], { compact: true }));
+    /* Read responses are also cached against the same data version, so a page
+       opened twice runs its aggregates once. Shown here because a cache nobody
+       can see the hit rate of is one nobody can tell has stopped working — the
+       symptom being pages that are merely slow again, which reads as the
+       database having a bad day. */
+    if (cacheStats) {
+      const total = cacheStats.hit + cacheStats.miss;
+      ru.body.append(el('p', 'cap',
+        `Response cache: ${fmt(cacheStats.hit)} served from cache of ${fmt(total)} requests`
+        + `${total ? ` (${Math.round((cacheStats.hit / total) * 100)}%)` : ''}, `
+        + `${fmt(cacheStats.entries)} entries held. Invalidated by any collection or rollup, `
+        + 'never by a timer.'));
+    }
     const stale = rollups.filter((r) => r.age_min != null && r.age_min > 45);
     const broken = rollups.filter((r) => r.status !== 'ok');
     if (broken.length) {

@@ -49,6 +49,9 @@ app.get('/api/map/journey', (req, res) => {
 
 /* Deliberately not all-green: one rollup late, so the Sources page's stale
    branch is exercised by the browser smoke test rather than only existing. */
+app.get('/api/cache-stats', (_q, r) => r.json(
+  { hit: 1840, miss: 260, skip: 92, entries: 214, version: '2026-08-22T13:30:00.000Z|2026-08-22T13:31:00.000Z' }));
+
 app.get('/api/rollups', (_q, r) => r.json([
   { name: 'rollup_day', status: 'ok', finished_at: new Date(Date.now() - 6 * 60000).toISOString(),
     rows_written: 4210, duration_ms: 1840, covers_from: '2025-08-21', covers_to: '2026-08-22',

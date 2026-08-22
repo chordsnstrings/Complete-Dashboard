@@ -66,6 +66,12 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
     rollupGrainSql, rollupState: async () => [],
+    /* The response cache object server.js closes over. The harness mounts a
+       slice of that file, so anything the slice references has to be here —
+       and a stub is right rather than the real cache: these tests assert what
+       routes RETURN, and a cache between them and the route would have the
+       second call answer from the first. */
+    cache: { stats: () => ({ hit: 0, miss: 0, skip: 0, entries: 0, version: 'test' }) },
     describeSettings: stubList, setSetting: stub, deleteSetting: stub, loadSettings: stub,
     insights: { run: stub }, pool: { query: db.query.bind(db) },
     ...(await import('../api/custody_sql.js')),

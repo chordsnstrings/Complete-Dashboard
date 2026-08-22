@@ -6,6 +6,7 @@ import { pool, migrate } from '../src/db.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings } from '../src/settings.js';
 import { win, winDays } from './window.js';
 import { rollupGrainSql, rollupState } from '../src/rollup.js';
+import { responseCache } from './cache.js';
 import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
@@ -25,6 +26,19 @@ process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', {
 const __dir = dirname(fileURLToPath(import.meta.url));
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+
+/* Read responses are cached against a data version, not a clock — see
+   api/cache.js. Registered before the routes so a hit never reaches one, and
+   after the body parser so a POST is still parsed normally on its way past.
+
+   Set CACHE=off to serve everything live; the numbers are identical either
+   way, so this is a lever for diagnosing a stale-looking page rather than a
+   behaviour switch. */
+const cache = responseCache({
+  pool,
+  enabled: String(process.env.CACHE || '').toLowerCase() !== 'off',
+});
+app.use('/api', cache);
 
 const q = (text, params) => pool.query(text, params).then((r) => r.rows);
 /* A 500 body used to carry the driver's own message, which names the storage
@@ -1207,6 +1221,12 @@ app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
    nothing about it looks wrong. This is what lets a page say when it was last
    computed — and what makes a rollup that has quietly stopped visible. */
 app.get('/api/rollups', wrap(async (_req, res) => res.json(await rollupState())));
+
+/* Whether the cache is doing anything. A cache nobody can see the hit rate of
+   is a cache nobody can tell has silently stopped working — the symptom being
+   pages that are merely slow again, which reads as the database having a bad
+   day. Never cached itself, for the same reason /api/rollups is not. */
+app.get('/api/cache-stats', wrap(async (_req, res) => res.json(cache.stats())));
 
 app.get('/api/settings/jobs', wrap(async (_req, res) => {
   const jobs = await q(
