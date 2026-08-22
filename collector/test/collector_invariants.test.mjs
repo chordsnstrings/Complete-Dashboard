@@ -36,8 +36,26 @@ check('the run records every window it attempted, not just a total',
    place Uber money exists at all, stayed empty. */
 check('and both of the uber sub-sources contribute their windows to the run',
   /perf\.chunks/.test(uber) && /rows_written: trips\.total \+ perf\.total/.test(uber));
-check('the earner breakdown does not ask for a field the response has no room for',
-  !/nextPageToken\n/.test(uber) && /paginationResult\?\.nextPageToken/.test(uber));
+/* It does not page at all now. The response type has no token this query can
+   select — asking for nextPageToken made the server reject the whole query, and
+   the guess that replaced it (paginationResult.nextPageToken) was never
+   SELECTED, so it read undefined and one page of ten drivers became the answer
+   for a fleet of eighty-five. Every weekly period in the database held exactly
+   ten drivers: the shape a cap leaves, and not one any real week has.
+
+   Drivers are asked for by name instead, ten at a time, from the ids we already
+   hold — so the batches are the fleet and there is no page to run out. */
+check('the earner breakdown does not ask for a pagination field this response has no room for',
+  !/nextPageToken/.test(uber));
+check('and asks for drivers by name rather than paging past the cap',
+  /driverListOrPageOptions: 'Driver_List'/.test(uber) && /driverList: drivers\.slice\(/.test(uber));
+check('taking the driver ids from both places they land, not just the roster',
+  /FROM driver_platform_state WHERE platform = 'uber'/.test(uber)
+  && /UNION SELECT driver_ext_id FROM trip WHERE platform = 'uber'/.test(uber));
+check('a rejected mode falls back rather than losing the data it was managing',
+  /listMode = false/.test(uber) && /driverListOrPageOptions: 'Page_Options'/.test(uber));
+check('and each window records how many of the fleet actually answered',
+  /drivers answered/.test(uber));
 check('a window that fails is recorded with the dates that would let it be re-fetched',
   /chunk\.error =/.test(uber) && /from: iso\(s\), to: iso\(e\)/.test(uber));
 // A backfill that starts twelve months ago and dies partway never reaches the

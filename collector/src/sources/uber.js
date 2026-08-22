@@ -6,7 +6,7 @@
 import { parse } from 'csv-parse/sync';
 import { config, normPlate } from '../config.js';
 import { http, qs, sleep } from '../http.js';
-import { upsertMany, logRun } from '../db.js';
+import { upsertMany, logRun, pool } from '../db.js';
 import { dateChunks, iso, unixMs } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
@@ -144,72 +144,137 @@ async function pullTrips(from, to, onStep) {
   return { total, chunks };
 }
 
-// Per-driver earnings + trip count + distance (7-day windows, GraphQL).
-//
-// The server caps this at ten drivers per call — "driver-uuids or page size
-// cannot be more than 10" — so a pageSize of 200 was rejected outright and the
-// fleet had no per-driver Uber earnings at all. Ten at a time, paged through.
-const EARNER_PAGE = 10;
+/* Every Uber driver this fleet has ever had, from the two places their ids
+   land. The roster is written by pullLive on every incremental and covers
+   people who have not driven yet; the trip table covers people who have driven
+   but may since have left the roster. Neither alone is the fleet. */
+async function uberDriverIds() {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT driver_ext_id FROM (
+       SELECT driver_ext_id FROM driver_platform_state WHERE platform = 'uber'
+       UNION SELECT driver_ext_id FROM trip WHERE platform = 'uber'
+     ) s WHERE coalesce(btrim(driver_ext_id), '') <> ''`);
+  return rows.map((r) => r.driver_ext_id);
+}
+
+const EARNER_QUERY = `query getEarnerBreakdownsV2($supplierUuid: ID!, $timeRange: OneOfTimeRange__Input, $driverListOrPageOptions: DriverListOrPagination, $driverList: [ID!], $pageOptions: PaginationOption__Input, $excludeAdjustmentItems: Boolean) {
+          getEarnerBreakdownsV2(supplierUuid: $supplierUuid, timeRange: $timeRange, driverList: $driverList, pageOptions: $pageOptions, driverListOrPageOptions: $driverListOrPageOptions, excludeAdjustmentItems: $excludeAdjustmentItems) {
+            earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode } }
+          } }`;
+
+async function earnerCall(s, e, variables) {
+  const body = JSON.stringify({
+    operationName: 'getEarnerBreakdownsV2',
+    variables: {
+      supplierUuid: config.uber.orgUuid,
+      timeRange: {
+        unixMilliOrDate: 'Unix_Time_Range',
+        startTimeUnixMillis: unixMs(s), endTimeUnixMillis: unixMs(e),
+      },
+      excludeAdjustmentItems: true,
+      ...variables,
+    },
+    query: EARNER_QUERY,
+  });
+  const { data } = await http('https://supplier.uber.com/graphql',
+    { method: 'POST', headers: uberWebHeaders(), body });
+  // An expired web cookie answers with `errors` and no data, which is
+  // indistinguishable from "this fleet had no drivers" unless we say so.
+  if (data?.errors?.length) {
+    return { err: String(data.errors[0]?.message || data.errors[0]).slice(0, 250), rows: [] };
+  }
+  return { err: null, rows: data?.data?.getEarnerBreakdownsV2?.earnerEarningsBreakdowns || [] };
+}
+
+/* Per-driver earnings, in seven-day windows, asked for BY NAME ten at a time
+   rather than paged.
+   ─────────────────────────────────────────────────────────────────────────
+   The server caps a page at ten — "driver-uuids or page size cannot be more
+   than 10" — and the response type carries no pagination token this query can
+   select, so page mode returns the first ten drivers and stops. On a fleet of
+   eighty-five that is an eighth of the money, reported as all of it: every
+   weekly period in the database held exactly ten drivers, which is the shape a
+   cap leaves and not one any real week has.
+
+   Asking for an explicit driver list removes the question. We already hold
+   every Uber driver id, so the batches ARE the fleet, and a driver missing from
+   a window is then a fact about that driver rather than about where the page
+   ran out.
+
+   If the server rejects list mode, it falls back to the single page it managed
+   before: a wrong guess about an enum should cost the improvement, not the
+   data. */
+const EARNER_BATCH = 10;
 
 async function pullEarnerBreakdowns(from, to) {
   let total = 0;
   const chunks = [];
-  for (const [s, e] of dateChunks(from, to, 7)) {
-    let pageToken = '', pages = 0, got = 0, err = null;
-    do {
-      const body = JSON.stringify({
-        operationName: 'getEarnerBreakdownsV2',
-        variables: {
-          supplierUuid: config.uber.orgUuid,
-          timeRange: { unixMilliOrDate: 'Unix_Time_Range', startTimeUnixMillis: unixMs(s), endTimeUnixMillis: unixMs(e) },
-          driverListOrPageOptions: 'Page_Options', pageOptions: { pageSize: EARNER_PAGE, pageToken },
-          driverList: null, excludeAdjustmentItems: true,
-        },
-        query: `query getEarnerBreakdownsV2($supplierUuid: ID!, $timeRange: OneOfTimeRange__Input, $driverListOrPageOptions: DriverListOrPagination, $driverList: [ID!], $pageOptions: PaginationOption__Input, $excludeAdjustmentItems: Boolean) {
-          getEarnerBreakdownsV2(supplierUuid: $supplierUuid, timeRange: $timeRange, driverList: $driverList, pageOptions: $pageOptions, driverListOrPageOptions: $driverListOrPageOptions, excludeAdjustmentItems: $excludeAdjustmentItems) {
-            earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode } }
-          } }`,
+  const drivers = await uberDriverIds();
+  const windows = dateChunks(from, to, 7);
+  log.info(SRC, 'earner breakdown', { drivers: drivers.length, windows: windows.length });
+  let listMode = drivers.length > 0;
+
+  const write = async (bd, s, e) => {
+    const rows = bd.map((d) => {
+      const ti = Object.fromEntries((d.tripInfos || []).map((x) => [x.tripAttributeName, x.value]));
+      return {
+        platform: SRC, fleet_id: config.uber.fleet, driver_ext_id: d.earnerUuid,
+        driver_name: d.earnerMetadata?.name, period_start: iso(s), period_end: iso(e),
+        trips: parseInt(ti['TRIP_ATTRIBUTE_NAME_COUNT']) || null,
+        distance_km: parseFloat(ti['TRIP_ATTRIBUTE_NAME_DISTRANCE']) || null,
+        earnings: d.netOutstanding ? Number(d.netOutstanding.amountE5) / 1e5 : null,
+        currency: d.netOutstanding?.currencyCode || 'AED', raw: d,
+      };
+    }).filter((r) => r.driver_ext_id);
+    if (!rows.length) return 0;
+    return upsertMany('driver_performance', rows,
+      ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+  };
+
+  for (const [s, e] of windows) {
+    let got = 0, err = null, seen = 0;
+
+    if (listMode) {
+      for (let i = 0; i < drivers.length; i += EARNER_BATCH) {
+        const r = await earnerCall(s, e, {
+          driverListOrPageOptions: 'Driver_List',
+          driverList: drivers.slice(i, i + EARNER_BATCH), pageOptions: null,
+        });
+        if (r.err) {
+          /* The mode is wrong, not this batch — stop trying it on every
+             remaining window rather than failing nine times a week for a year. */
+          log.warn(SRC, 'earner breakdown driver-list mode rejected, falling back to one page',
+            { err: r.err });
+          err = r.err; listMode = false; break;
+        }
+        seen += r.rows.length;
+        got += await write(r.rows, s, e);
+      }
+    }
+
+    if (!listMode) {
+      const r = await earnerCall(s, e, {
+        driverListOrPageOptions: 'Page_Options',
+        pageOptions: { pageSize: EARNER_BATCH, pageToken: '' }, driverList: null,
       });
-      const { data } = await http('https://supplier.uber.com/graphql', { method: 'POST', headers: uberWebHeaders(), body });
-      // An expired web cookie answers with `errors` and no data, which is
-      // indistinguishable from "this fleet had no drivers" unless we say so.
-      if (data?.errors?.length) {
-        err = String(data.errors[0]?.message || data.errors[0]).slice(0, 250);
+      if (r.err) {
+        err = r.err;
         log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} rejected`, { err });
-        break;
+      } else {
+        seen += r.rows.length;
+        got += await write(r.rows, s, e);
       }
-      const page = data?.data?.getEarnerBreakdownsV2 || {};
-      const bd = page.earnerEarningsBreakdowns || [];
-      const rows = bd.map((d) => {
-        const ti = Object.fromEntries((d.tripInfos || []).map((x) => [x.tripAttributeName, x.value]));
-        return {
-          platform: SRC, fleet_id: config.uber.fleet, driver_ext_id: d.earnerUuid,
-          driver_name: d.earnerMetadata?.name, period_start: iso(s), period_end: iso(e),
-          trips: parseInt(ti['TRIP_ATTRIBUTE_NAME_COUNT']) || null,
-          distance_km: parseFloat(ti['TRIP_ATTRIBUTE_NAME_DISTRANCE']) || null,
-          earnings: d.netOutstanding ? Number(d.netOutstanding.amountE5) / 1e5 : null,
-          currency: d.netOutstanding?.currencyCode || 'AED', raw: d,
-        };
-      });
-      if (rows.length) {
-        got += rows.length;
-        total += await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
-      }
-      /* The response type has no nextPageToken — asking for it made the server
-         reject the whole query with "Cannot query field", on every window, for
-         the life of this collector. It was a warning in the log and nothing
-         else, so /api/status reported uber ok while the fleet's per-driver
-         Uber earnings were empty. paginationResult is where a token would be
-         if this surface paginates; absent, one page is the answer. */
-      pageToken = page.paginationResult?.nextPageToken || '';
-      // A page cap the server does not honour would otherwise spin forever;
-      // 40 pages is 400 drivers, comfortably past this fleet's size.
-      if (++pages >= 40) { log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} stopped at ${pages} pages`); break; }
-    } while (pageToken);
-    /* Recorded per window, like the trip chunks beside it. A sub-source that
-       fails silently is the shape that hid a 299-day hole in the trip feed;
-       this one hid every Uber earning the fleet has ever made. */
-    chunks.push({ from: iso(s), to: iso(e), rows: got, error: err });
+    }
+
+    /* Recorded per window, like the trip chunks beside it, and with the driver
+       count: a window answering for ten of eighty-five drivers is not a quiet
+       week, and only this number tells the two apart. A sub-source that fails
+       silently is the shape that hid a 299-day hole in the trip feed; this one
+       hid seven eighths of every Uber earning the fleet has made. */
+    chunks.push({
+      from: iso(s), to: iso(e), rows: got, error: err,
+      detail: `${seen} of ${drivers.length} drivers answered`,
+    });
   }
   return { total, chunks };
 }
