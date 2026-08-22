@@ -13,6 +13,7 @@ import { dayRoutes } from './day_routes.js';
 import { segmentRoutes, slotRoutes } from './segment_routes.js';
 import { forecastRoutes } from './forecast_routes.js';
 import { playbookRoutes } from './playbook_routes.js';
+import { retentionRoutes } from './retention_routes.js';
 import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -1604,6 +1605,10 @@ slotRoutes(app, { q, wrap, range });
    a person can go and do, each carrying the arithmetic that sized it. */
 forecastRoutes(app, { q, wrap, DAYWIN });
 playbookRoutes(app, { q, wrap, range, DAYWIN });
+
+/* Whether a falling driver count is people leaving or nobody arriving. The
+   headcount cannot tell those apart and they need opposite remedies. */
+retentionRoutes(app, { q, wrap });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

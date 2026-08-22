@@ -1791,6 +1791,55 @@ app.get('/api/playbook', (req, r) => {
   });
 });
 
+
+/* ── driver lifecycle ────────────────────────────────────────────────────
+   Shaped like the live fleet: a large starting roster that drains, thin
+   intake, and a driver count that recovers late through returners rather than
+   through recruitment — which is exactly the distinction the page exists to
+   draw. */
+app.get('/api/retention', (_, r) => {
+  const months = MONTH_KEYS.slice(0, 12);   // the month in progress is excluded
+  const sizes = { '2025-08': 80, '2025-09': 26, '2025-10': 14, '2025-11': 9,
+    '2025-12': 5, '2026-01': 6, '2026-02': 4, '2026-03': 3, '2026-04': 2,
+    '2026-05': 2, '2026-06': 1, '2026-07': 7 };
+  const cohorts = months.map((m, ci) => {
+    const size = sizes[m] || 1;
+    const horizon = months.length - ci;
+    const retained = Array.from({ length: horizon }, (_, k) => {
+      // Steep first-month drop, then a slow bleed — the usual shape.
+      const pct = k === 0 ? 100 : Math.max(4, Math.round(100 * Math.pow(0.72, k) * (ci === 0 ? 1.05 : 0.9)));
+      return { offset: k, m: months[ci + k], n: Math.round((size * pct) / 100), pct };
+    });
+    const still = retained[retained.length - 1];
+    return { cohort: m, size, retained, still_active: still.n,
+      still_active_pct: still.pct, months_observed: horizon, is_left_censored: ci === 0 };
+  });
+  const flow = months.map((m, i) => {
+    const active = TREND[i]?.drivers ?? 0;
+    const joined = sizes[m] || 0;
+    const prev = i ? (TREND[i - 1]?.drivers ?? 0) : 0;
+    const returning = i && active > prev ? Math.max(0, active - prev - joined) : (i ? 2 : 0);
+    const left = i ? Math.max(0, prev + joined + returning - active) : 0;
+    return { m, active, joined, returning, left, net: i ? active - prev : null };
+  });
+  r.json({
+    ok: true, months, current_month_excluded: '2026-08',
+    cohorts, flow, last_complete_month: months[months.length - 1],
+    stopped_last_month: drivers.slice(0, 5).map((name, i) => ({
+      name, driver_ext_id: `drv-${i}`, months_active: 9 - i,
+      first_month: '2025-09', last_month: '2026-06', lifetime_bookings: 640 - i * 130 })),
+    started_last_month: drivers.slice(5, 7).map((name, i) => ({
+      name, driver_ext_id: `drv-${5 + i}`, bookings: 41 - i * 12 })),
+    tenure: { median_months_leavers: 3, median_months_so_far_stayers: 7, leavers: 121, stayers: 86,
+      note: 'Tenure for people still working is a lower bound — they have not finished. Averaging the two '
+        + 'together counts an unfinished span as a finished one, so they are reported apart.' },
+    people_total: 207,
+    caveat: 'A driver counts as active in a month when they took at least one booking in it. Platform '
+      + '"active" status is deliberately not used: a platform can keep somebody nominally active for a year '
+      + 'after their last trip, and on this fleet it does.',
+  });
+});
+
 // Anything not fixtured above answers with an empty list rather than a 404,
 // so a new page renders its own empty state instead of the view error box.
 app.get(/^\/api\//, (_, r) => r.json([]));

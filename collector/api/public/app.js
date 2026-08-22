@@ -20,6 +20,7 @@ import { renderSegments, renderSegment, segmentTable } from './segments.js';
 import { renderSlot } from './slot.js';
 import { renderPlaybook } from './playbook.js';
 import { renderForecast } from './forecast.js';
+import { renderRetention } from './retention.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -99,6 +100,7 @@ const VIEWS = [
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Analyse', sub: 'When trips happen — by day, hour and weekday' },
   { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'Analyse', sub: 'Per-driver output, quality and cross-platform activity' },
   { id: 'roster', label: 'Roster & supply', ic: '☰', grp: 'Analyse', sub: 'Who is on the books across all four platforms, and who is earning nothing' },
+  { id: 'retention', label: 'Joiners & leavers', ic: '⇅', grp: 'Analyse', sub: 'Whether a falling driver count is people leaving or nobody arriving — a headcount cannot tell them apart' },
   { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Analyse', sub: 'Utilisation and revenue per vehicle' },
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
   { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Analyse', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
@@ -182,7 +184,7 @@ function setHeader(detail) {
      did. The playbook DOES respect the window: "idle this month" is a
      different list from "idle this year". */
   const noFilter = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
-    'compliance', 'forecast'];
+    'compliance', 'forecast', 'retention'];
   $('#filters').style.display = noFilter.includes(state.view) ? 'none' : 'flex';
 }
 /* ─────────── views ─────────── */
@@ -513,6 +515,7 @@ V.segment = async (root) => renderSegment(root, state.param, state.sub);
    coming, and what to do about it. */
 V.playbook = async (root) => renderPlaybook(root);
 V.forecast = async (root) => renderForecast(root);
+V.retention = async (root) => renderRetention(root);
 
 /* One weekday-hour cell of the demand heatmap: `#slot/<dow>/<hour>`. */
 V.slot = async (root) => {
