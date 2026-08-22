@@ -855,6 +855,56 @@ app.get('/api/trips/daily', (_, r) => {
    and type, not a page of history. The mock returned a bare array, which is the
    shape the browser smoke test would then be validating against something the
    server no longer sends. */
+/* Revenue by channel. The shape that matters is the DARK row: a channel with
+   thousands of bookings and no money at all, which is what Uber is until its
+   earnings surfaces are collected. A fixture where every channel reports a fare
+   would make the page look finished. */
+app.get('/api/revenue', (_, r) => {
+  const platforms = [
+    { platform: 'uber', bookings: 6142, priced_bookings: 0, fares: null, priced_km: null,
+      km: 78400, drivers: 61, vehicles: 74, payouts: null, cash: null, payout_periods: 0,
+      components: null, tips: null, fare_coverage_pct: 0, revenue_per_km: null,
+      first_at: dayISO(30), last_at: dayISO(0), best: null, payout_drivers: 0,
+      first_period: null, last_period: null,
+      basis: 'none', basis_note: 'no fare on any booking and no payout reported — this channel’s money is dark' },
+    { platform: 'hotel', bookings: 1267, priced_bookings: 1267, fares: 61400, priced_km: 15600,
+      km: 15600, drivers: 22, vehicles: 31, payouts: null, cash: null, payout_periods: 0,
+      components: null, tips: null, fare_coverage_pct: 100, revenue_per_km: 3.94,
+      first_at: dayISO(30), last_at: dayISO(0), best: 61400, payout_drivers: 0,
+      first_period: null, last_period: null,
+      basis: 'fares', basis_note: 'fares reported on 1267 of 1267 bookings' },
+    { platform: 'yango', bookings: 214, priced_bookings: 96, fares: 4180, priced_km: 1180,
+      km: 2640, drivers: 9, vehicles: 11, payouts: 3210, cash: 640, payout_periods: 12,
+      components: null, tips: null, fare_coverage_pct: 44.9, revenue_per_km: 3.54,
+      first_at: dayISO(30), last_at: dayISO(0), best: 3210, payout_drivers: 9,
+      first_period: dayISO(28).slice(0, 10), last_period: dayISO(0).slice(0, 10),
+      basis: 'payout', basis_note: 'net payout — only 44.9% of bookings report a fare' },
+    { platform: 'bolt', bookings: 618, priced_bookings: 121, fares: 5100, priced_km: 1490,
+      km: 7300, drivers: 14, vehicles: 18, payouts: null, cash: null, payout_periods: 0,
+      components: null, tips: null, fare_coverage_pct: 19.6, revenue_per_km: 3.42,
+      first_at: dayISO(30), last_at: dayISO(0), best: 5100, payout_drivers: 0,
+      first_period: null, last_period: null,
+      basis: 'partial_fares',
+      basis_note: 'fares on only 121 of 618 bookings (19.6%) — the rest of this channel’s money is not collected' },
+  ];
+  const components = [
+    { platform: 'uber', category: 'net_fare', parent: null, amount: 41200, drivers: 58 },
+    { platform: 'uber', category: 'tip', parent: 'net_fare', amount: 1840, drivers: 34 },
+    { platform: 'uber', category: 'toll', parent: 'net_fare', amount: 610, drivers: 41 },
+    { platform: 'uber', category: 'cash_collected', parent: null, amount: -8300, drivers: 44 },
+  ];
+  r.json({
+    window: [dayISO(30).slice(0, 10), dayISO(0).slice(0, 10)],
+    platforms, components,
+    totals: { bookings: 8241, priced_bookings: 1484, fares: 70680, payouts: 3210, cash: 640,
+      tips: 1840, accounted: 69790, accounted_bookings: 1481, dark_bookings: 6760, dark_pct: 82 },
+    caveat: 'uber, bolt account for 6760 of 8241 bookings in this window and report little or no money. '
+      + 'Every fleet-wide revenue figure in this product is over what did land, so all of them understate '
+      + 'what the fleet took.',
+    measured_platforms: ['hotel'],
+  });
+});
+
 app.get('/api/recommendations', (_, r) => r.json({ shown: 3, truncated: false, history: 42, rows: [
   { platform: 'uber', rec_type: 'acceptance_rate', period_start: dayISO(28), period_end: dayISO(0),
     org_value: 0.79, target_value: 0.85, flagged_count: 14, flagged: true, updated_at: new Date().toISOString() },

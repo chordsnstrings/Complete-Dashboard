@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
-import { upsertMany, logRun } from '../db.js';
+import { upsertMany, logRun, pool } from '../db.js';
 import { iso } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { log } from '../log.js';
@@ -140,13 +140,40 @@ const money = (a) => {
   return null;
 };
 
+/* 50, not 200.
+   Uber caps page size on this family of surfaces and does not say so: the
+   sibling GraphQL surface rejects anything over ten outright, and this one
+   answers 200 OK with an EMPTY earnerPaymentBreakdowns list. The probe, which
+   asks for 50, has been getting 50 earner records all along while the
+   collector asking for 200 got none — the same endpoint, the same window, the
+   same credentials, a different page size. An empty list is indistinguishable
+   from a quiet week unless somebody compares the two, so the page size is
+   pinned here to the value that is known to work and the pages are walked. */
+const EARNER_PAGE = 50;
+const EARNER_PAGES_MAX = 40;
+
 async function pullEarningsComponents(from, to) {
   const token = await uberOAuthToken();
-  const url = `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({
-    org_id: config.uber.org, start_time: new Date(from).getTime(), end_time: new Date(to).getTime(), page_size: 200,
-  })}`;
-  const { data } = await http(url, { headers: { authorization: `Bearer ${token}` }, timeoutMs: 45000 });
-  const breakdowns = data?.earnerPaymentBreakdowns || [];
+  const call = async (pageToken) => {
+    const url = `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({
+      org_id: config.uber.org, start_time: new Date(from).getTime(),
+      end_time: new Date(to).getTime(), page_size: EARNER_PAGE,
+      ...(pageToken ? { page_token: pageToken } : {}),
+    })}`;
+    const { data } = await http(url, { headers: { authorization: `Bearer ${token}` }, timeoutMs: 45000 });
+    return data;
+  };
+
+  const breakdowns = [];
+  let pageToken = '', pages = 0;
+  do {
+    const data = await call(pageToken);
+    const page = data?.earnerPaymentBreakdowns || [];
+    breakdowns.push(...page);
+    pageToken = data?.paginationResult?.nextPageToken || data?.nextPageToken || '';
+    if (!page.length) break;
+  } while (pageToken && ++pages < EARNER_PAGES_MAX);
+
   const rows = [];
   const ps = iso(new Date(from)), pe = iso(new Date(to));
   const skipped = [];
@@ -190,6 +217,19 @@ async function pullEarningsComponents(from, to) {
     const k = `${r.driver_ext_id}|${r.category}`;
     if (seen.has(k)) return false; seen.add(k); return true;
   });
+  /* Zero earners on a fleet that plainly has drivers is a collection failure,
+     not an empty week — it is the state a page size of 200 put this in, and it
+     reported success throughout. The probe's own record of this surface is the
+     evidence: if it saw earners and we did not, the difference is ours. */
+  if (!breakdowns.length) {
+    const { rows: [probe] = [] } = await pool.query(
+      `SELECT record_count, probed_at FROM provider_probe
+        WHERE provider = 'uber' AND surface = 'earner-payments' AND ok`).catch(() => ({ rows: [] }));
+    if (probe?.record_count > 0) {
+      throw new Error('earner payments returned no earners, but the probe of the same surface saw '
+        + `${probe.record_count} at ${probe.probed_at}. The request, not the week, is wrong.`);
+    }
+  }
   log.info(SRC, 'earner payments', { earners: breakdowns.length, components: uniq.length });
   return uniq.length ? upsertMany('driver_earnings_component', uniq,
     ['platform', 'driver_ext_id', 'period_start', 'period_end', 'category']) : 0;

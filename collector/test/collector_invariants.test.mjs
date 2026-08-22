@@ -50,6 +50,32 @@ check('chunks are paced between reports', /await sleep\(consecutiveFailures \? /
 check('a GraphQL error response is reported, not read as an empty fleet',
   /data\?\.errors\?\.length/.test(uber));
 
+/* ── uber money ────────────────────────────────────────────────────────────
+   The trip export has no fare column, so every dirham of Uber revenue this
+   product can ever show comes from two surfaces — and both of them returned
+   nothing while reporting success, for the life of the collector.
+
+   The earner-payments REST surface answers 200 with an EMPTY list when asked
+   for a page of 200. The probe asks for 50 and has been getting 50 records the
+   whole time: same endpoint, same window, same credentials, different page
+   size. An empty list is indistinguishable from a quiet week unless something
+   compares the two, so the collector now does exactly that before believing
+   it. */
+const fleet = src('uber_fleet.js');
+check('the earner-payments page size is the one that is known to work',
+  /const EARNER_PAGE = 50;/.test(fleet) && !/page_size: 200/.test(fleet));
+check('and its pages are walked rather than assumed to be one',
+  /nextPageToken/.test(fleet) && /EARNER_PAGES_MAX/.test(fleet));
+check('zero earners is checked against the probe before it is believed',
+  /provider_probe/.test(fleet) && /record_count > 0/.test(fleet));
+check('records that come back and do not parse are a failure, not an empty week',
+  /and no parsable component/.test(fleet));
+check('the earner id is read from the spelling this API actually uses',
+  /earnerInfo\.uuid/.test(fleet));
+// Four surfaces, and 'ok' used to mean "at least one of them worked".
+check('a surface that fails is recorded against the run, not only in the log',
+  /failed\.push\(/.test(fleet) && /status: failed\.length === 0 \? 'ok'/.test(fleet));
+
 /* ── hotel ─────────────────────────────────────────────────────────────────
    The API returns a bcrypt password hash on every driver record. */
 const hotel = src('hotel.js');

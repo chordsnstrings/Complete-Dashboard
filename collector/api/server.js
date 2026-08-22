@@ -15,6 +15,7 @@ import { forecastRoutes } from './forecast_routes.js';
 import { playbookRoutes } from './playbook_routes.js';
 import { retentionRoutes } from './retention_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
+import { revenueRoutes } from './revenue_routes.js';
 import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -1729,6 +1730,7 @@ retentionRoutes(app, { q, wrap });
 /* Where next month's forecast work lands against who currently covers it —
    the join between the forecast and the rota. */
 capacityRoutes(app, { q, wrap });
+revenueRoutes(app, { q, wrap, range });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

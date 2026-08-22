@@ -25,6 +25,7 @@ import { renderPlaybook } from './playbook.js';
 import { renderForecast } from './forecast.js';
 import { renderRetention } from './retention.js';
 import { renderCapacity } from './capacity.js';
+import { renderRevenue } from './revenue.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -108,6 +109,7 @@ const VIEWS = [
   { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Analyse', sub: 'Utilisation and revenue per vehicle' },
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
   { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Analyse', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
+  { id: 'revenue', label: 'Revenue by channel', ic: '◇', grp: 'Analyse', sub: 'What each platform actually tells us about money — and which ones tell us nothing' },
   { id: 'finance', label: 'Finance', ic: '◈', grp: 'Analyse', sub: 'Revenue, payment mix and the transaction ledger' },
   { id: 'settlement', label: 'Settlement', ic: '◫', grp: 'Analyse', sub: 'Who settles the fare and when — cash in hand, and what is outstanding' },
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Analyse', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
@@ -559,6 +561,7 @@ V.playbook = async (root) => renderPlaybook(root);
 V.forecast = async (root) => renderForecast(root);
 V.retention = async (root) => renderRetention(root);
 V.capacity = async (root) => renderCapacity(root);
+V.revenue = async (root) => renderRevenue(root);
 
 /* One weekday-hour cell of the demand heatmap: `#slot/<dow>/<hour>`. */
 V.slot = async (root) => {
