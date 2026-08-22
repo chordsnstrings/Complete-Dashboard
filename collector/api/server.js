@@ -539,13 +539,45 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
       + 'platform with data in this window, so the total is the sum of what is shown.' });
 }));
 
-app.get('/api/drivers/performance', wrap(async (req, res) => res.json(await q(
-  `SELECT platform, driver_name, driver_ext_id, plate, period_start, period_end, trips,
-          hours_online, hours_on_trip,
-          acceptance_rate, cancellation_rate, distance_km, earnings, cash_earnings, rating
-   FROM driver_performance WHERE period_start >= $1 AND period_end <= $2
-     AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
-   ORDER BY period_start DESC, trips DESC NULLS LAST LIMIT 300`, range(req)))));
+/* Platform-reported performance records, most recent period first.
+   ─────────────────────────────────────────────────────────────────────────
+   Capped, and it started to bite the moment the Uber collector was fixed: a
+   weekly period used to hold ten drivers because the collector could only see
+   ten, and now holds a hundred and fifty, so 300 rows is two periods rather
+   than a year of them. The list looked identical before and after — no error,
+   no gap, just fourteen periods that quietly stopped being in it.
+
+   The totals are counted over the whole window so the page can say what it is
+   showing, and the periods are listed in full: a reader choosing a period from
+   a menu built out of a truncated list cannot see the ones that were cut. */
+app.get('/api/drivers/performance', wrap(async (req, res) => {
+  const p = range(req);
+  const rows = await q(
+    `SELECT platform, driver_name, driver_ext_id, plate, period_start, period_end, trips,
+            hours_online, hours_on_trip,
+            acceptance_rate, cancellation_rate, distance_km, earnings, cash_earnings, rating
+     FROM driver_performance WHERE period_start >= $1 AND period_end <= $2
+       AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
+     ORDER BY period_start DESC, trips DESC NULLS LAST LIMIT 300`, p);
+  const [t] = await q(
+    `SELECT count(*)::int total,
+            count(DISTINCT (platform, period_start, period_end))::int periods,
+            ${peopleCount('driver_ext_id', 'driver_name')}::int people,
+            round(sum(earnings)::numeric, 2) AS earnings,
+            round(sum(cash_earnings)::numeric, 2) AS cash_earnings,
+            array_remove(array_agg(DISTINCT platform), NULL) AS platforms
+     FROM driver_performance WHERE period_start >= $1 AND period_end <= $2
+       AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`, p);
+  const periods = await q(
+    `SELECT platform, to_char(period_start,'YYYY-MM-DD') AS period_start,
+            to_char(period_end,'YYYY-MM-DD') AS period_end,
+            count(*)::int drivers, round(sum(earnings)::numeric,2) AS earnings
+     FROM driver_performance WHERE period_start >= $1 AND period_end <= $2
+       AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
+     GROUP BY 1,2,3 ORDER BY 2 DESC, 1`, p);
+  res.json({ rows, periods, totals: t, shown: rows.length,
+    truncated: (t?.total ?? 0) > rows.length });
+}));
 
 /* ───────────────────────── vehicles / fleet ───────────────────────── */
 app.get('/api/vehicles', wrap(async (req, res) => {

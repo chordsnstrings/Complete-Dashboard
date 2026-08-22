@@ -1697,14 +1697,30 @@ app.get('/api/drivers/cross-platform', (_, r) => r.json({
   note: 'One row per person: platform accounts are folded by name.',
 }));
 
-app.get('/api/drivers/performance', (_, r) => r.json(drivers.slice(0, 6).map((name, i) => ({
-  platform: ['uber', 'bolt', 'yango'][i % 3], driver_name: name, driver_ext_id: `drv-${i}`,
-  plate: plates[i], period_start: '2026-08-14', period_end: '2026-08-20',
-  trips: 44 - i * 4, hours_online: 52 - i * 3, hours_on_trip: 31 - i * 2,
-  acceptance_rate: 0.92 - i * 0.04, cancellation_rate: 0.03 + i * 0.01,
-  distance_km: 900 - i * 60, earnings: 2400 - i * 180, cash_earnings: 800 - i * 60,
-  rating: +(4.9 - i * 0.08).toFixed(2),
-}))));
+/* {rows, periods, totals, shown, truncated} — a bare array before. The cap
+   started to bite the moment the Uber collector was fixed: a weekly period held
+   ten drivers because that was all the collector could see, and now holds a
+   hundred and fifty, so 300 rows is two periods rather than a year of them. */
+app.get('/api/drivers/performance', (_, r) => {
+  const rows = drivers.slice(0, 6).map((name, i) => ({
+    platform: ['uber', 'bolt', 'yango'][i % 3], driver_name: name, driver_ext_id: `drv-${i}`,
+    plate: plates[i], period_start: '2026-08-14', period_end: '2026-08-20',
+    trips: 44 - i * 4, hours_online: 52 - i * 3, hours_on_trip: 31 - i * 2,
+    acceptance_rate: 0.92 - i * 0.04, cancellation_rate: 0.03 + i * 0.01,
+    distance_km: 900 - i * 60, earnings: 2400 - i * 180, cash_earnings: 800 - i * 60,
+    rating: +(4.9 - i * 0.08).toFixed(2),
+  }));
+  r.json({
+    rows, shown: rows.length, truncated: true,
+    periods: [
+      { platform: 'uber', period_start: '2026-08-14', period_end: '2026-08-20', drivers: 150, earnings: 31176.79 },
+      { platform: 'uber', period_start: '2026-08-07', period_end: '2026-08-13', drivers: 148, earnings: 29840.12 },
+      { platform: 'yango', period_start: '2026-08-14', period_end: '2026-08-20', drivers: 9, earnings: 1210.4 },
+    ],
+    totals: { total: 1840, periods: 16, people: 152, earnings: 214880.5,
+      cash_earnings: 41200.75, platforms: ['uber', 'yango', 'bolt'] },
+  });
+});
 
 
 /* ── the fifteen routes that were falling through to the catch-all ────────

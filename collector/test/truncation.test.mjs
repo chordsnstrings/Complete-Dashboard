@@ -145,6 +145,27 @@ check('no list comes back at its cap without saying how many there really are',
     d.headline.drivers >= d.drivers.length, `${d.headline.drivers} vs ${d.drivers.length}`);
 }
 {
+  /* Platform-reported performance: 240 people over four weekly periods is 960
+     rows against a 300-row cap. This is the exact state the real fleet entered
+     the moment the Uber collector was fixed — a period used to hold ten drivers
+     because that was all the collector could see, and started holding a hundred
+     and fifty, so the first 300 rows became two periods rather than a year of
+     them. The list looked identical before and after: no error, no gap, just
+     fourteen periods that quietly stopped being in it. */
+  const pf = (await get(`/api/drivers/performance?${WIN}`)).body;
+  check('the performance list is truncated at this scale, so the next checks mean something',
+    pf.truncated === true && (pf.rows || []).length < pf.totals.total,
+    `${pf.shown} of ${pf.totals?.total}`);
+  check('and it says how many records, people and periods there really are',
+    pf.totals.total >= 900 && pf.totals.people === WIDE_PEOPLE && pf.totals.periods >= 4,
+    JSON.stringify(pf.totals));
+  check('and lists every period, so a period cut from the rows is still visible',
+    (pf.periods || []).length >= 4, String((pf.periods || []).length));
+  check('the earnings total is over every record, not over the page',
+    Number(pf.totals.earnings) > (pf.rows || []).reduce((a, r) => a + Number(r.earnings || 0), 0),
+    `${pf.totals.earnings} vs the page`);
+}
+{
   // The vehicle directory is the fleet's asset register; missing a car from it
   // is the one thing it must not do.
   const dir = (await get(`/api/vehicles/directory?${WIN}`)).body;

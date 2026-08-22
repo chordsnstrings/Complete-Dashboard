@@ -455,7 +455,15 @@ V.drivers = async (root) => {
       + 'telematics journeys are counted apart because they are the same physical trips seen by the tracker.'));
   }
   perf.body.innerHTML = '';
-  perf.body.append(tableFrom(pf.slice(0, 25), [
+  /* {rows, periods, totals, shown, truncated} — a bare array before. The cap
+     started to bite the moment the Uber collector was fixed: a weekly period
+     used to hold ten drivers because that was all the collector could see, and
+     now holds a hundred and fifty, so the first 300 rows are two periods rather
+     than a year of them. Tolerant of the old shape so a stale bundle still
+     draws something. */
+  const pfRows = Array.isArray(pf) ? pf : (pf.rows || []);
+  const pfTot = (Array.isArray(pf) ? null : pf.totals) || {};
+  perf.body.append(tableFrom(pfRows.slice(0, 25), [
     { label: 'Platform', key: 'platform' },
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Period', key: 'period_start', render: (r) => dayStr(r.period_start) },
@@ -463,6 +471,13 @@ V.drivers = async (root) => {
     { label: 'Hrs online', key: 'hours_online', num: true, render: (x) => x.hours_online ? (+x.hours_online).toFixed(1) : '—' },
     { label: 'Earnings', key: 'earnings', num: true, render: (x) => money(x.earnings) },
   ]));
+  if (pfTot.total) {
+    perf.body.append(el('p', 'cap',
+      `Showing 25 of ${fmt(pfTot.total)} records — ${fmt(pfTot.people)} people across `
+      + `${fmt(pfTot.periods)} reporting periods on ${(pfTot.platforms || []).join(', ') || 'no platform'}, `
+      + `${money(pfTot.earnings)} reported in total.`
+      + (pf.truncated ? ' The list is the most recent periods, not all of them.' : '')));
+  }
 };
 
 // The per-driver pages themselves. `state.param` is the platform driver id and

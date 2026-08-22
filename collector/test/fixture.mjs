@@ -211,6 +211,23 @@ async function seedWide(db) {
              VALUES ('uber','ecosine',$1,$2,'+9715000000',$3,$4,'working',4.6)
              ON CONFLICT DO NOTHING`,
       [p.id, p.name, `L${p.id}`, `2026-${String(9 + (i % 3)).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`]);
+    /* Platform-reported earnings, weekly, for everybody. Four weeks of 240
+       people is 960 rows against a 300-row cap — which is the state the real
+       fleet entered the moment the Uber collector stopped seeing ten drivers
+       and started seeing a hundred and fifty. Before this, no fixture ever had
+       more than a handful, so the cap on /api/drivers/performance could not
+       bite and the truncation test could not see it. */
+    for (const [ws, we] of [['2026-08-01', '2026-08-07'], ['2026-08-08', '2026-08-14'],
+      ['2026-08-15', '2026-08-21'], ['2026-08-22', '2026-08-28']]) {
+      await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, driver_name, plate,
+                 period_start, period_end, trips, hours_online, hours_on_trip, acceptance_rate,
+                 cancellation_rate, distance_km, earnings, cash_earnings)
+               VALUES ('uber','ecosine',$1,$2,$3,$4,$5,$6,$7,$8,0.91,0.04,$9,$10,$11)
+               ON CONFLICT DO NOTHING`,
+        [p.id, p.name, plate(i % WIDE_PLATES), ws, we,
+          20 + (i % 30), 40 + (i % 20), 22 + (i % 12),
+          300 + (i % 200), 900 + (i % 700), 120 + (i % 90)]);
+    }
   }
   return n;
 }
