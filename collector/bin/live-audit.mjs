@@ -1,5 +1,29 @@
-/* The same invariants the test suite asserts against a fixture, run against the
-   live database. A fixture is a hypothesis about the data; this is the data. */
+#!/usr/bin/env node
+/* The test suite's invariants, run against the live database.
+   ─────────────────────────────────────────────────────────────────────────
+   Every check in test/ runs against a fixture, and a fixture is a hypothesis
+   about the data. This runs the same questions against production, where the
+   answers are whatever the providers actually sent.
+
+   It found five things the fixtures could not:
+
+     - the driver directory and the driver ranking folded names differently, so
+       the two pages reported 90 and 89 drivers for the same fleet
+     - revenue_per_km divided the revenue of one population by the distance of
+       another, on three pages
+     - fifteen bookings carry no vehicle, so the vehicle table summed to fifteen
+       fewer trips than the fleet and nothing said why
+     - the fleet revenue headline counted complimentary rides and the settlement
+       page did not, a difference of AED 320
+     - and, behind all of it, Uber earnings had never been collected at all
+
+   Read-only: every request is a GET. Safe to run against production at any
+   time, and worth running after every deploy.
+
+       node bin/live-audit.mjs
+       BASE=http://localhost:8099 node bin/live-audit.mjs
+       WIN='from=2026-01-01&to=2026-08-22' node bin/live-audit.mjs
+*/
 const B = process.env.BASE || 'https://fleet-dashboard-wpeqb.ondigitalocean.app';
 const W = process.env.WIN || 'from=2026-07-23&to=2026-08-22';
 let pass = 0, fail = 0;
@@ -18,6 +42,13 @@ check('kpis.completion_pct', near(N(k.completion_pct), 100 * k.completed_trips /
 check('kpis.cancel_pct', near(N(k.cancel_pct), 100 * k.cancelled_trips / k.bookable_trips), `${k.cancel_pct}`);
 check('kpis.avg_km', near(N(k.avg_km), N(k.km) / k.trips_with_distance, 0.05), `${k.avg_km} vs ${N(k.km)}/${k.trips_with_distance}`);
 check('kpis.avg_fare', near(N(k.avg_fare), N(k.revenue) / k.priced_trips, 0.05), `${k.avg_fare}`);
+const settle = (await get('/api/settlement/mix')).body;
+const classSum = (settle.classes || []).reduce((a, c) => a + (Number(c.revenue) || 0), 0);
+check('kpis revenue and the settlement page describe the same money',
+  Math.abs(N(k.revenue) - classSum) <= (settle.classes || []).length / 2 + 1,
+  `${k.revenue} vs ${classSum}`);
+check('kpis trips and the settlement page describe the same trips',
+  k.trips === settle.total_trips, `${k.trips} vs ${settle.total_trips}`);
 check('kpis.revenue_per_km', near(N(k.revenue_per_km), N(k.priced_measured_revenue) / N(k.priced_km), 0.02), `${k.revenue_per_km} vs ${N(k.priced_measured_revenue)}/${N(k.priced_km)}`);
 check('outcomes fit the denominator', k.completed_trips + k.cancelled_trips <= k.bookable_trips, `${k.completed_trips}+${k.cancelled_trips} vs ${k.bookable_trips}`);
 

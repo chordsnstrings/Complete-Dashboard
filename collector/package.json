@@ -15,7 +15,8 @@
     "api": "node api/server.js",
     "check": "node --check src/index.js",
     "smoke": "node test/smoke_views.mjs",
-    "test": "node test/run-all.mjs"
+    "test": "node test/run-all.mjs",
+    "audit:live": "node bin/live-audit.mjs"
   },
   "dependencies": {
     "csv-parse": "^5.5.6",
