@@ -7,6 +7,7 @@
 //   node src/index.js schedule      — long-running: cron incrementals + realtime polling (container default)
 import cron from 'node-cron';
 import { migrate, pool } from './db.js';
+import { refreshRollups } from './rollup.js';
 import { backfill, incremental, cabmanTick, liveStatusTick, analystPass, probePass } from './run.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -31,6 +32,19 @@ async function main() {
     setInterval(() => liveStatusTick(), config.liveStatusSeconds * 1000);
     // historical/aggregate refresh every 30 minutes
     cron.schedule('*/30 * * * *', () => incremental().catch((e) => log.error('scheduler', 'incremental', { err: String(e) })));
+    /* Rollups on their own schedule as well as at the end of each run.
+       The run-end refresh covers the normal path, but CABMAN writes trips on a
+       five-minute tick of its own and a failed incremental leaves the rollups
+       behind with no other route back — and a page reading a stale rollup shows
+       a number that is wrong in a way nothing about it reveals. Fifteen minutes
+       is well inside the thirty-minute collection cycle, so the pages are never
+       more than one tick behind what has actually landed. */
+    cron.schedule('*/15 * * * *', () => refreshRollups()
+      .catch((e) => log.error('scheduler', 'rollup', { err: String(e) })));
+    /* And once at boot. A fresh database, or a deploy that lands before the
+       first collection, would otherwise serve empty months on every page that
+       reads a rollup until the quarter hour came round. */
+    refreshRollups().catch((e) => log.error('scheduler', 'rollup at boot', { err: String(e) }));
     /* The analyst costs a model call per pass, and its input is a month of
        aggregates that does not meaningfully change between two afternoons.
        Once a day, at 03:10 Dubai (23:10 UTC), after the overnight incremental

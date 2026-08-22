@@ -29,15 +29,30 @@ export function retentionRoutes(app, { q, wrap }) {
     /* One row per person per month they booked. Folded by canonical name,
        because the same human holds a separate id on every platform and
        counting ids reports three drivers where there is one. */
-    const activity = await q(
-      `SELECT lower(regexp_replace(btrim(driver_name), '\\s+', ' ', 'g')) AS person,
-              max(driver_name) AS name,
-              to_char(local_month, 'YYYY-MM') AS m,
-              count(*)::int bookings,
-              (array_agg(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id
-       FROM trip_norm
-       WHERE is_booking AND coalesce(btrim(driver_name), '') <> ''
-       GROUP BY 1, 3`);
+    /* From rollup_person_month. This grouped every booking ever collected by
+       person and month — no window, no index that helps — and cost 6.2
+       seconds identically for every viewer. src/rollup.js computes it when the
+       collector writes.
+
+       Note the fold: this query used its own, which collapsed whitespace and
+       case but NOT a repeated name part, so "Najeeb Ullah Khan Khan" was a
+       different person here from everywhere else in the product and appeared
+       as a separate cohort member. The rollup is keyed on person_key, the one
+       stored fold, so retention now counts the same humans the rest of the
+       pages do. */
+    let activity = await q(
+      `SELECT person_key AS person, name, to_char(month,'YYYY-MM') AS m, bookings, driver_ext_id
+       FROM rollup_person_month ORDER BY person_key, month`);
+    if (!activity.length) {
+      activity = await q(
+        `SELECT t.person_key AS person, max(n.driver_name) AS name,
+                to_char(date_trunc('month', n.local_day), 'YYYY-MM') AS m,
+                count(*)::int bookings,
+                (array_agg(DISTINCT n.driver_ext_id) FILTER (WHERE n.driver_ext_id IS NOT NULL))[1] AS driver_ext_id
+         FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
+         WHERE n.is_booking AND t.person_key IS NOT NULL AND t.person_key <> ''
+         GROUP BY 1, 3`);
+    }
 
     if (!activity.length) {
       return res.json({ ok: false, reason: 'No booking in the record names a driver.' });

@@ -18,6 +18,7 @@
 
 import { forecastMonths, weekdayShares, forecastDays, regimeWindow } from '../src/forecast.js';
 import { peopleCount } from './custody_sql.js';
+import { rollupGrainSql } from '../src/rollup.js';
 
 export function forecastRoutes(app, { q, wrap, DAYWIN }) {
   /* ── the forecast ─────────────────────────────────────────────────────── */
@@ -27,17 +28,28 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
     /* Whole Dubai-local months of BOOKINGS. Telematics journeys are the same
        physical trips seen by the tracker; forecasting the sum of both predicts
        a quantity that does not exist. */
-    const months = await q(
-      `SELECT to_char(local_month,'YYYY-MM') AS m,
-              count(*) FILTER (WHERE is_booking)::int trips,
-              ${peopleCount()} FILTER (WHERE is_booking)::int drivers,
-              count(DISTINCT plate) FILTER (WHERE is_booking)::int vehicles,
-              round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-              count(*) FILTER (WHERE has_fare)::int priced_trips,
-              min(local_day) AS first_day, max(local_day) AS last_day
-       FROM trip_norm
-       WHERE ($1::text IS NULL OR platform = $1)
-       GROUP BY 1 ORDER BY 1`, [req.query.platform || null]);
+    /* From rollup_month. This grouped every trip ever collected, with no
+       window to narrow it and no index that could help, and cost 12.4 seconds
+       on every load — identically for every viewer, because the answer does
+       not depend on anything in the request. src/rollup.js computes it when
+       the collector writes, which is the only time it changes.
+
+       Falls back to computing the grain from the same SQL the rollup is built
+       from, so a fresh database or a failed rollup is slow rather than empty,
+       and the fast path and the slow path cannot become different answers. */
+    const monthShape = `to_char(month,'YYYY-MM') AS m, bookings AS trips, drivers,
+              earning_vehicles AS vehicles, round(revenue,0) AS revenue, priced_trips`;
+    let months = await q(
+      `SELECT ${monthShape}, first_day, last_day FROM rollup_month
+       WHERE platform = coalesce($1,'*') AND fleet_id = '*' ORDER BY month`,
+      [req.query.platform || null]);
+    if (!months.length) {
+      months = await q(
+        `SELECT ${monthShape}, NULL::date AS first_day, NULL::date AS last_day
+         FROM (${rollupGrainSql('month')}) g
+         WHERE platform = coalesce($1,'*') AND fleet_id = '*' ORDER BY month`,
+        [req.query.platform || null]);
+    }
 
     if (!months.length) {
       return res.json({ ok: false, reason: 'No booking has ever been collected.', months: [] });
@@ -90,12 +102,20 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
     }
 
     /* ── the shape of a month, measured over recent complete weeks ──────── */
-    const days = await q(
-      `SELECT to_char(local_day,'YYYY-MM-DD') AS day, count(*)::int trips
-       FROM trip_norm
-       WHERE is_booking AND ($1::text IS NULL OR platform = $1)
-         AND local_day > (SELECT max(local_day) FROM trip_norm WHERE is_booking) - 70
-       GROUP BY 1 ORDER BY 1`, [req.query.platform || null]);
+    // From rollup_day, same reasoning as the months above.
+    const dayShape = `to_char(day,'YYYY-MM-DD') AS day, bookings AS trips`;
+    let days = await q(
+      `SELECT ${dayShape} FROM rollup_day
+       WHERE platform = coalesce($1,'*') AND fleet_id = '*'
+         AND day > (SELECT max(day) FROM rollup_day WHERE platform = '*' AND fleet_id = '*') - 70
+       ORDER BY day`, [req.query.platform || null]);
+    if (!days.length) {
+      days = await q(
+        `SELECT ${dayShape} FROM (${rollupGrainSql('day')}) g
+         WHERE platform = coalesce($1,'*') AND fleet_id = '*'
+           AND day > (SELECT max(local_day) FROM trip_norm WHERE is_booking) - 70
+         ORDER BY day`, [req.query.platform || null]);
+    }
     /* Drop the trailing partial week: the record stops mid-week, so the last
        few days are complete days but an incomplete cycle, and averaging them
        in tilts every weekday share toward whichever days happened to fall at

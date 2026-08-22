@@ -13,6 +13,7 @@ import { computeInsights } from './insights.js';
 import { runAnalyst } from './analyst.js';
 import { probeAll } from './probe.js';
 import { rebuildCustody } from './custody.js';
+import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
 import { monthsAgo, daysAgo } from './util.js';
 import { setState } from './db.js';
@@ -94,6 +95,17 @@ async function runWindowInner(mode, from, to, onProgress) {
   try {
     await rebuildCustody({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
   } catch (e) { log.error('run', 'custody', { err: String(e) }); }
+  /* Precompute the aggregates that have no window. /api/trend/monthly,
+     /api/forecast and /api/retention each group the ENTIRE trip history, so
+     nothing about a request can narrow them — but the answer is the same for
+     every viewer and only changes here, when new trips land. Rolling them up
+     now is what turns those pages from seconds into milliseconds.
+
+     Before insights, because insights reads aggregates too and there is no
+     reason for it to recompute what was just materialised. */
+  try {
+    await refreshRollups();
+  } catch (e) { log.error('run', 'rollup', { err: String(e) }); }
   // Turn the freshly-landed data into ranked, actionable findings.
   try {
     await computeInsights({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });

@@ -16,6 +16,7 @@
 import express from 'express';
 import { readFileSync, readdirSync } from 'node:fs';
 import { win, winDays } from '../api/window.js';
+import { rollupGrainSql } from '../src/rollup.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -64,6 +65,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
+    rollupGrainSql, rollupState: async () => [],
     describeSettings: stubList, setSetting: stub, deleteSetting: stub, loadSettings: stub,
     insights: { run: stub }, pool: { query: db.query.bind(db) },
     ...(await import('../api/custody_sql.js')),
@@ -91,7 +93,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     mountSource(src.slice(a, b));
   }
 
-  const deps = { q, wrap, range, endOfDay, F, FB, W, DAYWIN, CANON, win, winDays };
+  const deps = { q, wrap, range, endOfDay, F, FB, W, DAYWIN, CANON, win, winDays, rollupGrainSql };
   const mounted = [];
   for (const f of readdirSync('api').filter((x) => x.endsWith('_routes.js'))) {
     const mod = await import(`../api/${f}`);

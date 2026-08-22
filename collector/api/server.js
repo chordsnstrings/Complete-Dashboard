@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { pool, migrate } from '../src/db.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings } from '../src/settings.js';
 import { win, winDays } from './window.js';
+import { rollupGrainSql, rollupState } from '../src/rollup.js';
 import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
@@ -1199,6 +1200,14 @@ app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
 
 /* What has been asked for, what is running, and what happened to it. A queue
    nobody can see is a queue nobody can trust. */
+/* How fresh the precomputed answers are.
+   Four pages read rollups rather than aggregating the whole history on every
+   request. That is only an acceptable trade while the rollups are actually
+   running: a stale number served instantly is worse than a slow one, because
+   nothing about it looks wrong. This is what lets a page say when it was last
+   computed — and what makes a rollup that has quietly stopped visible. */
+app.get('/api/rollups', wrap(async (_req, res) => res.json(await rollupState())));
+
 app.get('/api/settings/jobs', wrap(async (_req, res) => {
   const jobs = await q(
     /* attempts and progress are both here for the same reason: a job that says
@@ -1316,25 +1325,48 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
 
      Bookings and telematics are counted separately and never summed, distance
      is guarded, and the month is the Dubai-local one. */
-  const observed = await q(
-    `SELECT local_month AS m,
-            count(*) FILTER (WHERE is_booking)::int trips,
-            count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
-            ${peopleCount()}::int drivers,
-            count(*) FILTER (WHERE driver_ext_id IS NOT NULL AND is_booking)::int attributed_trips,
-            count(distinct plate)::int vehicles,
-            count(distinct plate) FILTER (WHERE is_booking)::int earning_vehicles,
-            round(sum(distance_km) FILTER (WHERE has_distance AND is_booking)::numeric,0) km,
-            count(*) FILTER (WHERE has_distance AND is_booking)::int measured_trips,
-            round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-            count(*) FILTER (WHERE has_fare)::int priced_trips,
-            round(100.0*count(*) FILTER (WHERE outcome='not_completed')
-                  /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
-            array_agg(DISTINCT platform) platforms,
-            array_agg(DISTINCT platform) FILTER (WHERE is_booking) AS booking_platforms
-     FROM trip_norm WHERE ($1::text IS NULL OR platform=$1)
-     GROUP BY 1 ORDER BY 1`, [req.query.platform || null]);
-  if (!observed.length) return res.json({ months: [], breaks: [], gaps: [] });
+  /* Read from rollup_month rather than recomputing. This grouped every trip
+     ever collected, by month, with no window — there is nothing in a request
+     that can narrow it and no index that helps, so it cost 13.6 seconds and
+     cost it identically for every viewer on every load. The answer changes
+     only when the collector writes, so src/rollup.js computes it there.
+
+     The rollup carries the same guarded measures because it is built over
+     trip_norm, which is where the three traps above are resolved — it does not
+     restate them and cannot drift from them.
+
+     '*' is the stored "every platform" row, computed at that grain rather than
+     summed from the per-platform ones: a driver on Uber and Yango is one human
+     and summing would report two. */
+  const SHAPE = `month AS m, bookings AS trips, telematics AS telematics_journeys,
+            drivers, attributed_trips, vehicles, earning_vehicles,
+            round(km, 0) AS km, measured_trips,
+            round(revenue, 0) AS revenue, priced_trips,
+            round(100.0 * not_completed / nullif(outcome_n, 0), 1) AS cancel_pct`;
+  let observed = await q(
+    `SELECT ${SHAPE}, platforms, booking_platforms
+     FROM rollup_month
+     WHERE platform = coalesce($1, '*') AND fleet_id = '*'
+     ORDER BY month`, [req.query.platform || null]);
+
+  /* Before the first rollup has run — a fresh database, a deploy that lands
+     ahead of a collection, a rollup that failed — the table is empty and this
+     page would show nothing at all, which is a worse failure than being slow.
+     So it falls back to computing the grain, using the SAME SQL the rollup is
+     built from rather than a second copy that would drift from it. Slow, and
+     only until the next quarter hour. */
+  const fromRollup = observed.length > 0;
+  if (!observed.length) {
+    observed = await q(
+      `SELECT ${SHAPE}, NULL::text[] AS platforms, NULL::text[] AS booking_platforms
+       FROM (${rollupGrainSql('month')}) g
+       WHERE platform = coalesce($1, '*') AND fleet_id = '*'
+       ORDER BY month`, [req.query.platform || null]);
+  }
+  // Said in the response rather than only in a log: a reader deserves to know
+  // whether the figures were precomputed or derived on the spot.
+  const trendSource = fromRollup ? 'rollup' : 'live';
+  if (!observed.length) return res.json({ months: [], breaks: [], gaps: [], source: trendSource });
 
   /* A month with no rows is ambiguous: the fleet may have stood still, or we
      may simply hold no data for it. Treating the two the same produced a
@@ -1432,7 +1464,7 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
   }
   if (run) gaps.push(run);
 
-  res.json({ months, breaks, gaps });
+  res.json({ months, breaks, gaps, source: trendSource });
 }));
 
 // external context joined to the day (weather + calendar) for causality overlays

@@ -1708,12 +1708,54 @@ V.sources = async (root) => {
     'What has actually landed — and, for each dated source, how many days of the window it covered. '
     + 'A row count between two dates says nothing about the days in between.');
   root.append(cv.panel);
-  [st.body, cv.body].forEach(loading);
+  /* The background work, made visible. Four pages read precomputed aggregates
+     instead of grouping the whole trip history on every request — which is only
+     an acceptable trade while the rollups are actually running. A stale number
+     served instantly is worse than a slow one, because nothing about it looks
+     wrong, so the age of each is on the page. */
+  const ru = panel('Precomputed aggregates',
+    'Trend, Forecast and Retention read these rather than aggregating every trip on each load. '
+    + 'Rebuilt after every collection and every fifteen minutes.');
+  root.append(ru.panel);
+  [st.body, cv.body, ru.body].forEach(loading);
   // This page hides the global range filter, so the coverage question is asked
   // over the full observed history rather than over an invisible window.
   // The Dubai day, not the UTC one — see api/public/tz.js.
   const [from, to] = ['2000-01-01', dubaiDay()];
-  const [status, coverage] = await Promise.all([api('/api/status'), api('/api/coverage')]);
+  const [status, coverage, rollups] = await Promise.all([
+    api('/api/status'), api('/api/coverage'), api('/api/rollups').catch(() => [])]);
+
+  ru.body.innerHTML = '';
+  if (!rollups.length) {
+    ru.body.append(note('No rollup has run yet. The pages that read them fall back to computing '
+      + 'the same aggregate live — correct, but slow, until the next rebuild.'));
+  } else {
+    ru.body.append(tableFrom(rollups, [
+      { label: 'Rollup', key: 'name' },
+      { label: 'Status', key: 'status',
+        render: (r) => `<span class="tag ${r.status === 'ok' ? 'ok' : 'bad'}">${esc(r.status || '—')}</span>` },
+      /* Age, not a timestamp. "18 minutes ago" answers the question a reader
+         actually has; a timestamp makes them do the subtraction. */
+      { label: 'Age', key: 'age_min', num: true,
+        render: (r) => (r.age_min == null ? '—'
+          : r.age_min < 60 ? `${fmt(r.age_min)} min ago`
+            : `${fmt(Math.round(r.age_min / 60))} h ago`) },
+      { label: 'Rows', key: 'rows_written', num: true },
+      { label: 'Took', key: 'duration_ms', num: true,
+        render: (r) => (r.duration_ms == null ? '—' : `${fmt(Math.round(r.duration_ms / 100) / 10, 1)}s`) },
+      { label: 'Covers', key: 'covers_from',
+        render: (r) => (r.covers_from ? `${dayStr(r.covers_from)} → ${dayStr(r.covers_to)}` : '—') },
+    ], { compact: true }));
+    const stale = rollups.filter((r) => r.age_min != null && r.age_min > 45);
+    const broken = rollups.filter((r) => r.status !== 'ok');
+    if (broken.length) {
+      ru.body.append(note(`${broken.map((r) => r.name).join(', ')} failed: `
+        + `${esc(broken[0].error || 'no reason recorded')}. Those pages are computing live instead.`, 'err'));
+    } else if (stale.length) {
+      ru.body.append(note(`${stale.map((r) => r.name).join(', ')} has not rebuilt in over 45 minutes, `
+        + 'which is longer than the fifteen-minute schedule allows. The collector may not be running.', 'warn'));
+    }
+  }
   st.body.innerHTML = '';
   const TAG = { ok: 'ok', partial: 'warn', error: 'bad' };
   st.body.append(tableFrom(status, [

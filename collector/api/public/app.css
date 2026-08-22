@@ -685,6 +685,10 @@ td .pill,td .tag{white-space:nowrap}
    source and a healthy one rendered identically, both with the blue accent. */
 .note.ok{border-left-color:var(--good);background:var(--good-bg)}
 .note.err{border-left-color:var(--critical);background:var(--critical-bg)}
+/* And `warn`, for the middle case: a rollup that failed and one that is merely
+   late are different messages, and rendering them the same makes the reader
+   treat both as noise. */
+.note.warn{border-left-color:var(--warn);background:var(--warn-bg)}
 .note.warn{border-left-color:var(--warn);background:var(--warn-bg)}
 
 /* The empty state led with the generic word and whispered the useful one. */

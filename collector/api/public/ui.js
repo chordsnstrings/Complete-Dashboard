@@ -157,5 +157,8 @@ export const money = (v, cur = 'AED', d = 0) => {
   return `${cur} ${n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}`;
 };
 export const pct = (v, d = 0) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : `${Number(v).toFixed(d)}%`);
-export const note = (text) => el('div', 'note', esc(text));
+/* An optional tone. Callers were already passing one — a rollup that failed
+   and a rollup that is merely stale are different messages and were rendering
+   identically, because the second argument was silently dropped. */
+export const note = (text, tone) => el('div', `note${tone ? ' ' + tone : ''}`, esc(text));
 export { fmt, empty };

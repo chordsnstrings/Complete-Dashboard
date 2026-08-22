@@ -47,6 +47,20 @@ app.get('/api/map/journey', (req, res) => {
     distance_km: 83.4, moving_km: 78.1, occupied_km: 31.2 });
 });
 
+/* Deliberately not all-green: one rollup late, so the Sources page's stale
+   branch is exercised by the browser smoke test rather than only existing. */
+app.get('/api/rollups', (_q, r) => r.json([
+  { name: 'rollup_day', status: 'ok', finished_at: new Date(Date.now() - 6 * 60000).toISOString(),
+    rows_written: 4210, duration_ms: 1840, covers_from: '2025-08-21', covers_to: '2026-08-22',
+    error: null, age_min: 6 },
+  { name: 'rollup_month', status: 'ok', finished_at: new Date(Date.now() - 6 * 60000).toISOString(),
+    rows_written: 168, duration_ms: 910, covers_from: '2025-08-21', covers_to: '2026-08-22',
+    error: null, age_min: 6 },
+  { name: 'rollup_person_month', status: 'ok', finished_at: new Date(Date.now() - 52 * 60000).toISOString(),
+    rows_written: 1904, duration_ms: 2260, covers_from: '2025-08-21', covers_to: '2026-08-22',
+    error: null, age_min: 52 },
+]));
+
 app.get('/api/status', (_, r) => r.json([
   { source: 'cabman', mode: 'realtime', status: 'ok', finished_at: new Date().toISOString(),
     rows_written: 48, chunks_total: null, chunks_failed: null, failed_windows: [], windows: [],
@@ -767,7 +781,7 @@ app.get('/api/trend/monthly', (_, r) => {
   }
   // No gaps any more: the Uber backfill closed the 299-day hole, so every
   // month between the first and last trip on record has data.
-  r.json({ months, breaks, gaps: [] });
+  r.json({ source: 'rollup', months, breaks, gaps: [] });
 });
 
 const EV = [
