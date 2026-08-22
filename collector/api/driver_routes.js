@@ -650,4 +650,30 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      FROM vehicle_driver_day
      WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date
      ORDER BY day DESC, trips DESC LIMIT 400`, p))));
+
+  /* The mirror of the vehicle page's custody table: which cars has this person
+     had. Moved here from server.js, where three things were wrong with it:
+
+       - it took `driver_id` while every one of its eleven siblings takes `id`,
+         so a link built the way the rest of the app builds links answered 400
+       - it took ONE raw id, so somebody with an Uber account and a Bolt account
+         saw the cars from one of them
+       - it ignored the window, so it answered about all of history on a page
+         filtered to a month
+
+     withDriver resolves the person, hands over their whole key set, applies the
+     window and refuses an id nobody has. `driver_id` is still accepted, because
+     an address somebody has already bookmarked should not start 404ing. */
+  app.get('/api/driver/vehicles', (req, res, next) => {
+    if (!req.query.id && req.query.driver_id) req.query.id = req.query.driver_id;
+    return next();
+  }, withDriver(async (req, res, d, p) => res.json(await q(
+    `SELECT plate, count(DISTINCT day)::int days, sum(trips)::int trips,
+            round(sum(km)::numeric,0) km, round(sum(revenue)::numeric,0) revenue,
+            min(day) first_day, max(day) last_day,
+            count(DISTINCT day) FILTER (WHERE is_primary)::int primary_days,
+            array_agg(DISTINCT platform) AS platforms
+     FROM vehicle_driver_day
+     WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date
+     GROUP BY plate ORDER BY days DESC, trips DESC`, p))));
 }

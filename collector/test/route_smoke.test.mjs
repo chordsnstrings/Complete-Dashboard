@@ -128,7 +128,6 @@ const ARGS = {
   '/api/mix': 'by=payment',
   '/api/mix/detail': 'by=product',
   '/api/schema/raw-values': 'key=client&platform=hotel',
-  '/api/drivers/:id': null,
   '/api/corporate/property': 'id=h1',
   '/api/corporate/leakage': 'kind=complimentary',
   '/api/corporate/approach': 'by=driver',
@@ -281,6 +280,28 @@ check('every route the source declares is actually registered on the app',
   check('the mock answers in the same top-level shape as the real API',
     drift.length === 0, drift.length ? `\n      ${drift.join('\n      ')}` : '');
   mockServer.close();
+}
+
+/* ── a test's argument map may not name a route that does not exist ───────
+   Several files carry an ARGS map giving each detail route a parameter set
+   that resolves. Two of them named /api/vehicle/compliance and
+   /api/vehicle/hours, neither of which has ever existed — harmless in itself,
+   but a map with stale keys is a map nobody trusts to be complete, and the
+   failure it hides is the opposite one: a route MISSING from the map is called
+   with no parameters and quietly 400s inside a loop that only counts 500s. */
+{
+  const declared = new Set(all);
+  const stale = [];
+  for (const f of readdirSync('test').filter((x) => x.endsWith('.test.mjs'))) {
+    const src = readFileSync(`test/${f}`, 'utf8');
+    for (const m of src.matchAll(/const (?:ARGS|LIST_ARGS)\s*=\s*\{([\s\S]*?)\n\};/g)) {
+      for (const k of m[1].matchAll(/'(\/api\/[^']*)'\s*:/g)) {
+        if (!declared.has(k[1])) stale.push(`test/${f}: ${k[1]}`);
+      }
+    }
+  }
+  check('no test gives arguments to a route that does not exist',
+    stale.length === 0, stale.join('\n      '));
 }
 
 /* ── every schema file must survive being replayed ────────────────────────

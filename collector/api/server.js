@@ -841,27 +841,25 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
 }));
 
 // Who was driving this plate, day by day (handovers included).
-app.get('/api/vehicle/drivers', wrap(async (req, res) => {
-  if (!req.query.plate) return res.status(400).json({ error: 'plate required' });
-  const plate = req.query.plate.toUpperCase().replace(/[\s-]+/g, '');
-  res.json(await q(
-    `SELECT day, driver_ext_id, driver_name, platform, trips, km, revenue,
-            first_trip_at, last_trip_at, is_primary
-     FROM vehicle_driver_day
-     WHERE plate = $1 AND day BETWEEN $2 AND $3
-     ORDER BY day DESC, trips DESC`,
-    [plate, req.query.from || '2000-01-01', req.query.to || '2100-01-01']));
-}));
+/* /api/vehicle/drivers and /api/driver/vehicles used to be declared here, and
+   both predated the per-entity route modules. Being declared first, they won
+   the Express match — so the whole product's two "who drove what" endpoints
+   were the two oldest implementations of it:
 
-// The mirror view: which vehicles has this driver used?
-app.get('/api/driver/vehicles', wrap(async (req, res) => {
-  if (!req.query.driver_id) return res.status(400).json({ error: 'driver_id required' });
-  res.json(await q(
-    `SELECT plate, count(*)::int days, sum(trips)::int trips, round(sum(km)::numeric,0) km,
-            min(day) first_day, max(day) last_day
-     FROM vehicle_driver_day WHERE driver_ext_id = $1
-     GROUP BY plate ORDER BY days DESC`, [req.query.driver_id]));
-}));
+     - /api/driver/vehicles took `driver_id` while its eleven siblings take
+       `id`, so a link built the way every other link is built answered 400.
+       It also took ONE raw id, so a person with an Uber account and a Bolt
+       account saw one of their cars; and it ignored the window entirely, so it
+       answered about all of history under a page filtered to a month.
+
+     - /api/vehicle/drivers answered 200 for a plate that does not exist, while
+       every other vehicle route 404s. A page that renders empty for a typo,
+       instead of saying the vehicle is unknown, reads as "this car did
+       nothing".
+
+   They live in the route modules now, where withDriver/withVehicle already
+   resolve the entity, apply the Dubai window and refuse an unknown id.
+*/
 
 /* ───────────────────────── finance ───────────────────────── */
 app.get('/api/finance/ledger', wrap(async (req, res) => res.json(await q(

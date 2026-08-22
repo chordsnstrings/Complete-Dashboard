@@ -259,6 +259,17 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
      ORDER BY 1`, p))));
 
   /* ── who drove it, day by day ─────────────────────────────────────────── */
+  /* Day-by-day custody for one plate, handovers included. Moved here from
+     server.js, where it answered 200 for a plate that does not exist while
+     every other vehicle route 404s — so a typo rendered as a car that did
+     nothing rather than as a car we have never heard of. */
+  app.get('/api/vehicle/drivers', withVehicle(async (req, res, plate, p) => res.json(await q(
+    `SELECT day, driver_ext_id, driver_name, platform, trips, km, revenue,
+            first_trip_at, last_trip_at, is_primary
+     FROM vehicle_driver_day
+     WHERE plate = $3 AND day BETWEEN $1::date AND $2::date
+     ORDER BY day DESC, trips DESC`, [...winDays(req), plate]))));
+
   app.get('/api/vehicle/drivers-detail', withVehicle(async (req, res, plate, p) => {
     const days = await q(
       `SELECT day, driver_ext_id, driver_name, platform, trips, km, revenue,

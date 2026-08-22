@@ -39,8 +39,12 @@ const EXEMPT = {
   '/api/probe/uber/report-types': 'operator tool: asks the provider which reports this org can generate',
   '/api/probe/uber/report-columns': 'operator tool: reports one provider report’s column shape',
   '/api/probe/uber/rest': 'operator tool: reports the shape of the provider REST surfaces',
-  '/api/driver/vehicles': 'superseded by /api/driver/custody; kept for external callers',
-  '/api/vehicle/drivers': 'superseded by /api/vehicle/drivers-detail; kept for external callers',
+  '/api/driver/vehicles': 'the per-vehicle rollup of /api/driver/custody, which is what the page draws; '
+    + 'kept because it is an address somebody may have bookmarked, and it now resolves the whole person '
+    + 'and honours the window rather than answering about one account and all of history',
+  '/api/vehicle/drivers': 'the day-by-day form of /api/vehicle/drivers-detail, which is what the page draws; '
+    + 'kept for the same reason, and it 404s an unknown plate now rather than rendering it as a car that '
+    + 'did nothing',
   '/api/finance/daily': 'the same series as /api/trips/daily, which the finance view already draws',
   '/api/schema/raw-values': 'drill-down called with a key from /api/schema/raw-fields, not by literal path',
 };

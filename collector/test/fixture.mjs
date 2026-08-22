@@ -30,6 +30,14 @@ const PEOPLE = [
   { name: 'Dana Noor', ids: {} },                    // named, never numbered
 ];
 
+/* The corporate channel's properties. A booking made by a hotel belongs to a
+   property as much as to a driver, and the property is its own page. */
+const PARTNERS = [
+  { id: 'p-marina', name: 'Marina Grand Hotel' },
+  { id: 'p-creek', name: 'Creekside Residences' },
+  { id: 'p-dxb', name: 'Airport Executive Suites' },
+];
+
 let seed = 20260801;
 const rnd = () => (seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
 const pick = (a) => a[Math.floor(rnd() * a.length)];
@@ -54,17 +62,20 @@ export async function seedFleet(db, { wide = false } = {}) {
       // Uber's trip export carries no fare column at all.
       const price = platform === 'uber' ? null : +(9 + km * 2.4 + rnd() * 12).toFixed(2);
       const at = `${day}T${String(hour).padStart(2, '0')}:${String(Math.floor(rnd() * 60)).padStart(2, '0')}:00+04:00`;
+      // The corporate channel books against a PROPERTY, which is its own page.
+      const partner = platform === 'hotel' ? PARTNERS[Math.floor(rnd() * PARTNERS.length)].id : null;
       await q(
         `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
            requested_at, ended_at, distance_km, status, product, payment_type, price,
-           pickup_addr, dropoff_addr, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
-         VALUES ($1,$2,'ecosine',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+           pickup_addr, dropoff_addr, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, partner_id)
+         VALUES ($1,$2,'ecosine',$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
          ON CONFLICT DO NOTHING`,
         [platform, `${platform}-${d}-${i}`, PLATES[Math.floor(rnd() * 4)], id, person.name, at,
           new Date(Date.parse(at) + km * 3 * 60000).toISOString(), km, status,
           pick(['Electric', 'UberX', 'Comfort']), platform === 'hotel' ? 'offline' : pick(['cash', 'apple_pay', 'cashless']),
           price, 'Deira - Dubai - UAE', 'Marina - Dubai - UAE',
-          25.05 + rnd() * 0.25, 55.1 + rnd() * 0.35, 25.05 + rnd() * 0.25, 55.1 + rnd() * 0.35]);
+          25.05 + rnd() * 0.25, 55.1 + rnd() * 0.35, 25.05 + rnd() * 0.25, 55.1 + rnd() * 0.35,
+          partner]);
       n++;
     }
     // FMS telematics twin journeys: a plate, no driver, an odometer distance.
@@ -125,6 +136,13 @@ export async function seedFleet(db, { wide = false } = {}) {
                ON CONFLICT DO NOTHING`, [platform, id, p.name, PLATES[0]]);
     }
   }
+
+  for (const p of PARTNERS)
+    await q(`INSERT INTO partner (platform, partner_id, name, active, address, phone,
+               approval_required, purpose_required, editable_amount)
+             VALUES ('hotel',$1,$2,true,'Dubai, UAE','+97140000000',$3,$4,false)
+             ON CONFLICT DO NOTHING`,
+      [p.id, p.name, p.id === 'p-dxb', p.id !== 'p-marina']);
 
   for (const plate of PLATES)
     for (const [doc, when, state] of [['registration', '2026-10-01', 'valid'],
