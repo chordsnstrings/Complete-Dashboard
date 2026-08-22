@@ -16,6 +16,7 @@
     "check": "node --check src/index.js",
     "smoke": "node test/smoke_views.mjs",
     "test": "node test/run-all.mjs",
+    "audit:pages": "node bin/page-audit.mjs",
     "audit:live": "node bin/live-audit.mjs",
     "smoke:views": "node test/smoke_views.mjs",
     "live-ui": "node bin/live-ui.mjs",
