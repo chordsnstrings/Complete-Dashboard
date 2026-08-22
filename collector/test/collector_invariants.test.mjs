@@ -386,5 +386,24 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
     /distance_km\s*<\s*500/.test(v18));
 }
 
+/* ── bolt: four surfaces, one green tick ───────────────────────────────────
+   Bolt has two fleets on the FI roster and two on the portal, and every one of
+   them could be rejected while the run recorded status 'ok' with rows_written
+   0 — only a thrown exception reached the catch. That is the same shape that
+   hid a 299-day hole in the Uber trip history, and it is why Bolt read as a
+   healthy source for the life of the project while writing nothing at all. */
+const bolt = src('bolt.js');
+check('a bolt run that wrote nothing and failed everywhere is not "ok"',
+  /const status = fails\.length === 0 \? 'ok' : \(roster \+ trips > 0 \? 'partial' : 'error'\)/.test(bolt));
+check('and the failing surfaces are named in the run, not only in the log',
+  /error: fails\.length \? fails\.join/.test(bolt));
+check('a partial bolt run does not log at info, where nobody reads it',
+  /log\[status === 'ok' \? 'info' : 'warn'\]/.test(bolt));
+// Two fleets came back with two different codes under one message we invented.
+check('the FI gateway rejection carries its own message rather than our verdict',
+  /FI getDrivers rejected for/.test(bolt) && /data\?\.message/.test(bolt));
+check('and a thrown bolt run still reports what had already failed',
+  /\[String\(e\), \.\.\.fails\]/.test(bolt));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

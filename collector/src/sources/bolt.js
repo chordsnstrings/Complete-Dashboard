@@ -26,14 +26,24 @@ export async function fiToken() {
 }
 
 // FI roster → driver_performance (roster snapshot) + vehicle dim. company_id is per-fleet.
-async function pullFiRoster(from, to) {
+async function pullFiRoster(from, to, fails) {
   const token = await fiToken();
   let total = 0;
   for (const c of config.bolt.companies) {
     const body = JSON.stringify({ company_id: c.companyId, offset: 0, limit: 200, start_ts: Number(unixS(from)), end_ts: Number(unixS(to)) });
     const { data } = await http(`${config.bolt.fiGateway}/getDrivers`,
       { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body });
-    if (data?.code !== 0) { log.warn(SRC, `FI getDrivers ${c.fleet} not authorized`, { code: data?.code }); continue; }
+    /* This logged a bare code — 498806 for one fleet, 503 for the other — and
+       called both "not authorized", which is our guess rather than the
+       gateway's. Two different codes are two different problems, and the
+       message beside them is what says which. */
+    if (data?.code !== 0) {
+      const why = [data?.message, data?.error_hint && `hint=${data.error_hint}`].filter(Boolean).join(' ')
+        || 'no message';
+      log.warn(SRC, `FI getDrivers rejected for ${c.fleet} — ${why}`, { code: data?.code, company_id: c.companyId });
+      fails.push(`FI roster ${c.fleet}: code=${data?.code} ${why}`);
+      continue;
+    }
     const rows = (data.data?.drivers || []).map((d) => ({
       platform: SRC, fleet_id: c.fleet, driver_ext_id: d.driver_uuid,
       driver_name: `${d.first_name || ''} ${d.last_name || ''}`.trim(),
@@ -146,11 +156,15 @@ async function portalToken(fleet, companyId) {
 
 // Portal trips (orderHistory) — the only Bolt surface carrying trips and fares;
 // the FI gateway is roster-only.
-async function pullPortalTrips(from, to) {
+async function pullPortalTrips(from, to, fails) {
   let total = 0;
   for (const c of config.bolt.companies) {
     const rt = refreshTokenFor(c.fleet);
-    if (!rt) { log.warn(SRC, `portal skipped for ${c.fleet} — no refresh token (trips/earnings unavailable)`); continue; }
+    if (!rt) {
+      log.warn(SRC, `portal skipped for ${c.fleet} — no refresh token (trips/earnings unavailable)`);
+      fails.push(`portal ${c.fleet}: no refresh token configured`);
+      continue;
+    }
 
     const { at, err, meta } = await portalToken(c.fleet, c.companyId);
     if (!at) {
@@ -165,6 +179,7 @@ async function pullPortalTrips(from, to) {
         owner_matches: m?.fleet_owner_id == null ? null : m.fleet_owner_id === c.userId,
         expires_at: m?.expires_at || 'unknown',
       });
+      fails.push(`portal ${c.fleet}: ${err}`);
       continue;
     }
     const url = `${config.bolt.portalBase}/orderHistory/getTable?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`;
@@ -189,13 +204,28 @@ async function pullPortalTrips(from, to) {
   return total;
 }
 export async function collect({ from, to, mode }) {
+  /* Every one of the four surfaces here — two fleets on the FI roster, two on
+     the portal — could fail while this recorded status 'ok' with rows_written
+     0, because only a thrown exception ever reached the catch. That is the
+     same "the run reported success and wrote nothing" that hid a 299-day hole
+     in the Uber trip history, and it is why Bolt has read as a healthy source
+     for the life of the project while writing nothing at all.
+
+     A surface that failed is named in the run now, so /api/status can say
+     which half of Bolt is dark instead of showing a green tick over an empty
+     table. */
+  const fails = [];
   try {
-    const roster = await pullFiRoster(from, to);
-    const trips = await pullPortalTrips(from, to);
-    await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to, status: 'ok', rows_written: roster + trips });
-    log.info(SRC, 'done', { roster, trips });
+    const roster = await pullFiRoster(from, to, fails);
+    const trips = await pullPortalTrips(from, to, fails);
+    const status = fails.length === 0 ? 'ok' : (roster + trips > 0 ? 'partial' : 'error');
+    await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to,
+      status, rows_written: roster + trips,
+      error: fails.length ? fails.join('; ').slice(0, 500) : null });
+    log[status === 'ok' ? 'info' : 'warn'](SRC, `done (${status})`, { roster, trips, failed: fails.length || undefined });
   } catch (e) {
-    await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
+    await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to, status: 'error',
+      error: [String(e), ...fails].join('; ').slice(0, 500) });
     log.error(SRC, 'failed', { err: String(e) });
   }
 }
