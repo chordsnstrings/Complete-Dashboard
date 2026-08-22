@@ -45,8 +45,15 @@ check('and both of the uber sub-sources contribute their windows to the run',
 
    Drivers are asked for by name instead, ten at a time, from the ids we already
    hold — so the batches are the fleet and there is no page to run out. */
+/* Scoped to the GraphQL document, not to the whole file. Written as
+   "nextPageToken appears nowhere in uber.js" it started failing the moment the
+   driver roster — a REST response that genuinely carries one — was paged: a
+   check phrased more broadly than the rule it enforces fails on correct code,
+   which is how a suite stops being believed. */
+const earnerQuery = uber.slice(uber.indexOf('const EARNER_QUERY'),
+  uber.indexOf('async function earnerCall'));
 check('the earner breakdown does not ask for a pagination field this response has no room for',
-  !/nextPageToken/.test(uber));
+  !/nextPageToken/.test(earnerQuery), earnerQuery.slice(0, 80));
 check('and asks for drivers by name rather than paging past the cap',
   /driverListOrPageOptions: 'Driver_List'/.test(uber) && /driverList: drivers\.slice\(/.test(uber));
 check('taking the driver ids from both places they land, not just the roster',
@@ -56,6 +63,21 @@ check('a rejected mode falls back rather than losing the data it was managing',
   /listMode = false/.test(uber) && /driverListOrPageOptions: 'Page_Options'/.test(uber));
 check('and each window records how many of the fleet actually answered',
   /drivers answered/.test(uber));
+/* Around eight hundred calls and a quarter of an hour, and it ran with the
+   progress row frozen on the last TRIP window throughout — a watcher could not
+   tell the phase from a wedged run, which is the exact condition onStep exists
+   for. */
+check('the earnings phase reports its own progress, not only the trip phase',
+  /pullEarnerBreakdowns\(from, to, onStep\)/.test(uber) && /phase: 'earnings'/.test(uber));
+
+/* ── a default page size is not a fleet size ──────────────────────────────
+   The driver roster was fetched once with no limit and no cursor, so it took
+   the API's default page of 50 against a fleet of 152 — and every "on the books
+   but not earning" figure in the product was computed over that third. */
+check('the driver roster is paged rather than taking the first page',
+  /paginationResult\?\.nextPageToken/.test(uber) && /page_token: pageToken/.test(uber));
+check('and a server that ignores the cursor stops the loop instead of spinning',
+  /key === lastKey/.test(uber) && /cursor ignored by the server/.test(uber));
 check('a window that fails is recorded with the dates that would let it be re-fetched',
   /chunk\.error =/.test(uber) && /from: iso\(s\), to: iso\(e\)/.test(uber));
 // A backfill that starts twelve months ago and dies partway never reaches the

@@ -206,7 +206,7 @@ async function earnerCall(s, e, variables) {
    data. */
 const EARNER_BATCH = 10;
 
-async function pullEarnerBreakdowns(from, to) {
+async function pullEarnerBreakdowns(from, to, onStep) {
   let total = 0;
   const chunks = [];
   const drivers = await uberDriverIds();
@@ -275,6 +275,13 @@ async function pullEarnerBreakdowns(from, to) {
       from: iso(s), to: iso(e), rows: got, error: err,
       detail: `${seen} of ${drivers.length} drivers answered`,
     });
+    /* Reported per window, like the trip windows are. Fifty-three windows of
+       sixteen batches is around eight hundred calls and a quarter of an hour,
+       and it ran with the progress row frozen on the last TRIP window the whole
+       time — so a watcher could not tell this phase from a wedged one. That is
+       the exact condition onStep was added for. */
+    onStep?.({ window: `${iso(s)}..${iso(e)}`, index: chunks.length - 1, of: windows.length,
+      rows_so_far: total, phase: 'earnings' });
   }
   return { total, chunks };
 }
@@ -282,9 +289,36 @@ async function pullEarnerBreakdowns(from, to) {
 // Live driver status snapshot (OAuth).
 export async function pullLive() {
   const token = await uberOAuthToken();
-  const { data } = await http(`https://api.uber.com/v1/vehicle-suppliers/drivers/actions?${qs({ org_id: config.uber.org })}`,
-    { headers: { authorization: `Bearer ${token}` } });
-  const overviews = data?.driverStatusOverviews || [];
+  /* Paged. This asked once, with no limit and no cursor, and took whatever came
+     back — which is the API's default page of 50. The fleet has 152 Uber
+     drivers, so driver_platform_state held a third of the roster and every
+     "on the books but not earning" figure in the product was computed over
+     that third. A default page size is not a fleet size.
+
+     The token parameter name is a guess (the probe records that the response
+     carries paginationResult, not what to send back), so the loop is written to
+     survive being wrong: if the server ignores the cursor it returns page one
+     again, the ids are identical, and it stops and says so rather than looping
+     for ever. */
+  const overviews = [];
+  let pageToken = '', pages = 0, lastKey = null;
+  do {
+    const { data } = await http(
+      `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?${qs({
+        org_id: config.uber.org, limit: 50, ...(pageToken ? { page_token: pageToken } : {}),
+      })}`, { headers: { authorization: `Bearer ${token}` } });
+    const page = data?.driverStatusOverviews || [];
+    const key = page.map((d) => d.driverInfo?.driverUuid).join(',');
+    if (key && key === lastKey) {
+      log.warn(SRC, 'driver roster cursor ignored by the server — stopping at one page',
+        { drivers: overviews.length });
+      break;
+    }
+    lastKey = key;
+    overviews.push(...page);
+    pageToken = data?.paginationResult?.nextPageToken || data?.nextPageToken || '';
+    if (!page.length) break;
+  } while (pageToken && ++pages < 40);
 
   /* This response carries an `onboardingStatus` per driver — ACTIVE, WAITLIST,
      and two more — and it was being discarded, along with everyone it describes.
@@ -318,7 +352,7 @@ export async function pullLive() {
 export async function collect({ from, to, mode, onStep }) {
   try {
     const trips = await pullTrips(from, to, onStep);
-    const perf = await pullEarnerBreakdowns(from, to);
+    const perf = await pullEarnerBreakdowns(from, to, onStep);
     // Both sub-sources' windows, so a run that fetched every trip and no
     // earnings reads as partial rather than as ok.
     const chunks = [...trips.chunks, ...perf.chunks];
