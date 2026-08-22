@@ -317,15 +317,26 @@ export function slotRoutes(app, { q, wrap, range }) {
       `SELECT count(*)::int n FROM generate_series($1::date, $2::date, interval '1 day') d
        WHERE extract(dow from d)::int = $3::int`, [from, to, dow]);
 
+    /* Whether the window holds any bookings at all, anywhere. Two very
+       different states both produce zero here and they must not read alike:
+       a fleet that worked 5,000 bookings and none in this hour is a coverage
+       hole worth staffing, while a window with no data in it is not a finding
+       about this hour — it is the absence of any finding. Reported as 0.0
+       trips per Tuesday, the second is a claim nothing supports. */
+    const [{ n: measured } = { n: 0 }] = await q(
+      `SELECT count(*)::int n FROM trip_norm
+       WHERE is_booking AND local_day BETWEEN $1::date AND $2::date`, [from, to]);
+
     res.json({
       slot: { dow, hour },
       headline: {
         ...head,
         possible_days: possible,
+        window_trips: measured,
         // Trips per occurrence of this weekday, not per day the slot happened
         // to fire. The second flatters an hour nobody covers.
-        trips_per_occurrence: possible ? +((head?.trips || 0) / possible).toFixed(1) : null,
-        coverage_pct: possible ? Math.round(((head?.days_seen || 0) / possible) * 100) : null,
+        trips_per_occurrence: possible && measured ? +((head?.trips || 0) / possible).toFixed(1) : null,
+        coverage_pct: possible && measured ? Math.round(((head?.days_seen || 0) / possible) * 100) : null,
         revenue_per_priced_trip: head?.priced_n
           ? +(Number(head.revenue) / head.priced_n).toFixed(2) : null,
       },

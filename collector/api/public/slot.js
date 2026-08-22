@@ -25,9 +25,16 @@ export async function renderSlot(root, dow, hour) {
   const h = d.headline;
 
   if (!h.trips) {
-    return empty(root, `No booking on any channel was requested at ${hourStr(hour)} on a ${DOW[dow]} `
-      + 'anywhere in this window. An empty slot is a real answer — it is either demand you are not serving '
-      + 'or an hour the fleet has correctly decided not to staff.');
+    /* Two different nothings. With bookings elsewhere in the window, an empty
+       hour is a finding. With none anywhere, it is the absence of data and
+       saying "you are not serving this demand" would be inventing one. */
+    return empty(root, h.window_trips
+      ? `No booking on any channel was requested at ${hourStr(hour)} on a ${DOW[dow]} `
+        + `anywhere in this window, against ${fmt(h.window_trips)} bookings in the window overall. `
+        + 'An empty slot is a real answer — it is either demand you are not serving '
+        + 'or an hour the fleet has correctly decided not to staff.'
+      : 'This window holds no bookings at all, on any day or hour, so there is nothing '
+        + 'to say about this slot specifically. Widen the date range.');
   }
 
   root.append(kpiRow([

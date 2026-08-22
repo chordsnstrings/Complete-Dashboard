@@ -21,6 +21,25 @@ function canonName(s) {
   return parts.join(' ');
 }
 
+/* Two folds, deliberately different, and it matters which is which.
+
+   CANON is the plain fold: trim, collapse runs of whitespace, lowercase. It is
+   the *identity* fold — it is what synthesises a stable key for a driver the
+   provider names but never gives an id, and the same expression is used in
+   custody.js, so the person keys identically in vehicle_driver_day and here.
+
+   canonName() above is the looser *alias* fold, used only to decide that two
+   ids belong to one human. It additionally collapses a duplicated surname,
+   which is right for grouping and wrong for a key: fold the key that way and a
+   feed that starts spelling somebody "Khan Khan" silently renames their id.
+
+   canonSql() is CANON in JS, so a key built in Node matches one built in
+   Postgres. Never build a name: key with canonName(). */
+const CANON = (col) => `lower(regexp_replace(btrim(${col}), '\\s+', ' ', 'g'))`;
+const canonSql = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+const nameKey = (s) => `name:${canonSql(s)}`;
+const isNameKey = (id) => String(id || '').startsWith('name:');
+
 export function driverRoutes(app, { q, wrap, endOfDay }) {
   const win = (req) => [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
   /* Dubai calendar days, matching trip_norm.local_day and every other endpoint.
@@ -33,13 +52,27 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     isDay(req.query.to) ? req.query.to : '2100-01-01',
   ];
 
-  /* Resolve `?id=` (a platform driver id) or `?name=` into every record for that
-     person. Returns null when nothing matches, so callers can 404 honestly. */
+  /* Resolve `?id=` (a platform driver id, or a synthesised name: key) or
+     `?name=` into every record for that person. Returns null when nothing
+     matches, so callers can 404 honestly. */
   async function resolve(req) {
     const id = req.query.id || null;
     const nameQ = req.query.name || null;
     let seed = null;
-    if (id) {
+    /* A name: key is not a provider id and will never be found in a
+       driver_ext_id column — looking it up there 404s a person the directory
+       just linked to. It carries its own name, so resolve it directly. */
+    if (id && isNameKey(id)) {
+      const want = id.slice(5);
+      [seed] = await q(
+        `SELECT NULL::text AS driver_ext_id, driver_name, platform FROM trip
+         WHERE ${CANON('driver_name')} = $1 AND coalesce(btrim(driver_ext_id), '') = ''
+         ORDER BY requested_at DESC LIMIT 1`, [want]);
+      if (!seed) [seed] = await q(
+        `SELECT NULL::text AS driver_ext_id, driver_name, platform FROM trip
+         WHERE ${CANON('driver_name')} = $1 ORDER BY requested_at DESC LIMIT 1`, [want]);
+      if (!seed && !nameQ) return null;
+    } else if (id) {
       [seed] = await q(
         `SELECT driver_ext_id, driver_name, platform FROM trip
          WHERE driver_ext_id = $1 AND driver_name IS NOT NULL ORDER BY requested_at DESC LIMIT 1`, [id]);
@@ -58,25 +91,45 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const name = seed?.driver_name || nameQ;
     if (!name) return id ? { id, name: null, ids: [id], platforms: seed ? [seed.platform] : [] } : null;
 
-    // every id sharing the canonical name, across all sources that carry names
-    const aliasRows = name ? await q(
+    /* Every id sharing the canonical name, across all sources that carry names.
+       Rows with no id contribute the synthesised name: key rather than being
+       dropped, so a person the provider names but never numbers still resolves
+       to something the trip queries below can match. */
+    const aliasRows = await q(
       `SELECT DISTINCT platform, driver_ext_id, driver_name FROM (
-         SELECT platform, driver_ext_id, driver_name FROM trip WHERE driver_ext_id IS NOT NULL
-         UNION ALL SELECT platform, driver_ext_id, full_name FROM driver_compliance
-         UNION ALL SELECT platform, driver_ext_id, driver_name FROM driver_performance
-       ) s WHERE driver_ext_id IS NOT NULL AND driver_name IS NOT NULL`) : [];
+         SELECT platform,
+                coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')}) AS driver_ext_id,
+                driver_name FROM trip
+         UNION ALL
+         SELECT platform,
+                coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('full_name')}), full_name
+           FROM driver_compliance
+         UNION ALL
+         SELECT platform,
+                coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')}), driver_name
+           FROM driver_performance
+       ) s WHERE coalesce(btrim(driver_name), '') <> ''`);
     const want = canonName(name);
     const alias = aliasRows.filter((r) => canonName(r.driver_name) === want);
-    const ids = [...new Set([...alias.map((a) => a.driver_ext_id), ...(id ? [id] : [])])];
+    const ids = [...new Set([...alias.map((a) => a.driver_ext_id), ...(id ? [id] : []),
+                             // the key this person would have if never given an id
+                             ...(alias.length ? [] : [nameKey(name)])])];
     if (!ids.length) return null;
     // the longest spelling is usually the fullest one; prefer it for display
     const display = alias.map((a) => a.driver_name).sort((a, b) => b.length - a.length)[0] || name;
     return { id: id || ids[0], name: display, ids, platforms: [...new Set(alias.map((a) => a.platform))] };
   }
 
-  // Shared trip predicate: any of this person's ids, over the window.
-  // `$1..$2` window, `$3` id array — keep this argument order in every query.
-  const TW = `driver_ext_id = ANY($3) AND requested_at BETWEEN $1 AND $2`;
+  /* The person key: a provider id where there is one, the synthesised name: key
+     where there is not. Every query over trip/trip_norm keys on this, never on
+     the raw column — keyed raw, a driver the provider names without an id has
+     no matchable rows and every panel on their page comes back empty while the
+     directory row that linked there says they drove. */
+  const PKEY = `coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')})`;
+
+  // Shared trip predicate: any of this person's keys, over the window.
+  // `$1..$2` window, `$3` key array — keep this argument order in every query.
+  const TW = `${PKEY} = ANY($3) AND requested_at BETWEEN $1 AND $2`;
 
   // Wrap a handler so it resolves the driver first and 404s cleanly when unknown.
   const withDriver = (fn) => wrap(async (req, res) => {
@@ -111,21 +164,31 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const [from, to] = winDays(req);
     const rows = await q(
       `WITH ids AS (
-         -- Everyone we know of, from any source, whether or not they drove.
-         SELECT DISTINCT driver_ext_id, driver_name FROM trip
-           WHERE driver_ext_id IS NOT NULL AND coalesce(btrim(driver_name), '') <> ''
+         /* Everyone we know of, from any source, whether or not they drove.
+            A name with no id is still a person: the id is synthesised from the
+            canonical name so they key identically here, in the work CTE below,
+            and in vehicle_driver_day. Requiring an id here made those people
+            vanish from the directory entirely. */
+         SELECT DISTINCT coalesce(nullif(btrim(driver_ext_id), ''),
+                                  'name:' || ${CANON('driver_name')}) AS driver_ext_id,
+                driver_name FROM trip
+           WHERE coalesce(btrim(driver_name), '') <> ''
          UNION
-         SELECT driver_ext_id, full_name FROM driver_compliance
-           WHERE driver_ext_id IS NOT NULL AND coalesce(btrim(full_name), '') <> ''
+         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                         'name:' || ${CANON('full_name')}), full_name FROM driver_compliance
+           WHERE coalesce(btrim(full_name), '') <> ''
          UNION
-         SELECT driver_ext_id, full_name FROM driver_platform_state
-           WHERE driver_ext_id IS NOT NULL AND coalesce(btrim(full_name), '') <> ''
+         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                         'name:' || ${CANON('full_name')}), full_name FROM driver_platform_state
+           WHERE coalesce(btrim(full_name), '') <> ''
        ),
        who AS (
          SELECT driver_ext_id, max(driver_name) AS driver_name FROM ids GROUP BY 1
        ),
        t AS (
-         SELECT driver_ext_id, min(fleet_id) fleet_id,
+         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                         'name:' || ${CANON('driver_name')}) AS driver_ext_id,
+                min(fleet_id) fleet_id,
                 count(*) FILTER (WHERE is_booking)::int trips,
                 count(*) FILTER (WHERE outcome = 'completed')::int completed,
                 count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable,
@@ -137,14 +200,21 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 array_agg(DISTINCT platform) platforms,
                 mode() WITHIN GROUP (ORDER BY plate) plate
          FROM trip_norm
-         WHERE local_day BETWEEN $1::date AND $2::date AND driver_ext_id IS NOT NULL
-         GROUP BY driver_ext_id
+         -- Grouped on the SAME synthesised key as the ids CTE above. Keyed on
+         -- the raw column, a driver named without an id had an ids row and no
+         -- work to join to it, so they appeared with a permanent zero, which is
+         -- worse than absent: it reads as somebody who did nothing.
+         WHERE local_day BETWEEN $1::date AND $2::date
+           AND coalesce(btrim(driver_name), '') <> ''
+         GROUP BY 1
        ),
        -- The last trip EVER, so "has not driven in this window" and "has never
        -- driven" are different rows rather than the same blank.
        ever AS (
-         SELECT driver_ext_id, max(requested_at) last_ever, count(*)::int lifetime
-         FROM trip WHERE driver_ext_id IS NOT NULL GROUP BY 1
+         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                         'name:' || ${CANON('driver_name')}) AS driver_ext_id,
+                max(requested_at) last_ever, count(*)::int lifetime
+         FROM trip WHERE coalesce(btrim(driver_name), '') <> '' GROUP BY 1
        )
        SELECT who.driver_ext_id, who.driver_name,
               coalesce(t.trips, 0) AS trips, coalesce(t.completed, 0) AS completed,
@@ -203,9 +273,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const multi = [...byName.values()].filter((p) => p.ids.length > 1);
     if (multi.length) {
       const dayRows = await q(
-        `SELECT driver_ext_id, local_day FROM trip_norm
+        `SELECT ${PKEY} AS driver_ext_id, local_day FROM trip_norm
          WHERE local_day BETWEEN $1::date AND $2::date
-           AND driver_ext_id = ANY($3)`,
+           AND ${PKEY} = ANY($3)`,
         [from, to, multi.flatMap((p) => p.ids)]);
       const idToPerson = new Map();
       multi.forEach((p) => p.ids.forEach((id) => idToPerson.set(id, p)));
@@ -252,9 +322,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        FROM vehicle_driver_day WHERE driver_ext_id = ANY($1)
        GROUP BY plate ORDER BY days DESC LIMIT 40`, [d.ids]);
     const accounts = await q(
-      `SELECT platform, driver_ext_id, count(*)::int trips, min(requested_at) first_trip,
-              max(requested_at) last_trip
-       FROM trip WHERE driver_ext_id = ANY($1) GROUP BY 1,2 ORDER BY trips DESC`, [d.ids]);
+      `SELECT platform, ${PKEY} AS driver_ext_id, count(*)::int trips,
+              min(requested_at) first_trip, max(requested_at) last_trip
+       FROM trip WHERE ${PKEY} = ANY($1) GROUP BY 1,2 ORDER BY trips DESC`, [d.ids]);
     res.json({ ...d, span, compliance, vehicles, accounts });
   }));
 
@@ -357,7 +427,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   // comparison set — otherwise a single-trip driver distorts every rank.
   app.get('/api/driver/standing', withDriver(async (req, res, d, p) => {
     const peers = await q(
-      `SELECT driver_ext_id,
+      `SELECT ${PKEY} AS driver_ext_id,
               count(*)::int trips,
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days,
               sum(distance_km) km, sum(price) revenue,
@@ -366,7 +436,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                    /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0) completion,
               100.0*count(*) FILTER (WHERE outcome='not_completed')
                    /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0) cancel
-       FROM trip_norm WHERE requested_at BETWEEN $1 AND $2 AND driver_ext_id IS NOT NULL
+       FROM trip_norm
+       WHERE requested_at BETWEEN $1 AND $2
+         -- keyed on the person, so a named driver with no id is a peer like
+         -- anyone else instead of being quietly left out of the cohort they
+         -- are being ranked against
+         AND (coalesce(btrim(driver_ext_id), '') <> '' OR coalesce(btrim(driver_name), '') <> '')
        GROUP BY 1 HAVING count(*) >= 5`, [p[0], p[1]]);
     const mineIds = new Set(d.ids);
     const mine = peers.filter((r) => mineIds.has(r.driver_ext_id));

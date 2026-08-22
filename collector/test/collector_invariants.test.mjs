@@ -212,12 +212,24 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
      from their own definitions in the same file rather than special-casing the
      names, so a renamed or redefined predicate is followed rather than
      silently treated as absent. */
+  /* Resolved to a fixed point, because a shared predicate is itself built from
+     shared pieces: TW is `${PKEY} = ANY($3) AND …`, and one pass left the
+     inner ${PKEY} unresolved. The lint then saw no driver predicate in any
+     query using TW and reported six correctly-scoped statements as unguarded —
+     a lint that cries wolf gets its output ignored, which costs more than the
+     bug it watches for. */
   const resolveVars = (src2, stmt) => {
     let out2 = stmt;
-    for (const v of new Set([...stmt.matchAll(/\$\{(\w+)\}/g)].map((x) => x[1]))) {
-      const def = src2.match(new RegExp(`const ${v}\\s*=\\s*\`([^\`]*)\``))
-        || src2.match(new RegExp(`const ${v}\\s*=\\s*(?:\\(\\)\\s*=>\\s*)?\`([^\`]*)\``));
-      if (def) out2 = out2.split(`\${${v}}`).join(def[1]);
+    for (let pass = 0; pass < 6 && /\$\{\w+\}/.test(out2); pass++) {
+      let changed = false;
+      for (const v of new Set([...out2.matchAll(/\$\{(\w+)\}/g)].map((x) => x[1]))) {
+        const def = src2.match(new RegExp(`const ${v}\\s*=\\s*\`([^\`]*)\``))
+          || src2.match(new RegExp(`const ${v}\\s*=\\s*(?:\\(\\)\\s*=>\\s*)?\`([^\`]*)\``));
+        if (!def) continue;
+        const next = out2.split(`\${${v}}`).join(def[1]);
+        if (next !== out2) { out2 = next; changed = true; }
+      }
+      if (!changed) break;
     }
     return out2;
   };
@@ -238,7 +250,15 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
          said FILTER (WHERE is_booking) passed the lint silently. Strip every
          FILTER clause first, so only a real restriction counts. */
       const whereOnly = stmt.replace(/FILTER\s*\([^()]*(?:\([^()]*\)[^()]*)*\)/gi, '');
+      /* A person predicate is scoping, whether it names the raw column or the
+         synthesised person key. The key is coalesce(driver_ext_id, name:…),
+         which is NULL when a row carries neither — and an FMS telematics row
+         carries neither, so a person-scoped query still cannot reach an
+         odometer distance. Matching only the raw spelling made the lint report
+         every driver query as unguarded the moment the key was introduced. */
       const scoped = /driver_ext_id\s*=\s*ANY|driver_name IS NOT NULL|driver_ext_id IS NOT NULL/.test(whereOnly)
+        || /coalesce\(nullif\(btrim\(driver_ext_id\)[^)]*\)[\s\S]{0,120}?\)\s*=\s*ANY/.test(whereOnly)
+        || /btrim\(driver_name\), ''\) <> ''/.test(whereOnly)
         || /platform\s*=\s*'(?!fms)[a-z_]+'/.test(whereOnly)
         || /\bis_booking\b/.test(whereOnly)
         || /\bproduct IS NOT NULL\b/.test(whereOnly)

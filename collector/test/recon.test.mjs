@@ -17,11 +17,26 @@ for(const [name,fixes,exp] of CASES){
   console.log(`${ok?'PASS':'FAIL'}  ${name.padEnd(18)} got=${got} expected=${exp} (segs=${segs.length}, gap=${segs[0].max_gap_min}m)`);
 }
 const seg=buildSegments(CASES[0][1])[0];
+/* findMatch returns {match, nearest, nearest_gap_min}, not a booking. These
+   four checks still asked `!!findMatch(...)` — an object is always truthy, so
+   two of them asserted a rejection the shape of the return value made
+   impossible, and the other two passed for no reason. Read .match, and pin the
+   nearest-booking evidence beside it: that field is what makes a wrong verdict
+   falsifiable, and nothing was testing that it is populated. */
+const M=(...a)=>findMatch(...a);
 const checks=[
- ['match same plate+time', !!findMatch(seg,[{platform:'uber',external_id:'T1',plate:'L45235',requested_at:t(7),ended_at:t(23)}]), true],
- ['reject other plate', !!findMatch(seg,[{platform:'uber',external_id:'T2',plate:'L99999',requested_at:t(7),ended_at:t(23)}]), false],
- ['reject far-off time', !!findMatch(seg,[{platform:'hotel',external_id:'H1',plate:'L45235',requested_at:t(300),ended_at:t(310)}]), false],
- ['accept 12min drift', !!findMatch(seg,[{platform:'hotel',external_id:'H2',plate:'L45235',requested_at:t(-12),ended_at:t(-2)}]), true],
+ ['match same plate+time', !!M(seg,[{platform:'uber',external_id:'T1',plate:'L45235',requested_at:t(7),ended_at:t(23)}]).match, true],
+ ['reject other plate', !!M(seg,[{platform:'uber',external_id:'T2',plate:'L99999',requested_at:t(7),ended_at:t(23)}]).match, false],
+ ['a booking on another plate is not even the nearest one',
+   M(seg,[{platform:'uber',external_id:'T2',plate:'L99999',requested_at:t(7),ended_at:t(23)}]).nearest, null],
+ ['reject far-off time', !!M(seg,[{platform:'hotel',external_id:'H1',plate:'L45235',requested_at:t(300),ended_at:t(310)}]).match, false],
+ ['but it is still reported as the nearest, with the distance',
+   M(seg,[{platform:'hotel',external_id:'H1',plate:'L45235',requested_at:t(300),ended_at:t(310)}]).nearest_gap_min, 280],
+ ['accept 12min drift', !!M(seg,[{platform:'hotel',external_id:'H2',plate:'L45235',requested_at:t(-12),ended_at:t(-2)}]).match, true],
+ ['an overlapping booking reports a gap of zero',
+   M(seg,[{platform:'uber',external_id:'T1',plate:'L45235',requested_at:t(7),ended_at:t(23)}]).nearest_gap_min, 0],
+ ['no bookings at all is null everywhere, not a match',
+   JSON.stringify(M(seg,[])), '{"match":null,"nearest":null,"nearest_gap_min":null}'],
 ];
 for(const [n,got,exp] of checks){ const ok=got===exp; ok?pass++:fail++; console.log(`${ok?'PASS':'FAIL'}  ${n}`); }
 console.log(`\n${pass} passed, ${fail} failed`);
