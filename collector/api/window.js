@@ -59,6 +59,12 @@ export function winDays(req, now = Date.now()) {
     if (from > to) [from, to] = [to, from];   // an inverted range is a typo, not an empty set
     return [from, to];
   }
+  /* A single `day`, which several routes already take by that name — /api/day
+     and /api/map/journey among them. /api/track did not, and silently returned
+     every fix it has ever held to a caller who asked for one day: the same
+     trap `days` had, one letter apart, on the endpoint next to the one where
+     the parameter works. Understood here, it works everywhere. */
+  if (isDay(req.query?.day)) return [req.query.day, req.query.day];
   return daysWindow(req.query?.days, now) || ['2000-01-01', '2100-01-01'];
 }
 

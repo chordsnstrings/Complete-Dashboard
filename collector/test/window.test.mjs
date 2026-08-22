@@ -67,6 +67,26 @@ check('an inverted range is read as a typo, not as an empty set',
 check('one bound alone still leaves the other open',
   JSON.stringify(winDays(req({ from: '2026-01-01' }), NOW)) === '["2026-01-01","2100-01-01"]');
 
+console.log('\nwindow: a single day is a day');
+
+/* Several routes already take `day` by that name — /api/day, /api/map/journey.
+   /api/track did not, and answered a request for one day with every fix it has
+   ever held: the same trap `days` had, one letter apart, on the endpoint right
+   beside one where the parameter works. */
+check('day=2026-08-14 is that day and no other',
+  JSON.stringify(winDays(req({ day: '2026-08-14' }), NOW)) === '["2026-08-14","2026-08-14"]');
+check('and as a timestamp window it covers that whole day',
+  JSON.stringify(win(req({ day: '2026-08-14' }), NOW))
+    === '["2026-08-14","2026-08-14 23:59:59.999"]');
+check('an explicit from/to still wins over it',
+  JSON.stringify(winDays(req({ day: '2026-08-14', from: '2026-01-01', to: '2026-01-31' }), NOW))
+    === '["2026-01-01","2026-01-31"]');
+check('and it wins over days, being the more specific of the two',
+  JSON.stringify(winDays(req({ day: '2026-08-14', days: '30' }), NOW))
+    === '["2026-08-14","2026-08-14"]');
+check('a malformed day is ignored rather than passed into SQL',
+  JSON.stringify(winDays(req({ day: '2026-13-45' }), NOW)) === '["2000-01-01","2100-01-01"]');
+
 console.log('\nwindow: nonsense is ignored, never invented');
 
 /* A caller who asks for something unparseable gets the default window. The
