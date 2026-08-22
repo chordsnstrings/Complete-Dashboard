@@ -33,6 +33,8 @@ app.get('/api/live/now', (_q, res) => { calls++; res.json({ n: calls }); });
 app.post('/api/thing', (_q, res) => { calls++; res.json({ n: calls }); });
 const server = app.listen(0);
 const port = server.address().port;
+// The cache re-requests stale keys on itself, so it needs the real port.
+cache.setPort(port);
 const get = async (p, opts) => {
   const r = await fetch(`http://127.0.0.1:${port}${p}`, opts);
   return { status: r.status, cache: r.headers.get('x-cache'), body: await r.json() };
@@ -85,25 +87,52 @@ check('a POST is never served from the cache', calls === before + 2, `${before} 
 check('and does not disturb the GET entry it shares a path with',
   (await get('/api/thing')).body.n === 1);
 
-console.log('\ncache: a write invalidates it');
+console.log('\ncache: a write is noticed, without making anyone wait for it');
 
-/* The point of keying on a data version rather than a clock: an entry lives
-   exactly as long as the data behind it has not moved, so a reader never sees
-   numbers from before a collection that has already finished. */
+/* The version moves whenever a collection run or any of the three rollups
+   finishes — several times a quarter hour on this deployment, which is faster
+   than a warm pass can refill sixty entries. Invalidating outright meant every
+   request was a miss, measured in production, and the cache did nothing at all.
+
+   So a reader holding a stale answer gets it immediately and the refresh
+   happens behind them. Only a reader with no entry at all waits. */
+const stableN = (await get('/api/thing')).body.n;
 await db.query(
   `INSERT INTO collection_run (source, mode, status, finished_at)
    VALUES ('uber', 'incremental', 'ok', now())`);
+
 const after = await get('/api/thing');
-check('a finished collection run invalidates every entry',
-  after.cache === 'miss' && after.body.n > 1, `${after.cache} n=${after.body.n}`);
-const again = await get('/api/thing');
-check('and the fresh answer is then cached in its turn',
-  again.cache === 'hit' && again.body.n === after.body.n);
+check('a finished collection run is noticed', after.cache === 'stale', after.cache);
+check('and the reader is handed the previous answer rather than made to wait',
+  after.body.n === stableN, `${stableN} -> ${after.body.n}`);
+
+// The refresh happens behind them; give it a moment to land.
+await new Promise((r) => setTimeout(r, 300));
+const fresh = await get('/api/thing');
+check('the refresh ran behind the reader and the entry is current afterwards',
+  fresh.cache === 'hit' && fresh.body.n > stableN, `${fresh.cache} n=${fresh.body.n}`);
 
 await db.query(
   `INSERT INTO rollup_state (name, status, finished_at) VALUES ('rollup_day','ok', now())
    ON CONFLICT (name) DO UPDATE SET finished_at = now()`);
-check('a finished rollup invalidates it too', (await get('/api/thing')).cache === 'miss');
+check('a finished rollup is noticed too', (await get('/api/thing')).cache === 'stale');
+
+/* A burst of readers on a just-invalidated page must not each start the same
+   aggregate — that is the thundering herd the cache exists to prevent,
+   arriving one moment later. */
+await new Promise((r) => setTimeout(r, 300));
+await db.query(`INSERT INTO collection_run (source, mode, status, finished_at)
+                VALUES ('uber','incremental','ok', now())`);
+const beforeHerd = calls;
+await Promise.all(Array.from({ length: 8 }, () => get('/api/thing')));
+await new Promise((r) => setTimeout(r, 300));
+check('eight simultaneous readers cause one refresh, not eight',
+  calls - beforeHerd <= 2, `${beforeHerd} -> ${calls}`);
+
+/* And a reader with NO entry still waits, because there is nothing to hand
+   them — a cache that invented an answer would be a different kind of bug. */
+const cold = await get('/api/thing?never-seen=1');
+check('a page with no entry is served live, not from nothing', cold.cache === 'miss');
 
 console.log('\ncache: it is bounded and observable');
 

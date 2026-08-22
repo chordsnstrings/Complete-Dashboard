@@ -1880,6 +1880,8 @@ migrate()
     /* Warm the cache in the background as soon as the data moves, so the first
        reader after a collection is not the one who pays for the aggregate.
        See api/warm.js. WARM=off to leave it cold. */
+    // The cache needs the real port too, to re-request a stale key on itself.
+    cache.setPort(server.address().port);
     startWarmer({
       // From the listening socket, not the configured value: with PORT=0 the
       // real one only exists once the server is up, and warming the wrong port

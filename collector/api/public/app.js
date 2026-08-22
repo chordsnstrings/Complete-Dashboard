@@ -1753,12 +1753,15 @@ V.sources = async (root) => {
        symptom being pages that are merely slow again, which reads as the
        database having a bad day. */
     if (cacheStats) {
-      const total = cacheStats.hit + cacheStats.miss;
+      const served = cacheStats.hit + (cacheStats.stale || 0);
+      const total = served + cacheStats.miss;
       ru.body.append(el('p', 'cap',
-        `Response cache: ${fmt(cacheStats.hit)} served from cache of ${fmt(total)} requests`
-        + `${total ? ` (${Math.round((cacheStats.hit / total) * 100)}%)` : ''}, `
-        + `${fmt(cacheStats.entries)} entries held. Invalidated by any collection or rollup, `
-        + 'never by a timer.'));
+        `Response cache: ${fmt(served)} of ${fmt(total)} requests answered without re-running the query`
+        + `${total ? ` (${Math.round((served / total) * 100)}%)` : ''}, `
+        + `${fmt(cacheStats.entries)} entries held. `
+        + `${fmt(cacheStats.stale || 0)} were served from the previous collection while the `
+        + 'new one was computed behind the reader — so a page never waits for a refresh, and is '
+        + 'at most one collection cycle behind. Nothing is cached on a timer.'));
     }
     const stale = rollups.filter((r) => r.age_min != null && r.age_min > 45);
     const broken = rollups.filter((r) => r.status !== 'ok');
