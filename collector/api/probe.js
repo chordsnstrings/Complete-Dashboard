@@ -18,7 +18,7 @@
    Nothing here writes. */
 
 import { config } from '../src/config.js';
-import { http } from '../src/http.js';
+import { http, qs } from '../src/http.js';
 import { uberOAuthToken, uberWebHeaders } from '../src/auth/uber.js';
 import { loadSettings } from '../src/settings.js';
 import { log } from '../src/log.js';
@@ -177,6 +177,68 @@ export function probeRoutes(app, { wrap }) {
       }
     }
     res.json({ endpoints: out });
+  }));
+
+  /* ── is a gap in our history recoverable, or is it gone? ──────────────────
+     Uber earnings are absent for every month before about March 2026 — 20,016
+     bookings in September 2025 with no payout row against any of them. The
+     backfill DID ask for those windows: 65 chunks, none failed. They came back
+     empty.
+
+     That leaves two possibilities with opposite consequences. Either the
+     provider no longer serves data that old, in which case the half-year is
+     gone and the product must say so instead of showing a blank; or we asked
+     wrongly, in which case re-collecting recovers it. Guessing between them
+     decides whether to spend a day on a backfill or on an explanation, and the
+     only honest way to settle it is to ask the provider for a window we know
+     we are missing and see what comes back.
+
+     Read-only, on the same allowlisted surface the daily probe already calls —
+     only the window is a parameter, and it is parsed as a date rather than
+     passed through. Counts and field names only; no records leave here. */
+  app.get('/api/probe/uber/window', wrap(async (req, res) => {
+    await loadSettings();
+    const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+    if (!isDay(req.query.from) || !isDay(req.query.to)) {
+      return res.status(400).json({ error: 'from and to are required, as YYYY-MM-DD' });
+    }
+    const from = new Date(`${req.query.from}T00:00:00Z`).getTime();
+    const to = new Date(`${req.query.to}T23:59:59Z`).getTime();
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+      return res.status(400).json({ error: 'window is not a range' });
+    }
+    const org = config.uber.org;
+    if (!org) return res.status(400).json({ error: 'no Uber org configured' });
+
+    /* Both money surfaces, because they fail differently: earner-payments is
+       what driver_performance is built from, transactions is the ledger beside
+       it, and a window that one serves and the other does not is itself the
+       answer to a different question. */
+    const windowed = {
+      'earner-payments': `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({
+        org_id: org, start_time: from, end_time: to, page_size: 50 })}`,
+      transactions: `https://api.uber.com/v1/vehicle-suppliers/transactions?${qs({
+        org_id: org, start_time: from, end_time: to, limit: 50 })}`,
+    };
+    const token = await uberOAuthToken();
+    const out = [];
+    for (const [name, url] of Object.entries(windowed)) {
+      try {
+        const { data, status } = await http(url, {
+          timeoutMs: 45000, retries: 0, headers: { authorization: `Bearer ${token}` } });
+        const arr = Array.isArray(data) ? data
+          : Object.values(data || {}).find((v) => Array.isArray(v) && v.length && typeof v[0] === 'object');
+        out.push({ surface: name, status: status || 200,
+          count: Array.isArray(arr) ? arr.length : 0,
+          /* An empty list and a refusal look identical in a row count, and they
+             mean opposite things: one says the data is gone, the other says we
+             asked wrongly. */
+          top_level_keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 20) : [],
+          message: data?.message || data?.error || null,
+          fields: arr ? describe(arr) : [] });
+      } catch (e) { out.push({ surface: name, error: String(e).slice(0, 220) }); }
+    }
+    res.json({ window: [req.query.from, req.query.to], surfaces: out });
   }));
 
   log.info('api', 'probe routes mounted (read-only, allowlisted)');
