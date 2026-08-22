@@ -1635,6 +1635,162 @@ app.get('/api/settings', (_, r) => r.json([
     secret: false, source: 'environment', configured: true, value: '12', updated_at: null },
 ]));
 
+
+/* ── forecast and playbook ───────────────────────────────────────────────
+   Built from the live shape: bookings collapsed from ~24,000/month to 4,203 in
+   March 2026 and are recovering at about +830/month. The fixture keeps that,
+   because the whole point of the forecast page is that it refuses to fit
+   across the collapse. */
+app.get('/api/forecast', (req, r) => {
+  const horizon = Math.min(24, Math.max(1, Number(req.query.horizon) || 12));
+  const observed = TREND.map((row, i) => ({
+    m: MONTH_KEYS[i], trips: row.trips, drivers: row.drivers, vehicles: row.vehicles,
+    revenue: row.revenue, priced_trips: Math.round(row.trips * 0.35),
+    partial_month: MONTH_KEYS[i] === '2025-08' || MONTH_KEYS[i] === '2026-08',
+    no_data: false,
+  }));
+  const used = ['2026-03', '2026-04', '2026-05', '2026-06', '2026-07'];
+  const slope = 833, intercept = 4168;
+  const fc = [];
+  for (let k = 1; k <= horizon; k++) {
+    const [y, mo] = '2026-07'.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, mo - 1 + k, 1));
+    const ym = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+    const point = Math.round((intercept + slope * (4 + k)) / 100) * 100;
+    const halfWidth = Math.round((1050 + k * 190) / 100) * 100;
+    fc.push({ m: ym, point, low: Math.max(0, point - halfWidth), high: point + halfWidth,
+      flat: 6800, days: new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate(),
+      kind: k <= 3 ? 'forecast' : 'extrapolation' });
+  }
+  const shares = [
+    { dow: 0, mean: 232, share: 0.126, n: 8 }, { dow: 1, mean: 214, share: 0.116, n: 8 },
+    { dow: 2, mean: 221, share: 0.120, n: 8 }, { dow: 3, mean: 238, share: 0.129, n: 8 },
+    { dow: 4, mean: 266, share: 0.144, n: 8 }, { dow: 5, mean: 316, share: 0.171, n: 8 },
+    { dow: 6, mean: 356, share: 0.193, n: 8 },
+  ];
+  const next = fc[0];
+  const nd = new Date(Date.UTC(+next.m.slice(0, 4), +next.m.slice(5, 7), 0)).getUTCDate();
+  const dows = []; for (let i = 1; i <= nd; i++) dows.push(new Date(`${next.m}-${String(i).padStart(2, '0')}T00:00:00Z`).getUTCDay());
+  const tw = dows.reduce((a, d2) => a + shares[d2].share, 0);
+  const daily = dows.map((d2, i) => ({ day: `${next.m}-${String(i + 1).padStart(2, '0')}`, dow: d2,
+    expected: Math.round((next.point * shares[d2].share) / tw) }));
+  r.json({
+    ok: true, metric: 'trips',
+    break: { from: '2026-02', to: '2026-03', change_pct: -76 },
+    months_used: used,
+    months_excluded: ['2025-09', '2025-10', '2025-11', '2025-12', '2026-01', '2026-02'],
+    n: 5, slope_per_month: slope, r2: 0.918, typical_error: 454,
+    flat_baseline: 6800, beats_flat: true,
+    forecast: fc, observed,
+    in_progress: { m: '2026-08', days_so_far: 21, days_total: 31, trips_so_far: 5927,
+      per_day: 282.2, projected: 8748, forecast: next.point, low: next.low, high: next.high,
+      within_interval: 8748 >= next.low && 8748 <= next.high },
+    weekday_shares: shares, next_month: next.m, daily,
+    year_ahead: { total: fc.slice(0, 12).reduce((a, x) => a + x.point, 0),
+      low: fc.slice(0, 12).reduce((a, x) => a + x.low, 0),
+      high: fc.slice(0, 12).reduce((a, x) => a + x.high, 0), forecast_months: 3 },
+    revenue_note: 'The Uber trip export carries no fare column at all, so every AED figure in this product '
+      + 'describes the hotel, Bolt and Yango rows only. A booking forecast is in bookings.',
+  });
+});
+
+app.get('/api/playbook', (req, r) => {
+  const rate = Number(req.query.aed_per_trip) > 0 ? Number(req.query.aed_per_trip) : null;
+  const median = 92;
+  const mk = (a) => ({ ...a, aed_modelled: rate && a.ceiling && /bookings/.test(a.ceiling_unit || '')
+    ? Math.round(a.ceiling * rate) : null });
+  const actions = [
+    mk({ id: 'renew_documents', group: 'Protect', horizon: 'today',
+      title: 'Renew 8 vehicle documents expiring within 7 days',
+      why: '8 vehicles stop being able to work legally within the week, and 19 more within 45 days. This is '
+        + 'the only item here that avoids a loss rather than chasing a gain.',
+      basis: 'vehicle_document rows with an expiry date inside 45 days, counted in the database rather than '
+        + 'from a capped list, because this tile makes a claim about whether a car may legally drive.',
+      size: 8, size_unit: 'vehicles', ceiling: 8 * median, ceiling_unit: 'bookings/month protected',
+      aed_measured: null, certainty: 'measured', effort: 'low', link: '#compliance',
+      detail: plates.slice(0, 6).map((p2, i) => ({ plate: p2, expires_at: `2026-08-${25 + (i % 5)}`, days_left: 3 + i })) }),
+    mk({ id: 'collect_receivables', group: 'Collect', horizon: 'this week',
+      title: 'Chase AED 58,721 owed across 44 counterparties',
+      why: '458 bookings in this window settle on account or against salary rather than at the kerb. The '
+        + 'oldest is 45 days old.',
+      basis: 'Sum of price over trip_ext rows flagged is_receivable — room charges, company accounts and '
+        + 'salary postings. Measured, because these are the channels that report a fare.',
+      size: 44, size_unit: 'counterparties', aed_measured: 58721,
+      certainty: 'measured', effort: 'low', link: '#settlement/receivables' }),
+    mk({ id: 'reconcile_cash', group: 'Collect', horizon: 'this week',
+      title: 'Reconcile cash held by 86 drivers across 1,779 bookings',
+      why: '1,681 of those bookings come from a channel that reports no fare, so the AED figure is a floor '
+        + 'over the 98 that do.',
+      basis: 'trip_ext rows where the driver personally holds the money — a supervisor-collected fare is '
+        + 'deliberately excluded, because it is not what a cash-handling control is sized on.',
+      size: 86, size_unit: 'drivers holding cash', aed_measured: 7972,
+      certainty: 'partly measured', effort: 'low', link: '#settlement/cash' }),
+    mk({ id: 'recover_blocked_vehicles', group: 'Deploy', horizon: 'this week',
+      title: 'Reassign 31 vehicles held by drivers who cannot earn on them',
+      why: 'Each of these people is suspended or deactivated on the platform whose vehicle they are holding. '
+        + 'The car is the constraint in this business, not the person, so this is the cheapest capacity in it.',
+      basis: 'driver_platform_state rows where the provider itself reports the driver stopped AND a plate is '
+        + 'attached. This is the provider’s assertion, not an inference from quiet weeks.',
+      size: 31, size_unit: 'vehicles', ceiling: 31 * median, ceiling_unit: 'bookings/month',
+      aed_measured: null, certainty: 'ceiling', effort: 'low', link: '#roster/blocked',
+      detail: plates.slice(0, 6).map((p2, i) => ({ plate: p2, driver: drivers[i], state: 'suspended' })) }),
+    mk({ id: 'staff_thin_slots', group: 'Cover', horizon: 'next rota',
+      title: 'Roster 14 hours that reliably carry work and have three drivers or fewer',
+      why: 'The worst is Saturday at 19:00 — 186 bookings across 12 occurrences, covered by 2. An hour held '
+        + 'up by that few people stops working the day one of them is off.',
+      basis: 'Weekday-hour cells with at least 20 bookings over at least 3 occurrences and 3 or fewer '
+        + 'distinct drivers. Both halves are required: a thin hour with no demand is correctly unstaffed.',
+      size: 14, size_unit: 'hours', aed_measured: null,
+      certainty: 'observed', effort: 'medium', link: '#slot/6/19',
+      detail: [{ slot: 'Saturday 19:00', trips: 186, drivers: 2, per_occurrence: 15.5 },
+        { slot: 'Friday 20:00', trips: 154, drivers: 3, per_occurrence: 12.8 },
+        { slot: 'Thursday 03:00', trips: 96, drivers: 2, per_occurrence: 8.0 }] }),
+    mk({ id: 'redeploy_idle_vehicles', group: 'Deploy', horizon: 'this month',
+      title: 'Put 67 vehicles back to work — they took no booking at all this window',
+      why: '64 of 131 vehicles earned. 39 of the idle ones did not move either; 28 drove without a booking '
+        + 'behind them, which is a different problem with a different fix.',
+      basis: 'Every vehicle in vehicle_profile with zero bookings in the window. The ceiling is 67 × the '
+        + 'fleet’s MEDIAN earning vehicle (92 bookings), not its mean — a handful of very busy cars would '
+        + 'otherwise set the target for every idle one.',
+      size: 67, size_unit: 'vehicles', ceiling: 67 * median, ceiling_unit: 'bookings/month',
+      aed_measured: null, certainty: 'ceiling', effort: 'high', link: '#vehicles',
+      detail: plates.slice(0, 6).map((p2, i) => ({ plate: p2, journeys: i * 3, last_booking: i > 3 ? null : '2026-07-1' + i })) }),
+    mk({ id: 'reduce_cancellations', group: 'Improve', horizon: 'this month',
+      title: 'Recover some of 412 bookings lost at the door (5.9%)',
+      why: 'These were offered and did not complete — a rider no-show, a driver rejection, or a cancellation. '
+        + 'Every one is demand the fleet already had.',
+      basis: 'trip_norm.outcome, which normalises across platforms: Bolt reports a completed trip as '
+        + '"finished" and three of its four failure modes never contain the word "cancel".',
+      size: 412, size_unit: 'lost bookings', ceiling: 103,
+      ceiling_unit: 'bookings/month if a quarter are recoverable',
+      aed_measured: null, certainty: 'ceiling', effort: 'medium', link: '#platforms/funnel' }),
+    mk({ id: 'cut_return_deadhead', group: 'Improve', horizon: 'this month',
+      title: 'Cut 3,184 km of unpaid return running from 8 drop-off areas',
+      why: 'The worst is Jebel Ali Free Zone: 34 drops averaging 28 km of empty running afterwards. A short '
+        + 'paid trip ending somewhere remote costs more than a long one ending on a rank.',
+      basis: 'Straight-line distance from the drop-off point to where the driver actually ended the job, '
+        + 'which only the hotel channel reports. It understates road distance, so it is a floor.',
+      size: 8, size_unit: 'drop-off areas', ceiling: 3184, ceiling_unit: 'unpaid km',
+      aed_measured: null, certainty: 'measured', effort: 'medium', link: '#corporate/approach',
+      detail: [{ place: 'Jebel Ali Free Zone', drops: 34, avg_return_km: 28 },
+        { place: 'Al Qudra Rd', drops: 31, avg_return_km: 24.6 }] }),
+  ];
+  r.json({
+    window: ['2026-07-22', '2026-08-21'], actions,
+    fleet: { vehicles_seen: 131, earning: 64, moved_only: 28, still: 39, median_bookings: median },
+    totals: {
+      aed_measured: actions.reduce((a, x) => a + (x.aed_measured || 0), 0),
+      aed_modelled: rate ? actions.reduce((a, x) => a + (x.aed_modelled || 0), 0) : null,
+      bookings_ceiling: actions.reduce((a, x) => a + (/bookings/.test(x.ceiling_unit || '') ? (x.ceiling || 0) : 0), 0),
+    },
+    assumption: rate
+      ? { aed_per_trip: rate, note: 'Supplied by the caller. Every modelled figure is this rate times a ceiling.' }
+      : { aed_per_trip: null, note: 'No revenue-per-booking rate supplied, so nothing is converted to money. '
+        + 'The Uber export carries no fare column at all, so this fleet has no measured rate that covers most '
+        + 'of its volume — set one above, and read the result as an assumption.' },
+  });
+});
+
 // Anything not fixtured above answers with an empty list rather than a 404,
 // so a new page renders its own empty state instead of the view error box.
 app.get(/^\/api\//, (_, r) => r.json([]));

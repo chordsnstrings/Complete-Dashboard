@@ -18,6 +18,8 @@ import { renderRoster, ROSTER_TABS } from './roster.js';
 import { renderDay } from './day.js';
 import { renderSegments, renderSegment, segmentTable } from './segments.js';
 import { renderSlot } from './slot.js';
+import { renderPlaybook } from './playbook.js';
+import { renderForecast } from './forecast.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -104,6 +106,8 @@ const VIEWS = [
   { id: 'settlement', label: 'Settlement', ic: '◫', grp: 'Analyse', sub: 'Who settles the fare and when — cash in hand, and what is outstanding' },
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Analyse', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
   { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Analyse', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
+  { id: 'forecast', label: 'Forecast', ic: '◠', grp: 'Analyse', sub: 'What next month looks like, day by day, and how much of that is a guess' },
+  { id: 'playbook', label: 'To-do list', ic: '☑', grp: 'Operate', sub: 'What to do this month to earn more — each item with the arithmetic that sized it' },
   { id: 'insights', label: 'Action list', ic: '✦', grp: 'Operate', sub: 'What needs doing, ranked by what it costs to ignore' },
   { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Operate', sub: 'Claims a model proposed and the database judged — with the numbers that decided each one' },
   { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'Operate', sub: 'Documents and licences with an expiry date attached' },
@@ -173,7 +177,12 @@ function setHeader(detail) {
     $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
     crumb.style.display = 'none';
   }
-  const noFilter = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights', 'compliance'];
+  /* The forecast fits every whole month since the last regime change, so the
+     window selector does not control it — showing the control would imply it
+     did. The playbook DOES respect the window: "idle this month" is a
+     different list from "idle this year". */
+  const noFilter = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
+    'compliance', 'forecast'];
   $('#filters').style.display = noFilter.includes(state.view) ? 'none' : 'flex';
 }
 /* ─────────── views ─────────── */
@@ -499,6 +508,11 @@ V.segments = async (root) => {
   await renderSegments(root, kind, kind ? state.sub : null);
 };
 V.segment = async (root) => renderSegment(root, state.param, state.sub);
+
+/* The two pages an operations lead opens on the first of the month: what is
+   coming, and what to do about it. */
+V.playbook = async (root) => renderPlaybook(root);
+V.forecast = async (root) => renderForecast(root);
 
 /* One weekday-hour cell of the demand heatmap: `#slot/<dow>/<hour>`. */
 V.slot = async (root) => {

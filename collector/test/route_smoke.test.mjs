@@ -22,6 +22,9 @@ import { vehicleRoutes } from '../api/vehicle_routes.js';
 import { analyticsRoutes } from '../api/analytics_routes.js';
 import { rosterRoutes } from '../api/roster_routes.js';
 import { dayRoutes } from '../api/day_routes.js';
+import { segmentRoutes, slotRoutes } from '../api/segment_routes.js';
+import { forecastRoutes } from '../api/forecast_routes.js';
+import { playbookRoutes } from '../api/playbook_routes.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -159,6 +162,10 @@ vehicleRoutes(app, { q, wrap, endOfDay });
 analyticsRoutes(app, { q, wrap, range, F, FB });
 rosterRoutes(app, { q, wrap, range });
 dayRoutes(app, { q, wrap });
+segmentRoutes(app, { q, wrap, range, DAYWIN });
+slotRoutes(app, { q, wrap, range });
+forecastRoutes(app, { q, wrap, DAYWIN });
+playbookRoutes(app, { q, wrap, range, DAYWIN });
 
 const server = app.listen(0);
 const port = server.address().port;
@@ -189,18 +196,17 @@ const routes = [...new Set(declared)]
   // own allowlist test, not by executing them against a fixture.
   .filter((r) => !r.startsWith('/api/probe/'));
 
-const drvRoutes = [...readFileSync('api/driver_routes.js', 'utf8')
-  .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
-const vehRoutes = [...readFileSync('api/vehicle_routes.js', 'utf8')
-  .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
-const anaRoutes = [...readFileSync('api/analytics_routes.js', 'utf8')
-  .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
-const rosRoutes = [...readFileSync('api/roster_routes.js', 'utf8')
-  .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
-const dayRts = [...readFileSync('api/day_routes.js', 'utf8')
-  .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]);
+/* Every route file in api/, discovered. This named five of them and had
+   already fallen behind by two — segment_routes.js was mounted in production
+   and executed by nothing here, which is exactly the gap this test exists to
+   close. A new route file is now covered by existing. */
+const moduleRoutes = readdirSync('api')
+  .filter((f) => f.endsWith('_routes.js'))
+  .flatMap((f) => [...readFileSync(`api/${f}`, 'utf8')
+    .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]));
 
-const all = [...new Set([...routes, ...drvRoutes, ...vehRoutes, ...anaRoutes, ...rosRoutes, ...dayRts])];
+const all = [...new Set([...routes, ...moduleRoutes])]
+  .filter((r) => !r.startsWith('/api/probe/'));
 // `:param` routes need a real value substituted, not the literal placeholder.
 const SUB = { ':id': 'd0', ':plate': 'L100' };
 const resolved = all.map((r) => r.replace(/:(\w+)/g, (m) => SUB[m] || 'd0'));

@@ -25,7 +25,8 @@ const ROUTES = [
   'corporate/leakage', 'corporate/leakage/complimentary',
   'corporate/approach', 'corporate/approach/daypart',
   'property/h-palm', 'property/h-palm/guests', 'property/h-palm/drivers',
-  'causes', 'insights', 'action/idle_vehicle/L45235', 'action/nope/-',
+  'causes', 'forecast', 'playbook',
+  'insights', 'action/idle_vehicle/L45235', 'action/nope/-',
   'analyst', 'analyst/refuted', 'analyst/immaterial', 'analyst/unsupported', 'analyst/rules',
   'compliance', 'unauthorized',
   // Segments and slots: the pages that replaced the eleven modals. Every filter

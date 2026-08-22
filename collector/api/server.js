@@ -11,6 +11,8 @@ import { analyticsRoutes, analystRoutes } from './analytics_routes.js';
 import { rosterRoutes } from './roster_routes.js';
 import { dayRoutes } from './day_routes.js';
 import { segmentRoutes, slotRoutes } from './segment_routes.js';
+import { forecastRoutes } from './forecast_routes.js';
+import { playbookRoutes } from './playbook_routes.js';
 import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -1595,6 +1597,13 @@ segmentRoutes(app, { q, wrap, range, DAYWIN });
 /* One weekday-hour cell of the demand heatmap, as a rostering question rather
    than a colour: who covers it, on what, from where, and how reliably. */
 slotRoutes(app, { q, wrap, range });
+
+/* How much work is coming, and what to do this week to get more of it. Kept
+   apart because they answer different questions at different certainties: the
+   forecast is a projection with an interval; the playbook is a list of things
+   a person can go and do, each carrying the arithmetic that sized it. */
+forecastRoutes(app, { q, wrap, DAYWIN });
+playbookRoutes(app, { q, wrap, range, DAYWIN });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

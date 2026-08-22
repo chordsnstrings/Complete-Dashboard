@@ -844,3 +844,27 @@ span.dim{color:var(--ink-3);font-size:.72rem}
 /* An action-list row is a link to that finding's own page. */
 a.insight-row{text-decoration:none;color:inherit;display:grid}
 a.insight-row:hover{border-color:var(--accent)}
+
+/* ── the to-do list ─────────────────────────────────────────────────────── */
+/* An action is a heavier thing than a table row: it carries a claim, a size,
+   the arithmetic behind the size, and a link to the evidence. It gets a card
+   so those four never get read as one sentence. Layered on .card rather than
+   redefining it, so it inherits the surface and the left rule. */
+.act{padding:16px 18px}
+.act + .act{margin-top:12px}
+.act-head{display:flex;gap:14px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.act-title{font-weight:600;font-size:15px;line-height:1.35;flex:1 1 22rem;color:var(--ink-1)}
+.act-tags{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.act-why{margin:8px 0 0;color:var(--ink-2);font-size:13.5px;line-height:1.55;max-width:68ch}
+.act-figs{
+  display:flex;gap:22px;flex-wrap:wrap;
+  margin:14px 0 4px;padding:12px 0 0;border-top:1px solid var(--rule);
+}
+.act-fig{display:flex;flex-direction:column;gap:2px}
+.act-fig b{font-family:var(--mono);font-size:18px;line-height:1.1;font-weight:600;font-variant-numeric:tabular-nums;color:var(--ink-1)}
+.act-fig i{font-style:normal;font-size:11.5px;color:var(--ink-3);letter-spacing:.01em}
+.act-basis{margin:12px 0 0;font-size:13px}
+.act-basis > summary{cursor:pointer;color:var(--ink-3);font-size:12.5px;user-select:none}
+.act-basis > summary:hover{color:var(--ink-1)}
+.act-basis p{margin:8px 0 0;color:var(--ink-2);line-height:1.55;max-width:72ch}
+.act-foot{margin-top:12px}
