@@ -220,7 +220,49 @@ async function runOne(db, name, fn) {
    incremental window: a late-arriving trip, a corrected fare, or a run that
    fell behind all land days after the fact, and a rollup that only looked at
    today would miss every one of them. */
-export async function refreshRollups({ db = pool, days = null } = {}) {
+/* Only one refresh at a time.
+   Three things start one — the boot pass, the quarter-hourly cron, and the end
+   of every collection run — and on the first deploy two of them overlapped.
+   Both do INSERT ... ON CONFLICT DO UPDATE over the same rows, and two such
+   passes touching those rows in different orders deadlock: production reported
+   rollup_month status=error, "deadlock detected", which is Postgres correctly
+   refusing to corrupt anything and this code being wrong to ask.
+
+   Overlap is not an error worth propagating — the second pass would compute
+   exactly what the first is already computing. It is skipped and said so. */
+let inFlight = null;
+
+/* And across processes, where the in-process guard cannot see. Only the
+   collector refreshes today, so this is belt and braces — but a scaled worker
+   is one platform setting away, and the failure it would cause is the one that
+   just happened. pg_try_advisory_lock returns false rather than waiting, which
+   is what "skip, do not queue" needs. Skipped on PGlite, which has no pool. */
+const LOCK_KEY = 4711;
+async function withDbLock(db, fn) {
+  if (typeof db.connect !== 'function') return fn();
+  const client = await db.connect();
+  try {
+    const { rows } = await client.query('SELECT pg_try_advisory_lock($1) AS got', [LOCK_KEY]);
+    if (!rows[0]?.got) {
+      log.info(SRC, 'another process holds the rollup lock — skipped');
+      return null;
+    }
+    try { return await fn(); }
+    finally { await client.query('SELECT pg_advisory_unlock($1)', [LOCK_KEY]); }
+  } finally { client.release(); }
+}
+
+export async function refreshRollups(opts = {}) {
+  if (inFlight) {
+    log.info(SRC, 'refresh already running — skipped');
+    return inFlight;
+  }
+  inFlight = withDbLock(opts.db || pool, () => refreshRollupsInner(opts))
+    .finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+async function refreshRollupsInner({ db = pool, days = null } = {}) {
   const t0 = Date.now();
   const since = days
     ? new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)

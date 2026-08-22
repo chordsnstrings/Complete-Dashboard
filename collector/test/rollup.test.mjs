@@ -240,6 +240,41 @@ console.log('\nrollup: incremental equals full');
     `narrow=${augNarrow.drivers} live=${liveAug.drivers}`);
 }
 
+console.log('\nrollup: two refreshes do not race');
+
+/* Three things start a refresh — the boot pass, the quarter-hourly cron, and
+   the end of every collection run — and on the first deploy two overlapped.
+   Both do INSERT ... ON CONFLICT DO UPDATE over the same rows, and two such
+   passes touching them in different orders deadlock. Production reported
+   rollup_month status=error, "deadlock detected": Postgres correctly refusing
+   to corrupt anything, and this code wrong to have asked.
+
+   Overlap is not worth propagating as an error, because the second pass would
+   compute exactly what the first already is. It joins the first instead. */
+{
+  const seen = (await q(`SELECT month, trips FROM rollup_month
+                         WHERE platform='*' AND fleet_id='*' ORDER BY month`));
+  const [a, b, c] = await Promise.all([
+    refreshRollups({ db }), refreshRollups({ db }), refreshRollups({ db }),
+  ]);
+  check('three concurrent refreshes all resolve rather than deadlocking',
+    Array.isArray(a) && Array.isArray(b) && Array.isArray(c));
+  check('and the overlapping callers get the same result as the one that ran',
+    JSON.stringify(a) === JSON.stringify(b) && JSON.stringify(b) === JSON.stringify(c));
+  check('none of the three reports a failure',
+    [a, b, c].every((r) => r.every((x) => !x.error)),
+    JSON.stringify([a, b, c].flat().filter((x) => x.error)));
+  const after = (await q(`SELECT month, trips FROM rollup_month
+                          WHERE platform='*' AND fleet_id='*' ORDER BY month`));
+  check('and the numbers are unchanged, not tripled by three passes',
+    JSON.stringify(seen) === JSON.stringify(after));
+  /* The guard has to clear, or the first refresh is the only one this process
+     ever runs — which would be a far quieter failure than a deadlock. */
+  const later = await refreshRollups({ db });
+  check('a refresh after the others finish still runs, so the guard is not a latch',
+    Array.isArray(later) && later.every((x) => !x.error));
+}
+
 console.log('\nrollup: it says how old it is');
 
 const state = await rollupState(db);
