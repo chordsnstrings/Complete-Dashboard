@@ -1843,6 +1843,20 @@ V.settings = async (root) => {
 
   const credP = panel('Credentials', 'Stored encrypted in the database. Leave blank to keep the current value; the collector picks changes up within 30 seconds.');
   root.append(credP.panel); loading(credP.body);
+  /* Credentials that expire on a schedule nobody watches fail silently — the
+     source writes zero rows while the page still shows a healthy "settings"
+     tag. Where the stored value is a JWT it says when it dies, so show that
+     rather than making the supervisor infer it from a flat chart. */
+  const expiryTag = (d) => {
+    const e = d.expiry;
+    if (!e) return '';
+    if (e.expired) return ` <span class="tag bad" title="${esc(e.expires_at)}">expired</span>`;
+    const cls = e.days_left <= 2 ? 'warn' : 'dim';
+    const left = e.days_left < 1
+      ? `${Math.max(0, Math.round(e.days_left * 24))}h left`
+      : `${e.days_left}d left`;
+    return ` <span class="tag ${cls}" title="expires ${esc(e.expires_at)}">${left}</span>`;
+  };
   const defs = await api('/api/settings');
   credP.body.innerHTML = '';
   const wrap = el('div', 'setgrid'); credP.body.append(wrap);
@@ -1852,7 +1866,7 @@ V.settings = async (root) => {
     const row = el('div', 'setrow');
     row.innerHTML = `<div class="lab">${esc(d.label)}<small>${esc(d.key)}${d.hint ? ' · ' + esc(d.hint) : ''}</small></div>
       <div><input data-k="${esc(d.key)}" type="${d.secret ? 'password' : 'text'}" placeholder="${d.configured ? esc(d.value) : 'not set'}" ${d.secret ? '' : `value="${esc(d.value)}"`}></div>
-      <div><span class="tag ${d.configured ? (d.source === 'settings' ? 'ok' : 'dim') : 'warn'}">${d.configured ? d.source : 'unset'}</span></div>`;
+      <div><span class="tag ${d.configured ? (d.source === 'settings' ? 'ok' : 'dim') : 'warn'}">${d.configured ? d.source : 'unset'}</span>${expiryTag(d)}</div>`;
     wrap.append(row);
   });
   const actions = el('div', 'btnrow'); actions.style.marginTop = '16px';

@@ -5,6 +5,7 @@
 import crypto from 'node:crypto';
 import { pool } from './db.js';
 import { log } from './log.js';
+import { jwtExpiry } from './util.js';
 
 const KEY = crypto.createHash('sha256')
   .update(process.env.SETTINGS_KEY || process.env.DATABASE_URL || 'fleet-dev-key')
@@ -50,6 +51,11 @@ export const SETTING_DEFS = [
   { key: 'BOLT_CLIENT_ID', group: 'Bolt', label: 'OAuth client id', secret: false },
   { key: 'BOLT_CLIENT_SECRET', group: 'Bolt', label: 'OAuth client secret', secret: true },
   { key: 'BOLT_REFRESH_TOKEN', group: 'Bolt', label: 'Fleet-portal refresh token', secret: true, hint: '~7 day lifetime — refresh to unlock Bolt trips & earnings' },
+  // Single-use: the portal rotates it on every exchange and invalidates the one
+  // presented, so the collector writes the successor back here. Per fleet,
+  // because a token is issued to one fleet owner and the two fleets have two.
+  { key: 'BOLT_REFRESH_TOKEN_ECOSINE', group: 'Bolt', label: 'Portal refresh token — Ecosine', secret: true, hint: 'Rotates on use; the collector keeps it current. Paste a fresh one only when it has expired.' },
+  { key: 'BOLT_REFRESH_TOKEN_EGARI', group: 'Bolt', label: 'Portal refresh token — Egari', secret: true, hint: 'Rotates on use; the collector keeps it current. Paste a fresh one only when it has expired.' },
 
   { key: 'HOTEL_TOKEN', group: 'Hotel (ecosine.ae)', label: 'Operations manager bearer token', secret: true },
   { key: 'HOTEL_DOMAIN', group: 'Hotel (ecosine.ae)', label: 'x-domain header', secret: false },
@@ -109,6 +115,12 @@ export async function describeSettings() {
       configured: !!val,
       value: d.secret ? (val ? `••••••••${String(val).slice(-4)}` : '') : val,
       updated_at: updated[d.key] || null,
+      /* A credential that expires on a schedule nobody is watching fails
+         silently: the source writes zero rows and the page shows a healthy
+         "settings" tag, because "configured" only ever meant "a string is
+         present". A JWT states its own expiry, so the page can say "4 days
+         left" instead of waiting for the supervisor to notice a flat chart. */
+      expiry: val ? jwtExpiry(val) : null,
     };
   });
 }

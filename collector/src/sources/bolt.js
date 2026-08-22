@@ -6,9 +6,10 @@
 import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
 import { upsertMany, logRun } from '../db.js';
-import { unixS, iso } from '../util.js';
+import { unixS, iso, jwtPayload, jwtExpiry } from '../util.js';
 import { log } from '../log.js';
 import { stateRow } from '../roster.js';
+import { get, setSetting } from '../settings.js';
 
 const SRC = 'bolt';
 
@@ -60,22 +61,112 @@ async function pullFiRoster(from, to) {
   return total;
 }
 
-// Portal access token (per company) — only if a refresh token is configured.
-async function portalToken(companyId) {
-  const { data } = await http(`${config.bolt.portalBase}/getAccessToken?language=en-us&version=FO.3.856&brand=bolt`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ refresh_token: config.bolt.refreshToken, company: { company_id: companyId, company_type: 'fleet_company' } }),
-  });
-  return data?.data?.access_token || null;
+/* ── the refresh token is single-use, and we were throwing away its successor ──
+   The portal's getAccessToken does not merely mint an access token: it rotates
+   the refresh token and invalidates the one presented. We read
+   `data.data.access_token` and discarded the rest, so a freshly captured token
+   worked for the first company in the loop, was spent, and every later call —
+   the second fleet in the same run, and every run after it — got
+   REFRESH_TOKEN_INVALID. The dashboard read that as "the supervisor pasted a
+   stale token" and asked for another, which was then spent the same way.
+
+   Two responses tell the two failures apart, and only a side-by-side probe
+   makes it visible:
+
+     signature broken  → error_hint "Invalid refresh token"
+     already rotated   → error_hint "<a uuid that is not this token's jti>"
+
+   The second is the portal naming the token that superseded ours. That is why
+   the hint is logged verbatim now rather than being flattened to "invalid". */
+
+// A portal refresh token is issued to one fleet owner, and the two fleets have
+// different owners (userId 174036 / 173999), so each fleet gets its own key and
+// falls back to the shared one for a single-fleet setup.
+const RT_KEY = (fleet) => `BOLT_REFRESH_TOKEN_${String(fleet).toUpperCase()}`;
+const refreshTokenFor = (fleet) => get(RT_KEY(fleet)) || config.bolt.refreshToken || null;
+
+// Payload of a portal refresh token, or null if it is not a JWT we can read.
+// Never throws: an unreadable token still gets attempted, it just cannot be
+// pre-screened for expiry.
+export function readRefreshToken(tok) {
+  const p = jwtPayload(tok);
+  if (!p) return null;
+  return {
+    ...(jwtExpiry(tok) || { expires_at: null, days_left: null, expired: false }),
+    fleet_owner_id: p.data?.fleet_owner_id ?? null,
+    jti: p.data?.jti ?? null,
+  };
 }
 
-// Portal trips (orderHistory) — placeholder wired to the verified endpoint; enabled once a token exists.
+/* Exchange, and keep the successor. Returns { at, err } — never throws, because
+   one fleet's dead token must not cost us the other fleet's trips. */
+async function portalToken(fleet, companyId) {
+  const rt = refreshTokenFor(fleet);
+  if (!rt) return { at: null, err: 'no refresh token configured' };
+
+  const meta = readRefreshToken(rt);
+  if (meta?.expired) {
+    return { at: null, err: `refresh token expired ${meta.expires_at} — re-capture from the portal` };
+  }
+
+  const { data } = await http(`${config.bolt.portalBase}/getAccessToken?language=en-us&version=FO.3.856&brand=bolt`, {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ refresh_token: rt, company: { company_id: companyId, company_type: 'fleet_company' } }),
+  });
+
+  const at = data?.data?.access_token || data?.access_token || null;
+
+  /* Persist the successor before returning the access token. Written even when
+     the exchange failed, in case the portal hands back a usable token alongside
+     an error — and written per fleet, so one fleet's rotation cannot overwrite
+     the other's credential. */
+  const next = data?.data?.refresh_token || data?.refresh_token || null;
+  if (next && next !== rt) {
+    try {
+      await setSetting(RT_KEY(fleet), next);
+      const m = readRefreshToken(next);
+      log.info(SRC, `portal refresh token rotated for ${fleet}`,
+        { expires_at: m?.expires_at || 'unknown', days_left: m?.days_left ?? null });
+    } catch (e) {
+      // Losing the successor means the next run fails, so say so loudly rather
+      // than letting it surface a week later as "the supervisor pasted a stale token".
+      log.error(SRC, `could not store rotated refresh token for ${fleet} — next run will fail`,
+        { err: String(e).slice(0, 200) });
+    }
+  }
+
+  if (at) return { at, err: null };
+  return {
+    at: null,
+    err: [data?.message, data?.error_hint && `hint=${data.error_hint}`, data?.code != null && `code=${data.code}`]
+      .filter(Boolean).join(' ') || 'no access_token in response',
+    meta,
+  };
+}
+
+// Portal trips (orderHistory) — the only Bolt surface carrying trips and fares;
+// the FI gateway is roster-only.
 async function pullPortalTrips(from, to) {
-  if (!config.bolt.refreshToken) { log.warn(SRC, 'portal skipped — no BOLT_REFRESH_TOKEN (trips/earnings unavailable)'); return 0; }
   let total = 0;
   for (const c of config.bolt.companies) {
-    const at = await portalToken(c.companyId);
-    if (!at) { log.warn(SRC, `portal token invalid for ${c.fleet} — refresh needed`); continue; }
+    const rt = refreshTokenFor(c.fleet);
+    if (!rt) { log.warn(SRC, `portal skipped for ${c.fleet} — no refresh token (trips/earnings unavailable)`); continue; }
+
+    const { at, err, meta } = await portalToken(c.fleet, c.companyId);
+    if (!at) {
+      const m = meta || readRefreshToken(rt);
+      /* The owner the token was issued to, next to the fleet it is being used
+         for: a token minted for one owner cannot read the other's company, and
+         that mismatch is otherwise indistinguishable from an expired one. */
+      log.warn(SRC, `portal token rejected for ${c.fleet} — ${err}`, {
+        company_id: c.companyId,
+        token_owner: m?.fleet_owner_id ?? 'unreadable',
+        expected_owner: c.userId,
+        owner_matches: m?.fleet_owner_id == null ? null : m.fleet_owner_id === c.userId,
+        expires_at: m?.expires_at || 'unknown',
+      });
+      continue;
+    }
     const url = `${config.bolt.portalBase}/orderHistory/getTable?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`;
     const { data } = await http(url, {
       method: 'POST', headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
@@ -83,6 +174,10 @@ async function pullPortalTrips(from, to) {
         order_states: ['finished', 'client_cancelled', 'driver_did_not_respond', 'driver_rejected', 'client_did_not_show', 'driver_cancelled_after_accept'] }),
     });
     const orders = data?.data?.orders || data?.orders || [];
+    // An authenticated call that comes back with no orders is worth a line: it
+    // separates "the token works and the window is empty" from "the token works
+    // and we are reading the wrong field", which otherwise both read as zero.
+    if (!orders.length) log.info(SRC, `portal ${c.fleet}: authenticated, no orders in window`, { from: iso(from), to: iso(to) });
     const rows = orders.map((o) => ({
       platform: SRC, external_id: String(o.order_id || o.id), fleet_id: c.fleet,
       plate: normPlate(o.car_reg_number || o.license_plate), driver_name: o.driver_name,
@@ -93,7 +188,6 @@ async function pullPortalTrips(from, to) {
   }
   return total;
 }
-
 export async function collect({ from, to, mode }) {
   try {
     const roster = await pullFiRoster(from, to);

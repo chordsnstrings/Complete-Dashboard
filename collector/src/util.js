@@ -38,3 +38,33 @@ export function hmsToSeconds(s) {
   if (p.some(isNaN)) return null;
   return p.length === 3 ? p[0] * 3600 + p[1] * 60 + p[2] : p.length === 2 ? p[0] * 60 + p[1] : p[0];
 }
+
+/* ── how long is this credential good for? ────────────────────────────────
+   Several of the credentials the collector holds are JWTs that expire on a
+   schedule nobody is watching: the Bolt portal refresh token lasts about a
+   week, and when it dies the only symptom is a source quietly writing zero
+   rows. A JWT states its own expiry in the clear, so there is no reason for
+   that to be a surprise.
+
+   Deliberately total: an opaque cookie is not a JWT and must come back null
+   rather than throwing, because this runs over every stored secret. */
+export function jwtPayload(tok) {
+  try {
+    const part = String(tok).split('.')[1];
+    if (!part) return null;
+    const p = JSON.parse(Buffer.from(part, 'base64url').toString());
+    return p && typeof p === 'object' ? p : null;
+  } catch { return null; }
+}
+
+export function jwtExpiry(tok, now = Date.now()) {
+  const p = jwtPayload(tok);
+  const exp = Number(p?.exp) || null;
+  if (!exp) return null;
+  const ms = exp * 1000;
+  return {
+    expires_at: new Date(ms).toISOString(),
+    days_left: Math.round(((ms - now) / 86400000) * 10) / 10,
+    expired: ms <= now,
+  };
+}
