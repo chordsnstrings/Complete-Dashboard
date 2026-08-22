@@ -16,7 +16,7 @@
 
 import { empty, fmt, areaChart, hbars, donut } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
-         dtStr, timeStr, dayStr, money } from './ui.js';
+         dtStr, timeStr, dayStr, money, custody } from './ui.js';
 import { q, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -149,14 +149,9 @@ export function segmentTable(rows) {
        driver's other flagged segments. A handover day names two people and
        both are openable, which is why the endpoint returns name-and-id pairs
        rather than a comma-joined string it could only print. */
-    { label: 'Driver that day', key: 'drivers', render: (r) => {
-      const refs = r.driver_refs || (r.drivers
-        ? r.drivers.split(',').map((x) => ({ name: x.trim(), id: null })) : []);
-      if (!refs.length) return '<span class="dim">unknown</span>';
-      return refs.map((d) => entity('driver', d.id, d.name)).join(', ')
-        + ` <a class="dim" title="This driver’s other flagged segments"
-             href="${href('segments', 'driver', refs[0].name)}">⌕</a>`;
-    } },
+    { label: 'Driver that day', key: 'drivers',
+      render: (r) => custody(r, { title: 'This driver’s other flagged segments',
+        hrefFor: (d) => href('segments', 'driver', d.name) }) },
     { label: 'Started', key: 'started_at', render: (r) => `<a href="${href('segment', r.plate, r.started_at)}">${esc(dtStr(r.started_at))}</a>` },
     { label: 'Duration', key: 'duration_min', num: true, render: (r) => (r.duration_min ?? '—') + ' min' },
     { label: 'Distance', key: 'distance_km', num: true, render: (r) => (r.distance_km ?? 0) + ' km' },

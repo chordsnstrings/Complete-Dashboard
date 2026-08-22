@@ -23,16 +23,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
-import { driverRoutes } from '../api/driver_routes.js';
-import { vehicleRoutes } from '../api/vehicle_routes.js';
-import { analyticsRoutes } from '../api/analytics_routes.js';
-import { rosterRoutes } from '../api/roster_routes.js';
-import { dayRoutes } from '../api/day_routes.js';
-import { segmentRoutes, slotRoutes } from '../api/segment_routes.js';
-import { forecastRoutes } from '../api/forecast_routes.js';
-import { playbookRoutes } from '../api/playbook_routes.js';
-import { retentionRoutes } from '../api/retention_routes.js';
-import { capacityRoutes } from '../api/capacity_routes.js';
+import { mountAll } from './mount.mjs';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -107,40 +98,20 @@ const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::da
 
    Extracted individually rather than as a slab: a broad slice pulls in the
    file's own const declarations and collides with the ones passed in. */
-const src = readFileSync('api/server.js', 'utf8');
-const routeSource = (path) => {
-  const start = src.indexOf(`app.get('${path}'`);
-  if (start < 0) throw new Error(`route ${path} not found in server.js`);
-  // Walk to the matching close of the app.get(...) call.
-  let depth = 0, i = src.indexOf('(', start);
-  for (; i < src.length; i++) {
-    if (src[i] === '(') depth++;
-    else if (src[i] === ')') { depth--; if (depth === 0) break; }
-  }
-  return src.slice(start, i + 2);
-};
-for (const path of ['/api/drivers/leaderboard', '/api/trips/daily']) {
-  // eslint-disable-next-line no-new-func
-  new Function('app', 'q', 'wrap', 'range', 'F', 'FB', 'W', 'DAYWIN', 'endOfDay',
-    routeSource(path))(app, q, wrap, range, F, FB, W, DAYWIN, endOfDay);
-}
-
-driverRoutes(app, { q, wrap, endOfDay });
-vehicleRoutes(app, { q, wrap, endOfDay });
-analyticsRoutes(app, { q, wrap, range, F, FB });
-rosterRoutes(app, { q, wrap, range });
-dayRoutes(app, { q, wrap });
-segmentRoutes(app, { q, wrap, range, DAYWIN });
-slotRoutes(app, { q, wrap, range });
-forecastRoutes(app, { q, wrap, DAYWIN });
-playbookRoutes(app, { q, wrap, range, DAYWIN });
-retentionRoutes(app, { q, wrap });
-capacityRoutes(app, { q, wrap });
-
-const server = app.listen(0);
-const port = server.address().port;
+/* The whole application, mounted the way production does — server.js's routes
+   and every module in api/. This file used to extract two routes from
+   server.js by hand and mount eleven modules by name, which meant a check
+   written against /api/vehicles found no such route and died parsing Express's
+   404 HTML as JSON. test/mount.mjs is the one mounting, shared. */
+const { server, get: rawGet } = await mountAll(db);
 const WIN = 'from=2026-08-01&to=2026-08-31';
-const get = async (p) => (await fetch(`http://127.0.0.1:${port}${p}`)).json();
+/* Throws on a non-JSON body rather than letting JSON.parse report a stray "<"
+   from Express's 404 page — the error should name the route that is missing. */
+const get = async (p) => {
+  const r = await rawGet(p);
+  if (r.body == null) throw new Error(`${p} → ${r.status} ${r.raw || '(no body)'}`);
+  return r.body;
+};
 
 /* ── 1. how many vehicles does this fleet have? ─────────────────────────── */
 {
@@ -298,6 +269,61 @@ const get = async (p) => (await fetch(`http://127.0.0.1:${port}${p}`)).json();
     walk(body);
   }
   check('no percentage anywhere is negative or above 100', bad.length === 0, bad.join(' | '));
+}
+
+/* ── 8. one rule for who counts as one person ──────────────────────────── */
+/* api/server.js declares CANON as a module-level const, so it cannot be
+   imported — the whole file boots against a live pool. custody_sql.js exports
+   the same fold as personFold for the queries that live elsewhere. Two copies
+   of an identity rule is two answers about how many drivers a vehicle had, and
+   the vehicle page reported seven for a car five humans drove. Extracted and
+   evaluated rather than compared as source text, because whitespace and escape
+   differences are not differences in the SQL that reaches Postgres. */
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync('api/server.js', 'utf8');
+  const m = src.match(/const CANON = \(col\) => `[\s\S]*?`;/);
+  check('api/server.js still declares CANON where this test can find it', !!m);
+  if (m) {
+    // eslint-disable-next-line no-new-func
+    const CANON = new Function(`return ${m[0].replace(/^const CANON = /, '').replace(/;$/, '')}`)();
+    const { personFold, personKey, peopleCount } = await import('../api/custody_sql.js');
+    check('the shared person fold is byte for byte the one server.js uses',
+      CANON('x') === personFold('x'), `${CANON('x')}\n      ${personFold('x')}`);
+    check('the person key prefers the name and falls back to the id',
+      personKey('i', 'n').includes('coalesce') && personKey('i', 'n').endsWith('i)'),
+      personKey('i', 'n'));
+    check('counting people counts distinct person keys, not distinct records',
+      peopleCount('i', 'n').startsWith('count(DISTINCT coalesce('), peopleCount('i', 'n'));
+  }
+}
+
+/* ── 9. a vehicle's driver count is people, not platform records ────────── */
+/* Uber issues a UUID, Yango another, Bolt a third — for the same human. Every
+   vehicle-side count of DISTINCT driver_ext_id therefore counted records. */
+{
+  await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+             requested_at, status, distance_km, price)
+           VALUES ('uber','mp1','ecosine','L100','u-multi','Multi Platform Person',
+                   '2026-08-07T09:00:00+04:00','completed',10,40),
+                  ('yango','mp2','ecosine','L100','y-multi','Multi Platform Person',
+                   '2026-08-07T15:00:00+04:00','completed',10,40)`);
+  const { rebuildCustody } = await import('../src/custody.js');
+  await rebuildCustody({ from: '2026-08-01', to: '2026-08-31', db });
+  const det = await get(`/api/vehicle/drivers-detail?plate=L100&${WIN}`);
+  const rows = (det.totals || []).filter((r) => /Multi Platform/.test(r.driver_name || ''));
+  check('one human with two platform ids is one row on the vehicle page',
+    rows.length === 1, JSON.stringify(rows.map((r) => [r.driver_ext_id, r.trips])));
+  check('and that row carries both their trips, not one platform worth',
+    rows[0]?.trips === 2, String(rows[0]?.trips));
+  check('and stays openable, by every id they hold',
+    Array.isArray(rows[0]?.driver_ids) && rows[0].driver_ids.length === 2,
+    JSON.stringify(rows[0]?.driver_ids));
+  const veh = await get(`/api/vehicles?${WIN}`);
+  const l100 = (veh || []).find((r) => r.plate === 'L100');
+  check('and the fleet table counts them once as well',
+    l100 && l100.drivers === new Set((det.totals || []).map((r) => r.driver_name)).size,
+    `${l100?.drivers} vs ${new Set((det.totals || []).map((r) => r.driver_name)).size}`);
 }
 
 server.close(); await db.close();

@@ -13,7 +13,8 @@
    the ceiling on top, which is exactly backwards. */
 
 import { empty, fmt } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money,
+         entity, custody, custodyAsOf } from './ui.js';
 import { q, href, store } from './data.js';
 
 const GROUPS = [
@@ -159,9 +160,31 @@ function actionCard(a, d) {
     <p>${esc(a.basis)}</p>
     <p class="cap">${esc(cert.means)}</p>`;
   if (a.detail?.length) {
-    const cols = Object.keys(a.detail[0]).map((k) => ({
-      label: k.replace(/_/g, ' '), key: k,
-      render: (r) => (r[k] == null ? '—' : esc(String(r[k]))),
+    /* The evidence table is built from whatever keys the action returned, which
+       kept it honest — a new field on an action appears here without anyone
+       remembering to add it. But esc(String(v)) is only right for scalars: it
+       printed a plate as dead text next to a driver as dead text, so the one
+       table in the product whose whole job is "check this yourself" was the one
+       you could not click out of. And once actions started carrying custody,
+       it rendered [object Object].
+
+       So: scalars still fall through to the generic path, and the handful of
+       keys that name an entity render as links. Keys that exist only to carry
+       an id or a count for another column are folded into it rather than shown
+       as their own column of noise. */
+    const HIDDEN = new Set(['driver_ext_id', 'driver_n']);
+    const RENDER = {
+      plate: (r) => entity('vehicle', r.plate, r.plate),
+      driver: (r) => entity('driver', r.driver_ext_id, r.driver),
+      driver_name: (r) => entity('driver', r.driver_ext_id, r.driver_name),
+      held_by: (r) => custodyAsOf(r.held_by),
+      driver_refs: (r) => custody(r) + (r.driver_n > (r.driver_refs || []).length
+        ? ` <span class="dim">+${fmt(r.driver_n - (r.driver_refs || []).length)} more</span>` : ''),
+    };
+    const LABEL = { driver_refs: 'driven by', held_by: 'held by' };
+    const cols = Object.keys(a.detail[0]).filter((k) => !HIDDEN.has(k)).map((k) => ({
+      label: LABEL[k] || k.replace(/_/g, ' '), key: k,
+      render: RENDER[k] || ((r) => (r[k] == null ? '—' : esc(String(r[k])))),
     }));
     const tbl = tableFrom(a.detail, cols, { compact: true });
     basis.append(tbl);

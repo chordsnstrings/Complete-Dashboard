@@ -6,6 +6,7 @@
    most cases a SECOND number on the same screen that contradicted it. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
+import { mountAll } from './mount.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 
@@ -69,16 +70,12 @@ const quote = (v) => {
 const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
 const stub = async () => ({});
 const src = readFileSync('api/server.js', 'utf8');
-const body = src.slice(src.indexOf("/* ───────────────────────── overview ───────────────────────── */"),
-  src.indexOf('/* ───────────────── per-driver detail pages ───────────────── */'));
-// eslint-disable-next-line no-new-func
-new Function('app', 'q', 'wrap', 'range', 'F', 'FB', 'W', 'DAYWIN', 'CANON', 'quote', 'endOfDay',
-  'requireAdmin', 'describeSettings', 'setSetting', 'deleteSetting', 'loadSettings', 'insights', 'pool',
-  body)(app, q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, (_a, _b, next) => next(),
-  stub, stub, stub, stub, { run: stub }, { query: db.query.bind(db) });
-const server = app.listen(0);
-const port = server.address().port;
-const get = async (p) => (await fetch(`http://127.0.0.1:${port}${p}`)).json();
+const { server, get: rawGet } = await mountAll(db);
+const get = async (p) => {
+  const r = await rawGet(p);
+  if (r.body == null) throw new Error(`${p} → ${r.status} ${r.raw || '(no body)'}`);
+  return r.body;
+};
 const WIN = 'from=2026-08-01&to=2026-08-31';
 
 /* ── the platform donut contradicted the Trips KPI six inches above it ───

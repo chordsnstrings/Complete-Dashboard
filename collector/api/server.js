@@ -29,6 +29,7 @@ const q = (text, params) => pool.query(text, params).then((r) => r.rows);
    with time zone"). The full error is logged; the caller gets a reference to
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
+import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount } from './custody_sql.js';
 let errSeq = 0;
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   const ref = `e${Date.now().toString(36)}-${(++errSeq).toString(36)}`;
@@ -191,7 +192,7 @@ app.get('/api/kpis', wrap(async (req, res) => {
               / nullif(sum(distance_km) FILTER (WHERE has_fare AND has_distance),0))::numeric,2) revenue_per_km,
 
        -- who and what
-       count(DISTINCT driver_ext_id)::int drivers,
+       ${peopleCount()}::int drivers,
        count(*) FILTER (WHERE driver_ext_id IS NOT NULL)::int attributed_trips,
        count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL AND plate <> '')::int vehicles,
        count(DISTINCT platform) FILTER (WHERE is_booking)::int platforms
@@ -460,7 +461,16 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
             (array_agg(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
             round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
             round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-            count(*) FILTER (WHERE has_fare)::int priced_trips
+            count(*) FILTER (WHERE has_fare)::int priced_trips,
+            /* What they drove. A person working three platforms is usually
+               working them from ONE car, and that was the fact this table
+               could not show: the row folded four accounts into one human and
+               then made you open them to find out which asset it was. Taken
+               from the trips in this window rather than from custody, because
+               the fold here is by name and custody is keyed per id. */
+            (array_agg(DISTINCT plate) FILTER (WHERE plate IS NOT NULL))[1:3] AS plates,
+            count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL)::int plate_n,
+            mode() WITHIN GROUP (ORDER BY plate) AS main_plate
      FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
      GROUP BY 1 ORDER BY total_trips DESC LIMIT 150`, p);
   res.json({ platforms, drivers: rows,
@@ -491,13 +501,14 @@ app.get('/api/vehicles', wrap(async (req, res) => res.json(await q(
           round(sum(t.distance_km) FILTER (WHERE NOT t.is_booking AND t.has_distance)::numeric,0) telematics_km,
           round(sum(t.price) FILTER (WHERE t.has_fare)::numeric,0) revenue,
           count(*) FILTER (WHERE t.has_fare)::int priced_trips,
-          count(distinct t.driver_ext_id)::int drivers,
+          ${peopleCount('t.driver_ext_id', 't.driver_name')}::int drivers,
           count(distinct t.platform)::int platforms, max(t.requested_at) last_trip,
-          cd.driver_name AS current_driver, cd.as_of AS driver_as_of
+          cd.driver_name AS current_driver, cd.driver_ext_id AS current_driver_id,
+          cd.as_of AS driver_as_of
    FROM trip_norm t
    LEFT JOIN vehicle_current_driver cd ON cd.plate = t.plate
    WHERE ${W('t')} AND t.plate IS NOT NULL AND t.plate<>''
-   GROUP BY t.plate, cd.driver_name, cd.as_of
+   GROUP BY t.plate, cd.driver_name, cd.driver_ext_id, cd.as_of
    ORDER BY trips DESC, telematics_journeys DESC LIMIT 200`, range(req)))));
 
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
@@ -745,6 +756,12 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
             sum((ev.alert_type ILIKE '%turn%')::int)::int sharp_turn,
             sum((ev.alert_type ILIKE '%speed%')::int)::int overspeed,
             count(DISTINCT ev.plate)::int plates,
+            /* Which cars, not just how many. A row saying somebody has 18
+               harsh-braking events across 4 plates is not something anybody can
+               look into until they know which 4 — and "plates: 4" is a number
+               you cannot click. Capped at three with the count kept beside it,
+               so a truncated list admits that it is one. */
+            (array_agg(DISTINCT ev.plate ORDER BY ev.plate))[1:3] AS plate_list,
             round(max(km.km)::numeric, 0) AS booked_km,
             round((count(*) * 100.0 / nullif(max(km.km), 0))::numeric, 2) AS per_100km
      FROM ev
@@ -1185,7 +1202,7 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
     `SELECT local_month AS m,
             count(*) FILTER (WHERE is_booking)::int trips,
             count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
-            count(distinct driver_ext_id)::int drivers,
+            ${peopleCount()}::int drivers,
             count(*) FILTER (WHERE driver_ext_id IS NOT NULL AND is_booking)::int attributed_trips,
             count(distinct plate)::int vehicles,
             count(distinct plate) FILTER (WHERE is_booking)::int earning_vehicles,
@@ -1363,9 +1380,13 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => {
    returned as such. */
 app.get('/api/compliance/drivers', wrap(async (_, res) => {
   const rows = await q(
-    `SELECT platform, driver_ext_id, full_name, phone, licence_no, licence_expires,
-            (licence_expires - now()::date) AS days_left, state, suspension_reason, rating
-     FROM driver_compliance ORDER BY licence_expires ASC NULLS LAST LIMIT 300`);
+    `SELECT platform, c.driver_ext_id, full_name, phone, licence_no, licence_expires,
+            (licence_expires - now()::date) AS days_left, state, suspension_reason, rating,
+            -- A licence expiring in six days is a CAR that stops earning in six
+            -- days. The row named the person and left the asset to be worked
+            -- out by hand, which is the difference between a list and a plan.
+            ${vehicleLatest('c.driver_ext_id')} AS vehicle
+     FROM driver_compliance c ORDER BY licence_expires ASC NULLS LAST LIMIT 300`);
   const [mode] = await q(
     /* to_char, not the raw date. node-postgres hands a DATE back as a JS Date,
        and String(thatDate).slice(0, 10) is "Thu Jan 01" — which then fails to
@@ -1442,10 +1463,14 @@ app.get('/api/earnings/tips', wrap(async (req, res) => res.json(await q(
 
 // product-tier economics: which assets serve which tier
 app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
-  `SELECT plate, product, count(*)::int trips, round(sum(distance_km)::numeric,0) km,
-          round(avg(distance_km)::numeric,1) avg_km
-   FROM trip_norm WHERE ${F} AND plate IS NOT NULL AND product IS NOT NULL
-   GROUP BY plate, product ORDER BY plate, trips DESC LIMIT 600`, range(req)))));
+  `SELECT t.plate, t.product, count(*)::int trips, round(sum(t.distance_km)::numeric,0) km,
+          round(avg(t.distance_km)::numeric,1) avg_km,
+          -- "This car does 80% econom" is a finding about how it is being
+          -- dispatched and driven, and the row named only the car.
+          ${custodyOverWindow('t.plate')} AS driver_refs,
+          ${custodyCountOverWindow('t.plate')} AS driver_n
+   FROM trip_norm t WHERE ${F} AND t.plate IS NOT NULL AND t.product IS NOT NULL
+   GROUP BY t.plate, t.product ORDER BY t.plate, trips DESC LIMIT 600`, range(req)))));
 
 /* ───────────────── world events + causal attribution ───────────────── */
 // "What was happening when the numbers moved" — candidates, not proof.

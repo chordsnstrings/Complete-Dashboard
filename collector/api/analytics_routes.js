@@ -19,6 +19,7 @@
       is the only source that records where the driver set off from. Everywhere
       else it is unmeasured, and an unmeasured approach leg is never charted as
       a zero-kilometre one. */
+import { custodyOverWindow, custodyCountOverWindow, peopleCount } from './custody_sql.js';
 
 /* A number that lives in a JSON blob is a number a provider can change into a
    word without telling us. Every numeric read out of `raw` is guarded, because
@@ -236,7 +237,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               count(*) FILTER (WHERE coalesce(is_missing,false))::int missing_trips,
               count(DISTINCT guest_id)::int guests,
               count(DISTINCT partner_id)::int properties,
-              count(DISTINCT driver_ext_id)::int drivers,
+              ${peopleCount()}::int drivers,
               count(DISTINCT plate)::int vehicles,
               count(*) FILTER (WHERE zone = 'outside-dubai')::int outside_dubai,
               count(*) FILTER (WHERE zone IS NOT NULL)::int zoned
@@ -294,7 +295,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               count(*) FILTER (WHERE product = 'pick_and_drop')::int pick_and_drop,
               count(*) FILTER (WHERE product = 'drop_off')::int drop_off,
               count(DISTINCT guest_id)::int guests,
-              count(DISTINCT driver_ext_id)::int drivers,
+              ${peopleCount()}::int drivers,
               min(requested_at) first_at, max(requested_at) last_at
        FROM trip_ext WHERE ${F} AND platform = 'hotel'
        GROUP BY 1, 2 ORDER BY bookings DESC`, p)).map((r) => ({
@@ -320,7 +321,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     const [profile] = await q(
       `SELECT coalesce(partner_name, partner_id) name, partner_id,
               count(*)::int bookings, min(requested_at) first_at, max(requested_at) last_at,
-              count(DISTINCT guest_id)::int guests, count(DISTINCT driver_ext_id)::int drivers,
+              count(DISTINCT guest_id)::int guests, ${peopleCount()}::int drivers,
               count(DISTINCT plate)::int vehicles,
               sum(price) FILTER (WHERE NOT is_complimentary) revenue,
               count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int priced
@@ -637,7 +638,14 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               round(sum(t.distance_km) FILTER (WHERE t.has_distance)::numeric, 0) km,
               round(avg(t.distance_km) FILTER (WHERE t.has_distance)::numeric, 1) avg_km,
               max(vp.make) AS make, max(vp.model) AS model, max(vp.year)::int AS year,
-              max(vp.colour) AS colour
+              max(vp.colour) AS colour,
+              /* Who ran this car over the window. "L45240 does 4% premium work
+                 against a fleet median of 31%" is a finding about a person as
+                 much as an asset, and the row used to name only the asset —
+                 leaving the reader to open the vehicle page and work backwards
+                 to who had it before they could act on anything. */
+              ${custodyOverWindow('t.plate')} AS driver_refs,
+              ${custodyCountOverWindow('t.plate')} AS driver_n
        -- The window filter is applied inside a subquery rather than beside the
        -- join: vehicle_profile also has platform and fleet_id columns, and the
        -- shared filter names them bare, which makes the reference ambiguous.

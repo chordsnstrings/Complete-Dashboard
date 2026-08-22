@@ -12,6 +12,8 @@
    the fleet portal knows its documents, and only the combination answers
    "is this asset earning, and is it legal to be on the road". */
 
+import { peopleCount, personKey } from './custody_sql.js';
+
 const normPlate = (s) => String(s || '').toUpperCase().replace(/[\s-]+/g, '');
 
 export function vehicleRoutes(app, { q, wrap, endOfDay }) {
@@ -70,7 +72,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
                 round(sum(distance_km) FILTER (WHERE NOT is_booking AND has_distance)::numeric,0) telematics_km,
                 round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
                 count(*) FILTER (WHERE has_fare)::int priced_trips,
-                count(DISTINCT driver_ext_id)::int drivers,
+                ${peopleCount()}::int drivers,
                 count(DISTINCT platform)::int platforms,
                 max(requested_at) FILTER (WHERE is_booking) last_trip,
                 max(requested_at) last_movement,
@@ -139,7 +141,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     const [span] = await q(
       `SELECT min(requested_at) first_trip, max(requested_at) last_trip, count(*)::int trips,
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days_worked,
-              count(DISTINCT driver_ext_id)::int drivers
+              ${peopleCount()}::int drivers
        FROM trip WHERE ${TW}`, p);
     const [tel] = await q(
       `SELECT captured_at last_fix, polled_at, lat, lng, speed, status, seat_occupied,
@@ -184,7 +186,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
               round(100.0*count(*) FILTER (WHERE outcome='not_completed')
                     /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
-              count(DISTINCT driver_ext_id)::int drivers,
+              ${peopleCount()}::int drivers,
               count(DISTINCT platform) FILTER (WHERE is_booking)::int platforms
        FROM trip_norm WHERE ${TW}`, p);
     const [u] = await q(
@@ -230,7 +232,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               -- six-figure km on a single day of this vehicle's chart.
               round(sum(distance_km) FILTER (WHERE has_distance AND is_booking)::numeric,1) km,
               round(sum(price) FILTER (WHERE has_fare)::numeric,2) revenue,
-              count(DISTINCT driver_ext_id)::int drivers
+              ${peopleCount()}::int drivers
        FROM trip_norm WHERE ${TW} GROUP BY 1),
      g AS (
        SELECT (captured_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int fixes,
@@ -263,15 +265,25 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               first_trip_at, last_trip_at, is_primary
        FROM vehicle_driver_day WHERE plate = $3 AND day BETWEEN $1::date AND $2::date
        ORDER BY day DESC, trips DESC`, p);
+    /* Grouped by PERSON, not by platform record. Uber issues a UUID, Yango
+       another, Bolt a third — for the same human — so grouping on
+       driver_ext_id listed Muhammad Khalid twice, side by side, with his work
+       split between the two rows and neither of them right. Every id they hold
+       comes back beside the fold so both spellings stay openable and the row
+       can say how many accounts it is standing for. */
     const totals = await q(
-      `SELECT driver_ext_id, max(driver_name) driver_name,
+      `SELECT ${personKey()} AS person,
+              max(driver_name) driver_name,
+              (array_agg(DISTINCT driver_ext_id))[1] AS driver_ext_id,
+              array_agg(DISTINCT driver_ext_id) AS driver_ids,
               count(DISTINCT day)::int days,
               sum(trips)::int trips, round(sum(km)::numeric,0) km,
               round(sum(revenue)::numeric,0) revenue,
               min(day) first_day, max(day) last_day,
-              count(DISTINCT day) FILTER (WHERE is_primary)::int primary_days
+              count(DISTINCT day) FILTER (WHERE is_primary)::int primary_days,
+              array_agg(DISTINCT platform) AS platforms
        FROM vehicle_driver_day WHERE plate = $3 AND day BETWEEN $1::date AND $2::date
-       GROUP BY driver_ext_id ORDER BY trips DESC`, p);
+       GROUP BY 1 ORDER BY trips DESC`, p);
     res.json({ days, totals });
   }));
 

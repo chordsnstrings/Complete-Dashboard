@@ -20,6 +20,7 @@
       named `ceiling` so nothing downstream reads it as a promise.
 
    4. AN ACTION WITH NOTHING BEHIND IT IS NOT SHOWN. A zero is not a to-do. */
+import { custodyLatest, custodyOverWindow, custodyCountOverWindow, peopleCount } from './custody_sql.js';
 
 export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
   app.get('/api/playbook', wrap(async (req, res) => {
@@ -80,7 +81,9 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
            FROM plates p
            LEFT JOIN trip_norm t ON t.plate = p.plate AND ${DAYWIN('t.requested_at')}
            GROUP BY 1)
-         SELECT plate, bookings, journeys, to_char(last_booking,'YYYY-MM-DD') AS last_booking
+         SELECT plate, bookings, journeys, to_char(last_booking,'YYYY-MM-DD') AS last_booking,
+                ${custodyOverWindow('v.plate')} AS driver_refs,
+                ${custodyCountOverWindow('v.plate')} AS driver_n
           FROM v WHERE bookings = 0 ORDER BY journeys DESC, plate LIMIT 200`, [from, to]),
 
       /* Somebody who cannot earn on any platform, holding a car. The vehicle
@@ -99,7 +102,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
            SELECT local_dow AS dow, local_hour AS slot_hour,
                   count(*)::int trips,
                   count(DISTINCT local_day)::int days_seen,
-                  count(DISTINCT driver_ext_id)::int drivers
+                  ${peopleCount()}::int drivers
            FROM trip_norm
            WHERE is_booking AND ${DAYWIN('requested_at')}
            GROUP BY 1,2)
@@ -128,8 +131,13 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
          is the only lever here whose effect is avoiding a loss rather than
          making a gain, and it is the most certain of them. */
       q(`SELECT plate, doc_type, to_char(expires_at::date,'YYYY-MM-DD') AS expires_at,
-                (expires_at::date - now()::date)::int AS days_left
-         FROM vehicle_document
+                (expires_at::date - now()::date)::int AS days_left,
+                /* Whoever is driving it now, with the day that reading comes
+                   from. A renewal is a phone call and this is who answers it;
+                   without the day, "held by Kashif" from eleven weeks ago
+                   reads exactly like "held by Kashif" from yesterday. */
+                ${custodyLatest('d.plate')} AS held_by
+         FROM vehicle_document d
          WHERE expires_at IS NOT NULL AND expires_at::date <= now()::date + 45
          ORDER BY expires_at LIMIT 100`),
 
@@ -270,7 +278,8 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         aed_measured: null,
         certainty: 'ceiling', effort: 'high',
         link: '#vehicles',
-        detail: idle.slice(0, 12).map((v) => ({ plate: v.plate, journeys: v.journeys, last_booking: v.last_booking })),
+        detail: idle.slice(0, 12).map((v) => ({ plate: v.plate, journeys: v.journeys,
+          last_booking: v.last_booking, driver_refs: v.driver_refs, driver_n: v.driver_n })),
       });
     }
     if (blocked.length) {
@@ -288,7 +297,8 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         aed_measured: null,
         certainty: 'ceiling', effort: 'low',
         link: '#roster/blocked',
-        detail: blocked.slice(0, 12).map((b) => ({ plate: b.plate, driver: b.full_name, state: b.state })),
+        detail: blocked.slice(0, 12).map((b) => ({ plate: b.plate, driver: b.full_name,
+          driver_ext_id: b.driver_ext_id, state: b.state })),
       });
     }
 
@@ -368,7 +378,8 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         aed_measured: null,
         certainty: 'measured', effort: 'low',
         link: '#compliance',
-        detail: expiring.slice(0, 12).map((d) => ({ plate: d.plate, expires_at: d.expires_at, days_left: d.days_left })),
+        detail: expiring.slice(0, 12).map((d) => ({ plate: d.plate, expires_at: d.expires_at,
+          days_left: d.days_left, held_by: d.held_by })),
       });
     }
     if (Number(licence?.expiring) > 0) {

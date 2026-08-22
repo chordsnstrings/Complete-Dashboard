@@ -147,6 +147,16 @@ async function tabDrivers(root, plate) {
     const t = tableFrom(dd.totals, [
       { label: 'Driver', key: 'driver_name',
         render: (r) => entity('driver', r.driver_ext_id, r.driver_name || r.driver_ext_id) },
+      /* One human, several platform accounts. This table used to list Muhammad
+         Khalid twice — once per provider id — with his work split between the
+         rows and neither of them right. It folds by person now, and says how
+         many accounts the row stands for so the fold is visible rather than
+         something the reader has to take on trust. */
+      { label: 'Accounts', key: 'driver_ids',
+        render: (r) => ((r.driver_ids || []).length > 1
+          ? `<span title="${esc((r.driver_ids || []).join(', '))}">${fmt(r.driver_ids.length)}`
+            + ` <span class="dim">· ${esc((r.platforms || []).join(', '))}</span></span>`
+          : `<span class="dim">${esc((r.platforms || []).join(', ')) || '1'}</span>`) },
       { label: 'Days', key: 'days', num: true },
       { label: 'As primary', key: 'primary_days', num: true },
       { label: 'Trips', key: 'trips', num: true },

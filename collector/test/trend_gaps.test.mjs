@@ -5,6 +5,7 @@
    number is worse than no number, so this pins the behaviour. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
+import { mountAll } from './mount.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 
@@ -40,14 +41,12 @@ for (let i = 1; i <= 20; i++) await mk('fms', `g${n++}`, `2026-03-${String(i).pa
    extracted here rather than imported. Keeping the SQL identical is the point;
    the test fails loudly if the two drift. */
 const src = readFileSync('api/server.js', 'utf8');
-const body = src.slice(src.indexOf("app.get('/api/trend/monthly'"), src.indexOf('// external context joined to the day'));
-const app = express();
-const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
-// eslint-disable-next-line no-new-func
-new Function('app', 'q', 'wrap', body)(app, q, wrap);
-const server = app.listen(0);
-const port = server.address().port;
-const { months, breaks, gaps } = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+const { mountSource, server, get } = await mountAll(db, { serverRoutes: false });
+mountSource(src.slice(src.indexOf("app.get('/api/trend/monthly'"),
+  src.indexOf('// external context joined to the day')));
+const trend = await get('/api/trend/monthly');
+if (trend.body == null) throw new Error(`/api/trend/monthly → ${trend.status} ${trend.raw}`);
+const { months, breaks, gaps } = trend.body;
 
 /* ── the calendar is filled, so a hole looks like a hole ─────────────────── */
 check('every month between first and last is present', months.length === 7, String(months.length));
@@ -117,7 +116,7 @@ check('a break where the platform mix changed says so',
            VALUES ('fms','odo1','ecosine','L1',NULL,NULL,'2026-03-05T10:00:00+04:00',193027,'completed',NULL),
                   ('uber','real1','ecosine','L1','d1','Driver d1','2026-03-05T11:00:00+04:00',14,'completed',40),
                   ('uber','real2','ecosine','L1','d1','Driver d1','2026-03-06T11:00:00+04:00',16,'completed',40)`);
-  const again = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+  const again = (await get('/api/trend/monthly')).body;
   const mar = (again.months || []).find((m) => m.m === '2026-03');
   check('a 193,027 km odometer row is excluded from the month’s distance',
     Number(mar.km) === 30, String(mar.km));
@@ -134,7 +133,7 @@ check('a break where the platform mix changed says so',
   await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
              requested_at,distance_km,status,price)
            VALUES ('uber','tz1','ecosine','L1','d1','Driver d1','2026-04-01T01:00:00+04:00',10,'completed',40)`);
-  const tz = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+  const tz = (await get('/api/trend/monthly')).body;
   const apr = (tz.months || []).find((m) => m.m === '2026-04');
   check('a 01:00 Dubai booking counts in the Dubai month, not the UTC one',
     apr?.trips === 1, `${apr?.trips} in April`);
@@ -151,7 +150,7 @@ check('a break where the platform mix changed says so',
    genuinely quiet days is a quiet month, not a partial one, and excluding it
    from every comparison would hide exactly the thing worth seeing. */
 {
-  const p2 = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+  const p2 = (await get('/api/trend/monthly')).body;
   const ms = p2.months.filter((m) => !m.no_data);
   const firstObserved = ms[0], lastObserved = ms[ms.length - 1];
 
@@ -191,7 +190,7 @@ check('a break where the platform mix changed says so',
     `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,requested_at,distance_km,status,price)
      VALUES ('uber','partial-1','ecosine','L1','d1','Driver d1','2025-08-21T10:00:00+04:00',10,'completed',40),
             ('uber','partial-2','ecosine','L1','d1','Driver d1','2025-08-25T10:00:00+04:00',10,'completed',40)`);
-  const p3 = await (await fetch(`http://127.0.0.1:${port}/api/trend/monthly`)).json();
+  const p3 = (await get('/api/trend/monthly')).body;
   const aug = p3.months.find((m) => m.m === '2025-08');
   check('a month the record starts inside is flagged as partial',
     aug?.partial_month === true, JSON.stringify([aug?.m, aug?.partial_month]));

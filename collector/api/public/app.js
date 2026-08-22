@@ -3,7 +3,7 @@
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
-import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity, dayStr, dtStr, money, pct } from './ui.js';
+import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity, dayStr, dtStr, money, pct, custody, custodyAsOf } from './ui.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
@@ -566,6 +566,8 @@ V.vehicles = async (root) => {
     for (const r of byTier) {
       const cur = byPlate.get(r.plate) || { plate: r.plate, total: 0 };
       cur[r.product] = r.trips; cur.total += r.trips;
+      // Custody comes back on every row for the plate; keep the first.
+      if (!cur.driver_refs) { cur.driver_refs = r.driver_refs; cur.driver_n = r.driver_n; }
       byPlate.set(r.plate, cur);
     }
     /* The concentration sentence is computed over ALL vehicles; the slice is
@@ -576,6 +578,9 @@ V.vehicles = async (root) => {
     const pivot = allPlates.slice(0, 30);
     tierP.body.append(tableFrom(pivot, [
       { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+      { label: 'Driven by', key: 'driver_refs', render: (r) => custody(r)
+        + (r.driver_n > (r.driver_refs || []).length
+          ? ` <span class="dim">+${fmt(r.driver_n - (r.driver_refs || []).length)}</span>` : '') },
       ...tiers.map((t) => ({ label: t, key: t, num: true,
         render: (r) => (r[t] ? `${fmt(r[t])}<span class="dim"> · ${Math.round((r[t] / r.total) * 100)}%</span>` : '—') })),
       { label: 'Total', key: 'total', num: true, render: (r) => fmt(r.total) },
@@ -690,6 +695,13 @@ async function platformTiers(root) {
 
   root.append(tableFrom(t.vehicles, [
     { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+    /* Who ran the car over this window. A shortfall against the same model
+       elsewhere is a finding about how the car is being dispatched and driven,
+       and until this column existed the row named only the asset — so acting
+       on it meant opening the vehicle page to work out who to talk to. */
+    { label: 'Driven by', key: 'driver_refs', render: (r) => custody(r)
+      + (r.driver_n > (r.driver_refs || []).length
+        ? ` <span class="dim">+${fmt(r.driver_n - (r.driver_refs || []).length)} more</span>` : '') },
     { label: 'Model', key: 'model_key', render: (r) => esc([r.year, r.make, r.model].filter(Boolean).join(' ') || '—') },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Black', key: 'black', num: true },
@@ -1075,7 +1087,15 @@ V.safety = async (root) => {
     { label: 'Harsh accel', key: 'harsh_accel', num: true },
     { label: 'Sharp turn', key: 'sharp_turn', num: true },
     { label: 'Overspeed', key: 'overspeed', num: true },
-    { label: 'Vehicles', key: 'plates', num: true },
+    /* Which cars, not just how many. "18 events across 4 vehicles" is not
+       something anybody can look into until they know which 4, and a count is
+       not a thing you can click. */
+    { label: 'Vehicles', key: 'plate_list', render: (r) => {
+      const list = r.plate_list || [];
+      if (!list.length) return `<span class="dim">${fmt(r.plates)}</span>`;
+      return list.map((pl) => entity('vehicle', pl, pl)).join(' ')
+        + (r.plates > list.length ? ` <span class="dim">+${fmt(r.plates - list.length)}</span>` : '');
+    } },
     { label: 'Booked km', key: 'booked_km', num: true, render: (r) => fmt(r.booked_km) },
     { label: 'Per 100 km', key: 'per_100km', num: true,
       render: (r) => (r.per_100km == null ? '<span class="ent-off">distance unknown</span>'

@@ -12,6 +12,7 @@
    the weather and the calendar — and, critically, WHETHER EVERY SOURCE WAS
    COLLECTING. A quiet Tuesday and a Tuesday nobody fetched produce the same
    chart, and only this page can tell them apart. */
+import { custodyNames, custodyRefs } from './custody_sql.js';
 
 const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
   : Math.round(Number(v) * 10 ** d) / 10 ** d);
@@ -29,10 +30,14 @@ export function dayRoutes(app, { q, wrap }) {
     const T0 = `($1::date::timestamp AT TIME ZONE 'Asia/Dubai')`;
     const T1 = `(($1::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')`;
     const D = `local_day = $1::date`;
+    // Both the alert and the segment tables are keyed on a timestamp, and this
+    // page is one Dubai day — so custody is looked up on that day, not on the
+    // UTC one the raw timestamp would cast to.
+    const SEG_DAY = `$1::date`;
 
     const [
       headline, hours, platforms, drivers, vehicles, tiers, settlement,
-      alerts, segments, coverage, context, neighbours, corridors,
+      alerts, alertsByVehicle, segments, coverage, context, neighbours, corridors,
     ] = await Promise.all([
       q(`SELECT count(*) FILTER (WHERE is_booking)::int bookings,
                 count(*) FILTER (WHERE NOT is_booking)::int telematics,
@@ -66,25 +71,46 @@ export function dayRoutes(app, { q, wrap }) {
                 min(requested_at) first_trip, max(requested_at) last_trip
          FROM trip_ext WHERE ${D} AND is_booking AND driver_name IS NOT NULL
          GROUP BY driver_name ORDER BY trips DESC LIMIT 120`, p),
-      q(`SELECT plate, count(*) FILTER (WHERE is_booking)::int bookings,
-                count(*) FILTER (WHERE NOT is_booking)::int telematics,
-                round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 0) km,
-                count(DISTINCT driver_name)::int drivers,
-                sum(price) FILTER (WHERE NOT is_complimentary) revenue
-         FROM trip_ext WHERE ${D} AND plate IS NOT NULL
-         GROUP BY plate ORDER BY bookings DESC, telematics DESC LIMIT 120`, p),
+      q(`SELECT t.plate, count(*) FILTER (WHERE t.is_booking)::int bookings,
+                count(*) FILTER (WHERE NOT t.is_booking)::int telematics,
+                round(sum(t.distance_km) FILTER (WHERE t.has_distance)::numeric, 0) km,
+                count(DISTINCT t.driver_name)::int drivers,
+                -- "This car did 1 journey and 0 bookings" is the row on this
+                -- page most likely to start a conversation, and it named no
+                -- one to have it with.
+                ${custodyNames('t.plate', SEG_DAY)} AS driver_names,
+                ${custodyRefs('t.plate', SEG_DAY)} AS driver_refs,
+                sum(t.price) FILTER (WHERE NOT t.is_complimentary) revenue
+         FROM trip_ext t WHERE ${D} AND t.plate IS NOT NULL
+         GROUP BY t.plate ORDER BY bookings DESC, telematics DESC LIMIT 120`, p),
       q(`SELECT uber_tier AS tier, count(*)::int n FROM trip_ext
          WHERE ${D} AND uber_tier IS NOT NULL GROUP BY 1 ORDER BY n DESC`, p),
       q(`SELECT settlement_class, count(*)::int n,
                 sum(price) FILTER (WHERE NOT is_complimentary) revenue
          FROM trip_ext WHERE ${D} AND settlement_class IS NOT NULL GROUP BY 1 ORDER BY n DESC`, p),
+      /* Grouped by type for the shape of the day, and by (type, plate) for the
+         part an operations person can act on. A harsh-braking count with no
+         driver attached is a statistic; the same count against a named person
+         who held that car is a conversation to have tomorrow morning. */
       q(`SELECT alert_type, count(*)::int n, count(DISTINCT plate)::int plates,
                 array_remove(array_agg(DISTINCT plate), NULL) AS on_plates
-         FROM alert WHERE occurred_at >= ${T0} AND occurred_at < ${T1}
+         FROM alert a WHERE occurred_at >= ${T0} AND occurred_at < ${T1}
          GROUP BY 1 ORDER BY n DESC`, p),
+      q(`SELECT plate, count(*)::int n,
+                count(*) FILTER (WHERE alert_type ILIKE '%brake%')::int harsh_brake,
+                count(*) FILTER (WHERE alert_type ILIKE '%accel%')::int harsh_accel,
+                count(*) FILTER (WHERE alert_type ILIKE '%turn%')::int sharp_turn,
+                count(*) FILTER (WHERE alert_type ILIKE '%speed%')::int overspeed,
+                ${custodyNames('a.plate', SEG_DAY)} AS drivers,
+                ${custodyRefs('a.plate', SEG_DAY)} AS driver_refs
+         FROM alert a WHERE occurred_at >= ${T0} AND occurred_at < ${T1}
+           AND plate IS NOT NULL
+         GROUP BY 1 ORDER BY n DESC LIMIT 40`, p),
       q(`SELECT plate, started_at, ended_at, duration_min, distance_km, verdict,
-                verdict_reason, nearest_platform, nearest_gap_min
-         FROM occupancy_segment
+                verdict_reason, nearest_platform, nearest_gap_min,
+                ${custodyNames('o.plate', SEG_DAY)} AS drivers,
+                ${custodyRefs('o.plate', SEG_DAY)} AS driver_refs
+         FROM occupancy_segment o
          WHERE started_at >= ${T0} AND started_at < ${T1}
          ORDER BY CASE verdict WHEN 'unauthorized' THEN 0 WHEN 'unverifiable' THEN 1 ELSE 2 END,
                   started_at LIMIT 60`, p),
@@ -154,6 +180,7 @@ export function dayRoutes(app, { q, wrap }) {
       tiers,
       settlement: settlement.map((r) => ({ ...r, revenue: round(r.revenue, 0) })),
       alerts,
+      alertsByVehicle,
       segments,
       corridors: corridors.filter((c) => c.from_area !== '(unrecorded)' || c.to_area !== '(unrecorded)'),
       coverage,

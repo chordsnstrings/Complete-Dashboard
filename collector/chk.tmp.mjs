@@ -1,0 +1,13 @@
+import { PGlite } from '@electric-sql/pglite';
+import { applySchema } from './test/schema.mjs';
+import { seedFleet } from './test/fixture.mjs';
+import { rebuildCustody } from './src/custody.js';
+import { mountAll } from './test/mount.mjs';
+const db = new PGlite(); await applySchema(db); await seedFleet(db);
+await rebuildCustody({ from:'2026-08-01', to:'2026-08-31', db });
+const q=(t,p=[])=>db.query(t,p).then(r=>r.rows);
+console.log(await q(`SELECT driver_ext_id, max(driver_name) n, count(*)::int rows FROM vehicle_driver_day GROUP BY 1 ORDER BY 1`));
+const { get, server } = await mountAll(db);
+const d=(await get('/api/vehicle/drivers-detail?plate=L45240&from=2026-08-01&to=2026-08-31')).body;
+console.log('totals:', JSON.stringify(d.totals.map(r=>[r.driver_ext_id,r.driver_name,r.trips])));
+server.close(); await db.close();

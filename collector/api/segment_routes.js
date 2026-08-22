@@ -17,6 +17,7 @@
    `/api/segment` is one interval with everything that was true around it —
    every booking on every channel within an hour either side, not just the
    nearest; the driver who actually held the car that day; and the raw fixes. */
+import { custodyNames, custodyRefs, peopleCount } from './custody_sql.js';
 
 export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
   const VERDICTS = ['unauthorized', 'authorized', 'sensor_suspect', 'partial', 'stationary', 'unverifiable', 'pending'];
@@ -29,25 +30,12 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
      o.start_lat, o.start_lng, o.end_lat, o.end_lng,
      to_char((o.started_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS local_day`;
 
-  // The driver who held the car ON THE DAY OF THE SEGMENT. Naming today's
-  // custodian against a flag from March accuses the wrong person.
-  const CUSTODY = `(SELECT string_agg(DISTINCT v.driver_name, ', ')
-                     FROM vehicle_driver_day v
-                    WHERE v.plate = o.plate
-                      AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
-                      AND v.driver_name IS NOT NULL)`;
-
-  /* The same people, as name-and-id pairs.
-     A comma-joined string of names is a dead end by construction: the page can
-     print it and nothing more, so the most serious accusation this product
-     makes named somebody you could not open. A handover day names two people
-     and both must be openable, which rules out returning a single id. */
-  const CUSTODY_IDS = `(SELECT jsonb_agg(DISTINCT jsonb_build_object(
-                            'name', v.driver_name, 'id', v.driver_ext_id))
-                          FROM vehicle_driver_day v
-                         WHERE v.plate = o.plate
-                           AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
-                           AND v.driver_name IS NOT NULL)`;
+  /* The driver who held the car ON THE DAY OF THE SEGMENT, from the shared
+     definition — the same one the day page and the playbook use, so the person
+     an unauthorised journey names is the person the to-do list chases. */
+  const SEG_DAY = `(o.started_at AT TIME ZONE 'Asia/Dubai')::date`;
+  const CUSTODY = custodyNames('o.plate', SEG_DAY);
+  const CUSTODY_IDS = custodyRefs('o.plate', SEG_DAY);
 
   /* ── the list, with the facets that make the next click obvious ────────── */
   app.get('/api/segments', wrap(async (req, res) => {
@@ -253,7 +241,7 @@ export function slotRoutes(app, { q, wrap, range }) {
     const [[head], drivers, platforms, corridors, occurrences, peers, settle, outcome] = await Promise.all([
       q(`SELECT count(*)::int trips,
                 count(DISTINCT local_day)::int days_seen,
-                count(DISTINCT driver_ext_id)::int drivers,
+                ${peopleCount()}::int drivers,
                 count(DISTINCT plate)::int vehicles,
                 count(DISTINCT platform)::int platforms,
                 round(avg(distance_km) FILTER (WHERE has_distance)::numeric,1) avg_km,

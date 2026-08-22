@@ -89,7 +89,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       if (!seed && !nameQ) return null;          // unknown id — say so rather than answering emptily
     }
     const name = seed?.driver_name || nameQ;
-    if (!name) return id ? { id, name: null, ids: [id], platforms: seed ? [seed.platform] : [] } : null;
+    if (!name) return id
+      ? { id, name: null, ids: [id], keys: [id], platforms: seed ? [seed.platform] : [] }
+      : null;
 
     /* Every id sharing the canonical name, across all sources that carry names.
        Rows with no id contribute the synthesised name: key rather than being
@@ -111,13 +113,28 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        ) s WHERE coalesce(btrim(driver_name), '') <> ''`);
     const want = canonName(name);
     const alias = aliasRows.filter((r) => canonName(r.driver_name) === want);
-    const ids = [...new Set([...alias.map((a) => a.driver_ext_id), ...(id ? [id] : []),
-                             // the key this person would have if never given an id
-                             ...(alias.length ? [] : [nameKey(name)])])];
+    const ids = [...new Set([...alias.map((a) => a.driver_ext_id), ...(id ? [id] : [])]
+      .filter(Boolean))];
     if (!ids.length) return null;
+
+    /* Two different lists, and conflating them was a bug in both directions.
+
+       `ids` is what this person's ACCOUNTS are — the provider ids they hold. It
+       is shown to a reader ("three accounts across two platforms"), so a
+       synthesised key has no business in it.
+
+       `keys` is what their ROWS can be MATCHED by, which is a superset: the
+       same ids, plus the synthesised name key for every spelling they appear
+       under. A driver who works Uber under an id and the hotel channel without
+       one carries both forms, and matching on ids alone left their hotel work
+       off their own page while the fleet totals still counted it. A key that
+       matches nothing costs one comparison. */
+    const keys = [...new Set([...ids,
+      ...alias.map((a) => nameKey(a.driver_name)), nameKey(name)].filter(Boolean))];
     // the longest spelling is usually the fullest one; prefer it for display
     const display = alias.map((a) => a.driver_name).sort((a, b) => b.length - a.length)[0] || name;
-    return { id: id || ids[0], name: display, ids, platforms: [...new Set(alias.map((a) => a.platform))] };
+    return { id: id || ids[0], name: display, ids, keys,
+      platforms: [...new Set(alias.map((a) => a.platform))] };
   }
 
   /* The person key: a provider id where there is one, the synthesised name: key
@@ -135,7 +152,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   const withDriver = (fn) => wrap(async (req, res) => {
     const d = await resolve(req);
     if (!d) return res.status(404).json({ error: 'driver not found' });
-    return fn(req, res, d, [...win(req), d.ids]);
+    // The MATCH set, not the account list — see resolve() above.
+    return fn(req, res, d, [...win(req), d.keys]);
   });
 
   /* ── directory: every driver we know of, one row each ─────────────────
@@ -314,17 +332,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       `SELECT platform, driver_ext_id, full_name, phone, emirates_id, licence_no, licence_expires,
               (licence_expires - now()::date) AS licence_days_left, state, suspension_reason,
               rating, device_brand, device_model, updated_at
-       FROM driver_compliance WHERE driver_ext_id = ANY($1)`, [d.ids]);
+       FROM driver_compliance WHERE driver_ext_id = ANY($1)`, [d.keys]);
     const vehicles = await q(
       `SELECT plate, count(*)::int days, sum(trips)::int trips, round(sum(km)::numeric,0) km,
               round(sum(revenue)::numeric,0) revenue, min(day) first_day, max(day) last_day,
               bool_or(is_primary) ever_primary
        FROM vehicle_driver_day WHERE driver_ext_id = ANY($1)
-       GROUP BY plate ORDER BY days DESC LIMIT 40`, [d.ids]);
+       GROUP BY plate ORDER BY days DESC LIMIT 40`, [d.keys]);
     const accounts = await q(
       `SELECT platform, ${PKEY} AS driver_ext_id, count(*)::int trips,
               min(requested_at) first_trip, max(requested_at) last_trip
-       FROM trip WHERE ${PKEY} = ANY($1) GROUP BY 1,2 ORDER BY trips DESC`, [d.ids]);
+       FROM trip WHERE ${PKEY} = ANY($1) GROUP BY 1,2 ORDER BY trips DESC`, [d.keys]);
     res.json({ ...d, span, compliance, vehicles, accounts });
   }));
 
@@ -443,7 +461,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          -- are being ranked against
          AND (coalesce(btrim(driver_ext_id), '') <> '' OR coalesce(btrim(driver_name), '') <> '')
        GROUP BY 1 HAVING count(*) >= 5`, [p[0], p[1]]);
-    const mineIds = new Set(d.ids);
+    // The peers query projects the PERSON KEY, so the match set is the one to
+    // compare against — the account list would miss their id-less rows.
+    const mineIds = new Set(d.keys);
     const mine = peers.filter((r) => mineIds.has(r.driver_ext_id));
     if (!mine.length) return res.json({ n_peers: peers.length, metrics: [] });
     const sum = (k) => mine.reduce((a, r) => a + (+r[k] || 0), 0);

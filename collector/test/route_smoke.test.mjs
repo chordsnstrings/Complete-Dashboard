@@ -17,14 +17,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema, SCHEMA_FILES } from './schema.mjs';
 import express from 'express';
 import { readFileSync, readdirSync } from 'node:fs';
-import { driverRoutes } from '../api/driver_routes.js';
-import { vehicleRoutes } from '../api/vehicle_routes.js';
-import { analyticsRoutes } from '../api/analytics_routes.js';
-import { rosterRoutes } from '../api/roster_routes.js';
-import { dayRoutes } from '../api/day_routes.js';
-import { segmentRoutes, slotRoutes } from '../api/segment_routes.js';
-import { forecastRoutes } from '../api/forecast_routes.js';
-import { playbookRoutes } from '../api/playbook_routes.js';
+import { mountAll, START, END } from './mount.mjs';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -110,65 +103,20 @@ await q(`INSERT INTO ledger_entry (platform, external_id, fleet_id, occurred_at,
          VALUES ('uber','l1','ecosine', now(), 'payout', 500)`).catch(() => {});
 
 /* ── mount every route the way server.js does ─────────────────────────── */
+/* The mounting itself moved to test/mount.mjs, because three test files were
+   each building it and had drifted: one mounted eight route modules by name
+   while ten shipped, so two of them were called, answered 404, and counted as
+   passing. */
 const src = readFileSync('api/server.js', 'utf8');
-const body = src.slice(src.indexOf("/* ───────────────────────── overview ───────────────────────── */"),
-  src.indexOf('/* ───────────────── per-driver detail pages ───────────────── */'));
-
-const app = express();
-app.use(express.json());
-const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
-  res.status(500).json({ error: 'internal', detail: String(e).slice(0, 300) });
-});
-const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
-const asDate = (v, f) => {
-  const s = String(v || '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return f;
-  const d = new Date(`${s}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? f : s;
-};
-const range = (req) => {
-  let from = asDate(req.query.from, '2000-01-01'); let to = asDate(req.query.to, '2100-01-01');
-  if (from > to) [from, to] = [to, from];
-  return [from, to, req.query.platform || null, req.query.fleet || null];
-};
-const W = (alias = '') => {
-  const c = alias ? `${alias}.` : '';
-  return `${c}local_day BETWEEN $1::date AND $2::date`
-    + ` AND ($3::text IS NULL OR ${c}platform=$3)`
-    + ` AND ($4::text IS NULL OR ${c}fleet_id=$4)`;
-};
-const F = W();
-const FB = `${F} AND is_booking`;
-// Mirrors the server's helpers exactly; the assertions below check the shipped
-// source still defines them the same way.
-const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`;
-const CANON = (col) => `regexp_replace(
-    btrim(regexp_replace(lower(${col}), '\\s+', ' ', 'g')),
-    '(\\m\\w+)( \\1)+', '\\1', 'g')`;
-
-const quote = (v) => {
-  if (!/^[a-z0-9_]{1,32}$/i.test(String(v))) throw new Error(`unexpected platform name: ${v}`);
-  return `'${v}'`;
-};
-const requireAdmin = (_req, _res, next) => next();
-const stub = async () => ({});
-// eslint-disable-next-line no-new-func
-new Function('app', 'q', 'wrap', 'range', 'F', 'FB', 'W', 'DAYWIN', 'CANON', 'quote', 'endOfDay',
-  'requireAdmin', 'describeSettings', 'setSetting', 'deleteSetting', 'loadSettings', 'insights', 'pool',
-  body)(app, q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin,
-  stub, stub, stub, stub, { run: stub }, { query: db.query.bind(db) });
-driverRoutes(app, { q, wrap, endOfDay });
-vehicleRoutes(app, { q, wrap, endOfDay });
-analyticsRoutes(app, { q, wrap, range, F, FB });
-rosterRoutes(app, { q, wrap, range });
-dayRoutes(app, { q, wrap });
-segmentRoutes(app, { q, wrap, range, DAYWIN });
-slotRoutes(app, { q, wrap, range });
-forecastRoutes(app, { q, wrap, DAYWIN });
-playbookRoutes(app, { q, wrap, range, DAYWIN });
-
-const server = app.listen(0);
-const port = server.address().port;
+const { app, server, port, mounted } = await mountAll(db);
+check('every route module in api/ is mounted, not just the ones somebody listed',
+  mounted.length >= readdirSync('api').filter((x) => x.endsWith('_routes.js')).length,
+  mounted.join(' '));
+/* The harness slices server.js between two section comments. Rename either and
+   the slice silently shrinks to nothing, which would read as "every route
+   passes" rather than as a broken harness. */
+check('the section markers the harness slices between still exist in server.js',
+  src.includes(START) && src.indexOf(END) > src.indexOf(START));
 
 /* Every GET route the server declares, with a parameter set that resolves. A
    route not listed here is called with the window alone. */
@@ -223,6 +171,23 @@ for (const path of resolved) {
   }
 }
 check(`all ${resolved.length} GET routes execute without a server error`, bad === 0, `${bad} failed`);
+
+/* A route that is never mounted answers 404, and a 404 is not a 500 — so the
+   check above cannot tell "this route works" from "this route does not exist".
+   That is exactly how two shipped modules stayed unexercised. Ask Express what
+   it actually registered instead of inferring it from a status code. */
+const registered = new Set((app._router?.stack || app.router?.stack || [])
+  .filter((l) => l.route?.methods?.get).map((l) => l.route.path));
+/* /api/health and /api/ready are declared above the slice of server.js this
+   harness evaluates, because they read migration state and the live pool
+   rather than answering from SQL. They are covered by the source assertions
+   further down ("readiness is separate from liveness and names what is
+   missing", "the API refuses to serve on a failed migration"), so they are
+   named here rather than quietly passing through a looser filter. */
+const OUTSIDE_HARNESS = new Set(['/api/health', '/api/ready']);
+const unmounted = all.filter((r) => !registered.has(r) && !OUTSIDE_HARNESS.has(r));
+check('every route the source declares is actually registered on the app',
+  unmounted.length === 0, unmounted.join(' '));
 
 /* ── the mock API must answer in the same SHAPE as the real one ──────────
    mockapi.mjs is what the browser smoke test runs against, so a fixture whose

@@ -17,6 +17,7 @@
    Every assertion here is one of those numbers. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
+import { mountAll } from './mount.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 
@@ -65,33 +66,16 @@ await trip({ platform: 'bolt', id: 'bx', plate: 'L101', day: 7, status: 'client_
 
 /* ── mount the real handlers ──────────────────────────────────────────────
    Extracted from api/server.js rather than reimplemented, so this test fails
-   when the shipped SQL drifts. */
+   when the shipped SQL drifts. The helper injection comes from test/mount.mjs
+   for the same reason: this file used to name its own six helpers, and broke
+   the day a route it slices started using a seventh — with a ReferenceError
+   from inside an eval, a long way from the line that caused it. */
 const src = readFileSync('api/server.js', 'utf8');
 const slice = (from, to) => src.slice(src.indexOf(from), src.indexOf(to));
-const app = express();
-const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
-const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
-const asDate = (v, fallback) => {
-  const s = String(v || '');
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return fallback;
-  const d = new Date(`${s}T00:00:00Z`);
-  return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? fallback : s;
-};
-const range = (req) => {
-  let from = asDate(req.query.from, '2000-01-01');
-  let to = asDate(req.query.to, '2100-01-01');
-  if (from > to) [from, to] = [to, from];
-  return [from, to, req.query.platform || null, req.query.fleet || null];
-};
-const F = `local_day BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`;
-const FB = `${F} AND is_booking`;
-const body = slice("app.get('/api/kpis'", "app.get('/api/trips/daily'")
-  + slice('/* Breakdown by one dimension.', '/* ───────────────────────── drivers ───────────────────────── */');
-// eslint-disable-next-line no-new-func
-new Function('app', 'q', 'wrap', 'range', 'F', 'FB', body)(app, q, wrap, range, F, FB);
-const server = app.listen(0);
-const port = server.address().port;
-const get = async (p) => (await fetch(`http://127.0.0.1:${port}${p}`)).json();
+const { mountSource, server, get: rawGet } = await mountAll(db, { serverRoutes: false });
+mountSource(slice("app.get('/api/kpis'", "app.get('/api/trips/daily'")
+  + slice('/* Breakdown by one dimension.', '/* ───────────────────────── drivers ───────────────────────── */'));
+const get = async (p) => (await rawGet(p)).body;
 
 const W = 'from=2026-08-01&to=2026-08-31';
 const k = await get(`/api/kpis?${W}`);

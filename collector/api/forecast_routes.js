@@ -17,6 +17,7 @@
    assumption that produced it. */
 
 import { forecastMonths, weekdayShares, forecastDays, regimeWindow } from '../src/forecast.js';
+import { peopleCount } from './custody_sql.js';
 
 export function forecastRoutes(app, { q, wrap, DAYWIN }) {
   /* ── the forecast ─────────────────────────────────────────────────────── */
@@ -29,7 +30,7 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
     const months = await q(
       `SELECT to_char(local_month,'YYYY-MM') AS m,
               count(*) FILTER (WHERE is_booking)::int trips,
-              count(DISTINCT driver_ext_id) FILTER (WHERE is_booking)::int drivers,
+              ${peopleCount()} FILTER (WHERE is_booking)::int drivers,
               count(DISTINCT plate) FILTER (WHERE is_booking)::int vehicles,
               round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
               count(*) FILTER (WHERE has_fare)::int priced_trips,

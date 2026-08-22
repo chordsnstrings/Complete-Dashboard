@@ -11,7 +11,7 @@
 
 import { barChart, donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
-  dayStr, dtStr, timeStr, money, pct } from './ui.js';
+  dayStr, dtStr, timeStr, money, pct, custody } from './ui.js';
 import { api, href, state } from './data.js';
 
 const shift = (day, n) => {
@@ -143,6 +143,15 @@ export async function renderDay(root, day, onDetail) {
       + 'journeys the evidence cannot settle either way.');
     sp.body.append(tableFrom(d.segments, [
       { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+      /* The plate alone is not something anyone can act on. This is the day's
+         most serious claim and it used to name a car and no person, so the
+         reader's next move was to open the vehicle page and work backwards to
+         who had it. Custody is per day, so the name here is who held that car
+         on THIS day — naming today's custodian against a flag from March
+         accuses the wrong person. */
+      { label: 'Driver that day', key: 'drivers',
+        render: (r) => custody(r, { title: 'This driver’s other flagged segments',
+          hrefFor: (dr) => href('segments', 'driver', dr.name) }) },
       { label: 'From', key: 'started_at', render: (r) => timeStr(r.started_at) },
       { label: 'To', key: 'ended_at', render: (r) => timeStr(r.ended_at) },
       { label: 'Minutes', key: 'duration_min', num: true },
@@ -153,6 +162,26 @@ export async function renderDay(root, day, onDetail) {
       { label: 'Why', key: 'verdict_reason', render: (r) => esc(String(r.verdict_reason || '').slice(0, 120)) },
     ]));
     root.append(sp.panel);
+  }
+
+  /* The same events, against the person who was driving.
+     A bar chart of "38 harsh brakes" tells an operations manager the shape of
+     the day and nothing they can do about it tomorrow. Broken out per vehicle
+     and attributed to whoever held that vehicle on this day, it is a list of
+     conversations — which is what the page is for. */
+  if ((d.alertsByVehicle || []).length) {
+    const ap = panel('Harsh driving, by vehicle and driver',
+      'Telematics events on this day, against whoever held the car that day.');
+    ap.body.append(tableFrom(d.alertsByVehicle, [
+      { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+      { label: 'Driver that day', key: 'drivers', render: (r) => custody(r) },
+      { label: 'Events', key: 'n', num: true },
+      { label: 'Braking', key: 'harsh_brake', num: true },
+      { label: 'Acceleration', key: 'harsh_accel', num: true },
+      { label: 'Turns', key: 'sharp_turn', num: true },
+      { label: 'Speeding', key: 'overspeed', num: true },
+    ]));
+    root.append(ap.panel);
   }
 
   const dp = panel('Who drove', 'Every driver with a booking on this day, across all channels.');
@@ -176,7 +205,10 @@ export async function renderDay(root, day, onDetail) {
     { label: 'Bookings', key: 'bookings', num: true },
     { label: 'Telematics journeys', key: 'telematics', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'Drivers', key: 'drivers', num: true },
+    /* Named, not counted. "This car did 1 journey and 0 bookings" is the row on
+       this page most likely to start a conversation, and "drivers: 2" is not
+       somebody you can ring. */
+    { label: 'Driver that day', key: 'driver_refs', render: (r) => custody(r) },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
   ]));
   root.append(vp.panel);

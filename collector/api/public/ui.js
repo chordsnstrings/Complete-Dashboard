@@ -76,6 +76,40 @@ export const entity = (view, id, text) => (id
   ? `<a class="ent" href="${href(view, id)}">${esc(text ?? id)}</a>`
   : `<span class="ent-off">${esc(text ?? '—')}</span>`);
 
+/* The people who held a vehicle on the day a vehicle-level fact happened.
+   ─────────────────────────────────────────────────────────────────────────
+   Every table that names a plate can name them: an unauthorised journey, a
+   harsh-braking count, a document expiring, a car that moved with no booking.
+   A plate on its own is not actionable — somebody has to be rung.
+
+   Takes the {name, id} pairs the endpoint returns and falls back to splitting
+   the comma-joined names when only those are present, so an endpoint that has
+   not been given the pairs yet still reads rather than showing a blank. Every
+   name is rendered through entity(), so a handover day makes BOTH people
+   openable and a person with no id degrades to plain text rather than to a
+   broken link. */
+export const custody = (r, { title = null, hrefFor = null } = {}) => {
+  const refs = r.driver_refs || (r.drivers
+    ? String(r.drivers).split(',').map((x) => ({ name: x.trim(), id: null })) : []);
+  if (!refs.length) return '<span class="dim">unknown</span>';
+  const names = refs.map((d) => entity('driver', d.id, d.name)).join(', ');
+  return hrefFor
+    ? `${names} <a class="dim" title="${esc(title || '')}" href="${hrefFor(refs[0])}">⌕</a>`
+    : names;
+};
+
+/* The custodian as of the most recent day we hold custody for, for facts that
+   are not about a particular day — a document expiring next month, a car that
+   has not earned all quarter. The day is shown because "held by Kashif" means
+   something different if it is drawn from yesterday or from eleven weeks ago,
+   and hiding that invites somebody to ring the wrong person. */
+export const custodyAsOf = (ref) => (ref && ref.name
+  // Anchored at midday: a bare YYYY-MM-DD parses as UTC midnight, which renders
+  // as the previous day for any viewer west of Greenwich.
+  ? `${entity('driver', ref.id, ref.name)}<span class="dim"> as of `
+    + `${ref.day ? dayStr(`${ref.day}T12:00:00`) : 'an unrecorded day'}</span>`
+  : '<span class="dim">nobody on record</span>');
+
 export const pill = (text, tone) => `<span class="pill${tone ? ' ' + tone : ''}">${esc(text)}</span>`;
 
 export const dateStr = (v) => (v ? new Date(v).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');

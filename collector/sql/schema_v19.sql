@@ -10,28 +10,44 @@
 -- fold is two answers eventually). It is to name the fold once, here, and have
 -- the job insert from it and the page read from it.
 CREATE OR REPLACE VIEW custody_live AS
-WITH agg AS (
-  SELECT upper(replace(plate, ' ', '')) AS plate,
-         (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
-         -- A driver known only by name is still a driver. The synthesised key
-         -- is deterministic and prefixed so it cannot collide with a provider
-         -- id; the same expression appears in api/driver_routes.js (PKEY), so a
-         -- person keys identically on their own page and on their vehicle's.
-         coalesce(nullif(btrim(driver_ext_id), ''),
-                  'name:' || lower(regexp_replace(btrim(driver_name), '\s+', ' ', 'g'))) AS driver_ext_id,
-         platform,
-         max(driver_name) AS driver_name,
-         max(fleet_id)    AS fleet_id,
-         count(*)::int    AS trips,
-         round(sum(distance_km)::numeric, 1)::double precision AS km,
-         round(sum(price)::numeric, 2) AS revenue,
-         min(requested_at) AS first_trip_at,
-         max(requested_at) AS last_trip_at
-  FROM trip
-  WHERE plate IS NOT NULL AND plate <> ''
+WITH known AS (
+  /* One provider id per canonical name, for people who carry an id SOMEWHERE.
+     Without this, a driver who works Uber under an id and the hotel channel
+     without one becomes two custodians of the same car on the same day: the
+     vehicle page lists them twice, the driver count for that plate is one too
+     high, and clicking one of the two shows a fraction of their work. Folding
+     by exact normalised name is the identity rule this product already uses
+     everywhere else — see api/driver_routes.js — so this is not a new claim
+     about who is who, only the existing one applied here too. */
+  SELECT lower(regexp_replace(btrim(driver_name), '\s+', ' ', 'g')) AS canon,
+         min(driver_ext_id) AS driver_ext_id
+    FROM trip
+   WHERE coalesce(btrim(driver_ext_id), '') <> '' AND coalesce(btrim(driver_name), '') <> ''
+   GROUP BY 1
+),
+agg AS (
+  SELECT upper(replace(t.plate, ' ', '')) AS plate,
+         (t.requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
+         /* The person key, in preference order: the id this row carries; failing
+            that, an id the same person carries elsewhere; failing that, a
+            synthesised key from the canonical name — deterministic, and
+            prefixed so it can never be mistaken for a provider id. */
+         coalesce(nullif(btrim(t.driver_ext_id), ''), k.driver_ext_id,
+                  'name:' || lower(regexp_replace(btrim(t.driver_name), '\s+', ' ', 'g'))) AS driver_ext_id,
+         t.platform,
+         max(t.driver_name) AS driver_name,
+         max(t.fleet_id)    AS fleet_id,
+         count(*)::int      AS trips,
+         round(sum(t.distance_km)::numeric, 1)::double precision AS km,
+         round(sum(t.price)::numeric, 2) AS revenue,
+         min(t.requested_at) AS first_trip_at,
+         max(t.requested_at) AS last_trip_at
+  FROM trip t
+  LEFT JOIN known k ON k.canon = lower(regexp_replace(btrim(t.driver_name), '\s+', ' ', 'g'))
+  WHERE t.plate IS NOT NULL AND t.plate <> ''
     -- One of the two must identify somebody; a row with neither is a
     -- telematics journey and belongs to no driver.
-    AND (coalesce(btrim(driver_ext_id), '') <> '' OR coalesce(btrim(driver_name), '') <> '')
+    AND (coalesce(btrim(t.driver_ext_id), '') <> '' OR coalesce(btrim(t.driver_name), '') <> '')
   GROUP BY 1, 2, 3, 4
 )
 SELECT agg.*,

@@ -19,6 +19,7 @@
    demand. That is a rostering arithmetic, not a claim about anybody's limit. */
 
 import { forecastMonths, weekdayShares } from '../src/forecast.js';
+import { peopleCount } from './custody_sql.js';
 
 export function capacityRoutes(app, { q, wrap }) {
   app.get('/api/capacity', wrap(async (req, res) => {
@@ -55,7 +56,7 @@ export function capacityRoutes(app, { q, wrap }) {
       `WITH c AS (
          SELECT local_dow AS dow, local_hour AS slot_hour, local_day AS day,
                 count(*)::int bookings,
-                count(DISTINCT driver_ext_id)::int drivers
+                ${peopleCount()}::int drivers
          FROM trip_norm
          WHERE is_booking
            AND local_day > (SELECT max(local_day) FROM trip_norm WHERE is_booking) - $1::int

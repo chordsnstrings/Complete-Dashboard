@@ -41,8 +41,12 @@ for (const f of UI) {
   for (const m of src.matchAll(/\{\s*label:\s*'([^']+)'\s*,\s*key:\s*'([^']+)'([\s\S]{0,400}?)\}\s*,\s*\n/g)) {
     const [, label, key, rest] = m;
     if (!ENTITY_LABEL.test(label.trim())) continue;
-    // Linked if it uses the shared helper or builds an href to a detail page.
-    const linked = /entity\(|href\(\s*'(driver|vehicle|property|segment|slot|day)'/.test(rest);
+    /* Linked if it uses one of the shared helpers or builds an href to a detail
+       page. custody()/custodyAsOf() render every name through entity(), so a
+       column using them is linked by construction — and by more than a
+       hand-rolled anchor could be, because a handover day names two people and
+       both come out openable. */
+    const linked = /entity\(|custody\(|custodyAsOf\(|href\(\s*'(driver|vehicle|property|segment|slot|day)'/.test(rest);
     if (linked) continue;
     const line = src.slice(0, m.index).split('\n').length;
     findings.push(`api/public/${f}:${line}  "${label}" (key ${key})`);
@@ -87,7 +91,7 @@ for (const f of API) {
        handover day names two people who must both be openable. The convention
        is a parallel `driver_refs` aggregate of {name, id} pairs; a file that
        produces one has paired its name list and is not a dead end. */
-    if (/driver_refs/.test(src)) continue;
+    if (/driver_refs|custodyRefs/.test(src)) continue;
     const line = src.slice(0, m.index).split('\n').length;
     idless.push(`api/${f}:${line}`);
   }

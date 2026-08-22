@@ -1,0 +1,122 @@
+/* Who held this vehicle, on this day.
+   ─────────────────────────────────────────────────────────────────────────
+   Every fact this product records about a VEHICLE — an unauthorised journey, a
+   harsh-braking event, a document about to expire, a car that moved with no
+   booking against it — is a fact about a PERSON, and the plate alone does not
+   name them. "L45240 carried a passenger with no booking" is an accusation
+   nobody can act on; "L45240, held by Kashif Ali that day" is a conversation.
+
+   Two rules are baked in here and both were learned the hard way:
+
+   1. Custody is per DAY, not current. Naming today's custodian against a flag
+      from March accuses whoever happens to hold the car now.
+
+   2. A comma-joined string of names is a dead end by construction: a page can
+      print it and nothing more. A handover day names two people and both have
+      to be openable, so the pairs form is what the UI links from. Endpoints
+      return both — the string for reading, the pairs for clicking.
+
+   Correlated subqueries against vehicle_driver_day, which is indexed on
+   (plate, day) — cheap per row and, unlike a join, they cannot multiply the
+   row count of the query they are dropped into. */
+
+/** Names, comma-joined, for the plate and day named by the caller's columns. */
+export const custodyNames = (plate, day) =>
+  `(SELECT string_agg(DISTINCT v.driver_name, ', ')
+      FROM vehicle_driver_day v
+     WHERE v.plate = ${plate} AND v.day = ${day}
+       AND v.driver_name IS NOT NULL)`;
+
+/** The same people as {name, id} pairs, so every one of them is clickable. */
+export const custodyRefs = (plate, day) =>
+  `(SELECT jsonb_agg(DISTINCT jsonb_build_object('name', v.driver_name, 'id', v.driver_ext_id))
+      FROM vehicle_driver_day v
+     WHERE v.plate = ${plate} AND v.day = ${day}
+       AND v.driver_name IS NOT NULL)`;
+
+/* The custodian of a plate as of the most recent day we have custody for, for
+   facts that are not about a day at all — a document expiring next month, a
+   vehicle that has not earned this quarter. Reported with the day it is drawn
+   from, because "held by Kashif" is a different claim if the day is yesterday
+   or eleven weeks ago, and a page that hides that distinction invites somebody
+   to ring the wrong person. */
+export const custodyLatest = (plate) =>
+  `(SELECT jsonb_build_object('name', v.driver_name, 'id', v.driver_ext_id,
+                              'day', to_char(v.day, 'YYYY-MM-DD'))
+      FROM vehicle_driver_day v
+     WHERE v.plate = ${plate} AND v.driver_name IS NOT NULL
+     ORDER BY v.day DESC, v.is_primary DESC, v.trips DESC LIMIT 1)`;
+
+/* Who held the vehicle across a WINDOW rather than on one day — for tables
+   whose rows are a vehicle over a range (a tier mix, a quarter's earnings)
+   rather than a dated event. Ordered by days held, so the person who actually
+   ran the car leads and an occasional relief driver does not.
+
+   Capped at three: a plate with eleven drivers over a quarter is real, and a
+   cell listing all eleven is unreadable and stops being a link anybody clicks.
+   The count comes back beside them so the cell can say what it left out — a
+   truncated list that does not admit it is a lie by omission. */
+export const custodyOverWindow = (plate, from = '$1', to = '$2') => `
+  (SELECT jsonb_agg(x) FROM (
+     SELECT jsonb_build_object('name', v.driver_name, 'id', v.driver_ext_id,
+                               'days', count(DISTINCT v.day)::int) AS x
+       FROM vehicle_driver_day v
+      WHERE v.plate = ${plate} AND v.day BETWEEN ${from}::date AND ${to}::date
+        AND v.driver_name IS NOT NULL
+      GROUP BY v.driver_name, v.driver_ext_id
+      ORDER BY count(DISTINCT v.day) DESC, v.driver_name
+      LIMIT 3) s)`;
+
+export const custodyCountOverWindow = (plate, from = '$1', to = '$2') => `
+  (SELECT count(DISTINCT v.driver_ext_id)::int
+     FROM vehicle_driver_day v
+    WHERE v.plate = ${plate} AND v.day BETWEEN ${from}::date AND ${to}::date
+      AND v.driver_name IS NOT NULL)`;
+
+/* ── the mirror: what did this PERSON drive? ────────────────────────────
+   The same dead end in the other direction. A licence expiring in six days is
+   a car that stops earning in six days, and the row that reports it named only
+   the person — so working out which asset was about to go idle meant opening
+   the driver, reading their custody, and coming back. */
+
+/** The vehicle this person most recently held, with the day it is drawn from. */
+export const vehicleLatest = (driverId) =>
+  `(SELECT jsonb_build_object('plate', v.plate, 'day', to_char(v.day, 'YYYY-MM-DD'))
+      FROM vehicle_driver_day v
+     WHERE v.driver_ext_id = ${driverId}
+     ORDER BY v.day DESC, v.is_primary DESC, v.trips DESC LIMIT 1)`;
+
+/** Every vehicle this person held over a window, busiest first, capped at three. */
+export const vehiclesOverWindow = (driverId, from = '$1', to = '$2') => `
+  (SELECT jsonb_agg(x) FROM (
+     SELECT jsonb_build_object('plate', v.plate, 'days', count(DISTINCT v.day)::int) AS x
+       FROM vehicle_driver_day v
+      WHERE v.driver_ext_id = ${driverId} AND v.day BETWEEN ${from}::date AND ${to}::date
+      GROUP BY v.plate
+      ORDER BY count(DISTINCT v.day) DESC, v.plate
+      LIMIT 3) s)`;
+
+/* ── one human, several records ─────────────────────────────────────────
+   Uber issues a UUID, Yango a different id, Bolt a third, the hotel channel a
+   fourth — all for the same person. Counting DISTINCT driver_ext_id therefore
+   counts records, not people: a vehicle driven by five humans across four
+   platforms reported seven drivers, and the vehicle page listed two of them
+   twice, side by side, with their work split between the rows.
+
+   personFold is the rule that decides two records are one human, and it is
+   deliberately the SAME rule /api/driver/* resolves by, so the vehicle page and
+   the driver page cannot disagree about how many people there are. It is byte
+   for byte the CANON helper in api/server.js; test/consistency.test.mjs asserts
+   the two strings are identical, so a change to one that is not made to the
+   other fails rather than quietly splitting people again. */
+export const personFold = (col) => `regexp_replace(
+    btrim(regexp_replace(lower(${col}), '\\s+', ' ', 'g')),
+    '(\\m\\w+)( \\1)+', '\\1', 'g')`;
+
+/** The name where there is one, the id where there is not — never both. */
+export const personKey = (idCol = 'driver_ext_id', nameCol = 'driver_name') =>
+  `coalesce(nullif(${personFold(nameCol)}, ''), ${idCol})`;
+
+/** How many DISTINCT PEOPLE, as opposed to how many platform records. */
+export const peopleCount = (idCol = 'driver_ext_id', nameCol = 'driver_name') =>
+  `count(DISTINCT ${personKey(idCol, nameCol)})`;
