@@ -184,6 +184,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               round(100.0*count(*) FILTER (WHERE outcome='completed')
                     /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) completion_pct,
               count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
+              -- The numerators, beside the rates. A rate reported with only its
+              -- denominator is a figure the reader has to take on trust.
+              count(*) FILTER (WHERE outcome='completed')::int completed,
+              count(*) FILTER (WHERE outcome='not_completed')::int not_completed,
               round(100.0*count(*) FILTER (WHERE outcome='not_completed')
                     /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
               ${peopleCount()}::int drivers,

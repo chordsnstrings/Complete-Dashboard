@@ -219,8 +219,13 @@ async function tabOverview(root, id, prof) {
     { label: 'Hours online', value: k.hours_online != null ? fmt(k.hours_online, 1) : '—', sub: k.hours_on_trip != null ? `${fmt(k.hours_on_trip, 1)}h with a passenger` : 'platform-reported' },
     { label: 'Utilisation', value: k.utilisation_pct != null ? pct(k.utilisation_pct) : '—', sub: 'on-trip ÷ online', tone: k.utilisation_pct == null ? null : k.utilisation_pct >= 55 ? 'good' : k.utilisation_pct >= 35 ? 'warn' : 'critical' },
     { label: 'Trips', value: fmt(k.trips), sub: `${fmt(k.km)} km · avg ${fmt(k.avg_km, 1)} km` },
+    /* The numerator as well as the denominator. A rate with only its base under
+       it is a figure the reader has to take on trust — and the fleet page six
+       inches away on another screen prints both. */
     { label: 'Completion', value: pct(k.completion_pct, 1),
-      sub: k.outcome_n ? `${pct(k.cancel_pct, 1)} did not complete, over ${fmt(k.outcome_n)} trips` : 'no platform here reports an outcome',
+      sub: k.outcome_n
+        ? `${fmt(k.completed)} of ${fmt(k.outcome_n)} completed, ${fmt(k.not_completed)} did not`
+        : 'no platform here reports an outcome',
       tone: k.completion_pct == null ? null : k.completion_pct >= 95 ? 'good' : k.completion_pct >= 85 ? 'warn' : 'critical' },
     { label: 'Revenue', value: money(k.revenue), sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' },
     k.rating ? { label: 'Rating', value: fmt(k.rating, 2), sub: 'platform-reported', tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' } : null,
@@ -474,7 +479,9 @@ async function tabQuality(root, id) {
        driver whose platforms report no outcome at all scored 'critical' — the
        page accused them of a 0% completion rate it had never measured. */
     { label: 'Completion', value: pct(k.completion_pct, 1),
-      sub: k.outcome_n ? `over ${fmt(k.outcome_n)} trips whose platform reports an outcome` : 'no platform reported an outcome',
+      sub: k.outcome_n
+        ? `${fmt(k.completed)} of ${fmt(k.outcome_n)} trips whose platform reports an outcome`
+        : 'no platform reported an outcome',
       tone: k.completion_pct == null ? null : k.completion_pct >= 95 ? 'good' : k.completion_pct >= 85 ? 'warn' : 'critical' },
     { label: 'Did not complete', value: pct(k.cancel_pct, 1),
       sub: 'cancelled, rejected, no-show — normalised across platforms',

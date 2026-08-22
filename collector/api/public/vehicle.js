@@ -97,6 +97,17 @@ async function tabOverview(root, plate, prof) {
     { label: 'Idle days', value: fmt(k.idle_days), sub: 'reported a position, earned nothing',
       tone: k.idle_days === 0 ? 'good' : k.idle_days <= 3 ? 'warn' : 'critical' },
     { label: 'Drivers', value: fmt(k.drivers), sub: `across ${fmt(k.platforms)} platform(s)` },
+    /* Completion, which the endpoint has always returned and this page never
+       drew. A car with a normal booking count and a poor completion rate is a
+       different problem from an idle one, and the vehicle page was the only
+       view of the fleet that could not tell them apart. Reported with its
+       numerator, so the rate can be checked against the trips it came from. */
+    { label: 'Completion', value: pct(k.completion_pct, 1),
+      sub: k.outcome_n
+        ? `${fmt(k.completed)} of ${fmt(k.outcome_n)} bookings whose platform reports an outcome`
+        : 'no platform on this vehicle reports an outcome',
+      tone: k.completion_pct == null ? null
+        : Number(k.completion_pct) >= 95 ? 'good' : Number(k.completion_pct) >= 85 ? 'warn' : 'critical' },
     { label: 'Harsh events', value: fmt(k.alerts), sub: k.alerts_per_100km != null ? `${fmt(k.alerts_per_100km, 1)} per 100 km` : 'no matched distance',
       tone: k.alerts_per_100km == null ? null : k.alerts_per_100km <= 5 ? 'good' : k.alerts_per_100km <= 15 ? 'warn' : 'critical' },
     { label: 'Last fix', value: k.hours_since_fix != null ? `${fmt(k.hours_since_fix, 1)}h ago` : '—', sub: `${fmt(k.fixes)} fixes in range`,

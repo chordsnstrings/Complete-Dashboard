@@ -367,7 +367,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               round(100.0*count(*) FILTER (WHERE outcome='not_completed')
                     /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
               count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
+              /* The two numerators, beside the two rates they came from. The
+                 rates shipped with only their denominator, so "90.5%" was a
+                 figure the reader had to take on trust — while /api/kpis, six
+                 inches away on another page, reports both. A rate nobody can
+                 check against its own numerator is the same shape of claim
+                 this product refuses to make about a verdict. */
+              count(*) FILTER (WHERE outcome='completed')::int completed,
+              count(*) FILTER (WHERE outcome='not_completed')::int not_completed,
               count(*) FILTER (WHERE is_booking)::int bookings,
+              count(*) FILTER (WHERE has_fare)::int priced_trips,
+              count(*) FILTER (WHERE has_distance)::int trips_with_distance,
               round(avg(duration_s)::numeric/60,1) avg_minutes,
               count(DISTINCT plate)::int vehicles, count(DISTINCT platform)::int platforms
        FROM trip_norm WHERE ${TW}`, p);

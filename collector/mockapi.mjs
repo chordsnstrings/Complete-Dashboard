@@ -218,6 +218,9 @@ const dailyFor = (id) => {
     out.push({
       day: dayISO(b), trips, completed: trips - (b % 5 === 0 ? 1 : 0),
       cancelled: b % 5 === 0 ? 1 : 0,
+      // The denominator the day's completion rate is over — the trips whose
+      // platform reported an outcome at all, which excludes telematics rows.
+      outcome_n: trips,
       km: +km.toFixed(1), revenue: +(km * rnd(2.1, 3.4)).toFixed(2),
       first_trip_at: `${dayISO(b)}T0${Math.floor(first)}:00:00Z`,
       last_trip_at: `${dayISO(b)}T18:00:00Z`,
@@ -268,13 +271,19 @@ app.get('/api/driver/profile', (req, r) => {
   const i = idIndex(req.query.id);
   r.json({
     id: req.query.id, name: drivers[i], ids: [req.query.id],
+    /* `ids` is the ACCOUNTS this person holds — what a reader is shown. `keys`
+       is the superset their rows can be matched by, which includes the
+       synthesised name key for the channels that name them without an id. */
+    keys: [req.query.id, `name:${drivers[i].toLowerCase()}`],
     platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
     span: { first_trip: dayISO(DAYS), last_trip: new Date().toISOString(), trips: 420 - i * 37,
       days_worked: 26 - i, vehicles: 2, fleet_id: i % 3 ? 'ecosine' : 'egari' },
     compliance: [{ platform: 'hotel', driver_ext_id: req.query.id, full_name: drivers[i],
       phone: '+9715012345' + i, emirates_id: '784-1990-000000' + i, licence_no: 'AE18025' + i,
       licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9,
-      state: i === 3 ? 'suspended' : 'active', rating: 4.9 - i * 0.06,
+      state: i === 3 ? 'suspended' : 'active',
+      suspension_reason: i === 3 ? 'documents under review' : null,
+      rating: 4.9 - i * 0.06, updated_at: new Date().toISOString(),
       device_brand: 'Samsung', device_model: 'SM-A536E' }],
     vehicles: [
       { plate: plates[i % plates.length], days: 21, trips: 310, km: 4100, revenue: 11200,
@@ -294,6 +303,13 @@ app.get('/api/driver/kpis', (req, r) => {
     trips, days_worked: d.length, km: Math.round(d.reduce((a, x) => a + x.km, 0)),
     avg_km: 11.4, revenue: Math.round(d.reduce((a, x) => a + x.revenue, 0)), avg_fare: 34.2,
     completion_pct: 96.4 - i * 0.4, cancel_pct: 3.1 + i * 0.3, avg_minutes: 17.4,
+    /* The numerators beside the rates, and the denominators the money and
+       distance figures are actually over. A rate with only its base under it is
+       a figure the reader has to take on trust. */
+    outcome_n: trips, completed: Math.round(trips * (96.4 - i * 0.4) / 100),
+    not_completed: trips - Math.round(trips * (96.4 - i * 0.4) / 100),
+    bookings: trips, priced_trips: Math.round(trips * 0.4),
+    trips_with_distance: trips,
     vehicles: 2, platforms: i % 3 === 0 ? 2 : 1,
     median_start_h: 6.5 + (i % 3), median_end_h: 18.4, avg_span_h: 10.6, start_consistency_h: 0.8 + i * 0.15,
     hours_online: +d.reduce((a, x) => a + x.hours_online, 0).toFixed(1),
@@ -382,7 +398,10 @@ app.get('/api/driver/earnings', (req, r) => {
 app.get('/api/driver/quality', (req, r) => {
   const i = idIndex(req.query.id);
   r.json({
-    cancels: [{ status: 'rider_cancelled', n: 7, pct: 70 }, { status: 'driver_cancelled', n: 3, pct: 30 }],
+    // Which platform said it: the four channels do not share a status
+    // vocabulary, so a bare status with no platform beside it is ambiguous.
+    cancels: [{ platform: 'uber', status: 'rider_cancelled', n: 7, pct: 70 },
+      { platform: 'bolt', status: 'client_did_not_show', n: 3, pct: 30 }],
     cancel_daily: dailyFor(req.query.id).map((d) => ({ day: d.day, cancelled: d.cancelled, trips: d.trips })),
     alerts: [{ alert_type: 'Harsh Braking', n: 41 + i * 3, latest: new Date().toISOString() },
       { alert_type: 'Overspeed', n: 26 + i * 2, latest: new Date().toISOString() },
@@ -403,8 +422,13 @@ app.get('/api/driver/trips', (req, r) => {
     dropoff_addr: ['Business Bay - Bay Square', 'DXB Terminal 3', 'Al Barsha - MoE'][n % 3],
     distance_km: +rnd(2, 34).toFixed(1), duration_s: Math.round(rnd(400, 2600)),
     status: n % 17 === 0 ? 'rider_cancelled' : 'completed',
+    /* The normalised columns the table actually reads. `status` is each
+       provider's own word — Bolt says 'finished' for a success — and a row
+       carrying only that forces the render layer to re-derive the meaning. */
+    outcome: n % 17 === 0 ? 'not_completed' : 'completed',
+    is_booking: true, has_fare: n % 5 !== 1,
     product: ['UberX', 'Comfort', 'Uber Black'][n % 3], payment_type: n % 5 === 0 ? 'cash' : 'card',
-    price: +rnd(18, 140).toFixed(2), currency: 'AED',
+    price: n % 5 === 1 ? null : +rnd(18, 140).toFixed(2), currency: 'AED',
   })));
 });
 
@@ -496,6 +520,15 @@ app.get('/api/vehicle/kpis', (req, r) => {
   const alerts = d.reduce((a, x) => a + x.alerts, 0);
   r.json({ trips, days_worked: d.filter((x) => x.trips).length, km, avg_km: 11.8,
     revenue: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)), avg_fare: 36.4,
+    /* Bookings and telematics journeys are separate counts and never summed —
+       an FMS row is the same physical journey a ride platform already reported.
+       measured_trips and priced_trips are the denominators the distance and
+       money averages are actually over, and completed/outcome_n are the two
+       numbers the completion rate is made of. */
+    telematics_journeys: Math.round(trips * 1.2), days_earning: d.filter((x) => x.trips).length,
+    measured_trips: trips, priced_trips: Math.round(trips * 0.42),
+    outcome_n: trips, completed: Math.round(trips * 0.961),
+    not_completed: trips - Math.round(trips * 0.961),
     completion_pct: 96.1, cancel_pct: 3.4, drivers: 1 + (i % 3), platforms: 1 + (i % 2),
     utilisation: 0.58 - i * 0.04, hours_online: 512.4, hours_on_trip: 297.2,
     earnings_per_hour: 21.4, trips_per_online_hour: 0.41,
@@ -517,7 +550,12 @@ app.get('/api/vehicle/drivers-detail', (req, r) => {
   }));
   const totals = who.map((name, n) => {
     const mine = days.filter((x) => x.driver_name === name);
-    return { driver_ext_id: `drv-${n ? (i + 4) % drivers.length : i}`, driver_name: name,
+    const id = `drv-${n ? (i + 4) % drivers.length : i}`;
+    /* Grouped by PERSON, not by platform account: one human with an Uber id and
+       a Bolt id used to be two rows side by side with their work split between
+       them. Every id they hold comes back so both spellings stay openable. */
+    return { person: name.toLowerCase(), driver_ext_id: id, driver_ids: [id],
+      driver_name: name, platforms: ['uber'],
       days: mine.length, trips: mine.reduce((a, x) => a + x.trips, 0),
       km: Math.round(mine.reduce((a, x) => a + x.km, 0)),
       revenue: Math.round(mine.reduce((a, x) => a + x.revenue, 0)),
@@ -554,9 +592,12 @@ app.get('/api/vehicle/safety', (req, r) => {
       { alert_type: 'Harsh Braking', n: 44 - i * 3, latest: new Date().toISOString() },
       { alert_type: 'Harsh Acceleration', n: 18, latest: new Date().toISOString() },
       { alert_type: 'Sharp Turn', n: 9, latest: new Date().toISOString() }],
-    by_driver: [{ driver_name: drivers[i], n: 78, km: 3400 },
-      { driver_name: drivers[(i + 4) % drivers.length], n: 41, km: 2100 },
-      { driver_name: 'unattributed', n: 13, km: null }],
+    // With the id, because a harsh-driving count against a name you cannot
+    // open is a statistic rather than a conversation.
+    by_driver: [{ driver_name: drivers[i], driver_ext_id: `drv-${i}`, n: 78, km: 3400 },
+      { driver_name: drivers[(i + 4) % drivers.length],
+        driver_ext_id: `drv-${(i + 4) % drivers.length}`, n: 41, km: 2100 },
+      { driver_name: 'unattributed', driver_ext_id: null, n: 13, km: null }],
     daily: vDaily(req.query.plate).map((d) => ({ day: d.day, alerts: d.alerts })),
     recent: Array.from({ length: 40 }, (_, n) => ({
       alert_type: ['Overspeed', 'Harsh Braking', 'Harsh Acceleration', 'Sharp Turn'][n % 4],
@@ -567,15 +608,21 @@ app.get('/api/vehicle/safety', (req, r) => {
   });
 });
 
+/* Every slice carries `bookings` (the count excluding telematics twins),
+   `measured` (how many of them reported a distance) and `avg_km` over that
+   measured subset — the three numbers the panel divides by. A fixture with only
+   `n` and `revenue` renders the per-trip figures as em-dashes and looks fine. */
+const vMix = (label, n, revenue, avgKm) => ({
+  label, n, bookings: n, measured: Math.round(n * 0.9), revenue, avg_km: avgKm,
+});
 app.get('/api/vehicle/mix', (req, r) => r.json({
-  product: [{ label: 'UberX', n: 268, revenue: 8400, avg_km: 10.2 },
-    { label: 'Comfort', n: 92, revenue: 4600, avg_km: 14.1 },
-    { label: 'Uber Black', n: 24, revenue: 2800, avg_km: 22.4 }],
-  payment: [{ label: 'card', n: 320, revenue: 12800 }, { label: 'cash', n: 52, revenue: 2200 },
-    { label: 'corporate', n: 12, revenue: 800 }],
-  platform: [{ label: 'uber', n: 336, revenue: 13100 }, { label: 'yango', n: 34, revenue: 1400 },
-    { label: 'hotel', n: 14, revenue: 1300 }],
-  status: [{ label: 'completed', n: 371, revenue: 15800 }, { label: 'rider_cancelled', n: 13, revenue: 0 }],
+  product: [vMix('UberX', 268, 8400, 10.2), vMix('Comfort', 92, 4600, 14.1),
+    vMix('Uber Black', 24, 2800, 22.4)],
+  payment: [vMix('card', 320, 12800, 11.6), vMix('cash', 52, 2200, 9.8),
+    vMix('corporate', 12, 800, 18.2)],
+  platform: [vMix('uber', 336, 13100, 11.2), vMix('yango', 34, 1400, 12.9),
+    vMix('hotel', 14, 1300, 21.4)],
+  status: [vMix('completed', 371, 15800, 11.8), vMix('rider_cancelled', 13, 0, 4.1)],
   hours: Array.from({ length: 19 }, (_, n) => ({ h: n + 5, trips: Math.round(rnd(4, 26)) })),
 }));
 
