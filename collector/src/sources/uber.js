@@ -186,6 +186,33 @@ async function earnerCall(s, e, variables) {
   return { err: null, rows: data?.data?.getEarnerBreakdownsV2?.earnerEarningsBreakdowns || [] };
 }
 
+/* One earner window, for the operator probe.
+   ─────────────────────────────────────────────────────────────────────────
+   Exported so api/probe.js can ask "does Uber still hold earnings for
+   September 2025?" without a second copy of the GraphQL document living in the
+   probe — the drift that would cause is the same one that has already produced
+   five copies of a name fold in this codebase.
+
+   The question is worth a route because the answer decides what to do about a
+   half-year of missing money: the backfill asked for those windows, none
+   failed, and all of them came back empty. Either the provider will not serve
+   data that old — in which case it is gone and the product should say so —
+   or we asked wrongly, and re-collecting recovers it.
+
+   A sample of drivers, not the fleet: this is a diagnosis, not a collection,
+   and ten drivers answering for a window is enough to prove it is served. */
+export async function probeEarnerWindow(from, to, limit = 10) {
+  const drivers = (await uberDriverIds()).slice(0, limit);
+  if (!drivers.length) return { drivers: 0, rows: 0, err: 'no uber driver ids held' };
+  const { err, rows } = await earnerCall(from, to, {
+    driverListOrPageOptions: 'Driver_List', driverList: drivers,
+  });
+  /* Priced separately from the row count: a window can return a row per driver
+     with nothing in it, which is a different fact from returning nothing. */
+  const withMoney = rows.filter((r) => Number(r?.netOutstanding?.amountE5 || 0) !== 0).length;
+  return { drivers: drivers.length, rows: rows.length, rows_with_money: withMoney, err };
+}
+
 /* Per-driver earnings, in seven-day windows, asked for BY NAME ten at a time
    rather than paged.
    ─────────────────────────────────────────────────────────────────────────

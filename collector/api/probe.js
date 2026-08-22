@@ -20,6 +20,7 @@
 import { config } from '../src/config.js';
 import { http, qs } from '../src/http.js';
 import { uberOAuthToken, uberWebHeaders } from '../src/auth/uber.js';
+import { probeEarnerWindow } from '../src/sources/uber.js';
 import { loadSettings } from '../src/settings.js';
 import { log } from '../src/log.js';
 
@@ -220,6 +221,15 @@ export function probeRoutes(app, { wrap }) {
       transactions: `https://api.uber.com/v1/vehicle-suppliers/transactions?${qs({
         org_id: org, start_time: from, end_time: to, limit: 50 })}`,
     };
+    /* The surface that actually feeds driver_performance. The two REST
+       endpoints below are the ones the daily probe already watches, and it
+       turns out neither is the source: earner-payments returns an empty list
+       even for a month we hold AED 140,379 of earnings for, and transactions
+       404s outright. Probing only those would have said "the provider serves
+       nothing" about a window that is demonstrably served. */
+    const graph = await probeEarnerWindow(new Date(from), new Date(to))
+      .catch((e) => ({ err: String(e).slice(0, 200) }));
+
     const token = await uberOAuthToken();
     const out = [];
     for (const [name, url] of Object.entries(windowed)) {
@@ -238,7 +248,12 @@ export function probeRoutes(app, { wrap }) {
           fields: arr ? describe(arr) : [] });
       } catch (e) { out.push({ surface: name, error: String(e).slice(0, 220) }); }
     }
-    res.json({ window: [req.query.from, req.query.to], surfaces: out });
+    res.json({
+      window: [req.query.from, req.query.to],
+      // The one that answers the question; the REST pair is context.
+      earner_breakdowns: graph,
+      surfaces: out,
+    });
   }));
 
   log.info('api', 'probe routes mounted (read-only, allowlisted)');
