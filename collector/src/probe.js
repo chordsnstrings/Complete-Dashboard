@@ -31,6 +31,7 @@ import { uberOAuthToken, uberWebHeaders } from './auth/uber.js';
 import { fiToken } from './sources/bolt.js';
 import { dotDate, iso, daysAgo } from './util.js';
 import { log } from './log.js';
+import { probeEarnerWindow } from './sources/uber.js';
 
 const SRC = 'probe';
 const MAX_VALUES = 12;

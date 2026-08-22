@@ -145,5 +145,46 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     && !/surface: `[^`]*\$\{[^}]*(token|pass|cookie|secret)/i.test(src));
 }
 
+/* ── a helper referenced but never imported ────────────────────────────────
+   The history probe called probeEarnerWindow and the import line was never
+   added. node --check passed, because the file's syntax was fine. Importing the
+   module passed, because the reference sits inside a callback that only runs
+   against a live provider. It failed in production, four minutes after deploy,
+   as "ReferenceError: probeEarnerWindow is not defined" — recorded against the
+   surface it was probing, which is the one good thing about it.
+
+   Every capitalised-or-camelCase call in this file has to resolve to something:
+   an import, a local declaration, or a global. */
+{
+  const src2 = readFileSync('src/probe.js', 'utf8');
+  const imported = new Set(
+    [...src2.matchAll(/import\s*\{([^}]+)\}\s*from/g)]
+      .flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop())));
+  const declared = new Set([
+    ...[...src2.matchAll(/(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+    ...[...src2.matchAll(/export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]),
+  ]);
+  // `if (`, `for (`, `catch (` and friends match a call pattern and are not one.
+  const KEYWORDS = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'typeof',
+    'await', 'async', 'of', 'in', 'new', 'delete', 'void', 'yield', 'do', 'else', 'function']);
+  const GLOBALS = new Set(['Object', 'Array', 'String', 'Number', 'Boolean', 'JSON', 'Math', 'Date',
+    'Set', 'Map', 'Promise', 'Error', 'RegExp', 'Buffer', 'console', 'process', 'fetch',
+    'parseInt', 'parseFloat', 'isNaN', 'encodeURIComponent', 'decodeURIComponent', 'setTimeout',
+    'String', 'Intl', 'URL', 'URLSearchParams', 'AbortController', 'TextDecoder', 'structuredClone']);
+  const called = new Set([...src2.matchAll(/(?:^|[^.\w$'"`])([a-z][\w$]*)\s*\(/g)].map((m) => m[1]));
+  /* Parameter names and inline arrow bindings are declared where they are used
+     and appear in none of the patterns above. Built with a RegExp constructor
+     over a plain string: the first version wrote this as a template literal and
+     the backslashes ended up doubled, so the pattern matched everything and the
+     whole check silently passed — including on the exact bug it was written
+     for, which is how I found out. */
+  const isBinding = (n) => new RegExp('[(,]\\s*' + n + '\\s*[),=]|\\b' + n + '\\s*=>').test(src2);
+  const missing = [...called].filter((n) =>
+    !imported.has(n) && !declared.has(n) && !GLOBALS.has(n)
+    && !KEYWORDS.has(n) && !isBinding(n));
+  check('every function this file calls is imported or declared in it',
+    missing.length === 0, missing.join(', '));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
