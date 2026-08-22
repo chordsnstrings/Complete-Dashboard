@@ -6,6 +6,7 @@
    We draw straight lines between consecutive fixes and break the line wherever the
    gap is long enough that a straight line would be a lie (handled server-side in
    /api/map/journey), so the map never invents a road the car may not have taken. */
+import { timeStr } from './ui.js';
 
 const OSM = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
 const OSM_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
@@ -125,7 +126,7 @@ export function renderJourney(map, journey) {
         dashArray: occupied ? null : unknown ? '2,4' : '5,6',
       }).addTo(layer).bindTooltip(
         `${unknown ? 'Occupancy not reported by this feed' : occupied ? 'Passenger on board' : 'Running empty'}<br>` +
-        `${new Date(run[0].t).toLocaleTimeString()} → ${new Date(run[run.length - 1].t).toLocaleTimeString()}`,
+        `${timeStr(run[0].t)} → ${timeStr(run[run.length - 1].t)}`,
         { sticky: true });
       run = [run[run.length - 1]];
     };
@@ -144,10 +145,10 @@ export function renderJourney(map, journey) {
   const pointsFlat = (journey.segments || []).flatMap((s) => s.points);
   const last = pointsFlat[pointsFlat.length - 1];
   if (first) L.marker([first.lat, first.lng], { title: 'first fix' }).addTo(layer)
-    .bindTooltip(`Start ${new Date(first.t).toLocaleTimeString()}`, { direction: 'top' });
+    .bindTooltip(`Start ${timeStr(first.t)}`, { direction: 'top' });
   if (last && last !== first) L.circleMarker([last.lat, last.lng], {
     radius: 8, color: css('--s2'), weight: 3, fillColor: css('--s2'), fillOpacity: .35,
-  }).addTo(layer).bindTooltip(`Last fix ${new Date(last.t).toLocaleTimeString()}`, { direction: 'top' });
+  }).addTo(layer).bindTooltip(`Last fix ${timeStr(last.t)}`, { direction: 'top' });
 
   fitTo(map, all, { maxZoom: 16 });
   return layer;

@@ -3,8 +3,11 @@
 // everything shared between them (panels, tables, modals, routing, fetching)
 // lives in ui.js and data.js so the two cannot drift apart.
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
-import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity, dayStr, dtStr, money, pct, custody, custodyAsOf } from './ui.js';
-import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter } from './data.js';
+import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
+  dayStr, dtStr, timeStr, money, pct, custody, custodyAsOf } from './ui.js';
+import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
+import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
+  windowDates } from './data.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCauses } from './causes.js';
@@ -164,7 +167,7 @@ function setHeader(detail) {
   } else if (state.view === 'day') {
     const label = /^\d{4}-\d{2}-\d{2}$/.test(state.param || '')
       ? new Date(`${state.param}T12:00:00Z`).toLocaleDateString(undefined,
-        { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+        { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ })
       : 'Day';
     $('#viewTitle').textContent = label;
     $('#viewSub').textContent = 'Every source that saw this day — including whether each one was collecting';
@@ -1253,7 +1256,7 @@ V.live = async (root) => {
         ? '<span class="tag dim">not reported</span>'
         : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
     { label: 'Fix age', key: 'polled_at', render: (r) => `<span class="tag ${r.stale ? 'warn' : 'ok'}">${r.stale ? 'stale' : 'live'}</span>` },
-    { label: 'Last fix', key: 'captured_at', render: (r) => new Date(r.captured_at).toLocaleTimeString() },
+    { label: 'Last fix', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
   ]);
   /* The breadcrumb used to be a modal titled after the plate. It is now the
      vehicle's own Movement tab, which has the map, the parked clusters and the
@@ -1690,7 +1693,8 @@ V.sources = async (root) => {
   [st.body, cv.body].forEach(loading);
   // This page hides the global range filter, so the coverage question is asked
   // over the full observed history rather than over an invisible window.
-  const [from, to] = ['2000-01-01', new Date().toISOString().slice(0, 10)];
+  // The Dubai day, not the UTC one — see api/public/tz.js.
+  const [from, to] = ['2000-01-01', dubaiDay()];
   const [status, coverage] = await Promise.all([api('/api/status'), api('/api/coverage')]);
   st.body.innerHTML = '';
   const TAG = { ok: 'ok', partial: 'warn', error: 'bad' };
@@ -1700,7 +1704,7 @@ V.sources = async (root) => {
     { label: 'Rows', key: 'rows_written', num: true },
     { label: 'Windows', key: 'chunks_total', num: true, render: (r) => (r.chunks_total == null ? '—'
       : `${fmt(r.chunks_total - (r.chunks_failed || 0))} of ${fmt(r.chunks_total)}`) },
-    { label: 'Last run', key: 'finished_at', render: (r) => r.finished_at ? new Date(r.finished_at).toLocaleString() : '—' },
+    { label: 'Last run', key: 'finished_at', render: (r) => (r.finished_at ? dtStr(r.finished_at) : '—') },
     { label: 'Detail', key: 'error', render: (r) => (r.error
       ? `<span class="note err">${esc(String(r.error).slice(0, 90))}</span>`
       : r.chunks_failed
@@ -2053,7 +2057,7 @@ async function freshness() {
     const last = s.map((r) => r.finished_at).filter(Boolean).sort().pop();
     const bad = s.filter((r) => r.status !== 'ok').length;
     $('#freshness').innerHTML = last
-      ? `updated ${new Date(last).toLocaleTimeString()}<br>${bad ? `<span style="color:var(--warn)">${bad} source(s) need attention</span>` : 'all sources healthy'}`
+      ? `updated ${timeStr(last)}<br>${bad ? `<span style="color:var(--warn)">${bad} source(s) need attention</span>` : 'all sources healthy'}`
       : 'awaiting first collection';
   } catch { $('#freshness').textContent = 'status unavailable'; }
 }
@@ -2068,6 +2072,21 @@ $('#refreshBtn').onclick = (e) => {
   const b = e.currentTarget; b.classList.remove('spin'); void b.offsetWidth; b.classList.add('spin');
   render();
 };
+
+/* Which clock, and which days. Every calendar key the API computes is Dubai's
+   and every formatter here now renders in Dubai — but a reader in another zone
+   has no way to know that from a bare "17:00", and the difference is the whole
+   meaning of a peak-hour chart. Shown only when it could be misread, so it is
+   silent for the people it does not concern. */
+function tzNote() {
+  const host = $('#tzNote');
+  if (!host) return;
+  const [from, to] = windowDates();
+  const local = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  host.title = `${from} → ${to}, Dubai days`;
+  host.textContent = local === TZ ? '' : 'Dubai time';
+}
+tzNote();
 $('#themeBtn').onclick = () => {
   const r = document.documentElement, cur = r.getAttribute('data-theme');
   const dark = cur ? cur === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;

@@ -8,6 +8,7 @@
    The first thing on the page is not a number. It is whether every source was
    collecting, because a quiet Tuesday and a Tuesday nobody fetched produce the
    same chart, and every figure below is computed over whatever landed. */
+import { TZ } from './tz.js';
 
 import { barChart, donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
@@ -37,7 +38,7 @@ export async function renderDay(root, day, onDetail) {
   const nav = el('div', 'daynav');
   nav.innerHTML = `<a href="${href('day', shift(day, -1))}">← ${esc(dayStr(shift(day, -1)))}</a>
     <b>${esc(new Date(`${day}T12:00:00Z`).toLocaleDateString(undefined,
-      { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }))}</b>
+      { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: TZ }))}</b>
     <a href="${href('day', shift(day, 1))}">${esc(dayStr(shift(day, 1)))} →</a>`;
   root.append(nav);
 

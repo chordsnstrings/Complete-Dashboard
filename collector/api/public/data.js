@@ -3,6 +3,7 @@
    The dashboard is a multipage app behind a hash router. A route is
    `#<view>[/<param>[/<sub>]]` — so `#driver/7e96cb47.../territory` is a real,
    linkable address rather than a modal that vanishes on reload. */
+import { dubaiDay } from './tz.js';
 
 /* Storage access is guarded, not assumed. A browser with site data blocked
    THROWS on the getter rather than returning null, and this module is also
@@ -28,12 +29,18 @@ export const api = async (path, opts) => {
   return r.json();
 };
 
-// The window every view shares, expressed as dates so the server can widen the
-// `to` bound to the end of that day.
+/* The window every view shares, expressed as DUBAI dates so the server can
+   widen the `to` bound to the end of that day.
+
+   This took the UTC day from the viewer's clock. At 02:00 in Dubai the UTC day
+   is still yesterday, so "last 30 days" ended a day early and dropped the shift
+   in progress — on the one page an operator opens at 2am to see what is
+   happening now. West of Greenwich it went the other way and asked for a day
+   that has not started in Dubai. The fleet's calendar is Dubai's; the browser's
+   location is not part of the question. */
 export function windowDates() {
-  const to = new Date(); const from = new Date();
-  from.setDate(from.getDate() - state.days);
-  return [from.toISOString().slice(0, 10), to.toISOString().slice(0, 10)];
+  const now = Date.now();
+  return [dubaiDay(new Date(now - state.days * 864e5)), dubaiDay(new Date(now))];
 }
 export function params(extra = {}) {
   const [from, to] = windowDates();

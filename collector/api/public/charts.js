@@ -6,6 +6,7 @@ const tt = () => document.getElementById('tt');
    CSS background to TRANSPARENT — so the seventh slice of a donut went black
    and a bar coloured `--s8` disappeared entirely. Both are now defined; this
    list and the palette must stay in step. */
+import { TZ } from './tz.js';
 export const CAT = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
 export const SEQ = ['--b100', '--b200', '--b300', '--b400', '--b500', '--b600', '--b700'];
 
@@ -338,7 +339,12 @@ function arc(cx, cy, r, ir, a0, a1) {
 }
 function shortLabel(v) {
   const s = String(v ?? '');
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) { const d = new Date(s); return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }); }
+  // Dubai, like every other date in this product: a UTC-midnight date string
+  // rendered in a western zone is the previous day on the axis.
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s);
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: TZ });
+  }
   return s.length > 11 ? s.slice(0, 10) + '…' : s;
 }
 export function empty(host, msg = 'No data for this range yet') {

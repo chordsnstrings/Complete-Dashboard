@@ -868,3 +868,9 @@ a.insight-row:hover{border-color:var(--accent)}
 .act-basis > summary:hover{color:var(--ink-1)}
 .act-basis p{margin:8px 0 0;color:var(--ink-2);line-height:1.55;max-width:72ch}
 .act-foot{margin-top:12px}
+
+/* The timezone hint beside the filters. Deliberately quiet: it matters, but a
+   reader in Dubai should not have a badge in their way telling them the time is
+   in Dubai, so app.js leaves it empty for them. */
+.tz-note { font-size: 11px; color: var(--ink-3); align-self: center; letter-spacing: .02em; }
+.tz-note:empty { display: none; }

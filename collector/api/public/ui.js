@@ -4,6 +4,7 @@
    modals as the overview, and copying them would have let the two drift. */
 import { fmt, empty } from './charts.js';
 import { href } from './data.js';
+import { TZ, TZ_LABEL, dubaiDay } from './tz.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
 export const el = (tag, cls, html) => {
@@ -112,10 +113,30 @@ export const custodyAsOf = (ref) => (ref && ref.name
 
 export const pill = (text, tone) => `<span class="pill${tone ? ' ' + tone : ''}">${esc(text)}</span>`;
 
-export const dateStr = (v) => (v ? new Date(v).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—');
-export const dayStr = (v) => (v ? new Date(v).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : '—');
-export const timeStr = (v) => (v ? new Date(v).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '—');
+/* Every time and date in this product is Dubai time, stated explicitly.
+   ─────────────────────────────────────────────────────────────────────────
+   The API computes its calendar keys in Asia/Dubai — local_day, local_hour,
+   local_dow, the custody day, the whole demand heatmap. These formatters
+   rendered in the VIEWER's zone, so the two disagreed on the same screen: for
+   anyone outside the Gulf, a segment starting at 17:00 Dubai printed as 13:00
+   beside an hour-of-day chart whose peak was at 17. A driver's shift read
+   "03:00 – 15:00" for a day the fleet worked 07:00 – 19:00, and a booking
+   after midnight Dubai landed on the previous date — the exact off-by-one the
+   SQL side was fixed for.
+
+   The fleet operates in one city. Its clock is that city's clock, wherever the
+   person reading this happens to be. */
+export { TZ, TZ_LABEL, dubaiDay };
+
+export const dateStr = (v) => (v ? new Date(v).toLocaleDateString(undefined,
+  { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : '—');
+export const dayStr = (v) => (v ? new Date(v).toLocaleDateString(undefined,
+  { day: 'numeric', month: 'short', timeZone: TZ }) : '—');
+export const timeStr = (v) => (v ? new Date(v).toLocaleTimeString(undefined,
+  { hour: '2-digit', minute: '2-digit', timeZone: TZ }) : '—');
 export const dtStr = (v) => (v ? `${dayStr(v)} ${timeStr(v)}` : '—');
+
+
 // 7.5 → "07:30", which reads as a clock time rather than a decimal
 export const hourStr = (h) => {
   const n = Number(h);

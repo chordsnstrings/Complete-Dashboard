@@ -12,6 +12,7 @@
 
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, dayStr } from './ui.js';
+import { dubaiDay } from './tz.js';
 import { q } from './data.js';
 
 export async function renderCoverage(root) {
@@ -82,7 +83,8 @@ export async function renderCoverage(root) {
       const lead = (start.getUTCDay() + 6) % 7;
       for (let i = 0; i < lead; i++) strip.append(el('i', 'c void'));
       for (let t = Date.parse(s.first_day); t <= Date.parse(s.last_day); t += 864e5) {
-        const key = new Date(t).toISOString().slice(0, 10);
+        // The Dubai day, so a fix at 02:00 local counts on the day it happened.
+        const key = dubaiDay(new Date(t));
         const d = seen.get(key);
         const cell = el('i', d ? 'c' : 'c gap');
         if (d) {
