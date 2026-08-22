@@ -405,5 +405,57 @@ check('the FI gateway rejection carries its own message rather than our verdict'
 check('and a thrown bolt run still reports what had already failed',
   /\[String\(e\), \.\.\.fails\]/.test(bolt));
 
+/* ── reserved words that only bite as a bare alias ─────────────────────────
+   `SELECT n day` is not a column named day — Postgres reads it as the start of
+   an interval qualifier (INTERVAL '1' DAY) and rejects the whole statement.
+   Written `SELECT n AS day` it is fine. The same holds for hour, month, year,
+   minute, second and week.
+
+   This has now cost two 500s here: `hour` once, and `day` on the vehicle
+   earnings route. Both are syntax errors node --check cannot see, that appear
+   only when the query actually runs, and that read in review as an ordinary
+   alias. So it is checked rather than waited for.
+
+   Scoped to template literals that actually contain SQL, with their comments
+   stripped. Anything looser matches the prose in this codebase — "a quarter of
+   an hour," is a fine sentence and a false positive. */
+{
+  const UNITS = 'day|hour|month|year|minute|second|week';
+  /* Only an alias following an EXPRESSION is dangerous: a closing paren, a
+     cast, or a qualified column. `SELECT day, x FROM t` is a plain column
+     reference, so the token before is checked against the keywords that can
+     legitimately precede one. */
+  const LEAD = /^(select|,|\(|by|distinct|as|and|or|where|on|then|else|when|case|from|having|filter|order|group|partition|between|interval|extract|over|coalesce|nullif|min|max|sum|count|avg)$/i;
+  const { readdirSync: rd2, statSync: st2 } = await import('node:fs');
+  const walk2 = (dir) => rd2(dir).flatMap((f) => {
+    const full = `${dir}/${f}`;
+    return st2(full).isDirectory() ? walk2(full) : [full];
+  });
+  const offenders = [];
+  for (const f of [...walk2('api'), ...walk2('src')]) {
+    if (!f.endsWith('.js')) continue;
+    const text = readFileSync(f, 'utf8');
+    for (const lit of text.match(/`[^`]*`/g) || []) {
+      if (!/\bSELECT\b/i.test(lit)) continue;
+      // A SQL comment can say anything, including "that day, not whoever".
+      const sql = lit.replace(/--[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+      sql.split('\n').forEach((line) => {
+        // SELECT DISTINCT ON (day) day — the paren closes the ON list, and the
+        // token after it is an ordinary column reference.
+        if (/DISTINCT\s+ON\s*\(/i.test(line)) return;
+        const re = new RegExp(`([\\w.$)\\]]+)\\s+(${UNITS})\\s*(,|$)`, 'gi');
+        for (const m of line.matchAll(re)) {
+          if (LEAD.test(m[1])) continue;
+          const at = text.slice(0, text.indexOf(lit)).split('\n').length;
+          offenders.push(`${f}:~${at}  ${line.trim().slice(0, 90)}`);
+        }
+      });
+    }
+  }
+  check('no query aliases a column as a bare interval keyword',
+    offenders.length === 0,
+    offenders.length ? `\n      ${offenders.join('\n      ')}` : '');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

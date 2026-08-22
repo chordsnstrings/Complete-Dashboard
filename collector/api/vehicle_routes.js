@@ -14,6 +14,7 @@
 
 import { peopleCount, personKey } from './custody_sql.js';
 import { win, winDays } from './window.js';
+import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 
 const normPlate = (s) => String(s || '').toUpperCase().replace(/[\s-]+/g, '');
 
@@ -218,7 +219,23 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          SELECT DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day
          FROM trip WHERE ${TW})
        SELECT count(*)::int idle_days FROM seen WHERE day NOT IN (SELECT day FROM earned)`, p);
-    res.json({ ...t, ...u, ...a, ...gap, ...idle,
+    /* The money this asset actually made. `revenue` above is the sum of the
+       FARES on its trips, and on this fleet that is ten hotel bookings out of
+       266 — the other 256 are Uber, which prices nothing at trip level and
+       pays the DRIVER weekly instead. So the car read as earning AED 525 on
+       3,586 km. This is that driver pay, spread across the vehicles its driver
+       was actually holding (api/attribution_sql.js).
+
+       Kept as its own field, never folded into `revenue`: a fare is what one
+       rider paid for one trip, this is a share of a net weekly payout after
+       commission, and adding them would produce a number that is neither. */
+    const [att] = await q(
+      `SELECT round(sum(attributed)::numeric,2) attributed_earnings,
+              count(DISTINCT platform)::int attributed_platforms,
+              count(DISTINCT driver_ext_id)::int attributed_drivers,
+              bool_or(basis = 'even') AS any_even_split
+       FROM (${attributedEarnings({ extra: 'AND vd.plate = $3' })}) att`, p);
+    res.json({ ...t, ...u, ...a, ...gap, ...idle, ...att,
       alerts_per_100km: t.km > 0 ? +((a.alerts / t.km) * 100).toFixed(1) : null,
       // Over the priced distance, and from the revenue of the same trips —
       // see priced_measured_revenue above.
@@ -307,6 +324,89 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   }));
 
   /* ── movement: fixes, occupancy segments, unauthorised use ────────────── */
+  /* ── where the money came from ──────────────────────────────────────────
+     Its own endpoint, and its own page, because the answer has three layers a
+     single figure cannot carry: which channel, which driver, and on what
+     basis. The fares are measured; the attributed earnings are a share of a
+     driver's payout inferred from custody. Showing them in one column would
+     hide the difference, so they are returned as separate series and the page
+     labels each. */
+  app.get('/api/vehicle/earnings', withVehicle(async (req, res, plate, p) => {
+    const [byPlatform, attributed, daily, fares] = await Promise.all([
+      // Measured fares on this car's own trips, per channel.
+      q(`SELECT platform,
+                count(*) FILTER (WHERE is_booking)::int bookings,
+                count(*) FILTER (WHERE has_fare)::int priced_bookings,
+                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
+                round(sum(distance_km) FILTER (WHERE has_distance AND is_booking)::numeric,0) km
+         FROM trip_norm WHERE ${TW} AND is_booking
+         GROUP BY 1 ORDER BY 2 DESC`, p),
+      // Attributed driver pay, per channel and per person, with the basis kept
+      // so the page can mark an even split as the weaker inference it is.
+      q(`SELECT platform, driver_ext_id, max(driver_name) driver_name,
+                round(sum(attributed)::numeric,2) attributed,
+                round(sum(attributed_cash)::numeric,2) attributed_cash,
+                sum(trips)::int trips, round(sum(km)::numeric,0) km,
+                count(DISTINCT day)::int days,
+                bool_or(basis = 'even') any_even_split,
+                min(period_start) first_period, max(period_end) last_period
+         FROM (${attributedEarnings({ extra: 'AND vd.plate = $3' })}) att
+         GROUP BY 1,2 ORDER BY 4 DESC NULLS LAST`, p),
+      // The daily spine, so the two series can be drawn against each other.
+      /* `AS day`, not a bare `day`. Postgres reads a bare `day` after an
+         expression as an interval qualifier — SELECT n day is the start of
+         INTERVAL '1' DAY — so the alias has to be spelled out or the whole
+         statement is a syntax error. Same family as the `hour` trap already
+         documented in this codebase, and it cost a 500 on this route. */
+      q(`WITH f AS (
+           SELECT local_day AS day, round(sum(price) FILTER (WHERE has_fare)::numeric,2) AS fares,
+                  count(*) FILTER (WHERE is_booking)::int AS bookings
+           FROM trip_norm WHERE ${TW} AND is_booking GROUP BY 1),
+         a AS (
+           SELECT day, round(sum(attributed)::numeric,2) AS attributed
+           FROM (${attributedEarnings({ extra: 'AND vd.plate = $3' })}) att GROUP BY 1)
+         SELECT coalesce(f.day, a.day) AS day,
+                coalesce(f.fares, 0) AS fares, coalesce(f.bookings, 0) AS bookings,
+                coalesce(a.attributed, 0) AS attributed
+         FROM f FULL OUTER JOIN a ON a.day = f.day
+         ORDER BY 1`, p),
+      /* What the fares actually cover. A revenue figure over ten of 266
+         bookings is not wrong, but it is not the car's revenue either, and the
+         page has to be able to say which. */
+      q(`SELECT count(*) FILTER (WHERE is_booking)::int bookings,
+                count(*) FILTER (WHERE has_fare)::int priced,
+                count(DISTINCT platform) FILTER (WHERE is_booking)::int platforms,
+                count(DISTINCT platform) FILTER (WHERE has_fare)::int priced_platforms
+         FROM trip_norm WHERE ${TW}`, p),
+    ]);
+    const [cover] = fares;
+    const attTotal = attributed.reduce((a, r) => a + Number(r.attributed || 0), 0);
+    const fareTotal = byPlatform.reduce((a, r) => a + Number(r.fares || 0), 0);
+    res.json({
+      plate,
+      by_platform: byPlatform,
+      attributed,
+      daily,
+      totals: {
+        fares: +fareTotal.toFixed(2),
+        attributed: +attTotal.toFixed(2),
+        // Deliberately NOT a sum of the two. See attribution_sql.js.
+        bookings: cover?.bookings ?? 0,
+        priced_bookings: cover?.priced ?? 0,
+        fare_coverage_pct: cover?.bookings
+          ? Math.round((cover.priced / cover.bookings) * 1000) / 10 : null,
+        platforms: cover?.platforms ?? 0,
+        priced_platforms: cover?.priced_platforms ?? 0,
+      },
+      /* The one sentence a reader needs before trusting either number. */
+      caveat: cover?.bookings && cover.priced < cover.bookings
+        ? `Fares are reported on ${cover.priced} of ${cover.bookings} bookings. `
+          + `The rest are channels that price nothing per trip and pay the driver instead — `
+          + `their share is the attributed column, inferred from who was holding this vehicle.`
+        : null,
+    });
+  }));
+
   app.get('/api/vehicle/movement', withVehicle(async (req, res, plate, p) => {
     const segments = await q(
       `SELECT started_at, ended_at, duration_min, distance_km, top_speed, fixes,

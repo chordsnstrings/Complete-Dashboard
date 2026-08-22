@@ -3,6 +3,7 @@
      #vehicle/<plate>            overview   what it is, and whether it earns
      #vehicle/<plate>/drivers    drivers    who has held it, day by day
      #vehicle/<plate>/movement   movement   where it goes, and where it sits
+     #vehicle/<plate>/earnings   earnings   what it made, and how we know
      #vehicle/<plate>/safety     safety     harsh driving, attributed to a person
      #vehicle/<plate>/compliance compliance documents with an expiry date
      #vehicle/<plate>/trips      trips      the underlying records
@@ -22,6 +23,7 @@ export const VEHICLE_TABS = [
   { id: 'overview', label: 'Overview', ic: '◱' },
   { id: 'drivers', label: 'Drivers', ic: '◧' },
   { id: 'movement', label: 'Movement', ic: '◍' },
+  { id: 'earnings', label: 'Earnings', ic: '◈' },
   { id: 'safety', label: 'Safety', ic: '△' },
   { id: 'compliance', label: 'Compliance', ic: '❑' },
   { id: 'trips', label: 'Trips', ic: '▤' },
@@ -333,6 +335,99 @@ async function tabMovement(root, plate) {
 }
 
 /* ── tab: safety ─────────────────────────────────────────────────────────── */
+/* ── earnings ──────────────────────────────────────────────────────────────
+   This car showed AED 525 against 266 trips and 3,586 km, and the number was
+   not wrong — it was the sum of the fares on ten hotel bookings, the only
+   trips in the set that carry a price. The other 256 were Uber, which reports
+   no fare per trip and pays the DRIVER weekly instead, so the money existed
+   and simply had no route to a vehicle page.
+
+   Two columns, never one. The fares are measured: a rider paid that, for that
+   trip. The attributed figure is a share of a driver's net payout, after the
+   platform's commission, split across the vehicles that driver was holding.
+   They are different quantities and adding them would produce a third that
+   means nothing — so the page shows both, says which is which, and shows what
+   share of the bookings each one covers. */
+async function tabEarnings(root, plate) {
+  const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  const g = el('div', 'grid g2'); root.append(g);
+  const chP = panel('By channel', 'Fares are measured per trip; attributed pay is a share of a driver payout'); g.append(chP.panel);
+  const drvP = panel('By driver', 'Whose payout, and how much of it this vehicle earned'); g.append(drvP.panel);
+  const dayP = panel('Day by day', 'The two series side by side — a gap in one is not a gap in the other'); root.append(dayP.panel);
+  [chP.body, drvP.body, dayP.body].forEach(loading);
+
+  const e = await qAll('/api/vehicle/earnings', { plate });
+  const t = e.totals;
+
+  kpiHost.replaceWith(kpiRow([
+    { label: 'Attributed pay', value: money(t.attributed), sub: 'share of driver payouts, net of commission',
+      tone: t.attributed > 0 ? 'good' : null },
+    { label: 'Measured fares', value: money(t.fares),
+      sub: `on ${fmt(t.priced_bookings)} of ${fmt(t.bookings)} bookings` },
+    { label: 'Fare coverage', value: t.fare_coverage_pct != null ? pct(t.fare_coverage_pct) : '—',
+      sub: `${fmt(t.priced_platforms)} of ${fmt(t.platforms)} channels price per trip`,
+      tone: t.fare_coverage_pct == null ? null : t.fare_coverage_pct >= 80 ? 'good' : t.fare_coverage_pct >= 30 ? 'warn' : 'critical' },
+    { label: 'Drivers paid', value: fmt(e.attributed.length), sub: 'contributed pay to this asset' },
+  ]));
+
+  /* The sentence that stops the two columns being read as one. Without it the
+     smaller number looks like the answer and the larger like a duplicate. */
+  if (e.caveat) root.insertBefore(note(e.caveat), g);
+
+  chP.body.innerHTML = '';
+  const byChannel = e.by_platform.map((r) => ({
+    ...r,
+    attributed: e.attributed.filter((a) => a.platform === r.platform)
+      .reduce((a, x) => a + Number(x.attributed || 0), 0),
+  }));
+  if (!byChannel.length) chP.body.append(note('No bookings for this vehicle in this window.'));
+  else chP.body.append(tableFrom(byChannel, [
+    { label: 'Channel', key: 'platform', render: (r) => pill(r.platform) },
+    { label: 'Bookings', key: 'bookings', num: true },
+    { label: 'Measured fares', key: 'fares', num: true,
+      render: (r) => (r.fares != null ? money(r.fares) : '—') },
+    { label: 'Attributed pay', key: 'attributed', num: true,
+      render: (r) => (r.attributed > 0 ? money(r.attributed) : '—') },
+    { label: 'Km', key: 'km', num: true, render: (r) => (r.km ? fmt(r.km) : '—') },
+  ], { compact: true }));
+  chP.body.append(el('p', 'cap',
+    'A channel with bookings and no fares prices nothing per trip — its money is in the attributed column, or nowhere yet.'));
+
+  drvP.body.innerHTML = '';
+  if (!e.attributed.length) {
+    drvP.body.append(note('No driver payout overlaps this vehicle in this window. '
+      + 'Either the channels here price per trip, or the payout data has not been collected for these dates.'));
+  } else {
+    drvP.body.append(tableFrom(e.attributed, [
+      { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+      { label: 'Channel', key: 'platform', render: (r) => pill(r.platform) },
+      { label: 'Attributed', key: 'attributed', num: true, render: (r) => money(r.attributed) },
+      { label: 'Trips here', key: 'trips', num: true },
+      { label: 'Days', key: 'days', num: true },
+      /* An even split means the payout period recorded no trips to weight by,
+         so the share is the weakest kind of inference this page makes. Marking
+         it is the difference between a number and a number you can act on. */
+      { label: 'Basis', key: 'any_even_split',
+        render: (r) => pill(r.any_even_split ? 'even split' : 'by trips', r.any_even_split ? 'warn' : 'ok') },
+    ], { compact: true }));
+    drvP.body.append(el('p', 'cap',
+      'Attributed pay is a share of that driver’s payout for the period, split across the vehicles they held, weighted by trips.'));
+  }
+
+  dayP.body.innerHTML = '';
+  if (!e.daily.length) dayP.body.append(note('Nothing to plot for this window.'));
+  else {
+    /* Two hosts, not one: both chart helpers clear the element they are given,
+       so drawing the second into the same node erases the first — and the
+       panel would silently show one series while claiming to show two. */
+    const a = el('div'); const b = el('div');
+    dayP.body.append(el('p', 'cap', 'Attributed pay — a share of driver payouts, by day'), a,
+      el('p', 'cap', 'Measured fares — what riders paid on this vehicle’s own trips'), b);
+    areaChart(a, e.daily, { x: 'day', y: 'attributed' });
+    barChart(b, e.daily, { x: 'day', y: 'fares', label: 'Measured fares' });
+  }
+}
+
 async function tabSafety(root, plate) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
@@ -455,7 +550,7 @@ async function tabTrips(root, plate) {
 }
 
 const TABS = { overview: tabOverview, drivers: tabDrivers, movement: tabMovement,
-  safety: tabSafety, compliance: tabCompliance, trips: tabTrips };
+  earnings: tabEarnings, safety: tabSafety, compliance: tabCompliance, trips: tabTrips };
 
 /* ── page shell ──────────────────────────────────────────────────────────── */
 export async function renderVehicle(root, plate, tab = 'overview') {

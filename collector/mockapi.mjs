@@ -529,6 +529,12 @@ app.get('/api/vehicle/kpis', (req, r) => {
   const alerts = d.reduce((a, x) => a + x.alerts, 0);
   r.json({ trips, days_worked: d.filter((x) => x.trips).length, km, avg_km: 11.8,
     revenue: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)), avg_fare: 36.4,
+    /* Deliberately far larger than `revenue`. On the real fleet the fares
+       cover a tenth of the bookings and the attributed driver pay is the rest,
+       so a fixture where the two are comparable would let a page that quietly
+       swapped or summed them still look right. */
+    attributed_earnings: 5082.65, attributed_platforms: 1, attributed_drivers: 2,
+    any_even_split: true,
     /* Bookings and telematics journeys are separate counts and never summed —
        an FMS row is the same physical journey a ride platform already reported.
        measured_trips and priced_trips are the denominators the distance and
@@ -594,6 +600,44 @@ app.get('/api/vehicle/movement', (req, r) => {
     days: Array.from({ length: 12 }, (_, n) => ({ day: dayISO(n), fixes: 220 - n * 6 })),
     parked: [{ lat: 25.253, lng: 55.365, fixes: 142 }, { lat: 25.078, lng: 55.139, fixes: 71 },
       { lat: 25.196, lng: 55.276, fixes: 44 }, { lat: 25.118, lng: 55.200, fixes: 21 }],
+  });
+});
+
+/* The shape the browser smoke test renders against. Two money columns that
+   must never be added: `fares` is measured per trip, `attributed` is a share
+   of a driver payout. The fixture deliberately gives a channel with bookings
+   and no fares — that is the real fleet's dominant case and the one the page
+   exists for. */
+app.get('/api/vehicle/earnings', (req, r) => {
+  const i = pIndex(req.query.plate);
+  const byPlatform = [
+    { platform: 'uber', bookings: 240 + i, priced_bookings: 0, fares: null, km: 3400 },
+    { platform: 'hotel', bookings: 12, priced_bookings: 11, fares: 612.5, km: 190 },
+  ];
+  const attributed = [
+    { platform: 'uber', driver_ext_id: `drv-${i}`, driver_name: drivers[i],
+      attributed: 4180.25, attributed_cash: 320, trips: 190, km: 2600, days: 22,
+      any_even_split: false, first_period: '2026-07-24', last_period: '2026-08-22' },
+    { platform: 'uber', driver_ext_id: `drv-${(i + 3) % drivers.length}`,
+      driver_name: drivers[(i + 3) % drivers.length],
+      attributed: 902.4, attributed_cash: null, trips: 50, km: 800, days: 6,
+      any_even_split: true, first_period: '2026-08-03', last_period: '2026-08-09' },
+  ];
+  r.json({
+    plate: req.query.plate,
+    by_platform: byPlatform,
+    attributed,
+    daily: vDaily(req.query.plate).map((d, n) => ({
+      day: d.day, fares: n % 5 === 0 ? 62.5 : 0, bookings: d.trips ?? 0,
+      attributed: 120 + (n % 7) * 30,
+    })),
+    totals: {
+      fares: 612.5, attributed: 5082.65, bookings: 252 + i, priced_bookings: 11,
+      fare_coverage_pct: 4.4, platforms: 2, priced_platforms: 1,
+    },
+    caveat: 'Fares are reported on 11 of 252 bookings. The rest are channels that price '
+      + 'nothing per trip and pay the driver instead — their share is the attributed column, '
+      + 'inferred from who was holding this vehicle.',
   });
 });
 
