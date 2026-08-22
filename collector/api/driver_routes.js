@@ -66,13 +66,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        just linked to. It carries its own name, so resolve it directly. */
     if (id && isNameKey(id)) {
       const want = id.slice(5);
+      /* person_key rather than the fold. Identical value — sql/schema_v20.sql
+         stores this exact expression — but a stored column has an index and a
+         computed one cannot, so this was a full scan of 175,000 rows folded
+         twice on every driver page, before the page had asked for anything. */
       [seed] = await q(
         `SELECT NULL::text AS driver_ext_id, driver_name, platform FROM trip
-         WHERE ${CANON('driver_name')} = $1 AND coalesce(btrim(driver_ext_id), '') = ''
+         WHERE person_key = $1 AND coalesce(btrim(driver_ext_id), '') = ''
          ORDER BY requested_at DESC LIMIT 1`, [want]);
       if (!seed) [seed] = await q(
         `SELECT NULL::text AS driver_ext_id, driver_name, platform FROM trip
-         WHERE ${CANON('driver_name')} = $1 ORDER BY requested_at DESC LIMIT 1`, [want]);
+         WHERE person_key = $1 ORDER BY requested_at DESC LIMIT 1`, [want]);
       if (!seed && !nameQ) return null;
     } else if (id) {
       [seed] = await q(
@@ -99,22 +103,27 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        Rows with no id contribute the synthesised name: key rather than being
        dropped, so a person the provider names but never numbers still resolves
        to something the trip queries below can match. */
-    const aliasRows = await q(
+    /* Matched in SQL, not in Node. This selected EVERY row of trip, folded the
+       name on each, shipped all 175,000 to the process and then kept the
+       handful that matched — on every one of the eight or so requests a driver
+       page makes. The trip side is now an indexed lookup on person_key, which
+       stores the same fold; the other two tables are small enough that folding
+       them in place costs nothing, and they have no such column. */
+    const want = canonName(name);
+    const alias = await q(
       `SELECT DISTINCT platform, driver_ext_id, driver_name FROM (
          SELECT platform,
-                coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')}) AS driver_ext_id,
-                driver_name FROM trip
+                coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key) AS driver_ext_id,
+                driver_name FROM trip WHERE person_key = $1
          UNION ALL
          SELECT platform,
                 coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('full_name')}), full_name
-           FROM driver_compliance
+           FROM driver_compliance WHERE ${CANON('full_name')} = $1
          UNION ALL
          SELECT platform,
                 coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')}), driver_name
-           FROM driver_performance
-       ) s WHERE coalesce(btrim(driver_name), '') <> ''`);
-    const want = canonName(name);
-    const alias = aliasRows.filter((r) => canonName(r.driver_name) === want);
+           FROM driver_performance WHERE ${CANON('driver_name')} = $1
+       ) s WHERE coalesce(btrim(driver_name), '') <> ''`, [want]);
     const ids = [...new Set([...alias.map((a) => a.driver_ext_id), ...(id ? [id] : [])]
       .filter(Boolean))];
     if (!ids.length) return null;
@@ -190,9 +199,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
             and in vehicle_driver_day. Requiring an id here made those people
             vanish from the directory entirely. */
          SELECT DISTINCT coalesce(nullif(btrim(driver_ext_id), ''),
-                                  'name:' || ${CANON('driver_name')}) AS driver_ext_id,
+                                  'name:' || person_key) AS driver_ext_id,
                 driver_name FROM trip
-           WHERE coalesce(btrim(driver_name), '') <> ''
+           WHERE person_key IS NOT NULL AND person_key <> ''
          UNION
          SELECT coalesce(nullif(btrim(driver_ext_id), ''),
                          'name:' || ${CANON('full_name')}), full_name FROM driver_compliance
@@ -230,11 +239,15 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        ),
        -- The last trip EVER, so "has not driven in this window" and "has never
        -- driven" are different rows rather than the same blank.
+       /* person_key, not the fold. Both CTEs reading the trip table here are
+          unbounded — "everyone we know of" and "has this person ever driven"
+          are questions with no window — so they folded 175,000 names each, per
+          request. The stored column holds the identical value and is indexed. */
        ever AS (
          SELECT coalesce(nullif(btrim(driver_ext_id), ''),
-                         'name:' || ${CANON('driver_name')}) AS driver_ext_id,
+                         'name:' || person_key) AS driver_ext_id,
                 max(requested_at) last_ever, count(*)::int lifetime
-         FROM trip WHERE coalesce(btrim(driver_name), '') <> '' GROUP BY 1
+         FROM trip WHERE person_key IS NOT NULL AND person_key <> '' GROUP BY 1
        )
        SELECT who.driver_ext_id, who.driver_name,
               coalesce(t.trips, 0) AS trips, coalesce(t.completed, 0) AS completed,
