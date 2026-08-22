@@ -104,6 +104,23 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     }
   }
 
+  /* The real server ends with this, after every route and before the static
+     handler: an /api path matching nothing is a 404, not the dashboard. It
+     lives outside the START/END slice, so mounting it here is what lets a test
+     check the behaviour rather than only its position in the source.
+
+     Only when this harness has mounted the whole app. Express fixes middleware
+     order at registration, and a test that passes serverRoutes:false goes on to
+     add its slice with mountSource AFTERWARDS — so registering the guard here
+     unconditionally put it in front of routes that did not exist yet and turned
+     every one of them into a 404. Which is the same shadowing bug the guard was
+     written to fix, introduced at the other end. */
+  if (serverRoutes) {
+    app.use('/api', (req, res) => res.status(404).json({
+      error: 'no such endpoint', path: req.originalUrl.split('?')[0],
+    }));
+  }
+
   const server = app.listen(0);
   const port = server.address().port;
   return {

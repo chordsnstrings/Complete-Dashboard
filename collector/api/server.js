@@ -1827,6 +1827,21 @@ revenueRoutes(app, { q, wrap, range });
    the columns we happen to have chosen. */
 probeRoutes(app, { wrap });
 
+/* An /api path that matches nothing is a 404, not the dashboard.
+   The catch-all below serves index.html for anything unrouted, which is right
+   for #vehicle/L40965 and wrong for /api/rollups: an undeclared or misspelled
+   API path came back 200 with a page of HTML, and the client's r.json() failed
+   with "Unexpected token <" — an error that says nothing about the actual
+   mistake. This is also how a deploy that has not yet landed looks exactly like
+   a deploy that has, which cost real time to see through.
+
+   Before the static handler, so it cannot be shadowed by a file that happens to
+   sit at the same path. */
+app.use('/api', (req, res) => res.status(404).json({
+  error: 'no such endpoint',
+  path: req.originalUrl.split('?')[0],
+}));
+
 // Static dashboard LAST: app.get('*') would otherwise shadow any API route
 // registered after it (this silently broke /api/insights once already).
 app.use(express.static(join(__dir, 'public'), { maxAge: '5m' }));

@@ -44,6 +44,21 @@ check('and no route reads from/to straight off the query string again',
   !/req\.query\.from \|\| '2000-01-01'/.test(src));
 
 
+/* An /api path that matches nothing must be a 404, not the dashboard.
+   app.get('*') serves index.html for anything unrouted — right for
+   #vehicle/L40965, wrong for /api/rollups. An undeclared or misspelled API path
+   came back 200 with a page of HTML, and the client's r.json() failed with
+   "Unexpected token <", an error that says nothing about the real mistake. It
+   also made a deploy that had not yet landed look exactly like one that had. */
+{
+  const guard = src.indexOf("app.use('/api', (req, res) => res.status(404)");
+  check('an unrouted /api path is refused rather than served the dashboard', guard > -1);
+  check('and that guard sits after every api route, or it would shadow them all',
+    guard > lastApi, `${guard} vs ${lastApi}`);
+  check('and before the catch-all, which would otherwise answer first',
+    guard > -1 && guard < catchAll);
+}
+
 /* ── map/CSS regressions ──────────────────────────────────────────────────
    Two bugs that both produced a "broken map" with no error in the console:
    1. a blanket `svg{width:100%;height:auto}` collapsed Leaflet's overlay pane

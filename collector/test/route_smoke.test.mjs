@@ -108,7 +108,7 @@ await q(`INSERT INTO ledger_entry (platform, external_id, fleet_id, occurred_at,
    while ten shipped, so two of them were called, answered 404, and counted as
    passing. */
 const src = readFileSync('api/server.js', 'utf8');
-const { app, server, port, mounted } = await mountAll(db);
+const { app, server, port, mounted, get } = await mountAll(db);
 check('every route module in api/ is mounted, not just the ones somebody listed',
   mounted.length >= readdirSync('api').filter((x) => x.endsWith('_routes.js')).length,
   mounted.join(' '));
@@ -513,6 +513,25 @@ check('readiness is separate from liveness and names what is missing',
 check('the API refuses to serve on a failed migration', /process\.exit\(1\)/.test(src));
 check('an idle-client failure is logged, not fatal',
   /pool\.on\('error'/.test(readFileSync('src/db.js', 'utf8')));
+
+/* And at runtime, not only in the source: an /api path that matches nothing
+   answers 404 with JSON. It used to fall through to the SPA catch-all and come
+   back 200 with a page of HTML, so a misspelled or not-yet-deployed endpoint
+   failed at the client with "Unexpected token <". */
+{
+  const miss = await get('/api/definitely-not-a-route');
+  check('an unrouted /api path answers 404, not the dashboard', miss.status === 404,
+    `${miss.status} ${miss.raw || JSON.stringify(miss.body)}`);
+  check('and answers in JSON, naming the path it could not find',
+    miss.body?.error === 'no such endpoint' && miss.body?.path === '/api/definitely-not-a-route',
+    JSON.stringify(miss.body));
+  /* The guard must not have eaten a real route on the way. /api/kpis rather
+     than /api/health: health and ready are declared outside the START/END
+     slice this harness mounts, so they are legitimately absent here and would
+     make a passing guard look like a broken one. */
+  const real = await get('/api/kpis');
+  check('while a real endpoint still answers normally', real.status === 200, String(real.status));
+}
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
