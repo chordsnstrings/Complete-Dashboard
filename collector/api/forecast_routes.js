@@ -58,10 +58,19 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
     /* Mark the months the record only partly covers. They are short by
        construction — collection starts and stops mid-month — and fitting one
        as though it were whole drags the whole line toward zero. */
-    const [{ a: spanFrom, b: spanTo } = {}] = await q(
-      `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
-       FROM trip_norm WHERE is_booking AND ($1::text IS NULL OR platform = $1)`,
+    /* From rollup_day — a few thousand rows — rather than a min/max over every
+       trip. `is_booking` is a computed predicate, so the index on local_day
+       cannot serve the original and it scanned the table. */
+    let [{ a: spanFrom, b: spanTo } = {}] = await q(
+      `SELECT to_char(min(day),'YYYY-MM-DD') a, to_char(max(day),'YYYY-MM-DD') b
+       FROM rollup_day WHERE platform = coalesce($1,'*') AND fleet_id = '*' AND bookings > 0`,
       [req.query.platform || null]);
+    if (!spanFrom) {
+      [{ a: spanFrom, b: spanTo } = {}] = await q(
+        `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
+         FROM trip_norm WHERE is_booking AND ($1::text IS NULL OR platform = $1)`,
+        [req.query.platform || null]);
+    }
     const lastOf = (ym) => {
       const [y, mo] = ym.split('-').map(Number);
       return `${ym}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, '0')}`;

@@ -20,20 +20,39 @@
 
 import { forecastMonths, weekdayShares } from '../src/forecast.js';
 import { peopleCount } from './custody_sql.js';
+import { rollupGrainSql } from '../src/rollup.js';
 
 export function capacityRoutes(app, { q, wrap }) {
   app.get('/api/capacity', wrap(async (req, res) => {
     /* ── how much work is coming ──────────────────────────────────────── */
-    const months = await q(
-      `SELECT to_char(local_month,'YYYY-MM') AS m,
-              count(*) FILTER (WHERE is_booking)::int trips,
-              min(local_day) AS first_day, max(local_day) AS last_day
-       FROM trip_norm GROUP BY 1 ORDER BY 1`);
+    /* From rollup_month, like /api/forecast — the same full-history grouping,
+       with nothing in the request that could narrow it. Falls back to computing
+       the grain from the SAME SQL the rollup is built from, so a database with
+       no rollup yet is slow rather than blank and the two paths cannot become
+       different answers. */
+    const monthShape = `to_char(month,'YYYY-MM') AS m, bookings AS trips`;
+    let months = await q(
+      `SELECT ${monthShape}, first_day, last_day FROM rollup_month
+       WHERE platform = '*' AND fleet_id = '*' ORDER BY month`);
+    if (!months.length) {
+      months = await q(
+        `SELECT ${monthShape}, NULL::date AS first_day, NULL::date AS last_day
+         FROM (${rollupGrainSql('month')}) g
+         WHERE platform = '*' AND fleet_id = '*' ORDER BY month`);
+    }
     if (!months.length) return res.json({ ok: false, reason: 'No booking has been collected.' });
 
-    const [{ a: spanFrom, b: spanTo } = {}] = await q(
-      `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
-       FROM trip_norm WHERE is_booking`);
+    /* The span from rollup_day, which is a few thousand rows, rather than a
+       min/max over every trip. `is_booking` is a computed predicate, so the
+       index on local_day cannot serve the original and it scanned. */
+    let [{ a: spanFrom, b: spanTo } = {}] = await q(
+      `SELECT to_char(min(day),'YYYY-MM-DD') a, to_char(max(day),'YYYY-MM-DD') b
+       FROM rollup_day WHERE platform = '*' AND fleet_id = '*' AND bookings > 0`);
+    if (!spanFrom) {
+      [{ a: spanFrom, b: spanTo } = {}] = await q(
+        `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
+         FROM trip_norm WHERE is_booking`);
+    }
     const lastOf = (ym) => {
       const [y, mo] = ym.split('-').map(Number);
       return `${ym}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, '0')}`;
