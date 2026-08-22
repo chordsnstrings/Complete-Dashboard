@@ -31,9 +31,17 @@ check('no /api route is shadowed by the catch-all', shadowed.length === 0, shado
 const lastApi = Math.max(...apiRoutes.map((r) => r.at));
 check('catch-all is registered after the last api route', catchAll > lastApi);
 
-// endOfDay guard: date-only `to` bounds must be widened
-check('endOfDay helper present', /const endOfDay =/.test(src));
-check('range() uses endOfDay', /endOfDay\(req\.query\.to/.test(src));
+/* The window helper moved into api/window.js, and these two checks moved with
+   it — from grepping server.js for a call to actually running the thing. The
+   behaviour they guard is unchanged: a date-only `to` bound must be widened to
+   the end of that day, or every trip on the window's last day disappears. It
+   is exercised properly in test/window.test.mjs; this is the wiring check,
+   that server.js takes its window from the shared module rather than growing
+   another private copy. */
+check('server.js takes its window from the shared helper',
+  /from '\.\/window\.js'/.test(src) && /const \[from, to\] = winDays\(req\)/.test(src));
+check('and no route reads from/to straight off the query string again',
+  !/req\.query\.from \|\| '2000-01-01'/.test(src));
 
 
 /* ── map/CSS regressions ──────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { pool, migrate } from '../src/db.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings } from '../src/settings.js';
+import { win, winDays } from './window.js';
 import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
@@ -83,9 +84,11 @@ const asDate = (v, fallback) => {
   return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? fallback : s;
 };
 const range = (req) => {
-  let from = asDate(req.query.from, '2000-01-01');
-  let to = asDate(req.query.to, '2100-01-01');
-  if (from > to) [from, to] = [to, from];      // an inverted range is a typo, not an empty set
+  /* `days` too, not only from/to — see api/window.js. The hash router carries
+     ?days=30 and the front end turns it into from/to before every fetch, so a
+     caller reading the API directly got `days` silently ignored and every trip
+     the fleet has ever taken, under a thirty-day label. */
+  const [from, to] = winDays(req);
   return [from, to, req.query.platform || null, req.query.fleet || null];
 };
 /* The window predicate, optionally table-qualified. It was a bare string, and
@@ -641,7 +644,7 @@ app.get('/api/track', wrap(async (req, res) => {
      WHERE plate=$1 AND lat IS NOT NULL AND lng IS NOT NULL
        AND captured_at BETWEEN $2 AND $3
      ORDER BY captured_at`,
-    [req.query.plate.toUpperCase().replace(/[\s-]+/g, ''), req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')]));
+    [req.query.plate.toUpperCase().replace(/[\s-]+/g, ''), ...win(req)]));
 }));
 
 /* ───────────────────── map: where was the fleet, when ───────────────────── */
@@ -682,7 +685,7 @@ app.get('/api/map/days', wrap(async (req, res) => {
      LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
      ORDER BY d.day DESC, d.fixes DESC LIMIT 400`,
     [req.query.plate ? req.query.plate.toUpperCase().replace(/[\s-]+/g, '') : null,
-     req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')]));
+     ...win(req)]));
 }));
 
 // A day's journey for one vehicle, split into segments wherever the car stopped
@@ -1429,7 +1432,7 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
 
 // external context joined to the day (weather + calendar) for causality overlays
 app.get('/api/context', wrap(async (req, res) => {
-  const [from, to] = [req.query.from || '2000-01-01', req.query.to || '2100-01-01'];
+  const [from, to] = winDays(req);
   res.json(await q(
     `SELECT w.day, w.temp_max, w.precipitation, w.wind_max, w.is_forecast,
             c.hijri_month, c.is_ramadan, c.is_holiday, c.holiday_name
@@ -1574,7 +1577,7 @@ app.get('/api/earnings/components', wrap(async (req, res) => res.json(await q(
    FROM driver_earnings_component
    WHERE period_start >= $1 AND period_end <= $2
    GROUP BY 1,2,3,4,6 ORDER BY abs(sum(amount)) DESC LIMIT 400`,
-  [req.query.from || '2000-01-01', req.query.to || '2100-01-01']))));
+  winDays(req)))));
 
 // per-driver tip rate — service quality expressed in money
 app.get('/api/earnings/tips', wrap(async (req, res) => res.json(await q(
@@ -1587,7 +1590,7 @@ app.get('/api/earnings/tips', wrap(async (req, res) => res.json(await q(
    WHERE period_start >= $1 AND period_end <= $2
    GROUP BY driver_ext_id HAVING sum(amount) FILTER (WHERE category='net_fare') > 0
    ORDER BY tip_pct DESC NULLS LAST LIMIT 200`,
-  [req.query.from || '2000-01-01', req.query.to || '2100-01-01']))));
+  winDays(req)))));
 
 // product-tier economics: which assets serve which tier
 app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
@@ -1613,7 +1616,7 @@ app.get('/api/breaks', wrap(async (req, res) => {
 }));
 
 app.get('/api/events', wrap(async (req, res) => {
-  const [from, to] = [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
+  const [from, to] = [...win(req)];
   res.json(await q(
     `SELECT source, code, title, category, scope, starts_on, ends_on,
             expected_effect, confidence, url, summary
@@ -1663,7 +1666,7 @@ app.get('/api/schema/raw-fields', wrap(async (req, res) => {
     .includes(req.query.table) ? req.query.table : 'trip';
   const platform = req.query.platform || null;
   const sample = Math.min(Math.max(+req.query.sample || 4000, 100), 20000);
-  const [from, to] = [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
+  const [from, to] = [...win(req)];
 
   // A field a provider only started sending recently is diluted to nothing by a
   // year-wide random sample, so the window has to be selectable.
@@ -1727,7 +1730,7 @@ app.get('/api/schema/raw-values', wrap(async (req, res) => {
      WHERE raw ? $2 AND ${providerFilter(table, 1)} AND ${tcol} BETWEEN $3 AND $4
      GROUP BY 1 ORDER BY n DESC LIMIT 60`,
     [req.query.platform || null, req.query.key,
-     req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')]));
+     ...win(req)]));
 }));
 
 /* ───────────────── per-driver detail pages ───────────────── */

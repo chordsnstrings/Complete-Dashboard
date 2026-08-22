@@ -11,6 +11,8 @@
    name, never on a fuzzy score, because merging two real people into one page
    is a worse failure than showing the same person twice. */
 
+import { win, winDays } from './window.js';
+
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
 /* Some feeds duplicate a name part ("Khan Khan", "Gul Gul"). Collapsing an
@@ -51,16 +53,6 @@ const nameKey = (s) => `name:${canonSql(s)}`;
 const isNameKey = (id) => String(id || '').startsWith('name:');
 
 export function driverRoutes(app, { q, wrap, endOfDay }) {
-  const win = (req) => [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
-  /* Dubai calendar days, matching trip_norm.local_day and every other endpoint.
-     Binding a bare date against a timestamptz in a UTC session made the window
-     start at 04:00 Dubai and end at 03:59 the following day, so this page and
-     the /api/vehicles panel beside it disagreed about the same plate. */
-  const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
-  const winDays = (req) => [
-    isDay(req.query.from) ? req.query.from : '2000-01-01',
-    isDay(req.query.to) ? req.query.to : '2100-01-01',
-  ];
 
   /* Resolve `?id=` (a platform driver id, or a synthesised name: key) or
      `?name=` into every record for that person. Returns null when nothing

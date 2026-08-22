@@ -13,21 +13,11 @@
    "is this asset earning, and is it legal to be on the road". */
 
 import { peopleCount, personKey } from './custody_sql.js';
+import { win, winDays } from './window.js';
 
 const normPlate = (s) => String(s || '').toUpperCase().replace(/[\s-]+/g, '');
 
 export function vehicleRoutes(app, { q, wrap, endOfDay }) {
-  const win = (req) => [req.query.from || '2000-01-01', endOfDay(req.query.to || '2100-01-01')];
-  /* Dubai calendar days, matching trip_norm.local_day and every other endpoint.
-     Bound as a raw timestamptz in a UTC session, a window starting on the 1st
-     began at 04:00 Dubai and ended at 03:59 on the day after the last — so this
-     directory and the /api/vehicles panel on the same screen disagreed about
-     the same plate. */
-  const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
-  const winDays = (req) => [
-    isDay(req.query.from) ? req.query.from : '2000-01-01',
-    isDay(req.query.to) ? req.query.to : '2100-01-01',
-  ];
 
   // `$1..$2` window, `$3` plate — same argument order in every query below.
   const TW = `plate = $3 AND requested_at BETWEEN $1 AND $2`;

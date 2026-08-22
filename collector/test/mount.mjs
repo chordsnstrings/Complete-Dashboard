@@ -15,6 +15,7 @@
    listed; a module nobody adds to a list is a module nothing executes. */
 import express from 'express';
 import { readFileSync, readdirSync } from 'node:fs';
+import { win, winDays } from '../api/window.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -28,15 +29,13 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     res.status(500).json({ error: 'internal', detail: String(e).slice(0, 300) });
   });
   const endOfDay = (d) => (/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d} 23:59:59.999` : d);
-  const asDate = (v, f) => {
-    const s = String(v || '');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return f;
-    const d = new Date(`${s}T00:00:00Z`);
-    return Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== s ? f : s;
-  };
+  /* The window comes from the real module now, not a copy. This file's own
+     header warns about helpers here drifting from the server's, and `range`
+     was doing exactly that: the server learned to honour `?days=` and this
+     copy did not, so a route reading a days window would have passed here
+     while returning every trip in production. */
   const range = (req) => {
-    let from = asDate(req.query.from, '2000-01-01'); let to = asDate(req.query.to, '2100-01-01');
-    if (from > to) [from, to] = [to, from];
+    const [from, to] = winDays(req);
     return [from, to, req.query.platform || null, req.query.fleet || null];
   };
   const W = (alias = '') => {
@@ -64,7 +63,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
 
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
-    q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin,
+    q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
     describeSettings: stubList, setSetting: stub, deleteSetting: stub, loadSettings: stub,
     insights: { run: stub }, pool: { query: db.query.bind(db) },
     ...(await import('../api/custody_sql.js')),
@@ -92,7 +91,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     mountSource(src.slice(a, b));
   }
 
-  const deps = { q, wrap, range, endOfDay, F, FB, W, DAYWIN, CANON };
+  const deps = { q, wrap, range, endOfDay, F, FB, W, DAYWIN, CANON, win, winDays };
   const mounted = [];
   for (const f of readdirSync('api').filter((x) => x.endsWith('_routes.js'))) {
     const mod = await import(`../api/${f}`);
