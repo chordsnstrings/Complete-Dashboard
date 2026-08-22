@@ -44,7 +44,14 @@ const PATHS = [
 ];
 
 // The windows the UI opens with. 30 is the default; 7 and 90 are one click away.
-const WINDOWS = [30, 7, 90];
+/* The windows the UI opens with, and the two it does not.
+   30 is the default and 7 and 90 are one click away. 365 was left out and it is
+   the one that hurts most: a year crosses every collection gap this fleet has,
+   so its queries are the heaviest, and nobody had warmed them — the first
+   person to switch a page to a year paid the full aggregate every time.
+   All-time is deliberately still absent: it is reachable only by hand-editing a
+   URL, and warming it would double this pass to serve a window nobody opens. */
+const WINDOWS = [30, 7, 90, 365];
 
 export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
   if (!enabled) { log.info(SRC, 'disabled'); return { stop() {} }; }

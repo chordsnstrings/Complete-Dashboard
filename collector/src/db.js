@@ -17,7 +17,23 @@ function poolConfig() {
     || `postgres://${p.PGUSER || 'fleet'}:${p.PGPASSWORD || 'fleet'}@${p.PGHOST || 'db'}:${p.PGPORT || '5432'}/${p.PGDATABASE || 'fleet'}`;
   const needSsl = p.DATABASE_SSL === 'true' || /sslmode=/i.test(cs);
   if (needSsl) { try { const u = new URL(cs); u.searchParams.delete('sslmode'); cs = u.toString(); } catch { /* keep as-is */ } }
-  return { connectionString: cs, max: 8, ssl: needSsl ? { rejectUnauthorized: false } : undefined };
+  return {
+    connectionString: cs,
+    max: 8,
+    /* A query that will not finish must not hold a pool slot for ever. With
+       eight connections, two stuck queries are a quarter of the API's capacity
+       and the symptom is every other page becoming slow — which reads as a
+       database problem rather than as one bad statement. Two minutes is far
+       longer than the slowest honest query here (the full rollup, at about
+       forty seconds) and far shorter than a hang.
+
+       One value governs both processes. The collector's heaviest single
+       statement is the full rollup at about forty seconds, so it fits — and if
+       a backfill ever needs longer, STATEMENT_TIMEOUT_MS raises it for that
+       component without touching the API's. */
+    statement_timeout: Number(process.env.STATEMENT_TIMEOUT_MS || 120000),
+    ssl: needSsl ? { rejectUnauthorized: false } : undefined,
+  };
 }
 export const pool = new pg.Pool(poolConfig());
 

@@ -157,18 +157,44 @@ app.get('/api/health', (_, res) => res.json({ ok: true }));
 
 /* Readiness: can this instance actually answer? A green health check in front
    of a missing view is worse than a red one, because it routes users to it. */
+/* Readiness must not queue behind the data.
+   ─────────────────────────────────────────────────────────────────────────
+   The pool holds eight connections. Eight concurrent heavy queries — a cold
+   cache after a deploy, or a wide window nobody has warmed — take all of them,
+   and this check then waits its turn. Measured during a sweep of the API at a
+   ninety-day window: 81 seconds, against 0.27 when asked on its own.
+
+   That is a feedback loop, not just a slow endpoint. The platform's health
+   check times out, the app is restarted, the restart empties the response
+   cache, and the next wave of traffic is entirely cold — which is how a busy
+   minute becomes an outage. It matches the 521s and 522s seen from the edge
+   earlier today.
+
+   The answer it gives changes only when a migration runs, so it is remembered.
+   A ready process answers from memory and never touches the pool; a process
+   that is NOT ready re-checks almost immediately, because that is the state
+   worth being impatient about. */
+let readyMemo = null;
 app.get('/api/ready', wrap(async (_, res) => {
   const need = ['trip_norm', 'trip_ext', 'source_day_coverage'];
+  const TTL_OK = 30000, TTL_BAD = 2000;
+  if (readyMemo && Date.now() - readyMemo.at < (readyMemo.body.ready ? TTL_OK : TTL_BAD)) {
+    return res.status(readyMemo.status).json(readyMemo.body);
+  }
+  const answer = (status, body) => {
+    readyMemo = { at: Date.now(), status, body };
+    return res.status(status).json(body);
+  };
   try {
     const [row] = await q(
       `SELECT ${need.map((v, i) => `to_regclass('${v}') IS NOT NULL AS v${i}`).join(', ')}`);
     const missing = need.filter((_, i) => !row[`v${i}`]);
-    if (missing.length) {
-      return res.status(503).json({ ready: false, reason: 'schema incomplete', missing });
-    }
-    res.json({ ready: true, views: need });
+    if (missing.length) return answer(503, { ready: false, reason: 'schema incomplete', missing });
+    return answer(200, { ready: true, views: need });
   } catch (e) {
-    res.status(503).json({ ready: false, reason: 'database unreachable' });
+    /* Not remembered as long: "the database was unreachable a moment ago" is
+       exactly the claim that should expire quickly. */
+    return answer(503, { ready: false, reason: 'database unreachable' });
   }
 }));
 

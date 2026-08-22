@@ -533,6 +533,29 @@ check('an idle-client failure is logged, not fatal',
   check('while a real endpoint still answers normally', real.status === 200, String(real.status));
 }
 
+/* ── readiness must not queue behind the data ─────────────────────────────
+   The pool holds eight connections. Eight concurrent heavy queries take all of
+   them and the readiness check then waits its turn: measured at 81 seconds
+   during a sweep at a ninety-day window, against 0.27 asked on its own. That is
+   a feedback loop rather than a slow endpoint — the platform's health check
+   times out, the app restarts, the restart empties the response cache, and the
+   next wave of traffic is entirely cold. */
+{
+  const src2 = readFileSync('api/server.js', 'utf8');
+  check('the readiness answer is remembered rather than re-queried per request',
+    /let readyMemo = null;/.test(src2) && /readyMemo\.at/.test(src2));
+  /* A ready process can answer from memory for a while; a process that is NOT
+     ready is the state worth being impatient about. */
+  check('a positive answer is held far longer than a negative one',
+    /TTL_OK = 30000, TTL_BAD = 2000/.test(src2));
+  check('and "the database was unreachable" expires quickly, being the claim most worth retrying',
+    /Not remembered as long/.test(src2));
+
+  const db2 = readFileSync('src/db.js', 'utf8');
+  check('a query that will not finish cannot hold a pool slot for ever',
+    /statement_timeout: Number\(process\.env\.STATEMENT_TIMEOUT_MS \|\| 120000\)/.test(db2));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

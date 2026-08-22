@@ -26,8 +26,17 @@ const B = process.env.BASE || 'https://fleet-dashboard-wpeqb.ondigitalocean.app'
 const dubai = (d) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 const TO = dubai(new Date());
-const FROM = dubai(new Date(Date.now() - 29 * 864e5));
-const WIN = `from=${FROM}&to=${TO}`;
+/* Every window the product offers, not only the default one.
+   A page is not audited because it renders over thirty days. The windows differ
+   in kind and not merely in size: seven days can hold nothing at all for a
+   source that reports weekly, a year crosses every collection gap this fleet
+   has, and all-time is the only window in which a page meets the months whose
+   earnings were never collected. Each of those has broken something different. */
+const WINDOWS = (process.env.WINDOWS || '7,30,90,365,all').split(',').map((w) => w.trim());
+const windowQs = (w) => (w === 'all'
+  ? 'from=2000-01-01&to=2100-01-01'
+  : `from=${dubai(new Date(Date.now() - (Number(w) - 1) * 864e5))}&to=${TO}`);
+let WIN = windowQs('30');
 
 /* Which source file backs each view. Most views delegate to a module of the
    same name; the rest are declared inline in app.js. Discovered by looking for
@@ -93,7 +102,8 @@ const SEG = await (async () => {
     return rows[0] ? { plate: rows[0].plate, at: rows[0].started_at } : null;
   } catch { return null; }
 })();
-console.log(`window ${FROM} .. ${TO}\n  plate=${PLATE}  driver=${DRIVER}  property=${PROPERTY}`
+console.log(`windows: ${WINDOWS.join(', ')}  (today ${TO})`
+  + `\n  plate=${PLATE}  driver=${DRIVER}  property=${PROPERTY}`
   + `  segment=${SEG ? `${SEG.plate}@${String(SEG.at).slice(0, 19)}` : 'none'}\n`);
 
 /* Per route, not one global bag. `id` means a driver on /api/driver/* and a
@@ -171,6 +181,9 @@ function junk(json) {
   return [...new Set(bad)].slice(0, 4);
 }
 
+const byWindow = [];
+for (const W of WINDOWS) {
+WIN = windowQs(W);
 const report = [];
 for (const view of VIEWS) {
   const { text, delegates, resolved } = sourceFor(view);
@@ -200,6 +213,7 @@ for (const view of VIEWS) {
 }
 
 let bad = 0;
+console.log(`\n== window: ${W === 'all' ? 'all time' : `last ${W} days`}`);
 console.log('view                 calls  status');
 console.log('─'.repeat(78));
 for (const r of report) {
@@ -222,6 +236,17 @@ for (const r of report) {
   for (const b of r.refused) console.log(`  ✗ UNREACHED ${b.path} → ${b.status} ${b.raw.slice(0, 60)}`);
 }
 console.log('─'.repeat(78));
-console.log(`${report.length} views, ${report.reduce((a, r) => a + (r.endpoints || 0), 0)} endpoint calls, `
+const calls = report.reduce((a, r) => a + (r.endpoints || 0), 0);
+console.log(`${report.length} views, ${calls} endpoint calls, `
   + `${bad} view(s) with an error or an unreached panel`);
-process.exit(bad ? 1 : 0);
+byWindow.push({ window: W, views: report.length, calls, bad });
+}
+
+console.log(`\n${'='.repeat(78)}\nsummary`);
+for (const w of byWindow) {
+  console.log(`  ${(w.window === 'all' ? 'all time' : `${w.window}d`).padEnd(10)}`
+    + `${String(w.calls).padStart(5)} calls   ${w.bad ? `${w.bad} view(s) with an error` : 'clean'}`);
+}
+const totalBad = byWindow.reduce((a, w) => a + w.bad, 0);
+console.log(`\n${byWindow.length} windows, ${byWindow.reduce((a, w) => a + w.calls, 0)} calls, ${totalBad} failing`);
+process.exit(totalBad ? 1 : 0);
