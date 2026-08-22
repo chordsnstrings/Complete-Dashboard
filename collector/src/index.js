@@ -8,6 +8,7 @@
 import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
+import { recordCredentialVisibility } from './settings.js';
 import { backfill, incremental, cabmanTick, liveStatusTick, analystPass, probePass } from './run.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -52,6 +53,16 @@ async function main() {
        first collection, would otherwise serve empty months on every page that
        reads a rollup until the quarter hour came round. */
     refreshRollups().catch((e) => log.error('scheduler', 'rollup at boot', { err: String(e) }));
+    /* And record which credentials this process can actually see, so the
+       Settings page — served by the API, which has a different environment —
+       stops reporting the collector's working Uber session as missing. Names
+       and presence only; no value is written. Re-recorded hourly, because an
+       env change arrives with a deploy and a settings change arrives at any
+       time. */
+    recordCredentialVisibility('collector')
+      .catch((e) => log.warn('scheduler', 'credential visibility', { err: String(e).slice(0, 120) }));
+    cron.schedule('5 * * * *', () => recordCredentialVisibility('collector')
+      .catch((e) => log.warn('scheduler', 'credential visibility', { err: String(e).slice(0, 120) })));
     /* The analyst costs a model call per pass, and its input is a month of
        aggregates that does not meaningfully change between two afternoons.
        Once a day, at 03:10 Dubai (23:10 UTC), after the overnight incremental

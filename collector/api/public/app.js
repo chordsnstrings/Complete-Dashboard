@@ -1906,6 +1906,24 @@ V.settings = async (root) => {
      source writes zero rows while the page still shows a healthy "settings"
      tag. Where the stored value is a JWT it says when it dies, so show that
      rather than making the supervisor infer it from a flat chart. */
+  /* Where a credential actually lives.
+     The API and the collector are separate components with separate
+     environments: UBER_WEB_COOKIE and YANGO_COOKIE are set on the collector
+     worker and nowhere else, which is right, because only the collector calls
+     those providers. This page is served by the API, and it showed both as
+     "unset" — so an operator would go and capture a new Uber session while the
+     collector had a working one. A credential held by the process that uses it
+     is not missing. */
+  const sourceTag = (d) => {
+    if (d.configured) return `<span class="tag ${d.source === 'settings' ? 'ok' : 'dim'}">${esc(d.source)}</span>`;
+    const others = d.seen_by || [];
+    if (others.length) {
+      const where = others.map((o) => o.component).join(', ');
+      return `<span class="tag ok" title="Not in this service's environment, but held by ${esc(where)} — `
+        + `which is the process that uses it.">on ${esc(where)}</span>`;
+    }
+    return '<span class="tag warn">unset</span>';
+  };
   const expiryTag = (d) => {
     const e = d.expiry;
     if (!e) return '';
@@ -1925,7 +1943,7 @@ V.settings = async (root) => {
     const row = el('div', 'setrow');
     row.innerHTML = `<div class="lab">${esc(d.label)}<small>${esc(d.key)}${d.hint ? ' · ' + esc(d.hint) : ''}</small></div>
       <div><input data-k="${esc(d.key)}" type="${d.secret ? 'password' : 'text'}" placeholder="${d.configured ? esc(d.value) : 'not set'}" ${d.secret ? '' : `value="${esc(d.value)}"`}></div>
-      <div><span class="tag ${d.configured ? (d.source === 'settings' ? 'ok' : 'dim') : 'warn'}">${d.configured ? d.source : 'unset'}</span>${expiryTag(d)}</div>`;
+      <div>${sourceTag(d)}${expiryTag(d)}</div>`;
     wrap.append(row);
   });
   const actions = el('div', 'btnrow'); actions.style.marginTop = '16px';

@@ -1945,8 +1945,14 @@ app.get('/api/schema/raw-fields', (req, r) => r.json({
 }));
 
 app.get('/api/settings', (_, r) => r.json([
+  /* Unset in the API's own environment but held by the collector — the case
+     that made this page tell an operator to re-capture a working session. */
   { key: 'UBER_WEB_COOKIE', group: 'Uber', label: 'Supplier portal cookie', hint: 'Paste from a logged-in supplier.uber.com session',
-    secret: true, source: 'unset', configured: false, value: '', updated_at: null },
+    secret: true, source: 'unset', configured: false, value: '', updated_at: null,
+    seen_by: [{ component: 'collector', source: 'environment', observed_at: new Date().toISOString() }] },
+  // And one genuinely missing everywhere, so the two render differently.
+  { key: 'YANGO_COOKIE', group: 'Yango', label: 'Yandex session cookie', hint: 'Expires — re-paste from a logged-in fleet.yango.com session',
+    secret: true, source: 'unset', configured: false, value: '', updated_at: null, seen_by: [] },
   { key: 'CABMAN_PASS', group: 'CABMAN', label: 'Password', hint: null,
     secret: true, source: 'environment', configured: true, value: '••••••••7f2a', updated_at: null },
   { key: 'HOTEL_TOKEN', group: 'Hotel', label: 'Bearer token', hint: null,

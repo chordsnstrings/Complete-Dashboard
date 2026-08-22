@@ -3,7 +3,7 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { pool, migrate } from '../src/db.js';
-import { describeSettings, setSetting, deleteSetting, loadSettings } from '../src/settings.js';
+import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
 import { win, winDays } from './window.js';
 import { rollupGrainSql, rollupState } from '../src/rollup.js';
 import { responseCache } from './cache.js';
@@ -1882,6 +1882,10 @@ migrate()
        See api/warm.js. WARM=off to leave it cold. */
     // The cache needs the real port too, to re-request a stale key on itself.
     cache.setPort(server.address().port);
+    // The API's own view, so the Settings page can show both and name the
+    // difference rather than presenting one process's environment as the truth.
+    recordCredentialVisibility('api')
+      .catch((e) => log.warn('api', 'credential visibility', { err: String(e).slice(0, 120) }));
     startWarmer({
       // From the listening socket, not the configured value: with PORT=0 the
       // real one only exists once the server is up, and warming the wrong port

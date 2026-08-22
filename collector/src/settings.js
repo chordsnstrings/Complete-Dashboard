@@ -101,11 +101,59 @@ export async function deleteSetting(key) {
   await loadSettings(true);
 }
 
+/* What THIS process can see, recorded for the other one to read.
+   ─────────────────────────────────────────────────────────────────────────
+   The API and the collector are separate components with separate
+   environments. On this deployment UBER_WEB_COOKIE and YANGO_COOKIE are set on
+   the collector worker and nowhere else, which is right — only the collector
+   calls those providers, and a web-facing service has no business holding a
+   session cookie it never uses.
+
+   The Settings page is served by the API, and it reported both as unset. An
+   operator reading that would conclude the Uber session had expired and go
+   capture a new one, while the collector had a working one all along. The page
+   was describing the API's environment and calling it the fleet's credentials.
+
+   Names and presence only. Never a value, not even a masked one: this row is
+   read by a web service, and a secret that reaches it has been copied somewhere
+   it was deliberately kept out of. */
+export async function recordCredentialVisibility(component, db = pool) {
+  await loadSettings(true);
+  const rows = SETTING_DEFS.map((d) => {
+    const fromDb = cache[d.key] != null;
+    const fromEnv = !!process.env[d.key];
+    return {
+      component, key: d.key,
+      configured: fromDb || fromEnv,
+      source: fromDb ? 'settings' : fromEnv ? 'environment' : 'unset',
+    };
+  });
+  for (const r of rows) {
+    await db.query(
+      `INSERT INTO credential_visibility (component, key, configured, source, observed_at)
+       VALUES ($1,$2,$3,$4, now())
+       ON CONFLICT (component, key) DO UPDATE
+         SET configured = EXCLUDED.configured, source = EXCLUDED.source, observed_at = now()`,
+      [r.component, r.key, r.configured, r.source]);
+  }
+  log.info('settings', `recorded credential visibility for ${component}`,
+    { configured: rows.filter((r) => r.configured).length, of: rows.length });
+  return rows;
+}
+
 // Safe view for the Settings UI: secrets are masked, never returned in clear.
 export async function describeSettings() {
   await loadSettings(true);
   const { rows } = await pool.query('SELECT key, updated_at FROM app_setting');
   const updated = Object.fromEntries(rows.map((r) => [r.key, r.updated_at]));
+  /* What the OTHER components can see, so this page describes the fleet's
+     credentials rather than this process's environment. */
+  let elsewhere = {};
+  try {
+    const { rows: vis } = await pool.query(
+      `SELECT component, key, configured, source, observed_at FROM credential_visibility`);
+    for (const v of vis) (elsewhere[v.key] ||= []).push(v);
+  } catch { elsewhere = {}; }
   return SETTING_DEFS.map((d) => {
     const fromDb = cache[d.key] != null && updated[d.key] != null;
     const val = cache[d.key] ?? process.env[d.key] ?? '';
@@ -121,6 +169,12 @@ export async function describeSettings() {
          present". A JWT states its own expiry, so the page can say "4 days
          left" instead of waiting for the supervisor to notice a flat chart. */
       expiry: val ? jwtExpiry(val) : null,
+      /* Where else this credential is held. A key unset here but present on the
+         collector is not missing — it is scoped to the process that uses it,
+         which is the safer arrangement and was being reported as a fault. */
+      seen_by: (elsewhere[d.key] || [])
+        .filter((v) => v.configured)
+        .map((v) => ({ component: v.component, source: v.source, observed_at: v.observed_at })),
     };
   });
 }
