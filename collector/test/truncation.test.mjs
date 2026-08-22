@@ -175,6 +175,42 @@ check('no list comes back at its cap without saying how many there really are',
 
 console.log(`\n  ${WIDE_PLATES} vehicles, ${WIDE_PEOPLE} people, ${trips} trips, `
   + `${CAPS.size} distinct caps in api/`);
+/* ── a window wider than the record must not be answered in full ──────────
+   The daily series fills the calendar deliberately: a day nobody collected and
+   a day nobody drove are different facts, and drawing only the days that have
+   rows turned a 124-day collection hole into two touching bars. But it filled
+   the REQUESTED window, so a request from 2000 to 2100 answered with 36,526
+   rows — 368 of which had any trips — and 7.9MB of zeros, enough to stall the
+   browser it was drawn in. There was no fleet in 2000, and a row saying it took
+   no trips that day is not a fact about anything. */
+{
+  const wide = (await get('/api/trips/daily?from=2000-01-01&to=2100-01-01')).body;
+  const rows = Array.isArray(wide) ? wide : (wide?.rows || []);
+  check('a hundred-year window does not answer with a hundred years of zeros',
+    rows.length < 2000, `${rows.length} rows`);
+  /* And the fill still happens inside the record, which is the whole reason it
+     exists — clamping must not have turned it into "only the days with rows".
+     Contiguity is the property, not the presence of an empty day: this fixture
+     has data on every day it covers, so counting empties would test the fixture
+     rather than the endpoint. A series with a day missing from the middle is
+     what the fill exists to prevent. */
+  const dayMs = 864e5;
+  const gaps = rows.slice(1).filter((r, i) =>
+    (Date.parse(String(r.d)) - Date.parse(String(rows[i].d))) !== dayMs);
+  check('but the calendar is still filled, so the series has no missing day in it',
+    rows.length > 1 && gaps.length === 0,
+    `${rows.length} rows, ${gaps.length} discontinuities`);
+  /* Bounded by span, not clamped to the data. The trailing days of a window
+     showing "nothing recorded" is how a collector that stopped three days ago
+     becomes visible, so the fill must still run past the last day that has
+     rows — clamping to the record was the first attempt and hid exactly that. */
+  check('the series still runs to the end of the window, not to the last day with data',
+    String(rows[rows.length - 1].d).slice(0, 10) === '2100-01-01',
+    String(rows[rows.length - 1]?.d));
+  check('and is cut at the far end instead, where there was no fleet to report on',
+    rows.length <= 801, `${rows.length} rows`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close(); await db.close();
 process.exit(fail ? 1 : 0);

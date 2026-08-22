@@ -290,6 +290,10 @@ app.get('/api/kpis', wrap(async (req, res) => {
    counted telematics journeys alongside bookings, which double-counts the same
    physical trip. Telematics volume is returned as its own series so movement
    is still visible without being added to demand. */
+/* More than twice the longest window the range picker offers, so no question a
+   person can ask through the product is ever truncated by it. */
+const DAILY_MAX_DAYS = 800;
+
 app.get('/api/trips/daily', wrap(async (req, res) => {
   const p = range(req);
   /* Every day in the window, whether or not anything landed on it — and, per
@@ -305,7 +309,23 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
      A day nobody collected and a day nobody drove are different facts and this
      is where they stop looking the same. */
   const rows = await q(
-    `WITH cal AS (SELECT generate_series($1::date, $2::date, interval '1 day')::date AS d),
+    /* The calendar is filled across the window, and the window is bounded.
+       Filling the requested window is the whole point: a day nobody collected
+       and a day nobody drove are different facts, and the trailing days of a
+       thirty-day view showing "nothing recorded" is how a collector that
+       stopped three days ago becomes visible. Clamping this to the days that
+       have data would hide exactly that, which was the first attempt and was
+       wrong.
+
+       What is not a fact about anything is 2000-01-01. Asked from 2000 to 2100
+       this answered with 36,526 rows — 368 of which had any trips — and 7.9MB
+       of zeros, enough to stall the browser drawing it. So the SPAN is capped
+       rather than the content: 800 days is more than twice the longest window
+       the range picker offers, and the response says when it has been cut. */
+    `WITH cal AS (
+       SELECT generate_series(
+         greatest($1::date, $2::date - ${DAILY_MAX_DAYS}), $2::date, interval '1 day')::date AS d
+     ),
      agg AS (
        SELECT local_day AS d,
               count(*) FILTER (WHERE is_booking)::int trips,
