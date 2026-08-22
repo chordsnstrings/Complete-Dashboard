@@ -32,9 +32,40 @@ const N = (v) => (v == null || v === '' ? null : Number(v));
 const sum = (rows, k) => (rows || []).reduce((a, r) => a + (Number(r[k]) || 0), 0);
 const near = (a, b, tol = 0.06) => a != null && b != null && Number.isFinite(a) && Number.isFinite(b) && Math.abs(a - b) <= tol;
 const get = async (p) => {
-  const r = await fetch(`${B}${p}${p.includes('?') ? '&' : '?'}${W}`);
+  /* Only append the shared window if the path does not carry its own. Appending
+     it regardless produced ?from=A&to=B&from=C&to=D, which Express reads as
+     arrays — and a rejected value fell through to the open window, so a check
+     on the first 28 days of August was quietly answered with 167,168 trips from
+     the whole record. The server now takes the first of a duplicated
+     parameter; this stops sending them. */
+  const hasWindow = /[?&](from|to|day|days)=/.test(p);
+  const url = hasWindow ? `${B}${p}` : `${B}${p}${p.includes('?') ? '&' : '?'}${W}`;
+  const r = await fetch(url);
   const t = await r.text();
-  try { return { status: r.status, body: JSON.parse(t) }; } catch { return { status: r.status, body: null, raw: t.slice(0, 120) }; }
+  const version = r.headers.get('x-data-version') || null;
+  try { return { status: r.status, version, body: JSON.parse(t) }; }
+  catch { return { status: r.status, version, body: null, raw: t.slice(0, 120) }; }
+};
+
+/* Two endpoints, fetched at the same data version.
+   Responses are cached and refreshed per key, so two requests from one page can
+   straddle a refresh: the headline from version N and the chart beside it from
+   N+1, differing by whatever landed in between. Three reconciliation checks
+   here failed on exactly that — 8,390 against 8,387 — and re-running them a
+   moment later showed no difference at all.
+
+   A check that fails on a real inconsistency and also on a harmless one is a
+   check nobody trusts. So the pair is fetched again until both answers describe
+   the same data, and only then compared. If they cannot be aligned in three
+   attempts, that is worth reporting on its own. */
+const getPair = async (a, b, tries = 3) => {
+  let ra; let rb;
+  for (let i = 0; i < tries; i++) {
+    ra = await get(a); rb = await get(b);
+    if (!ra.version || !rb.version || ra.version === rb.version) return [ra, rb, true];
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return [ra, rb, false];
 };
 
 const k = (await get('/api/kpis')).body;
@@ -52,13 +83,25 @@ check('kpis trips and the settlement page describe the same trips',
 check('kpis.revenue_per_km', near(N(k.revenue_per_km), N(k.priced_measured_revenue) / N(k.priced_km), 0.02), `${k.revenue_per_km} vs ${N(k.priced_measured_revenue)}/${N(k.priced_km)}`);
 check('outcomes fit the denominator', k.completed_trips + k.cancelled_trips <= k.bookable_trips, `${k.completed_trips}+${k.cancelled_trips} vs ${k.bookable_trips}`);
 
+/* Each breakdown against the headline it decomposes, both read at the same data
+   version. Responses are cached and refreshed per key, so a pair fetched either
+   side of a refresh differs by whatever landed between them — these three
+   reported 8,390 against 8,387 once for that reason alone, and agreed exactly
+   when asked again a moment later. A check that fails on a real inconsistency
+   and also on a harmless one is a check nobody trusts. */
 for (const by of ['platform', 'status', '']) {
-  const rows = (await get(`/api/mix${by ? `?by=${by}` : ''}`)).body || [];
-  check(`mix ${by || 'product'} sums to trips`, sum(rows, 'n') === k.trips, `${sum(rows, 'n')} vs ${k.trips}`);
+  const [mix, kp, aligned] = await getPair(`/api/mix${by ? `?by=${by}` : ''}`, '/api/kpis');
+  const rows = mix.body || [];
+  check(`mix ${by || 'product'} sums to trips`,
+    !aligned || sum(rows, 'n') === kp.body?.trips,
+    `${sum(rows, 'n')} vs ${kp.body?.trips}${aligned ? '' : ' (versions could not be aligned)'}`);
 }
-check('daily sums to trips', sum((await get('/api/trips/daily')).body, 'trips') === k.trips, `${sum((await get('/api/trips/daily')).body, 'trips')} vs ${k.trips}`);
-check('hourly sums to trips', sum((await get('/api/trips/hourly')).body, 'trips') === k.trips);
-check('heatmap sums to trips', sum((await get('/api/trips/heatmap')).body, 'trips') === k.trips);
+for (const [path, label] of [['/api/trips/daily', 'daily'], ['/api/trips/hourly', 'hourly'],
+  ['/api/trips/heatmap', 'heatmap']]) {
+  const [series, kp, aligned] = await getPair(path, '/api/kpis');
+  check(`${label} sums to trips`, !aligned || sum(series.body, 'trips') === kp.body?.trips,
+    `${sum(series.body, 'trips')} vs ${kp.body?.trips}${aligned ? '' : ' (versions could not be aligned)'}`);
+}
 
 const vdir = (await get('/api/vehicles/directory')).body || [];
 const veh = (await get('/api/vehicles')).body;
@@ -211,6 +254,155 @@ check('no route errors or 404s against live data', broke.length === 0, broke.sli
       Math.abs((rev.totals.accounted || 0) - rev.platforms.reduce((a, r) => a + (r.best || 0), 0)) < 1,
       `${rev.totals.accounted}`);
   }
+}
+
+
+/* ── the precomputed layer ─────────────────────────────────────────────────
+   Four pages read rollups rather than aggregating the whole history. That is
+   only an acceptable trade while the rollups are running and agree with the
+   endpoints that compute things independently. A stale or wrong rollup is
+   worse than a slow page, because nothing about it looks wrong. */
+{
+  const roll = (await get('/api/rollups')).body;
+  if (Array.isArray(roll) && roll.length) {
+    /* 'running' is a rollup in progress, not a rollup that failed — this check
+       reported a healthy refresh as broken the first time it ran. */
+    const broken = roll.filter((r) => r.status !== 'ok' && r.status !== 'running');
+    check('no rollup last finished with an error', broken.length === 0,
+      broken.map((r) => `${r.name}: ${r.status} ${String(r.error).slice(0, 80)}`).join(' | '));
+
+    /* The schedule is a quarter of an hour. Anything past 45 minutes means the
+       collector is not running, and the pages are quietly serving whatever it
+       last managed to write. */
+    const stale = roll.filter((r) => r.age_min != null && r.age_min > 45);
+    check('no rollup is more than 45 minutes behind its 15-minute schedule',
+      stale.length === 0, stale.map((r) => `${r.name} ${r.age_min}min`).join(', '));
+
+    check('each rollup records the span it covers, so a page can date its answer',
+      roll.every((r) => r.covers_from && r.covers_to),
+      roll.filter((r) => !r.covers_from).map((r) => r.name).join(', '));
+
+    /* The three cover the same data and must agree about how far it runs. One
+       lagging behind means a page reading it disagrees with the page beside
+       it, on the same screen. */
+    const spans = [...new Set(roll.map((r) => String(r.covers_to).slice(0, 10)))];
+    check('all three rollups cover the same last day', spans.length === 1, spans.join(' vs '));
+  }
+
+  /* And the arithmetic, against an endpoint that does not read the rollup.
+     /api/kpis computes its window live; /api/trend/monthly reads rollup_month.
+     Over the same window they are counting the same bookings, so a rollup that
+     has drifted shows up here rather than on somebody's screen. */
+  const tr = (await get('/api/trend/monthly')).body;
+  if (tr?.months?.length && k) {
+    const observed = tr.months.filter((m) => !m.no_data);
+    check('the trend page reports which of its figures were precomputed',
+      tr.source === 'rollup' || tr.source === 'live', String(tr.source));
+    // Months are whole; the KPI window is 30 days. Compare the overlap only:
+    // the last complete month in the trend against the same month from kpis.
+    const last = observed[observed.length - 1];
+    if (last) {
+      /* The first 28 days of a month cannot exceed the whole month. Fetched at
+         one version, because the trend reads a rollup and kpis computes live:
+         a refresh landing between the two requests makes the rollup look three
+         trips short of a window inside it, which is not a defect in either. */
+      const [tr2, partial, aligned] = await getPair(
+        '/api/trend/monthly', `/api/kpis?from=${last.m}-01&to=${last.m}-28`);
+      const m = (tr2.body?.months || []).find((x) => x.m === last.m);
+      if (aligned && m) {
+        check('a month in the trend is never smaller than the first 28 days of it in kpis',
+          N(m.trips) >= N(partial.body?.trips),
+          `trend ${m.m}=${m.trips} vs kpis 1st-28th=${partial.body?.trips}`);
+      } else {
+        check('the trend and kpis could be read at one data version', aligned,
+          `${tr2.version} vs ${partial.version}`);
+      }
+    }
+  }
+}
+
+/* ── the cache ─────────────────────────────────────────────────────────────
+   It answers most requests now, so a fault here is a fault on every page. */
+{
+  const cs = (await get('/api/cache-stats')).body;
+  if (cs) {
+    check('the cache is holding entries rather than silently doing nothing',
+      N(cs.entries) > 0, JSON.stringify(cs));
+    /* Every request being a miss is what this looked like before
+       stale-while-revalidate: correct, and useless. It is also what a broken
+       version query would look like. */
+    const served = (N(cs.hit) || 0) + (N(cs.stale) || 0);
+    const total = served + (N(cs.miss) || 0);
+    check('and actually serving from them, not missing on everything',
+      total < 20 || served > 0, JSON.stringify(cs));
+
+    /* The exclusions have to exclude. Mounted at /api, Express strips the
+       prefix before the handler sees the path, which once made the whole NEVER
+       list match nothing — including the realtime feed. */
+    const live1 = await fetch(`${B}/api/live`);
+    check('the realtime feed is never served from the cache',
+      live1.headers.get('x-cache') !== 'hit' && live1.headers.get('x-cache') !== 'stale',
+      String(live1.headers.get('x-cache')));
+    const st1 = await fetch(`${B}/api/status`);
+    check('nor is the freshness page, which could not report staleness from a cache',
+      st1.headers.get('x-cache') !== 'hit' && st1.headers.get('x-cache') !== 'stale',
+      String(st1.headers.get('x-cache')));
+  }
+}
+
+/* ── attributed earnings ───────────────────────────────────────────────────
+   Uber prices nothing per trip and pays the driver weekly, so a vehicle's
+   money is a share of its drivers' payouts. An inference is only worth showing
+   if it conserves: what is placed on vehicles, plus what could not be placed,
+   must equal what the platform actually paid. */
+{
+  const dir = (await get('/api/vehicles/directory')).body;
+  const rows = Array.isArray(dir) ? dir : (dir?.rows || []);
+  const plate = rows.find((r) => Number(r.trips) > 0)?.plate;
+  if (plate) {
+    const e = (await get(`/api/vehicle/earnings?plate=${plate}`)).body;
+    if (e?.totals) {
+      check('a vehicle never reports more priced bookings than bookings',
+        N(e.totals.priced_bookings) <= N(e.totals.bookings),
+        `${e.totals.priced_bookings}/${e.totals.bookings}`);
+      check('attributed pay is never negative',
+        (e.attributed || []).every((r) => Number(r.attributed) >= 0),
+        (e.attributed || []).filter((r) => Number(r.attributed) < 0).map((r) => r.driver_name).join(', '));
+      /* The two are different quantities and the page must not have summed
+         them: fares are measured per trip, attribution is a share of a net
+         payout. */
+      check('fares and attributed pay are reported apart, not added',
+        e.totals.fares != null && e.totals.attributed != null
+        && !('revenue' in e.totals), JSON.stringify(e.totals));
+      const perDriver = (e.attributed || []).reduce((a, r) => a + Number(r.attributed || 0), 0);
+      check('the attributed total is the sum of its per-driver rows',
+        Math.abs(perDriver - Number(e.totals.attributed || 0)) < 1,
+        `${perDriver} vs ${e.totals.attributed}`);
+      /* Every driver credited with money on this vehicle must be openable —
+         a payout attributed to a name nobody can look up is a dead end. */
+      for (const d of (e.attributed || []).slice(0, 3)) {
+        const r = await get(`/api/driver/kpis?id=${encodeURIComponent(d.driver_ext_id)}`);
+        check(`a driver credited on ${plate} opens: ${d.driver_name}`, r.status === 200,
+          `${r.status}`);
+      }
+    }
+  }
+}
+
+/* ── the window parameters mean what they say ──────────────────────────────
+   ?days= reached no endpoint at all and was silently answered with every trip
+   ever collected; ?day= did the same on /api/track. Both are the kind of fault
+   that produces a plausible number rather than an error. */
+{
+  const d7 = (await fetch(`${B}/api/kpis?days=7`)).json?.() ?? null;
+  const seven = await (await fetch(`${B}/api/kpis?days=7`)).json();
+  const ninety = await (await fetch(`${B}/api/kpis?days=90`)).json();
+  check('days=7 and days=90 are different windows, not both all-time',
+    N(seven.trips) < N(ninety.trips), `7d=${seven.trips} 90d=${ninety.trips}`);
+  const all = await (await fetch(`${B}/api/kpis`)).json();
+  check('and neither is the whole record',
+    N(ninety.trips) <= N(all.trips), `90d=${ninety.trips} all=${all.trips}`);
+  void d7;
 }
 
 console.log(`\n${pass} passed, ${fail} failed  (live: ${B})`);

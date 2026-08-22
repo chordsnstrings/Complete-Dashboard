@@ -23,8 +23,16 @@
    regex and was bound straight into SQL, where Postgres rejected the statement
    and the page showed "could not load this view". The round trip through Date
    is what separates a date-shaped string from a date. */
+/* A duplicated query parameter arrives as an array — /api/kpis?from=A&from=B
+   gives ['A','B'] — and a rejected value falls through to the open window,
+   which is every trip ever collected under a thirty-day label. That is the same
+   silent-wrong-window failure this file exists to prevent, arriving by a
+   different door. The first value wins, which is what a reader typing a URL
+   twice would expect and what every proxy in the chain assumes. */
+const first = (v) => (Array.isArray(v) ? v[0] : v);
+
 const isDay = (v) => {
-  const s = String(v || '');
+  const s = String(first(v) || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
   const d = new Date(`${s}T00:00:00Z`);
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
@@ -44,8 +52,8 @@ export const dubaiDay = (d) => new Intl.DateTimeFormat('en-CA', {
 export function daysWindow(v, now = Date.now()) {
   // Digits only. Number() would read "1e3" as 1000 and " 30\n" as 30; a query
   // parameter that does not look like a count should not be guessed at.
-  if (!/^\d+$/.test(String(v ?? ''))) return null;
-  const n = Number(v);
+  if (!/^\d+$/.test(String(first(v) ?? ''))) return null;
+  const n = Number(first(v));
   if (!Number.isInteger(n) || n < 1 || n > 3660) return null;
   return [dubaiDay(new Date(now - (n - 1) * 864e5)), dubaiDay(new Date(now))];
 }
@@ -54,8 +62,8 @@ export function daysWindow(v, now = Date.now()) {
    against local_day (a date) or apply their own timezone conversion. */
 export function winDays(req, now = Date.now()) {
   if (isDay(req.query?.from) || isDay(req.query?.to)) {
-    let from = isDay(req.query.from) ? req.query.from : '2000-01-01';
-    let to = isDay(req.query.to) ? req.query.to : '2100-01-01';
+    let from = isDay(req.query.from) ? first(req.query.from) : '2000-01-01';
+    let to = isDay(req.query.to) ? first(req.query.to) : '2100-01-01';
     if (from > to) [from, to] = [to, from];   // an inverted range is a typo, not an empty set
     return [from, to];
   }
@@ -64,7 +72,7 @@ export function winDays(req, now = Date.now()) {
      every fix it has ever held to a caller who asked for one day: the same
      trap `days` had, one letter apart, on the endpoint next to the one where
      the parameter works. Understood here, it works everywhere. */
-  if (isDay(req.query?.day)) return [req.query.day, req.query.day];
+  if (isDay(req.query?.day)) return [first(req.query.day), first(req.query.day)];
   return daysWindow(req.query?.days, now) || ['2000-01-01', '2100-01-01'];
 }
 

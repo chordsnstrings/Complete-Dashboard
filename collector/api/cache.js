@@ -86,6 +86,15 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port } = {}
     const key = req.originalUrl;
     const v = await currentVersion();
     const hit = store.get(key);
+    /* The version this answer describes, on every response — cached, stale or
+       live. Two requests from one page can straddle a refresh: the headline
+       comes from version N and the chart beside it from N+1, and their totals
+       then differ by whatever landed in between. That is small and it is real,
+       and a reader comparing two numbers deserves to be able to tell. It is
+       also what turns a reconciliation check from flaky into precise: compare
+       like with like, or fetch again. */
+    res.set('x-data-version', v);
+
     if (hit && hit.version === v) {
       stats.hit++;
       res.set('x-cache', 'hit');

@@ -67,6 +67,25 @@ check('an inverted range is read as a typo, not as an empty set',
 check('one bound alone still leaves the other open',
   JSON.stringify(winDays(req({ from: '2026-01-01' }), NOW)) === '["2026-01-01","2100-01-01"]');
 
+console.log('\nwindow: a duplicated parameter is not a missing one');
+
+/* Express turns ?from=A&from=B into ['A','B'], and a value this helper rejects
+   falls through to the open window — every trip ever collected, under a
+   thirty-day label. Found by an audit check whose own URL had appended the
+   window twice: it reported 167,168 trips for the first 28 days of August and
+   looked, for a moment, like a serious data bug. */
+check('a duplicated from/to takes the first value rather than falling back to all time',
+  JSON.stringify(winDays(req({ from: ['2026-08-01', '2026-07-23'], to: ['2026-08-28', '2026-08-22'] }), NOW))
+    === '["2026-08-01","2026-08-28"]');
+check('a duplicated days does too',
+  JSON.stringify(winDays(req({ days: ['7', '90'] }), NOW))
+    === JSON.stringify(winDays(req({ days: '7' }), NOW)));
+check('a duplicated day does too',
+  JSON.stringify(winDays(req({ day: ['2026-08-14', '2026-01-01'] }), NOW))
+    === '["2026-08-14","2026-08-14"]');
+check('and a duplicated but invalid value is still refused',
+  JSON.stringify(winDays(req({ from: ['nope', '2026-08-01'] }), NOW)) === '["2000-01-01","2100-01-01"]');
+
 console.log('\nwindow: a single day is a day');
 
 /* Several routes already take `day` by that name — /api/day, /api/map/journey.

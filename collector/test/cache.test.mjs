@@ -37,7 +37,8 @@ const port = server.address().port;
 cache.setPort(port);
 const get = async (p, opts) => {
   const r = await fetch(`http://127.0.0.1:${port}${p}`, opts);
-  return { status: r.status, cache: r.headers.get('x-cache'), body: await r.json() };
+  return { status: r.status, cache: r.headers.get('x-cache'),
+    version: r.headers.get('x-data-version'), body: await r.json() };
 };
 
 console.log('\ncache: it caches');
@@ -133,6 +134,24 @@ check('eight simultaneous readers cause one refresh, not eight',
    them — a cache that invented an answer would be a different kind of bug. */
 const cold = await get('/api/thing?never-seen=1');
 check('a page with no entry is served live, not from nothing', cold.cache === 'miss');
+
+console.log('\ncache: every answer says which data it describes');
+
+/* Two requests from one page can straddle a refresh — the headline from
+   version N, the chart beside it from N+1 — and their totals then differ by
+   whatever landed in between. Small, real, and invisible without this. It is
+   also what turns a cross-page reconciliation check from flaky into precise:
+   compare like with like, or fetch again. */
+{
+  const a1 = await get('/api/thing');
+  check('a cached response carries the data version it describes',
+    !!a1.version && a1.version !== 'boot', String(a1.version));
+  const cold2 = await get('/api/thing?fresh-key=1');
+  check('and so does a live one, so the two can be compared at all',
+    !!cold2.version, String(cold2.version));
+  check('two answers from the same version report the same version',
+    (await get('/api/thing')).version === (await get('/api/thing?fresh-key=1')).version);
+}
 
 console.log('\ncache: it is bounded and observable');
 
