@@ -203,7 +203,10 @@ check('every route the source declares is actually registered on the app',
 {
   const mockSrc = readFileSync('mockapi.mjs', 'utf8');
   const mockRoutes = new Set([...mockSrc.matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]));
-  const uiSrc = readdirSync('api/public').filter((f) => f.endsWith('.js'))
+  /* swr.js names the endpoints the client must NOT serve from its cache. A
+     reference in order to avoid something is not a use of it, and counting them
+     demanded mock fixtures for routes the browser never fetches. */
+  const uiSrc = readdirSync('api/public').filter((f) => f.endsWith('.js') && f !== 'swr.js')
     .map((f) => readFileSync(`api/public/${f}`, 'utf8')).join('\n');
   const usedByUi = all.filter((r) => new RegExp(
     r.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + `(?=['"\`?&]|\\$\\{|$)`, 'm').test(uiSrc));

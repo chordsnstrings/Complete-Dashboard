@@ -1976,10 +1976,40 @@ app.use('/api', (req, res) => res.status(404).json({
   path: req.originalUrl.split('?')[0],
 }));
 
-// Static dashboard LAST: app.get('*') would otherwise shadow any API route
-// registered after it (this silently broke /api/insights once already).
-app.use(express.static(join(__dir, 'public'), { maxAge: '5m' }));
-app.get('*', (_, res) => res.sendFile(join(__dir, 'public', 'index.html')));
+/* Static dashboard LAST: app.get('*') would otherwise shadow any API route
+   registered after it (this silently broke /api/insights once already).
+
+   Cached the way the assets actually behave, which is not one rule:
+
+     - /vendor is a pinned copy of Leaflet. It changes when somebody deliberately
+       vendors a new version and never otherwise, so it is immutable for a year.
+       It was being re-fetched every five minutes like everything else, and it
+       is the largest single asset the dashboard loads.
+
+     - app.js and app.css change on every deploy, so they cannot be immutable
+       without a content hash and a build step. stale-while-revalidate gets most
+       of the benefit without either: the browser paints from its copy
+       immediately and checks for a new one behind, so a returning reader waits
+       for no round trip and still picks up a deploy within one page load.
+
+     - index.html is the thing that names the others. It revalidates every time,
+       because serving a stale document is how a deploy fails to arrive at all. */
+const YEAR = 31536000;
+app.use('/vendor', express.static(join(__dir, 'public', 'vendor'), {
+  maxAge: YEAR * 1000, immutable: true,
+}));
+app.use(express.static(join(__dir, 'public'), {
+  etag: true,
+  setHeaders(res, path) {
+    res.setHeader('Cache-Control', path.endsWith('index.html')
+      ? 'public, max-age=0, must-revalidate'
+      : 'public, max-age=300, stale-while-revalidate=604800');
+  },
+}));
+app.get('*', (_, res) => {
+  res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+  res.sendFile(join(__dir, 'public', 'index.html'));
+});
 
 const port = process.env.PORT || 8080;
 /* Fail closed. This used to `.catch(log).finally(listen)`, which served traffic

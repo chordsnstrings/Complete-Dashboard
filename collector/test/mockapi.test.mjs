@@ -66,7 +66,11 @@ const ARGS = {
 
 const mockSrc = readFileSync('mockapi.mjs', 'utf8');
 const mockRoutes = new Set([...mockSrc.matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1]));
-const uiSrc = readdirSync('api/public').filter((f) => f.endsWith('.js'))
+/* swr.js excluded for the same reason as in endpoint_coverage: it names the
+   endpoints the client must NOT serve from cache, and a reference in order to
+   avoid something is not a use of it. Counting them asked the mock for
+   fixtures the browser never fetches. */
+const uiSrc = readdirSync('api/public').filter((f) => f.endsWith('.js') && f !== 'swr.js')
   .map((f) => readFileSync(`api/public/${f}`, 'utf8')).join('\n');
 const all = declaredRoutes();
 const usedByUi = all.filter((r) => new RegExp(

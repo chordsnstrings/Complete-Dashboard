@@ -2190,6 +2190,32 @@ async function render() {
   }
   freshness();
 }
+/* A held answer turned out to be stale — redraw, without stealing the reader's
+   place.
+   ─────────────────────────────────────────────────────────────────────────
+   api() paints from what we last knew and revalidates behind it, firing this
+   only when the fresh answer actually differs. Three things make the redraw
+   unobtrusive:
+
+     - it is debounced. A page issues up to fifteen requests and several may
+       come back changed within the same moment; redrawing once is enough.
+     - it is dropped if the reader has navigated since. The event belongs to the
+       page that asked, not to whatever is on screen when it arrives.
+     - the scroll position is restored. Redrawing a long table and returning the
+       reader to the top would be a worse cost than the wait being saved, which
+       is the whole reason nothing redraws when the data has not moved. */
+let refreshTimer = null;
+window.addEventListener('data:refreshed', () => {
+  const at = `${state.view}/${state.param}/${state.sub}/${state.days}/${state.platform}/${state.fleet}`;
+  clearTimeout(refreshTimer);
+  refreshTimer = setTimeout(() => {
+    const now = `${state.view}/${state.param}/${state.sub}/${state.days}/${state.platform}/${state.fleet}`;
+    if (now !== at) return;                 // they have moved on; this is not their page any more
+    const y = window.scrollY;
+    render().then(() => window.scrollTo({ top: y }));
+  }, 250);
+});
+
 async function freshness() {
   try {
     const s = await api('/api/status');

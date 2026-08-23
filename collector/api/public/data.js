@@ -4,6 +4,7 @@
    `#<view>[/<param>[/<sub>]]` — so `#driver/7e96cb47.../territory` is a real,
    linkable address rather than a modal that vanishes on reload. */
 import { dubaiDay } from './tz.js';
+import { swr } from './swr.js';
 
 /* Storage access is guarded, not assumed. A browser with site data blocked
    THROWS on the getter rather than returning null, and this module is also
@@ -23,10 +24,47 @@ export const state = {
   admin: store.get('adminToken'),
 };
 
+/* Fetch, but answer from what we last knew if we have it.
+   ─────────────────────────────────────────────────────────────────────────
+   A page issues between five and fifteen of these and shows skeletons until
+   they land. On a phone the round trips are most of the wait, and the numbers
+   behind them move every half hour at most — so the reader is waiting for the
+   network to re-tell them something they already have.
+
+   With a stored answer the page paints real figures immediately and the real
+   request runs behind it. When it comes back different, `data:refreshed` fires
+   and the view redraws; when it comes back the same, nothing happens at all,
+   which is the common case and the reason this does not flicker.
+
+   See api/public/swr.js for what is never cached and why. */
 export const api = async (path, opts) => {
-  const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 160)}`);
-  return r.json();
+  const method = (opts?.method || 'GET').toUpperCase();
+  const held = method === 'GET' && !opts ? swr.get(path) : null;
+
+  const live = (async () => {
+    const r = await fetch(path, opts);
+    if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 160)}`);
+    const body = await r.json();
+    if (method === 'GET' && !opts) {
+      const { changed } = swr.put(path, body);
+      /* Only when it moved. Redrawing a page that is already correct costs the
+         reader their scroll position and their place in a table, which is
+         worse than the wait being saved. */
+      if (changed && held) {
+        window.dispatchEvent(new CustomEvent('data:refreshed', { detail: { path } }));
+      }
+    }
+    return body;
+  })();
+
+  if (held) {
+    /* The request is still running; it must not become an unhandled rejection
+       just because nobody is awaiting it. A failed refresh leaves the reader
+       with the figures they already had, which is the right outcome. */
+    live.catch(() => {});
+    return held.body;
+  }
+  return live;
 };
 
 /* The window every view shares, expressed as DUBAI dates so the server can

@@ -19,8 +19,13 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
 const server = readdirSync('api')
   .filter((f) => f.endsWith('.js'))
   .map((f) => readFileSync(`api/${f}`, 'utf8')).join('\n');
+/* swr.js is excluded because it lists the endpoints the client must NOT serve
+   from its cache — a realtime feed, a freshness report. Those are references to
+   endpoints in order to avoid them, which is the opposite of using one, and
+   counting them made /api/health and /api/ready look reachable from the UI
+   while also being exempted. */
 const ui = readdirSync('api/public')
-  .filter((f) => f.endsWith('.js') && f !== 'charts.js')
+  .filter((f) => f.endsWith('.js') && f !== 'charts.js' && f !== 'swr.js')
   .map((f) => readFileSync(`api/public/${f}`, 'utf8')).join('\n');
 
 const routes = [...new Set([...server.matchAll(/app\.(?:get|post)\((['"])(\/api\/[^'"]*)\1/g)].map((m) => m[2]))].sort();
