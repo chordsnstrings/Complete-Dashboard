@@ -500,5 +500,30 @@ check('and a thrown bolt run still reports what had already failed',
     appending.length === 0, appending.join(', '));
 }
 
+/* ── one bad moment must not cost a year of history ────────────────────────
+   The earner collector asks for drivers ten at a time by name, and falls back
+   to a single page if the server rejects that mode. listMode was declared
+   outside the window loop, so the first failure of any kind disabled the mode
+   for every remaining window — and windows run oldest first. One timeout in the
+   first week of the record degraded all fifty-three weeks to a page of ten
+   drivers, and the run still reported every window successful, because a page
+   of ten is not an error.
+
+   Uber earnings are in fact absent for every month before about March 2026,
+   with 20,016 bookings in September 2025 and no payout row against any of them,
+   while the provider still serves that window when asked. This is the shape
+   that produces exactly that. */
+{
+  const uberSrc = src('uber.js');
+  check('the driver-list mode is abandoned only when the server rejects the MODE',
+    /const modeRejected = /.test(uberSrc) && /if \(modeRejected\) listMode = false;/.test(uberSrc));
+  check('and any other failure keeps the mode for the next window',
+    /keeping driver-list mode/.test(uberSrc));
+  /* The failure is still recorded either way, or "we retried and it worked" and
+     "we retried and it failed every time" would look the same. */
+  check('either way the window records the error rather than swallowing it',
+    /err = r\.err;/.test(uberSrc));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

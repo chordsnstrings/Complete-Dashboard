@@ -268,11 +268,28 @@ async function pullEarnerBreakdowns(from, to, onStep) {
           driverList: drivers.slice(i, i + EARNER_BATCH), pageOptions: null,
         });
         if (r.err) {
-          /* The mode is wrong, not this batch — stop trying it on every
-             remaining window rather than failing nine times a week for a year. */
-          log.warn(SRC, 'earner breakdown driver-list mode rejected, falling back to one page',
+          /* A rejected MODE and a bad moment are different failures, and
+             treating them the same cost a year of history.
+
+             listMode is declared outside the window loop, so setting it false
+             here disabled driver-list mode for every remaining window — and the
+             windows run oldest first. One timeout in the first week of the
+             record therefore degraded all fifty-three weeks to a single page of
+             ten drivers, and the run still reported every window successful,
+             because a page of ten is not an error.
+
+             The mode is only abandoned when the server says the mode is wrong.
+             Anything else is retried on the next window, where it will either
+             recur — and be recorded — or not. */
+          const modeRejected = /driver.?list|driverListOrPageOptions|unknown enum|invalid.*mode/i
+            .test(r.err);
+          log.warn(SRC, modeRejected
+            ? 'earner breakdown driver-list mode rejected, falling back to one page'
+            : `earner breakdown ${iso(s)}..${iso(e)} batch failed, keeping driver-list mode`,
             { err: r.err });
-          err = r.err; listMode = false; break;
+          err = r.err;
+          if (modeRejected) listMode = false;
+          break;
         }
         seen += r.rows.length;
         got += await write(r.rows, s, e);
