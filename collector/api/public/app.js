@@ -1175,7 +1175,7 @@ V.safety = async (root) => {
 V.unauthorized = async (root) => {
   const kh = el('div', 'kpis'); root.append(kh);
   const g = el('div', 'grid g23'); root.append(g);
-  const trend = panel('Occupancy per day', 'Unauthorized vs booked occupancy segments'); g.append(trend.panel);
+  const trend = panel('Occupancy per day', 'Unexplained intervals against every occupancy interval seen'); g.append(trend.panel);
   const verdicts = panel('How segments resolve', 'Every seat-occupancy interval, classified'); g.append(verdicts.panel);
   const veh = panel('Vehicles with unexplained trips', 'Ranked by count — click to inspect'); root.append(veh.panel);
   const list = panel('Flagged segments', 'Click a row for the full evidence trail'); root.append(list.panel);
@@ -1206,9 +1206,22 @@ V.unauthorized = async (root) => {
   /* Every click here used to open a modal. A flag against a named driver is
      the most serious claim this product makes, and it needs an address you can
      paste into a message — so each of these now navigates to a page. */
-  barChart(trend.body, daily, { x: 'd', y: 'unauthorized', color: '--s8', label: 'unexplained',
+  /* The unexplained count against every occupancy interval seen that day.
+     This plotted `unauthorized` alone under a title promising "unauthorized vs
+     booked", and unauthorized is zero on every day — so a page holding 136
+     segments drew an empty chart on an axis of 0 to 1, and read as "we looked
+     and there is nothing". The truth is that 68 of those 136 could not be
+     judged at all, which is a different statement entirely.
+
+     gapBars rather than barChart, because a day with no seat-occupancy data and
+     a day where the sensor saw nobody are different facts and only one of them
+     is a zero. */
+  gapBars(trend.body, daily, { x: 'd', y: 'unauthorized', secondary: 'segments',
+    color: '--s8', label: 'unexplained', secondaryLabel: 'occupancy intervals seen',
+    gapLabel: 'no seat-occupancy data',
     onClick: (d) => { location.hash = href('segments', 'day', dayKey(d.d)); } });
-  trend.body.append(el('p', 'cap', 'Click a bar for that day’s segments; the day’s full picture — every source, every platform — is on its own page.'));
+  trend.body.append(el('p', 'cap', 'The pale bar is every occupancy interval seen that day; the solid one is the '
+    + 'unexplained share. Click for that day’s segments — the day’s full picture, every source and platform, is on its own page.'));
   donut(verdicts.body, (sum.byVerdict || []).map((r) => ({ label: r.verdict, n: r.n })),
     { onClick: (d) => { location.hash = href('segments', 'verdict', d.label); } });
 

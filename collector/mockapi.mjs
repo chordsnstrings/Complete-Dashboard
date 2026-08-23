@@ -1883,15 +1883,24 @@ app.get('/api/unauthorized/by-vehicle', (_, r) => r.json({
   })) }));
 
 app.get('/api/unauthorized/daily', (_, r) => r.json(
-  Array.from({ length: 21 }, (_, i) => ({
-    d: `2026-08-${String(i + 1).padStart(2, '0')}`,
-    unauthorized: i % 4 === 0 ? 3 : i % 3 === 0 ? 1 : 0,
-    authorized: 8 + (i % 5), total: 12 + (i % 6),
-    // "Needs a human" is the actionable count: unauthorised plus unverifiable,
-    // which is not the same as unauthorised alone.
-    needs_a_human: (i % 4 === 0 ? 3 : i % 3 === 0 ? 1 : 0) + (i % 5 === 0 ? 2 : 0),
-    segments: 12 + (i % 6),
-  }))));
+  /* Twenty-one days, three of which have no seat-occupancy data at all — the
+     shape production has, where the reconciler had produced segments for three
+     days of a thirty-day window. Those days must draw as a hatched void and not
+     as zero, and this fixture is the only place the browser smoke test meets
+     that case. */
+  Array.from({ length: 21 }, (_, i) => {
+    const uncollected = i === 5 || i === 6 || i === 14;
+    const segments = uncollected ? 0 : 12 + (i % 6);
+    const unauthorized = uncollected ? 0 : (i % 4 === 0 ? 3 : i % 3 === 0 ? 1 : 0);
+    const authorized = uncollected ? 0 : Math.min(segments, 8 + (i % 5));
+    const needs_a_human = uncollected ? 0 : (i % 5 === 0 ? 2 : 1);
+    /* `partial` is the largest bucket on the real fleet — 68 of 136 — and was
+       counted in none of the named ones, so the row did not sum to itself. */
+    const partial = Math.max(0, segments - unauthorized - authorized - needs_a_human);
+    return { d: `2026-08-${String(i + 1).padStart(2, '0')}`,
+      unauthorized, authorized, needs_a_human, partial, stationary: 0,
+      segments, uncollected };
+  })));
 
 app.get('/api/sensor-health', (_, r) => r.json(plates.map((p, i) => ({
   plate: p, occupied_fixes: i === 2 ? 0 : 400 - i * 40,

@@ -1147,12 +1147,49 @@ app.get('/api/unauthorized/daily', wrap(async (req, res) => {
        by UTC day put segments between midnight and 04:00 on the previous day,
        while the drill that opened from a bar filtered by Dubai day — so a bar
        could open onto an empty list. */
-    `SELECT (started_at AT TIME ZONE 'Asia/Dubai')::date AS d,
-            count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
-            count(*) FILTER (WHERE verdict='authorized')::int authorized,
-            count(*) FILTER (WHERE verdict IN ('unverifiable','pending'))::int needs_a_human,
-            count(*)::int segments
-     FROM occupancy_segment WHERE ${DAYWIN('started_at')} GROUP BY 1 ORDER BY 1`, [from, to]));
+    /* Every verdict, and every day.
+       ─────────────────────────────────────────────────────────────────────
+       Two things were wrong here and they compounded into a page that read as
+       "we looked and there is nothing".
+
+       The named buckets did not sum to the row's own total. `partial` — a
+       segment whose telemetry has a hole, so it cannot be judged — was counted
+       in none of them, and it is the LARGEST bucket: 68 of 136 over thirty
+       days. A row saying 65 segments, 10 authorized, 9 needing a human left 46
+       unaccounted for and unmentioned.
+
+       And only days that HAVE a segment came back. Over a thirty-day window
+       this returned three rows, because the reconciler has only produced
+       segments for three days — which the chart then drew as the fleet's whole
+       month. A day with no seat-occupancy data and a day where the sensor saw
+       nobody are different facts, and the calendar is filled so the first can
+       be drawn as a void rather than as zero. */
+    `WITH cal AS (
+       SELECT generate_series(
+         greatest($1::date, $2::date - 400), $2::date, interval '1 day')::date AS d
+     ),
+     agg AS (
+       SELECT (started_at AT TIME ZONE 'Asia/Dubai')::date AS d,
+              count(*) FILTER (WHERE verdict='unauthorized')::int unauthorized,
+              count(*) FILTER (WHERE verdict='authorized')::int authorized,
+              count(*) FILTER (WHERE verdict IN ('unverifiable','pending'))::int needs_a_human,
+              count(*) FILTER (WHERE verdict='partial')::int partial,
+              count(*) FILTER (WHERE verdict='stationary')::int stationary,
+              count(*)::int segments
+       FROM occupancy_segment WHERE ${DAYWIN('started_at')} GROUP BY 1
+     )
+     SELECT to_char(cal.d, 'YYYY-MM-DD') AS d,
+            coalesce(agg.unauthorized, 0) unauthorized,
+            coalesce(agg.authorized, 0) authorized,
+            coalesce(agg.needs_a_human, 0) needs_a_human,
+            coalesce(agg.partial, 0) partial,
+            coalesce(agg.stationary, 0) stationary,
+            coalesce(agg.segments, 0) segments,
+            -- No segment at all is not "nobody sat in a car": it is a day the
+            -- reconciler had nothing to judge, and must not be drawn as zero.
+            (agg.d IS NULL) AS uncollected
+     FROM cal LEFT JOIN agg ON agg.d = cal.d
+     ORDER BY cal.d`, [from, to]));
 }));
 
 // sensor health per vehicle — dead/stuck pads make leakage numbers unreliable

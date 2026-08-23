@@ -93,7 +93,14 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
    void across the full height of the plot — an absence, not a low value — and
    the caption states how many there were. */
 export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'uncollected',
-  onClick, valueFmt = (v) => fmt(v), secondary } = {}) {
+  onClick, valueFmt = (v) => fmt(v), secondary,
+  // What the background bar IS. It was hardcoded as "telematics journeys" in the
+  // tooltip, which is true on the one page that first used it and a lie on any
+  // other — the unauthorized page draws total occupancy intervals there.
+  secondaryLabel = 'telematics journeys',
+  // What a hatched day MEANS. "nothing was collected" is right for a trip
+  // series and wrong for a seat sensor, where the honest statement is narrower.
+  gapLabel = 'nothing was collected' } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
@@ -122,7 +129,7 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     const bx = pl + step * i;
     if (d[gapKey]) {
       const band = mk('rect', { x: bx, y: pt, width: Math.max(step, 1), height: ih, fill: 'url(#gapHatch)' });
-      interactive(band, `${esc(d[x])} — <b>nothing was collected</b>${
+      interactive(band, `${esc(d[x])} — <b>${esc(gapLabel)}</b>${
         d.silent_sources ? `<br>silent: ${esc([].concat(d.silent_sources).join(', '))}` : ''}`);
       svg.append(band);
       return;
@@ -136,7 +143,7 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     const r = mk('rect', { x: cx, y: by, width: bw, height: Math.max(h, 1), rx: 3,
       fill: `var(${color})`, 'data-rise': '' });
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}${
-      secondary && +d[secondary] ? `<br>${fmt(d[secondary])} telematics journeys` : ''}`,
+      secondary && +d[secondary] ? `<br>${fmt(d[secondary])} ${esc(secondaryLabel)}` : ''}`,
     onClick && (() => onClick(d)));
     svg.append(r);
     const every = Math.max(1, Math.ceil(data.length / 12));
@@ -151,7 +158,7 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   if (gaps || partial) {
     const c = document.createElement('p'); c.className = 'cap';
     c.innerHTML = [
-      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} days collected nothing at all</b> and are drawn as a hatched band, not as zero.` : '',
+      gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} days: ${esc(gapLabel)}</b> — drawn as a hatched band, not as zero.` : '',
       partial ? `${fmt(partial)} more had at least one source silent, so their bars are understated.` : '',
     ].filter(Boolean).join(' ');
     host.append(c);
