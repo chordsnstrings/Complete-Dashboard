@@ -1197,6 +1197,21 @@ V.unauthorized = async (root) => {
     ['Inconclusive', fmt(t.partial || 0), 'telemetry gaps — cannot judge'],
   ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${d}</div></div>`).join('');
 
+  /* What the figures above actually cover.
+     Seat occupancy comes from a five-minute realtime poll with no history
+     behind it, so on this fleet the evidence spans about three days. The page
+     was reporting "0 unexplained trips" over a thirty-day window on that basis
+     — right about three days, presented as an answer about thirty. */
+  const cov = sum.coverage;
+  if (cov && !cov.complete) {
+    const w = el('div', 'panel');
+    w.innerHTML = `<div class="note warn">Seat-occupancy evidence covers `
+      + `<b>${fmt(cov.days_with_data)} of the ${fmt(cov.days_in_window)} days</b> in this window. `
+      + `The other ${fmt(cov.days_in_window - cov.days_with_data)} have no sensor data at all, so nothing `
+      + `on them could be judged either way — the figures below describe the days that do, not the range you picked.</div>`;
+    root.insertBefore(w, g);
+  }
+
   if (t.low_confidence) {
     const w = el('div', 'panel');
     w.innerHTML = `<div class="note err">⚠ ${fmt(t.low_confidence)} flagged segment(s) were assessed while a revenue channel was unavailable — a booking may exist that we could not read. Fix the source in Settings before acting on these.</div>`;

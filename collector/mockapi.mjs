@@ -1857,6 +1857,9 @@ const UN_VERDICTS = [
 app.get('/api/unauthorized/summary', (_, r) => {
   const by = Object.fromEntries(UN_VERDICTS.map((v) => [v.verdict, v.n]));
   r.json({
+  // Partial on purpose: the real fleet has three days of sensor data in a
+  // thirty-day window, and the banner that says so must be exercised.
+  coverage: { days_with_data: 3, days_in_window: 30, complete: false },
     byVerdict: UN_VERDICTS,
     totals: {
       unauthorized: by.unauthorized, authorized: by.authorized,

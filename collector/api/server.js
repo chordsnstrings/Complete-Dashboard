@@ -1041,11 +1041,33 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
   const [extra] = await q(
     `SELECT round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,0) unauth_km,
             count(*) FILTER (WHERE verdict='unauthorized' AND low_confidence)::int low_confidence,
-            count(*) FILTER (WHERE low_confidence)::int needs_a_human
+            count(*) FILTER (WHERE low_confidence)::int needs_a_human,
+            /* How much of the window this answer actually covers.
+               ─────────────────────────────────────────────────────────────
+               Seat occupancy comes from CABMAN, which is a five-minute
+               realtime poll: it stores what it sees from the moment it starts
+               and there is no history behind it. On this fleet that is about
+               three days of evidence, and the page was reporting "0 unexplained
+               trips" over a thirty-day window on the strength of it.
+
+               The number was never wrong — it was right about three days and
+               presented as an answer about thirty. Those are different claims
+               and only one of them is true. */
+            count(DISTINCT (started_at AT TIME ZONE 'Asia/Dubai')::date)::int days_with_data
      FROM occupancy_segment WHERE ${DAYWIN('started_at')}`, [from, to]);
+  const daysInWindow = Math.max(1, Math.round(
+    (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1);
   const byVerdict = Object.fromEntries(rows.map((r) => [r.verdict, r.n]));
   res.json({
     byVerdict: rows,
+    /* Stated beside the verdicts rather than left to be inferred from a chart:
+       a reader who does not know the evidence covers three days will read every
+       figure here as a month's worth. */
+    coverage: {
+      days_with_data: extra?.days_with_data || 0,
+      days_in_window: daysInWindow,
+      complete: (extra?.days_with_data || 0) >= daysInWindow,
+    },
     totals: {
       // Every verdict the schema defines, whether or not it occurred, so a
       // category dropping to zero is visible rather than absent.
