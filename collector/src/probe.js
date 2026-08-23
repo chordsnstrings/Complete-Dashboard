@@ -209,8 +209,22 @@ export function surfaces({ from, to }) {
         'does the provider still serve this window', async () => {
           const r = await probeEarnerWindow(new Date(w.from), new Date(w.to));
           if (r.err) throw new Error(r.err);
-          return { data: { window: [w.from, w.to], ...r },
-            status: 200, count: r.rows_with_money };
+          /* An ARRAY of one entry per row the provider returned, because
+             record_count is the length of the first array found in the payload
+             — and returning an object whose first array was the two-element
+             window made every result read "2 records". Both windows reported
+             the same number, I read it as two rows of earnings, and told
+             somebody the missing months were recoverable on that basis. They
+             were the two ends of a date range.
+
+             One field, and it carries no identifier: the whole question is
+             whether ANY row came back and whether any of it was money. */
+          return {
+            data: Array.from({ length: r.rows }, (_, i) => ({
+              money: i < r.rows_with_money ? 'yes' : 'no',
+            })),
+            status: 200,
+          };
         });
     }
 
