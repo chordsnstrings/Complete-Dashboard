@@ -1040,6 +1040,82 @@ app.get('/api/revenue', (_, r) => {
   });
 });
 
+/* Reconciliation: bank payout against on-trip net + tips + salik − cash, per
+   month or per day of one month. The shapes that matter: a month with work and
+   NO statement (expected null, never 0 — the surface does not reach that far
+   back), and deltas landing in each tone band so the smoke run exercises the
+   green, warn and critical pills rather than only one of them. */
+app.get('/api/reconcile', (req, r) => {
+  const note = 'Bank payout ≈ on-trip net + tips + salik − cash collected: what the '
+    + 'platform wires is what the fleet earned on-trip, plus tips and toll reimbursements, '
+    + 'minus the cash its drivers already hold — proven to 0.7% on July 2026.';
+  const round2 = (v) => Math.round(v * 100) / 100;
+  const finish = (row) => {
+    const expected = row.ontrip_net == null ? null
+      : round2(row.ontrip_net + (row.tips || 0) + (row.salik || 0) - (row.cash_collected || 0));
+    const delta = expected == null || row.bank_payout == null ? null
+      : round2(row.bank_payout - expected);
+    return { platform: req.query.platform || '*', ...row, expected_payout: expected, delta,
+      delta_pct: delta == null || !expected ? null : Math.round((delta / Math.abs(expected)) * 1000) / 10 };
+  };
+  const totalsOf = (rows) => {
+    const sum = (k) => {
+      const xs = rows.map((x) => x[k]).filter((v) => v != null);
+      return xs.length ? round2(xs.reduce((a, b) => a + b, 0)) : null;
+    };
+    const rec = rows.filter((x) => x.delta != null);
+    const recExpected = rec.reduce((a, x) => a + x.expected_payout, 0);
+    const delta = rec.length ? round2(rec.reduce((a, x) => a + x.delta, 0)) : null;
+    return { trips: sum('trips'), ontrip_net: sum('ontrip_net'), tips: sum('tips'),
+      salik: sum('salik'), cash_collected: sum('cash_collected'),
+      expected_payout: sum('expected_payout'), bank_payout: sum('bank_payout'),
+      reconciled_rows: rec.length, delta,
+      delta_pct: delta != null && recExpected ? Math.round((delta / Math.abs(recExpected)) * 1000) / 10 : null };
+  };
+
+  const month = req.query.month || null;
+  if (month) {
+    const [y, mo] = month.split('-').map(Number);
+    const daysIn = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const rows = Array.from({ length: daysIn }, (_, i) => {
+      const d = `${month}-${String(i + 1).padStart(2, '0')}`;
+      // Beyond the 22nd nothing has landed yet; day 5 has no statement and
+      // day 9 no payout, so the drill shows dashes where a source is silent.
+      if (i >= 22) return finish({ d, trips: null, ontrip_net: null, tips: null, salik: null,
+        cash_collected: null, ontrip_days: 0, bank_payout: null, payout_days: 0 });
+      const net = 5800 + (i % 7) * 240;
+      const stmt = i !== 4;
+      return finish({ d, trips: 220 + (i % 5) * 14,
+        ontrip_net: stmt ? net : null, tips: stmt ? 60 + (i % 3) * 10 : null,
+        salik: stmt ? 170 + (i % 4) * 12 : null, cash_collected: stmt ? 1150 + (i % 6) * 90 : null,
+        ontrip_days: stmt ? 1 : 0,
+        bank_payout: i === 8 ? null : round2(net * 0.82 + 120 + (i % 5) * 60),
+        payout_days: i === 8 ? 0 : 1 });
+    });
+    return r.json({ grain: 'day', month, trips_source: 'rollup', rows,
+      totals: totalsOf(rows), note });
+  }
+
+  const rows = [
+    // Work with no statement behind it: the surface does not reach March.
+    { m: '2026-03', trips: 5820, ontrip_net: null, tips: null, salik: null, cash_collected: null,
+      ontrip_days: 0, bank_payout: 148200, payout_days: 31 },
+    { m: '2026-04', trips: 6240, ontrip_net: 171400, tips: 2110, salik: 5230, cash_collected: 34600,
+      ontrip_days: 30, bank_payout: 143210, payout_days: 30 },
+    { m: '2026-05', trips: 6105, ontrip_net: 168300, tips: 1980, salik: 5010, cash_collected: 33800,
+      ontrip_days: 31, bank_payout: 132600, payout_days: 31 },
+    { m: '2026-06', trips: 5570, ontrip_net: 152800, tips: 1720, salik: 4620, cash_collected: 30900,
+      ontrip_days: 30, bank_payout: 109300, payout_days: 28 },
+    // The proven month: the identity holds to 0.7%.
+    { m: '2026-07', trips: 7356, ontrip_net: 199930, tips: 2410, salik: 6110, cash_collected: 41800,
+      ontrip_days: 31, bank_payout: 167820, payout_days: 31 },
+    { m: '2026-08', trips: 4820, ontrip_net: 132400, tips: 1610, salik: 4030, cash_collected: 27400,
+      ontrip_days: 22, bank_payout: 104300, payout_days: 21 },
+  ].map(finish);
+  r.json({ grain: 'month', month: null, trips_source: 'rollup', rows,
+    totals: totalsOf(rows), note });
+});
+
 app.get('/api/recommendations', (_, r) => r.json({ shown: 3, truncated: false, history: 42, rows: [
   { platform: 'uber', rec_type: 'acceptance_rate', period_start: dayISO(28), period_end: dayISO(0),
     org_value: 0.79, target_value: 0.85, flagged_count: 14, flagged: true, updated_at: new Date().toISOString() },

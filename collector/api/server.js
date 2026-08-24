@@ -22,6 +22,7 @@ import { playbookRoutes } from './playbook_routes.js';
 import { retentionRoutes } from './retention_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
 import { revenueRoutes } from './revenue_routes.js';
+import { reconcileRoutes } from './reconcile_routes.js';
 import { probeRoutes } from './probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -2282,6 +2283,11 @@ retentionRoutes(app, { q, wrap });
    the join between the forecast and the rota. */
 capacityRoutes(app, { q, wrap });
 revenueRoutes(app, { q, wrap, range });
+
+/* The month-by-month check that the platform's numbers add up: bank payout
+   against on-trip net + tips + salik − cash, the identity the July 2026
+   ledger reconciliation proved to 0.7%. */
+reconcileRoutes(app, { q, wrap, rollupGrainSql });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this
