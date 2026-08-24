@@ -173,13 +173,24 @@ const F = W();
 
 /* When a tracker counts as reporting.
    ─────────────────────────────────────────────────────────────────────────
-   The CABMAN poll is five-minutely, so two missed cycles is the point at which
-   a vehicle has stopped talking rather than merely been unlucky. Written once
-   because it was about to be written twice: /api/live already measured
-   staleness on the FIX and /api/kpis still measured it on the POLL, and two
+   Written once because it was about to be written twice: /api/live measured
+   staleness on the FIX and /api/kpis measured it on the POLL, and two
    endpoints disagreeing about which vehicles are live is worse than either
-   threshold being slightly wrong. */
-const FIX_FRESH = "interval '11 minutes'";
+   being slightly wrong.
+
+   Thirty minutes, and the number is measured rather than reasoned. Eleven was
+   the first answer — two missed cycles of a five-minute poll — and it was
+   argued from the poll interval instead of from what the fixes actually do.
+   Against the live fleet it counted 13 vehicles of 130 as reporting, while 58
+   had fixes inside a quarter of an hour and 85 inside half of one: these
+   trackers routinely answer eleven to fifteen minutes behind, so the tight
+   threshold called forty-five working vehicles dead.
+
+   Half an hour is six poll cycles. It is comfortably past the cadence the
+   fleet actually reports at and nowhere near the dormant trackers, which are
+   silent for days — twenty-five of them are, and they are counted separately
+   because "has stopped reporting" is a different fact from "is late". */
+const FIX_FRESH = "interval '30 minutes'";
 
 
 /* A Dubai-local day window for the tables that are keyed on a raw timestamp

@@ -103,5 +103,15 @@ check('and it measures the fix age, not the poll age',
   /now\(\) - captured_at < \$\{FIX_FRESH\}/.test(live) && !/polled_at < interval/.test(live),
   'liveness measured on when we asked rather than when the tracker answered');
 
+/* The threshold has to clear the cadence the trackers actually report at.
+   Set from the poll interval instead — eleven minutes, two missed cycles — it
+   counted 13 of 130 vehicles as live while 58 had fixes inside a quarter of an
+   hour: the fleet answers eleven to fifteen minutes behind, so a tight bound
+   calls working vehicles dead. Anything under twenty is arguing from the poll
+   again. */
+const fresh = Number((kpiSrc.match(/const FIX_FRESH = "interval '(\d+) minutes'"/) || [])[1]);
+check('the freshness bound clears the observed reporting lag',
+  fresh >= 20 && fresh <= 120, `${fresh} minutes`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

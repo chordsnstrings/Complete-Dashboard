@@ -65,7 +65,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
-    FIX_FRESH: "interval '11 minutes'",
+    FIX_FRESH: "interval '30 minutes'",
     rollupGrainSql, rollupState: async () => [],
     /* The response cache object server.js closes over. The harness mounts a
        slice of that file, so anything the slice references has to be here —
