@@ -130,5 +130,45 @@ const [renamed] = await q(`SELECT person_key FROM trip WHERE external_id = 't0'`
 check('an updated name updates the stored key with it',
   renamed.person_key === 'renamed person', JSON.stringify(renamed.person_key));
 
+console.log('\nthe cross-platform table groups on the stored fold');
+
+/* The fold is two nested regexes. schema_v20 stored it as a generated column
+   with an index and recorded the measurement in its own header — the same
+   aggregate costs 2,434ms computing the regex and 129ms reading the column —
+   and /api/drivers/cross-platform was the last route still computing it, on
+   the page whose other two panels were already fast.
+
+   Two things have to hold, and both are easy to get wrong:
+   the grouping key must be the stored column, and the WHERE must NOT be. */
+{
+  const src = readFileSync('api/server.js', 'utf8');
+  const at = src.indexOf("app.get('/api/drivers/cross-platform'");
+  const body = src.slice(at, src.indexOf('res.json({ platforms', at));
+  check('it groups on the stored column', /GROUP BY t\.person_key/.test(body));
+  check('and no longer recomputes the fold in the SQL',
+    !/regexp_replace/.test(body) && !/\$\{CANON\(/.test(body),
+    'the regex is back in the grouping key');
+  /* Making the predicate match the partial index's definition is what took the
+     driver directory from 4.3 seconds to 41: the planner chose that index and
+     walked most of the table with it. person_key is the key, never the
+     filter. */
+  check('the filter still tests the name, not the indexed column',
+    /coalesce\(btrim\(n\.driver_name\), ''\) <> ''/.test(body)
+    && !/WHERE[^)]*person_key\s*(IS NOT NULL|<>)/.test(body),
+    'a person_key predicate here makes the planner choose the partial index');
+  /* The population used to come from a SECOND full aggregation at the same
+     grain — the whole window grouped by person again, to count how many people
+     there are and how many work more than one channel. It rides on the first
+     aggregation now. The small DISTINCT-platform lookup above it is a
+     different thing and is left alone: it decides which per-platform columns
+     the response carries, and taking it from a rollup would add a column of
+     zeros for a platform whose trips carry no driver name. */
+  check('the population rides on the one aggregation, not a second of them',
+    /count\(\*\) OVER \(\)/.test(body)
+    && (body.match(/GROUP BY t\.person_key/g) || []).length === 1
+    && !/GROUP BY 1\) s/.test(body),
+    'the window is still grouped by person twice');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

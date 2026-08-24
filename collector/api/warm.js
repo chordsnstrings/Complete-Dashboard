@@ -36,7 +36,8 @@ const dubaiDay = (d) => new Intl.DateTimeFormat('en-CA', {
    the ones every session begins with, and the slowest of them. */
 const PATHS = [
   '/api/kpis', '/api/trips/daily', '/api/mix?by=product',
-  '/api/drivers/leaderboard', '/api/drivers/directory', '/api/roster',
+  '/api/drivers/leaderboard', '/api/drivers/directory', '/api/drivers/cross-platform',
+  '/api/roster',
   '/api/vehicles', '/api/vehicles/directory',
   '/api/forecast', '/api/retention', '/api/capacity',
   '/api/playbook', '/api/revenue',

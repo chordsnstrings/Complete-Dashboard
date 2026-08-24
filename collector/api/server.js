@@ -707,44 +707,72 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
     `SELECT DISTINCT platform FROM trip_norm WHERE ${F} AND driver_name IS NOT NULL ORDER BY 1`, p))
     .map((r) => r.platform);
   const cols = platforms.map((pl) =>
-    `count(*) FILTER (WHERE platform = ${quote(pl)})::int "${pl}_trips"`).join(',\n          ');
+    `count(*) FILTER (WHERE n.platform = ${quote(pl)})::int "${pl}_trips"`).join(',\n          ');
+  /* Grouped on the STORED fold, and aggregated once.
+     ─────────────────────────────────────────────────────────────────────────
+     A person can hold several platform accounts, so this table folds them by
+     name — and it did that by running the fold's two nested regexes over every
+     row, as the GROUP BY key. schema_v20 added `trip.person_key` as a stored
+     generated column carrying exactly that expression, with an index, and
+     recorded the measurement in its own header: the same aggregate costs
+     2,434ms with the regex and 129ms without it. This route was the one site
+     that never moved to it.
+
+     It also aggregated the same rows TWICE — once for the hundred and fifty
+     rows the page shows, and again in full for the two population counts
+     underneath it ("N of M people work more than one channel", which must be
+     counted over everybody rather than over the page). One CTE now serves
+     both.
+
+     The join is 1:1 — `trip` is PRIMARY KEY (platform, external_id), which is
+     the join key — so nothing fans out and no count inflates. And the WHERE
+     deliberately still tests driver_name rather than person_key: making the
+     predicate match the partial index's definition is what took the driver
+     directory from 4.3 seconds to 41, because the planner then chose that
+     index and walked most of the table with it. person_key is the grouping
+     key here, never the filter. */
   const rows = await q(
-    `SELECT ${CANON('driver_name')} AS person, max(driver_name) driver_name,
+    `WITH people AS (
+       SELECT t.person_key AS person, max(n.driver_name) driver_name,
             ${cols}${cols ? ',' : ''}
-            count(*) FILTER (WHERE is_booking)::int booking_trips,
-            count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+            count(*) FILTER (WHERE n.is_booking)::int booking_trips,
+            count(*) FILTER (WHERE NOT n.is_booking)::int telematics_journeys,
             count(*)::int total_trips,
-            count(DISTINCT platform)::int platform_count,
-            count(DISTINCT driver_ext_id)::int accounts,
+            count(DISTINCT n.platform)::int platform_count,
+            count(DISTINCT n.driver_ext_id)::int accounts,
             -- Any one of the person's platform ids. /api/driver/* resolves an
             -- id to the whole folded person, so one is enough to make the name
             -- a link; without it the row named somebody you could not open.
-            (array_agg(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
-            round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
-            round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-            count(*) FILTER (WHERE has_fare)::int priced_trips,
+            (array_agg(DISTINCT n.driver_ext_id) FILTER (WHERE n.driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
+            round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric,0) km,
+            round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+            count(*) FILTER (WHERE n.has_fare)::int priced_trips,
             /* What they drove. A person working three platforms is usually
                working them from ONE car, and that was the fact this table
                could not show: the row folded four accounts into one human and
                then made you open them to find out which asset it was. Taken
                from the trips in this window rather than from custody, because
                the fold here is by name and custody is keyed per id. */
-            (array_agg(DISTINCT plate) FILTER (WHERE plate IS NOT NULL))[1:3] AS plates,
-            count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL)::int plate_n,
-            mode() WITHIN GROUP (ORDER BY plate) AS main_plate
-     FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
-     GROUP BY 1 ORDER BY total_trips DESC LIMIT 150`, p);
-  /* Counted in the database over every person, not over the 150 rows this
-     page happened to receive. The panel prints "N of M people work more than
-     one channel", and with more than 150 drivers in the window M was the cap —
-     so the sentence understated the fleet and the share it implies was wrong.
-     A count is cheap; a truncated denominator is a false statement. */
-  const [pop] = await q(
-    `SELECT count(*)::int people, count(*) FILTER (WHERE platforms > 1)::int multi
-     FROM (SELECT ${CANON('driver_name')} AS person,
-                  count(DISTINCT platform)::int platforms
-           FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
-           GROUP BY 1) s`, p);
+            (array_agg(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL))[1:3] AS plates,
+            count(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL)::int plate_n,
+            mode() WITHIN GROUP (ORDER BY n.plate) AS main_plate
+       FROM trip_norm n ${JOIN_TRIP}
+       WHERE ${W('n')} AND coalesce(btrim(n.driver_name), '') <> ''
+       GROUP BY t.person_key)
+     SELECT *,
+            /* The population, carried on every row rather than counted by a
+               second pass over the same grain. */
+            count(*) OVER ()::int AS _people,
+            count(*) FILTER (WHERE platform_count > 1) OVER ()::int AS _multi
+       FROM people ORDER BY total_trips DESC LIMIT 150`, p);
+  /* Counted over every person, not over the 150 rows this page happened to
+     receive. The panel prints "N of M people work more than one channel", and
+     with more than 150 drivers in the window M was the cap — so the sentence
+     understated the fleet and the share it implies was wrong. */
+  const pop = rows.length
+    ? { people: rows[0]._people, multi: rows[0]._multi }
+    : { people: 0, multi: 0 };
+  for (const r of rows) { delete r._people; delete r._multi; }
   res.json({ platforms, drivers: rows,
     people: pop?.people ?? rows.length,
     multi_platform: pop?.multi ?? 0,
