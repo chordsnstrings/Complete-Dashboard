@@ -13,6 +13,7 @@
    COLLECTING. A quiet Tuesday and a Tuesday nobody fetched produce the same
    chart, and only this page can tell them apart. */
 import { custodyNames, custodyRefs } from './custody_sql.js';
+import { fleetIncome } from './income_sql.js';
 
 const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
   : Math.round(Number(v) * 10 ** d) / 10 ** d);
@@ -156,10 +157,48 @@ export function dayRoutes(app, { q, wrap }) {
     const thin = coverage.filter((c) => c.inside_span && c.rows > 0
       && Number(c.median_rows) > 0 && c.rows < Number(c.median_rows) * 0.3);
 
+    /* What the day brought in, both channels. `revenue` here is the fares on
+       that day's trips, and Uber prices nothing per trip — so a day the fleet
+       ran nine hundred bookings showed the price of the few hotel ones.
+
+       A payout is weekly, which is why no day page could show one before:
+       driver_payout_day spreads each statement across the days it covers
+       (sql/schema_v23.sql), so a single day now has a share of it. That share
+       is an ESTIMATE — a driver does not earn a seventh of their week each day
+       — and the page says so. It is the right estimate for "what did this day
+       bring in" and it is exactly wrong for "what did this driver earn on
+       Tuesday", which is why nothing here reports per-driver day pay. */
+    const payByPlat = await q(
+      `SELECT platform, round(sum(earnings)::numeric,2) payouts,
+              count(DISTINCT day)::int payout_days
+       FROM driver_payout_day WHERE day = $1::date GROUP BY 1`, p);
+    const byPlat = new Map();
+    const plat = (name) => {
+      if (!byPlat.has(name)) {
+        byPlat.set(name, { platform: name, bookings: 0, priced_bookings: 0,
+          fares: null, payouts: null, payout_days: 0 });
+      }
+      return byPlat.get(name);
+    };
+    for (const r of platforms) Object.assign(plat(r.platform), {
+      bookings: r.n, priced_bookings: r.revenue == null ? 0 : r.n,
+      fares: r.revenue == null ? null : Number(r.revenue) });
+    for (const y of payByPlat) Object.assign(plat(y.platform), {
+      payouts: y.payouts == null ? null : Number(y.payouts),
+      payout_days: y.payout_days ?? 0 });
+    const income = fleetIncome([...byPlat.values()], 1);
+
     res.json({
       day,
       headline: {
         ...h,
+        ...income,
+        /* The estimate is labelled where it is produced, not where it is drawn:
+           a caller reading this endpoint directly needs it as much as the page
+           does. */
+        payout_basis: income.accounted_payouts
+          ? 'a share of each weekly platform statement, spread evenly across the days it covers'
+          : null,
         revenue: h.priced ? round(h.revenue, 0) : null,
         avg_fare: h.priced ? round(Number(h.revenue) / h.priced, 2) : null,
         booked_km: round(h.booked_km, 0),

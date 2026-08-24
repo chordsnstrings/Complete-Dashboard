@@ -227,7 +227,17 @@ async function tabOverview(root, id, prof) {
         ? `${fmt(k.completed)} of ${fmt(k.outcome_n)} completed, ${fmt(k.not_completed)} did not`
         : 'no platform here reports an outcome',
       tone: k.completion_pct == null ? null : k.completion_pct >= 95 ? 'good' : k.completion_pct >= 85 ? 'warn' : 'critical' },
-    { label: 'Revenue', value: money(k.revenue), sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' },
+    /* What this person's work brought in, both channels. This tile was the
+       fares on their trips, and Uber's export has no fare column — so a driver
+       doing eighty Uber trips and one hotel booking led with the price of the
+       hotel booking. Their actual pay was three panels down under Earnings. */
+    { label: 'Money in', value: k.accounted ? money(k.accounted) : '—',
+      sub: k.accounted
+        ? `${money(k.accounted_fares || 0)} in fares · ${money(k.accounted_payouts || 0)} paid out `
+          + `by ${(k.accounted_platforms || []).join(', ')}`
+        : 'no fare and no payout statement covers this window' },
+    { label: 'Fares', value: money(k.accounted_fares),
+      sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' },
     k.rating ? { label: 'Rating', value: fmt(k.rating, 2), sub: 'platform-reported', tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' } : null,
   ]));
 
@@ -293,7 +303,7 @@ async function tabActivity(root, id) {
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Cancelled', key: 'cancelled', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+    { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
     { label: 'Online', key: 'hours_online', num: true, render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
     /* A day may span two vehicles — a handover — so this is a comma-joined
        list, and each plate in it is its own page. */
@@ -696,7 +706,7 @@ export async function renderDriverDirectory(root) {
     { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },
     { label: 'Days', key: 'days', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+    { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
     /* dayStr has no year, and this dashboard offers a 12-month window: "21 Oct"
        and "21 Aug" sat side by side with nothing to say which year, so a driver

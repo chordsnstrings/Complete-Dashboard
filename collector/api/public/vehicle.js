@@ -196,7 +196,7 @@ async function tabDrivers(root, plate) {
       { label: 'As primary', key: 'primary_days', num: true },
       { label: 'Trips', key: 'trips', num: true },
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-      { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+      { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
       { label: 'Held', key: '_h', render: (r) => `${dayStr(r.first_day)} → ${dayStr(r.last_day)}` },
     ]);
     tot.body.append(t);
@@ -647,7 +647,7 @@ export async function renderVehicleDirectory(root) {
       render: (r) => fmt(r.telematics_journeys) },
     { label: 'Days', key: 'days', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+    { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
     { label: 'Alerts', key: 'alerts', num: true },
     { label: 'Tracker', key: '_t', render: (r) => (!r.last_fix ? pill('none', 'warn')
       : pill(r.stale ? 'stale' : (r.status || 'live'), r.stale ? 'warn' : 'ok')) },

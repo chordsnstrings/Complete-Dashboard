@@ -58,7 +58,18 @@ export async function renderDay(root, day, onDetail) {
     { label: 'Completed', value: fmt(h.completed),
       sub: h.completion_pct == null ? null : `${pct(h.completion_pct, 1)} of bookable`,
       tone: h.completion_pct != null && h.completion_pct < 85 ? 'warn' : null },
-    { label: 'Revenue', value: money(h.revenue),
+    /* Both channels. This tile was the fares on the day's trips, and Uber
+       prices nothing per trip — so a day the fleet ran nine hundred bookings
+       showed the price of the handful of hotel ones. The payout half is a share
+       of the weekly statements covering this day, which is an estimate, and the
+       sub-line says so rather than letting an exact-looking number imply it was
+       measured on the day. */
+    { label: 'Money in', value: h.accounted ? money(h.accounted) : '—',
+      sub: h.accounted
+        ? `${money(h.accounted_fares || 0)} in fares · ${money(h.accounted_payouts || 0)} `
+          + (h.payout_basis ? 'estimated from the weekly platform statements' : 'in payouts')
+        : 'no fare and no payout statement reaches this day' },
+    { label: 'Fares', value: money(h.revenue),
       sub: h.priced ? `over ${fmt(h.priced)} priced bookings` : 'no booking that day reports a fare' },
     { label: 'Drivers out', value: fmt(h.drivers) },
     { label: 'Vehicles used', value: fmt(h.vehicles) },
@@ -190,7 +201,7 @@ export async function renderDay(root, day, onDetail) {
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Did not complete', key: 'cancelled', num: true },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+    { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'Channels', key: 'platforms', render: (r) => esc((r.platforms || []).join(', ')) },
     { label: 'Vehicles', key: 'plates',
@@ -216,7 +227,7 @@ export async function renderDay(root, day, onDetail) {
        this page most likely to start a conversation, and "drivers: 2" is not
        somebody you can ring. */
     { label: 'Driver that day', key: 'driver_refs', render: (r) => custody(r) },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+    { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
   ]));
   if (h.vehicles > d.vehicles.length) {
     vp.body.append(el('p', 'cap',

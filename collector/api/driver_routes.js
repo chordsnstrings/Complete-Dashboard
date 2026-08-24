@@ -12,6 +12,7 @@
    is a worse failure than showing the same person twice. */
 
 import { win, winDays } from './window.js';
+import { fleetIncome } from './income_sql.js';
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -446,7 +447,42 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           earnings jumped whenever the window moved past a Monday. */
        FROM driver_payout_day
        WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date`, p);
-    res.json({ ...t, ...shift, ...perf,
+    /* What this person's work brought in, both channels, per platform.
+       `revenue` above is the fares on their trips, and the Uber export has no
+       fare column — so a driver working Uber and one hotel booking led with the
+       price of the hotel booking. Their actual pay was already in this response
+       as `reported_earnings` and the tile strip did not show it.
+
+       Per platform, and the same rule the fleet and vehicle pages use
+       (api/income_sql.js): a payout is what is left of a channel's own fares
+       after its commission, so a channel reporting both contributes one. */
+    const [fareByPlat, payByPlat] = await Promise.all([
+      q(`SELECT platform, count(*)::int bookings,
+                count(*) FILTER (WHERE has_fare)::int priced_bookings,
+                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares
+         FROM trip_norm WHERE ${TW} AND is_booking GROUP BY 1`, p),
+      q(`SELECT platform, round(sum(earnings)::numeric,2) payouts,
+                count(DISTINCT day)::int payout_days
+         FROM driver_payout_day
+         WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date
+         GROUP BY 1`, p),
+    ]);
+    const byPlat = new Map();
+    const plat = (name) => {
+      if (!byPlat.has(name)) {
+        byPlat.set(name, { platform: name, bookings: 0, priced_bookings: 0,
+          fares: null, payouts: null, payout_days: 0 });
+      }
+      return byPlat.get(name);
+    };
+    const n = (v) => (v == null ? null : Number(v));
+    for (const f of fareByPlat) Object.assign(plat(f.platform), {
+      bookings: f.bookings, priced_bookings: f.priced_bookings, fares: n(f.fares) });
+    for (const y of payByPlat) Object.assign(plat(y.platform), {
+      payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
+    const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
+
+    res.json({ ...t, ...shift, ...perf, ...fleetIncome([...byPlat.values()], windowDays),
       trips_per_day: t.days_worked ? +(t.trips / t.days_worked).toFixed(1) : null,
       utilisation_pct: perf?.hours_online ? +((perf.hours_on_trip / perf.hours_online) * 100).toFixed(1) : null });
   }));

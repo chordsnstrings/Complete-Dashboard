@@ -354,6 +354,15 @@ app.get('/api/driver/kpis', (req, r) => {
     hours_on_trip: +d.reduce((a, x) => a + x.hours_on_trip, 0).toFixed(1),
     acceptance_rate: 0.91 - i * 0.02, cancellation_rate: 0.04, rating: 4.9 - i * 0.06,
     reported_earnings: 9800 - i * 500, cash_earnings: 1200,
+    /* Money in, and the two halves it is made of. Deliberately dominated by the
+       payout: on this fleet a driver's fares are the few hotel bookings they
+       happened to take, so a fixture where the halves are comparable would let
+       a page that quietly showed only one still look right. */
+    accounted: 9800 - i * 500 + Math.round(d.reduce((a, x) => a + x.revenue, 0)),
+    accounted_fares: Math.round(d.reduce((a, x) => a + x.revenue, 0)),
+    accounted_payouts: 9800 - i * 500,
+    accounted_platforms: ['hotel', 'uber'], accounted_bookings: trips,
+    dark_bookings: 0, dark_pct: 0,
     trips_per_day: +(trips / d.length).toFixed(1), utilisation_pct: 58.2 - i * 2.4,
   });
 });
@@ -1454,6 +1463,13 @@ app.get('/api/day', (req, r) => {
     headline: { bookings: 215, telematics: 240, completed: 201, not_completed: 14,
       bookable: 215, priced: 41, revenue: 4180, avg_fare: 101.95, booked_km: 3120,
       telematics_km: 4210, drivers: 34, vehicles: 41, completion_pct: 93.5,
+      /* The day's income: fares from the hotel channel plus a share of the
+         weekly Uber statements covering this day. payout_basis is what stops
+         that share reading as something measured on the day itself. */
+      accounted: 10430, accounted_fares: 4180, accounted_payouts: 6250,
+      accounted_platforms: ['hotel', 'uber'], accounted_bookings: 215,
+      dark_bookings: 0, dark_pct: 0,
+      payout_basis: 'a share of each weekly platform statement, spread evenly across the days it covers',
       first_at: `${day}T02:14:00Z`, last_at: `${day}T20:41:00Z` },
     versus_neighbours: { median_bookings: 241, delta_pct: -10.8,
       series: Array.from({ length: 15 }, (_, i) => {

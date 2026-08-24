@@ -360,7 +360,7 @@ V.demand = async (root) => {
       { label: 'Day', key: 'd', render: (r) => dayStr(r.d) },
       { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-      { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+      { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
       { label: 'Max temp', key: 'temp_max', num: true, render: (r) => (r.temp_max != null
         ? `<span class="pill ${r.temp_max >= 44 ? 'bad' : r.temp_max >= 41 ? 'warn' : 'ok'}">${r.temp_max.toFixed(1)}°C</span>` : '—') },
       { label: 'Rain', key: 'precipitation', num: true, render: (r) => (r.precipitation ? `${r.precipitation} mm` : '—') },
@@ -966,7 +966,7 @@ V.finance = async (root) => {
       { label: 'Tier', key: 'label' },
       { label: 'Trips', key: 'n', num: true, render: (r) => fmt(r.n) },
       { label: 'Priced', key: 'priced_n', num: true, render: (r) => `${fmt(r.priced_n)} of ${fmt(r.n)}` },
-      { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+      { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
       { label: 'Share of revenue', key: '_sr', num: true, render: (r) => pct(((+r.revenue || 0) / totalRev) * 100, 1) },
       { label: 'Per priced trip', key: '_pt', num: true, render: (r) => money(perTrip(r), 'AED', 2) },
     ], { compact: true }));

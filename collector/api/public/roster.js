@@ -134,7 +134,7 @@ export async function renderRoster(root) {
         ? (r.plates || []).slice(0, 2).map((p2) => entity('vehicle', p2, p2)).join(' ')
         : '<span class="ent-off">none attached</span>') },
     { label: 'Trips this window', key: 'trips', num: true },
-    { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+    { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
     // Zero and unobserved are different numbers and must not share a cell.
     { label: 'Trips ever', key: 'lifetime_trips', num: true,
       render: (r) => (r.activity_known ? fmt(r.lifetime_trips || 0)

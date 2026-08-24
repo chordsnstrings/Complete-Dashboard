@@ -48,7 +48,11 @@ export async function renderSlot(root, dow, hour) {
     { label: 'People covering it', value: fmt(h.drivers),
       sub: h.drivers <= 2 ? 'this hour depends on very few people' : `${fmt(h.vehicles)} vehicles`,
       tone: h.drivers <= 2 ? 'critical' : h.drivers <= 4 ? 'warn' : null },
-    { label: 'Revenue', value: h.priced_n ? money(h.revenue) : '—',
+    /* Fares, named as such. An hour-of-week slot has no payout of its own —
+       platform statements are weekly and spreading one to a single HOUR would
+       be an estimate on an estimate — so this page states what it measured and
+       leaves the combined figure to the pages that can honestly carry it. */
+    { label: 'Fares', value: h.priced_n ? money(h.revenue) : '—',
       sub: h.priced_n
         ? `over the ${fmt(h.priced_n)} of ${fmt(h.trips)} trips that carry a fare`
         : 'no trip in this slot carries a fare — Uber’s export has no fare column' },
@@ -76,7 +80,7 @@ export async function renderSlot(root, dow, hour) {
       { label: 'Completion', key: 'completion_pct', num: true,
         render: (r) => (r.completion_pct == null ? '<span class="dim">n/a</span>'
           : `<span class="pill ${r.completion_pct >= 90 ? 'ok' : r.completion_pct >= 75 ? 'warn' : 'bad'}">${r.completion_pct}%</span>`) },
-      { label: 'Revenue', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+      { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
     ], { compact: true }));
     const top = d.drivers[0];
     const share = h.trips ? Math.round((top.trips / h.trips) * 100) : 0;
@@ -114,7 +118,7 @@ export async function renderSlot(root, dow, hour) {
     pp.body.append(tableFrom(d.platforms, [
       { label: 'Platform', key: 'platform' },
       { label: 'Trips', key: 'trips', num: true },
-      { label: 'Revenue', key: 'revenue', num: true,
+      { label: 'Fares', key: 'revenue', num: true,
         render: (r) => (r.priced_n ? money(r.revenue) : '<span class="dim">no fare column</span>') },
     ], { compact: true }));
   } else empty(pp.body, 'No platform data');
