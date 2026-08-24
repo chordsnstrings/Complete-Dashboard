@@ -21,3 +21,12 @@
 -- re-fetches the same money under honest windows.
 DELETE FROM driver_performance
 WHERE period_end - period_start > 62;
+
+-- And the same rows out of the materialised day table (sql/schema_v23.sql):
+-- the refresher rebuilds it after every collection, but "after every
+-- collection" is up to a quarter hour away, and a migration that half-purges —
+-- source rows gone, their expansion still being served — leaves every money
+-- page wrong in a way nothing on the page can explain. The day rows carry
+-- their period bounds precisely so a correction like this can reach them.
+DELETE FROM driver_payout_day
+WHERE period_end - period_start > 62;

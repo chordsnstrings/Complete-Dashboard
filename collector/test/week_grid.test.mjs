@@ -162,6 +162,9 @@ check('a driver with no work that week writes no row',
 const v24 = readFileSync('sql/schema_v24.sql', 'utf8');
 check('the migration removes windows no provider legitimately issues',
   /DELETE FROM driver_performance\s+WHERE period_end - period_start > 62/.test(v24));
+check('from the materialised day table as well, not only the source',
+  /DELETE FROM driver_payout_day\s+WHERE period_end - period_start > 62/.test(v24),
+  'a half-purge serves the smear for up to a quarter hour after claiming it fixed it');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
