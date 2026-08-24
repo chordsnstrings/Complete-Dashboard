@@ -16,7 +16,7 @@
 
 import { barChart, areaChart, donut, hbars, heatmap, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
-  dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt } from './ui.js';
+  dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime } from './ui.js';
 import { qAll, href } from './data.js';
 import { makeMap, fitTo } from './map.js';
 
@@ -594,7 +594,7 @@ async function tabTrips(root, id) {
   p.body.append(bar);
   const host = el('div'); p.body.append(host);
   const cols = [
-    { label: 'Requested', key: 'requested_at', render: (r) => dtStr(r.requested_at) },
+    { label: 'Requested', key: 'requested_at', render: (r) => tripTime(r.plate, r.requested_at) },
     { label: 'Platform', key: 'platform' },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'From', key: 'pickup_addr' },

@@ -20,7 +20,7 @@
 
 import { donut, hbars, areaChart, stackedBar, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
-  dayStr, dtStr, money, pct } from './ui.js';
+  dayStr, dtStr, money, pct, tripTime } from './ui.js';
 import { q, qAll, href, state } from './data.js';
 
 export const CORP_TABS = [
@@ -319,7 +319,7 @@ async function corpLeakage(host, kind = state.sub) {
   host.append(p);
   if (!l.rows.length) { empty(body, 'Nothing in this category for this window'); return; }
   body.append(tableFrom(l.rows, [
-    { label: 'When', key: 'requested_at', render: (r) => dtStr(r.requested_at) },
+    { label: 'When', key: 'requested_at', render: (r) => tripTime(r.plate, r.requested_at) },
     { label: 'Property', key: 'property', render: (r) => entity('property', r.partner_id, r.property) },
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },

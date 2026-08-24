@@ -132,6 +132,11 @@ export function parseHash(h = location.hash.slice(1)) {
     days: [7, 30, 90, 180, 365].includes(+search.get('days')) ? +search.get('days') : null,
     platform: search.get('platform') || null,
     fleet: search.get('fleet') || null,
+    /* A single day, validated the same way: every trip row deep-links to the
+       vehicle's replay OF THAT DAY, and the movement page reads this to
+       preselect it. A malformed value is null, and the page falls back to the
+       newest replayable day exactly as if no day had been asked for. */
+    day: /^\d{4}-\d{2}-\d{2}$/.test(search.get('day') || '') ? search.get('day') : null,
   };
 }
 export function navigate(view, param, sub) {

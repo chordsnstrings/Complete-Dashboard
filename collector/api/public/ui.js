@@ -136,6 +136,17 @@ export const timeStr = (v) => (v ? new Date(v).toLocaleTimeString(undefined,
   { hour: '2-digit', minute: '2-digit', timeZone: TZ }) : '—');
 export const dtStr = (v) => (v ? `${dayStr(v)} ${timeStr(v)}` : '—');
 
+/* A trip's timestamp, as a door into the telemetry behind it: the link opens
+   the vehicle's movement replay preselected to that trip's Dubai day. Every
+   table that lists trips renders its time through this, so "what actually
+   happened on that ride" is one click from any number that mentions it. No
+   plate — a hotel booking before dispatch, an unmatched statement line — and
+   it degrades to the plain timestamp rather than a link to nowhere. */
+export const tripTime = (plate, at) => (plate && at
+  ? `<a class="lnk" href="${href('vehicle', plate, 'movement')}?day=${dubaiDay(at)}" `
+    + `title="Replay ${esc(plate)} on this day">${esc(dtStr(at))}</a>`
+  : esc(dtStr(at)));
+
 
 // 7.5 → "07:30", which reads as a clock time rather than a decimal
 export const hourStr = (h) => {

@@ -87,9 +87,10 @@ export const platformPayouts = () => `
    the cash share — 13% in a heavy-cash month — and showing one where a reader
    expects the other is how that difference gets reported as a bug.
 
-   Sourced from driver_statement_day: the operator's imported daily ledger, and
-   any provider statement surface that still answers. Same four parameters as
-   the two queries beside it. */
+   Sourced from driver_statement_day, API sources only: the operator's imported
+   workbook (source='ledger') is REFERENCE data — it taught the reconciliation
+   and it verifies our numbers in tests, but the platform displays only what a
+   connected API returned. Same four parameters as the two queries beside it. */
 export const platformStatements = () => `
   SELECT platform,
          round(sum(net)::numeric,2) statement_net,
@@ -102,7 +103,8 @@ export const platformStatements = () => `
          count(DISTINCT day)::int statement_days,
          count(DISTINCT name_key) FILTER (WHERE NOT pseudo)::int statement_drivers
   FROM driver_statement_day
-  WHERE day BETWEEN $1::date AND $2::date
+  WHERE source <> 'ledger'
+    AND day BETWEEN $1::date AND $2::date
     AND ($3::text IS NULL OR platform=$3)
     AND ($4::text IS NULL OR fleet_id=$4)
   GROUP BY 1`;

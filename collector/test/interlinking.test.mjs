@@ -137,5 +137,41 @@ check('every view a link points at is actually registered',
   missing.length === 0, missing.join(', '));
 
 console.log(`\n  ${UI.length} page modules, ${API.length} api modules, ${targets.size} link targets`);
+console.log('\nrule 4: a trip leads to its telemetry');
+
+/* A trip row naming a time and a plate must open the vehicle replay of that
+   day on click — "what actually happened on that ride" is the question every
+   trips table exists to raise. tripTime() is the one helper that builds the
+   link (and degrades to plain text when there is no plate), so the rule is:
+   a trips table renders its timestamp through tripTime, never bare dtStr. */
+{
+  const ui = readFileSync('api/public/ui.js', 'utf8');
+  check('tripTime links the replay preselected to the trip day',
+    /href\('vehicle', plate, 'movement'\)}\?day=\$\{dubaiDay\(at\)/.test(ui));
+  check('and degrades to plain text without a plate',
+    /plate && at\s*\?/.test(ui) && /: esc\(dtStr\(at\)\)/.test(ui));
+
+  /* Scoped to tables that ARE trips — the ones showing a pickup and dropoff.
+     The jobs table has a 'Requested' column too (when a human queued a
+     collection run), and the segment pages list bookings beside telemetry that
+     is already on screen; neither is a trip needing a door to its replay. */
+  const offenders = [];
+  for (const f of UI) {
+    const src = readFileSync(`api/public/${f}`, 'utf8');
+    if (!src.includes("key: 'pickup_addr'")) continue;
+    for (const m of src.matchAll(/label: '(?:Requested|When)', key: 'requested_at', render: \(r\) => ([^,}]+)/g)) {
+      if (!/tripTime/.test(m[1])) offenders.push(`${f}: ${m[1].trim()}`);
+    }
+  }
+  check('every trips table opens its telemetry on click', offenders.length === 0, offenders.join(' | '));
+
+  const veh = readFileSync('api/public/vehicle.js', 'utf8');
+  check('the movement page honours the day the link asked for',
+    /parseHash\(\)\.day/.test(veh) && /sel\.value = asked/.test(veh));
+  const data = readFileSync('api/public/data.js', 'utf8');
+  check('and the router validates it like every other filter',
+    /day: \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test/.test(data));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

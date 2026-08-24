@@ -53,6 +53,33 @@ check('name case and double spaces fold to one driver',
 check('the import moved the data version (a collection run exists for it)',
   (await db.query(`SELECT count(*)::int n FROM collection_run WHERE source='ledger'`)).rows[0].n === 1);
 
+console.log('\nthe ledger is reference, not display');
+
+/* The workbook was given to understand the calculation, not to be a source on
+   the platform: displayed statement figures come from API sources only. The
+   ledger rows stay stored — they verify the API numbers in tests and hold the
+   only record of months no API serves — but no endpoint surfaces them. */
+const kLedger = (await req('/api/kpis?from=2026-08-01&to=2026-08-31')).body;
+check('ledger rows do not surface in kpis', kLedger.statement_net == null,
+  String(kLedger.statement_net));
+const revLedger = (await req('/api/revenue?from=2026-08-01&to=2026-08-31')).body;
+check('nor on the revenue page',
+  (revLedger.platforms || []).every((r) => r.statement_net == null));
+
+/* An API-sourced statement — the uber statement report — IS displayed. */
+await post('/api/import/statement-days', {
+  rows: [
+    { date: '2026-08-03', driver: 'Amina Rashid', company: 'Ecosine', platform: 'Uber',
+      gross: 500, fees: 130, net: 370, tips: 10, salik: 12, cash: 80, bank: 312, trips: 14 },
+    { date: '2026-08-04', driver: 'AMINA  RASHID', company: 'Ecosine', platform: 'Uber',
+      gross: 400, fees: 104, net: 296, tips: 0, salik: 8, cash: 60, bank: 244, trips: 11 },
+    { date: '2026-08-03', driver: 'Bilal Noor', company: 'Egari', platform: 'Bolt',
+      gross: 200, fees: 50, net: 150, tips: 0, salik: 0, cash: 150, bank: 0, trips: '' },
+    { date: '2026-08-03', driver: 'Not Match', company: 'Ecosine', platform: 'Uber',
+      gross: 90, fees: 20, net: 70, cash: 70, bank: 0, pseudo: true },
+  ],
+  source: 'uber_report', done: true });
+
 console.log('\nthe statement rides beside the payout, never inside it');
 
 const W = 'from=2026-08-01&to=2026-08-31';
@@ -86,6 +113,8 @@ check('the monthly trend carries the statement series', aug && aug.statement_net
 console.log('\nand the payout resolution never sees it');
 check('driver_payout_day is untouched by the import',
   (await db.query(`SELECT count(*)::int n FROM driver_payout_day`)).rows[0].n === 0);
+check('both sources coexist in storage',
+  (await db.query(`SELECT count(DISTINCT source)::int n FROM driver_statement_day`)).rows[0].n === 2);
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

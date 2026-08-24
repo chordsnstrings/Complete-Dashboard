@@ -1733,7 +1733,7 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
      built from trips alone. The statement months extend it. */
   const stmtSpan = await q(
     `SELECT to_char(min(day), 'YYYY-MM') a, to_char(max(day), 'YYYY-MM') b
-     FROM driver_statement_day WHERE ($1::text IS NULL OR platform = $1)`,
+     FROM driver_statement_day WHERE source <> 'ledger' AND ($1::text IS NULL OR platform = $1)`,
     [req.query.platform || null]);
   if (!observed.length && !stmtSpan[0]?.a) {
     return res.json({ months: [], breaks: [], gaps: [], source: trendSource });
@@ -1808,7 +1808,7 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
               round(sum(cash)::numeric, 2) AS statement_cash,
               round(sum(bank)::numeric, 2) AS statement_bank
        FROM driver_statement_day
-       WHERE ($1::text IS NULL OR platform = $1)
+       WHERE source <> 'ledger' AND ($1::text IS NULL OR platform = $1)
        GROUP BY 1, 2`, [req.query.platform || null]),
   ]);
   const incomeByMonth = new Map();

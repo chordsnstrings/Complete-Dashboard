@@ -15,8 +15,8 @@
 
 import { barChart, areaChart, donut, hbars, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
-  dayStr, dtStr, timeStr, money, pct, fmt } from './ui.js';
-import { qAll, href } from './data.js';
+  dayStr, dtStr, timeStr, money, pct, fmt, tripTime } from './ui.js';
+import { qAll, href, parseHash } from './data.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
 
 export const VEHICLE_TABS = [
@@ -303,6 +303,12 @@ async function tabMovement(root, plate) {
   };
 
   sel.onchange = (e) => showDay(e.target.value);
+  /* Every trip row in the app deep-links here with ?day= — the replay of THIS
+     vehicle on THAT trip's day. Honoured only when the day is actually
+     replayable; an address asking for a day with no stored fixes falls back to
+     the newest one, exactly as if no day had been asked for. */
+  const asked = parseHash().day;
+  if (asked && mv.days.some((d) => String(d.day).slice(0, 10) === asked)) sel.value = asked;
   if (mv.days.length) await showDay(sel.value); else showParking();
 
   verd.body.innerHTML = '';
@@ -537,7 +543,7 @@ async function tabTrips(root, plate) {
   p.body.append(bar);
   const host = el('div'); p.body.append(host);
   const cols = [
-    { label: 'Requested', key: 'requested_at', render: (r) => dtStr(r.requested_at) },
+    { label: 'Requested', key: 'requested_at', render: (r) => tripTime(plate, r.requested_at) },
     { label: 'Driver', key: 'driver_name', render: (r) => (r.driver_ext_id
       ? `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name || r.driver_ext_id)}</a>`
       : esc(r.driver_name || '—')) },

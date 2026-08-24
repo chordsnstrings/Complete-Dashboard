@@ -24,6 +24,12 @@ import { probeEarnerWindow } from '../src/sources/uber.js';
 import { loadSettings } from '../src/settings.js';
 import { log } from '../src/log.js';
 
+/* The org a probe asks about: the first with a full credential pair. The
+   legacy fields carry Ecosine's values where they are set, but on a component
+   that holds only one org's cookie the pair must come from ONE entry — the
+   Ecosine uuid with the Egari cookie is a 401 wearing a confusing hat. */
+const uberOrg = () => config.uber.orgs?.[0] || config.uber;
+
 const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
 
 /* Report types worth testing for existence. Uber answers an unknown name with
@@ -80,18 +86,18 @@ export function probeRoutes(app, { wrap }) {
   /* Which report types this org can actually generate. */
   app.get('/api/probe/uber/report-types', wrap(async (req, res) => {
     await loadSettings();
-    if (!config.uber.orgUuid) return res.status(400).json({ error: 'no Uber org configured' });
+    if (!uberOrg().orgUuid) return res.status(400).json({ error: 'no Uber org configured' });
     const to = req.query.to || new Date().toISOString().slice(0, 10);
     const from = req.query.from || new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
     const out = [];
     for (const reportType of CANDIDATE_REPORTS) {
       try {
         const { data } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
-          method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(),
+          method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(uberOrg()),
           body: JSON.stringify({
-            orgId: { uuid: { value: config.uber.orgUuid } }, reportType,
+            orgId: { uuid: { value: uberOrg().orgUuid } }, reportType,
             startDate: { value: from }, endDate: { value: to },
-            childOrgUuids: [{ uuid: { value: config.uber.orgUuid } }],
+            childOrgUuids: [{ uuid: { value: uberOrg().orgUuid } }],
           }),
         });
         const ok = data?.status === 'success';
@@ -109,11 +115,11 @@ export function probeRoutes(app, { wrap }) {
     const to = req.query.to || new Date().toISOString().slice(0, 10);
     const from = req.query.from || new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
     const { data: gen } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
-      method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(),
+      method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(uberOrg()),
       body: JSON.stringify({
-        orgId: { uuid: { value: config.uber.orgUuid } }, reportType,
+        orgId: { uuid: { value: uberOrg().orgUuid } }, reportType,
         startDate: { value: from }, endDate: { value: to },
-        childOrgUuids: [{ uuid: { value: config.uber.orgUuid } }],
+        childOrgUuids: [{ uuid: { value: uberOrg().orgUuid } }],
       }),
     });
     if (gen?.status !== 'success') {
@@ -123,8 +129,8 @@ export function probeRoutes(app, { wrap }) {
     let url = null;
     for (let i = 0; i < 30 && !url; i++) {
       const { data } = await http(`${REPORTS}/DownloadReport?localeCode=en-GB`, {
-        method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(),
-        body: JSON.stringify({ orgId: { uuid: { value: config.uber.orgUuid } }, reportId: { uuid: { value: id } } }),
+        method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(uberOrg()),
+        body: JSON.stringify({ orgId: { uuid: { value: uberOrg().orgUuid } }, reportId: { uuid: { value: id } } }),
       });
       url = data?.data?.signedUrl?.value;
       if (!url) await new Promise((r2) => setTimeout(r2, 5000));
