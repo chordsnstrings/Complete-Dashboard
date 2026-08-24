@@ -40,6 +40,8 @@ const usedInUi = (route) => new RegExp(
    adding one is a decision rather than a shrug. */
 const EXEMPT = {
   '/api/health': 'liveness probe for the platform, not for people',
+  '/api/import/statement-days': 'operator tool: batched import of the daily ledger — driven by '
+    + 'bin/import-ledger.mjs, not by a page',
   '/api/ready': 'readiness probe for the platform — checks the schema is complete before traffic is routed here',
   '/api/probe/uber/report-types': 'operator tool: asks the provider which reports this org can generate',
   '/api/probe/uber/report-columns': 'operator tool: reports one provider report’s column shape',

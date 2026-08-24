@@ -113,6 +113,7 @@ app.get('/api/kpis', (_, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, c
   /* accounted is the best figure PER PLATFORM summed, so it is not fares plus
      payouts: yango reports both here and is counted on its payout only. */
   accounted: 237366, accounted_fares: 41188, accounted_payouts: 196178,
+    statement_net: 96480, statement_platforms: ['bolt', 'hotel', 'uber', 'yango'],
   accounted_bookings: 2043, accounted_platforms: ['hotel', 'uber', 'yango'],
   dark_bookings: 0, dark_pct: 0 }));
 app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800' },
@@ -358,6 +359,7 @@ app.get('/api/driver/kpis', (req, r) => {
        payout: on this fleet a driver's fares are the few hotel bookings they
        happened to take, so a fixture where the halves are comparable would let
        a page that quietly showed only one still look right. */
+    statement_net: null, statement_platforms: [],
     accounted: 9800 - i * 500 + Math.round(d.reduce((a, x) => a + x.revenue, 0)),
     accounted_fares: Math.round(d.reduce((a, x) => a + x.revenue, 0)),
     accounted_payouts: 9800 - i * 500,
@@ -577,6 +579,7 @@ app.get('/api/vehicle/kpis', (req, r) => {
     any_even_split: true,
     /* And the two together, per platform — hotel counted on its fares, uber on
        its payout, so accounted is their sum and not fares + every payout. */
+    statement_net: null, statement_platforms: [],
     accounted: 5082.65 + Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
     accounted_fares: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
     accounted_payouts: 5082.65, accounted_platforms: ['hotel', 'uber'],
@@ -792,7 +795,7 @@ app.get('/api/trend/monthly', (_, r) => {
              older half of this record has work and no recoverable money, which
              is a fact the page has to state rather than draw as a flat line. */
           accounted_fares: Math.round(row.trips * 0.35 * 96),
-          accounted_payouts: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : null,
+          statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : null,
           accounted: Math.round(row.trips * 0.35 * 96)
             + (i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : 0),
           accounted_platforms: i >= MONTH_KEYS.length - 6 ? ['hotel', 'uber'] : ['hotel'],
@@ -806,7 +809,7 @@ app.get('/api/trend/monthly', (_, r) => {
           drivers_known: row.attributed_trips > 0 }
       : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0, earning_vehicles: 0,
           km: null, measured_trips: 0, revenue: null, priced_trips: 0, cancel_pct: null,
-          accounted: null, accounted_fares: null, accounted_payouts: null,
+          accounted: null, accounted_fares: null, statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: null,
           accounted_platforms: [], income_missing: false,
           platforms: [], booking_platforms: [], no_data: true, drivers_known: false,
           partial_month: false, days_in_record: null };
@@ -983,14 +986,20 @@ app.get('/api/revenue', (_, r) => {
       first_at: dayISO(30), last_at: dayISO(0), best: null, payout_drivers: 0,
       first_period: null, last_period: null, payout_days: 0, payout_coverage_pct: null,
       booking_days: 31, payout_coverage_days: null, payout_coverage_base: null,
-      basis: 'none', basis_note: 'no fare on any booking and no payout reported — this channel’s money is dark' },
+      basis: 'none', basis_note: 'no fare on any booking and no payout reported — this channel’s money is dark',
+      statement_net: 61200, statement_gross: 78400, statement_fees: 17200, statement_tips: 610,
+      statement_salik: 2400, statement_cash: 12400, statement_bank: 46200, statement_days: 31,
+      statement_drivers: 58 },
     { platform: 'hotel', bookings: 1267, priced_bookings: 1267, fares: 61400, priced_km: 15600,
       km: 15600, drivers: 22, vehicles: 31, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 100, revenue_per_km: 3.94,
       first_at: dayISO(30), last_at: dayISO(0), best: 61400, payout_drivers: 0,
       first_period: null, last_period: null, payout_days: 0, payout_coverage_pct: null,
       booking_days: 31, payout_coverage_days: null, payout_coverage_base: null,
-      basis: 'fares', basis_note: 'fares reported on 1267 of 1267 bookings' },
+      basis: 'fares', basis_note: 'fares reported on 1267 of 1267 bookings',
+      statement_net: 14200, statement_gross: 15800, statement_fees: 1600, statement_tips: 0,
+      statement_salik: 0, statement_cash: 0, statement_bank: 14200, statement_days: 31,
+      statement_drivers: 21 },
     { platform: 'yango', bookings: 214, priced_bookings: 96, fares: 4180, priced_km: 1180,
       km: 2640, drivers: 9, vehicles: 11, payouts: 3210, cash: 640, payout_periods: 12,
       components: null, tips: null, fare_coverage_pct: 44.9, revenue_per_km: 3.54,
@@ -1000,7 +1009,10 @@ app.get('/api/revenue', (_, r) => {
       /* Coverage is measured against the days the channel WORKED (booking_days),
          not the calendar window — see api/income_sql.js coverage(). */
       booking_days: 31, payout_coverage_days: 29, payout_coverage_base: 31,
-      basis: 'payout', basis_note: 'net payout — only 44.9% of bookings report a fare' },
+      basis: 'payout', basis_note: 'net payout — only 44.9% of bookings report a fare',
+      statement_net: 980, statement_gross: 1220, statement_fees: 240, statement_tips: 0,
+      statement_salik: 40, statement_cash: 520, statement_bank: 460, statement_days: 29,
+      statement_drivers: 9 },
     { platform: 'bolt', bookings: 618, priced_bookings: 121, fares: 5100, priced_km: 1490,
       km: 7300, drivers: 14, vehicles: 18, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 19.6, revenue_per_km: 3.42,
@@ -1019,6 +1031,7 @@ app.get('/api/revenue', (_, r) => {
     window: [dayISO(30).slice(0, 10), dayISO(0).slice(0, 10)], window_days: 31,
     platforms, components,
     totals: { bookings: 8241, priced_bookings: 1484, fares: 70680, payouts: 3210, cash: 640,
+      statement_net: 76380, statement_cash: 12920, statement_bank: 60860,
       tips: 1840, accounted: 69790, accounted_bookings: 1481, dark_bookings: 6760, dark_pct: 82 },
     caveat: 'uber, bolt account for 6760 of 8241 bookings in this window and report little or no money. '
       + 'Every fleet-wide revenue figure in this product is over what did land, so all of them understate '

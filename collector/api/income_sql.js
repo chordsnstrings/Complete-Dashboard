@@ -79,6 +79,34 @@ export const platformPayouts = () => `
 
    Falls back to the window length when the channel reported no bookings at all,
    where there is nothing better and nothing to be wrong about. */
+/* Per-platform STATEMENT sums — the third view of the money, beside fares and
+   payouts, and never mixed into either. A payout is what the platform wires to
+   the bank (net of the cash drivers already collected, plus tips and tolls);
+   the statement net is gross minus commission, the figure an operator means by
+   "what did we earn". Reconciled against the operator's ledger they differ by
+   the cash share — 13% in a heavy-cash month — and showing one where a reader
+   expects the other is how that difference gets reported as a bug.
+
+   Sourced from driver_statement_day: the operator's imported daily ledger, and
+   any provider statement surface that still answers. Same four parameters as
+   the two queries beside it. */
+export const platformStatements = () => `
+  SELECT platform,
+         round(sum(net)::numeric,2) statement_net,
+         round(sum(gross)::numeric,2) statement_gross,
+         round(sum(fees)::numeric,2) statement_fees,
+         round(sum(tips)::numeric,2) statement_tips,
+         round(sum(salik)::numeric,2) statement_salik,
+         round(sum(cash)::numeric,2) statement_cash,
+         round(sum(bank)::numeric,2) statement_bank,
+         count(DISTINCT day)::int statement_days,
+         count(DISTINCT name_key) FILTER (WHERE NOT pseudo)::int statement_drivers
+  FROM driver_statement_day
+  WHERE day BETWEEN $1::date AND $2::date
+    AND ($3::text IS NULL OR platform=$3)
+    AND ($4::text IS NULL OR fleet_id=$4)
+  GROUP BY 1`;
+
 export function coverage(r, windowDays) {
   const base = r.booking_days > 0 ? r.booking_days : windowDays;
   return {
@@ -153,6 +181,14 @@ export function fleetIncome(rows, windowDays) {
       .map((r) => r.payouts)) || null,
     accounted_bookings: measured.reduce((a, r) => a + n(r.bookings), 0),
     accounted_platforms: measured.map((r) => r.platform).sort(),
+    /* The statement view rides beside the chosen basis, never inside it:
+       adding statement net to a platform already counted on fares or payout
+       would count the same trips twice. It is its own pair of fields, summed
+       over every platform that has statement rows in the window. */
+    statement_net: sum(rows.filter((r) => r.statement_net != null)
+      .map((r) => r.statement_net)) || null,
+    statement_platforms: rows.filter((r) => r.statement_net != null)
+      .map((r) => r.platform).sort(),
     dark_bookings: darkRows.reduce((a, r) => a + n(r.bookings), 0),
     dark_pct: bookings
       ? Math.round((darkRows.reduce((a, r) => a + n(r.bookings), 0) / bookings) * 1000) / 10 : null,

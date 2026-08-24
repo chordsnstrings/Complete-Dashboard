@@ -30,7 +30,7 @@
    A platform contributing nothing is the most important row on the page,
    because it is the one somebody can fix. */
 import { peopleCount } from './custody_sql.js';
-import { chooseBasis, fleetIncome } from './income_sql.js';
+import { chooseBasis, fleetIncome, platformStatements } from './income_sql.js';
 
 export function revenueRoutes(app, { q, wrap, range }) {
   app.get('/api/revenue', wrap(async (req, res) => {
@@ -39,7 +39,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
     const windowDays = Math.max(1,
       Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1);
 
-    const [fares, payouts, components, tips] = await Promise.all([
+    const [fares, payouts, components, tips, stmts] = await Promise.all([
       /* Per platform, over BOOKINGS only — a telematics journey is the same
          physical trip seen by the tracker and has no fare by definition. */
       q(`SELECT platform,
@@ -110,6 +110,10 @@ export function revenueRoutes(app, { q, wrap, range }) {
          FROM driver_earnings_component
          WHERE period_start >= $1::date AND period_end <= $2::date AND category ILIKE '%tip%'
          GROUP BY 1`, [from, to]),
+      /* The statement view — the operator's daily ledger and any provider
+         statement surface that still answers. See api/income_sql.js on why it
+         never merges into fares or payouts. */
+      q(platformStatements(), p),
     ]);
 
     const num = (v) => (v == null ? null : Number(v));
@@ -138,6 +142,12 @@ export function revenueRoutes(app, { q, wrap, range }) {
       if (c.parent == null) r.components = (r.components || 0) + num(c.amount);
     }
     for (const t of tips) row(t.platform).tips = num(t.tips);
+    for (const t of stmts) Object.assign(row(t.platform), {
+      statement_net: num(t.statement_net), statement_gross: num(t.statement_gross),
+      statement_fees: num(t.statement_fees), statement_tips: num(t.statement_tips),
+      statement_salik: num(t.statement_salik), statement_cash: num(t.statement_cash),
+      statement_bank: num(t.statement_bank), statement_days: t.statement_days,
+      statement_drivers: t.statement_drivers });
 
     /* Which figure to believe for each platform, and why. Stated as a basis
        rather than blended, because a fare and a payout are different money and
@@ -174,6 +184,9 @@ export function revenueRoutes(app, { q, wrap, range }) {
         fares: rows.reduce((a, r) => a + (r.fares || 0), 0) || null,
         payouts: rows.reduce((a, r) => a + (r.payouts || 0), 0) || null,
         cash: rows.reduce((a, r) => a + (r.cash || 0), 0) || null,
+        statement_net: rows.reduce((a, r) => a + (r.statement_net || 0), 0) || null,
+        statement_cash: rows.reduce((a, r) => a + (r.statement_cash || 0), 0) || null,
+        statement_bank: rows.reduce((a, r) => a + (r.statement_bank || 0), 0) || null,
         tips: rows.reduce((a, r) => a + (r.tips || 0), 0) || null,
         /* And the fleet's income: the best figure per platform, summed. Honest
            only because every row says which of the two kinds of money it is,

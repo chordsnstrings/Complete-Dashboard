@@ -8,7 +8,7 @@ import { describeSettings, setSetting, deleteSetting, loadSettings, recordCreden
 import { win, winDays } from './window.js';
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
 import { responseCache } from './cache.js';
-import { platformFares, platformPayouts, fleetIncome } from './income_sql.js';
+import { platformFares, platformPayouts, platformStatements, fleetIncome } from './income_sql.js';
 import { startWarmer } from './warm.js';
 import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
@@ -343,9 +343,10 @@ app.get('/api/kpis', wrap(async (req, res) => {
      api/income_sql.js picks one figure per platform and sums those — the same
      rule, the same code, as the Revenue page, which is the only way the two
      pages can be relied on to agree. */
-  const [fareRows, payRows] = await Promise.all([
+  const [fareRows, payRows, stmtRows] = await Promise.all([
     q(platformFares(F), p),
     q(platformPayouts(), p),
+    q(platformStatements(), p),
   ]);
   const num = (v) => (v == null ? null : Number(v));
   const byPlat = new Map();
@@ -361,6 +362,11 @@ app.get('/api/kpis', wrap(async (req, res) => {
   for (const y of payRows) Object.assign(plat(y.platform), {
     payouts: num(y.payouts), payout_days: y.payout_days ?? 0,
     payout_drivers: y.drivers, payout_cash: num(y.cash) });
+  for (const t of stmtRows) Object.assign(plat(t.platform), {
+    statement_net: num(t.statement_net), statement_gross: num(t.statement_gross),
+    statement_cash: num(t.statement_cash), statement_bank: num(t.statement_bank),
+    statement_tips: num(t.statement_tips), statement_salik: num(t.statement_salik),
+    statement_days: t.statement_days });
   const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
   const income = fleetIncome([...byPlat.values()], windowDays);
 
@@ -1468,6 +1474,67 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
    something already pending is REFUSED rather than merged, because "queued"
    for a job that will never run is the same lie in a different shape. */
 const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe'];
+/* Statement-day import — the operator's daily ledger, batched.
+   ─────────────────────────────────────────────────────────────────────────
+   The ledger is the only machine-readable source for months the provider APIs
+   no longer serve (Uber earnings before 2026-02-09), and the only source at
+   all for the statement/treasury view of the money — gross, commission, cash
+   in hand, bank transfer — that the reconciliation showed a reader needs
+   BESIDE the bank payout, not instead of it. Rows land in
+   driver_statement_day (sql/schema_v25.sql), never in driver_performance:
+   daily rows would win every day in the payout resolution and silently
+   replace the bank figure with the statement figure.
+
+   Batched because the body parser caps at 256kb; the importer sends ~400 rows
+   per call. Each batch is one multi-row upsert. The final batch should carry
+   done:true, which records the import as a collection run — that is what
+   moves the data version and invalidates the response cache. */
+app.post('/api/import/statement-days', requireAdmin, wrap(async (req, res) => {
+  const { rows = [], source = 'ledger', done = false } = req.body || {};
+  if (!Array.isArray(rows) || rows.length > 500) {
+    return res.status(400).json({ error: 'rows must be an array of at most 500' });
+  }
+  const bad = [];
+  const clean = [];
+  const num = (v) => (v === '' || v == null ? null : Number(v));
+  for (const [i, r] of rows.entries()) {
+    const day = String(r.date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !r.driver || !r.platform || !r.company) {
+      bad.push(i); continue;
+    }
+    clean.push([String(r.platform).toLowerCase(), String(r.company).toLowerCase(),
+      String(r.driver).trim(), day, num(r.gross), num(r.fees), num(r.net), num(r.tips),
+      num(r.salik), num(r.cash), num(r.bank), num(r.network_cash), num(r.unremitted),
+      r.trips === '' || r.trips == null ? null : parseInt(r.trips, 10),
+      source, Boolean(r.pseudo)]);
+  }
+  let written = 0;
+  if (clean.length) {
+    const vals = clean.map((_, i) => `($${i * 16 + 1},$${i * 16 + 2},$${i * 16 + 3},$${i * 16 + 4}::date,`
+      + `$${i * 16 + 5},$${i * 16 + 6},$${i * 16 + 7},$${i * 16 + 8},$${i * 16 + 9},$${i * 16 + 10},`
+      + `$${i * 16 + 11},$${i * 16 + 12},$${i * 16 + 13},$${i * 16 + 14},$${i * 16 + 15},$${i * 16 + 16})`).join(',');
+    const r2 = await pool.query(
+      `INSERT INTO driver_statement_day (platform, fleet_id, driver_name, day, gross, fees, net,
+         tips, salik, cash, bank, network_cash, unremitted, trips, source, pseudo)
+       VALUES ${vals}
+       ON CONFLICT (platform, fleet_id, name_key, day, source) DO UPDATE SET
+         gross = EXCLUDED.gross, fees = EXCLUDED.fees, net = EXCLUDED.net,
+         tips = EXCLUDED.tips, salik = EXCLUDED.salik, cash = EXCLUDED.cash,
+         bank = EXCLUDED.bank, network_cash = EXCLUDED.network_cash,
+         unremitted = EXCLUDED.unremitted, trips = EXCLUDED.trips,
+         driver_name = EXCLUDED.driver_name, pseudo = EXCLUDED.pseudo,
+         ingested_at = now()`, clean.flat());
+    written = r2.rowCount ?? clean.length;
+  }
+  if (done) {
+    await pool.query(
+      `INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, finished_at)
+       SELECT $1, 'ecosine', 'import', 'ok', count(*), now() FROM driver_statement_day WHERE source = $1`,
+      [source]);
+  }
+  res.json({ ok: true, written, rejected: bad.length, rejected_indexes: bad.slice(0, 10) });
+}));
+
 app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
   const mode = JOB_MODES.includes(req.body?.mode) ? req.body.mode : 'incremental';
   const [existing] = await q(
@@ -1661,7 +1728,16 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
   // Said in the response rather than only in a log: a reader deserves to know
   // whether the figures were precomputed or derived on the spot.
   const trendSource = fromRollup ? 'rollup' : 'live';
-  if (!observed.length) return res.json({ months: [], breaks: [], gaps: [], source: trendSource });
+  /* Months that exist only in the imported ledger — the pre-API history the
+     import exists to recover — have no trip rows, so the calendar cannot be
+     built from trips alone. The statement months extend it. */
+  const stmtSpan = await q(
+    `SELECT to_char(min(day), 'YYYY-MM') a, to_char(max(day), 'YYYY-MM') b
+     FROM driver_statement_day WHERE ($1::text IS NULL OR platform = $1)`,
+    [req.query.platform || null]);
+  if (!observed.length && !stmtSpan[0]?.a) {
+    return res.json({ months: [], breaks: [], gaps: [], source: trendSource });
+  }
 
   /* A month with no rows is ambiguous: the fleet may have stood still, or we
      may simply hold no data for it. Treating the two the same produced a
@@ -1669,7 +1745,9 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
      collected at all. Fill the calendar so the gap is visible as a gap. */
   const key = (d) => new Date(d).toISOString().slice(0, 7);
   const byMonth = new Map(observed.map((r) => [key(r.m), r]));
-  const first = new Date(observed[0].m), last = new Date(observed[observed.length - 1].m);
+  const bounds = [...(observed.length ? [key(observed[0].m), key(observed[observed.length - 1].m)] : []),
+    ...(stmtSpan[0]?.a ? [stmtSpan[0].a, stmtSpan[0].b] : [])].sort();
+  const first = new Date(bounds[0]), last = new Date(bounds[bounds.length - 1]);
   /* The first and last months of any record are partial by construction: the
      data starts and ends mid-month. Collection here begins on 21 August, so
      that month holds eleven days and September reads as +344% against it —
@@ -1715,12 +1793,21 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
        FROM (${rollupGrainSql('month')}) g
        WHERE fleet_id = '*' AND platform <> '*'
          AND ($1::text IS NULL OR platform = $1)`;
-  const [platMonths, payMonths] = await Promise.all([
+  const [platMonths, payMonths, stmtMonths] = await Promise.all([
     q(platMonthSql, [req.query.platform || null]),
     q(`SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS m, platform,
               round(sum(earnings)::numeric, 2) AS payouts,
               count(DISTINCT day)::int AS payout_days
        FROM driver_payout_day
+       WHERE ($1::text IS NULL OR platform = $1)
+       GROUP BY 1, 2`, [req.query.platform || null]),
+    /* The statement view per month — the operator's ledger. Rides beside the
+       payout, never inside it; see api/income_sql.js. */
+    q(`SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS m, platform,
+              round(sum(net)::numeric, 2) AS statement_net,
+              round(sum(cash)::numeric, 2) AS statement_cash,
+              round(sum(bank)::numeric, 2) AS statement_bank
+       FROM driver_statement_day
        WHERE ($1::text IS NULL OR platform = $1)
        GROUP BY 1, 2`, [req.query.platform || null]),
   ]);
@@ -1742,6 +1829,10 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
     for (const r of payMonths) Object.assign(cell(r.m, r.platform), {
       payouts: r.payouts == null ? null : Number(r.payouts),
       payout_days: r.payout_days ?? 0 });
+    for (const r of stmtMonths) Object.assign(cell(r.m, r.platform), {
+      statement_net: r.statement_net == null ? null : Number(r.statement_net),
+      statement_cash: r.statement_cash == null ? null : Number(r.statement_cash),
+      statement_bank: r.statement_bank == null ? null : Number(r.statement_bank) });
     for (const [m, inner] of acc) {
       const [y, mo] = m.split('-').map(Number);
       const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
@@ -1780,6 +1871,12 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
           cancel_pct: null, platforms: [], booking_platforms: [],
           accounted: null, accounted_fares: null, accounted_payouts: null,
           accounted_platforms: [], income_missing: false,
+          /* The income spread comes AFTER the nulls: a month with no collected
+             trips can still hold imported statement money — the pre-API ledger
+             months are exactly that — and dropping it here made the history
+             the import exists to recover invisible on the one chart that
+             shows history. */
+          ...inc,
           no_data: true, drivers_known: false, partial_month: false, days_in_record: null });
   }
 

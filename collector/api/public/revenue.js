@@ -49,7 +49,11 @@ export async function renderRevenue(root) {
     { label: 'Fares charged', value: t.fares != null ? money(t.fares) : '—',
       sub: `gross, over the ${fmt(t.priced_bookings)} bookings that report one` },
     { label: 'Payouts reported', value: t.payouts != null ? money(t.payouts) : '—',
-      sub: 'net of platform commission — a different quantity, never added to the fares' },
+      sub: 'what the platforms wired to the bank — net of commission AND of cash already collected' },
+    { label: 'Statement net', value: t.statement_net != null ? money(t.statement_net) : '—',
+      sub: t.statement_net != null
+        ? 'gross minus commission, from the operator ledger — the "what did we earn" figure'
+        : 'no ledger rows in this window' },
     { label: 'Cash collected', value: t.cash != null ? money(t.cash) : '—',
       sub: 'already in the driver’s hand, owed back to the fleet' },
     { label: 'Tips', value: t.tips != null ? money(t.tips) : '—',
@@ -79,6 +83,12 @@ export async function renderRevenue(root) {
       // bookings, and three days of it on a thirty-day window is not the month.
       render: (r) => (r.payouts == null ? '<span class="dim">not reported</span>'
         : `${money(r.payouts)}<span class="dim"> · ${r.payout_days || 0} of ${d.window_days} days</span>`) },
+    { label: 'Statement (net)', key: 'statement_net', num: true,
+      /* The third view of the money — the operator's daily ledger. Differs
+         from the payout by the cash drivers hold plus tips and tolls; a 13%
+         difference in a heavy-cash month is normal, not a bug. */
+      render: (r) => (r.statement_net == null ? '<span class="dim">no ledger</span>'
+        : `${money(r.statement_net)}<span class="dim"> · cash ${r.statement_cash != null ? money(r.statement_cash) : '—'}</span>`) },
     { label: 'Per km', key: 'revenue_per_km', num: true,
       render: (r) => (r.revenue_per_km != null
         ? `${money(r.revenue_per_km, 'AED', 2)}<span class="dim"> over ${fmt(r.priced_km)} km</span>`
@@ -88,9 +98,12 @@ export async function renderRevenue(root) {
     { label: 'Why', key: 'basis_note', render: (r) => `<span class="wrap dim">${esc(r.basis_note)}</span>` },
   ]));
   p.body.append(el('p', 'cap',
-    'A fare is what the rider was charged. A payout is what the platform says it paid the fleet, '
-    + 'after its own commission. They are different money and this page never adds them together — '
-    + '"accounted for" above takes the better of the two per channel and says which it used.'));
+    'Three views of the same money, never added together. A fare is what the rider was charged. '
+    + 'A statement net is gross minus the platform’s commission — what the fleet EARNED, from the '
+    + 'operator’s daily ledger. A payout is what actually reached the bank: the statement net minus '
+    + 'cash the drivers already collected, plus tips and toll reimbursements. Reconciled on July 2026 '
+    + 'these agree to 0.7% once the cash is accounted for — a payout below the statement is drivers '
+    + 'holding cash, not missing money. "Accounted for" takes fares or payout per channel and says which.'));
   host.append(p.panel);
 
   /* ── what is missing, and what would fix it ──────────────────────────── */

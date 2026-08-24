@@ -240,7 +240,10 @@ V.overview = async (root) => {
       k.accounted
         ? `AED ${fmt(k.accounted_fares || 0)} in fares · AED ${fmt(k.accounted_payouts || 0)} in `
           + `platform payouts · ${(k.accounted_platforms || []).join(', ') || 'no platform'}`
-        : 'no fare and no payout statement in this range'],
+          + (k.statement_net ? ` · ledger net AED ${fmt(k.statement_net)}` : '')
+        : (k.statement_net
+          ? `no fare or payout collected — the operator ledger records AED ${fmt(k.statement_net)} net`
+          : 'no fare and no payout statement in this range')],
     ['Completion', k.completion_pct != null ? k.completion_pct + '%' : '—', `${k.cancel_pct ?? 0}% cancelled`],
     ['Vehicles', fmt(k.vehicles), 'with a trip in this range'],
     ['Safety alerts', fmt(k.alerts), 'harsh-driving events'],
@@ -916,6 +919,15 @@ V.finance = async (root) => {
         ? `${(k.payout_platforms || []).join(', ')} · ${fmt(k.payout_days)} day(s) of statements, `
           + `${fmt(k.payout_drivers)} driver(s)`
         : 'no payout statement covers this range' },
+    /* The statement view beside the bank view. What the fleet EARNED (gross
+       minus commission, from the operator's daily ledger) vs what REACHED the
+       bank (the payout — net of the cash drivers already hold, plus tips and
+       tolls). Reconciled to 0.7% on July 2026; a payout below the statement is
+       drivers holding cash, not missing money. */
+    { label: 'Ledger net (statement)', value: money(k.statement_net),
+      sub: k.statement_net != null
+        ? `gross − commission, from the operator ledger · ${(k.statement_platforms || []).join(', ')}`
+        : 'no ledger rows cover this range' },
     { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
       sub: k.priced_trips ? `over ${fmt(k.priced_trips)} priced trips` : 'no fares in this range' },
     { label: 'Revenue per km', value: money(k.revenue_per_km, 'AED', 2),
