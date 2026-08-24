@@ -51,6 +51,31 @@ app.use(compression({
 }));
 app.use(express.json({ limit: '256kb' }));
 
+/* Not ready is a state, not a failure — and it must not look like either a
+   healthy answer or a dead process.
+
+   Boot used to be migrate().then(listen): nothing bound the port until every
+   migration had applied. Correct against the failure it was written for (a
+   broken schema serving 500s behind a green check), and fatal against a slower
+   one: with the database busy — a collection run, a rollup, a cache-warm sweep
+   — idempotent no-op migrations took over a minute, the platform's readiness
+   probe found a closed port eleven times, declared the deploy failed, and
+   rolled the app back to the previous commit. The deploy did not fail; it was
+   not finished being measured.
+
+   So the port binds immediately and this gate answers 503 (with Retry-After)
+   on every /api route except /api/health until migrate() resolves. Health
+   answers 200 from the moment the process is up — it means "the process is
+   alive", and says migrating:true while that is the whole truth. A failed
+   migration still exits the process: fail-closed is unchanged, only fail-slow
+   stopped being read as failure. */
+let migrationsDone = false;
+app.use((req, res, next) => {
+  if (migrationsDone || !req.path.startsWith('/api/') || req.path === '/api/health') return next();
+  res.set('retry-after', '5');
+  return res.status(503).json({ error: 'starting', detail: 'migrations are still applying — retry shortly' });
+});
+
 /* Read responses are cached against a data version, not a clock — see
    api/cache.js. Registered before the routes so a hit never reaches one, and
    after the body parser so a POST is still parsed normally on its way past.
@@ -176,7 +201,7 @@ const FB = `${F} AND is_booking`;
 /* Liveness: the process is up and the event loop is turning. Nothing more —
    a liveness probe that touches the database restarts a healthy container
    every time the database hiccups. */
-app.get('/api/health', (_, res) => res.json({ ok: true }));
+app.get('/api/health', (_, res) => res.json({ ok: true, migrating: !migrationsDone }));
 
 /* Readiness: can this instance actually answer? A green health check in front
    of a missing view is worse than a red one, because it routes users to it. */
@@ -2224,14 +2249,17 @@ app.get('*', (_, res) => {
 });
 
 const port = process.env.PORT || 8080;
-/* Fail closed. This used to `.catch(log).finally(listen)`, which served traffic
-   on a half-built schema behind a health check that returned ok unconditionally
-   — so a failed schema_v7 meant `trip_norm` did not exist and eleven endpoints
-   500'd while the platform reported the app healthy and routed users to it. */
-let server;
+/* Listen first; serve data only once the schema is current. The 503 gate above
+   holds every data route until migrate() resolves, so the failure this order
+   used to invite — a half-built schema behind a green check — cannot recur,
+   while the failure the old order caused (a busy database reading as a failed
+   deploy) cannot either. A migration that REJECTS still exits: better a dead
+   process the platform replaces than a live one lying about its schema. */
+const server = app.listen(port, () => log.info('api', `listening on :${port} (migrations pending)`));
 migrate()
-  .then(() => { server = app.listen(port, () => {
-    log.info('api', `listening on :${port}`);
+  .then(() => {
+    migrationsDone = true;
+    log.info('api', 'migrations complete — serving');
     /* Warm the cache in the background as soon as the data moves, so the first
        reader after a collection is not the one who pays for the aggregate.
        See api/warm.js. WARM=off to leave it cold. */
@@ -2250,5 +2278,5 @@ migrate()
       enabled: String(process.env.WARM || '').toLowerCase() !== 'off'
         && String(process.env.CACHE || '').toLowerCase() !== 'off',
     });
-  }); })
+  })
   .catch((e) => { log.error('api', 'migrate failed — refusing to serve', { err: String(e) }); process.exit(1); });

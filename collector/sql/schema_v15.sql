@@ -16,6 +16,31 @@
 -- Two changes: a partial unique index for the NULL-window rules so they upsert
 -- like everything else, and a purge of the copies already accumulated.
 
+-- The purge runs BEFORE the indexes, and unconditionally — both the hard way.
+--
+-- This file originally created the indexes first and guarded the purge behind
+-- schema_once. A migration file is one implicit transaction: the index failed
+-- on the duplicates it was meant to prevent, the whole file rolled back —
+-- purge included — and the guard meant nothing because the INSERT rolled back
+-- with it. Result: "could not create unique index insight_nullwindow_uniq" on
+-- every boot since this file shipped, no index, and the duplicate verdicts it
+-- describes still accumulating forty-eight a day in production while the
+-- migration that fixes them reported having tried.
+--
+-- Deleting older copies is idempotent, so it needs no run-once guard: on a
+-- database already deduped it deletes nothing.
+DELETE FROM insight a USING insight b
+WHERE a.code = b.code
+  AND a.entity_type IS NOT DISTINCT FROM b.entity_type
+  AND a.entity_id   IS NOT DISTINCT FROM b.entity_id
+  AND (
+    (a.window_start IS NULL AND a.window_end IS NULL
+     AND b.window_start IS NULL AND b.window_end IS NULL)
+    OR a.entity_type = 'fleet'
+  )
+  AND (a.computed_at < b.computed_at
+       OR (a.computed_at = b.computed_at AND a.id < b.id));
+
 CREATE UNIQUE INDEX IF NOT EXISTS insight_nullwindow_uniq
   ON insight (code, entity_type, entity_id)
   WHERE window_start IS NULL AND window_end IS NULL;
@@ -29,21 +54,4 @@ CREATE UNIQUE INDEX IF NOT EXISTS insight_fleet_verdict_uniq
   ON insight (code, entity_type, entity_id)
   WHERE entity_type = 'fleet';
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM schema_once WHERE name = 'v15_dedupe_insights') THEN
-    -- Keep the most recent copy of each finding; delete the rest.
-    DELETE FROM insight a USING insight b
-    WHERE a.code = b.code
-      AND a.entity_type IS NOT DISTINCT FROM b.entity_type
-      AND a.entity_id   IS NOT DISTINCT FROM b.entity_id
-      AND (
-        (a.window_start IS NULL AND a.window_end IS NULL
-         AND b.window_start IS NULL AND b.window_end IS NULL)
-        OR a.entity_type = 'fleet'
-      )
-      AND (a.computed_at < b.computed_at
-           OR (a.computed_at = b.computed_at AND a.id < b.id));
-    INSERT INTO schema_once (name) VALUES ('v15_dedupe_insights');
-  END IF;
-END $$;
+

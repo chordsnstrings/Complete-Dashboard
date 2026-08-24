@@ -192,5 +192,59 @@ check('a woff2 is not re-compressed', font.enc === null, `content-encoding: ${fo
 check('and arrives whole', font.bytes === fontRaw, `${font.bytes} of ${fontRaw} bytes`);
 srv.close();
 
+console.log('\nboot: the port opens before the schema settles');
+
+/* A deploy died in production because migrations queued behind a busy database:
+   nothing listened until they finished, the readiness probe found a closed port
+   eleven times, and the platform rolled back a commit with nothing wrong in it.
+   The port must bind first, health must answer immediately, and every data
+   route must refuse — 503, not 200, not a hang — until migrate() resolves. */
+{
+  const boot = express();
+  let migrationsDone = false;
+  boot.use((req2, res2, next2) => {
+    if (migrationsDone || !req2.path.startsWith('/api/') || req2.path === '/api/health') return next2();
+    res2.set('retry-after', '5');
+    return res2.status(503).json({ error: 'starting' });
+  });
+  boot.get('/api/health', (_q, r2) => r2.json({ ok: true, migrating: !migrationsDone }));
+  boot.get('/api/kpis', (_q, r2) => r2.json({ trips: 1 }));
+  boot.get('/', (_q, r2) => r2.send('<html>'));
+  const bs = boot.listen(0);
+  await new Promise((r2) => bs.once('listening', r2));
+  const bBase = `http://127.0.0.1:${bs.address().port}`;
+  const g = async (path) => { const r2 = await fetch(`${bBase}${path}`); return { status: r2.status, body: await r2.json().catch(() => null), retry: r2.headers.get('retry-after') }; };
+
+  const h1 = await g('/api/health');
+  check('health answers 200 while migrations run', h1.status === 200 && h1.body?.migrating === true,
+    JSON.stringify(h1));
+  const d1 = await g('/api/kpis');
+  check('a data route refuses with 503 and says when to retry',
+    d1.status === 503 && d1.retry === '5', JSON.stringify(d1));
+  const s1 = await fetch(`${bBase}/`);
+  check('the static shell is not gated — a reader can load the page while it waits',
+    s1.status === 200);
+
+  migrationsDone = true;
+  const h2 = await g('/api/health');
+  const d2 = await g('/api/kpis');
+  check('and everything serves once migrations resolve',
+    h2.body?.migrating === false && d2.status === 200, JSON.stringify([h2.body, d2.status]));
+  bs.close();
+}
+
+/* The gate in the real server has to match what was just proven: same predicate,
+   health exempted by its full path, everything else held. */
+const bootSrc = readFileSync('api/server.js', 'utf8');
+/* The CALL, at the start of its line — 'migrate()' also appears in the prose
+   explaining the gate, several hundred lines earlier. */
+check('server.js binds the port before migrate()',
+  bootSrc.indexOf('app.listen(port') < bootSrc.indexOf('\nmigrate()'),
+  'migrate() still runs first');
+check('and gates /api on the migration flag',
+  /migrationsDone \|\| !req\.path\.startsWith\('\/api\/'\) \|\| req\.path === '\/api\/health'/.test(bootSrc));
+check('and a failed migration still kills the process',
+  /migrate failed — refusing to serve.*process\.exit\(1\)/.test(bootSrc));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
