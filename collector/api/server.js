@@ -1436,18 +1436,45 @@ app.get('/api/coverage', wrap(async (_, res) => {
      much work sits before it. A page can then say "6,231 bookings we hold no
      money for" instead of drawing a flat line. */
   const byPlatform = new Map(earnings.map((e) => [e.platform, e]));
-  const gaps = [];
-  for (const t of trips) {
-    const e = byPlatform.get(t.platform);
-    if (!e || !t.from_ts) continue;
-    const tripFrom = new Date(t.from_ts).toISOString().slice(0, 10);
-    const payFrom = new Date(e.from_day).toISOString().slice(0, 10);
-    if (payFrom <= tripFrom) continue;
-    const [{ unpaid }] = await q(
-      `SELECT count(*)::int unpaid FROM trip
-       WHERE platform = $1 AND (requested_at AT TIME ZONE 'Asia/Dubai')::date < $2::date`,
-      [t.platform, payFrom]);
-    gaps.push({ platform: t.platform, trips_from: tripFrom, earnings_from: payFrom, bookings_before: unpaid });
+  /* One query for every platform's gap, not one query per platform in series.
+     ─────────────────────────────────────────────────────────────────────────
+     This loop awaited a count over the whole trip table once per platform, and
+     each of those counts was written so it could not use an index: comparing
+     `(requested_at AT TIME ZONE 'Asia/Dubai')::date` to a bound is a function
+     of the column, so Postgres reads every row to evaluate it. Four platforms
+     therefore meant four sequential full scans, and the endpoint took twenty
+     seconds on a database doing nothing else — which is why the Data sources
+     page answered the platform's gateway with a 504 during a backfill.
+
+     Both halves are fixed: the bounds are pushed into one pass over the table,
+     and the predicate compares the TIMESTAMP against a converted bound, which
+     trip_platform_requested_idx can serve. The Dubai-day arithmetic is
+     unchanged — midnight Dubai is the same instant either way round; only
+     which side of the comparison is transformed has moved. */
+  const wanted = trips
+    .map((t) => {
+      const e = byPlatform.get(t.platform);
+      if (!e || !t.from_ts || !e.from_day) return null;
+      const tripFrom = new Date(t.from_ts).toISOString().slice(0, 10);
+      const payFrom = new Date(e.from_day).toISOString().slice(0, 10);
+      return payFrom <= tripFrom ? null : { platform: t.platform, tripFrom, payFrom };
+    })
+    .filter(Boolean);
+  let gaps = [];
+  if (wanted.length) {
+    const counts = await q(
+      `SELECT t.platform, count(*)::int unpaid
+         FROM trip t
+         JOIN unnest($1::text[], $2::date[]) AS b(platform, before)
+           ON b.platform = t.platform
+        WHERE t.requested_at < (b.before::timestamp AT TIME ZONE 'Asia/Dubai')
+        GROUP BY 1`,
+      [wanted.map((w) => w.platform), wanted.map((w) => w.payFrom)]);
+    const byPl = new Map(counts.map((c) => [c.platform, c.unpaid]));
+    gaps = wanted.map((w) => ({
+      platform: w.platform, trips_from: w.tripFrom, earnings_from: w.payFrom,
+      bookings_before: byPl.get(w.platform) ?? 0,
+    }));
   }
   res.json({ trips, telemetry, alerts, ledger, earnings, earnings_gaps: gaps });
 }));

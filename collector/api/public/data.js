@@ -37,13 +37,49 @@ export const state = {
    which is the common case and the reason this does not flicker.
 
    See api/public/swr.js for what is never cached and why. */
+/* A gateway timeout is not a dead end — usually it is a race we can win.
+   ─────────────────────────────────────────────────────────────────────────
+   The platform's gateway gives up on a slow request, but our server does not:
+   it finishes the query, stores the answer in the response cache, and the next
+   request for the same URL is served from memory in milliseconds. So a 502/503/
+   504 on a GET is worth exactly one more try, a moment later — the retry
+   usually lands on the answer the abandoned request just finished computing.
+
+   Only for GETs without options: a POST is not safe to repeat, and this must
+   never turn one collection trigger into two. */
+const GATEWAY = new Set([502, 503, 504]);
+async function fetchWithRetry(path, opts) {
+  const r = await fetch(path, opts);
+  if (r.ok || opts || !GATEWAY.has(r.status)) return r;
+  await new Promise((res) => setTimeout(res, 1200));
+  return fetch(path, opts);
+}
+
+/* What the reader is told when it fails anyway. The gateway answers with a
+   full HTML error page, and printing the first 160 characters of it put
+   `504 <!DOCTYPE html> <html> <head> <meta name="viewport"…` on screen where a
+   sentence belonged — the reader learns nothing and cannot tell a slow query
+   from a broken one. */
+async function failure(r) {
+  const text = await r.text().catch(() => '');
+  if (GATEWAY.has(r.status) || /^\s*<(!doctype|html)/i.test(text)) {
+    return `${r.status} — the server took too long to answer. It is usually still `
+      + 'computing this; try again in a moment.';
+  }
+  try {
+    const j = JSON.parse(text);
+    if (j?.error) return `${r.status} ${j.error}${j.detail ? `: ${j.detail}` : ''}`;
+  } catch { /* not JSON — fall through to the raw text */ }
+  return `${r.status} ${text.slice(0, 160)}`;
+}
+
 export const api = async (path, opts) => {
   const method = (opts?.method || 'GET').toUpperCase();
   const held = method === 'GET' && !opts ? swr.get(path) : null;
 
   const live = (async () => {
-    const r = await fetch(path, opts);
-    if (!r.ok) throw new Error(`${r.status} ${(await r.text()).slice(0, 160)}`);
+    const r = await fetchWithRetry(path, opts);
+    if (!r.ok) throw new Error(await failure(r));
     const body = await r.json();
     if (method === 'GET' && !opts) {
       const { changed } = swr.put(path, body);

@@ -16,6 +16,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { responseCache } from '../api/cache.js';
 import { startWarmer } from '../api/warm.js';
+import { readFileSync, readdirSync } from 'node:fs';
 
 const db = new PGlite();
 let pass = 0, fail = 0;
@@ -92,6 +93,62 @@ const n = seen.length;
 await new Promise((res) => setTimeout(res, 100));
 check('disabled, it warms nothing', seen.length === n);
 off.stop();
+
+console.log('\nit warms the keys the pages actually ask for');
+
+/* The bug this exists to prevent, found on a 504.
+   ─────────────────────────────────────────────────────────────────────────
+   The response cache keys on the full URL, so /api/coverage and
+   /api/coverage?from=…&to=… are two different entries. Five endpoints answer
+   a question with no window — how much data do we hold, what does the whole
+   record look like — and the UI calls them BARE. They were in the windowed
+   list, so every pass warmed four keys nobody would ever request and left the
+   one key every reader hits permanently cold. /api/coverage is a twenty-second
+   query; a reader opening Data sources during a backfill waited on it until
+   the platform's gateway gave up.
+
+   Grepping the UI is the check, because the failure is a DISAGREEMENT between
+   two files: warm.js is right only relative to how data.js asks. */
+{
+  const warmSrc = readFileSync('api/warm.js', 'utf8');
+  const bare = [...warmSrc.matchAll(/const BARE_PATHS = \[([^\]]+)\]/gs)]
+    .flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]));
+  const windowed = [...warmSrc.matchAll(/const PATHS = \[([^\]]+)\]/gs)]
+    .flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]));
+  check('the warmer declares both kinds of key', bare.length > 0 && windowed.length > 0);
+
+  /* How each path is CALLED in the UI: api() sends no window, q()/qAll() do. */
+  const ui = readdirSync('api/public').filter((f) => f.endsWith('.js'))
+    .map((f) => readFileSync(`api/public/${f}`, 'utf8')).join('\n');
+  const calledBare = (path) => new RegExp(`\\bapi\\('${path.replace(/[/?]/g, '\\$&')}'`).test(ui);
+  const calledWindowed = (path) => new RegExp(`\\b(?:q|qAll)\\('${path.replace(/[/?]/g, '\\$&')}'`).test(ui);
+
+  /* Called bare ⇒ warmed bare, whether or not it is ALSO called with a window.
+     The first version of this check asked "is it called bare and never
+     windowed", and /api/coverage — the endpoint that caused the 504 — is
+     called both ways, so the check passed while the bare key stayed cold.
+     Each way of asking is its own cache key; every key a page requests has to
+     be warmed. */
+  const allWarmed = new Set([...bare, ...windowed]);
+  const miswarmed = [...allWarmed].filter((p) => calledBare(p) && !bare.includes(p));
+  check('every endpoint the UI asks for bare is warmed bare',
+    miswarmed.length === 0,
+    `${miswarmed.join(', ')} — the UI asks bare, so that key is never warmed`);
+  const misWindowed = [...allWarmed].filter((p) => calledWindowed(p) && !windowed.includes(p));
+  check('and every one it asks for with a window is warmed with one',
+    misWindowed.length === 0, misWindowed.join(', '));
+
+  const overwarmed = bare.filter((p) => !calledBare(p));
+  check('and nothing is warmed bare that the UI never asks for bare',
+    overwarmed.length === 0, overwarmed.join(', '));
+
+  /* And the pass really does request them without a window. */
+  const paths = seen.map((u) => u.split('127.0.0.1:')[1]?.replace(/^\d+/, '') || u);
+  for (const b of bare) {
+    check(`${b} is warmed with no window`, paths.includes(b),
+      paths.filter((x) => x.startsWith(b)).slice(0, 2).join(' '));
+  }
+}
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

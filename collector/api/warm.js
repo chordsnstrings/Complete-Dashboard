@@ -35,12 +35,34 @@ const dubaiDay = (d) => new Intl.DateTimeFormat('en-CA', {
    nobody has opened yet. These are the list views and the headline numbers —
    the ones every session begins with, and the slowest of them. */
 const PATHS = [
-  '/api/kpis', '/api/trips/daily', '/api/mix?by=product', '/api/platforms',
+  '/api/kpis', '/api/trips/daily', '/api/mix?by=product',
   '/api/drivers/leaderboard', '/api/drivers/directory', '/api/roster',
   '/api/vehicles', '/api/vehicles/directory',
-  '/api/trend/monthly', '/api/forecast', '/api/retention', '/api/capacity',
-  '/api/playbook', '/api/revenue', '/api/insights', '/api/compliance/drivers',
-  '/api/alerts/by-driver', '/api/alerts/by-vehicle', '/api/coverage',
+  '/api/forecast', '/api/retention', '/api/capacity',
+  '/api/playbook', '/api/revenue',
+  '/api/alerts/by-driver', '/api/alerts/by-vehicle',
+  /* Also in BARE_PATHS, and deliberately in both: Data sources asks for the
+     whole record and Collection gaps asks about a window, so the endpoint has
+     two live cache keys and warming either alone leaves a page cold. */
+  '/api/coverage',
+];
+
+/* Warmed WITHOUT a window, because that is how the pages ask for them.
+   ─────────────────────────────────────────────────────────────────────────
+   The cache keys on the full URL, so `/api/coverage?from=…&to=…` and
+   `/api/coverage` are two entries. These five endpoints answer a question that
+   has no window — how much data do we hold, what does the whole record look
+   like — and the UI calls them bare. They sat in the windowed list, so every
+   pass warmed four keys nobody would ever request and left the one key every
+   reader hits permanently cold.
+
+   That is the shape of the 504 on the Data sources page: /api/coverage is a
+   twenty-second query, it had never once been warm, and a reader opening that
+   page during a backfill waited on the live query until the platform's gateway
+   gave up. Warm what is asked for, not what is convenient to loop over. */
+const BARE_PATHS = [
+  '/api/platforms', '/api/trend/monthly', '/api/insights',
+  '/api/compliance/drivers', '/api/coverage',
 ];
 
 // The windows the UI opens with. 30 is the default; 7 and 90 are one click away.
@@ -78,20 +100,28 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
     const t0 = Date.now();
     let ok = 0; let failed = 0;
     try {
+      const hit = async (url) => {
+        try {
+          const r = await fetch(url, { headers: { 'x-warm': '1' } });
+          r.ok ? ok++ : failed++;
+          await r.arrayBuffer();      // drain, or the socket stays open
+        } catch { failed++; }
+        /* A breath between requests. Without it this is a burst of sixty
+           aggregates against a database somebody may be reading a page
+           from, which trades one slow first load for a slow minute. */
+        await new Promise((res) => setTimeout(res, 150));
+      };
+      /* The windowless ones first: they are the whole-history aggregates, the
+         slowest queries here, and the ones a cold reader waits longest on. */
+      for (const path of BARE_PATHS) {
+        if (stopped) return;
+        await hit(`http://127.0.0.1:${port}${path}`);
+      }
       for (const days of WINDOWS) {
         for (const path of PATHS) {
           if (stopped) return;
           const sep = path.includes('?') ? '&' : '?';
-          const url = `http://127.0.0.1:${port}${path}${sep}${windowQs(days)}`;
-          try {
-            const r = await fetch(url, { headers: { 'x-warm': '1' } });
-            r.ok ? ok++ : failed++;
-            await r.arrayBuffer();      // drain, or the socket stays open
-          } catch { failed++; }
-          /* A breath between requests. Without it this is a burst of sixty
-             aggregates against a database somebody may be reading a page
-             from, which trades one slow first load for a slow minute. */
-          await new Promise((res) => setTimeout(res, 150));
+          await hit(`http://127.0.0.1:${port}${path}${sep}${windowQs(days)}`);
         }
       }
       log.info(SRC, 'cache warmed', { ok, failed, ms: Date.now() - t0 });
