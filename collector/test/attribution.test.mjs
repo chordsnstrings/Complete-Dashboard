@@ -190,6 +190,26 @@ check('a finer report displaces the coarse one for the days it covers',
   near(bolt[0].e, 2600 + 500) && bolt[0].days === 30,
   `${bolt[0].e} over ${bolt[0].days} days`);
 
+/* A roster snapshot is not a payout. The Bolt collector writes "who is on the
+   books" into driver_performance with a rating and no money, and a backfill
+   stamped each one with its whole year — 365 rows of nulls per driver per run,
+   which on the live table was most of the expansion and none of the meaning. */
+await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, rating)
+         VALUES ('bolt','ecosine','d-roster','2025-09-01','2026-09-01', 4.8)`);
+const [{ roster }] = await q(
+  `SELECT count(*)::int roster FROM driver_payout_day WHERE driver_ext_id = 'd-roster'`);
+check('a row measuring nothing is not spread over a year of days',
+  roster === 0, `${roster} day rows`);
+
+/* But hours without money ARE a measurement, and the driver page's utilisation
+   figures are summed from them. Dropping every row without `earnings` would
+   have taken those with it. */
+await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, hours_online)
+         VALUES ('yango','ecosine','d-hours','2026-09-07','2026-09-13', 42)`);
+const [{ hrs }] = await q(
+  `SELECT round(sum(hours_online)::numeric,2) hrs FROM driver_payout_day WHERE driver_ext_id = 'd-hours'`);
+check('a period reporting hours and no money is still spread', Number(hrs) === 42, String(hrs));
+
 /* The choice has to be stable. Two reads of the same unchanged data returning
    different numbers is worse than a number that is merely wrong, because
    nobody can tell which reading to act on. */

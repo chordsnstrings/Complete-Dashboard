@@ -54,6 +54,19 @@ SELECT DISTINCT ON (p.platform, p.driver_ext_id, d.day)
        p.currency, p.ingested_at
 FROM driver_performance p
 CROSS JOIN LATERAL generate_series(p.period_start, p.period_end, interval '1 day') AS d(day)
+/* Rows that measure nothing are not spread over anything. The Bolt collector
+   writes a ROSTER snapshot into this table — who is on the books, with a rating
+   and no money, no hours and no trips — and a backfill stamped it with its
+   whole year, so each one expanded to 365 rows carrying nulls. On the live
+   table that was the majority of the expansion and all of it was noise: a null
+   contributes nothing to any sum and cannot win a day it has no measure for.
+
+   Every measure, not earnings alone: a period reporting hours and no money is
+   a real observation, and dropping it would take the driver-page utilisation
+   figures with it. */
+WHERE p.earnings IS NOT NULL OR p.cash_earnings IS NOT NULL
+   OR p.trips IS NOT NULL OR p.distance_km IS NOT NULL
+   OR p.hours_online IS NOT NULL OR p.hours_on_trip IS NOT NULL
 ORDER BY p.platform, p.driver_ext_id, d.day,
          /* Finest measurement first, then most recently collected. Both keys
             are needed: without the first a month-long summary would displace
