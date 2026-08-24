@@ -43,6 +43,9 @@ export const SETTING_DEFS = [
   { key: 'UBER_ORG_ENCRYPTED', group: 'Uber', label: 'Org id (encrypted, REST)', secret: false },
   { key: 'UBER_ORG_UUID', group: 'Uber', label: 'Org uuid (GraphQL/reports)', secret: false },
   { key: 'UBER_WEB_COOKIE', group: 'Uber', label: 'Supplier web session cookie', secret: true, hint: 'Expires — re-paste from a logged-in supplier.uber.com session' },
+  { key: 'UBER_ORG_UUID_EGARI', group: 'Uber', label: 'Org uuid — Egari', secret: false },
+  { key: 'UBER_ORG_ENCRYPTED_EGARI', group: 'Uber', label: 'Org id (encrypted, REST) — Egari', secret: false },
+  { key: 'UBER_WEB_COOKIE_EGARI', group: 'Uber', label: 'Supplier web session cookie — Egari', secret: true, hint: 'Expires — re-paste from a logged-in supplier.uber.com session for the Egari org' },
 
   { key: 'YANGO_PARK_ID', group: 'Yango', label: 'Park id', secret: false },
   { key: 'YANGO_API_KEY', group: 'Yango', label: 'API key', secret: true },

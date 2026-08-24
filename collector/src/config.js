@@ -46,7 +46,22 @@ export const config = {
   },
 
   get uber() {
+    /* Two Uber businesses, one collector. Each fleet is a separate Uber org
+       with its own supplier session — the reconciliation against the
+       operator's own ledger showed Egari as ~27% of Uber trips and a third of
+       the money, all invisible while only Ecosine's org was configured. An org
+       missing either its uuid or its cookie is simply not collected (and the
+       run for it never starts), so a half-pasted credential cannot produce a
+       half-collected fleet. The unsuffixed keys stay Ecosine's: they predate
+       the second fleet and every probe reads them. */
+    const orgs = [
+      { fleet: 'ecosine', orgUuid: get('UBER_ORG_UUID'), org: get('UBER_ORG_ENCRYPTED'),
+        webCookie: get('UBER_WEB_COOKIE') },
+      { fleet: 'egari', orgUuid: get('UBER_ORG_UUID_EGARI'), org: get('UBER_ORG_ENCRYPTED_EGARI'),
+        webCookie: get('UBER_WEB_COOKIE_EGARI') },
+    ].filter((o) => o.orgUuid && o.webCookie);
     return {
+      orgs,
       org: get('UBER_ORG_ENCRYPTED'),
       orgUuid: get('UBER_ORG_UUID'),
       oauth: {

@@ -23,8 +23,14 @@ export async function uberOAuthToken() {
   return cached.token;
 }
 
-// Headers for the supplier web session (reports + graphql).
-export function uberWebHeaders() {
-  if (!config.uber.webCookie) throw new Error('UBER_WEB_COOKIE not set (session expired?)');
-  return { 'content-type': 'application/json', 'x-csrf-token': 'x', cookie: config.uber.webCookie };
+// Headers for the supplier web session (reports + graphql). Each org carries
+// its own session; called without one it falls back to the legacy single-org
+// cookie so the probes keep working unchanged.
+export function uberWebHeaders(org = null) {
+  const cookie = org?.webCookie || config.uber.webCookie;
+  if (!cookie) {
+    const which = org?.fleet ? ` for ${org.fleet}` : '';
+    throw new Error(`Uber web cookie${which} not set (session expired?)`);
+  }
+  return { 'content-type': 'application/json', 'x-csrf-token': 'x', cookie };
 }

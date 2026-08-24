@@ -57,8 +57,8 @@ check('the earner breakdown does not ask for a pagination field this response ha
 check('and asks for drivers by name rather than paging past the cap',
   /driverListOrPageOptions: 'Driver_List'/.test(uber) && /driverList: drivers\.slice\(/.test(uber));
 check('taking the driver ids from both places they land, not just the roster',
-  /FROM driver_platform_state WHERE platform = 'uber'/.test(uber)
-  && /UNION SELECT driver_ext_id FROM trip WHERE platform = 'uber'/.test(uber));
+  /FROM driver_platform_state\s+WHERE platform = 'uber'/.test(uber)
+  && /UNION SELECT driver_ext_id FROM trip\s+WHERE platform = 'uber'/.test(uber));
 check('a rejected mode falls back rather than losing the data it was managing',
   /listMode = false/.test(uber) && /driverListOrPageOptions: 'Page_Options'/.test(uber));
 check('and each window records how many of the fleet actually answered',
@@ -523,6 +523,43 @@ check('and a thrown bolt run still reports what had already failed',
      "we retried and it failed every time" would look the same. */
   check('either way the window records the error rather than swallowing it',
     /err = r\.err;/.test(uberSrc));
+}
+
+console.log('\nuber: both fleets are collected, or the absence is loud');
+
+/* The operator's own ledger put Egari at ~27% of Uber trips and a third of the
+   money; the collector was built against one org and every number the
+   dashboard showed for "uber" was silently Ecosine-only. These pin the shape
+   of the fix: a second org is a first-class pass with its own run row, never a
+   merge into the first one's — and a missing credential drops the ORG, not a
+   random half of its data. */
+{
+  const cfg = readFileSync('src/config.js', 'utf8');
+  check('config lists uber orgs per fleet',
+    /fleet: 'ecosine'.*UBER_ORG_UUID'/s.test(cfg) && /fleet: 'egari'.*UBER_ORG_UUID_EGARI/s.test(cfg));
+  check('an org missing either credential is not collected at all',
+    /\.filter\(\(o\) => o\.orgUuid && o\.webCookie\)/.test(cfg),
+    'a half-pasted credential would produce a half-collected fleet');
+
+  const uberSrc = src('uber.js');
+  check('collect runs once per configured org', /for \(const o of \(config\.uber\.orgs/.test(uberSrc));
+  check('each fleet logs its own run row', /logRun\(\{ source: SRC, fleet_id: o\.fleet/.test(uberSrc),
+    'a dead Egari cookie must read as Egari failing, not as half the numbers missing');
+  check('trips and earnings are stamped with the org being collected, not a constant',
+    !/fleet_id: config\.uber\.fleet/.test(uberSrc));
+  check('the earnings driver list is scoped to the fleet being asked about',
+    /fleet_id = \$1 OR fleet_id IS NULL/.test(uberSrc));
+  check('the org pointer is cleared even when a fleet fails',
+    /finally \{\s*cur = null;/.test(uberSrc),
+    'a thrown pass would leave the next probe reading the wrong org');
+
+  const auth = readFileSync('src/auth/uber.js', 'utf8');
+  check('the web session is per org, with the legacy cookie as fallback',
+    /uberWebHeaders\(org = null\)/.test(auth) && /org\?\.webCookie \|\| config\.uber\.webCookie/.test(auth));
+
+  const st = readFileSync('src/settings.js', 'utf8');
+  check('the Egari credentials are real settings the UI can show',
+    /UBER_ORG_UUID_EGARI/.test(st) && /UBER_WEB_COOKIE_EGARI/.test(st));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

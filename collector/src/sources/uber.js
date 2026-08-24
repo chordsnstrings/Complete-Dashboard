@@ -1,4 +1,4 @@
-// Uber collector (Ecosine).
+// Uber collector — one pass per configured org (Ecosine, Egari).
 //  Historical trips  : report pipeline GenerateReport -> poll DownloadReport -> signed CSV.
 //                      Server limits: <=31-day range, <=3 concurrent reports, async, ~12mo retention.
 //  Driver perf       : GraphQL getPerformanceReport / getEarnerBreakdownsV2 (per driver).
@@ -13,6 +13,15 @@ import { stateRow } from '../roster.js';
 import { log } from '../log.js';
 
 const SRC = 'uber';
+
+/* The org this run is collecting. collect() and pullLive() iterate the
+   configured orgs sequentially and set this before each fleet's pass; the
+   exported probes never set it and fall back to the first configured org (the
+   legacy fields carry the same Ecosine values, so a database with only the old
+   keys behaves exactly as before). Module state is safe here because the
+   scheduler runs sources one at a time and every helper below awaits. */
+let cur = null;
+const org = () => cur || config.uber.orgs?.[0] || config.uber;
 const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
 
 // Uber caps an org at three reports in flight. Abandoning a report does not
@@ -23,13 +32,13 @@ const CONCURRENCY_HINT = /concurrent|too many|limit|in progress|rate/i;
 
 async function generateReport(start, end, attempt = 0) {
   const body = JSON.stringify({
-    orgId: { uuid: { value: config.uber.orgUuid } },
+    orgId: { uuid: { value: org().orgUuid } },
     reportType: 'REPORT_TYPE_TRIP_ACTIVITY',
     startDate: { value: iso(start) }, endDate: { value: iso(end) },
-    childOrgUuids: [{ uuid: { value: config.uber.orgUuid } }],
+    childOrgUuids: [{ uuid: { value: org().orgUuid } }],
   });
   const { data } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`,
-    { method: 'POST', headers: uberWebHeaders(), body });
+    { method: 'POST', headers: uberWebHeaders(org()), body });
   if (data.status !== 'success') {
     const detail = JSON.stringify(data?.data?.meta?.details || data);
     if (CONCURRENCY_HINT.test(detail) && attempt < 4) {
@@ -51,8 +60,8 @@ async function downloadReport(reportId, budgetMs = 600000) {
   let wait = 4000;
   while (Date.now() < deadline) {
     const { data } = await http(`${REPORTS}/DownloadReport?localeCode=en-GB`, {
-      method: 'POST', headers: uberWebHeaders(),
-      body: JSON.stringify({ orgId: { uuid: { value: config.uber.orgUuid } }, reportId: { uuid: { value: reportId } } }),
+      method: 'POST', headers: uberWebHeaders(org()),
+      body: JSON.stringify({ orgId: { uuid: { value: org().orgUuid } }, reportId: { uuid: { value: reportId } } }),
     });
     const url = data?.data?.signedUrl?.value;
     if (url) return url;
@@ -67,7 +76,7 @@ async function downloadReport(reportId, budgetMs = 600000) {
 function csvToTrips(csv) {
   const recs = parse(csv, { columns: true, skip_empty_lines: true, bom: true });
   return recs.map((r) => ({
-    platform: SRC, external_id: r['Trip UUID'], fleet_id: config.uber.fleet,
+    platform: SRC, external_id: r['Trip UUID'], fleet_id: org().fleet,
     plate: normPlate(r['Number plate']),
     driver_ext_id: r['Driver UUID'],
     driver_name: `${r['Driver first name'] || ''} ${r['Driver surname'] || ''}`.trim(),
@@ -149,11 +158,18 @@ async function pullTrips(from, to, onStep) {
    people who have not driven yet; the trip table covers people who have driven
    but may since have left the roster. Neither alone is the fleet. */
 async function uberDriverIds() {
+  /* Scoped to the org being collected: asking Egari's supplier endpoint about
+     Ecosine's drivers wastes a batch per ten of them, and the union of two
+     fleets grows every driver either one hires. Rows from before the fleet
+     split carry Ecosine's id already; a null fleet is included for safety —
+     an extra id costs a little, a missing one costs that driver's earnings. */
   const { rows } = await pool.query(
     `SELECT DISTINCT driver_ext_id FROM (
-       SELECT driver_ext_id FROM driver_platform_state WHERE platform = 'uber'
-       UNION SELECT driver_ext_id FROM trip WHERE platform = 'uber'
-     ) s WHERE coalesce(btrim(driver_ext_id), '') <> ''`);
+       SELECT driver_ext_id FROM driver_platform_state
+        WHERE platform = 'uber' AND (fleet_id = $1 OR fleet_id IS NULL)
+       UNION SELECT driver_ext_id FROM trip
+        WHERE platform = 'uber' AND (fleet_id = $1 OR fleet_id IS NULL)
+     ) s WHERE coalesce(btrim(driver_ext_id), '') <> ''`, [org().fleet]);
   return rows.map((r) => r.driver_ext_id);
 }
 
@@ -170,7 +186,7 @@ async function earnerCall(s, e, variables) {
   const body = JSON.stringify({
     operationName: 'getEarnerBreakdownsV2',
     variables: {
-      supplierUuid: config.uber.orgUuid,
+      supplierUuid: org().orgUuid,
       timeRange: {
         unixMilliOrDate: 'Unix_Time_Range',
         startTimeUnixMillis: unixMs(s), endTimeUnixMillis: unixMs(e),
@@ -181,7 +197,7 @@ async function earnerCall(s, e, variables) {
     query: EARNER_QUERY,
   });
   const { data } = await http('https://supplier.uber.com/graphql',
-    { method: 'POST', headers: uberWebHeaders(), body });
+    { method: 'POST', headers: uberWebHeaders(org()), body });
   // An expired web cookie answers with `errors` and no data, which is
   // indistinguishable from "this fleet had no drivers" unless we say so.
   if (data?.errors?.length) {
@@ -252,7 +268,7 @@ async function pullEarnerBreakdowns(from, to, onStep) {
     const rows = bd.map((d) => {
       const ti = Object.fromEntries((d.tripInfos || []).map((x) => [x.tripAttributeName, x.value]));
       return {
-        platform: SRC, fleet_id: config.uber.fleet, driver_ext_id: d.earnerUuid,
+        platform: SRC, fleet_id: org().fleet, driver_ext_id: d.earnerUuid,
         driver_name: d.earnerMetadata?.name, period_start: iso(s), period_end: iso(e),
         trips: parseInt(ti['TRIP_ATTRIBUTE_NAME_COUNT']) || null,
         distance_km: parseFloat(ti['TRIP_ATTRIBUTE_NAME_DISTRANCE']) || null,
@@ -344,6 +360,18 @@ async function pullEarnerBreakdowns(from, to, onStep) {
 
 // Live driver status snapshot (OAuth).
 export async function pullLive() {
+  /* Live status is a REST call keyed on the ENCRYPTED org id, which only
+     Ecosine has so far — an org without one is skipped, not failed, and says
+     so once per run rather than throwing on every poll. */
+  let total = 0;
+  for (const o of (config.uber.orgs?.length ? config.uber.orgs : [config.uber])) {
+    if (!o.org) { log.info(SRC, `live status skipped for ${o.fleet} — no encrypted org id`); continue; }
+    total += await pullLiveOrg(o);
+  }
+  return total;
+}
+
+async function pullLiveOrg(o) {
   const token = await uberOAuthToken();
   /* Paged. This asked once, with no limit and no cursor, and took whatever came
      back — which is the API's default page of 50. The fleet has 152 Uber
@@ -361,7 +389,7 @@ export async function pullLive() {
   do {
     const { data } = await http(
       `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?${qs({
-        org_id: config.uber.org, limit: 50, ...(pageToken ? { page_token: pageToken } : {}),
+        org_id: o.org, limit: 50, ...(pageToken ? { page_token: pageToken } : {}),
       })}`, { headers: { authorization: `Bearer ${token}` } });
     const page = data?.driverStatusOverviews || [];
     const key = page.map((d) => d.driverInfo?.driverUuid).join(',');
@@ -383,7 +411,7 @@ export async function pullLive() {
      supply pipeline was invisible because the one endpoint that reports it was
      read for its position data and thrown away. */
   const roster = overviews.map((d) => stateRow({
-    platform: SRC, driverExtId: d.driverInfo?.driverUuid, fleetId: config.uber.fleet,
+    platform: SRC, driverExtId: d.driverInfo?.driverUuid, fleetId: o.fleet,
     name: [d.driverInfo?.firstName, d.driverInfo?.lastName].filter(Boolean).join(' '),
     rawState: d.onboardingStatus,
     reason: d.suspensionReason || d.statusEntries?.[0]?.reason,
@@ -398,7 +426,7 @@ export async function pullLive() {
   }
 
   const rows = overviews.map((d) => ({
-    source: SRC, fleet_id: config.uber.fleet, plate: normPlate(d.vehicleInfo?.licensePlate || 'UNKNOWN'),
+    source: SRC, fleet_id: o.fleet, plate: normPlate(d.vehicleInfo?.licensePlate || 'UNKNOWN'),
     captured_at: d.statusEntries?.[0]?.timestamp || new Date().toISOString(),
     status: (d.statusEntries?.[0]?.status || '').replace('DRIVER_STATUS_', ''), raw: d,
   })).filter((r) => r.plate !== 'UNKNOWN');
@@ -406,22 +434,33 @@ export async function pullLive() {
 }
 
 export async function collect({ from, to, mode, onStep }) {
-  try {
-    const trips = await pullTrips(from, to, onStep);
-    const perf = await pullEarnerBreakdowns(from, to, onStep);
-    // Both sub-sources' windows, so a run that fetched every trip and no
-    // earnings reads as partial rather than as ok.
-    const chunks = [...trips.chunks, ...perf.chunks];
-    // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
-    // are still missing", and it is the difference between a hole that is
-    // visible and one that is not.
-    await logRun({ source: SRC, fleet_id: config.uber.fleet, mode,
-      window_start: from, window_end: to, rows_written: trips.total + perf.total,
-      chunks });
-    log.info(SRC, 'done', { trips: trips.total, perf,
-      windows_failed: trips.chunks.filter((c) => c.error).length, of: trips.chunks.length });
-  } catch (e) {
-    await logRun({ source: SRC, fleet_id: config.uber.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
-    log.error(SRC, 'failed', { err: String(e) });
+  /* One full pass per configured org, sequentially, each under its own run
+     row — so the Sources page shows uber/ecosine and uber/egari separately
+     and a dead cookie on one fleet reads as that fleet's failure, not as half
+     the numbers quietly missing from a shared one. Sequential on purpose:
+     the report pipeline's three-in-flight cap is per org, but the two
+     sessions share this process's connection pool and the API's patience. */
+  for (const o of (config.uber.orgs?.length ? config.uber.orgs : [config.uber])) {
+    cur = o;
+    try {
+      const trips = await pullTrips(from, to, onStep);
+      const perf = await pullEarnerBreakdowns(from, to, onStep);
+      // Both sub-sources' windows, so a run that fetched every trip and no
+      // earnings reads as partial rather than as ok.
+      const chunks = [...trips.chunks, ...perf.chunks];
+      // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
+      // are still missing", and it is the difference between a hole that is
+      // visible and one that is not.
+      await logRun({ source: SRC, fleet_id: o.fleet, mode,
+        window_start: from, window_end: to, rows_written: trips.total + perf.total,
+        chunks });
+      log.info(SRC, `done (${o.fleet})`, { trips: trips.total, perf,
+        windows_failed: trips.chunks.filter((c) => c.error).length, of: trips.chunks.length });
+    } catch (e) {
+      await logRun({ source: SRC, fleet_id: o.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
+      log.error(SRC, `failed (${o.fleet})`, { err: String(e) });
+    } finally {
+      cur = null;
+    }
   }
 }
