@@ -32,4 +32,9 @@ app.get('/api/*', async (req, res) => {
 });
 app.use(express.static(pub));
 app.get('*', (_, r) => r.sendFile(join(pub, 'index.html')));
-app.listen(8100, () => console.log(`live proxy on http://localhost:8100 → ${UP}`));
+/* PORT, because several of these run at once. Auditing the product a page-group
+   at a time means several agents each holding a bridge to production, and a
+   hardcoded port makes the second one die on EADDRINUSE — or worse, silently
+   read the first one's upstream. */
+const PORT = Number(process.env.PORT || 8100);
+app.listen(PORT, () => console.log(`live proxy on http://localhost:${PORT} → ${UP}`));
