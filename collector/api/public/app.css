@@ -253,9 +253,23 @@ a{color:var(--accent-ink)}
   font-family:"IBM Plex Mono",monospace;font-size:.63rem;letter-spacing:.13em;
   text-transform:uppercase;color:var(--ink-3);
 }
+/* The headline number. It is set at a size that fits "AED 9,907" in a 158px
+   column and wraps "AED 19,662" onto two lines — which is not a rounding
+   problem, it is every money tile on a real fleet: the combined figure is an
+   order of magnitude larger than the fares half it replaced, and "AED 257,122"
+   broke the row into ragged two-line cards.
+
+   Shrunk to fit rather than truncated or wrapped: a money figure with its
+   thousands on the next line is harder to read than the same figure a point
+   smaller, and one that is cut off is not a figure at all. cqi units size
+   against the CARD, so the same rule holds in a six-across strip and a
+   two-across one without a breakpoint for each. */
+.kpi{container-type:inline-size}
 .kpi .n{
-  font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.72rem;
+  font-family:"Fraunces",Georgia,serif;font-weight:600;
+  font-size:clamp(1.15rem, 11cqi, 1.72rem);
   letter-spacing:-.02em;line-height:1.18;margin-top:4px;font-variant-numeric:tabular-nums;
+  white-space:nowrap;
 }
 .kpi .d{font-size:.75rem;color:var(--ink-2);margin-top:2px}
 .kpi .d b{font-weight:600;color:var(--ink)}

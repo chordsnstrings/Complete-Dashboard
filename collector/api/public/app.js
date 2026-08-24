@@ -852,7 +852,11 @@ async function platformFunnel(root) {
 V.finance = async (root) => {
   const kh = el('div'); root.append(kh); loading(kh);
   const g = el('div', 'grid g2'); root.append(g);
-  const rev = panel('Revenue per day', 'Fare revenue from trips'); g.append(rev.panel);
+  /* Fares per day, and titled as such. Platform statements are weekly, so this
+     series can only be the metered half — the tiles above carry the combined
+     figure, and a panel titled Revenue beside them implied this was the same
+     money at a finer grain. */
+  const rev = panel('Fares per day', 'Metered fares only — platform payouts are weekly and appear in the tiles above'); g.append(rev.panel);
   const pay = panel('Payment mix', 'Cash vs card vs wallet — cash is money the fleet has to collect'); g.append(pay.panel);
   const g2 = el('div', 'grid g2'); root.append(g2);
   const tier = panel('What each service tier earns', 'Uber Black and Comfort carry a different fare per kilometre than UberX — this is where tier allocation shows up as money');
