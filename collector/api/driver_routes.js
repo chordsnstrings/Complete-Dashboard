@@ -239,27 +239,34 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        who AS (
          SELECT driver_ext_id, max(driver_name) AS driver_name FROM ids GROUP BY 1
        ),
-       t AS (
-         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
-                         'name:' || ${CANON('driver_name')}) AS driver_ext_id,
-                min(fleet_id) fleet_id,
-                count(*) FILTER (WHERE is_booking)::int trips,
-                count(*) FILTER (WHERE outcome = 'completed')::int completed,
-                count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable,
-                count(DISTINCT local_day)::int days,
-                round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-                count(*) FILTER (WHERE has_fare)::int priced_trips,
-                max(requested_at) last_trip, min(requested_at) first_trip,
-                array_agg(DISTINCT platform) platforms,
-                mode() WITHIN GROUP (ORDER BY plate) plate
-         FROM trip_norm
+       work AS (
+         /* The synthesised key from the STORED fold. Written with the fold
+            inline it ran two nested regexes over every row in the window as
+            the GROUP BY key, which is nineteen twentieths of this CTE's cost
+            (schema_v20 measured 2,434ms against 129ms) — and it is the same
+            value, because person_key IS that expression, generated and
+            stored. The filter still tests driver_name: matching the partial
+            index's own predicate is what took this endpoint from 4.3s to 41s. */
+         SELECT coalesce(nullif(btrim(n.driver_ext_id), ''),
+                         'name:' || bt.person_key) AS driver_ext_id,
+                min(n.fleet_id) fleet_id,
+                count(*) FILTER (WHERE n.is_booking)::int trips,
+                count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
+                count(*) FILTER (WHERE n.outcome IS NOT NULL)::int bookable,
+                count(DISTINCT n.local_day)::int days,
+                round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
+                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+                count(*) FILTER (WHERE n.has_fare)::int priced_trips,
+                max(n.requested_at) last_trip, min(n.requested_at) first_trip,
+                array_agg(DISTINCT n.platform) platforms,
+                mode() WITHIN GROUP (ORDER BY n.plate) AS plate
+         FROM trip_norm n JOIN trip bt ON bt.platform = n.platform AND bt.external_id = n.external_id
          -- Grouped on the SAME synthesised key as the ids CTE above. Keyed on
          -- the raw column, a driver named without an id had an ids row and no
          -- work to join to it, so they appeared with a permanent zero, which is
          -- worse than absent: it reads as somebody who did nothing.
-         WHERE local_day BETWEEN $1::date AND $2::date
-           AND coalesce(btrim(driver_name), '') <> ''
+         WHERE n.local_day BETWEEN $1::date AND $2::date
+           AND coalesce(btrim(n.driver_name), '') <> ''
          GROUP BY 1
        )
        /* The lifetime figures come from the CTE at the top of this statement:
@@ -269,21 +276,21 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           folding 175,000 names per request is what the stored, indexed column
           exists to avoid. */
        SELECT who.driver_ext_id, who.driver_name,
-              coalesce(t.trips, 0) AS trips, coalesce(t.completed, 0) AS completed,
-              coalesce(t.bookable, 0) AS bookable, coalesce(t.days, 0) AS days,
-              t.km, t.revenue, coalesce(t.priced_trips, 0) AS priced_trips,
-              t.last_trip, t.first_trip, t.plate, t.fleet_id,
-              coalesce(t.platforms, ARRAY[]::text[]) AS platforms,
+              coalesce(w.trips, 0) AS trips, coalesce(w.completed, 0) AS completed,
+              coalesce(w.bookable, 0) AS bookable, coalesce(w.days, 0) AS days,
+              w.km, w.revenue, coalesce(w.priced_trips, 0) AS priced_trips,
+              w.last_trip, w.first_trip, w.plate, w.fleet_id,
+              coalesce(w.platforms, ARRAY[]::text[]) AS platforms,
               ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
               dc.state, dc.licence_expires, dc.rating,
               (dc.licence_expires - now()::date) AS licence_days_left,
               dps.state AS platform_state, dps.can_earn
        FROM who
-       LEFT JOIN t   ON t.driver_ext_id = who.driver_ext_id
+       LEFT JOIN work w ON w.driver_ext_id = who.driver_ext_id
        LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
-       ORDER BY coalesce(t.trips, 0) DESC, who.driver_name LIMIT 800`, [from, to]);
+       ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 800`, [from, to]);
 
     /* Fold per-platform rows into one row per person, so the directory lists
        humans rather than accounts. Counts are carried through and the ratios
