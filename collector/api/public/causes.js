@@ -289,7 +289,13 @@ export async function renderCauses(root) {
       `${MONTH(m)}: ${fmt(row.trips)} bookings on ${esc((row.booking_platforms || row.platforms || []).join(', ') || 'unknown')}` +
       `${row.telematics_journeys ? `, ${fmt(row.telematics_journeys)} telematics journeys behind them` : ''}` +
       `${row.drivers_known ? `, ${row.drivers} drivers` : ', no driver attribution'}` +
-      `${row.revenue ? `, AED ${fmt(row.revenue)} booked` : ''}` +
+      `${row.accounted ? `, AED ${fmt(row.accounted)} in` : ''}` +
+      /* Uber's earnings API serves roughly the last six months, so a month
+         older than that has bookings, distance and drivers and no money that
+         can ever be collected for it. Without saying so the reader sees a
+         month of work worth nothing and reasonably concludes the fleet had a
+         bad month. */
+      `${row.income_missing ? ' — no platform statement covers this month; its money is not recoverable' : ''}` +
       `${near.length ? ` — ${near.length} break(s) touch this month.` : ''}`);
     trend.body.append(d);
   });

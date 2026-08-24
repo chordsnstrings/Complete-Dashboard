@@ -787,9 +787,27 @@ app.get('/api/trend/monthly', (_, r) => {
           priced_trips: Math.round(row.trips * 0.35), no_data: false,
           // Collection starts on 21 August 2025, so that month holds 11 days.
           partial_month: k === '2025-08', days_in_record: k === '2025-08' ? 11 : null,
+          /* Money per month, both channels — and the months no statement can
+             ever cover. Uber's earnings API serves roughly the last six, so the
+             older half of this record has work and no recoverable money, which
+             is a fact the page has to state rather than draw as a flat line. */
+          accounted_fares: Math.round(row.trips * 0.35 * 96),
+          accounted_payouts: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : null,
+          accounted: Math.round(row.trips * 0.35 * 96)
+            + (i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : 0),
+          accounted_platforms: i >= MONTH_KEYS.length - 6 ? ['hotel', 'uber'] : ['hotel'],
+          income_missing: i < MONTH_KEYS.length - 6,
+          /* The bookings the money above actually covers, and the share it does
+             not. On a month before the earnings API's retention horizon that is
+             most of them. */
+          accounted_bookings: i >= MONTH_KEYS.length - 6 ? row.trips : Math.round(row.trips * 0.35),
+          dark_bookings: i >= MONTH_KEYS.length - 6 ? 0 : row.trips - Math.round(row.trips * 0.35),
+          dark_pct: i >= MONTH_KEYS.length - 6 ? 0 : 65,
           drivers_known: row.attributed_trips > 0 }
       : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0, earning_vehicles: 0,
           km: null, measured_trips: 0, revenue: null, priced_trips: 0, cancel_pct: null,
+          accounted: null, accounted_fares: null, accounted_payouts: null,
+          accounted_platforms: [], income_missing: false,
           platforms: [], booking_platforms: [], no_data: true, drivers_known: false,
           partial_month: false, days_in_record: null };
   });

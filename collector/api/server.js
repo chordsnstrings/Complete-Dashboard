@@ -1625,10 +1625,70 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
   };
   const dayDiff = (a2, b2) => Math.round((Date.parse(b2) - Date.parse(a2)) / 864e5) + 1;
 
+  /* Money, per month, both channels — the trend line on the page whose job is
+     explaining why the numbers moved was the fares alone, so it plotted the
+     hotel channel and called it revenue. Uber prices nothing per trip and pays
+     weekly, so for most of this record the line was near zero while the fleet
+     was working.
+
+     Per platform per month, using the same rule as every other page
+     (api/income_sql.js): a payout is what is left of a channel's own fares
+     after commission, so a channel reporting both contributes one of them. The
+     per-platform rollup rows carry the fares; driver_payout_day carries the
+     payouts, resolved for the overlapping report windows. */
+  /* From the rollup when there is one, and from the same grain SQL the rollup
+     is built from when there is not — exactly as `observed` above does, and for
+     the same reason. Reading rollup_month unconditionally here meant that on a
+     fresh database every month reported its payouts and none of its fares,
+     because the fallback covered one of the two queries. */
+  const platMonthSql = fromRollup
+    ? `SELECT to_char(month, 'YYYY-MM') AS m, platform, bookings, priced_trips, revenue
+       FROM rollup_month
+       WHERE fleet_id = '*' AND platform <> '*'
+         AND ($1::text IS NULL OR platform = $1)`
+    : `SELECT to_char(month, 'YYYY-MM') AS m, platform, bookings, priced_trips, revenue
+       FROM (${rollupGrainSql('month')}) g
+       WHERE fleet_id = '*' AND platform <> '*'
+         AND ($1::text IS NULL OR platform = $1)`;
+  const [platMonths, payMonths] = await Promise.all([
+    q(platMonthSql, [req.query.platform || null]),
+    q(`SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS m, platform,
+              round(sum(earnings)::numeric, 2) AS payouts,
+              count(DISTINCT day)::int AS payout_days
+       FROM driver_payout_day
+       WHERE ($1::text IS NULL OR platform = $1)
+       GROUP BY 1, 2`, [req.query.platform || null]),
+  ]);
+  const incomeByMonth = new Map();
+  {
+    const acc = new Map();
+    const cell = (m, pl) => {
+      if (!acc.has(m)) acc.set(m, new Map());
+      const inner = acc.get(m);
+      if (!inner.has(pl)) {
+        inner.set(pl, { platform: pl, bookings: 0, priced_bookings: 0,
+          fares: null, payouts: null, payout_days: 0 });
+      }
+      return inner.get(pl);
+    };
+    for (const r of platMonths) Object.assign(cell(r.m, r.platform), {
+      bookings: r.bookings, priced_bookings: r.priced_trips,
+      fares: r.revenue == null ? null : Number(r.revenue) });
+    for (const r of payMonths) Object.assign(cell(r.m, r.platform), {
+      payouts: r.payouts == null ? null : Number(r.payouts),
+      payout_days: r.payout_days ?? 0 });
+    for (const [m, inner] of acc) {
+      const [y, mo] = m.split('-').map(Number);
+      const daysInMonth = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+      incomeByMonth.set(m, fleetIncome([...inner.values()], daysInMonth));
+    }
+  }
+
   const months = [];
   for (const d = new Date(first); d <= last; d.setUTCMonth(d.getUTCMonth() + 1)) {
     const k = key(d);
     const row = byMonth.get(k);
+    const inc = incomeByMonth.get(k) || {};
     const partial = !!row && ((spanFrom && spanFrom > `${k}-01`) || (spanTo && spanTo < lastOf(k)));
     months.push(row
       ? { ...row, m: k, no_data: false,
@@ -1639,12 +1699,22 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
             ? Math.max(1, dayDiff(spanFrom > `${k}-01` ? spanFrom : `${k}-01`,
               spanTo < lastOf(k) ? spanTo : lastOf(k)))
             : null,
+          ...inc,
+          /* A month with work and no statement is not a month the fleet earned
+             nothing. Uber's earnings API serves roughly the last six months, so
+             every month before that has bookings, distance and drivers, and no
+             money that can ever be collected for it. Said here, once, so no page
+             has to infer it from a null. */
+          income_missing: !!(row.trips > 0 && inc.accounted_payouts == null
+            && (row.priced_trips || 0) < row.trips),
           // FMS-derived trips carry no driver id, so "0 drivers" on a month
           // that has trips means unattributable, not idle.
           drivers_known: row.attributed_trips > 0 }
       : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0,
           earning_vehicles: 0, km: null, measured_trips: 0, revenue: null, priced_trips: 0,
           cancel_pct: null, platforms: [], booking_platforms: [],
+          accounted: null, accounted_fares: null, accounted_payouts: null,
+          accounted_platforms: [], income_missing: false,
           no_data: true, drivers_known: false, partial_month: false, days_in_record: null });
   }
 

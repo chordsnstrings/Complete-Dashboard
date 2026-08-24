@@ -26,11 +26,31 @@ export async function fiToken() {
 }
 
 // FI roster → driver_performance (roster snapshot) + vehicle dim. company_id is per-fleet.
+/* The FI gateway refuses a range longer than 31 days — "code=498806
+   INVALID_DATE_RANGE, maximum allowed date range is 31 days" — and a backfill
+   asks for a year. So every backfill run has failed at this call since backfill
+   existed, with the roster for one fleet never collected and the run recorded
+   as an error whose message named a date range nobody read as a limit.
+
+   Clamped to the last 31 days of whatever was asked for, which is the right
+   window regardless: getDrivers returns the roster as it stands, and a roster
+   is a snapshot. Asking about a year of it does not return a year of history,
+   it returns the same list — when it returns anything at all. */
+const FI_MAX_DAYS = 31;
+export function rosterWindow(from, to) {
+  const end = new Date(to);
+  const start = new Date(from);
+  const earliest = new Date(end);
+  earliest.setUTCDate(earliest.getUTCDate() - (FI_MAX_DAYS - 1));
+  return [start > earliest ? start : earliest, end];
+}
+
 async function pullFiRoster(from, to, fails) {
   const token = await fiToken();
   let total = 0;
+  const [rFrom, rTo] = rosterWindow(from, to);
   for (const c of config.bolt.companies) {
-    const body = JSON.stringify({ company_id: c.companyId, offset: 0, limit: 200, start_ts: Number(unixS(from)), end_ts: Number(unixS(to)) });
+    const body = JSON.stringify({ company_id: c.companyId, offset: 0, limit: 200, start_ts: Number(unixS(rFrom)), end_ts: Number(unixS(rTo)) });
     const { data } = await http(`${config.bolt.fiGateway}/getDrivers`,
       { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body });
     /* This logged a bare code — 498806 for one fleet, 503 for the other — and
@@ -47,7 +67,10 @@ async function pullFiRoster(from, to, fails) {
     const rows = (data.data?.drivers || []).map((d) => ({
       platform: SRC, fleet_id: c.fleet, driver_ext_id: d.driver_uuid,
       driver_name: `${d.first_name || ''} ${d.last_name || ''}`.trim(),
-      plate: normPlate(d.active_vehicle?.reg_number), period_start: iso(from), period_end: iso(to),
+      /* The window actually asked for, not the run's. Stamping a backfill's
+         whole year on a roster snapshot made one row per driver spanning 365
+         days, which sql/schema_v23.sql then expands to a row per day. */
+      plate: normPlate(d.active_vehicle?.reg_number), period_start: iso(rFrom), period_end: iso(rTo),
       rating: d.driver_rating, raw: d,
     })).filter((r) => r.driver_ext_id);
     if (rows.length) total += await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);

@@ -210,6 +210,47 @@ check('a break where the platform mix changed says so',
     JSON.stringify((p3.breaks || []).map((b) => [b.from, b.to, b.boundary_artifact])));
 }
 
+{
+  /* ── money on the page that explains why the numbers moved ──────────────
+     The trend line was `revenue` — sum(price) over the trip table. Uber prices
+     nothing per trip, so for most of this record the line sat near zero while
+     the fleet was working, and the page whose job is explaining movement
+     explained a movement that never happened.
+
+     Worse is the far end of the record. Uber's earnings API serves roughly the
+     last six months; before that there are bookings, distance and drivers, and
+     no money that can ever be collected. A reader sees a month of work worth
+     nothing and concludes the fleet had a bad month. */
+  const t = (await get('/api/trend/monthly')).body;
+  const withWork = (t.months || []).filter((m) => !m.no_data && m.trips > 0);
+  const num = (x) => (x == null ? 0 : Number(x));
+
+  check('every month reports what it took in, not only what was priced',
+    withWork.length > 0 && withWork.every((m) => 'accounted' in m && 'accounted_payouts' in m),
+    JSON.stringify(withWork.map((m) => m.m)));
+  check('and the total is the sum of the halves it names',
+    withWork.every((m) => Math.abs(num(m.accounted)
+      - (num(m.accounted_fares) + num(m.accounted_payouts))) < 1),
+    JSON.stringify(withWork.map((m) => [m.m, m.accounted, m.accounted_fares, m.accounted_payouts])));
+  check('and never counts a channel on both its fares and its payout',
+    withWork.every((m) => num(m.accounted) <= num(m.revenue) + num(m.accounted_payouts) + 1));
+
+  /* A month with no rows at all must not claim an income of zero — that is the
+     same conflation between "stood still" and "we hold nothing" that this file
+     was written for. */
+  const empty = (t.months || []).filter((m) => m.no_data);
+  check('a month with no data reports no income rather than zero',
+    empty.every((m) => m.accounted == null && m.income_missing === false),
+    JSON.stringify(empty.map((m) => [m.m, m.accounted, m.income_missing])));
+
+  /* And a month with work whose money cannot be collected says so, rather than
+     leaving the reader to infer it from a null. */
+  check('the flag exists on every month, so a page can rely on it',
+    (t.months || []).every((m) => typeof m.income_missing === 'boolean'));
+  check('and is never set on a month that has its payout',
+    withWork.filter((m) => m.accounted_payouts != null).every((m) => m.income_missing === false));
+}
+
 server.close();
 
 console.log(`\n${pass} passed, ${fail} failed`);

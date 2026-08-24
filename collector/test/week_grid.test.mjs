@@ -116,5 +116,27 @@ check('but the row stores the last day covered',
    record says the earnings phase wrote nothing. */
 check('the rows written are counted', /total \+= got;/.test(body));
 
+console.log('\nthe Bolt roster fits inside the range its gateway allows');
+
+/* Every backfill run failed here and said so in a message nobody read as a
+   limit: "code=498806 INVALID_DATE_RANGE, maximum allowed date range is 31
+   days". A backfill asks for a year. One fleet's roster was therefore never
+   collected by a backfill, ever, and the run was recorded as an error whose
+   other three sub-sources had worked. */
+import { rosterWindow } from '../src/sources/bolt.js';
+
+const days = ([a, b]) => Math.round((b - a) / 86400000) + 1;
+const year = rosterWindow(D('2025-08-23T22:36:00Z'), D('2026-08-23T22:36:00Z'));
+check('a year-long backfill is clamped to 31 days', days(year) === 31, String(days(year)));
+check('and clamped to the RECENT end — a roster is a snapshot, not a history',
+  +year[1] === +D('2026-08-23T22:36:00Z'), iso(year[1]));
+
+const short = rosterWindow(D('2026-08-21T02:58:00Z'), D('2026-08-24T02:58:00Z'));
+check('a window already inside the limit is left alone', days(short) === 4, String(days(short)));
+check('and keeps the start it was given', +short[0] === +D('2026-08-21T02:58:00Z'));
+
+const exact = rosterWindow(D('2026-07-25T00:00:00Z'), D('2026-08-24T00:00:00Z'));
+check('a window exactly at the limit is not clamped further', days(exact) === 31, String(days(exact)));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
