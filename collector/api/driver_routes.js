@@ -192,28 +192,29 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      as a failure. */
   app.get('/api/drivers/directory', wrap(async (req, res) => {
     const [from, to] = winDays(req);
-    const rows = await q(
-      `WITH ever AS (
-         /* One scan of the trip table, answering both questions it was asked
-            twice. This CTE and the ids one below read the same table with
-            the same predicate and build the same synthesised key — "who has
-            ever driven" and "what is their lifetime" are the same scan, and
-            running it twice is where a third of this endpoint's time went.
+    /* "Has this person ever driven, and when last" is the one question here
+       with no window, so answering it live means grouping the entire trip
+       history on every request — two hundred and fifteen thousand rows to
+       decorate eight hundred directory rows. driver_lifetime holds it,
+       rebuilt after every collection from the SAME SQL that is the fallback
+       below, so the two cannot disagree; the fallback runs on a fresh
+       database or a deploy that lands before the first rollup.
 
-            A seq-scan predicate on purpose. Written as
-              WHERE person_key IS NOT NULL AND person_key <> ''
-            it matches the partial index's own predicate exactly, so the
-            planner chose an index scan and then fetched the heap row for
-            essentially every row in the table. /api/drivers/directory went
-            from 4.3s to 41s. The projection still uses person_key, which is
-            where the saving actually was; the filter goes back to the column
-            the scan is reading anyway. */
-         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
-                         'name:' || person_key) AS driver_ext_id,
+       A seq-scan predicate on purpose, in both. Written as
+         WHERE person_key IS NOT NULL AND person_key <> ''
+       it matches the partial index's own predicate exactly, so the planner
+       chose an index scan and then fetched the heap row for essentially every
+       row in the table: this endpoint went from 4.3s to 41s. The projection
+       still uses person_key, which is where the saving actually was. */
+    const lifetimeReady = (await q('SELECT 1 FROM driver_lifetime LIMIT 1')).length > 0;
+    const everSql = lifetimeReady
+      ? 'SELECT driver_ext_id, driver_name, last_ever, lifetime FROM driver_lifetime'
+      : `SELECT coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key) AS driver_ext_id,
                 max(driver_name) AS driver_name,
                 max(requested_at) last_ever, count(*)::int lifetime
-         FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1
-       ),
+           FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1`;
+    const rows = await q(
+      `WITH ever AS (${everSql}),
        ids AS (
          /* Everyone we know of, from any source, whether or not they drove.
             A name with no id is still a person: the id is synthesised from the

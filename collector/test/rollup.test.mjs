@@ -298,17 +298,66 @@ console.log('\nrollup: two refreshes do not race');
 console.log('\nrollup: it says how old it is');
 
 const state = await rollupState(db);
-// Five passes: the three trip grains, the payout-day materialisation, and the
-// on-trip statement derivation.
-check('every rollup records a state row', state.length === 5, JSON.stringify(state.map((s) => s.name)));
+/* Six passes: the three trip grains, the payout-day materialisation, the
+   on-trip statement derivation, and the driver lifetime. The count is asserted
+   rather than the names, because a pass that stops recording its state is one
+   nobody can tell has stopped running. */
+check('every rollup records a state row', state.length === 6, JSON.stringify(state.map((s) => s.name)));
 check('the payout pass is one of them', state.some((r) => r.name === 'driver_payout_day'));
 check('and the statement pass beside it', state.some((r) => r.name === 'driver_statement_day'));
+check('and the lifetime pass', state.some((r) => r.name === 'driver_lifetime'));
 check('all three succeeded', state.every((s) => s.status === 'ok'),
   state.filter((s) => s.status !== 'ok').map((s) => `${s.name}: ${s.error}`).join(' | '));
 check('each records what it covers, so a page can date the answer it shows',
   state.every((s) => s.covers_from && s.covers_to && s.finished_at));
 check('and how long it took, so a rollup that is getting slower is visible',
   state.every((s) => Number.isFinite(Number(s.duration_ms))));
+
+console.log('\nthe lifetime rollup answers exactly what the live scan did');
+
+/* driver_lifetime exists so the driver directory does not group the entire
+   trip history on every request. That is only a safe trade while the two
+   agree, and the way they stop agreeing is the synthesised key: it is the
+   platform id where there is one and the folded name where there is not, and
+   a rollup keyed on either half alone is faster and wrong. So this runs the
+   directory's own fallback SQL against the table the rollup filled and
+   requires them to match row for row. */
+{
+  const { refreshLifetime } = await import('../src/rollup.js');
+  const LIVE = `SELECT coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key) AS driver_ext_id,
+                       max(driver_name) AS driver_name,
+                       max(requested_at) last_ever, count(*)::int lifetime
+                  FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1`;
+  const live = (await db.query(LIVE)).rows
+    .sort((a, b) => a.driver_ext_id.localeCompare(b.driver_ext_id));
+  await refreshLifetime(db);
+  const rolled = (await db.query(
+    'SELECT driver_ext_id, driver_name, last_ever, lifetime FROM driver_lifetime')).rows
+    .sort((a, b) => a.driver_ext_id.localeCompare(b.driver_ext_id));
+
+  check('every person the live scan finds is in the rollup',
+    live.length === rolled.length && live.length > 0, `${live.length} vs ${rolled.length}`);
+  const diffs = [];
+  for (let i = 0; i < Math.min(live.length, rolled.length); i++) {
+    const a = live[i]; const b = rolled[i];
+    if (a.driver_ext_id !== b.driver_ext_id) diffs.push(`key ${a.driver_ext_id} vs ${b.driver_ext_id}`);
+    else if (a.lifetime !== b.lifetime) diffs.push(`${a.driver_ext_id} lifetime ${a.lifetime} vs ${b.lifetime}`);
+    else if (String(a.last_ever) !== String(b.last_ever)) diffs.push(`${a.driver_ext_id} last_ever`);
+    else if (a.driver_name !== b.driver_name) diffs.push(`${a.driver_ext_id} name`);
+  }
+  check('and every key, name, lifetime and last-seen matches', diffs.length === 0,
+    diffs.slice(0, 3).join(' | '));
+  /* The key is the directory's, not person_key: two ids belonging to one
+     person are two directory rows, and folding them here would silently merge
+     two people's careers into one. */
+  const synth = rolled.filter((r) => String(r.driver_ext_id).startsWith('name:'));
+  check('a driver known only by name still gets a row',
+    synth.length > 0 || live.every((r) => !String(r.driver_ext_id).startsWith('name:')),
+    'the synthesised key is not being built');
+  check('a re-run replaces rather than doubling',
+    (await refreshLifetime(db),
+      (await db.query('SELECT count(*)::int n FROM driver_lifetime')).rows[0].n === rolled.length));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

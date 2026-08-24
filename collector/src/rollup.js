@@ -284,6 +284,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
   out.push(await runOne(db, 'rollup_person_month', () => refreshPersonMonth(db, since)));
   out.push(await runOne(db, 'driver_payout_day', () => refreshPayouts(db)));
   out.push(await runOne(db, 'driver_statement_day', () => refreshStatements(db)));
+  out.push(await runOne(db, 'driver_lifetime', () => refreshLifetime(db)));
   /* Refresh the planner's statistics on the tables this just rewrote, and on
      trip itself. A generated column arrives with NO statistics — Postgres has
      never seen its distribution — so every plan touching person_key was being
@@ -295,7 +296,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
      cheap next to the rollup that just ran. Failure is not fatal: stale
      statistics are a slow query, not a wrong one. */
   try {
-    await db.query('ANALYZE trip, rollup_day, rollup_month, rollup_person_month, driver_payout_day');
+    await db.query('ANALYZE trip, rollup_day, rollup_month, rollup_person_month, driver_payout_day, driver_lifetime');
   } catch (e) { log.warn(SRC, 'analyze failed — plans may be stale', { err: String(e).slice(0, 120) }); }
 
   const failed = out.filter((o) => o.error);
@@ -437,6 +438,37 @@ export async function refreshStatements(db = pool) {
         net = EXCLUDED.net, tips = EXCLUDED.tips, salik = EXCLUDED.salik,
         cash = EXCLUDED.cash, driver_ext_id = EXCLUDED.driver_ext_id,
         ingested_at = now()`);
+    await db.query('COMMIT');
+    return r.rowCount ?? 0;
+  } catch (e) {
+    await db.query('ROLLBACK').catch(() => {});
+    throw e;
+  }
+}
+
+/* Who has ever driven, and when they last did — see sql/schema_v29.sql.
+   ─────────────────────────────────────────────────────────────────────────
+   The one question on the driver directory with no window, so the only way to
+   answer it live is to group the entire trip history on every request. The SQL
+   here is the directory's own, unchanged, so the precomputed answer cannot
+   drift from the live one: the same synthesised key, the same predicate, the
+   same aggregates. test/rollup.test.mjs runs both and requires them to match.
+
+   Rebuilt whole rather than incrementally. The measures are max() and count()
+   over all time, so a narrow pass cannot update them without reading the rows
+   it excluded — the cheap-looking version is the wrong one. */
+export async function refreshLifetime(db = pool) {
+  await db.query('BEGIN');
+  try {
+    await db.query("SET LOCAL statement_timeout = '600000'").catch(() => {});
+    await db.query('DELETE FROM driver_lifetime');
+    const r = await db.query(`
+      INSERT INTO driver_lifetime (driver_ext_id, driver_name, last_ever, lifetime)
+      SELECT coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key),
+             max(driver_name), max(requested_at), count(*)::int
+        FROM trip
+       WHERE driver_name IS NOT NULL AND btrim(driver_name) <> ''
+       GROUP BY 1`);
     await db.query('COMMIT');
     return r.rowCount ?? 0;
   } catch (e) {
