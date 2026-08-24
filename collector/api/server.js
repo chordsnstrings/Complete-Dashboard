@@ -96,7 +96,7 @@ const q = (text, params) => pool.query(text, params).then((r) => r.rows);
    with time zone"). The full error is logged; the caller gets a reference to
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
-import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, personFold } from './custody_sql.js';
+import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, JOIN_TRIP, personFold } from './custody_sql.js';
 let errSeq = 0;
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   const ref = `e${Date.now().toString(36)}-${(++errSeq).toString(36)}`;
@@ -265,55 +265,55 @@ app.get('/api/kpis', wrap(async (req, res) => {
   const [t] = await q(
     `SELECT
        -- bookings: the number a fleet manager means by "trips"
-       count(*) FILTER (WHERE is_booking)::int trips,
-       count(*) FILTER (WHERE outcome = 'completed')::int completed_trips,
-       count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled_trips,
-       count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable_trips,
-       round(100.0*count(*) FILTER (WHERE outcome = 'completed')
-             / nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) completion_pct,
-       round(100.0*count(*) FILTER (WHERE outcome = 'not_completed')
-             / nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0),1) cancel_pct,
+       count(*) FILTER (WHERE n.is_booking)::int trips,
+       count(*) FILTER (WHERE n.outcome = 'completed')::int completed_trips,
+       count(*) FILTER (WHERE n.outcome = 'not_completed')::int cancelled_trips,
+       count(*) FILTER (WHERE n.outcome IS NOT NULL)::int bookable_trips,
+       round(100.0*count(*) FILTER (WHERE n.outcome = 'completed')
+             / nullif(count(*) FILTER (WHERE n.outcome IS NOT NULL),0),1) completion_pct,
+       round(100.0*count(*) FILTER (WHERE n.outcome = 'not_completed')
+             / nullif(count(*) FILTER (WHERE n.outcome IS NOT NULL),0),1) cancel_pct,
 
        -- telematics, reported separately: this is movement, not demand
-       count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
-       round(sum(distance_km) FILTER (WHERE NOT is_booking AND has_distance)::numeric,0) telematics_km,
+       count(*) FILTER (WHERE NOT n.is_booking)::int telematics_journeys,
+       round(sum(n.distance_km) FILTER (WHERE NOT n.is_booking AND n.has_distance)::numeric,0) telematics_km,
 
        -- distance over bookings only, and only where it is plausible
-       round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
-       round(avg(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,2) avg_km,
-       count(*) FILTER (WHERE is_booking AND has_distance)::int trips_with_distance,
+       round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
+       round(avg(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,2) avg_km,
+       count(*) FILTER (WHERE n.is_booking AND n.has_distance)::int trips_with_distance,
 
        /* Money, and the rows it actually covers. Every filter here carries
-          is_booking as well as has_fare: a telematics row is the same physical
-          journey a ride platform already reported, and if one ever arrives
-          carrying a price it would be counted a second time. */
-       round(sum(price) FILTER (WHERE is_booking AND has_fare)::numeric,0) revenue,
-       count(*) FILTER (WHERE is_booking AND has_fare)::int priced_trips,
-       round(avg(price) FILTER (WHERE is_booking AND has_fare)::numeric,2) avg_fare,
-       round(sum(distance_km) FILTER (WHERE is_booking AND has_fare AND has_distance)::numeric,0) priced_km,
+          n.is_booking as well as n.has_fare: a telematics row is the same physical
+          journey a ride n.platform already reported, and if one ever arrives
+          carrying a n.price it would be counted a second time. */
+       round(sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare)::numeric,0) revenue,
+       count(*) FILTER (WHERE n.is_booking AND n.has_fare)::int priced_trips,
+       round(avg(n.price) FILTER (WHERE n.is_booking AND n.has_fare)::numeric,2) avg_fare,
+       round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)::numeric,0) priced_km,
        /* The numerator of revenue_per_km, reported so the ratio can be checked.
           The revenue column covers every trip with a FARE; priced_km covers
           those that also report a DISTANCE. Dividing the first by the second is
           a ratio between two populations: live it came out 3.93 where
           revenue/priced_km is 5.28, and neither figure was derivable from the
           two printed beside it. */
-       round(sum(price) FILTER (WHERE is_booking AND has_fare AND has_distance)::numeric,0) priced_measured_revenue,
-       count(*) FILTER (WHERE is_booking AND has_fare AND has_distance)::int priced_measured_trips,
-       round((sum(price) FILTER (WHERE is_booking AND has_fare AND has_distance)
-              / nullif(sum(distance_km) FILTER (WHERE is_booking AND has_fare AND has_distance),0))::numeric,2) revenue_per_km,
+       round(sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)::numeric,0) priced_measured_revenue,
+       count(*) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)::int priced_measured_trips,
+       round((sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)
+              / nullif(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance),0))::numeric,2) revenue_per_km,
 
        -- who and what
-       ${peopleCount()}::int drivers,
-       count(*) FILTER (WHERE driver_ext_id IS NOT NULL)::int attributed_trips,
-       count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL AND plate <> '')::int vehicles,
+       ${peopleCountStored()}::int drivers,
+       count(*) FILTER (WHERE n.driver_ext_id IS NOT NULL)::int attributed_trips,
+       count(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL AND n.plate <> '')::int vehicles,
        /* Bookings with no vehicle recorded against them. They appear on no
           vehicle page and in no per-vehicle total, so the vehicle directory
           sums to fifteen fewer trips than the fleet does — a difference that
           previously had no home and read as one of the two numbers being
           wrong. Reported, so the two reconcile. */
-       count(*) FILTER (WHERE is_booking AND coalesce(btrim(plate), '') = '')::int trips_without_vehicle,
-       count(DISTINCT platform) FILTER (WHERE is_booking)::int platforms
-     FROM trip_norm WHERE ${F}`, p);
+       count(*) FILTER (WHERE n.is_booking AND coalesce(btrim(n.plate), '') = '')::int trips_without_vehicle,
+       count(DISTINCT n.platform) FILTER (WHERE n.is_booking)::int platforms
+     FROM trip_norm n ${JOIN_TRIP} WHERE ${W('n')}`, p);
 
   const [v] = await q(`SELECT count(*)::int live_vehicles,
       count(*) FILTER (WHERE now()-polled_at < interval '11 minutes')::int fresh

@@ -20,7 +20,7 @@
       named `ceiling` so nothing downstream reads it as a promise.
 
    4. AN ACTION WITH NOTHING BEHIND IT IS NOT SHOWN. A zero is not a to-do. */
-import { custodyLatest, custodyOverWindow, custodyCountOverWindow, peopleCount } from './custody_sql.js';
+import { custodyLatest, custodyOverWindow, custodyCountOverWindow, peopleCount, peopleCountStored, JOIN_TRIP } from './custody_sql.js';
 
 export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
   app.get('/api/playbook', wrap(async (req, res) => {
@@ -99,12 +99,12 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       q(`WITH s AS (
            -- "hour" is a reserved word; unquoted as an alias it is a syntax
            -- error rather than a column name.
-           SELECT local_dow AS dow, local_hour AS slot_hour,
+           SELECT n.local_dow AS dow, n.local_hour AS slot_hour,
                   count(*)::int trips,
-                  count(DISTINCT local_day)::int days_seen,
-                  ${peopleCount()}::int drivers
-           FROM trip_norm
-           WHERE is_booking AND ${DAYWIN('requested_at')}
+                  count(DISTINCT n.local_day)::int days_seen,
+                  ${peopleCountStored()}::int drivers
+           FROM trip_norm n ${JOIN_TRIP}
+           WHERE n.is_booking AND ${DAYWIN('n.requested_at')}
            GROUP BY 1,2)
          SELECT dow, slot_hour AS hour, trips, days_seen, drivers,
                 round(trips::numeric / nullif(days_seen,0), 1) AS trips_per_occurrence

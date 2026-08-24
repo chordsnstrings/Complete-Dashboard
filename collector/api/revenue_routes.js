@@ -29,8 +29,8 @@
 
    A platform contributing nothing is the most important row on the page,
    because it is the one somebody can fix. */
-import { peopleCount } from './custody_sql.js';
 import { chooseBasis, fleetIncome, platformStatements } from './income_sql.js';
+import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
 
 export function revenueRoutes(app, { q, wrap, range }) {
   app.get('/api/revenue', wrap(async (req, res) => {
@@ -42,21 +42,21 @@ export function revenueRoutes(app, { q, wrap, range }) {
     const [fares, payouts, components, tips, stmts] = await Promise.all([
       /* Per platform, over BOOKINGS only — a telematics journey is the same
          physical trip seen by the tracker and has no fare by definition. */
-      q(`SELECT platform,
+      q(`SELECT n.platform,
                 count(*)::int bookings,
                 /* The days this channel worked in the window — the denominator
                    payout coverage is measured against. See api/income_sql.js. */
-                count(DISTINCT local_day)::int booking_days,
-                count(*) FILTER (WHERE has_fare)::int priced_bookings,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
-                round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
-                round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
-                ${peopleCount()}::int drivers,
-                count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL)::int vehicles,
-                min(requested_at) first_at, max(requested_at) last_at
-         FROM trip_norm
-         WHERE local_day BETWEEN $1::date AND $2::date AND is_booking
-           AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
+                count(DISTINCT n.local_day)::int booking_days,
+                count(*) FILTER (WHERE n.has_fare)::int priced_bookings,
+                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,2) fares,
+                round(sum(n.distance_km) FILTER (WHERE n.has_fare AND n.has_distance)::numeric,0) priced_km,
+                round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric,0) km,
+                ${peopleCountStored()}::int drivers,
+                count(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL)::int vehicles,
+                min(n.requested_at) first_at, max(n.requested_at) last_at
+         FROM trip_norm n ${JOIN_TRIP}
+         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
+           AND ($3::text IS NULL OR n.platform=$3) AND ($4::text IS NULL OR n.fleet_id=$4)
          GROUP BY 1`, p),
 
       /* What each platform says it paid. Periods overlap between platforms and
