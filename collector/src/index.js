@@ -107,11 +107,12 @@ async function main() {
            SET status = 'running', started_at = now(), attempts = coalesce(attempts, 0) + 1
            WHERE id = (SELECT id FROM collector_job WHERE status = 'queued'
                        ORDER BY requested_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-           RETURNING id, mode, attempts`);
+           RETURNING id, mode, fleet, attempts`);
         const job = rows[0];
         if (!job) return;
         jobRunning = true;
-        log.info('scheduler', `on-demand ${job.mode} claimed`, { job: job.id });
+        log.info('scheduler', `on-demand ${job.mode} claimed`,
+          { job: job.id, fleet: job.fleet || 'both fleets' });
         /* Write which source the run is on as it goes. Eight sources run in
            sequence and one of them takes four and a half hours; without this
            the job row says 'running' for the whole afternoon and a wedged
@@ -120,10 +121,14 @@ async function main() {
           `UPDATE collector_job SET progress = $2 WHERE id = $1`, [job.id, JSON.stringify(p2)])
           .catch((e) => log.warn('scheduler', 'progress write failed', { err: String(e).slice(0, 80) }));
         try {
-          if (job.mode === 'backfill') await backfill(progress);
+          /* A job can name one fleet. The two fleets are separate businesses
+             with separate credentials on the same providers, and the reason to
+             run one alone is that its credential was just replaced. The
+             analyst and probe passes are fleet-agnostic and ignore it. */
+          if (job.mode === 'backfill') await backfill(progress, job.fleet || null);
           else if (job.mode === 'analyst') await analystPass();
           else if (job.mode === 'probe') await probePass();
-          else await incremental(progress);
+          else await incremental(progress, job.fleet || null);
           await pool.query(
             `UPDATE collector_job SET status='done', finished_at=now() WHERE id=$1`, [job.id]);
           log.info('scheduler', `on-demand ${job.mode} finished`, { job: job.id });

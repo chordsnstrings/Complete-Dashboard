@@ -218,8 +218,8 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
   check('progress names what is still to come, so a truncated run is visible',
     /remaining: names\.slice/.test(run));
   check('backfill and incremental both accept the progress callback',
-    /export const backfill = \(onProgress\)/.test(run)
-    && /export const incremental = \(onProgress\)/.test(run));
+    /export const backfill = \(onProgress(, fleet = null)?\)/.test(run)
+    && /export const incremental = \(onProgress(, fleet = null)?\)/.test(run));
 
   const idx = (await import('node:fs')).readFileSync('src/index.js', 'utf8');
   check('the scheduler persists that progress against the job row',
@@ -252,7 +252,7 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
     /onStep\?\.\(\{ window:/.test((await import('node:fs')).readFileSync('src/sources/uber.js', 'utf8'))
     && /onStep\?\.\(\{ window:/.test((await import('node:fs')).readFileSync('src/sources/fms.js', 'utf8')));
   check('the runner passes a step callback down to every source',
-    /mod\.collect\(\{ from, to, mode, onStep \}\)/.test(run));
+    /mod\.collect\(\{ from, to, mode, onStep(, fleet)? \}\)/.test(run));
   check('a completed window counts as progress for the requeue',
     /steps_at_last_attempt/.test(idx));
   check('the two progress measures are defined once, so they cannot disagree',
@@ -542,7 +542,10 @@ console.log('\nuber: both fleets are collected, or the absence is loud');
     'a half-pasted credential would produce a half-collected fleet');
 
   const uberSrc = src('uber.js');
-  check('collect runs once per configured org', /for \(const o of \(config\.uber\.orgs/.test(uberSrc));
+  /* The org list moved behind uberOrgs(), which also applies the fleet filter —
+     the check is that collect still iterates orgs, not that it inlines the
+     list it iterates. */
+  check('collect runs once per configured org', /for \(const o of uberOrgs\(fleet\)\)/.test(uberSrc));
   check('each fleet logs its own run row', /logRun\(\{ source: SRC, fleet_id: o\.fleet/.test(uberSrc),
     'a dead Egari cookie must read as Egari failing, not as half the numbers missing');
   check('trips and earnings are stamped with the org being collected, not a constant',
@@ -560,6 +563,63 @@ console.log('\nuber: both fleets are collected, or the absence is loud');
   const st = readFileSync('src/settings.js', 'utf8');
   check('the Egari credentials are real settings the UI can show',
     /UBER_ORG_UUID_EGARI/.test(st) && /UBER_WEB_COOKIE_EGARI/.test(st));
+}
+
+console.log('\nthe two fleets are collected separately, and fail separately');
+
+/* Ecosine and Egari are separate Uber businesses with separate credentials.
+   The only thing they share is this process, and that is exactly what makes
+   the failure mode easy to write by accident: a bare `for (const org of orgs)`
+   with an await inside throws out of the whole pass on the first rejection, so
+   an expired Egari cookie takes Ecosine's live map down with it — and the log
+   names Egari while the operator watches Ecosine go blank.
+
+   Every multi-org entry point therefore isolates each fleet, and a run can be
+   narrowed to one of them. */
+{
+  const uberSrc = src('uber.js');
+  const live = uberSrc.slice(uberSrc.indexOf('export async function pullLive'));
+  const liveBody = live.slice(0, live.indexOf('\nexport function uberOrgs'));
+  check('the live pull guards each fleet on its own',
+    /try \{[\s\S]*?await pullLiveOrg\(o\)[\s\S]*?\} catch/.test(liveBody),
+    'one fleet rejecting would end the pass before the next one runs');
+  check('and says which fleet failed rather than failing silently',
+    /live status failed for \$\{o\.fleet\}/.test(liveBody)
+    && /live status incomplete/.test(liveBody));
+  check('a fleet with no REST credential is skipped, not failed',
+    /if \(!o\.org\)/.test(liveBody) && /skipped for/.test(liveBody),
+    'a credential nobody has pasted yet is not a broken collector');
+
+  check('collect can be narrowed to one fleet', /uberOrgs\(fleet\)/.test(uberSrc));
+  check('and the org list is derived, not written down twice',
+    /export function uberOrgs\(fleet = null\)/.test(uberSrc));
+
+  const run = readFileSync('src/run.js', 'utf8');
+  check('the fleet reaches the sources through the run',
+    /collect\(\{ from, to, mode, onStep, fleet \}\)/.test(run));
+  check('and every entry point can carry it',
+    /export const backfill = \(onProgress, fleet = null\)/.test(run)
+    && /export const incremental = \(onProgress, fleet = null\)/.test(run)
+    && /export const catchUp = \(days = 30, onProgress, fleet = null\)/.test(run));
+
+  const idx = readFileSync('src/index.js', 'utf8');
+  check('the worker claims the job\'s fleet and honours it',
+    /RETURNING id, mode, fleet, attempts/.test(idx)
+    && /backfill\(progress, job\.fleet \|\| null\)/.test(idx));
+
+  const server = readFileSync('api/server.js', 'utf8');
+  check('the trigger accepts a fleet from the operator',
+    /FLEETS\.includes\(req\.body\?\.fleet\)/.test(server));
+  /* Two fleets queued at once are two different jobs. Written as a plain
+     `mode = $1` test, asking for Egari while an Ecosine run was in flight
+     answered "already queued" and did nothing. */
+  check('and a run for one fleet does not block the other',
+    /fleet IS NOT DISTINCT FROM \$2/.test(server),
+    'the de-duplication would treat the two fleets as the same job');
+  const v28 = readFileSync('sql/schema_v28.sql', 'utf8');
+  check('the queue records which fleet was asked for',
+    /ADD COLUMN IF NOT EXISTS fleet TEXT/.test(v28)
+    && /job_pending_idx ON collector_job \(status, mode, fleet/.test(v28));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

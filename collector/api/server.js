@@ -4,6 +4,7 @@ import compression from 'compression';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { pool, migrate } from '../src/db.js';
+import { config } from '../src/config.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
 import { win, winDays } from './window.js';
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
@@ -1561,6 +1562,11 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
    something already pending is REFUSED rather than merged, because "queued"
    for a job that will never run is the same lie in a different shape. */
 const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe'];
+/* The fleets a run can be narrowed to. Taken from the configured Uber orgs
+   rather than written down twice: a third fleet is a credential the operator
+   pastes, not a code change, and a list that has to be edited alongside is a
+   list that will not be. */
+const FLEETS = [...new Set((config.uber.orgs || []).map((o) => o.fleet))];
 /* Statement-day import — the operator's daily ledger, batched.
    ─────────────────────────────────────────────────────────────────────────
    The ledger is the only machine-readable source for months the provider APIs
@@ -1624,21 +1630,30 @@ app.post('/api/import/statement-days', requireAdmin, wrap(async (req, res) => {
 
 app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
   const mode = JOB_MODES.includes(req.body?.mode) ? req.body.mode : 'incremental';
+  /* One fleet, or both. Ecosine and Egari are separate businesses with
+     separate credentials on the same providers, and they fail separately —
+     so when a credential is replaced, the question is whether THAT fleet
+     collects now. Asking it should not mean waiting out a full pass over the
+     fleet that was already working. Absent means both, which is what every
+     schedule asks for and what every job before this one meant. */
+  const fleet = FLEETS.includes(req.body?.fleet) ? req.body.fleet : null;
   const [existing] = await q(
-    `SELECT id, status, requested_at FROM collector_job
-     WHERE mode = $1 AND status IN ('queued', 'running') ORDER BY requested_at LIMIT 1`, [mode]);
+    `SELECT id, status, requested_at, fleet FROM collector_job
+      WHERE mode = $1 AND fleet IS NOT DISTINCT FROM $2
+        AND status IN ('queued', 'running') ORDER BY requested_at LIMIT 1`, [mode, fleet]);
   if (existing) {
+    const scope = fleet ? `${mode} for ${fleet}` : mode;
     return res.status(409).json({
-      ok: false, mode, already: existing.status, job_id: existing.id,
+      ok: false, mode, fleet, already: existing.status, job_id: existing.id,
       requested_at: existing.requested_at,
-      detail: `a ${mode} is already ${existing.status}; queuing another would do the same work twice`,
+      detail: `a ${scope} is already ${existing.status}; queuing another would do the same work twice`,
     });
   }
   const [job] = await q(
-    `INSERT INTO collector_job (mode, requested_by) VALUES ($1, $2)
-     RETURNING id, mode, status, requested_at`,
-    [mode, (req.get('x-admin-token') ? 'admin' : 'unauthenticated')]);
-  res.json({ ok: true, queued: mode, job_id: job.id, job });
+    `INSERT INTO collector_job (mode, fleet, requested_by) VALUES ($1, $2, $3)
+     RETURNING id, mode, fleet, status, requested_at`,
+    [mode, fleet, (req.get('x-admin-token') ? 'admin' : 'unauthenticated')]);
+  res.json({ ok: true, queued: mode, fleet, job_id: job.id, job });
 }));
 
 /* What has been asked for, what is running, and what happened to it. A queue

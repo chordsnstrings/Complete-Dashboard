@@ -360,15 +360,45 @@ async function pullEarnerBreakdowns(from, to, onStep) {
 
 // Live driver status snapshot (OAuth).
 export async function pullLive() {
-  /* Live status is a REST call keyed on the ENCRYPTED org id, which only
-     Ecosine has so far — an org without one is skipped, not failed, and says
-     so once per run rather than throwing on every poll. */
+  /* One fleet's failure is that fleet's failure.
+     ─────────────────────────────────────────────────────────────────────────
+     The two fleets are separate Uber businesses with separate credentials, and
+     the only thing they share is this process. Written as a bare loop, a
+     rejection on the second org threw out of the whole pass — so an expired
+     Egari credential would have taken Ecosine's live map down with it, and the
+     log would have named Egari while the operator watched Ecosine go blank.
+     They are collected one at a time and each one's outcome is its own: a
+     fleet that fails is reported, and the next fleet still runs.
+
+     Live status is a REST call keyed on the ENCRYPTED org id, which is not the
+     uuid the reports and GraphQL surfaces use. An org without one is skipped
+     rather than failed — it is a credential nobody has pasted yet, not a
+     broken collector — and it says so once per run rather than throwing on
+     every five-minute poll. */
   let total = 0;
-  for (const o of (config.uber.orgs?.length ? config.uber.orgs : [config.uber])) {
+  const failed = [];
+  for (const o of uberOrgs()) {
     if (!o.org) { log.info(SRC, `live status skipped for ${o.fleet} — no encrypted org id`); continue; }
-    total += await pullLiveOrg(o);
+    try {
+      total += await pullLiveOrg(o);
+    } catch (e) {
+      failed.push(o.fleet);
+      log.error(SRC, `live status failed for ${o.fleet}`, { err: String(e).slice(0, 200) });
+    }
   }
+  /* Reported, not swallowed: the caller counts rows, and rows written by the
+     fleets that DID answer must not read as "everything is fine". */
+  if (failed.length) log.warn(SRC, 'live status incomplete', { failed: failed.join(', ') });
   return total;
+}
+
+/* The orgs to collect, in order, honouring a fleet filter.
+   Every entry point takes the same filter, so a single fleet can be collected
+   on its own — to re-pull one after a credential is replaced, without making
+   the other fleet pay for a full pass it did not need. */
+export function uberOrgs(fleet = null) {
+  const all = config.uber.orgs?.length ? config.uber.orgs : [config.uber];
+  return fleet ? all.filter((o) => o.fleet === fleet) : all;
 }
 
 async function pullLiveOrg(o) {
@@ -433,14 +463,14 @@ async function pullLiveOrg(o) {
   return rows.length ? upsertMany('telemetry_snapshot', rows, ['source', 'plate', 'captured_at']) : 0;
 }
 
-export async function collect({ from, to, mode, onStep }) {
+export async function collect({ from, to, mode, onStep, fleet = null }) {
   /* One full pass per configured org, sequentially, each under its own run
      row — so the Sources page shows uber/ecosine and uber/egari separately
      and a dead cookie on one fleet reads as that fleet's failure, not as half
      the numbers quietly missing from a shared one. Sequential on purpose:
      the report pipeline's three-in-flight cap is per org, but the two
      sessions share this process's connection pool and the API's patience. */
-  for (const o of (config.uber.orgs?.length ? config.uber.orgs : [config.uber])) {
+  for (const o of uberOrgs(fleet)) {
     cur = o;
     try {
       const trips = await pullTrips(from, to, onStep);

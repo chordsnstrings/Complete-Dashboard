@@ -73,6 +73,12 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
        second call answer from the first. */
     cache: { stats: () => ({ hit: 0, miss: 0, skip: 0, entries: 0, version: 'test' }) },
     describeSettings: stubList, setSetting: stub, deleteSetting: stub, loadSettings: stub,
+    /* The routes read config for the things an operator can change without a
+       deploy — which fleets exist, chiefly. Injected rather than imported so a
+       test never depends on what happens to be in the environment's settings
+       table; both fleets are present so a route that narrows to one has
+       something to narrow to. */
+    config: { uber: { orgs: [{ fleet: 'ecosine' }, { fleet: 'egari' }] } },
     insights: { run: stub }, pool: { query: db.query.bind(db) },
     /* Every api/*_sql.js module, discovered rather than listed.
        This was `...(await import('../api/custody_sql.js'))`, one name written

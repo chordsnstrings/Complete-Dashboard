@@ -47,18 +47,18 @@ const HISTORICAL = { uber, uberFleet, yango, bolt, hotel, external, events, fms 
    A queued run waits rather than being dropped: skipping it silently is how a
    collection gap opens without anything saying so. */
 let inFlight = null;
-export async function runWindow(mode, from, to, onProgress) {
+export async function runWindow(mode, from, to, onProgress, fleet = null) {
   if (inFlight) {
     log.info('run', `${mode} waiting — another collection is in flight`);
     await inFlight.catch(() => {});
   }
   let release;
   inFlight = new Promise((r) => { release = r; });
-  try { return await runWindowInner(mode, from, to, onProgress); }
+  try { return await runWindowInner(mode, from, to, onProgress, fleet); }
   finally { release(); inFlight = null; }
 }
 
-async function runWindowInner(mode, from, to, onProgress) {
+async function runWindowInner(mode, from, to, onProgress, fleet = null) {
   await loadSettings(true);   // pick up Settings-page credential changes without a redeploy
   log.info('run', `${mode} ${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}`);
   const names = Object.keys(HISTORICAL);
@@ -82,7 +82,11 @@ async function runWindowInner(mode, from, to, onProgress) {
       return onProgress?.({ current: name, done, total: names.length,
         remaining: names.slice(done + 1), step: st, steps });
     };
-    try { await mod.collect({ from, to, mode, onStep }); }
+    /* `fleet` reaches the sources that serve more than one business — Uber is
+       two separate Uber orgs with separate credentials — so a run can be
+       narrowed to the fleet whose credential was just replaced instead of
+       re-pulling both. A source that serves one fleet ignores the key. */
+    try { await mod.collect({ from, to, mode, onStep, fleet }); }
     catch (e) { log.error('run', `${name} threw`, { err: String(e) }); }
     done++;
     log.info('run', `${mode} ${name} finished`, { done, of: names.length });
@@ -147,10 +151,15 @@ export async function probePass() {
   catch (e) { log.error('probe', 'pass failed', { err: String(e) }); return null; }
 }
 
-export const backfill = (onProgress) =>
-  runWindow('backfill', monthsAgo(config.backfillMonths), new Date(), onProgress);
-export const incremental = (onProgress) =>
-  runWindow('incremental', daysAgo(config.incrementalDays), new Date(), onProgress);
+/* `fleet` narrows a run to one business. The two fleets are separate accounts
+   with separate credentials on the same providers, and the reason to run one
+   alone is almost always the same: a credential was just replaced and the
+   operator wants to know whether it works, without waiting out a full pass
+   over the fleet that was already fine. */
+export const backfill = (onProgress, fleet = null) =>
+  runWindow('backfill', monthsAgo(config.backfillMonths), new Date(), onProgress, fleet);
+export const incremental = (onProgress, fleet = null) =>
+  runWindow('incremental', daysAgo(config.incrementalDays), new Date(), onProgress, fleet);
 
 /* ── the catch-up ──────────────────────────────────────────────────────────
    The incremental window is three days and it runs every half hour. Nothing
@@ -171,8 +180,8 @@ export const incremental = (onProgress) =>
    Every write is an upsert keyed on the provider's own id, so re-collecting a
    day that is already correct changes nothing — which is what makes running
    this on a timer safe rather than merely convenient. */
-export const catchUp = (days = 30, onProgress) =>
-  runWindow('catchup', daysAgo(days), new Date(), onProgress);
+export const catchUp = (days = 30, onProgress, fleet = null) =>
+  runWindow('catchup', daysAgo(days), new Date(), onProgress, fleet);
 
 // CABMAN realtime GPS — fixed 5-minute refresh, persisted to telemetry_snapshot (via cabman.collect,
 // which upserts snapshots and writes a collection_run row). This is the owner of CABMAN data.
