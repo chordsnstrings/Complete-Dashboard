@@ -24,6 +24,7 @@ import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { mountAll } from './mount.mjs';
+import { refreshPayouts } from '../src/rollup.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -389,6 +390,7 @@ const get = async (p) => {
     (platform, fleet_id, driver_ext_id, driver_name, period_start, period_end, earnings)
     VALUES ('uber','ecosine','c-pay','Payout Driver','2026-08-03','2026-08-09', 700),
            ('uber','ecosine','c-pay','Payout Driver','2026-08-04','2026-08-10', 700)`);
+  await refreshPayouts(db); // the payout table is collector-filled; this test plays the collector
 
   const k = await get(`/api/kpis?${WIN}`);
   const rev = await get(`/api/revenue?${WIN}`);

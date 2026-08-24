@@ -282,6 +282,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
     return n;
   }));
   out.push(await runOne(db, 'rollup_person_month', () => refreshPersonMonth(db, since)));
+  out.push(await runOne(db, 'driver_payout_day', () => refreshPayouts(db)));
   /* Refresh the planner's statistics on the tables this just rewrote, and on
      trip itself. A generated column arrives with NO statistics — Postgres has
      never seen its distribution — so every plan touching person_key was being
@@ -293,7 +294,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
      cheap next to the rollup that just ran. Failure is not fatal: stale
      statistics are a slow query, not a wrong one. */
   try {
-    await db.query('ANALYZE trip, rollup_day, rollup_month, rollup_person_month');
+    await db.query('ANALYZE trip, rollup_day, rollup_month, rollup_person_month, driver_payout_day');
   } catch (e) { log.warn(SRC, 'analyze failed — plans may be stale', { err: String(e).slice(0, 120) }); }
 
   const failed = out.filter((o) => o.error);
@@ -303,6 +304,49 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
     failed: failed.length || undefined,
   });
   return out;
+}
+
+/* Materialise the payout-day resolution — see sql/schema_v23.sql.
+   ─────────────────────────────────────────────────────────────────────────
+   driver_payout_day_live expands every report window into its days and picks a
+   winner per (platform, driver, day). Computing that on demand cost a one-vCPU
+   database twenty seconds and more per query, and every page's money passes
+   through it — so it runs here, once per collection cycle, and everything else
+   reads the table it fills.
+
+   Always in full, never incrementally. The winner for a day can change when a
+   FINER report arrives for a week already covered by a coarse one, and which
+   days that dethrones is exactly the question the view answers — an
+   incremental refresh would have to answer it twice. The whole expansion is
+   one INSERT..SELECT on the server; measured at production shape it is the
+   cost of one of the queries it replaces.
+
+   DELETE, not TRUNCATE: TRUNCATE takes ACCESS EXCLUSIVE and blocks every
+   reader for the duration of the rebuild, while DELETE inside the transaction
+   lets a concurrent reader see the previous complete answer until the commit
+   swaps it. The dead rows are the price; autovacuum collects them, and the
+   ANALYZE below keeps the planner current meanwhile. */
+export async function refreshPayouts(db = pool) {
+  await db.query('BEGIN');
+  try {
+    await db.query('DELETE FROM driver_payout_day');
+    const r = await db.query(`
+      INSERT INTO driver_payout_day
+        (platform, fleet_id, driver_ext_id, driver_name, day,
+         period_start, period_end, period_days, period_earnings,
+         earnings, cash_earnings, trips, distance_km, hours_online, hours_on_trip,
+         acceptance_rate, cancellation_rate, completion_rate, rating, currency, ingested_at)
+      SELECT platform, fleet_id, driver_ext_id, driver_name, day,
+             period_start, period_end, period_days, period_earnings,
+             earnings, cash_earnings, trips, distance_km, hours_online, hours_on_trip,
+             acceptance_rate, cancellation_rate, completion_rate, rating, currency, ingested_at
+      FROM driver_payout_day_live`);
+    await db.query('COMMIT');
+    return r.rowCount ?? 0;
+  } catch (e) {
+    await db.query('ROLLBACK').catch(() => {});
+    throw e;
+  }
 }
 
 /* How fresh each rollup is, for the API to hand to a page. */

@@ -18,6 +18,7 @@ import { applySchema, SCHEMA_FILES } from './schema.mjs';
 import express from 'express';
 import { readFileSync, readdirSync } from 'node:fs';
 import { mountAll, START, END } from './mount.mjs';
+import { refreshPayouts } from '../src/rollup.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -85,6 +86,7 @@ await q(`INSERT INTO driver_performance (platform,fleet_id,driver_ext_id,driver_
          VALUES ('yango','ecosine','d0','Driver d0','2026-08-01','2026-08-31',40,4.8,0.9,$1)`,
   [JSON.stringify({ count_orders_all: 100, count_orders_accepted: 80, count_orders_completed: 70,
     price_cash: 900, price_cashless: 300, price_platform_commission: -220, work_time_seconds: 90000, state: 'active' })]);
+await refreshPayouts(db); // the payout table is collector-filled; this test plays the collector
 await q(`INSERT INTO telemetry_snapshot (plate, fleet_id, source, captured_at, polled_at, lat, lng, speed, status, seat_occupied)
          SELECT 'L100','ecosine','cabman', now() - (g || ' minutes')::interval, now(), 25.1+g*0.001, 55.2+g*0.001, 40, 'Active', true
          FROM generate_series(1,40) g`);

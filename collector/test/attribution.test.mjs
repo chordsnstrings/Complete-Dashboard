@@ -14,6 +14,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { attributedEarnings, unattributedEarnings } from '../api/attribution_sql.js';
+import { refreshPayouts } from '../src/rollup.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -50,6 +51,11 @@ await day('CARC', '2026-08-11', 'd-sara', 0, 0);
 await pay('d-omar', '2026-08-10', '2026-08-16', 500);
 
 const W = ['2026-08-10', '2026-08-16'];
+/* driver_payout_day is a TABLE the collector fills through src/rollup.js —
+   these tests seed driver_performance by hand, so they refresh by hand at each
+   point a collector run would have. Reading without refreshing here would test
+   an empty table and pass vacuously. */
+await refreshPayouts(db);
 const rows = await q(attributedEarnings(), W);
 const byPlate = {};
 for (const r of rows) byPlate[r.plate] = (byPlate[r.plate] || 0) + Number(r.attributed);
@@ -116,6 +122,7 @@ console.log('\nattribution: nothing is invented from nothing');
    "attributed earnings" reads as measured and is worse than no row at all. */
 await pay('d-zero', '2026-08-10', '2026-08-16', 0);
 await day('CARD', '2026-08-10', 'd-zero', 5);
+await refreshPayouts(db);
 const withZero = await q(attributedEarnings(), W);
 check('a zero payout produces no attributed row',
   !withZero.some((r) => r.plate === 'CARD'));
@@ -123,6 +130,7 @@ check('a zero payout produces no attributed row',
 await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, trips)
          VALUES ('uber','ecosine','d-null','2026-08-10','2026-08-16', 9)`);
 await day('CARE', '2026-08-10', 'd-null', 5);
+await refreshPayouts(db);
 const withNull = await q(attributedEarnings(), W);
 check('a period reporting trips but no earnings produces no attributed row',
   !withNull.some((r) => r.plate === 'CARE'));
@@ -133,6 +141,7 @@ check('and is not counted as unplaced pay either, since there was no pay',
    day the driver spent on Uber, even under the same driver id. */
 await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, earnings)
          VALUES ('yango','ecosine','d-ali','2026-08-10','2026-08-16', 300)`);
+await refreshPayouts(db);
 const crossed = await q(attributedEarnings(), W);
 check('a payout is only placed on days worked on the SAME platform',
   !crossed.some((r) => r.platform === 'yango'));
@@ -155,6 +164,7 @@ await pay('d-dup', '2026-09-07', '2026-09-13', 700);   // grid A, a full Mon–S
 await pay('d-dup', '2026-09-08', '2026-09-14', 700);   // grid B, the same week shifted a day
 for (const d of ['2026-09-07', '2026-09-08', '2026-09-09']) await day('CARF', d, 'd-dup', 10);
 
+await refreshPayouts(db);
 const dupRows = await q(attributedEarnings(), D);
 const dupTotal = dupRows.filter((r) => r.driver_ext_id === 'd-dup')
   .reduce((a, r) => a + Number(r.attributed), 0);
@@ -182,6 +192,7 @@ await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, peri
          VALUES ('bolt','ecosine','d-bolt','2026-09-01','2026-09-30', 3000)`);
 await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, earnings)
          VALUES ('bolt','ecosine','d-bolt','2026-09-10','2026-09-13', 500)`);
+await refreshPayouts(db);
 const bolt = await q(
   `SELECT round(sum(earnings)::numeric,2) e, count(*)::int days
    FROM driver_payout_day WHERE driver_ext_id = 'd-bolt'`);
@@ -196,6 +207,7 @@ check('a finer report displaces the coarse one for the days it covers',
    which on the live table was most of the expansion and none of the meaning. */
 await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, rating)
          VALUES ('bolt','ecosine','d-roster','2025-09-01','2026-09-01', 4.8)`);
+await refreshPayouts(db);
 const [{ roster }] = await q(
   `SELECT count(*)::int roster FROM driver_payout_day WHERE driver_ext_id = 'd-roster'`);
 check('a row measuring nothing is not spread over a year of days',
@@ -206,6 +218,7 @@ check('a row measuring nothing is not spread over a year of days',
    have taken those with it. */
 await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, hours_online)
          VALUES ('yango','ecosine','d-hours','2026-09-07','2026-09-13', 42)`);
+await refreshPayouts(db);
 const [{ hrs }] = await q(
   `SELECT round(sum(hours_online)::numeric,2) hrs FROM driver_payout_day WHERE driver_ext_id = 'd-hours'`);
 check('a period reporting hours and no money is still spread', Number(hrs) === 42, String(hrs));

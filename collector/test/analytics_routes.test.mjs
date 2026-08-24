@@ -19,6 +19,7 @@ import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { analyticsRoutes } from '../api/analytics_routes.js';
+import { refreshPayouts } from '../src/rollup.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -126,6 +127,7 @@ await q(`INSERT INTO driver_performance
     work_time_seconds: 360000, price_cash: 3000, price_cashless: 1000,
     price_platform_commission: -800, state: 'active' }),
    JSON.stringify({ driver_score: 'n/a', state: 'suspended' })]);
+await refreshPayouts(db); // the payout table is collector-filled; this test plays the collector
 
 /* ── mount the real module ───────────────────────────────────────────────── */
 const app = express();

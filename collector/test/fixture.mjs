@@ -11,6 +11,8 @@
      - FMS telematics rows: journeys with a plate, no driver, odometer distance
      - a vehicle with telemetry but no trips, and one with trips but no telemetry
      - a driver who left mid-window, and one who started mid-window */
+import { refreshPayouts } from '../src/rollup.js';
+
 export const PLATES = ['L45240', 'L46174', 'L40965', 'L36395', 'L94178'];
 export const DAY0 = '2026-08-01';
 export const DAY1 = '2026-08-31';
@@ -45,7 +47,17 @@ const pick = (a) => a[Math.floor(rnd() * a.length)];
 export async function seedFleet(db, { wide = false } = {}) {
   const q = (t, p = []) => db.query(t, p);
   let n = 0;
-  if (wide) return seedWide(db);
+  /* driver_payout_day is a TABLE (sql/schema_v23.sql) the collector fills
+     through src/rollup.js after every run. A fixture plays the collector, so
+     it fills the table the same way — in BOTH branches: the first version of
+     this refresh sat at the bottom of seedWide's tail, and the default fleet
+     returned three lines up from here without ever running it, so the preview
+     served a fleet that was never paid while every wide-fixture test passed. */
+  if (wide) {
+    const nWide = await seedWide(db);
+    await refreshPayouts(db);
+    return nWide;
+  }
   for (let d = 0; d < 31; d++) {
     const day = `2026-08-${String(d + 1).padStart(2, '0')}`;
     for (let i = 0; i < 12; i++) {
@@ -157,6 +169,7 @@ export async function seedFleet(db, { wide = false } = {}) {
                window_start, window_end)
              VALUES ($1,'ecosine','incremental','ok',100,'2026-08-31T20:00:00Z','2026-08-01','2026-08-31')`, [s]);
 
+  await refreshPayouts(db);
   return n;
 }
 

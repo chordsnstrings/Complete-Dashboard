@@ -31,9 +31,26 @@
 
    src/util.js now pins the Uber collector to Monday-anchored calendar weeks so
    new rows land on one grid and the upsert replaces rather than accumulates.
-   This view is what makes the numbers right in the meantime, and what keeps
-   them right when a provider answers on a grid of its own. */
-CREATE OR REPLACE VIEW driver_payout_day AS
+   This resolution is what makes the numbers right in the meantime, and what
+   keeps them right when a provider answers on a grid of its own.
+
+   TWO relations share the work and the split is deliberate:
+
+   driver_payout_day_live — the VIEW below, the single copy of the rules.
+   Computing it expands every report window into its days and sorts the lot,
+   which at production volume took a one-vCPU database twenty seconds and more
+   per query — and every page's money passes through it, so a cold cache put
+   that cost in front of every first reader, and a 720-call audit failed 79 of
+   them on timeouts alone.
+
+   driver_payout_day — a TABLE holding the live view's rows, refreshed by
+   src/rollup.js inside the same pass (and advisory lock) as the other rollups:
+   after every collection and on the quarter-hour, which is exactly as often as
+   the answer can change, because payouts move only when a collector writes.
+   Everything reads the table; only the refresher reads the live view. The
+   refresh is DELETE + INSERT in one transaction, so a reader mid-refresh sees
+   the previous complete answer, never a half-built one. */
+CREATE OR REPLACE VIEW driver_payout_day_live AS
 SELECT DISTINCT ON (p.platform, p.driver_ext_id, d.day)
        p.platform, p.fleet_id, p.driver_ext_id, p.driver_name,
        d.day::date                                   AS day,
@@ -78,10 +95,55 @@ ORDER BY p.platform, p.driver_ext_id, d.day,
          p.ingested_at DESC NULLS LAST,
          p.period_start ASC;
 
+/* Transition: earlier deploys created driver_payout_day and driver_payout as
+   views. A view cannot become a table in place, so where the old shape exists
+   it is dropped first. Idempotent — a transitioned database has nothing to
+   drop, and a fresh one never had the views. */
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_views WHERE viewname = 'driver_payout_day') THEN
+    DROP VIEW IF EXISTS driver_payout;
+    DROP VIEW driver_payout_day;
+  END IF;
+END $$;
+
+CREATE TABLE IF NOT EXISTS driver_payout_day (
+  platform          TEXT NOT NULL,
+  fleet_id          TEXT,
+  driver_ext_id     TEXT NOT NULL,
+  driver_name       TEXT,
+  day               DATE NOT NULL,
+  period_start      DATE NOT NULL,
+  period_end        DATE NOT NULL,
+  period_days       INT,
+  period_earnings   NUMERIC,
+  earnings          NUMERIC,
+  cash_earnings     NUMERIC,
+  trips             NUMERIC,
+  distance_km       DOUBLE PRECISION,
+  hours_online      DOUBLE PRECISION,
+  hours_on_trip     DOUBLE PRECISION,
+  acceptance_rate   DOUBLE PRECISION,
+  cancellation_rate DOUBLE PRECISION,
+  completion_rate   DOUBLE PRECISION,
+  rating            DOUBLE PRECISION,
+  currency          TEXT,
+  ingested_at       TIMESTAMPTZ,
+  PRIMARY KEY (platform, driver_ext_id, day)
+);
+/* The two scans every page makes that the primary key does not serve: money
+   over a day range, and one person's history regardless of platform. */
+CREATE INDEX IF NOT EXISTS payout_day_day_idx    ON driver_payout_day (day);
+CREATE INDEX IF NOT EXISTS payout_day_driver_idx ON driver_payout_day (driver_ext_id, day);
+
 /* The periods that actually contribute, one row per window that won at least
    one of its days. This is what a page should LIST — showing driver_performance
    directly put sixty-seven overlapping rows in front of a reader as if they
-   were sixty-seven weeks of work. */
+   were sixty-seven weeks of work.
+
+   Grouped over the TABLE, so listing periods costs one indexed group-by rather
+   than a fresh expansion, and so the list can never disagree with the day sums
+   beside it: they are the same rows. */
 CREATE OR REPLACE VIEW driver_payout AS
 SELECT platform, fleet_id, driver_ext_id, driver_name,
        period_start, period_end, period_days,

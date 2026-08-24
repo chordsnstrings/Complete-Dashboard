@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { pool, migrate } from '../src/db.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
 import { win, winDays } from './window.js';
-import { rollupGrainSql, rollupState } from '../src/rollup.js';
+import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
 import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, fleetIncome } from './income_sql.js';
 import { startWarmer } from './warm.js';
@@ -2260,6 +2260,16 @@ migrate()
   .then(() => {
     migrationsDone = true;
     log.info('api', 'migrations complete — serving');
+    /* The payout table is filled by the worker's rollup pass. On the deploy
+       that transitions it from a view — and on any fresh database — it is
+       empty until that pass runs, which is up to a quarter hour of every money
+       figure reading zero. Fill it here once, in the background, if the data
+       exists and the table does not reflect it; the advisory lock inside
+       refreshRollups makes racing the worker harmless. */
+    q(`SELECT (SELECT count(*) FROM driver_payout_day) = 0
+           AND EXISTS (SELECT 1 FROM driver_performance) AS empty`)
+      .then(([r]) => (r?.empty ? refreshRollups() : null))
+      .catch((e) => log.warn('api', 'payout boot-fill skipped', { err: String(e).slice(0, 120) }));
     /* Warm the cache in the background as soon as the data moves, so the first
        reader after a collection is not the one who pays for the aggregate.
        See api/warm.js. WARM=off to leave it cold. */
