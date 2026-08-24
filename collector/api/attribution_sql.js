@@ -42,12 +42,25 @@
    Weights are computed over the driver's WHOLE period, not only the part
    inside the window — otherwise a period half outside would have its inside
    half scaled up to 100% and the car would appear to have earned the full
-   week's pay in three days. */
+   week's pay in three days.
+
+   The source is driver_payout, not driver_performance. The raw table is a log
+   of REPORT WINDOWS and its key is the window, so the same payout week arrives
+   twice whenever a backfill and a catch-up ask on different grids — and one
+   driver's twenty-eight weeks were held as sixty-seven rows summing to more
+   than double the truth. driver_payout is the same periods with the overlaps
+   resolved, and its `earnings` is the part of the period no finer report
+   already accounts for. See sql/schema_v23.sql.
+
+   Spreading is over the days the driver actually DROVE, never over the
+   calendar: a week's pay earned across three days of custody belongs to those
+   three days. Dividing it by seven first and then dropping the four days with
+   no custody record would quietly delete more than half of it. */
 export const attributedEarnings = ({ platformFilter = '', extra = '' } = {}) => `
   WITH pay AS (
     SELECT platform, driver_ext_id, period_start, period_end,
            earnings, cash_earnings
-    FROM driver_performance
+    FROM driver_payout
     WHERE earnings IS NOT NULL AND earnings > 0
       AND period_end >= $1::date AND period_start <= $2::date
       ${platformFilter}
@@ -96,13 +109,17 @@ export const attributedEarnings = ({ platformFilter = '', extra = '' } = {}) => 
    vehicle, because the driver has no vehicle-day inside the period. Reported
    beside the attributed total so a page can say "AED 12,400 across these cars,
    and AED 900 we could not place" instead of quietly showing the smaller
-   number as if it were everything. */
+   number as if it were everything.
+
+   Reads driver_payout for the same reason attributedEarnings does — the two
+   halves have to partition ONE set of periods or their sum is not the payout
+   total, which is the only property that makes either number checkable. */
 export const unattributedEarnings = ({ platformFilter = '' } = {}) => `
   SELECT p.platform,
          count(*)::int periods,
          count(DISTINCT p.driver_ext_id)::int drivers,
          round(sum(p.earnings)::numeric, 2) AS earnings
-  FROM driver_performance p
+  FROM driver_payout p
   WHERE p.earnings IS NOT NULL AND p.earnings > 0
     AND p.period_end >= $1::date AND p.period_start <= $2::date
     ${platformFilter}

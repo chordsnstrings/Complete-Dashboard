@@ -467,17 +467,40 @@ async function tabEarnings(root, id) {
   else areaChart(line.body, withRev.map((d) => ({ label: dayStr(d.day), v: +d.revenue })), { x: 'label', y: 'v', valueFmt: (v) => money(v) });
 
   per.body.innerHTML = '';
+  /* These are the statements the platform published, and they OVERLAP: a
+     provider is asked for a report window, not for a disjoint period, so a
+     backfill and a catch-up on different grids describe the same week twice.
+     The server resolves that per day and hands back `counted` — the part of
+     each statement no finer report already accounts for. `earnings` is still
+     the statement's own figure, because that is what the platform will show
+     the driver, and the two have to be reconcilable.
+
+     Adding the Earnings column down the page gives a number that is too big.
+     The column that adds up is Counted, so it is the one totalled and the one
+     the note explains. */
+  const displaced = e.periods.filter((r) => r.days_used != null && r.days_used < r.period_days);
+  const counted = e.periods.reduce((a, r) => a + Number(r.counted ?? r.earnings ?? 0), 0);
   per.body.append(tableFrom(e.periods, [
     { label: 'Platform', key: 'platform' },
     { label: 'Period', key: '_p', render: (r) => `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` },
+    { label: 'Days', key: 'days_used', num: true,
+      render: (r) => (r.days_used == null ? '—'
+        : r.days_used === r.period_days ? String(r.period_days)
+        : `<span class="tag warn">${r.days_used} of ${r.period_days}</span>`) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Online', key: 'hours_online', num: true, render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
     { label: 'On trip', key: 'hours_on_trip', num: true, render: (r) => (r.hours_on_trip ? `${fmt(r.hours_on_trip, 1)} h` : '—') },
     { label: 'Accept', key: 'acceptance_rate', num: true, render: (r) => (r.acceptance_rate != null ? pct(r.acceptance_rate * 100) : '—') },
-    { label: 'Earnings', key: 'earnings', num: true, render: (r) => money(r.earnings) },
+    { label: 'Statement', key: 'earnings', num: true, render: (r) => money(r.earnings) },
+    { label: 'Counted', key: 'counted', num: true, render: (r) => money(r.counted ?? r.earnings) },
     { label: 'Cash', key: 'cash_earnings', num: true, render: (r) => money(r.cash_earnings) },
     { label: 'Rating', key: 'rating', num: true, render: (r) => (r.rating ? fmt(r.rating, 2) : '—') },
   ]));
+  per.body.append(el('p', 'cap', `${money(counted)} counted across ${fmt(e.periods.length)} statement(s)`
+    + (displaced.length
+      ? ` — ${fmt(displaced.length)} of them overlap another statement, and only the days no other `
+        + 'statement covers are counted. Adding the Statement column instead would count those days twice.'
+      : '. None of them overlap, so Statement and Counted agree.')));
 }
 
 /* ── tab: quality ────────────────────────────────────────────────────────── */

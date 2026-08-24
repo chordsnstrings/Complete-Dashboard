@@ -435,8 +435,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               round(avg(rating)::numeric,2) rating,
               round(sum(earnings)::numeric,2) reported_earnings,
               round(sum(cash_earnings)::numeric,2) cash_earnings
-       FROM driver_performance
-       WHERE driver_ext_id = ANY($3) AND period_start >= $1::date AND period_end <= $2::date`, p);
+       /* Day grain, and the window applied to the day. Summed over
+          driver_performance this counted the same payout week two and three
+          times — the provider is asked for overlapping report windows and the
+          window is the row's key. See sql/schema_v23.sql.
+
+          It also read period_start >= from AND period_end <= to, which is
+          "periods wholly inside the window": a 30-day view of weekly payouts
+          silently dropped the two weeks straddling its edges, so the driver's
+          earnings jumped whenever the window moved past a Monday. */
+       FROM driver_payout_day
+       WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date`, p);
     res.json({ ...t, ...shift, ...perf,
       trips_per_day: t.days_worked ? +(t.trips / t.days_worked).toFixed(1) : null,
       utilisation_pct: perf?.hours_online ? +((perf.hours_on_trip / perf.hours_online) * 100).toFixed(1) : null });
@@ -622,11 +631,24 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        FROM driver_earnings_component
        WHERE driver_ext_id = ANY($3) AND period_start >= $1::date AND period_end <= $2::date
        GROUP BY 1,2,4 ORDER BY abs(sum(amount)) DESC`, p);
+    /* The windows that actually contribute, not every window ever fetched.
+       This listed driver_performance directly, and for one driver over six
+       months that was sixty-seven rows for twenty-eight weeks of work —
+       overlapping pairs six days apart, each a real answer to a slightly
+       different question, presented as if they were consecutive periods. The
+       reader could not add them up and neither could we. See
+       sql/schema_v23.sql; "counted" is the part of the period this window
+       covers, which is the whole of it unless a finer report overlaps it. */
     const periods = await q(
-      `SELECT platform, period_start, period_end, trips, hours_online, hours_on_trip,
-              earnings, cash_earnings, acceptance_rate, cancellation_rate, rating
-       FROM driver_performance
-       WHERE driver_ext_id = ANY($3) AND period_start >= $1::date AND period_end <= $2::date
+      `SELECT platform, period_start, period_end, period_days, days_used,
+              round(period_earnings::numeric,2) AS earnings,
+              round(earnings::numeric,2) AS counted,
+              round(cash_earnings::numeric,2) AS cash_earnings,
+              round(trips::numeric,0)::int AS trips,
+              round(hours_online::numeric,2) AS hours_online,
+              round(hours_on_trip::numeric,2) AS hours_on_trip
+       FROM driver_payout
+       WHERE driver_ext_id = ANY($3) AND period_end >= $1::date AND period_start <= $2::date
        ORDER BY period_start DESC LIMIT 120`, p);
     const [tips] = await q(
       `SELECT round(sum(amount) FILTER (WHERE category='tip')::numeric,2) tips,

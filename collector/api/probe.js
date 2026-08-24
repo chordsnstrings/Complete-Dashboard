@@ -227,7 +227,13 @@ export function probeRoutes(app, { wrap }) {
        even for a month we hold AED 140,379 of earnings for, and transactions
        404s outright. Probing only those would have said "the provider serves
        nothing" about a window that is demonstrably served. */
-    const graph = await probeEarnerWindow(new Date(from), new Date(to))
+    /* `to` is inclusive to whoever typed it and exclusive to Uber, so the day
+       asked about has to be pushed past. Without this a probe for a single day
+       asks for a zero-length range and reports "the provider serves nothing"
+       about a day it serves — the same off-by-one that was quietly costing the
+       collector one day in seven. */
+    const until = new Date(to); until.setUTCDate(until.getUTCDate() + 1);
+    const graph = await probeEarnerWindow(new Date(from), until)
       .catch((e) => ({ err: String(e).slice(0, 200) }));
 
     const token = await uberOAuthToken();

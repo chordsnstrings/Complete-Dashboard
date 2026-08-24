@@ -7,7 +7,7 @@ import { parse } from 'csv-parse/sync';
 import { config, normPlate } from '../config.js';
 import { http, qs, sleep } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
-import { dateChunks, iso, unixMs } from '../util.js';
+import { dateChunks, weekChunks, iso, unixMs } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
 import { log } from '../log.js';
@@ -162,6 +162,10 @@ const EARNER_QUERY = `query getEarnerBreakdownsV2($supplierUuid: ID!, $timeRange
             earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode } }
           } }`;
 
+/* The range is HALF-OPEN: [s, e). Uber takes two instants, not two days, so an
+   `e` of "the last day I want" asks for that day's first millisecond and
+   nothing else — six days of a seven-day week. Callers pass the instant the
+   period ENDS. This cost one day in seven of every Uber earning on record. */
 async function earnerCall(s, e, variables) {
   const body = JSON.stringify({
     operationName: 'getEarnerBreakdownsV2',
@@ -237,7 +241,10 @@ async function pullEarnerBreakdowns(from, to, onStep) {
   let total = 0;
   const chunks = [];
   const drivers = await uberDriverIds();
-  const windows = dateChunks(from, to, 7);
+  /* Whole calendar weeks, not seven days counted from whenever this run began
+     — see weekChunks. The window is the primary key of what gets stored, so a
+     grid that moves with the run stores the same week twice. */
+  const windows = [...weekChunks(from, to)];
   log.info(SRC, 'earner breakdown', { drivers: drivers.length, windows: windows.length });
   let listMode = drivers.length > 0;
 
@@ -258,12 +265,12 @@ async function pullEarnerBreakdowns(from, to, onStep) {
       ['platform', 'driver_ext_id', 'period_start', 'period_end']);
   };
 
-  for (const [s, e] of windows) {
+  for (const { start: s, end: e, until } of windows) {
     let got = 0, err = null, seen = 0;
 
     if (listMode) {
       for (let i = 0; i < drivers.length; i += EARNER_BATCH) {
-        const r = await earnerCall(s, e, {
+        const r = await earnerCall(s, until, {
           driverListOrPageOptions: 'Driver_List',
           driverList: drivers.slice(i, i + EARNER_BATCH), pageOptions: null,
         });
@@ -297,7 +304,7 @@ async function pullEarnerBreakdowns(from, to, onStep) {
     }
 
     if (!listMode) {
-      const r = await earnerCall(s, e, {
+      const r = await earnerCall(s, until, {
         driverListOrPageOptions: 'Page_Options',
         pageOptions: { pageSize: EARNER_BATCH, pageToken: '' }, driverList: null,
       });
@@ -315,6 +322,11 @@ async function pullEarnerBreakdowns(from, to, onStep) {
        week, and only this number tells the two apart. A sub-source that fails
        silently is the shape that hid a 299-day hole in the trip feed; this one
        hid seven eighths of every Uber earning the fleet has made. */
+    /* `total` is what collect() adds to rows_written and what onStep reports as
+       progress. It was declared, never added to, and returned as 0 — so every
+       run in the record says the earnings phase wrote nothing, including the
+       ones that wrote 154 rows a week for twenty-eight weeks. */
+    total += got;
     chunks.push({
       from: iso(s), to: iso(e), rows: got, error: err,
       detail: `${seen} of ${drivers.length} drivers answered`,

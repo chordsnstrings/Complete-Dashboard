@@ -14,6 +14,46 @@ export function* dateChunks(from, to, maxDays = 31) {
   }
 }
 
+/* Whole Monday-anchored weeks covering [from,to], oldest→newest.
+   ─────────────────────────────────────────────────────────────────────────
+   dateChunks anchors its grid to whatever `from` happens to be, which is fine
+   for a trip pull — the same trip upserts to the same row whichever window it
+   arrives in. It is wrong for a REPORT, where the window IS the key: the same
+   payout week fetched by a backfill starting on a Saturday and a catch-up
+   starting on a Thursday lands as two rows six days apart, and a sum over them
+   counts nearly everything twice. Live, one driver's twenty-eight weeks were
+   stored as sixty-seven overlapping rows and summed to 128,357 AED against a
+   true 57,110.
+
+   So the grid is fixed to the calendar instead of to the run. Every run
+   produces the same boundaries, and the upsert replaces rather than adds.
+
+   `until` is the EXCLUSIVE upper bound — the instant the week ends, which is
+   midnight on the following Monday. A provider handed the last day covered as
+   its end bound returns six days of a seven-day week, and Uber does: measured
+   across three grids and twenty-eight weeks, every window reported 85.5% of
+   the trips the trip feed holds for the same span. 6/7 is 0.857.
+
+   Both edges are widened to whole weeks rather than clipped. A clipped week is
+   a different key, which is the bug this exists to prevent, and asking for a
+   few extra days costs one request. */
+export function* weekChunks(from, to) {
+  const monday = (d) => {
+    const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+    // getUTCDay: 0=Sunday. Sunday belongs to the week that began six days ago.
+    x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
+    return x;
+  };
+  const last = monday(new Date(to));
+  let s = monday(new Date(from));
+  while (s <= last) {
+    const end = new Date(s); end.setUTCDate(end.getUTCDate() + 6);
+    const until = new Date(s); until.setUTCDate(until.getUTCDate() + 7);
+    yield { start: new Date(s), end, until };
+    s = until;
+  }
+}
+
 export const monthsAgo = (n) => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - n); return d; };
 export const daysAgo = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return d; };
 

@@ -644,27 +644,46 @@ app.get('/api/drivers/cross-platform', wrap(async (req, res) => {
    a menu built out of a truncated list cannot see the ones that were cut. */
 app.get('/api/drivers/performance', wrap(async (req, res) => {
   const p = range(req);
+  /* Every figure here reads driver_payout / driver_payout_day rather than
+     driver_performance. The raw table is a log of REPORT WINDOWS, and the same
+     payout week arrives under two keys whenever a backfill and a catch-up use
+     different grids — so `sum(earnings)` over it counted the money two and
+     three times. The window is also matched on overlap now, not containment:
+     `period_start >= from AND period_end <= to` means "periods wholly inside",
+     which drops the weeks straddling both edges of every 30-day view.
+     See sql/schema_v23.sql. */
   const rows = await q(
-    `SELECT platform, driver_name, driver_ext_id, plate, period_start, period_end, trips,
-            hours_online, hours_on_trip,
-            acceptance_rate, cancellation_rate, distance_km, earnings, cash_earnings, rating
-     FROM driver_performance WHERE period_start >= $1 AND period_end <= $2
+    `SELECT platform, driver_name, driver_ext_id, period_start, period_end,
+            period_days, days_used,
+            round(trips::numeric,0)::int AS trips,
+            round(hours_online::numeric,2) AS hours_online,
+            round(hours_on_trip::numeric,2) AS hours_on_trip,
+            round(distance_km::numeric,1) AS distance_km,
+            round(period_earnings::numeric,2) AS earnings,
+            round(earnings::numeric,2) AS counted,
+            round(cash_earnings::numeric,2) AS cash_earnings
+     FROM driver_payout WHERE period_end >= $1 AND period_start <= $2
        AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
      ORDER BY period_start DESC, trips DESC NULLS LAST LIMIT 300`, p);
   const [t] = await q(
-    `SELECT count(*)::int total,
+    /* `total` counts payout ROWS, because that is what `rows` above lists and
+       what `truncated` compares against — a day count here would report the
+       list as truncated on a window that fits entirely. */
+    `SELECT count(DISTINCT (platform, driver_ext_id, period_start, period_end))::int total,
             count(DISTINCT (platform, period_start, period_end))::int periods,
+            count(DISTINCT day)::int payout_days,
             ${peopleCount('driver_ext_id', 'driver_name')}::int people,
             round(sum(earnings)::numeric, 2) AS earnings,
             round(sum(cash_earnings)::numeric, 2) AS cash_earnings,
             array_remove(array_agg(DISTINCT platform), NULL) AS platforms
-     FROM driver_performance WHERE period_start >= $1 AND period_end <= $2
+     FROM driver_payout_day WHERE day BETWEEN $1 AND $2
        AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`, p);
   const periods = await q(
     `SELECT platform, to_char(period_start,'YYYY-MM-DD') AS period_start,
             to_char(period_end,'YYYY-MM-DD') AS period_end,
-            count(*)::int drivers, round(sum(earnings)::numeric,2) AS earnings
-     FROM driver_performance WHERE period_start >= $1 AND period_end <= $2
+            count(DISTINCT driver_ext_id)::int drivers,
+            round(sum(earnings)::numeric,2) AS earnings
+     FROM driver_payout_day WHERE day BETWEEN $1 AND $2
        AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
      GROUP BY 1,2,3 ORDER BY 2 DESC, 1`, p);
   res.json({ rows, periods, totals: t, shown: rows.length,

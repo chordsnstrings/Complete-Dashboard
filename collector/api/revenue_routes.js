@@ -59,26 +59,33 @@ export function revenueRoutes(app, { q, wrap, range }) {
          a driver can appear in several, so this is summed per platform and
          never across them without saying so. */
       q(`WITH pay AS (
-           SELECT * FROM driver_performance
-            WHERE period_start >= $1::date AND period_end <= $2::date
+           /* Day grain, and the window on the day. Over driver_performance
+              this summed overlapping report windows — the same payout week
+              fetched by a backfill and a catch-up on different grids — so
+              every platform total was inflated. It also required periods
+              WHOLLY inside the window, which dropped the two straddling its
+              edges. See sql/schema_v23.sql. */
+           SELECT * FROM driver_payout_day
+            WHERE day BETWEEN $1::date AND $2::date
               AND ($3::text IS NULL OR platform=$3)
          ),
          /* Which DAYS of the window the payout periods actually cover.
             Without this, three days of payout on a thirty-day window made a
             channel read as fully accounted for — the payout was real, the
             coverage was 10%, and the difference is a month of missing money
-            presented as a month of measured money. */
+            presented as a month of measured money.
+
+            It used to expand each period back out to its days with a lateral
+            generate_series. pay is already one row per day, so that expansion
+            would now re-expand every day into a whole period and count the
+            window several times over; the days are simply counted instead. */
          covered AS (
-           SELECT p2.platform, count(DISTINCT d)::int days
-             FROM pay p2
-             CROSS JOIN LATERAL generate_series(
-               greatest(p2.period_start, $1::date), least(p2.period_end, $2::date), interval '1 day') d
-            GROUP BY 1
+           SELECT platform, count(DISTINCT day)::int days FROM pay GROUP BY 1
          )
          SELECT pay.platform,
                 round(sum(pay.earnings)::numeric,2) payouts,
                 round(sum(pay.cash_earnings)::numeric,2) cash,
-                count(*)::int periods,
+                count(DISTINCT (pay.period_start, pay.period_end))::int periods,
                 count(DISTINCT pay.driver_ext_id)::int drivers,
                 min(pay.period_start) first_period, max(pay.period_end) last_period,
                 max(covered.days) AS payout_days

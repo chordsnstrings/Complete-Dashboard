@@ -139,5 +139,75 @@ check('a payout is only placed on days worked on the SAME platform',
 check('and that unplaceable cross-platform pay is reported instead',
   near((await q(unattributedEarnings(), W)).find((r) => r.platform === 'yango')?.earnings, 300));
 
+console.log('\nthe same week, fetched twice, is not paid twice');
+
+/* The shape that was live. The Uber collector asked for seven-day ranges
+   anchored to whenever the run began, so a backfill starting on a Saturday and
+   a catch-up starting on a Sunday stored the same payout week under two keys
+   six days apart. Neither row is wrong. Adding them is.
+
+   Measured on the production database before this: one driver's twenty-eight
+   weeks were held as sixty-seven rows summing to AED 128,357 against AED
+   57,110 on a single grid — so every vehicle earnings figure the product had
+   ever shown was inflated by roughly that factor. */
+const D = ['2026-09-01', '2026-09-30'];
+await pay('d-dup', '2026-09-07', '2026-09-13', 700);   // grid A, a full Mon–Sun week
+await pay('d-dup', '2026-09-08', '2026-09-14', 700);   // grid B, the same week shifted a day
+for (const d of ['2026-09-07', '2026-09-08', '2026-09-09']) await day('CARF', d, 'd-dup', 10);
+
+const dupRows = await q(attributedEarnings(), D);
+const dupTotal = dupRows.filter((r) => r.driver_ext_id === 'd-dup')
+  .reduce((a, r) => a + Number(r.attributed), 0);
+
+/* 700 for the week, plus the one day grid B covers that grid A does not
+   (14 Sep), which is a seventh of B's week. Not 1,400. */
+check('two overlapping reports of one week are not added together',
+  near(dupTotal, 700 + 100), String(dupTotal));
+
+const perDay = await q(
+  `SELECT day::text, count(*)::int n FROM driver_payout_day
+   WHERE driver_ext_id = 'd-dup' GROUP BY 1 HAVING count(*) > 1`);
+check('no day is counted twice', perDay.length === 0, JSON.stringify(perDay));
+
+/* And nothing is lost either — the union of both windows is 7 Sep to 14 Sep,
+   and every one of those eight days must still be represented somewhere. */
+const [{ days }] = await q(
+  `SELECT count(*)::int days FROM driver_payout_day WHERE driver_ext_id = 'd-dup'`);
+check('and no day is dropped', days === 8, String(days));
+
+/* Bolt and Yango overlap differently: a backfill writes one 31-day row and the
+   catch-ups write 4-day rows inside it. The finer report must win the days it
+   covers, and the coarse one must still supply the days it does not. */
+await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, earnings)
+         VALUES ('bolt','ecosine','d-bolt','2026-09-01','2026-09-30', 3000)`);
+await q(`INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, period_start, period_end, earnings)
+         VALUES ('bolt','ecosine','d-bolt','2026-09-10','2026-09-13', 500)`);
+const bolt = await q(
+  `SELECT round(sum(earnings)::numeric,2) e, count(*)::int days
+   FROM driver_payout_day WHERE driver_ext_id = 'd-bolt'`);
+/* 26 days from the month at 100/day, plus the four-day report's own 500. */
+check('a finer report displaces the coarse one for the days it covers',
+  near(bolt[0].e, 2600 + 500) && bolt[0].days === 30,
+  `${bolt[0].e} over ${bolt[0].days} days`);
+
+/* The choice has to be stable. Two reads of the same unchanged data returning
+   different numbers is worse than a number that is merely wrong, because
+   nobody can tell which reading to act on. */
+const twice = await Promise.all([
+  q(`SELECT round(sum(earnings)::numeric,4) e FROM driver_payout_day`),
+  q(`SELECT round(sum(earnings)::numeric,4) e FROM driver_payout_day`),
+]);
+check('the resolution is deterministic', twice[0][0].e === twice[1][0].e,
+  `${twice[0][0].e} then ${twice[1][0].e}`);
+
+/* driver_payout is what the pages LIST, and it must reconcile with the day
+   grain it is built from — otherwise a page shows periods that add up to one
+   number beside a total that is another. */
+const [recon] = await q(
+  `SELECT round((SELECT sum(earnings) FROM driver_payout)::numeric,4) a,
+          round((SELECT sum(earnings) FROM driver_payout_day)::numeric,4) b`);
+check('the period view and the day view sum to the same money',
+  recon.a === recon.b, `${recon.a} vs ${recon.b}`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

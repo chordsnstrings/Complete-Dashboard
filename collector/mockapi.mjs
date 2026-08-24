@@ -418,7 +418,9 @@ app.get('/api/driver/earnings', (req, r) => {
     periods: Array.from({ length: 4 }, (_, w) => ({ platform: 'uber',
       period_start: dayISO(7 * (w + 1)), period_end: dayISO(7 * w),
       trips: 62 - w * 4, hours_online: 58.2 - w, hours_on_trip: 33.4 - w,
-      earnings: 2350 - w * 120, cash_earnings: 400, acceptance_rate: .91, cancellation_rate: .04, rating: 4.88 })),
+      earnings: 2350 - w * 120, cash_earnings: 400, acceptance_rate: .91, cancellation_rate: .04, rating: 4.88,
+      // See /api/drivers/performance above: whole weeks, none displaced.
+      period_days: 7, days_used: 7, counted: 2350 - w * 120 })),
     tips: 286 - i * 20, fare: 8420 - i * 400, tip_pct: +(((286 - i * 20) / (8420 - i * 400)) * 100).toFixed(2),
   });
 });
@@ -1772,6 +1774,11 @@ app.get('/api/drivers/performance', (_, r) => {
     acceptance_rate: 0.92 - i * 0.04, cancellation_rate: 0.03 + i * 0.01,
     distance_km: 900 - i * 60, earnings: 2400 - i * 180, cash_earnings: 800 - i * 60,
     rating: +(4.9 - i * 0.08).toFixed(2),
+    /* period_days is the window's length and days_used how much of it this row
+       still accounts for once a finer overlapping report has taken the rest —
+       equal here, because a tidy fixture has no overlaps. counted is the money
+       those days carry. See sql/schema_v23.sql. */
+    period_days: 7, days_used: 7, counted: 2400 - i * 180,
   }));
   r.json({
     rows, shown: rows.length, truncated: true,
@@ -1780,7 +1787,7 @@ app.get('/api/drivers/performance', (_, r) => {
       { platform: 'uber', period_start: '2026-08-07', period_end: '2026-08-13', drivers: 148, earnings: 29840.12 },
       { platform: 'yango', period_start: '2026-08-14', period_end: '2026-08-20', drivers: 9, earnings: 1210.4 },
     ],
-    totals: { total: 1840, periods: 16, people: 152, earnings: 214880.5,
+    totals: { total: 1840, periods: 16, people: 152, payout_days: 112, earnings: 214880.5,
       cash_earnings: 41200.75, platforms: ['uber', 'yango', 'bolt'] },
   });
 });

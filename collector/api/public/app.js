@@ -469,13 +469,21 @@ V.drivers = async (root) => {
     { label: 'Period', key: 'period_start', render: (r) => dayStr(r.period_start) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Hrs online', key: 'hours_online', num: true, render: (x) => x.hours_online ? (+x.hours_online).toFixed(1) : '—' },
-    { label: 'Earnings', key: 'earnings', num: true, render: (x) => money(x.earnings) },
+    /* Statement and Counted, for the same reason as the driver page: these are
+       report windows and they overlap, so the platform's own figure and the
+       part of it that has not already been counted elsewhere are two different
+       numbers. Only the second one adds up. */
+    { label: 'Statement', key: 'earnings', num: true, render: (x) => money(x.earnings) },
+    { label: 'Counted', key: 'counted', num: true, render: (x) => money(x.counted ?? x.earnings) },
   ]));
   if (pfTot.total) {
     perf.body.append(el('p', 'cap',
       `Showing 25 of ${fmt(pfTot.total)} records — ${fmt(pfTot.people)} people across `
       + `${fmt(pfTot.periods)} reporting periods on ${(pfTot.platforms || []).join(', ') || 'no platform'}, `
-      + `${money(pfTot.earnings)} reported in total.`
+      + `${money(pfTot.earnings)} over ${fmt(pfTot.payout_days)} paid day(s). `
+      + 'The total counts each day once: report windows overlap where a backfill '
+      + 'and a catch-up describe the same week, and adding the statements would '
+      + 'count those days twice.'
       + (pf.truncated ? ' The list is the most recent periods, not all of them.' : '')));
   }
 };
