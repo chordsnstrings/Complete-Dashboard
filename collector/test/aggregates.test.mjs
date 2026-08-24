@@ -18,6 +18,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
+import { seedFleet } from './fixture.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { custodyOverWindow, custodyCountOverWindow } from '../api/custody_sql.js';
@@ -356,6 +357,205 @@ console.log('\ncash exposure aggregates the window once');
   check('the window is aggregated once, not three times',
     (analyticsSrc.slice(cashAt, analyticsSrc.indexOf('res.json(', cashAt)).match(/await q\(/g) || []).length === 1,
     'a second pass over the same window is back');
+}
+
+/* ── the two endpoints that read a whole year to answer one question ───────
+   /api/geo/corridors declared three awaits and ran five aggregations of the
+   same window, each one splitting the same address strings apart again to
+   build its group key; /api/tiers/mix grouped on two view expressions the
+   planner keeps no statistics for and sorted every Uber trip in the window
+   through a temp file to produce twenty rows.
+
+   Both rewrites have to answer exactly what the originals answered, so the
+   check is the old SQL against the live endpoint rather than a restatement of
+   what the new one is supposed to produce. The old side is written out here
+   because it is frozen; the new side is reached over HTTP through the handler
+   that ships, so no copy of it can drift.
+
+   Three fleets, because the two default fixtures work one corridor between two
+   areas and would hide every folding question this endpoint has: an address
+   with no community segment in it, a trip that names a drop-off and no pickup,
+   a corridor seen twice rather than three times, and a fleet working more
+   corridors than the page is allowed to show. */
+{
+  const AREA = (c) => `nullif(btrim(split_part(${c}, ' - ', 2)), '')`;
+  const FW = 'local_day BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR platform=$3)'
+    + ' AND ($4::text IS NULL OR fleet_id=$4)';
+  const P = ['2026-08-01', '2026-08-31', null, null];
+  const W = 'from=2026-08-01&to=2026-08-31';
+
+  /* The five passes and the JS that assembled them, as they stood. */
+  const corridorsBefore = async (d) => {
+    const qq = (t) => d.query(t, P).then((r) => r.rows);
+    const rows = await qq(
+      `SELECT coalesce(${AREA('pickup_addr')}, '(unrecorded)') AS from_area,
+              coalesce(${AREA('dropoff_addr')}, '(unrecorded)') AS to_area,
+              count(*)::int trips,
+              round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km,
+              round(avg(duration_s)::numeric / 60, 1) avg_min,
+              count(*) FILTER (WHERE price IS NOT NULL)::int priced,
+              round(avg(price) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::numeric, 2) avg_fare,
+              array_agg(DISTINCT platform) platforms
+       FROM trip_ext
+       WHERE ${FW} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
+       GROUP BY 1, 2 HAVING count(*) >= 3
+       ORDER BY trips DESC LIMIT 120`);
+    const origins = await qq(
+      `SELECT coalesce(${AREA('pickup_addr')}, '(unrecorded)') AS area,
+              count(*)::int trips,
+              count(*) FILTER (WHERE local_hour BETWEEN 5 AND 9)::int morning,
+              count(*) FILTER (WHERE local_hour BETWEEN 16 AND 21)::int evening,
+              round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km
+       FROM trip_ext WHERE ${FW} AND pickup_addr IS NOT NULL
+       GROUP BY 1 ORDER BY trips DESC LIMIT 60`);
+    const [t] = await qq(
+      `SELECT (SELECT count(*)::int FROM (
+                 SELECT 1 FROM trip_ext WHERE ${FW} AND pickup_addr IS NOT NULL
+                 GROUP BY ${AREA('pickup_addr')}, ${AREA('dropoff_addr')}
+                 HAVING count(*) >= 3) g) AS corridors_3plus,
+              (SELECT count(*)::int FROM (
+                 SELECT 1 FROM trip_ext WHERE ${FW} AND pickup_addr IS NOT NULL
+                 GROUP BY ${AREA('pickup_addr')}, ${AREA('dropoff_addr')}) g) AS corridors_all,
+              (SELECT count(DISTINCT ${AREA('pickup_addr')})::int
+                 FROM trip_ext WHERE ${FW} AND pickup_addr IS NOT NULL) AS origins_all`);
+    const shown = rows.filter((r) => r.from_area !== '(unrecorded)' || r.to_area !== '(unrecorded)');
+    return { corridors: shown, origins, totals: t, shown: shown.length,
+      truncated: (t?.corridors_all ?? 0) > shown.length,
+      origins_shown: origins.length,
+      origins_truncated: (t?.origins_all ?? 0) > origins.length };
+  };
+
+  const DIM = { day: 'ext_local_day', daypart: 'daypart', dow: 'local_dow', hour: 'local_hour' };
+  const mixBefore = (dim) => `SELECT ${dim} AS label, uber_tier AS tier, count(*)::int n,
+              round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km
+       FROM trip_ext WHERE ${FW} AND platform = 'uber' AND uber_tier IS NOT NULL
+       GROUP BY 1, 2 ORDER BY 1, n DESC`;
+
+  /* ORDER BY trips DESC does not decide anything between two corridors of the
+     same size, and never did — so the lists are compared as sets, and the
+     order they came back in is checked separately as the sequence the sort key
+     actually determines. */
+  const sorted = (a) => JSON.stringify([...a].sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));
+  const bykey = (a, k) => JSON.stringify(a.map((r) => k.map((f) => r[f])));
+
+  /* Addresses the seeded fleets do not carry. */
+  const shapes = async (d) => {
+    const A = ['01 Cluster E - Al Thanyah Fifth - Dubai - UAE', 'Marina Walk - Dubai Marina - Dubai - UAE',
+      'Gate 4 - Al Barsha First - Dubai - UAE', 'Terminal 3 - Dubai Airport - Dubai - UAE',
+      'PlainAddressNoDash', 'Villa - Jumeirah Second - Dubai - UAE'];
+    const B = ['Office - Business Bay - Dubai - UAE', 'Mall - Al Wasl - Dubai - UAE',
+      'NoDashHere', 'Tower - Dubai Airport - Dubai - UAE'];
+    let i = 0;
+    const add = (pickup, dropoff, o = {}) => d.query(
+      `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+         requested_at, ended_at, distance_km, duration_s, status, product, payment_type, price,
+         pickup_addr, dropoff_addr)
+       VALUES ($1,$2,'ecosine',$3,$4,$5,$6,$7,$8,$9,'completed',$10,$11,$12,$13,$14)
+       ON CONFLICT DO NOTHING`,
+      [o.platform ?? 'uber', `geo-${i++}`, 'L45240', 'u-khalid', 'Muhammad Khalid',
+        `2026-08-12T${String(o.hour ?? 7).padStart(2, '0')}:15:00+04:00`,
+        `2026-08-12T${String((o.hour ?? 7) + 1).padStart(2, '0')}:00:00+04:00`,
+        o.km === undefined ? 12.5 : o.km, o.dur === undefined ? 1800 : o.dur,
+        o.product ?? 'Comfort', o.pay ?? 'card', o.price === undefined ? 60 : o.price, pickup, dropoff]);
+    for (let n = 0; n < 5; n++) await add(A[0], B[0], { hour: 6 + n, km: 10 + n, price: 40 + n });
+    // no distance and no fare at all
+    for (let n = 0; n < 4; n++) await add(A[1], B[1], { hour: 17, km: null, price: null, platform: 'yango' });
+    // a distance too large to be a trip distance, and no duration
+    for (let n = 0; n < 3; n++) await add(A[2], B[0], { hour: 20, km: 900, dur: null, platform: 'bolt' });
+    // seen twice, which is under the cut the corridor list makes
+    for (let n = 0; n < 2; n++) await add(A[3], B[3], { hour: 5, km: 0, price: 0, pay: 'foc-complimentary' });
+    // neither address carries a community segment
+    for (let n = 0; n < 4; n++) await add(A[4], B[2], { hour: 16, km: 7.25, platform: 'hotel', pay: 'room-charge' });
+    // a drop-off with no pickup: a corridor out of nowhere, and no origin
+    for (let n = 0; n < 3; n++) await add(null, B[1], { hour: 9, km: 3.5 });
+    for (let n = 0; n < 3; n++) await add(A[5], null, { hour: 21, km: 30, price: null });
+    for (let n = 0; n < 6; n++) await add(A[1], B[3], { hour: 8 + n, km: 22.4, price: 130, platform: 'hotel' });
+  };
+
+  /* More corridors and more pickup areas than the page may show, each a
+     different size, so which rows survive the cap is decided rather than
+     arbitrary. */
+  const overflowing = (d) => d.exec(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, ended_at, distance_km,
+       duration_s, status, product, payment_type, price, pickup_addr, dropoff_addr)
+     SELECT 'uber', 'many-' || i || '-' || j, 'ecosine', 'L45240',
+            timestamptz '2026-08-10 04:00:00+04' + ((j % 18) * interval '1 hour'),
+            timestamptz '2026-08-10 05:00:00+04' + ((j % 18) * interval '1 hour'),
+            5 + (j % 20), 900 + j, 'completed', 'Comfort', 'card', 30 + j,
+            'Plot - Origin ' || i || ' - Dubai - UAE',
+            'Unit - Dest ' || (i % 9) || ' - Dubai - UAE'
+     FROM generate_series(1, 130) i, generate_series(1, 9 + i) j`);
+
+  const fleets = [
+    ['the seeded fleet', async (d) => { await seedFleet(d); await shapes(d); }],
+    ['the wide fleet', async (d) => { await seedFleet(d, { wide: true }); await shapes(d); }],
+    ['a fleet working more corridors than the page shows', async (d) => { await seedFleet(d); await overflowing(d); }],
+  ];
+
+  for (const [name, build] of fleets) {
+    console.log(`\ncorridors and tier mix are unchanged over ${name}`);
+    const d = new PGlite();
+    await applySchema(d);
+    await build(d);
+    const { get: gg, server: srv } = await mountAll(d, { serverRoutes: false });
+
+    const before = await corridorsBefore(d);
+    const after = (await gg(`/api/geo/corridors?${W}`)).body;
+    check('the same corridors, whatever order the ties fell in',
+      sorted(before.corridors) === sorted(after.corridors),
+      `${before.corridors.length} vs ${after.corridors.length}`);
+    check('in the same order by size',
+      bykey(before.corridors, ['trips']) === bykey(after.corridors, ['trips']));
+    check('the same pickup areas', sorted(before.origins) === sorted(after.origins),
+      `${before.origins.length} vs ${after.origins.length}`);
+    check('in the same order by size',
+      bykey(before.origins, ['trips']) === bykey(after.origins, ['trips']));
+    check('the same tiles, counted over every corridor rather than the list',
+      JSON.stringify(before.totals) === JSON.stringify(after.totals),
+      `${JSON.stringify(before.totals)} vs ${JSON.stringify(after.totals)}`);
+    check('and the same answer about whether either list was cut',
+      before.shown === after.shown && before.truncated === after.truncated
+      && before.origins_shown === after.origins_shown
+      && before.origins_truncated === after.origins_truncated,
+      `${JSON.stringify([before.shown, before.truncated, before.origins_shown, before.origins_truncated])}`
+      + ` vs ${JSON.stringify([after.shown, after.truncated, after.origins_shown, after.origins_truncated])}`);
+
+    for (const by of ['daypart', 'day', 'dow', 'hour']) {
+      const was = await d.query(mixBefore(DIM[by]), P).then((r) => r.rows);
+      const is = (await gg(`/api/tiers/mix?${W}&by=${by}`)).body;
+      check(`the tier mix by ${by} is the same rows in the same order by size`,
+        sorted(was) === sorted(is) && bykey(was, ['label', 'n']) === bykey(is, ['label', 'n']),
+        `${was.length} vs ${is.length}`);
+    }
+    srv.close();
+    await d.close();
+  }
+
+  /* The point of the rewrite, stated where it can fail. */
+  console.log('\nneither endpoint reads the trip table more than once');
+  const routes = readFileSync('api/analytics_routes.js', 'utf8');
+  const bodyOf = (route) => {
+    const at = routes.indexOf(`app.get('${route}'`);
+    return routes.slice(at, routes.indexOf("\n  app.get('", at + 10));
+  };
+  /* The SQL rather than the whole handler: the prose above each of these names
+     the expression it stopped using, and a check that reads the comment is a
+     check that fails on its own explanation. */
+  const sqlOf = (route) => {
+    const body = bodyOf(route);
+    return body.slice(body.indexOf('`WITH'), body.lastIndexOf('`'));
+  };
+  const corridorSql = sqlOf('/api/geo/corridors');
+  check('the corridors page names trip_ext once',
+    (corridorSql.match(/FROM trip_ext/g) || []).length === 1,
+    `${(corridorSql.match(/FROM trip_ext/g) || []).length} scans`);
+  check('and asks the database for it once',
+    (bodyOf('/api/geo/corridors').match(/await q\(/g) || []).length === 1,
+    `${(bodyOf('/api/geo/corridors').match(/await q\(/g) || []).length} statements`);
+  const mixSql = sqlOf('/api/tiers/mix');
+  check('the tier mix groups on the column rather than the view expression',
+    !/uber_tier/.test(mixSql) && /product AS tier/.test(mixSql),
+    'uber_tier is back as a grouping key, and the planner cannot cost it');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
