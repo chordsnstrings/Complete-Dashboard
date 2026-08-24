@@ -72,27 +72,84 @@ export async function upsert(table, row, conflict) {
 }
 
 // Batched upsert (chunks to keep parameter counts sane).
+/* One statement per batch, not one per row.
+   ─────────────────────────────────────────────────────────────────────────
+   This sent a separate INSERT for every row. A year backfill writes about
+   165,000 trips, so it sent 165,000 statements, each a round trip to a managed
+   database on another host — and it is why a backfill pinned a one-vCPU
+   Postgres for hours and every dashboard page timed out behind it. The work
+   was never the writing; it was the asking.
+
+   Three things have to be right for a multi-row upsert, and each of them is a
+   real failure this code has to handle:
+
+   1. Rows in one call can carry DIFFERENT columns — the sources build objects
+      field by field and omit what a provider did not send. A single statement
+      has one column list, so rows are grouped by their column signature and
+      each group gets its own statement.
+
+   2. A conflict key must not appear twice in one statement. Postgres refuses
+      with "ON CONFLICT DO UPDATE command cannot affect row a second time" —
+      the row-at-a-time version simply applied them in order, so duplicates
+      inside one batch were legal and the last one won. The same rule is kept
+      by de-duplicating on the conflict key before the statement, last write
+      winning, which is what a sequential replay would have produced.
+
+   3. Postgres allows 65,535 bind parameters per statement. A batch of 200
+      rows of 25 columns is 5,000, but a wide table and a large chunk could
+      cross it, so the batch size is derived from the column count.
+
+   Same transaction per batch, same ON CONFLICT semantics, same idempotency on
+   re-run. Only the number of round trips changed. */
 export async function upsertMany(table, rows, conflict, chunk = 200) {
+  if (!rows.length) return 0;
+  const MAX_PARAMS = 60000;   // under Postgres's 65535, with room for the shape
+
+  // Group by column signature: one statement can only carry one column list.
+  const groups = new Map();
+  for (const r of rows) {
+    const cols = Object.keys(r);
+    const key = cols.slice().sort().join('\u0000');
+    if (!groups.has(key)) groups.set(key, { cols, rows: [] });
+    groups.get(key).rows.push(r);
+  }
+
   let n = 0;
-  for (let i = 0; i < rows.length; i += chunk) {
-    const slice = rows.slice(i, i + chunk);
-    // sequential upserts inside a transaction for idempotent re-runs
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
+  for (const { cols, rows: groupRows } of groups.values()) {
+    const updates = cols.filter((c) => !conflict.includes(c)).map((c) => `${c}=EXCLUDED.${c}`);
+    const doUpdate = updates.length ? `DO UPDATE SET ${updates.join(', ')}` : 'DO NOTHING';
+    const perBatch = Math.max(1, Math.min(chunk, Math.floor(MAX_PARAMS / cols.length)));
+
+    for (let i = 0; i < groupRows.length; i += perBatch) {
+      const slice = groupRows.slice(i, i + perBatch);
+      /* Last write wins within the batch, exactly as sequential upserts did.
+         The key is built from the conflict columns; a row missing one of them
+         cannot collide on it, so it is kept as its own entry. */
+      const byKey = new Map();
       for (const r of slice) {
-        const cols = Object.keys(r);
-        const ph = cols.map((_, j) => `$${j + 1}`);
-        const updates = cols.filter((c) => !conflict.includes(c)).map((c) => `${c}=EXCLUDED.${c}`);
-        const doUpdate = updates.length ? `DO UPDATE SET ${updates.join(', ')}` : 'DO NOTHING';
-        await client.query(
-          `INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph.join(',')}) ON CONFLICT (${conflict.join(',')}) ${doUpdate}`,
-          cols.map((c) => r[c]));
+        byKey.set(conflict.map((c) => `${r[c]}`).join('\u0000'), r);
       }
-      await client.query('COMMIT');
-      n += slice.length;
-    } catch (e) { await client.query('ROLLBACK'); throw e; }
-    finally { client.release(); }
+      const batch = [...byKey.values()];
+
+      const params = [];
+      const tuples = batch.map((r) => {
+        const ph = cols.map((c) => { params.push(r[c]); return `$${params.length}`; });
+        return `(${ph.join(',')})`;
+      });
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          `INSERT INTO ${table} (${cols.join(',')}) VALUES ${tuples.join(',')}`
+          + ` ON CONFLICT (${conflict.join(',')}) ${doUpdate}`, params);
+        await client.query('COMMIT');
+        /* The count reports rows ACCEPTED, including the ones a duplicate
+           inside the batch replaced — the caller is reporting how much of the
+           provider's answer it stored, not how many statements ran. */
+        n += slice.length;
+      } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
+      finally { client.release(); }
+    }
   }
   return n;
 }
