@@ -566,6 +566,12 @@ app.get('/api/vehicle/kpis', (req, r) => {
        swapped or summed them still look right. */
     attributed_earnings: 5082.65, attributed_platforms: 1, attributed_drivers: 2,
     any_even_split: true,
+    /* And the two together, per platform — hotel counted on its fares, uber on
+       its payout, so accounted is their sum and not fares + every payout. */
+    accounted: 5082.65 + Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
+    accounted_fares: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
+    accounted_payouts: 5082.65, accounted_platforms: ['hotel', 'uber'],
+    accounted_bookings: trips, dark_bookings: 0, dark_pct: 0,
     /* Bookings and telematics journeys are separate counts and never summed —
        an FMS row is the same physical journey a ride platform already reported.
        measured_trips and priced_trips are the denominators the distance and

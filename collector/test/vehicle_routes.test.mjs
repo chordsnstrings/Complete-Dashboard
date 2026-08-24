@@ -254,6 +254,45 @@ check('a vehicle with no trips reports zero, not null', dir2.find((r) => r.plate
     !!row && row.trips > 0, JSON.stringify(narrow.map((r) => [r.plate, r.trips])));
 }
 
+console.log('\nwhat the car took in, not what a tenth of it was priced at');
+
+/* The card this page opens on used to be the FARES on the vehicle's trips. On
+   a car working mostly Uber that is a handful of hotel bookings, and the rest
+   of its work is paid for weekly to the driver — so a car showing 266 trips
+   and 3,586 km led with AED 525. Both halves were already on the page; only
+   one was in the headline. */
+{
+  const v = (await get(`/api/vehicle/kpis?plate=${PLATE}&${W}`)).body;
+  const n = (x) => (x == null ? 0 : Number(x));
+  check('the vehicle KPI states what the car took in',
+    'accounted' in v && 'accounted_fares' in v && 'accounted_payouts' in v,
+    JSON.stringify({ accounted: v.accounted, revenue: v.revenue }));
+  check('and it is the sum of the halves it names',
+    Math.abs(n(v.accounted) - (n(v.accounted_fares) + n(v.accounted_payouts))) < 0.5,
+    `${v.accounted} vs ${n(v.accounted_fares)} + ${n(v.accounted_payouts)}`);
+  /* The whole point: a car whose money is mostly payout must not still lead
+     with the fares. Uber prices nothing per trip, so its share can only arrive
+     through attribution. */
+  check('the combined figure is not just the fares again',
+    n(v.accounted) >= n(v.revenue), `${v.accounted} vs ${v.revenue}`);
+  /* And never more than both halves reported, which is what adding a channel's
+     fares to its own payout would give — a payout is those fares after
+     commission, not money beside them. */
+  check('and never counts a channel on both its fares and its payout',
+    n(v.accounted) <= n(v.revenue) + n(v.attributed_earnings) + 0.5,
+    `${v.accounted} vs a naive ${n(v.revenue) + n(v.attributed_earnings)}`);
+  check('every platform it counted is named',
+    Array.isArray(v.accounted_platforms)
+      && v.accounted_platforms.length > 0
+      && v.accounted_platforms.every((x) => typeof x === 'string'),
+    JSON.stringify(v.accounted_platforms));
+
+  /* A window with no data must not produce a zero that reads as measured. */
+  const empty = (await get(`/api/vehicle/kpis?plate=${PLATE}&from=2019-01-01&to=2019-01-31`)).body;
+  check('an empty window reports no income rather than AED 0',
+    empty.accounted == null, String(empty.accounted));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

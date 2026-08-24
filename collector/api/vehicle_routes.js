@@ -15,6 +15,7 @@
 import { peopleCount, personKey, peopleCountStored, JOIN_TRIP } from './custody_sql.js';
 import { win, winDays } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
+import { fleetIncome } from './income_sql.js';
 
 const normPlate = (s) => String(s || '').toUpperCase().replace(/[\s-]+/g, '');
 
@@ -242,7 +243,41 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               count(DISTINCT driver_ext_id)::int attributed_drivers,
               bool_or(basis = 'even') AS any_even_split
        FROM (${attributedEarnings({ extra: 'AND vd.plate = $3' })}) att`, p);
-    res.json({ ...t, ...u, ...a, ...gap, ...idle, ...att,
+    /* And the two of them combined, per platform, which is the number a person
+       looking at a car actually wants. Both halves are already here and the
+       page showed only the first: a car working mostly Uber led with the fares
+       on its handful of hotel bookings.
+
+       Per platform because the two cannot be added for the SAME one — a payout
+       is what is left of those same fares after commission. The rule is the one
+       /api/kpis and /api/revenue use (api/income_sql.js), so a car's Money in
+       is built the same way as the fleet's. */
+    const [fareByPlat, attByPlat] = await Promise.all([
+      q(`SELECT platform, count(*)::int bookings,
+                count(*) FILTER (WHERE has_fare)::int priced_bookings,
+                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares
+         FROM trip_norm WHERE ${TW} AND is_booking GROUP BY 1`, p),
+      q(`SELECT platform, round(sum(attributed)::numeric,2) payouts,
+                count(DISTINCT day)::int payout_days
+         FROM (${attributedEarnings({ extra: 'AND vd.plate = $3' })}) att GROUP BY 1`, p),
+    ]);
+    const byPlat = new Map();
+    const plat = (name) => {
+      if (!byPlat.has(name)) {
+        byPlat.set(name, { platform: name, bookings: 0, priced_bookings: 0,
+          fares: null, payouts: null, payout_days: 0 });
+      }
+      return byPlat.get(name);
+    };
+    const n = (v) => (v == null ? null : Number(v));
+    for (const f of fareByPlat) Object.assign(plat(f.platform), {
+      bookings: f.bookings, priced_bookings: f.priced_bookings, fares: n(f.fares) });
+    for (const y of attByPlat) Object.assign(plat(y.platform), {
+      payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
+    const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
+    const income = fleetIncome([...byPlat.values()], windowDays);
+
+    res.json({ ...t, ...u, ...a, ...gap, ...idle, ...att, ...income,
       alerts_per_100km: t.km > 0 ? +((a.alerts / t.km) * 100).toFixed(1) : null,
       // Over the priced distance, and from the revenue of the same trips —
       // see priced_measured_revenue above.

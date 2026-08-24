@@ -108,20 +108,25 @@ export function chooseBasis(r, windowDays) {
    priced_bookings, fares, payouts and payout_days. */
 export function fleetIncome(rows, windowDays) {
   const n = (v) => (v == null ? 0 : Number(v));
+  /* Fares arrive as a NUMERIC string and attributed payouts as the result of a
+     division, so summing them in JS produces 3291.9300000000003. It reaches
+     the page as a value, not only as text — a caller doing its own arithmetic
+     inherits the noise — so it is rounded here, once, where the sum is made. */
+  const sum = (xs) => (xs.length ? Math.round(xs.reduce((a, x) => a + n(x), 0) * 100) / 100 : 0);
   for (const r of rows) chooseBasis(r, windowDays);
   const measured = rows.filter((r) => r.best != null);
   const bookings = rows.reduce((a, r) => a + n(r.bookings), 0);
   const darkRows = rows.filter((r) => r.basis === 'none' || r.basis === 'partial_fares'
     || r.basis === 'partial_payout');
   return {
-    accounted: measured.reduce((a, r) => a + n(r.best), 0) || null,
+    accounted: sum(measured.map((r) => r.best)) || null,
     /* Both halves of it, so a reader can see which kind of money moved.
        These sum the CHOSEN figure only — a platform counted on its payout does
        not also contribute its fares, or the total would exceed itself. */
-    accounted_fares: rows.filter((r) => r.basis === 'fares' || r.basis === 'partial_fares')
-      .reduce((a, r) => a + n(r.fares), 0) || null,
-    accounted_payouts: rows.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout')
-      .reduce((a, r) => a + n(r.payouts), 0) || null,
+    accounted_fares: sum(rows.filter((r) => r.basis === 'fares' || r.basis === 'partial_fares')
+      .map((r) => r.fares)) || null,
+    accounted_payouts: sum(rows.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout')
+      .map((r) => r.payouts)) || null,
     accounted_bookings: measured.reduce((a, r) => a + n(r.bookings), 0),
     accounted_platforms: measured.map((r) => r.platform).sort(),
     dark_bookings: darkRows.reduce((a, r) => a + n(r.bookings), 0),

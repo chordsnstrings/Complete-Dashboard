@@ -100,7 +100,17 @@ async function tabOverview(root, plate, prof) {
        works mostly Uber this figure covers a few per cent of its work — and
        presented bare it reads as what the vehicle earned. The fleet page has
        carried this caveat for a while; the vehicle page had not. */
-    { label: 'Revenue', value: k.priced_trips ? money(k.revenue) : '—',
+    /* Both halves. The card above showed fares alone, and this page is the one
+       somebody opens to ask what a car is worth: a vehicle working mostly Uber
+       led with the price of its handful of hotel bookings while the platform
+       paid for the rest of its work by the week. That money was already on the
+       page, three panels down, under "attributed". */
+    { label: 'Money in', value: k.accounted ? money(k.accounted) : '—',
+      sub: k.accounted
+        ? `${money(k.accounted_fares || 0)} in fares · ${money(k.accounted_payouts || 0)} attributed from `
+          + `platform payouts · ${(k.accounted_platforms || []).join(', ')}`
+        : 'no fare and no payout reaches this vehicle in this range' },
+    { label: 'Fares', value: k.priced_trips ? money(k.accounted_fares) : '—',
       sub: !k.priced_trips
         ? 'no booking on this vehicle carries a fare'
         : `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings (${pct(100 * k.priced_trips / k.trips, 0)}) that report one`
