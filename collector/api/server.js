@@ -422,6 +422,48 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
 
      A day nobody collected and a day nobody drove are different facts and this
      is where they stop looking the same. */
+  /* The day grain, precomputed.
+     ─────────────────────────────────────────────────────────────────────────
+     The aggregate below groups every trip in the window by day, and one of its
+     measures is a COUNT DISTINCT of drivers — which over a year is two hundred
+     thousand rows hashed into three hundred and sixty-five buckets, each
+     carrying its own distinct set. It timed out at a year, on the endpoint the
+     overview's chart is built from.
+
+     rollup_day holds exactly this, at exactly this grain, refreshed after every
+     collection — the same trade /api/trend/monthly already makes, with the same
+     fallback: when the rollup has nothing for the window (a fresh database, or
+     a deploy that lands before the first collection) the live grain is computed
+     from the SAME SQL the rollup is built from, rather than a second copy that
+     would drift.
+
+     One measure genuinely changes, and for the better: the rollup counts
+     distinct PEOPLE, folding a person's several platform accounts into one,
+     while this counted distinct driver_name. Every other page in the product
+     counts people, so the overview chart and the monthly trend could report
+     different driver counts for the same day. They now agree. */
+  const rollupReady = (await q(
+    `SELECT 1 FROM rollup_day
+      WHERE day BETWEEN $1::date AND $2::date
+        AND platform = coalesce($3, '*') AND fleet_id = coalesce($4, '*') LIMIT 1`, p)).length > 0;
+  const aggSql = rollupReady
+    ? `SELECT day AS d, bookings AS trips, completed, not_completed AS cancelled,
+              telematics AS telematics_journeys, round(km, 0) AS km,
+              round(revenue, 0) AS revenue, priced_trips, drivers
+         FROM rollup_day
+        WHERE day BETWEEN $1::date AND $2::date
+          AND platform = coalesce($3, '*') AND fleet_id = coalesce($4, '*')`
+    : `SELECT local_day AS d,
+              count(*) FILTER (WHERE is_booking)::int trips,
+              count(*) FILTER (WHERE outcome = 'completed')::int completed,
+              count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled,
+              count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+              round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+              round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+              count(*) FILTER (WHERE has_fare)::int priced_trips,
+              count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int drivers
+       FROM trip_norm WHERE ${F} GROUP BY 1`;
+
   const rows = await q(
     /* The calendar is filled across the window, and the window is bounded.
        Filling the requested window is the whole point: a day nobody collected
@@ -440,18 +482,7 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
        SELECT generate_series(
          greatest($1::date, $2::date - ${DAILY_MAX_DAYS}), $2::date, interval '1 day')::date AS d
      ),
-     agg AS (
-       SELECT local_day AS d,
-              count(*) FILTER (WHERE is_booking)::int trips,
-              count(*) FILTER (WHERE outcome = 'completed')::int completed,
-              count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled,
-              count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
-              round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
-              round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-              count(*) FILTER (WHERE has_fare)::int priced_trips,
-              count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int drivers
-       FROM trip_norm WHERE ${F} GROUP BY 1
-     ),
+     agg AS (${aggSql}),
      -- What each source normally does, so "nothing today" can be judged.
      norm AS (
        SELECT source, percentile_cont(0.5) WITHIN GROUP (ORDER BY rows) AS median_rows,

@@ -241,6 +241,74 @@ check('the weekday-hour heatmap sums to the trip count',
     `${sum(vdir, 'trips')} + ${k.trips_without_vehicle} vs ${k.trips}`);
 }
 
+console.log('\nthe daily chart agrees with itself, precomputed or not');
+
+/* /api/trips/daily reads rollup_day when it is populated and computes the
+   grain live when it is not. Two code paths answering one question is the
+   arrangement that quietly stops agreeing — and a precomputed number that
+   disagrees with the live one is worse than a slow page, because nothing about
+   it looks wrong. Everything above this point ran against the LIVE path,
+   because nothing had refreshed the rollup yet; this runs the same window
+   through both and requires them to match.
+
+   One measure is expected to differ, and the assertion says so rather than
+   glossing it: the rollup counts distinct PEOPLE, folding a person's several
+   platform accounts together, while the live path counts distinct
+   driver_name. The fold is the product's standard everywhere else, so the two
+   are allowed to differ ONLY there, and only downward. */
+{
+  const live = (await get(`/api/trips/daily?${W}`)).body;
+  const { refreshRollups } = await import('../src/rollup.js');
+  await refreshRollups({ db });
+  const rolled = (await get(`/api/trips/daily?${W}`)).body;
+
+  check('both paths return the same calendar', live.length === rolled.length,
+    `${live.length} vs ${rolled.length}`);
+
+  /* Counts must be identical — there is no arithmetic that could make them
+     differ. The two rounded measures are allowed one unit, and only because of
+     double rounding, which is worth stating exactly rather than waving at:
+     rollup_day stores km to one decimal and revenue to two, so rounding those
+     to whole units rounds a number that was already rounded. A true 171.45
+     becomes 171 computed live and 172 via the rollup. It is a display unit on
+     a chart, and the alternative is widening two rollup columns for it. */
+  const EXACT = ['trips', 'completed', 'cancelled', 'telematics_journeys', 'priced_trips'];
+  const ROUNDED = ['km', 'revenue'];
+  const differing = [];
+  const drifting = [];
+  for (let i = 0; i < Math.min(live.length, rolled.length); i++) {
+    for (const m of EXACT) {
+      const a = live[i][m] == null ? null : Number(live[i][m]);
+      const b = rolled[i][m] == null ? null : Number(rolled[i][m]);
+      if (a !== b) differing.push(`${live[i].d}.${m}: live ${a} vs rollup ${b}`);
+    }
+    for (const m of ROUNDED) {
+      const a = live[i][m] == null ? null : Number(live[i][m]);
+      const b = rolled[i][m] == null ? null : Number(rolled[i][m]);
+      if (a == null && b == null) continue;
+      if (a == null || b == null || Math.abs(a - b) > 1) {
+        drifting.push(`${live[i].d}.${m}: live ${a} vs rollup ${b}`);
+      }
+    }
+  }
+  check('every count matches exactly, day for day', differing.length === 0,
+    differing.slice(0, 3).join(' | '));
+  check('and the rounded measures never differ by more than a display unit',
+    drifting.length === 0, drifting.slice(0, 3).join(' | '));
+
+  const driversDiffer = live.filter((r, i) => rolled[i]
+    && Number(r.drivers) !== Number(rolled[i].drivers));
+  check('the driver count folds accounts into people, never inflates',
+    driversDiffer.every((r, j) => Number(rolled[live.indexOf(r)].drivers) <= Number(r.drivers)),
+    driversDiffer.slice(0, 2).map((r) => `${r.d}: ${r.drivers}`).join(' '));
+
+  /* And the cross-check that mattered before still holds on the rollup path:
+     the daily chart must sum to the headline. */
+  const kAfter = (await get(`/api/kpis?${W}`)).body;
+  check('the precomputed daily trips still sum to the KPI headline',
+    sum(rolled, 'trips') === kAfter.trips, `${sum(rolled, 'trips')} vs ${kAfter.trips}`);
+}
+
 /* ── 7. and all of it again at a scale where every list is truncated ────── */
 /* Small numbers hide truncation: with five vehicles nothing is ever cut, so a
    headline computed over a capped list agrees with the list by accident. At 240
