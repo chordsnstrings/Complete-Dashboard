@@ -158,15 +158,25 @@ export async function upsertMany(table, rows, conflict, chunk = 200) {
    landed. A run that wrote rows while most of its windows failed reported
    status='ok' for months while the Uber trip history had a 299-day hole in it;
    `chunks` is what makes that impossible to miss. Passing chunks is optional,
-   so a source that does not chunk is unaffected. */
-export async function logRun(run) {
+   so a source that does not chunk is unaffected.
+
+   `detail` is that list of windows and nothing around it — the shape
+   schema_v12 documents and the shape every reader has to expect.
+
+   The db handle is a parameter so a test can drive this writer against a
+   throwaway database instead of hand-writing what it believes this stores. It
+   believed wrong for as long as the coverage fixture existed: it wrote
+   {chunks: [...]}, the endpoint read a 'chunks' key, and the two agreed with
+   each other and with nothing that ships. A writer no test can call is a
+   writer whose output no test can check. */
+export async function logRun(run, db = pool) {
   const chunks = Array.isArray(run.chunks) ? run.chunks : null;
   const failed = chunks ? chunks.filter((c) => c.error).length : null;
   // A source that succeeded on some windows and failed on others is not 'ok',
   // whatever it managed to write.
   const status = run.status === 'error' ? 'error'
     : (failed ? 'partial' : (run.status || 'ok'));
-  const { rows } = await pool.query(
+  const { rows } = await db.query(
     `INSERT INTO collection_run
        (source,fleet_id,mode,window_start,window_end,status,rows_written,finished_at,error,
         chunks_total,chunks_failed,detail)

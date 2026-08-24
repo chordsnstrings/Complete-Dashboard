@@ -859,14 +859,31 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        per-window records existed to say it.
 
        Only chunks that SUCCEEDED and returned nothing count as an answer. A
-       window that errored is still an open question. */
+       window that errored is still an open question.
+
+       collection_run.detail IS the list of windows, not a wrapper around one.
+       logRun stores chunks.map(...) — a bare array, as schema_v12 documents and
+       as /api/status has always read it — and this asked for detail -> 'chunks'
+       instead. In Postgres that is not an error: a text key against a JSON
+       array is NULL, so coalesce handed the expansion an empty array, this
+       query returned nothing on every row, and every hole in the product fell
+       through to "no record of anyone asking". The page whose whole purpose is
+       telling a hole worth chasing from one the provider has already answered
+       was giving the chasing answer to all of them, and the only reason the
+       tests agreed was that the fixture wrote a shape the collector does not.
+
+       jsonb_typeof rather than a bare expansion, because JSONB guarantees no
+       shape: a row holding anything but an array contributes no windows,
+       instead of failing the statement and taking the page down with it. */
     const attempts = await q(
       `SELECT source,
               (c ->> 'from') AS from_day, (c ->> 'to') AS to_day,
               (c ->> 'rows')::int AS rows,
               (c ->> 'error') IS NOT NULL AS failed,
               max(finished_at) AS last_tried
-       FROM collection_run r, jsonb_array_elements(coalesce(r.detail -> 'chunks', '[]'::jsonb)) c
+       FROM collection_run r,
+            jsonb_array_elements(
+              CASE WHEN jsonb_typeof(r.detail) = 'array' THEN r.detail ELSE '[]'::jsonb END) c
        WHERE c ? 'from' AND c ? 'to'
        GROUP BY 1, 2, 3, 4, 5`);
 

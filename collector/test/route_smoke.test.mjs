@@ -437,8 +437,11 @@ check('the trip table survived the injection attempt',
    for months while the trip history had a 299-day hole in it. */
 {
   const { logRun } = await import('../src/db.js');
-  // logRun talks to the shared pool, so the rule it encodes is asserted from
-  // the source and the behaviour is asserted directly below against PGlite.
+  // The rule logRun encodes is asserted from the source, and the shape it
+  // produces is asserted below against PGlite. logRun now takes a db handle,
+  // so test/analytics_routes.test.mjs drives the writer itself rather than
+  // guessing at its output — which is how the coverage fixture came to store a
+  // shape the collector has never written.
   const dbSrc = readFileSync('src/db.js', 'utf8');
   check('a run with a failed window cannot report ok',
     /const status = run\.status === 'error' \? 'error'/.test(dbSrc)
