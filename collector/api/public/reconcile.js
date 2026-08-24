@@ -11,6 +11,21 @@
    an expected payout of AED 0 would accuse the platform of not paying for
    work it simply never reported on.
 
+   Two things every figure on this page depends on, and the page says both out
+   loud rather than leaving them to be inferred.
+
+   The SCOPE is the whole record. These rows are months; a thirty-day window
+   spans two partial ones, and reconciling six days of July against July's bank
+   payout is the very mismatch the delta column exists to catch. So the range
+   selector is hidden here (see setHeader in app.js) and the span the numbers
+   cover is printed where it used to sit — every tile and every row describes
+   that same span.
+
+   The COMPARISON is over driver-days, not months. The statement surface names
+   some of the fleet's drivers and the bank figure names all of them, so the
+   two figures the delta is made of are printed beside it rather than left to
+   be assumed from the columns further left.
+
    Clicking a month opens the same table at day grain, because "August is 9%
    off" is only actionable once you can see WHICH days carry the gap — cash
    timing shows up as paired over/under days, a missing statement week as a
@@ -43,6 +58,24 @@ const deltaPill = (r) => {
   return pill(`${sign}AED ${fmt(Math.abs(r.delta))}${off == null ? '' : ` · ${pct(off, 1)}`}`, tone);
 };
 
+/* A full-period figure, with the part of it the comparison actually used shown
+   beside it when the two differ. Without the second number a partly-matched
+   row reads as a wild discrepancy instead of a partial answer. */
+const withCompared = (full, compared, why) => {
+  if (full == null) return orDash(null, why);
+  const show = compared != null && Math.abs(compared - full) > 1;
+  return `${money(full)}${show ? `<span class="dim"> · ${money(compared)} compared</span>` : ''}`;
+};
+
+/* Why nothing could be compared in this row. Three different absences, and
+   they call for three different actions — chase the statement, chase the
+   payout, or look at who is missing from one of them. */
+const noMatchReason = (r) => {
+  if (r.ontrip_net == null) return 'no statement';
+  if (r.bank_payout == null) return 'no payout reported';
+  return 'no driver-day on both sides';
+};
+
 const COLS = (keyCol) => [
   keyCol,
   { label: 'Trips', key: 'trips', num: true,
@@ -54,20 +87,19 @@ const COLS = (keyCol) => [
   { label: 'Cash collected', key: 'cash_collected', num: true,
     render: (r) => orDash(r.cash_collected, '') },
   { label: 'Expected payout', key: 'expected_payout', num: true,
-    render: (r) => orDash(r.expected_payout, 'needs the statement') },
+    render: (r) => withCompared(r.expected_payout, r.expected_covered, 'needs the statement') },
   { label: 'Bank payout', key: 'bank_payout', num: true,
-    /* The month's real bank money, and — where the statement side covers only
-       part of the month — how much of it the comparison beside it could
-       actually test. Without the second number a partially-covered month reads
-       as a wild discrepancy instead of a partial answer. */
-    render: (r) => (r.bank_payout == null ? orDash(null, 'no payout reported')
-      : `${money(r.bank_payout)}${r.bank_covered != null && r.expected_payout != null
-        && Math.abs(r.bank_covered - r.bank_payout) > 1
-        ? `<span class="dim"> · ${money(r.bank_covered)} on covered days</span>` : ''}`) },
-  { label: 'Δ bank − expected', key: 'delta', num: true, render: deltaPill,
-    /* Compared over the days BOTH sides cover — see api/reconcile_routes.js.
-       A month whose statement holds one week is a one-week comparison, not a
-       month-long discrepancy. */ },
+    render: (r) => withCompared(r.bank_payout, r.bank_covered, 'no payout reported') },
+  { label: 'Δ bank − expected', key: 'delta', num: true, render: deltaPill },
+  /* The column that explains the one before it. A delta drawn over 53 of the
+     189 drivers the bank paid that day is a different claim from one drawn
+     over all of them, and the number is the difference between "the platform
+     underpaid" and "we hold a third of the statement". */
+  { label: 'Compared over', key: 'matched_pairs',
+    render: (r) => (r.matched_pairs
+      ? `<span class="dim">${fmt(r.matched_drivers)} of ${fmt(r.bank_drivers)} drivers`
+        + ` · ${fmt(r.matched_days)} day${r.matched_days === 1 ? '' : 's'}</span>`
+      : `<span class="dim">— ${esc(noMatchReason(r))}</span>`) },
 ];
 
 export async function renderReconcile(root, month) {
@@ -97,34 +129,44 @@ export async function renderReconcile(root, month) {
       : 'Nothing to reconcile yet: no trips, statements or payouts on record.');
   }
 
+  /* The span every figure below covers, said once, in the words the rows are
+     keyed in. This is the sentence the range selector used to contradict. */
+  const span = month ? MONTH_LABEL(month)
+    : d.rows.length === 1 ? MONTH_LABEL(d.rows[0].m)
+      : `${MONTH_LABEL(d.rows[0].m)} → ${MONTH_LABEL(d.rows[d.rows.length - 1].m)}`;
+  const over = `over ${span}`;
+
   const t = d.totals;
   host.append(kpiRow([
     { label: 'Trips', value: t.trips != null ? fmt(t.trips) : '—',
-      sub: 'bookings over the rows below' },
+      sub: `bookings ${over}` },
     { label: 'Expected payout', value: t.expected_payout != null ? money(t.expected_payout) : '—',
-      sub: 'on-trip net + tips + salik − cash, where a statement exists' },
+      sub: `on-trip net + tips + salik − cash, ${over}, where a statement exists` },
     { label: 'Bank payout', value: t.bank_payout != null ? money(t.bank_payout) : '—',
-      sub: t.bank_covered != null && t.bank_payout != null
-        && Math.abs(t.bank_covered - t.bank_payout) > 1
-        ? `what the platforms report having paid · ${money(t.bank_covered)} of it on days the `
-          + 'statement side also covers'
-        : 'what the platforms report having paid' },
-    { label: 'Gap', html: t.delta == null ? '<span class="dim">—</span>'
-        : deltaPill(t),
-      /* Measured over the days both sides describe. The statement surface
-         reaches back weeks and the payout record months, so a whole-month
-         comparison of a partly-covered month is not a discrepancy — it is two
-         answers to different questions. */
+      sub: `what the platforms report having paid, ${over}` },
+    /* The two figures the gap is the difference of, and how much of the record
+       they cover. The Gap tile used to sit beside a bank total spanning every
+       month while measuring one — two scopes in one row of tiles, with nothing
+       on screen to tell them apart. */
+    { label: 'Compared over', value: t.matched_pairs ? fmt(t.matched_pairs) : '—',
+      sub: t.matched_pairs
+        ? `driver-day(s) both sides describe, in ${fmt(t.reconciled_rows)} `
+          + `${month ? 'day(s)' : 'month(s)'}`
+        : 'no driver-day is described by both sides' },
+    { label: 'Gap', html: t.delta == null ? '<span class="dim">—</span>' : deltaPill(t),
       sub: t.delta == null
-        ? `nothing reconcilable: no ${month ? 'day' : 'month'} holds both sides`
-        : `over the ${fmt(t.reconciled_rows)} ${month ? 'day(s)' : 'month(s)'} holding both sides` },
+        ? 'nothing reconcilable: the two sides never describe the same driver on the same day'
+        : `${money(t.bank_covered)} banked against ${money(t.expected_covered)} expected, `
+          + 'on those driver-days alone' },
   ]));
 
   const mp = month
     ? panel(`${MONTH_LABEL(month)}, day by day`,
       'The same identity at day grain. A dash is a day the source in question reported nothing.')
     : panel('Month by month',
-      'One row per month, all platforms combined unless the platform filter narrows it. Click a month for its days.');
+      `Every month on record — ${span} — all platforms combined unless the platform filter `
+      + 'narrows it. The date range at the top of the page does not apply to a table of months, '
+      + 'so it is not offered here. Click a month for its days.');
 
   const keyCol = month
     ? { label: 'Day', key: 'd',
@@ -142,7 +184,9 @@ export async function renderReconcile(root, month) {
   host.append(note(
     'A gap between bank and expected is usually timing, not theft: cash a driver banked in the '
     + 'neighbouring month, and per-trip surcharges the statement mapping deliberately leaves '
-    + 'unguessed. And the on-trip side only reaches as far back as the platform statement '
-    + 'surfaces do — Uber serves roughly the last six months — so older months show an expected '
-    + 'payout of “—”, which means unknowable, not zero.'));
+    + 'unguessed. The on-trip side reaches only as far back as the platform statement surfaces '
+    + 'do, and Uber’s is far shorter than it reads: its earner-payments surface answers for the '
+    + 'CURRENT payment period and returns an empty list for every older window, however wide the '
+    + 'request. So the on-trip column begins where collection began and grows a week at a time '
+    + 'from here; earlier months show “—”, which means unknowable, not zero.'));
 }

@@ -111,7 +111,7 @@ const VIEWS = [
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
   { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Analyse', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
   { id: 'revenue', label: 'Revenue by channel', ic: '◇', grp: 'Analyse', sub: 'What each platform actually tells us about money — and which ones tell us nothing' },
-  { id: 'reconcile', label: 'Reconciliation', ic: '⇌', grp: 'Analyse', sub: 'Month by month: what the platforms wired against what their own statements say they owed' },
+  { id: 'reconcile', label: 'Reconciliation', ic: '⇌', grp: 'Analyse', sub: 'Every month on record: what the platforms wired against what their own statements say they owed' },
   { id: 'finance', label: 'Finance', ic: '◈', grp: 'Analyse', sub: 'Revenue, payment mix and the transaction ledger' },
   { id: 'settlement', label: 'Settlement', ic: '◫', grp: 'Analyse', sub: 'Who settles the fare and when — cash in hand, and what is outstanding' },
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Analyse', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
@@ -195,6 +195,17 @@ function setHeader(detail) {
   const noFilter = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
     'compliance', 'forecast', 'retention', 'capacity'];
   $('#filters').style.display = noFilter.includes(state.view) ? 'none' : 'flex';
+  /* A view can need the platform and fleet filters and NOT the range, which the
+     all-or-nothing list above cannot say. Reconciliation is the whole record by
+     construction — its rows are months, and the months a thirty-day window
+     touches are two partial ones — but a fleet's money is still its own, so the
+     other two controls stay. Leaving the range selector on screen had it
+     reading "Last 30 days" above a trips figure counting every trip the fleet
+     has ever taken; the control did nothing and said otherwise, which is worse
+     than being wrong. */
+  const noRange = ['reconcile'];
+  const range = $('#fRange');
+  if (range) range.style.display = noRange.includes(state.view) ? 'none' : '';
 }
 /* ─────────── views ─────────── */
 const V = {};

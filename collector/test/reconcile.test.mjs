@@ -8,6 +8,7 @@
    losing its sign, or the daily drill disagreeing with the month it drills
    into. */
 import { PGlite } from '@electric-sql/pglite';
+import { readFileSync } from 'node:fs';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
 
@@ -179,6 +180,132 @@ console.log('\ncoverage: two sides that reach back different distances');
   check('the totals carry the covered figure too',
     r.body.totals.bank_covered != null && r.body.totals.bank_covered <= r.body.totals.bank_payout,
     JSON.stringify([r.body.totals.bank_covered, r.body.totals.bank_payout]));
+}
+
+console.log('\ncoverage: two sides that name different PEOPLE on the same day');
+
+/* The fault the day-level fix left behind, and the one the operator actually
+   met. A covered day is not a comparable day: the statement names SOME of the
+   fleet's drivers and the bank figure for that day names ALL of them. August
+   2026 held AED 18,116 of on-trip net for fifty-three drivers beside AED
+   35,858 of bank money covering a hundred and eighty-nine, and the page called
+   the difference a 153% gap. Nothing was missing. The two sides were answering
+   about different people. */
+const stmtFor = (name, id, day, net, tips, salik, cash) => db.query(
+  `INSERT INTO driver_statement_day (platform, fleet_id, driver_name, driver_ext_id, day,
+     net, tips, salik, cash, source, pseudo)
+   VALUES ('uber', 'ecosine', $1, $2, $3, $4, $5, $6, $7, 'uber_rest', false)`,
+  [name, id, day, net, tips, salik, cash]);
+const payFor = (name, id, day, earnings) => db.query(
+  `INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, driver_name, day,
+     period_start, period_end, earnings, cash_earnings)
+   VALUES ('uber', 'ecosine', $1, $2, $3, $3, $3, $4, 0)`, [id, name, day, earnings]);
+{
+  // One day, three drivers paid, one of them on the statement.
+  await payFor('Bilal Haq', 'u-bilal', '2026-05-10', 500);
+  await payFor('Carla Diaz', 'u-carla', '2026-05-10', 400);
+  await payFor('Dan Osei', 'u-dan', '2026-05-10', 300);
+  await stmtFor('Bilal Haq', 'u-bilal', '2026-05-10', 380, 10, 6, 40);
+
+  const may = (await get('/api/reconcile')).body.rows.find((x) => x.m === '2026-05');
+  check('the row still reports the whole month of bank money',
+    Number(may.bank_payout) === 1200, String(may.bank_payout));
+  check('and the whole month of on-trip net', Number(may.ontrip_net) === 380,
+    String(may.ontrip_net));
+  // 380 + 10 + 6 − 40 = 356, against Bilal's own 500 — not against all 1,200.
+  check('the comparison is per driver-day, not per day',
+    may.expected_covered === 356 && may.bank_covered === 500,
+    JSON.stringify([may.expected_covered, may.bank_covered]));
+  check('so the delta is the difference of exactly those two figures',
+    may.delta === 144 && Math.abs(may.delta_pct - 40.4) < 0.05,
+    JSON.stringify([may.delta, may.delta_pct]));
+  check('and the row says how much of the day it could speak for',
+    may.matched_drivers === 1 && may.bank_drivers === 3 && may.matched_days === 1
+    && may.matched_pairs === 1 && may.ontrip_drivers === 1, JSON.stringify(may));
+  check('comparing the whole covered day would have said something absurd',
+    Math.round(((1200 - 356) / 356) * 100) > 200,
+    'guard: the day-level comparison really was that wrong');
+}
+
+console.log('\none human, two platform accounts');
+
+/* src/rollup.js folds a person's several Uber accounts into ONE statement row
+   and keeps one of their ids, so joining the two sides on driver_ext_id would
+   drop the other account's payouts and re-open the same gap under a different
+   name. The join key is personKey — the fold the driver and vehicle pages
+   already resolve people by — so the two accounts land on the one person. */
+{
+  await payFor('Sara  Ghulam Qadir', 'u-sara-a', '2026-04-05', 200);
+  await payFor('sara ghulam qadir', 'u-sara-b', '2026-04-05', 150);
+  await stmtFor('Sara Ghulam Qadir', 'u-sara-a', '2026-04-05', 300, 0, 0, 0);
+
+  const apr = (await get('/api/reconcile')).body.rows.find((x) => x.m === '2026-04');
+  check('both accounts count as the one person the statement names',
+    apr.bank_covered === 350 && apr.matched_drivers === 1 && apr.bank_drivers === 1,
+    JSON.stringify([apr.bank_covered, apr.matched_drivers, apr.bank_drivers]));
+  check('and the delta is measured against both halves of their money',
+    apr.expected_covered === 300 && apr.delta === 50,
+    JSON.stringify([apr.expected_covered, apr.delta]));
+  check('an id join would have compared against 200 and invented a shortfall',
+    apr.bank_covered !== 200, 'guard: the id join is the tempting wrong answer');
+}
+
+console.log('\nthe scope is stated, not implied');
+
+/* The page carrying this kept the dashboard's range selector on screen while
+   the endpoint ignored it, so "Last 30 days" sat above a trips figure counting
+   every trip the fleet has ever taken and a table running Aug 2025 to Aug 2026.
+   The answer was right and the label was a lie. */
+{
+  const all = (await get('/api/reconcile')).body;
+  check('the month view says it covers every month on record',
+    all.scope.kind === 'all-time' && /every month/.test(all.scope.label),
+    JSON.stringify(all.scope));
+  check('and names the span its rows actually run over',
+    all.scope.from === '2026-04-01' && all.scope.to === '2026-08-31'
+    && all.scope.rows === all.rows.length, JSON.stringify(all.scope));
+
+  const windowed = (await get('/api/reconcile?from=2026-08-01&to=2026-08-31')).body;
+  check('a window a caller passes changes nothing — and the answer still says so',
+    windowed.scope.kind === 'all-time' && windowed.rows.length === all.rows.length,
+    JSON.stringify([windowed.scope.kind, windowed.rows.length, all.rows.length]));
+  check('the totals are the sum of the rows below them, one scope for both',
+    windowed.totals.trips === all.totals.trips
+    && windowed.totals.bank_payout === all.totals.bank_payout,
+    JSON.stringify([windowed.totals.trips, all.totals.trips]));
+
+  const drill = (await get('/api/reconcile?month=2026-08')).body;
+  check('a drill says it covers that month and nothing else',
+    drill.scope.kind === 'month' && drill.scope.from === '2026-08-01'
+    && drill.scope.to === '2026-08-31', JSON.stringify(drill.scope));
+  check('the totals carry both sides of what was compared',
+    all.totals.expected_covered != null && all.totals.bank_covered != null
+    && all.totals.matched_pairs > 0,
+    JSON.stringify([all.totals.expected_covered, all.totals.bank_covered,
+      all.totals.matched_pairs]));
+  check('and the headline gap is the difference of exactly those two',
+    Math.abs(all.totals.delta - (all.totals.bank_covered - all.totals.expected_covered)) < 0.01,
+    JSON.stringify([all.totals.delta, all.totals.bank_covered, all.totals.expected_covered]));
+}
+
+console.log('\nthe page cannot offer a control the endpoint does not honour');
+
+{
+  const appSrc = readFileSync('api/public/app.js', 'utf8');
+  const uiSrc = readFileSync('api/public/reconcile.js', 'utf8');
+  check('the reconciliation view hides the range selector',
+    /const noRange = \[[^\]]*'reconcile'/.test(appSrc) && /#fRange/.test(appSrc));
+  check('while keeping the platform and fleet filters it does honour',
+    !/const noFilter = \[[^\]]*'reconcile'/.test(appSrc));
+  check('and the page asks for nothing but month, platform and fleet',
+    !/\bfrom=|\bdays=|state\.days/.test(uiSrc));
+  check('the gap is presented as the difference of two named figures',
+    /banked against/.test(uiSrc) && /expected_covered/.test(uiSrc));
+  check('a row with no shared driver-day says so rather than showing a zero',
+    /no driver-day on both sides/.test(uiSrc));
+  check('and the note tells the truth about how far the on-trip side reaches',
+    /current payment period/i.test(uiSrc) && !/last six months/.test(uiSrc),
+    'the surface serves the current period, not six months');
 }
 
 server.close();

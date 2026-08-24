@@ -158,21 +158,60 @@ const EARNER_PAGES_MAX = 40;
    asked is the key the rows are stored under. Stamped with the RUN's window,
    an incremental's three days and a backfill's year both produced rows that
    were neither comparable with each other nor with the weekly grid every
-   other Uber figure lives on. */
+   other Uber figure lives on.
+
+   Most of those weeks come back empty, and that is this surface's normal
+   answer rather than a fault. Probing it week by week settles what it serves:
+   the week ending 23 Aug 2026 answers with thirty-two earners, the week before
+   it with none, February with none, and a June-to-today request with the same
+   thirty-two — so what comes back is the CURRENT payment period and nothing
+   else, however the window is asked. Every historical week in a backfill is
+   legitimately silent and no request can change that.
+
+   The zero-earner guard therefore fired on almost every chunk. It threw, which
+   abandoned the rest of the loop — and the loop runs oldest first, so a catchup
+   over the last month died on its first old week and never reached the one week
+   Uber would have answered. The check is still worth making, because the
+   failure it was written for (a page size the server silently refuses) is real;
+   it just has to be a question about the RUN rather than about each week. If
+   the whole window came back without a single earner while the probe of the
+   same surface saw some, the request is wrong. If one week answered, the silent
+   ones are simply outside the period Uber serves. */
 async function pullEarningsComponents(from, to) {
   const token = await uberOAuthToken();
-  let totalRows = 0;
+  let totalRows = 0, earners = 0, weeks = 0, served = 0;
   for (const wk of weekChunks(from, to)) {
-    totalRows += await pullEarningsWeek(token, wk.start, wk.end);
+    /* `until`, not `end`: the range is HALF-OPEN, so an end of Sunday asks for
+       Sunday's first millisecond and nothing else. src/sources/uber.js records
+       what that cost on the sibling surface — one day in seven of every Uber
+       earning on record — and this collector was still making the same ask.
+       The rows keep the CLOSED week as their key, because that is the grid
+       every other Uber figure lives on and what schema_v26 prunes against. */
+    const r = await pullEarningsWeek(token, wk.start, wk.end, wk.until);
+    totalRows += r.rows; earners += r.earners; weeks += 1;
+    if (r.earners) served += 1;
   }
+  if (weeks && !earners) {
+    const { rows: [probe] = [] } = await pool.query(
+      `SELECT record_count, probed_at FROM provider_probe
+        WHERE provider = 'uber' AND surface = 'earner-payments' AND ok`).catch(() => ({ rows: [] }));
+    if (probe?.record_count > 0) {
+      throw new Error(`earner payments returned no earners in any of ${weeks} week(s), but the `
+        + `probe of the same surface saw ${probe.record_count} at ${probe.probed_at}. `
+        + 'The request, not the window, is wrong.');
+    }
+  }
+  /* Weeks served beside weeks asked, because "3 of 53" is the shape of a
+     surface with a horizon and "0 of 53" is the shape of a broken request. */
+  log.info(SRC, 'earner payments', { weeks, weeks_served: served, earners, components: totalRows });
   return totalRows;
 }
 
-async function pullEarningsWeek(token, from, to) {
+async function pullEarningsWeek(token, from, to, until = to) {
   const call = async (pageToken) => {
     const url = `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({
       org_id: config.uber.org, start_time: new Date(from).getTime(),
-      end_time: new Date(to).getTime(), page_size: EARNER_PAGE,
+      end_time: new Date(until).getTime(), page_size: EARNER_PAGE,
       ...(pageToken ? { page_token: pageToken } : {}),
     })}`;
     const { data } = await http(url, { headers: { authorization: `Bearer ${token}` }, timeoutMs: 45000 });
@@ -232,22 +271,14 @@ async function pullEarningsWeek(token, from, to) {
     const k = `${r.driver_ext_id}|${r.category}`;
     if (seen.has(k)) return false; seen.add(k); return true;
   });
-  /* Zero earners on a fleet that plainly has drivers is a collection failure,
-     not an empty week — it is the state a page size of 200 put this in, and it
-     reported success throughout. The probe's own record of this surface is the
-     evidence: if it saw earners and we did not, the difference is ours. */
-  if (!breakdowns.length) {
-    const { rows: [probe] = [] } = await pool.query(
-      `SELECT record_count, probed_at FROM provider_probe
-        WHERE provider = 'uber' AND surface = 'earner-payments' AND ok`).catch(() => ({ rows: [] }));
-    if (probe?.record_count > 0) {
-      throw new Error('earner payments returned no earners, but the probe of the same surface saw '
-        + `${probe.record_count} at ${probe.probed_at}. The request, not the week, is wrong.`);
-    }
-  }
-  log.info(SRC, 'earner payments', { earners: breakdowns.length, components: uniq.length });
-  return uniq.length ? upsertMany('driver_earnings_component', uniq,
-    ['platform', 'driver_ext_id', 'period_start', 'period_end', 'category']) : 0;
+  /* Zero earners is reported upward rather than thrown here — see the run-level
+     check in pullEarningsComponents for why that distinction is the difference
+     between collecting the one week Uber serves and collecting nothing. */
+  return {
+    earners: breakdowns.length,
+    rows: uniq.length ? await upsertMany('driver_earnings_component', uniq,
+      ['platform', 'driver_ext_id', 'period_start', 'period_end', 'category']) : 0,
+  };
 }
 
 export async function collect({ from, to, mode }) {
