@@ -20,6 +20,7 @@ import express from 'express';
 import { readFileSync } from 'node:fs';
 import { analyticsRoutes } from '../api/analytics_routes.js';
 import { refreshPayouts, refreshRollups } from '../src/rollup.js';
+import { logRun } from '../src/db.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -587,12 +588,24 @@ const W = 'from=2026-08-01&to=2026-08-31';
   // silent: same shape, and no chunk record at all.
   await day('silent', '2026-06-01'); await day('silent', '2026-06-20');
 
-  const run = (source, chunks) => q(
-    `INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, finished_at, detail)
-     VALUES ($1, 'ecosine', 'backfill', 'ok', 0, now(), $2::jsonb)`,
-    [source, JSON.stringify({ chunks })]);
+  /* Seeded through the collector's OWN writer, not by hand.
+     The hand-written version stored {chunks: [...]}, a shape nothing in the
+     collector has ever produced, and the endpoint read detail -> 'chunks' to
+     match it. The two agreed with each other and with nothing that ships: in
+     production that expression is NULL against the bare array logRun writes,
+     so no window was ever found and every hole in the product read as one
+     nobody had asked about — the answer that sends somebody chasing months the
+     provider has already answered as empty. A fixture that disagrees with the
+     writer is how a test certifies a bug, so this one calls the writer. */
+  const run = (source, chunks) => logRun(
+    { source, fleet_id: 'ecosine', mode: 'backfill', rows_written: 0, chunks }, db);
   await run('asked', [{ from: '2026-05-25', to: '2026-06-25', rows: 0, error: null }]);
   await run('failed', [{ from: '2026-05-25', to: '2026-06-25', rows: 0, error: 'timeout after 600s' }]);
+
+  check('the collector records its windows as a list, which is the shape the page reads',
+    (await q(`SELECT jsonb_typeof(detail) AS t FROM collection_run WHERE detail IS NOT NULL`))
+      .every((r) => r.t === 'array'),
+    JSON.stringify(await q(`SELECT source, jsonb_typeof(detail) AS t FROM collection_run`)));
 
   const cov = await get('/api/coverage/calendar?from=2026-06-01&to=2026-06-25');
   const by = Object.fromEntries(cov.sources.map((x) => [x.source, x]));
