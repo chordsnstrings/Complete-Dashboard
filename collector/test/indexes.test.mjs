@@ -69,19 +69,39 @@ check('no column is filtered this way without being on the list',
 
 console.log('\nthe live-fleet count can use an index for its sort');
 
-/* /api/kpis takes the newest reading per vehicle with DISTINCT ON (plate)
-   ORDER BY plate, polled_at DESC. telemetry_snapshot was indexed on
-   (plate, captured_at DESC) — the time the TRACKER recorded the fix, not the
-   time we asked — so the sort could not be served and the headline figure on
-   every page sorted the whole table. */
+/* Two different questions are asked of telemetry_snapshot, one per timestamp,
+   and each needs its own index:
+
+     captured_at — when the TRACKER saw the vehicle. /api/kpis takes the newest
+       fix per plate to count what is reporting.
+     polled_at   — when WE asked. /api/live takes the newest row per plate so it
+       can report the two ages separately, because "our collector is down" and
+       "this tracker stopped" are different states.
+
+   Both sorts must be servable. This check exists because the first version of
+   it pinned only the polled_at index, and when /api/kpis was moved onto the
+   fix — a dormant tracker satisfies a poll-age test forever — the guard fired
+   and said so, which is the whole point of writing it against the SOURCE. */
 check('telemetry_snapshot is indexed on (plate, polled_at DESC)',
   /CREATE INDEX[^;]*ON telemetry_snapshot \(plate, polled_at DESC\)/i.test(sql));
+check('and on (plate, captured_at DESC)',
+  /CREATE INDEX[^;]*ON telemetry_snapshot \(plate, captured_at DESC\)/i.test(sql));
+
 const kpiSrc = readFileSync('api/server.js', 'utf8');
 const kpi = kpiSrc.slice(kpiSrc.indexOf("app.get('/api/kpis'"));
 const live = kpi.slice(0, kpi.indexOf('\napp.'));
-check('and that is still the column the query orders by',
-  !/DISTINCT ON \(plate\)/.test(live) || /ORDER BY plate, polled_at DESC/.test(live),
-  'the query changed its sort column — the index no longer matches it');
+/* Whichever column it sorts by, an index has to cover it. */
+const sortCol = (live.match(/DISTINCT ON \(plate\)[\s\S]*?ORDER BY plate, (\w+) DESC/) || [])[1];
+check('the live-vehicle count sorts on a column an index covers',
+  !/DISTINCT ON \(plate\)/.test(live)
+  || (sortCol && new RegExp(`ON telemetry_snapshot \\(plate, ${sortCol} DESC\\)`, 'i').test(sql)),
+  `sorts on ${sortCol || '(unparsed)'} — no matching index`);
+/* And it must measure the FIX, not the poll: the provider lists dormant
+   trackers on every cycle, so a poll-age test counts a vehicle silent since
+   April 2024 as live for ever. */
+check('and it measures the fix age, not the poll age',
+  /now\(\) - captured_at < \$\{FIX_FRESH\}/.test(live) && !/polled_at < interval/.test(live),
+  'liveness measured on when we asked rather than when the tracker answered');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

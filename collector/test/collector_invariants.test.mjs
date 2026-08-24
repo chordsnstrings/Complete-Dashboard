@@ -622,5 +622,49 @@ console.log('\nthe two fleets are collected separately, and fail separately');
     && /job_pending_idx ON collector_job \(status, mode, fleet/.test(v28));
 }
 
+console.log('\na silent vehicle is not a broken clock');
+
+/* The CABMAN feed returns every vehicle it knows of on every five-minute
+   cycle, including trackers that went quiet long ago — four of this fleet's
+   have produced no fix since April 2024. Their timestamps sat in the median
+   lag, dragged it past the threshold, and the collector logged an ERROR every
+   five minutes blaming a timezone change that had not happened. The tell was
+   the number itself: around forty-five minutes, and no timezone is
+   forty-five minutes away from Dubai.
+
+   Static checks, because the alarm only fires against a live provider — but
+   the thing that broke was which POPULATION the median is taken over, and
+   that is visible in the source. */
+{
+  const cab = src('cabman.js');
+  check('the median is taken over the vehicles still reporting',
+    /const talking = lags\.filter\(\(m\) => m < DORMANT_MIN\)/.test(cab)
+    && /talking\[Math\.floor\(talking\.length \/ 2\)\]/.test(cab),
+    'a dormant tracker still drags the median past the threshold');
+  check('and dormant vehicles are counted, not counted AS a clock error',
+    /vehicles listed but not reporting/.test(cab) && /log\.info\(SRC, 'vehicles listed/.test(cab),
+    'silence is worth reporting and is not an error in the collector');
+  check('the hint no longer asserts a cause it cannot know',
+    !/check whether the provider changed the timezone/.test(cab)
+    && /whole-hour offset/.test(cab),
+    'an alarm that names the wrong cause is worse than one that names none');
+
+  /* The same confusion in the other direction: liveness measured on when WE
+     polled rather than when the TRACKER reported. A dormant vehicle satisfies
+     a poll-age test forever, because the provider keeps listing it and we keep
+     upserting the same ancient fix with a fresh poll time. */
+  const server = readFileSync('api/server.js', 'utf8');
+  const kpi = server.slice(server.indexOf("app.get('/api/kpis'"));
+  const liveQ = kpi.slice(0, kpi.indexOf('\napp.'));
+  check('the live-vehicle count measures the fix, not the poll',
+    /now\(\) - captured_at < \$\{FIX_FRESH\}/.test(liveQ)
+    && !/now\(\)-polled_at < interval/.test(liveQ),
+    'a tracker silent since 2024 counted as live');
+  check('and the threshold is shared with the live map rather than restated',
+    (server.match(/\$\{FIX_FRESH\}/g) || []).length >= 3
+    && /const FIX_FRESH = /.test(server),
+    'two endpoints disagreeing about which vehicles are live is its own bug');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

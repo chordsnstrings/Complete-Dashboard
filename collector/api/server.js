@@ -171,6 +171,17 @@ const W = (alias = '') => {
 };
 const F = W();
 
+/* When a tracker counts as reporting.
+   ─────────────────────────────────────────────────────────────────────────
+   The CABMAN poll is five-minutely, so two missed cycles is the point at which
+   a vehicle has stopped talking rather than merely been unlucky. Written once
+   because it was about to be written twice: /api/live already measured
+   staleness on the FIX and /api/kpis still measured it on the POLL, and two
+   endpoints disagreeing about which vehicles are live is worse than either
+   threshold being slightly wrong. */
+const FIX_FRESH = "interval '11 minutes'";
+
+
 /* A Dubai-local day window for the tables that are keyed on a raw timestamp
    rather than on trip_norm's local_day: alert, occupancy_segment,
    telemetry_snapshot, ledger_entry.
@@ -316,9 +327,30 @@ app.get('/api/kpis', wrap(async (req, res) => {
        count(DISTINCT n.platform) FILTER (WHERE n.is_booking)::int platforms
      FROM trip_norm n ${JOIN_TRIP} WHERE ${W('n')}`, p);
 
-  const [v] = await q(`SELECT count(*)::int live_vehicles,
-      count(*) FILTER (WHERE now()-polled_at < interval '11 minutes')::int fresh
-      FROM (SELECT DISTINCT ON (plate) plate, polled_at FROM telemetry_snapshot ORDER BY plate, polled_at DESC) s`);
+  /* How many vehicles are actually reporting, measured on the FIX rather than
+     on the poll.
+     ─────────────────────────────────────────────────────────────────────────
+     Both figures here were about us, not about the fleet. live_vehicles counted
+     every plate telemetry has ever held, so a tracker that stopped in April
+     2024 was still "live" two years later — four of them are, and sixteen have
+     been silent over a month. And `fresh` tested polled_at, the moment WE asked,
+     which a dormant vehicle satisfies forever: the provider keeps listing it,
+     we keep upserting the same ancient fix with a new poll time, and it reads
+     as current on every page carrying the number.
+
+     captured_at is when the tracker says it saw the vehicle, which is the only
+     column that can answer the question. Fifteen minutes rather than eleven
+     because the CABMAN poll is five-minutely and its fixes routinely arrive a
+     couple of cycles behind; reporting is what is being measured, not
+     punctuality. The silent count is returned beside them so a page can say
+     which vehicles have gone quiet instead of quietly dropping them. */
+  const [v] = await q(`SELECT
+        count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int live_vehicles,
+        count(*) FILTER (WHERE now() - captured_at < ${FIX_FRESH})::int fresh,
+        count(*) FILTER (WHERE now() - captured_at >= interval '1 day')::int silent_vehicles,
+        count(*)::int tracked_vehicles
+      FROM (SELECT DISTINCT ON (plate) plate, captured_at
+              FROM telemetry_snapshot ORDER BY plate, captured_at DESC) s`);
   // Alerts take the same fleet filter as the trips beside them; without it a
   // single-fleet view showed one fleet's trips next to both fleets' alerts.
   const [a] = await q(
@@ -902,7 +934,7 @@ app.get('/api/live', wrap(async (_, res) => res.json(await q(
              no actual fix in over eleven minutes. The poll age is returned
              separately so "our collector is down" and "this tracker stopped
              reporting" stay two different states. */
-          (now() - s.captured_at > interval '11 minutes') AS stale,
+          (now() - s.captured_at > ${FIX_FRESH}) AS stale,
           round(extract(epoch FROM now() - s.captured_at) / 60)::int AS fix_age_min,
           round(extract(epoch FROM now() - s.polled_at) / 60)::int AS poll_age_min,
           cd.driver_name AS current_driver, cd.as_of AS driver_as_of
