@@ -117,46 +117,67 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      is only knowable where the channel reports a fare, which Uber does not. */
   app.get('/api/settlement/cash-exposure', wrap(async (req, res) => {
     const p = range(req);
+    /* Grouped once, with the fleet-wide totals riding on the rows.
+       ─────────────────────────────────────────────────────────────────────
+       This asked the same question of the same window twice over: once for the
+       two hundred drivers the page lists, and again for the totals printed
+       underneath them — a second statement that scanned trip_ext once for the
+       sums and grouped it all over again, inside itself, for the driver count.
+       Three passes where the data supports one. Cold at a wide window the pair
+       took about thirty-five seconds, close enough to the gateway's own
+       patience that the Settlement page was one slow morning from showing
+       nothing at all.
+
+       So the window is aggregated once and the totals are read off that same
+       result. The window aggregates below run over every holder the CTE
+       produced, before ORDER BY and LIMIT reduce it to a page, which is the
+       whole point of them being here: "AED x is in drivers' hands" is a figure
+       somebody sizes a cash control on, and summing the visible page
+       understates it by exactly the tail nobody is watching. The driver count
+       has the same problem and is the likelier of the two to be wrong first,
+       because a fleet has more drivers than it has drivers worth listing.
+
+       That count is over the SAME grouping the list uses, not over DISTINCT
+       driver_ext_id. Those differ whenever one person appears both with and
+       without a platform id, and a tile reading 4 above a list of 5 rows is a
+       contradiction on screen — worse than either number being slightly off.
+       Being the CTE's own row count it can no longer drift from the list it
+       describes, which the separate statement could always have done. */
     const rows = await q(
-      `SELECT coalesce(driver_name, '(unnamed)') driver_name, driver_ext_id,
-              count(*)::int cash_trips,
-              count(*) FILTER (WHERE price IS NOT NULL)::int priced_cash_trips,
-              sum(price) AS cash_value,
-              array_agg(DISTINCT platform) platforms,
-              array_remove(array_agg(DISTINCT plate), NULL) plates,
-              max(requested_at) last_cash_trip
-       FROM trip_ext
-       WHERE ${FB} AND driver_holds_cash
-       GROUP BY 1, 2 ORDER BY cash_trips DESC LIMIT 200`, p);
-    /* Totalled in the database, not over the 200 rows returned. "AED x is in
-       drivers' hands" is a figure somebody acts on, and summing the visible
-       page understates it by exactly the tail — which is the part nobody is
-       watching. The driver count has the same problem and is the more likely
-       to be wrong first, because a fleet has more drivers than it has drivers
-       worth listing. */
-    const [totals] = await q(
-      /* The driver count is over the SAME grouping the list uses, not over
-         DISTINCT driver_ext_id. Those differ whenever one person appears both
-         with and without a platform id — and a tile reading 4 above a list of
-         5 rows is a contradiction on screen, which is worse than either number
-         being slightly off. The tile has to describe the list it sits above. */
-      `SELECT (SELECT count(*)::int FROM (
-                 SELECT 1 FROM trip_ext WHERE ${FB} AND driver_holds_cash
-                 GROUP BY coalesce(driver_name, '(unnamed)'), driver_ext_id) g) AS drivers,
-              count(*)::int cash_trips,
-              count(*) FILTER (WHERE price IS NOT NULL)::int priced,
-              sum(price) AS value
-       FROM trip_ext WHERE ${FB} AND driver_holds_cash`, p);
-    const cashTrips = totals?.cash_trips || 0;
-    const priced = totals?.priced || 0;
+      `WITH holders AS (
+         SELECT coalesce(driver_name, '(unnamed)') driver_name, driver_ext_id,
+                count(*)::int cash_trips,
+                count(*) FILTER (WHERE price IS NOT NULL)::int priced_cash_trips,
+                sum(price) AS cash_value,
+                array_agg(DISTINCT platform) platforms,
+                array_remove(array_agg(DISTINCT plate), NULL) plates,
+                max(requested_at) last_cash_trip
+           FROM trip_ext
+          WHERE ${FB} AND driver_holds_cash
+          GROUP BY 1, 2)
+       SELECT *,
+              count(*) OVER ()::int AS _drivers,
+              sum(cash_trips) OVER ()::int AS _cash_trips,
+              sum(priced_cash_trips) OVER ()::int AS _priced,
+              sum(cash_value) OVER () AS _value
+         FROM holders ORDER BY cash_trips DESC LIMIT 200`, p);
+    const totals = rows.length
+      ? { drivers: rows[0]._drivers, cash_trips: rows[0]._cash_trips,
+          priced: rows[0]._priced, value: rows[0]._value }
+      : { drivers: 0, cash_trips: 0, priced: 0, value: null };
+    for (const r of rows) {
+      delete r._drivers; delete r._cash_trips; delete r._priced; delete r._value;
+    }
+    const cashTrips = totals.cash_trips || 0;
+    const priced = totals.priced || 0;
     res.json({
       drivers: rows.map((r) => ({
         ...r, cash_value: r.priced_cash_trips ? round(r.cash_value, 0) : null,
         value_known_pct: share(r.priced_cash_trips, r.cash_trips),
       })),
-      driver_count: totals?.drivers || 0,
+      driver_count: totals.drivers || 0,
       shown: rows.length,
-      truncated: (totals?.drivers || 0) > rows.length,
+      truncated: (totals.drivers || 0) > rows.length,
       total_cash_trips: cashTrips,
       total_cash_value_known: priced ? round(NUM(totals.value) || 0, 0) : null,
       value_known_pct: share(priced, cashTrips),

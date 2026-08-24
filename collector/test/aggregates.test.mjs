@@ -219,5 +219,144 @@ console.log('\nproduct-by-vehicle resolves custody once per plate');
     'a correlated subquery is back in the select list');
 }
 
+console.log('\ncash exposure aggregates the window once');
+
+/* The Settlement page's cash panel asked the same question of the same window
+   twice: one statement for the two hundred drivers it lists, and a second one
+   for the totals underneath them — which scanned trip_ext for the sums and
+   grouped it a third time, nested inside itself, for the driver count. Cold at
+   a wide window that pair took about thirty-five seconds.
+
+   The rewrite has to answer exactly what those two statements answered, so the
+   check is the OLD pair against the NEW single statement over the same rows,
+   rather than a restatement of what the new one is supposed to produce. The
+   new SQL is read from the shipped source; a copy in this file would drift and
+   stop testing anything.
+
+   On its own database, because "the same rows in the same order" only means
+   something when the order is a total one. The fixture above ties five cash
+   drivers on four trips each, and two statements that reach the same rows by
+   different plans are free to break a tie differently — so every holder here
+   holds a different number of trips. */
+{
+  const cdb = new PGlite();
+  await applySchema(cdb);
+  const cq = (t, prm = []) => cdb.query(t, prm).then((r) => r.rows);
+  let cn = 0;
+  const cash = (o) => cq(
+    `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+                       requested_at,status,payment_type,price)
+     VALUES ($1,$2,'ecosine',$3,$4,$5,$6,'completed',$7,$8)`,
+    [o.platform, `c${cn++}`, o.plate ?? null, o.ext ?? null, o.name ?? null,
+     `2026-${o.month ?? '08'}-${String(o.day).padStart(2, '0')}T10:00:00+04:00`,
+     o.pay, o.price ?? null]);
+
+  /* Seven holders, seven different trip counts, and between them every shape
+     the panel has to survive: a channel that prices its cash rides and one
+     that does not, a driver with no name at all, and one human appearing both
+     with a platform id and without one — which is two rows on the page and
+     therefore has to be two in the count above it. */
+  const holders = [
+    { name: 'Cash Nine', ext: 'h9', platform: 'hotel', pay: 'cash-driver', price: 90, n: 9 },
+    { name: 'Cash Eight', ext: 'h8', platform: 'hotel', pay: 'cash', price: 40, n: 8 },
+    { name: 'Cash Seven', ext: 'u7', platform: 'uber', pay: 'cash-driver', price: null, n: 7 },
+    { name: 'Cash Six', ext: null, platform: 'yango', pay: 'cash', price: 25, n: 6 },
+    { name: 'Cash Six', ext: 'y6', platform: 'yango', pay: 'cash', price: null, n: 5 },
+    { name: null, ext: 'u4', platform: 'uber', pay: 'cash-driver', price: 12.5, n: 4 },
+    { name: 'Cash Three', ext: 'u3', platform: 'uber', pay: 'cash', price: null, n: 3 },
+  ];
+  for (const h of holders) {
+    for (let i = 0; i < h.n; i++) {
+      await cash({ ...h, plate: `P${h.n}`, day: 1 + (i % 20) });
+    }
+  }
+  /* Rows the panel must not count, one for each way it could: a supervisor
+     took the money so no driver is holding it, a card fare, a telematics
+     journey of the same trip, and a cash ride outside the window. */
+  await cash({ name: 'Not Holding', ext: 's1', platform: 'hotel', pay: 'cash-supervisor', price: 70, day: 4 });
+  await cash({ name: 'Not Holding', ext: 's1', platform: 'hotel', pay: 'card', price: 70, day: 4 });
+  await cash({ name: 'Tracker', ext: 't1', platform: 'fms', pay: 'cash', price: null, day: 4 });
+  await cash({ name: 'Cash Nine', ext: 'h9', platform: 'hotel', pay: 'cash-driver', price: 90, day: 4, month: '07' });
+
+  const FB2 = 'local_day BETWEEN $1::date AND $2::date'
+    + ' AND ($3::text IS NULL OR platform=$3)'
+    + ' AND ($4::text IS NULL OR fleet_id=$4) AND is_booking';
+  /* The retired pair, spelled out here because it no longer exists anywhere
+     to be read from. */
+  const oldRows = `SELECT coalesce(driver_name, '(unnamed)') driver_name, driver_ext_id,
+              count(*)::int cash_trips,
+              count(*) FILTER (WHERE price IS NOT NULL)::int priced_cash_trips,
+              sum(price) AS cash_value,
+              array_agg(DISTINCT platform) platforms,
+              array_remove(array_agg(DISTINCT plate), NULL) plates,
+              max(requested_at) last_cash_trip
+       FROM trip_ext
+       WHERE ${FB2} AND driver_holds_cash
+       GROUP BY 1, 2 ORDER BY cash_trips DESC LIMIT 200`;
+  const oldTotals = `SELECT (SELECT count(*)::int FROM (
+                 SELECT 1 FROM trip_ext WHERE ${FB2} AND driver_holds_cash
+                 GROUP BY coalesce(driver_name, '(unnamed)'), driver_ext_id) g) AS drivers,
+              count(*)::int cash_trips,
+              count(*) FILTER (WHERE price IS NOT NULL)::int priced,
+              sum(price) AS value
+       FROM trip_ext WHERE ${FB2} AND driver_holds_cash`;
+
+  const analyticsSrc = readFileSync('api/analytics_routes.js', 'utf8');
+  const cashAt = analyticsSrc.indexOf("app.get('/api/settlement/cash-exposure'");
+  let newSql = analyticsSrc.slice(analyticsSrc.indexOf('`WITH holders AS (', cashAt) + 1);
+  newSql = newSql.slice(0, newSql.indexOf('`, p)')).replace('${FB}', FB2);
+
+  const P = ['2026-08-01', '2026-08-31', null, null];
+  const strip = (rs) => rs.map(({ _drivers, _cash_trips, _priced, _value, ...r }) => r);
+  const before = await cq(oldRows, P);
+  const [beforeT] = await cq(oldTotals, P);
+  const after = await cq(newSql, P);
+
+  check('the rewrite returns the same number of holders',
+    before.length === after.length && before.length === 7, `${before.length} vs ${after.length}`);
+  check('and the same values in the same order',
+    JSON.stringify(before) === JSON.stringify(strip(after)),
+    JSON.stringify(strip(after).slice(0, 1)));
+  check('a supervisor-collected fare is still not a driver holding cash',
+    !JSON.stringify(after).includes('Not Holding'));
+  check('a telematics journey is still not a booking',
+    !JSON.stringify(after).includes('Tracker'));
+  check('one human with two ids is two rows and two holders',
+    after.filter((r) => r.driver_name === 'Cash Six').length === 2
+      && after[0]._drivers === 7, String(after[0]?._drivers));
+  check('the totals the second statement used to fetch now ride on the rows',
+    after[0]._cash_trips === beforeT.cash_trips && after[0]._priced === beforeT.priced
+      && Number(after[0]._value) === Number(beforeT.value),
+    `${after[0]._cash_trips}/${after[0]._priced}/${after[0]._value} vs `
+      + `${beforeT.cash_trips}/${beforeT.priced}/${beforeT.value}`);
+
+  /* And the reason the totals are worth carrying at all: past two hundred
+     holders the page is a truncation of the fleet, and a cash figure summed
+     over what it happens to show understates the money by exactly the tail. */
+  await cdb.exec(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,
+                                    driver_name,requested_at,status,payment_type,price)
+    SELECT 'uber', 'tail' || i, 'ecosine', 'L900', 'tail' || i, 'Tail Driver ' || i,
+           '2026-08-15T10:00:00+04:00'::timestamptz, 'completed', 'cash-driver',
+           CASE WHEN i % 7 = 0 THEN 33.00 END
+      FROM generate_series(1, 210) i`);
+  const [wideT] = await cq(oldTotals, P);
+  const wide = await cq(newSql, P);
+  const pageTrips = wide.reduce((a, r) => a + r.cash_trips, 0);
+
+  check('the page is capped at two hundred holders', wide.length === 200, String(wide.length));
+  check('the holder count is the whole population, not the page',
+    wide[0]._drivers === 217 && wide[0]._drivers === wideT.drivers,
+    `${wide[0]._drivers} vs ${wideT.drivers}`);
+  check('the cash total is the whole population, not the page',
+    wide[0]._cash_trips === wideT.cash_trips && wide[0]._cash_trips > pageTrips,
+    `${wide[0]._cash_trips} vs ${wideT.cash_trips}, page ${pageTrips}`);
+  check('and so is the money the fleet is holding',
+    Number(wide[0]._value) === Number(wideT.value),
+    `${wide[0]._value} vs ${wideT.value}`);
+  check('the window is aggregated once, not three times',
+    (analyticsSrc.slice(cashAt, analyticsSrc.indexOf('res.json(', cashAt)).match(/await q\(/g) || []).length === 1,
+    'a second pass over the same window is back');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
