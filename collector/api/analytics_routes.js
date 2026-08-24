@@ -687,15 +687,50 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     });
   }));
 
+  /* Twenty rows, and it sorted the whole year to reach them.
+     ─────────────────────────────────────────────────────────────────────────
+     Both grouping keys were view expressions — daypart is a CASE over the
+     Dubai hour, and uber_tier is a CASE over product — and Postgres keeps no
+     statistics for an expression. It therefore estimated sixty-seven thousand
+     groups where a daypart against a tier can only ever produce twenty, ruled
+     out a hash aggregate on that estimate, and sorted every Uber trip in the
+     window through a temp file instead: eighty-five thousand rows spilled to
+     the same disk the backfill is already saturating, to produce twenty.
+
+     So the aggregate is taken at the grain the calendar keys already hold —
+     the local hour, day or weekday, as narrow integers beside product, which
+     is a real column with real statistics — and the label is applied to the
+     twenty-odd rows that come out. Both halves of the distance average travel
+     up with them, because an average of averages is not an average. */
   app.get('/api/tiers/mix', wrap(async (req, res) => {
     const p = range(req);
-    const by = { day: 'ext_local_day', daypart: 'daypart', dow: 'local_dow', hour: 'local_hour' };
-    const dim = by[req.query.by] || by.daypart;
+    /* The label of a daypart is a fold of the hour, and the other three
+       dimensions are their own label. Written as grain and label rather than
+       one dimension because the grain is what the database groups on and the
+       label is what the page reads. */
+    const by = {
+      day: ['local_day', 'k'],
+      daypart: ['local_hour', `CASE WHEN k < 5 THEN 'night' WHEN k < 10 THEN 'morning'
+                        WHEN k < 15 THEN 'midday' WHEN k < 20 THEN 'evening'
+                        ELSE 'late' END`],
+      dow: ['local_dow', 'k'],
+      hour: ['local_hour', 'k'],
+    };
+    const [grain, label] = by[req.query.by] || by.daypart;
+    /* product rather than uber_tier: the two differ only on rows this filter
+       has already excluded, and the real column is the one the planner can
+       cost. */
     res.json(await q(
-      `SELECT ${dim} AS label, uber_tier AS tier, count(*)::int n,
-              round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km
-       FROM trip_ext WHERE ${F} AND platform = 'uber' AND uber_tier IS NOT NULL
-       GROUP BY 1, 2 ORDER BY 1, n DESC`, p));
+      `WITH mix AS (
+         SELECT ${grain} AS k, product AS tier, count(*)::int n,
+                sum(distance_km) FILTER (WHERE has_distance) km,
+                count(distance_km) FILTER (WHERE has_distance) km_n
+           FROM trip_norm
+          WHERE ${F} AND platform = 'uber' AND product IS NOT NULL
+          GROUP BY 1, 2)
+       SELECT ${label} AS label, tier, sum(n)::int n,
+              round((sum(km) / nullif(sum(km_n), 0))::numeric, 1) avg_km
+         FROM mix GROUP BY 1, 2 ORDER BY 1, n DESC`, p));
   }));
 
   /* ───────────────────────── coverage calendar ─────────────────────────
@@ -900,54 +935,103 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      Where the work starts and ends. Every channel returns a formatted address
      rather than a place id, so the community is parsed out of the string; the
      response says so, because a parsed area is evidence of a pattern and not a
-     geofence. */
+     geofence.
+
+     The page asks three things — which corridors carry the work, which areas
+     the work starts in, and how many of each there are altogether — and it
+     asked them as five separate aggregations of the same window, each one
+     pulling the same address strings apart again to build its group key. All
+     three are readings of one table at corridor grain, so the corridor grain
+     is computed once and everything else is derived from it.
+
+     The origins panel and the three tiles are over a NARROWER set of rows than
+     the corridor list: a trip that names only a drop-off is a corridor out of
+     nowhere, and it has no origin at all. That restriction rides on the
+     corridor row as a count of its own rather than becoming another pass.
+
+     The three shapes come back in one result set with a kind on each row,
+     because splitting them in JS costs nothing and a second statement would
+     cost a second scan. */
   app.get('/api/geo/corridors', wrap(async (req, res) => {
     const p = range(req);
     const rows = await q(
-      `SELECT coalesce(${areaOf('pickup_addr')}, '(unrecorded)') AS from_area,
-              coalesce(${areaOf('dropoff_addr')}, '(unrecorded)') AS to_area,
-              count(*)::int trips,
-              round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km,
-              round(avg(duration_s)::numeric / 60, 1) avg_min,
-              count(*) FILTER (WHERE price IS NOT NULL)::int priced,
-              round(avg(price) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::numeric, 2) avg_fare,
-              array_agg(DISTINCT platform) platforms
-       FROM trip_ext
-       WHERE ${F} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
-       GROUP BY 1, 2 HAVING count(*) >= 3
-       ORDER BY trips DESC LIMIT 120`, p);
-    const origins = await q(
-      `SELECT coalesce(${areaOf('pickup_addr')}, '(unrecorded)') AS area,
-              count(*)::int trips,
-              count(*) FILTER (WHERE local_hour BETWEEN 5 AND 9)::int morning,
-              count(*) FILTER (WHERE local_hour BETWEEN 16 AND 21)::int evening,
-              round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km
-       FROM trip_ext WHERE ${F} AND pickup_addr IS NOT NULL
-       GROUP BY 1 ORDER BY trips DESC LIMIT 60`, p);
-    /* Counted in the database. The page's "Distinct pickup areas" and
-       "Corridors seen 3+ times" tiles were the lengths of lists capped at 60
-       and 120 rows — right until the fleet works more than 120 distinct
-       corridors, at which point both tiles quietly become the cap. */
-    const [t] = await q(
-      `SELECT (SELECT count(*)::int FROM (
-                 SELECT 1 FROM trip_ext WHERE ${F} AND pickup_addr IS NOT NULL
-                 GROUP BY ${areaOf('pickup_addr')}, ${areaOf('dropoff_addr')}
-                 HAVING count(*) >= 3) g) AS corridors_3plus,
-              (SELECT count(*)::int FROM (
-                 SELECT 1 FROM trip_ext WHERE ${F} AND pickup_addr IS NOT NULL
-                 GROUP BY ${areaOf('pickup_addr')}, ${areaOf('dropoff_addr')}) g) AS corridors_all,
-              (SELECT count(DISTINCT ${areaOf('pickup_addr')})::int
-                 FROM trip_ext WHERE ${F} AND pickup_addr IS NOT NULL) AS origins_all`, p);
-    const shown = rows.filter((r) => r.from_area !== '(unrecorded)' || r.to_area !== '(unrecorded)');
+      `WITH base AS (
+         SELECT coalesce(${areaOf('pickup_addr')}, '(unrecorded)') AS from_area,
+                coalesce(${areaOf('dropoff_addr')}, '(unrecorded)') AS to_area,
+                count(*)::int AS trips,
+                round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) AS avg_km,
+                round(avg(duration_s)::numeric / 60, 1) AS avg_min,
+                count(*) FILTER (WHERE price IS NOT NULL)::int AS priced,
+                round(avg(price) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::numeric, 2) AS avg_fare,
+                array_agg(DISTINCT platform) AS platforms,
+                -- The pickup-only measures, carried at corridor grain so the
+                -- origins panel is a roll-up rather than another scan. The
+                -- distance average is kept as its two halves because an
+                -- average of averages is not an average.
+                count(*) FILTER (WHERE pickup_addr IS NOT NULL)::int AS from_trips,
+                count(*) FILTER (WHERE pickup_addr IS NOT NULL AND local_hour BETWEEN 5 AND 9)::int AS from_morning,
+                count(*) FILTER (WHERE pickup_addr IS NOT NULL AND local_hour BETWEEN 16 AND 21)::int AS from_evening,
+                sum(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km,
+                count(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km_n
+           FROM trip_ext
+          WHERE ${F} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
+          GROUP BY 1, 2),
+       corridor AS (
+         SELECT row_number() OVER () AS seq, c.*
+           FROM (SELECT * FROM base WHERE trips >= 3 ORDER BY trips DESC LIMIT 120) c),
+       origin AS (
+         SELECT row_number() OVER () AS seq, o.*
+           FROM (SELECT from_area AS area, sum(from_trips)::int AS trips,
+                        sum(from_morning)::int AS morning, sum(from_evening)::int AS evening,
+                        round((sum(from_km) / nullif(sum(from_km_n), 0))::numeric, 1) AS avg_km
+                   FROM base GROUP BY 1 HAVING sum(from_trips) > 0
+                  ORDER BY trips DESC LIMIT 60) o)
+       SELECT 'corridor' AS kind, seq, from_area, to_area, trips, avg_km, avg_min, priced,
+              avg_fare, platforms, NULL::int AS morning, NULL::int AS evening,
+              NULL::int AS corridors_3plus, NULL::int AS corridors_all, NULL::int AS origins_all
+         FROM corridor
+       UNION ALL
+       SELECT 'origin', seq, area, NULL, trips, avg_km, NULL, NULL,
+              NULL, NULL, morning, evening,
+              NULL, NULL, NULL
+         FROM origin
+       UNION ALL
+       /* Counted over every corridor, not over the lists. The page's "Distinct
+          pickup areas" and "Corridors seen 3+ times" tiles were the lengths of
+          lists capped at 60 and 120 rows — right until the fleet works more
+          than 120 distinct corridors, at which point both tiles quietly become
+          the cap. One row, always, so an empty window still states its zeroes. */
+       SELECT 'total', 0, NULL, NULL, NULL, NULL, NULL, NULL,
+              NULL, NULL, NULL, NULL,
+              count(*) FILTER (WHERE from_trips >= 3)::int,
+              count(*) FILTER (WHERE from_trips > 0)::int,
+              count(DISTINCT from_area) FILTER (WHERE from_trips > 0 AND from_area <> '(unrecorded)')::int
+         FROM base
+       ORDER BY 1, 2`, p);
+
+    const totalRow = rows.find((r) => r.kind === 'total');
+    const t = {
+      corridors_3plus: totalRow?.corridors_3plus ?? 0,
+      corridors_all: totalRow?.corridors_all ?? 0,
+      origins_all: totalRow?.origins_all ?? 0,
+    };
+    const corridors = rows.filter((r) => r.kind === 'corridor').map((r) => ({
+      from_area: r.from_area, to_area: r.to_area, trips: r.trips, avg_km: r.avg_km,
+      avg_min: r.avg_min, priced: r.priced, avg_fare: r.avg_fare, platforms: r.platforms,
+    }));
+    const origins = rows.filter((r) => r.kind === 'origin').map((r) => ({
+      area: r.from_area, trips: r.trips, morning: r.morning, evening: r.evening, avg_km: r.avg_km,
+    }));
+    const shown = corridors.filter((r) => r.from_area !== '(unrecorded)' || r.to_area !== '(unrecorded)');
     res.json({
       note: 'Areas are parsed from the address text each provider returns, not from a place id.',
       corridors: shown,
       origins,
       totals: t,
       shown: shown.length,
-      truncated: (t?.corridors_all ?? 0) > shown.length,
+      truncated: t.corridors_all > shown.length,
       origins_shown: origins.length,
-      origins_truncated: (t?.origins_all ?? 0) > origins.length,
+      origins_truncated: t.origins_all > origins.length,
     });
   }));
 
