@@ -214,6 +214,13 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('the cash total is not a sum over the visible page',
     c.total_cash_trips === c.drivers.reduce((a, d) => a + d.cash_trips, 0),
     String(c.total_cash_trips));
+  /* Those totals now travel on the rows, so they have to be taken off them
+     again before the page sees one. A driver row carrying the fleet's cash
+     total in a column nobody named is a number waiting to be read as that
+     driver's. */
+  check('the columns that carried the totals do not reach the page',
+    c.drivers.every((d) => !Object.keys(d).some((key) => key.startsWith('_'))),
+    JSON.stringify(Object.keys(c.drivers[0] || {})));
 }
 
 /* ── receivables ─────────────────────────────────────────────────────────── */
