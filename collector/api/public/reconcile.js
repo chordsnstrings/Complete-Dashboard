@@ -56,8 +56,18 @@ const COLS = (keyCol) => [
   { label: 'Expected payout', key: 'expected_payout', num: true,
     render: (r) => orDash(r.expected_payout, 'needs the statement') },
   { label: 'Bank payout', key: 'bank_payout', num: true,
-    render: (r) => orDash(r.bank_payout, 'no payout reported') },
-  { label: 'Δ bank − expected', key: 'delta', num: true, render: deltaPill },
+    /* The month's real bank money, and — where the statement side covers only
+       part of the month — how much of it the comparison beside it could
+       actually test. Without the second number a partially-covered month reads
+       as a wild discrepancy instead of a partial answer. */
+    render: (r) => (r.bank_payout == null ? orDash(null, 'no payout reported')
+      : `${money(r.bank_payout)}${r.bank_covered != null && r.expected_payout != null
+        && Math.abs(r.bank_covered - r.bank_payout) > 1
+        ? `<span class="dim"> · ${money(r.bank_covered)} on covered days</span>` : ''}`) },
+  { label: 'Δ bank − expected', key: 'delta', num: true, render: deltaPill,
+    /* Compared over the days BOTH sides cover — see api/reconcile_routes.js.
+       A month whose statement holds one week is a one-week comparison, not a
+       month-long discrepancy. */ },
 ];
 
 export async function renderReconcile(root, month) {
@@ -94,9 +104,17 @@ export async function renderReconcile(root, month) {
     { label: 'Expected payout', value: t.expected_payout != null ? money(t.expected_payout) : '—',
       sub: 'on-trip net + tips + salik − cash, where a statement exists' },
     { label: 'Bank payout', value: t.bank_payout != null ? money(t.bank_payout) : '—',
-      sub: 'what the platforms report having paid' },
+      sub: t.bank_covered != null && t.bank_payout != null
+        && Math.abs(t.bank_covered - t.bank_payout) > 1
+        ? `what the platforms report having paid · ${money(t.bank_covered)} of it on days the `
+          + 'statement side also covers'
+        : 'what the platforms report having paid' },
     { label: 'Gap', html: t.delta == null ? '<span class="dim">—</span>'
         : deltaPill(t),
+      /* Measured over the days both sides describe. The statement surface
+         reaches back weeks and the payout record months, so a whole-month
+         comparison of a partly-covered month is not a discrepancy — it is two
+         answers to different questions. */
       sub: t.delta == null
         ? `nothing reconcilable: no ${month ? 'day' : 'month'} holds both sides`
         : `over the ${fmt(t.reconciled_rows)} ${month ? 'day(s)' : 'month(s)'} holding both sides` },

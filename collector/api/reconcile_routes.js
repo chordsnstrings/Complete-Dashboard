@@ -88,7 +88,21 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
       payRows = await q(
         `SELECT to_char(date_trunc('month', p.day), 'YYYY-MM') AS m,
                 round(sum(p.earnings)::numeric, 2) AS bank_payout,
-                count(DISTINCT p.day)::int AS payout_days
+                count(DISTINCT p.day)::int AS payout_days,
+                /* The half of the bank money the identity can actually be
+                   tested against: payouts on DAYS THE STATEMENT SIDE COVERS.
+                   The statement surface reaches back a few weeks; the payout
+                   record reaches back months. Compared whole-month against
+                   whole-month, a month where the statement holds one week
+                   read as the platform overpaying by 1,449% — the money was
+                   fine, the two sides were answering about different days. */
+                round(sum(p.earnings) FILTER (WHERE EXISTS (
+                  SELECT 1 FROM driver_statement_day s2
+                  WHERE s2.source <> 'ledger' AND s2.day = p.day
+                    AND s2.platform = p.platform
+                    AND ($1::text IS NULL OR s2.platform = $1)
+                    AND ($2::text IS NULL OR s2.fleet_id = $2)
+                ))::numeric, 2) AS bank_covered
          FROM driver_payout_day p
          WHERE ${sideWhere('p')}
          GROUP BY 1`, [platform, fleet]);
@@ -138,7 +152,10 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
       payRows = await q(
         `SELECT to_char(p.day, 'YYYY-MM-DD') AS d,
                 round(sum(p.earnings)::numeric, 2) AS bank_payout,
-                1::int AS payout_days
+                1::int AS payout_days,
+                /* At day grain the two sides cover the same day by
+                   construction, so covered IS the full figure. */
+                round(sum(p.earnings)::numeric, 2) AS bank_covered
          FROM driver_payout_day p
          WHERE ${sideWhere('p')} AND ${dayBound('p')}
          GROUP BY 1`, P);
@@ -166,7 +183,13 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
       const expected = ontrip == null ? null
         : r2(ontrip + (tips ?? 0) + (salik ?? 0) - (cash ?? 0));
       const bank = num(p?.bank_payout);
-      const delta = expected == null || bank == null ? null : r2(bank - expected);
+      const bankCovered = num(p?.bank_covered);
+      /* Delta compares LIKE WITH LIKE: the expected payout is built from the
+         statement days, so it is tested against the bank money of those same
+         days. The full bank figure stays in the row — it is the real month —
+         but a coverage mismatch must read as "partially covered", never as a
+         thousand-percent discrepancy. */
+      const delta = expected == null || bankCovered == null ? null : r2(bankCovered - expected);
       const deltaPct = delta == null || !expected ? null
         : Math.round((delta / Math.abs(expected)) * 1000) / 10;
       return {
@@ -180,6 +203,7 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         ontrip_days: s ? s.ontrip_days : 0,
         expected_payout: expected,
         bank_payout: bank,
+        bank_covered: bankCovered,
         payout_days: p ? p.payout_days : 0,
         delta,
         delta_pct: deltaPct,
@@ -198,6 +222,10 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
       cash_collected: sumOf('cash_collected'),
       expected_payout: sumOf('expected_payout'),
       bank_payout: sumOf('bank_payout'),
+      /* Beside the full bank total, the part of it the identity was actually
+         tested against — so a reader can see at a glance how much of the
+         money the reconciliation covers. */
+      bank_covered: sumOf('bank_covered'),
     };
     /* The headline gap is measured only where BOTH sides exist. Summing every
        bank payout against only the months that have a statement would report

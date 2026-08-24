@@ -145,6 +145,42 @@ const empty2 = (await get('/api/reconcile?month=2031-01')).body;
 check('a month before or after the record answers empty rather than 31 blank rows',
   Array.isArray(empty2.rows) && empty2.rows.length === 0, String((empty2.rows || []).length));
 
+console.log('\ncoverage: two sides that reach back different distances');
+
+/* The failure this page shipped with, caught the moment it met production
+   data. The statement surface reaches back weeks; the payout record reaches
+   back months. Compared whole-month against whole-month, August held one week
+   of statement against a full month of bank payouts and reported the platform
+   overpaying by 1,449% — a number with no meaning, on the page whose entire
+   job is telling the operator whether the money is right.
+
+   The delta is therefore measured over the days BOTH sides describe. The full
+   bank figure stays in the row, because that is the month's real money. */
+{
+  // A month with payouts every day and statement rows for only two of them.
+  for (const d of ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10']) {
+    await pay(`2026-06-${d}`, 500);
+  }
+  await stmt('2026-06-01', 400, 8, 4, 80, 'uber_rest');
+  await stmt('2026-06-02', 400, 8, 4, 80, 'uber_rest');
+
+  const r = await get('/api/reconcile');
+  const jun = r.body.rows.find((x) => x.m === '2026-06');
+  check('the row still reports the whole month of bank money',
+    jun.bank_payout === 5000, String(jun.bank_payout));
+  check('and names the part of it the comparison could test',
+    jun.bank_covered === 1000, String(jun.bank_covered));
+  /* expected = (400+400) + 16 + 8 − 160 = 664, against 1000 of covered bank. */
+  check('the delta compares like with like', jun.delta === 336, String(jun.delta));
+  check('so a partly-covered month reads as a percentage, not a catastrophe',
+    Math.abs(jun.delta_pct) < 100, String(jun.delta_pct));
+  check('a whole-month comparison would have said something absurd',
+    Math.round(((5000 - 664) / 664) * 100) > 600, 'guard: the old arithmetic really was that wrong');
+  check('the totals carry the covered figure too',
+    r.body.totals.bank_covered != null && r.body.totals.bank_covered <= r.body.totals.bank_payout,
+    JSON.stringify([r.body.totals.bank_covered, r.body.totals.bank_payout]));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

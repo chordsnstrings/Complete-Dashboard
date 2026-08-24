@@ -1082,7 +1082,7 @@ app.get('/api/reconcile', (req, r) => {
       // Beyond the 22nd nothing has landed yet; day 5 has no statement and
       // day 9 no payout, so the drill shows dashes where a source is silent.
       if (i >= 22) return finish({ d, trips: null, ontrip_net: null, tips: null, salik: null,
-        cash_collected: null, ontrip_days: 0, bank_payout: null, payout_days: 0 });
+        cash_collected: null, ontrip_days: 0, bank_payout: null, bank_covered: null, payout_days: 0 });
       const net = 5800 + (i % 7) * 240;
       const stmt = i !== 4;
       return finish({ d, trips: 220 + (i % 5) * 14,
@@ -1099,18 +1099,18 @@ app.get('/api/reconcile', (req, r) => {
   const rows = [
     // Work with no statement behind it: the surface does not reach March.
     { m: '2026-03', trips: 5820, ontrip_net: null, tips: null, salik: null, cash_collected: null,
-      ontrip_days: 0, bank_payout: 148200, payout_days: 31 },
+      ontrip_days: 0, bank_payout: 148200, bank_covered: 148200, payout_days: 31 },
     { m: '2026-04', trips: 6240, ontrip_net: 171400, tips: 2110, salik: 5230, cash_collected: 34600,
-      ontrip_days: 30, bank_payout: 143210, payout_days: 30 },
+      ontrip_days: 12, bank_payout: 143210, bank_covered: 61400, payout_days: 30 },
     { m: '2026-05', trips: 6105, ontrip_net: 168300, tips: 1980, salik: 5010, cash_collected: 33800,
-      ontrip_days: 31, bank_payout: 132600, payout_days: 31 },
+      ontrip_days: 31, bank_payout: 132600, bank_covered: 132600, payout_days: 31 },
     { m: '2026-06', trips: 5570, ontrip_net: 152800, tips: 1720, salik: 4620, cash_collected: 30900,
-      ontrip_days: 30, bank_payout: 109300, payout_days: 28 },
+      ontrip_days: 30, bank_payout: 109300, bank_covered: 109300, payout_days: 28 },
     // The proven month: the identity holds to 0.7%.
     { m: '2026-07', trips: 7356, ontrip_net: 199930, tips: 2410, salik: 6110, cash_collected: 41800,
-      ontrip_days: 31, bank_payout: 167820, payout_days: 31 },
+      ontrip_days: 31, bank_payout: 167820, bank_covered: 167820, payout_days: 31 },
     { m: '2026-08', trips: 4820, ontrip_net: 132400, tips: 1610, salik: 4030, cash_collected: 27400,
-      ontrip_days: 22, bank_payout: 104300, payout_days: 21 },
+      ontrip_days: 22, bank_payout: 104300, bank_covered: 104300, payout_days: 21 },
   ].map(finish);
   r.json({ grain: 'month', month: null, trips_source: 'rollup', rows,
     totals: totalsOf(rows), note });
