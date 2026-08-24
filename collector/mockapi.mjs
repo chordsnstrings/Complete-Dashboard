@@ -104,7 +104,17 @@ app.get('/api/kpis', (_, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, c
   // The numerator revenue_per_km is actually over, and the bookings that
   // belong to no vehicle at all — without which the vehicle table sums to
   // fewer trips than the fleet and nothing says why.
-  priced_measured_revenue: 39200, priced_measured_trips: 178, trips_without_vehicle: 15 }));
+  priced_measured_revenue: 39200, priced_measured_trips: 178, trips_without_vehicle: 15,
+  /* Platform payouts, and the two channels together. Revenue is sum(price) over
+     the trip table and covers 9% of trips on this fleet, so the headline was
+     the hotel channel presented as the whole business. */
+  payouts: 196178, payout_cash: 834.44, payout_days: 28, payout_drivers: 148,
+  payout_platforms: ['uber', 'yango'], payout_coverage_pct: 93.3,
+  /* accounted is the best figure PER PLATFORM summed, so it is not fares plus
+     payouts: yango reports both here and is counted on its payout only. */
+  accounted: 237366, accounted_fares: 41188, accounted_payouts: 196178,
+  accounted_bookings: 2043, accounted_platforms: ['hotel', 'uber', 'yango'],
+  dark_bookings: 0, dark_pct: 0 }));
 app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800' },
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
   by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }],

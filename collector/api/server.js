@@ -8,6 +8,7 @@ import { describeSettings, setSetting, deleteSetting, loadSettings, recordCreden
 import { win, winDays } from './window.js';
 import { rollupGrainSql, rollupState } from '../src/rollup.js';
 import { responseCache } from './cache.js';
+import { platformFares, platformPayouts, fleetIncome } from './income_sql.js';
 import { startWarmer } from './warm.js';
 import { log } from '../src/log.js';
 import { driverRoutes } from './driver_routes.js';
@@ -298,9 +299,63 @@ app.get('/api/kpis', wrap(async (req, res) => {
      WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
        AND ($3::text IS NULL OR fleet_id = $3)`, [p[0], p[1], p[3]]);
 
+  /* The money the ride platforms say they PAID, which for this fleet is nearly
+     all of it. `revenue` above is sum(price) over the trip table and the Uber
+     trip export carries no fare column, so on a normal month it describes 651
+     of 7,356 trips — 8.8% — and the headline every page leads with was the
+     hotel channel alone. The Revenue page has combined the two since it was
+     built; the KPI it sits above did not, which is how a fleet turning over
+     AED 257,000 in July read as AED 58,185 everywhere else.
+
+     Kept as its own field rather than folded into revenue. A fare is what a
+     rider paid for one trip; a payout is a weekly net statement after the
+     platform's commission. They are both money the fleet received and they add
+     up to what it took in, but they are not the same measurement and a page
+     that prints one number has to be able to say which parts it is made of. */
+  /* Per PLATFORM, because the two kinds of money cannot be added for the same
+     one: a payout is what is left of those same fares after the platform's
+     commission, so a channel reporting both would be counted nearly twice.
+     api/income_sql.js picks one figure per platform and sums those — the same
+     rule, the same code, as the Revenue page, which is the only way the two
+     pages can be relied on to agree. */
+  const [fareRows, payRows] = await Promise.all([
+    q(platformFares(F), p),
+    q(platformPayouts(), p),
+  ]);
+  const num = (v) => (v == null ? null : Number(v));
+  const byPlat = new Map();
+  const plat = (name) => {
+    if (!byPlat.has(name)) {
+      byPlat.set(name, { platform: name, bookings: 0, priced_bookings: 0,
+        fares: null, payouts: null, payout_days: 0 });
+    }
+    return byPlat.get(name);
+  };
+  for (const f of fareRows) Object.assign(plat(f.platform), {
+    bookings: f.bookings, priced_bookings: f.priced_bookings, fares: num(f.fares) });
+  for (const y of payRows) Object.assign(plat(y.platform), {
+    payouts: num(y.payouts), payout_days: y.payout_days ?? 0,
+    payout_drivers: y.drivers, payout_cash: num(y.cash) });
+  const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
+  const income = fleetIncome([...byPlat.values()], windowDays);
+
   const share = (n, d) => (d ? +((n / d) * 100).toFixed(1) : null);
+  const payoutDays = Math.max(0, ...payRows.map((r) => r.payout_days || 0));
   res.json({
     ...t, ...v, ...a,
+    /* What the fleet took in, and the two kinds of money it is made of.
+       `revenue` above is sum(price) over the trip table and the Uber export
+       carries no fare column, so on a normal month it describes 651 of 7,356
+       trips — the hotel channel alone, and the headline every page led with. */
+    ...income,
+    payouts: payRows.reduce((acc, r) => acc + Number(r.payouts || 0), 0) || null,
+    payout_days: payoutDays,
+    payout_drivers: payRows.reduce((acc, r) => acc + Number(r.drivers || 0), 0) || null,
+    payout_platforms: payRows.map((r) => r.platform).sort(),
+    /* How much of the window the payout statements actually span. Three days of
+       payout on a thirty-day window is not a thirty-day figure, and without
+       this the combined total reads as complete when it is a tenth covered. */
+    payout_coverage_pct: share(Math.min(payoutDays, windowDays), windowDays),
     priced_pct: share(t.priced_trips, t.trips),
     attributed_pct: share(t.attributed_trips, t.trips),
   });

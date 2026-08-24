@@ -225,13 +225,22 @@ V.overview = async (root) => {
   kpiHost.innerHTML = [
     ['Trips', fmt(k.trips), `${fmt(k.drivers)} drivers · ${fmt(k.telematics_journeys || 0)} telematics journeys`],
     ['Distance', fmt(k.km) + ' km', `avg ${k.avg_km ?? '—'} km/trip`],
-    // Revenue over the trips that CARRY a fare. Presenting it as the fleet's
-    // revenue while it covers 4% of the trips beside it is the single most
-    // misread number on this page.
-    ['Revenue', k.revenue ? 'AED ' + fmt(k.revenue) : '—',
-      k.priced_trips && k.trips
-        ? `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} trips (${Math.round(k.priced_trips / k.trips * 100)}%) that report one`
-        : 'no trip in this range reports a fare'],
+    /* Both channels, because one of them alone is not this fleet's money.
+       This card showed sum(price) over the trip table, and the Uber export
+       carries no fare column — so on a normal month it was 651 of 7,356 trips,
+       the hotel channel by itself, and a fleet that took in AED 257,000 in July
+       read as AED 58,185 here. The Revenue page has added the two together
+       since it was built; this card is what most people actually look at.
+
+       The parts stay named underneath. A fare is what a rider paid for a trip
+       and a payout is a weekly statement net of the platform's commission —
+       they are both money in, and a reader comparing this month to last needs
+       to know which half moved. */
+    ['Money in', k.accounted ? 'AED ' + fmt(k.accounted) : '—',
+      k.accounted
+        ? `AED ${fmt(k.accounted_fares || 0)} in fares · AED ${fmt(k.accounted_payouts || 0)} in `
+          + `platform payouts · ${(k.accounted_platforms || []).join(', ') || 'no platform'}`
+        : 'no fare and no payout statement in this range'],
     ['Completion', k.completion_pct != null ? k.completion_pct + '%' : '—', `${k.cancel_pct ?? 0}% cancelled`],
     ['Vehicles', fmt(k.vehicles), 'with a trip in this range'],
     ['Safety alerts', fmt(k.alerts), 'harsh-driving events'],
@@ -882,8 +891,27 @@ V.finance = async (root) => {
     : 'no priced trips in this range';
 
   const kpis = kpiRow([
-    { label: 'Revenue', value: money(k.revenue), sub: coverage,
+    /* The fleet's whole income leads, with the two channels it is made of
+       beside it. Revenue alone led here, and revenue is sum(price) over the
+       trip table — which for this fleet is the hotel and Yango channels and
+       nothing else, because the Uber export has no fare column. A page titled
+       Finance opened on a number covering 9% of the work. */
+    { label: 'Money in', value: money(k.accounted),
+      sub: k.payout_coverage_pct != null && k.payout_coverage_pct < 90
+        ? `fares plus platform payouts — payouts cover ${pct(k.payout_coverage_pct, 0)} of the window`
+        : 'fares plus platform payouts',
+      tone: k.payout_coverage_pct != null && k.payout_coverage_pct < 60 ? 'warn' : null },
+    /* The halves of Money in, not the raw reported sums. A channel that reports
+       both fares and payouts contributes only the one it is counted on — the
+       payout is what is left of those same fares after commission — so these
+       two tiles add to the one above them and the raw sums do not. */
+    { label: 'Fares', value: money(k.accounted_fares), sub: coverage,
       tone: k.priced_pct != null && k.priced_pct < 40 ? 'warn' : null },
+    { label: 'Platform payouts', value: money(k.accounted_payouts),
+      sub: k.payout_days
+        ? `${(k.payout_platforms || []).join(', ')} · ${fmt(k.payout_days)} day(s) of statements, `
+          + `${fmt(k.payout_drivers)} driver(s)`
+        : 'no payout statement covers this range' },
     { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
       sub: k.priced_trips ? `over ${fmt(k.priced_trips)} priced trips` : 'no fares in this range' },
     { label: 'Revenue per km', value: money(k.revenue_per_km, 'AED', 2),
@@ -904,9 +932,12 @@ V.finance = async (root) => {
   // revenue line as the fleet's whole income.
   if (k.priced_pct != null && k.priced_pct < 90) {
     kpis.after(note(
-      `Money on this page covers ${pct(k.priced_pct, 1)} of trips — the other ${fmt(k.trips - k.priced_trips)} ` +
-      `carry no fare at all. Uber's trip export omits fares and telematics trips have none, so revenue here is ` +
-      `the hotel and Yango channels only. Trip counts cover everything; money does not.`));
+      `Fares cover ${pct(k.priced_pct, 1)} of trips — the other ${fmt(k.trips - k.priced_trips)} ` +
+      `carry no fare at all, because Uber's trip export omits them and telematics trips have none. ` +
+      `That work is paid for, and the money arrives as weekly platform statements rather than per-trip ` +
+      `fares, which is what Platform payouts counts. The two are different measurements — a fare is what ` +
+      `a rider paid, a payout is a statement net of the platform's commission — so Money in is their sum ` +
+      `and every tile below it is over fares only.`));
   }
 
   areaChart(rev.body, daily, { x: 'd', y: 'revenue', color: '--s3', valueFmt: (v) => money(v) });

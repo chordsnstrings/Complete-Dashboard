@@ -30,6 +30,7 @@
    A platform contributing nothing is the most important row on the page,
    because it is the one somebody can fix. */
 import { peopleCount } from './custody_sql.js';
+import { chooseBasis, fleetIncome } from './income_sql.js';
 
 export function revenueRoutes(app, { q, wrap, range }) {
   app.get('/api/revenue', wrap(async (req, res) => {
@@ -137,45 +138,16 @@ export function revenueRoutes(app, { q, wrap, range }) {
 
     /* Which figure to believe for each platform, and why. Stated as a basis
        rather than blended, because a fare and a payout are different money and
-       a reader who cannot tell them apart cannot check either. */
+       a reader who cannot tell them apart cannot check either.
+
+       The rule moved to api/income_sql.js so /api/kpis can apply the same one.
+       It had grown its own — sum(fares) + sum(payouts) across everything — and
+       that double-counts any platform reporting both, so the Overview and this
+       page printed different totals for the same month. */
     for (const r of byPlatform.values()) {
-      r.fare_coverage_pct = r.bookings
-        ? Math.round((r.priced_bookings / r.bookings) * 1000) / 10 : null;
       r.revenue_per_km = r.fares != null && r.priced_km
         ? Math.round((r.fares / r.priced_km) * 100) / 100 : null;
-      /* A payout covers DAYS, and a fare covers BOOKINGS. Both have to be
-         measured against the window or a figure drawn from three of its thirty
-         days reads as the whole month. */
-      r.payout_coverage_pct = r.payout_days
-        ? Math.round((Math.min(r.payout_days, windowDays) / windowDays) * 1000) / 10 : null;
-      if (r.priced_bookings && r.fare_coverage_pct >= 80) {
-        r.basis = 'fares';
-        r.best = r.fares;
-        r.basis_note = `fares reported on ${r.priced_bookings} of ${r.bookings} bookings`;
-      } else if (r.payouts != null && r.payout_coverage_pct >= 80) {
-        r.basis = 'payout';
-        r.best = r.payouts;
-        r.basis_note = r.priced_bookings
-          ? `net payout — only ${r.fare_coverage_pct}% of bookings report a fare`
-          : 'net payout, after the platform’s commission — this channel reports no fare at all';
-      } else if (r.payouts != null) {
-        /* The payout is real and covers a fraction of the window. Reporting it
-           as the channel's revenue would understate the month by however much
-           of it was never collected — which is the whole gap, not a rounding. */
-        r.basis = 'partial_payout';
-        r.best = r.payouts;
-        r.basis_note = `net payout covering only ${r.payout_days} of the window’s ${windowDays} days `
-          + `(${r.payout_coverage_pct}%) — the rest of this channel’s money has not been collected yet`;
-      } else if (r.priced_bookings) {
-        r.basis = 'partial_fares';
-        r.best = r.fares;
-        r.basis_note = `fares on only ${r.priced_bookings} of ${r.bookings} bookings `
-          + `(${r.fare_coverage_pct}%) — the rest of this channel’s money is not collected`;
-      } else {
-        r.basis = 'none';
-        r.best = null;
-        r.basis_note = 'no fare on any booking and no payout reported — this channel’s money is dark';
-      }
+      chooseBasis(r, windowDays);
     }
 
     const rows = [...byPlatform.values()].sort((a, b) => (b.bookings || 0) - (a.bookings || 0));
@@ -194,19 +166,19 @@ export function revenueRoutes(app, { q, wrap, range }) {
         priced_bookings: rows.reduce((a, r) => a + (r.priced_bookings || 0), 0),
         /* Two totals, never one. Gross fares charged to riders and net payouts
            from the platforms are different money; adding them would produce a
-           number that is neither and that nobody could check. */
+           number that is neither and that nobody could check. These are the
+           raw sums of each kind — what was REPORTED, across every platform. */
         fares: rows.reduce((a, r) => a + (r.fares || 0), 0) || null,
         payouts: rows.reduce((a, r) => a + (r.payouts || 0), 0) || null,
         cash: rows.reduce((a, r) => a + (r.cash || 0), 0) || null,
         tips: rows.reduce((a, r) => a + (r.tips || 0), 0) || null,
-        /* The best figure per platform, summed. Honest only because every row
-           says which of the two kinds of money it is, and because the share of
-           the fleet's work it leaves out is reported beside it. */
-        accounted: rows.reduce((a, r) => a + (r.best || 0), 0) || null,
-        accounted_bookings: rows.filter((r) => r.best != null)
-          .reduce((a, r) => a + (r.bookings || 0), 0),
-        dark_bookings: darkBookings,
-        dark_pct: totalBookings ? Math.round((darkBookings / totalBookings) * 1000) / 10 : null,
+        /* And the fleet's income: the best figure per platform, summed. Honest
+           only because every row says which of the two kinds of money it is,
+           and because the share of the fleet's work it leaves out is reported
+           beside it. Computed by api/income_sql.js, which /api/kpis calls too —
+           the two pages disagreed by AED 40 on a fixture and by a great deal
+           more on a fleet where Yango reports both fares and payouts. */
+        ...fleetIncome(rows, windowDays),
       },
       components,
       /* The sentence a reader needs before believing any figure above it. */

@@ -369,6 +369,87 @@ const get = async (p) => {
     `${l100?.drivers} vs ${new Set((det.totals || []).map((r) => r.driver_name)).size}`);
 }
 
+{
+  /* ── the fleet's income, on the two pages that state it ────────────────
+     The Overview and Finance KPI strip led with `revenue`, which is sum(price)
+     over the trip table. The Uber trip export has no fare column, so on this
+     fleet that figure is the hotel and Yango channels and nothing else — 651
+     of 7,356 trips in a live July, and a business that took in AED 257,000
+     reading as AED 58,185 on every page except one. The Revenue page had been
+     adding the platform payout statements alongside the fares since it was
+     built. Two pages, two answers, both defensible in isolation: the exact
+     shape this file exists to catch.
+
+     They are checked against each other rather than against a constant, so the
+     next person to change either definition has to change both. */
+  /* Two overlapping statements of the same August week, which is the shape the
+     Uber collector was producing — so these checks run against a number that
+     had to be resolved rather than one that was already unambiguous. */
+  await q(`INSERT INTO driver_performance
+    (platform, fleet_id, driver_ext_id, driver_name, period_start, period_end, earnings)
+    VALUES ('uber','ecosine','c-pay','Payout Driver','2026-08-03','2026-08-09', 700),
+           ('uber','ecosine','c-pay','Payout Driver','2026-08-04','2026-08-10', 700)`);
+
+  const k = await get(`/api/kpis?${WIN}`);
+  const rev = await get(`/api/revenue?${WIN}`);
+  const num = (x) => (x == null ? 0 : Number(x));
+
+  /* `in`, not != null: a fleet with no statement in the window legitimately has
+     no payout, and the failure this guards is the FIELD going missing — which
+     is what "revenue is the whole story" looked like for a year. */
+  check('the KPI reports platform payouts at all, not only metered fares',
+    'payouts' in k && 'accounted' in k, JSON.stringify({ revenue: k.revenue, payouts: k.payouts }));
+  check('and the payout it reports is real, not zero',
+    num(k.payouts) > 0, String(k.payouts));
+  /* The identity is over the CHOSEN halves, not the reported ones. A payout is
+     what is left of the same fares after the platform's commission, so a
+     channel reporting both must contribute one of them — never their sum.
+     The first version of this endpoint added sum(fares) + sum(payouts) across
+     everything, which is why the two pages differed. */
+  check('the combined figure is the sum of the halves it names',
+    Math.abs(num(k.accounted) - (num(k.accounted_fares) + num(k.accounted_payouts))) < 1,
+    `${k.accounted} vs ${num(k.accounted_fares)} + ${num(k.accounted_payouts)}`);
+  check('and never exceeds it by counting a channel twice',
+    num(k.accounted) <= num(k.revenue) + num(k.payouts) + 1,
+    `${k.accounted} vs a naive ${num(k.revenue) + num(k.payouts)}`);
+  /* The fixture has a platform reporting fares AND payouts, so this is a real
+     comparison rather than one that holds because nothing overlaps. */
+  const both = (rev.platforms || []).filter((r) => r.fares != null && r.payouts != null);
+  check('and the fixture actually exercises a channel reporting both',
+    both.length > 0, (rev.platforms || []).map((r) => r.platform).join(','));
+  check('the Overview and the Revenue page agree on what the fleet took in',
+    Math.abs(num(k.accounted) - num(rev.totals?.accounted)) < 1,
+    `kpis ${k.accounted} vs revenue ${rev.totals?.accounted}`);
+  check('and on the fare half of it',
+    Math.abs(num(k.revenue) - num(rev.totals?.fares)) < 1,
+    `${k.revenue} vs ${rev.totals?.fares}`);
+  check('and on the payout half',
+    Math.abs(num(k.payouts) - num(rev.totals?.payouts)) < 1,
+    `${k.payouts} vs ${rev.totals?.payouts}`);
+
+  /* A combined total is only readable beside how much of the window the payout
+     statements actually span: three days of payout on a thirty-day window is
+     not a thirty-day figure, and without saying so the sum reads as complete. */
+  check('the payout coverage is stated, not implied',
+    k.payout_coverage_pct != null && k.payout_coverage_pct <= 100,
+    String(k.payout_coverage_pct));
+  check('and it is measured over the days statements actually cover',
+    k.payout_days != null && k.payout_days <= 31, String(k.payout_days));
+
+  /* The payout total must be the resolved one. driver_performance holds
+     overlapping report windows and summing it directly is what inflated one
+     driver from AED 57,110 to AED 128,357 — see sql/schema_v23.sql. */
+  const [{ naive }] = await q(
+    `SELECT round(sum(earnings)::numeric,0) naive FROM driver_performance
+     WHERE period_end >= '2026-08-01'::date AND period_start <= '2026-08-31'::date`);
+  const [{ resolved }] = await q(
+    `SELECT round(sum(earnings)::numeric,0) resolved FROM driver_payout_day
+     WHERE day BETWEEN '2026-08-01'::date AND '2026-08-31'::date`);
+  check('the headline payout is the deduplicated one, not the raw sum',
+    Math.abs(num(k.payouts) - num(resolved)) <= 1,
+    `kpi ${k.payouts} vs resolved ${resolved} (raw ${naive})`);
+}
+
 server.close(); await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

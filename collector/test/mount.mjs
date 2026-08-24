@@ -74,7 +74,20 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     cache: { stats: () => ({ hit: 0, miss: 0, skip: 0, entries: 0, version: 'test' }) },
     describeSettings: stubList, setSetting: stub, deleteSetting: stub, loadSettings: stub,
     insights: { run: stub }, pool: { query: db.query.bind(db) },
-    ...(await import('../api/custody_sql.js')),
+    /* Every api/*_sql.js module, discovered rather than listed.
+       This was `...(await import('../api/custody_sql.js'))`, one name written
+       out by hand — and the day api/income_sql.js arrived, every route in the
+       slice that used it threw ReferenceError. The harness reports that as an
+       empty body, so nine assertions across three files failed with `undefined`
+       and pointed at the queries rather than at this line.
+
+       Same rule as the schema list and the test runner: a file that exists is
+       a file that participates. The suffix is the contract — these modules are
+       SQL builders and pure helpers, importable with no side effects, which is
+       what makes importing all of them safe. */
+    ...Object.assign({}, ...await Promise.all(
+      readdirSync('api').filter((f) => f.endsWith('_sql.js'))
+        .map((f) => import(`../api/${f}`)))),
   };
   /* Evaluate an arbitrary fragment of server.js against the same helpers. Tests
      that want ONE route rather than the whole file slice it out and mount it
