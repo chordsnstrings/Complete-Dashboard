@@ -660,33 +660,49 @@ app.get('/api/mix/detail', wrap(async (req, res) => {
    roster. */
 app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
   const p = range(req);
+  /* Grouped on the stored fold, and counted in the same pass.
+     ─────────────────────────────────────────────────────────────────────────
+     Two faults, both of which this page's sibling panels had already had
+     fixed. The fold that turns a person's several platform accounts into one
+     row is two nested regexes, and running it as the GROUP BY key costs
+     nineteen twentieths of the query (schema_v20 measured 2,434ms against
+     129ms); trip.person_key is that expression, stored and indexed. And the
+     population underneath the table — "N of M people", which has to count
+     everybody rather than the hundred rows shown, or the sentence understates
+     the fleet — was a second full aggregation of the same window at the same
+     grain. It rides on the first one now.
+
+     The filter still tests driver_name. Matching the partial index's own
+     predicate is what took the driver directory from 4.3 seconds to 41. */
   const rows = await q(
-    `SELECT ${CANON('driver_name')} AS person,
-            max(driver_name) AS driver_name,
-            (array_agg(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
-            array_remove(array_agg(DISTINCT platform), NULL) AS platforms,
-            count(DISTINCT driver_ext_id)::int accounts,
-            mode() WITHIN GROUP (ORDER BY plate) AS plate,
+    `WITH people AS (
+       SELECT t.person_key AS person,
+            max(n.driver_name) AS driver_name,
+            (array_agg(DISTINCT n.driver_ext_id) FILTER (WHERE n.driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
+            array_remove(array_agg(DISTINCT n.platform), NULL) AS platforms,
+            count(DISTINCT n.driver_ext_id)::int accounts,
+            mode() WITHIN GROUP (ORDER BY n.plate) AS plate,
             count(*)::int trips,
-            round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
-            round(avg(distance_km) FILTER (WHERE has_distance)::numeric,1) avg_km,
-            round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
+            round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric,0) km,
+            round(avg(n.distance_km) FILTER (WHERE n.has_distance)::numeric,1) avg_km,
+            round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
             -- Testing status = 'completed' scored every completed Bolt trip as a
             -- failure (Bolt says 'finished'), and FMS telematics rows, which
             -- hardcode 'completed' and cannot be cancelled at all, padded the
             -- denominator. outcome is NULL on telematics, so FILTER drops them
             -- from both sides rather than counting them as successes.
-            round(100.0*count(*) FILTER (WHERE outcome='completed')
-                  /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0)) completion_pct,
-            count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n
-     FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
-     GROUP BY 1 ORDER BY trips DESC LIMIT 100`, p);
-  const [t] = await q(
-    `SELECT count(*)::int people FROM (
-       SELECT 1 FROM trip_norm WHERE ${F} AND coalesce(btrim(driver_name), '') <> ''
-       GROUP BY ${CANON('driver_name')}) s`, p);
-  res.json({ rows, people: t?.people ?? rows.length, shown: rows.length,
-    truncated: (t?.people ?? 0) > rows.length });
+            round(100.0*count(*) FILTER (WHERE n.outcome='completed')
+                  /nullif(count(*) FILTER (WHERE n.outcome IS NOT NULL),0)) completion_pct,
+            count(*) FILTER (WHERE n.outcome IS NOT NULL)::int outcome_n
+       FROM trip_norm n ${JOIN_TRIP}
+       WHERE ${W('n')} AND coalesce(btrim(n.driver_name), '') <> ''
+       GROUP BY t.person_key)
+     SELECT *, count(*) OVER ()::int AS _people
+       FROM people ORDER BY trips DESC LIMIT 100`, p);
+  const people = rows.length ? rows[0]._people : 0;
+  for (const r of rows) delete r._people;
+  res.json({ rows, people: people || rows.length, shown: rows.length,
+    truncated: people > rows.length });
 }));
 
 /* One row per PERSON, with a column per platform that actually has data.

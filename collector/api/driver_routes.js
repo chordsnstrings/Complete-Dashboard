@@ -193,24 +193,39 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   app.get('/api/drivers/directory', wrap(async (req, res) => {
     const [from, to] = winDays(req);
     const rows = await q(
-      `WITH ids AS (
+      `WITH ever AS (
+         /* One scan of the trip table, answering both questions it was asked
+            twice. This CTE and the ids one below read the same table with
+            the same predicate and build the same synthesised key — "who has
+            ever driven" and "what is their lifetime" are the same scan, and
+            running it twice is where a third of this endpoint's time went.
+
+            A seq-scan predicate on purpose. Written as
+              WHERE person_key IS NOT NULL AND person_key <> ''
+            it matches the partial index's own predicate exactly, so the
+            planner chose an index scan and then fetched the heap row for
+            essentially every row in the table. /api/drivers/directory went
+            from 4.3s to 41s. The projection still uses person_key, which is
+            where the saving actually was; the filter goes back to the column
+            the scan is reading anyway. */
+         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                         'name:' || person_key) AS driver_ext_id,
+                max(driver_name) AS driver_name,
+                max(requested_at) last_ever, count(*)::int lifetime
+         FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1
+       ),
+       ids AS (
          /* Everyone we know of, from any source, whether or not they drove.
             A name with no id is still a person: the id is synthesised from the
             canonical name so they key identically here, in the work CTE below,
             and in vehicle_driver_day. Requiring an id here made those people
-            vanish from the directory entirely. */
-         SELECT DISTINCT coalesce(nullif(btrim(driver_ext_id), ''),
-                                  'name:' || person_key) AS driver_ext_id,
-                driver_name FROM trip
-           -- A seq-scan predicate on purpose. Written as
-          --   WHERE person_key IS NOT NULL AND person_key <> ''
-          -- it matches the partial index's own predicate exactly, so the
-          -- planner chose an index scan and then fetched the heap row for
-          -- essentially every row in the table. /api/drivers/directory went
-          -- from 4.3s to 41s. The projection still uses person_key, which is
-          -- where the saving actually was; the filter goes back to the column
-          -- the scan is reading anyway.
-           WHERE driver_name IS NOT NULL AND btrim(driver_name) <> ''
+            vanish from the directory entirely.
+
+            The trip branch reads the CTE above rather than scanning the table
+            a second time. The who CTE takes max(driver_name) per key, so
+            collapsing the several names a key may carry to their max here
+            leaves that maximum unchanged. */
+         SELECT driver_ext_id, driver_name FROM ever
          UNION
          SELECT coalesce(nullif(btrim(driver_ext_id), ''),
                          'name:' || ${CANON('full_name')}), full_name FROM driver_compliance
@@ -245,19 +260,13 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          WHERE local_day BETWEEN $1::date AND $2::date
            AND coalesce(btrim(driver_name), '') <> ''
          GROUP BY 1
-       ),
-       -- The last trip EVER, so "has not driven in this window" and "has never
-       -- driven" are different rows rather than the same blank.
-       /* person_key, not the fold. Both CTEs reading the trip table here are
-          unbounded — "everyone we know of" and "has this person ever driven"
-          are questions with no window — so they folded 175,000 names each, per
-          request. The stored column holds the identical value and is indexed. */
-       ever AS (
-         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
-                         'name:' || person_key) AS driver_ext_id,
-                max(requested_at) last_ever, count(*)::int lifetime
-         FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1
        )
+       /* The lifetime figures come from the CTE at the top of this statement:
+          the last trip EVER, so "has not driven in this window" and "has never
+          driven" are different rows rather than the same blank — and keyed on
+          person_key rather than the fold, because that scan is unbounded and
+          folding 175,000 names per request is what the stored, indexed column
+          exists to avoid. */
        SELECT who.driver_ext_id, who.driver_name,
               coalesce(t.trips, 0) AS trips, coalesce(t.completed, 0) AS completed,
               coalesce(t.bookable, 0) AS bookable, coalesce(t.days, 0) AS days,
