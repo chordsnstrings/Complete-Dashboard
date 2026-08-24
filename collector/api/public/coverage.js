@@ -11,7 +11,7 @@
    across a hole here is wrong, and the honest thing to do is show the hole. */
 
 import { empty, fmt } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, dayStr } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, dayStr, dateStr } from './ui.js';
 import { dubaiDay } from './tz.js';
 import { q } from './data.js';
 
@@ -31,6 +31,37 @@ export async function renderCoverage(root) {
       sub: 'inside each source’s own collecting span', tone: holed.length ? 'warn' : null },
     { label: 'Rows in window', value: fmt(c.sources.reduce((a, s) => a + s.total_rows, 0)) },
   ]));
+
+  /* ── the hole that is not a collection failure ──────────────────────────
+     Everything else on this page is a gap somebody can close by re-running a
+     collector. This one nobody can: Uber's earnings API serves roughly the last
+     six months, and the trip feed goes back a year — so half the record has
+     bookings, distance and drivers with no money attached and none that can
+     ever be fetched. Every backfill asked for those windows and every window
+     answered ok and empty, which is indistinguishable from a quiet week unless
+     it is said out loud. It belongs here because this is the page about the
+     difference between the two. */
+  const cov = await q('/api/coverage').catch(() => ({}));
+  const moneyGaps = cov.earnings_gaps || [];
+  if (moneyGaps.length) {
+    const { panel: mp, body: mb } = panel('Work we hold no money for',
+      'Where a platform\u2019s trip feed reaches further back than its earnings API will serve');
+    mb.append(tableFrom(moneyGaps, [
+      { label: 'Platform', key: 'platform' },
+      /* With the year. These two dates are the whole point of the row and they
+         are usually in different years — "Aug 21" beside "Feb 9" reads as five
+         months forward when it is six months back. dayStr omits the year
+         because most of this product is inside one window; this table is not. */
+      { label: 'Trips from', key: 'trips_from', render: (r) => dateStr(r.trips_from) },
+      { label: 'Money from', key: 'earnings_from', render: (r) => dateStr(r.earnings_from) },
+      { label: 'Bookings before that', key: 'bookings_before', num: true,
+        render: (r) => fmt(r.bookings_before) },
+    ]));
+    mb.append(note('These are not missing collections. The provider no longer serves statements for '
+      + 'those windows, so the work is on record and the money is not, permanently. Any revenue figure '
+      + 'over a range that reaches into them is measuring a shorter period than it appears to.'));
+    root.append(mp);
+  }
 
   /* ── the distinction that changes what you do about a hole ──────────────
      A gap in one source is a collection failure and the fix is to re-run the

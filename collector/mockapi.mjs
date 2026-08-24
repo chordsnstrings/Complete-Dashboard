@@ -1990,6 +1990,17 @@ app.get('/api/coverage', (_, r) => r.json({
   telemetry: [{ source: 'cabman', n: 412880, last_poll: new Date().toISOString() }],
   alerts: [{ n: 1904, latest: '2026-08-21T14:20:00Z' }],
   ledger: [{ n: 2399, latest: '2026-08-20T21:00:00Z' }],
+  /* Money coverage beside trip coverage. Uber's trip feed reaches back a year
+     and its earnings API serves about six months, so half the record has work
+     on it and no money — permanently, since the provider will not serve those
+     windows however many times they are asked for. */
+  earnings: [
+    { platform: 'uber', n: 4158, from_day: '2026-02-09', to_day: '2026-08-21', days: 194, earnings: 1275353 },
+    { platform: 'yango', n: 62, from_day: '2026-08-01', to_day: '2026-08-21', days: 21, earnings: 8420 },
+  ],
+  earnings_gaps: [
+    { platform: 'uber', trips_from: '2025-08-21', earnings_from: '2026-02-09', bookings_before: 131687 },
+  ],
 }));
 
 app.get('/api/product/by-vehicle', (_, r) => r.json(

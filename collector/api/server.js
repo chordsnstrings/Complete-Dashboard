@@ -1373,12 +1373,47 @@ app.get('/api/status', wrap(async (_, res) => res.json((await q(
   };
 }))));
 
-app.get('/api/coverage', wrap(async (_, res) => res.json({
-  trips: await q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts FROM trip GROUP BY 1`),
-  telemetry: await q(`SELECT source, count(*)::int n, max(polled_at) last_poll FROM telemetry_snapshot GROUP BY 1`),
-  alerts: await q(`SELECT count(*)::int n, max(occurred_at) latest FROM alert`),
-  ledger: await q(`SELECT count(*)::int n, max(event_at) latest FROM ledger_entry`),
-}) ));
+app.get('/api/coverage', wrap(async (_, res) => {
+  const [trips, telemetry, alerts, ledger, earnings] = await Promise.all([
+    q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts FROM trip GROUP BY 1`),
+    q(`SELECT source, count(*)::int n, max(polled_at) last_poll FROM telemetry_snapshot GROUP BY 1`),
+    q(`SELECT count(*)::int n, max(occurred_at) latest FROM alert`),
+    q(`SELECT count(*)::int n, max(event_at) latest FROM ledger_entry`),
+    /* Money coverage, beside trip coverage, because they are not the same span
+       and the difference is the single largest hole in this product.
+
+       Uber's earnings API serves roughly the last six months. The trip feed
+       goes back a year — so there is half a year of bookings, distance and
+       drivers with no money attached and none that can ever be collected. Every
+       backfill asked for those windows, every window returned ok, and every one
+       of them returned nothing: a silence indistinguishable from a quiet week
+       unless it is stated. This states it. */
+    q(`SELECT platform,
+              count(*)::int n,
+              min(day) from_day, max(day) to_day,
+              count(DISTINCT day)::int days,
+              round(sum(earnings)::numeric, 0) earnings
+       FROM driver_payout_day WHERE earnings IS NOT NULL GROUP BY 1`),
+  ]);
+  /* Per platform: where the trip feed starts, where the money starts, and how
+     much work sits before it. A page can then say "6,231 bookings we hold no
+     money for" instead of drawing a flat line. */
+  const byPlatform = new Map(earnings.map((e) => [e.platform, e]));
+  const gaps = [];
+  for (const t of trips) {
+    const e = byPlatform.get(t.platform);
+    if (!e || !t.from_ts) continue;
+    const tripFrom = new Date(t.from_ts).toISOString().slice(0, 10);
+    const payFrom = new Date(e.from_day).toISOString().slice(0, 10);
+    if (payFrom <= tripFrom) continue;
+    const [{ unpaid }] = await q(
+      `SELECT count(*)::int unpaid FROM trip
+       WHERE platform = $1 AND (requested_at AT TIME ZONE 'Asia/Dubai')::date < $2::date`,
+      [t.platform, payFrom]);
+    gaps.push({ platform: t.platform, trips_from: tripFrom, earnings_from: payFrom, bookings_before: unpaid });
+  }
+  res.json({ trips, telemetry, alerts, ledger, earnings, earnings_gaps: gaps });
+}));
 
 /* ───────────────────────── settings ───────────────────────── */
 app.get('/api/settings', wrap(async (_, res) => res.json(await describeSettings())));
