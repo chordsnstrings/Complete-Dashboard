@@ -156,12 +156,27 @@ check('a driver with no work that week writes no row',
   /r\.trips \|\| 0\) > 0 \|\| \(r\.earnings \|\| 0\) > 0 \|\| \(r\.hours_online \|\| 0\) > 0/.test(ybody),
   'idle drivers would expand seven rows of zeros per week');
 
+console.log('\nthe payments components ask in weeks too');
+
+/* Same surface family as Yango's summary: it aggregates whatever range it is
+   asked, and it was asked with the run's window — so a backfill's year became
+   one period per driver and an incremental's three days another, on grids
+   that can never reconcile. */
+const fleetSrc = readFileSync('src/sources/uber_fleet.js', 'utf8');
+check('the earner-payments pull iterates calendar weeks',
+  /for \(const wk of weekChunks\(from, to\)\)/.test(fleetSrc));
+check('and no code path still stamps the run window on a component row',
+  !/start_time: new Date\(from\)/.test(fleetSrc.slice(0, fleetSrc.indexOf('pullEarningsWeek'))));
+
 /* And the smears already stored are deleted, not merely outgrown: the fixed
    collectors write NEW rows beside the old ones (the window is the key), and
    the resolution keeps giving the smear every day nothing honest covers. */
 const v24 = readFileSync('sql/schema_v24.sql', 'utf8');
 check('the migration removes windows no provider legitimately issues',
   /DELETE FROM driver_performance\s+WHERE period_end - period_start > 62/.test(v24));
+check('components older than a week die the same death (schema_v26)',
+  /DELETE FROM driver_earnings_component\s+WHERE period_end - period_start > 6/.test(
+    readFileSync('sql/schema_v26.sql', 'utf8')));
 check('from the materialised day table as well, not only the source',
   /DELETE FROM driver_payout_day\s+WHERE period_end - period_start > 62/.test(v24),
   'a half-purge serves the smear for up to a quarter hour after claiming it fixed it');

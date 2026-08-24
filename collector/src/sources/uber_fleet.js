@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
-import { iso } from '../util.js';
+import { iso, weekChunks } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { log } from '../log.js';
 
@@ -152,8 +152,23 @@ const money = (a) => {
 const EARNER_PAGE = 50;
 const EARNER_PAGES_MAX = 40;
 
+/* Asked in Monday-anchored calendar weeks, never in one call for the run's
+   window — the same law the Uber and Yango collectors follow, for the same
+   reason: this surface aggregates whatever range it is asked, and the range
+   asked is the key the rows are stored under. Stamped with the RUN's window,
+   an incremental's three days and a backfill's year both produced rows that
+   were neither comparable with each other nor with the weekly grid every
+   other Uber figure lives on. */
 async function pullEarningsComponents(from, to) {
   const token = await uberOAuthToken();
+  let totalRows = 0;
+  for (const wk of weekChunks(from, to)) {
+    totalRows += await pullEarningsWeek(token, wk.start, wk.end);
+  }
+  return totalRows;
+}
+
+async function pullEarningsWeek(token, from, to) {
   const call = async (pageToken) => {
     const url = `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({
       org_id: config.uber.org, start_time: new Date(from).getTime(),

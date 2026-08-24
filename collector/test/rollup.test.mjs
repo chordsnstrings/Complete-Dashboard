@@ -298,9 +298,11 @@ console.log('\nrollup: two refreshes do not race');
 console.log('\nrollup: it says how old it is');
 
 const state = await rollupState(db);
-// Four passes now: the three trip grains plus the payout-day materialisation.
-check('every rollup records a state row', state.length === 4, JSON.stringify(state.map((s) => s.name)));
+// Five passes: the three trip grains, the payout-day materialisation, and the
+// on-trip statement derivation.
+check('every rollup records a state row', state.length === 5, JSON.stringify(state.map((s) => s.name)));
 check('the payout pass is one of them', state.some((r) => r.name === 'driver_payout_day'));
+check('and the statement pass beside it', state.some((r) => r.name === 'driver_statement_day'));
 check('all three succeeded', state.every((s) => s.status === 'ok'),
   state.filter((s) => s.status !== 'ok').map((s) => `${s.name}: ${s.error}`).join(' | '));
 check('each records what it covers, so a page can date the answer it shows',

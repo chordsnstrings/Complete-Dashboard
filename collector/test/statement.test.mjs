@@ -7,6 +7,7 @@
    side, and these tests are about the ways that goes wrong: the two getting
    ADDED, a statement row winning a payout day, an import that double-writes on
    re-run, or a pseudo-driver ("Not Match") appearing in a driver list. */
+import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
@@ -115,6 +116,59 @@ check('driver_payout_day is untouched by the import',
   (await db.query(`SELECT count(*)::int n FROM driver_payout_day`)).rows[0].n === 0);
 check('both sources coexist in storage',
   (await db.query(`SELECT count(DISTINCT source)::int n FROM driver_statement_day`)).rows[0].n === 2);
+
+console.log('\non-trip days derive from the components the API returns');
+
+/* The REST payments surface is the API source for on-trip money. Its rows are
+   per driver-week per category; refreshStatements turns them into statement
+   days. The traps proven here: cash_collected arrives NEGATIVE and must flip,
+   overlapping report grids must resolve finest-first rather than both
+   spreading, and two accounts folding to one person-day must SUM. */
+const { refreshStatements } = await import('../src/rollup.js');
+const dec = (id, ps, pe, cat, amt, name) => db.query(
+  `INSERT INTO driver_earnings_component (platform, driver_ext_id, period_start, period_end,
+     category, amount, driver_name, fleet_id, parent)
+   VALUES ('uber', $1, $2, $3, $4, $5, $6, 'ecosine', null)`, [id, ps, pe, cat, amt, name]);
+
+await dec('u-1', '2026-08-03', '2026-08-09', 'net_fare', 700, 'Test Driver');
+await dec('u-1', '2026-08-03', '2026-08-09', 'tip', 14, 'Test Driver');
+await dec('u-1', '2026-08-03', '2026-08-09', 'toll', 7, 'Test Driver');
+await dec('u-1', '2026-08-03', '2026-08-09', 'cash_collected', -140, 'Test Driver');
+// an older, coarser run-stamped period overlapping the same days
+await dec('u-1', '2026-08-01', '2026-08-28', 'net_fare', 9999, 'Test Driver');
+// a second account of the same person, same week
+await dec('u-1b', '2026-08-03', '2026-08-09', 'net_fare', 70, 'TEST  driver');
+await refreshStatements(db);
+
+const [d1] = (await db.query(`SELECT * FROM driver_statement_day
+  WHERE source='uber_rest' AND day='2026-08-04'`)).rows;
+check('a week of components becomes seven statement days', !!d1);
+check('the finest period wins the day (700/7, never 9999/28)',
+  d1 && Math.abs(Number(d1.net) - (100 + 10)) < 0.01, d1 && String(d1.net));
+check('cash flips positive on the way in', d1 && Math.abs(Number(d1.cash) - 20) < 0.01,
+  d1 && String(d1.cash));
+check('tips and salik ride separately',
+  d1 && Math.abs(Number(d1.tips) - 2) < 0.01 && Math.abs(Number(d1.salik) - 1) < 0.01);
+check('two accounts of one person sum rather than last-write-wins',
+  d1 && Math.abs(Number(d1.net) - 110) < 0.01, 'expected 100 + 10');
+/* The resolver honestly gives a day to the only period covering it — even a
+   coarse one. That is correct AT THE RESOLVER: the defence against run-stamped
+   smears is schema_v26 deleting them at the source, exactly as schema_v24 did
+   for the payout rows. Here the seeded 28-day row stands in for that junk, so
+   the expectations state the resolver's real arithmetic. */
+const [d20] = (await db.query(`SELECT net FROM driver_statement_day
+  WHERE source='uber_rest' AND day='2026-08-20'`)).rows;
+check('a day only the coarse period covers takes its share of it',
+  d20 && Math.abs(Number(d20.net) - 9999 / 28) < 0.01, d20 && String(d20.net));
+check('while the migration kills over-week periods at the source',
+  /period_end - period_start > 6/.test(readFileSync('sql/schema_v26.sql', 'utf8')));
+check('a re-run replaces the slice rather than doubling it',
+  (await refreshStatements(db), (await db.query(`SELECT count(*)::int n FROM driver_statement_day
+     WHERE source='uber_rest'`)).rows[0].n === 28));
+const kD = (await req('/api/kpis?from=2026-08-01&to=2026-08-31')).body;
+check('and the derived days surface as on-trip revenue',
+  kD.statement_net != null && Math.abs(kD.statement_net - (770 + 9999 * (21 / 28) + 886)) < 1,
+  String(kD.statement_net));
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

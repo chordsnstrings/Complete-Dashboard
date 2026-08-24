@@ -283,6 +283,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
   }));
   out.push(await runOne(db, 'rollup_person_month', () => refreshPersonMonth(db, since)));
   out.push(await runOne(db, 'driver_payout_day', () => refreshPayouts(db)));
+  out.push(await runOne(db, 'driver_statement_day', () => refreshStatements(db)));
   /* Refresh the planner's statistics on the tables this just rewrote, and on
      trip itself. A generated column arrives with NO statistics — Postgres has
      never seen its distribution — so every plan touching person_key was being
@@ -341,6 +342,90 @@ export async function refreshPayouts(db = pool) {
              earnings, cash_earnings, trips, distance_km, hours_online, hours_on_trip,
              acceptance_rate, cancellation_rate, completion_rate, rating, currency, ingested_at
       FROM driver_payout_day_live`);
+    await db.query('COMMIT');
+    return r.rowCount ?? 0;
+  } catch (e) {
+    await db.query('ROLLBACK').catch(() => {});
+    throw e;
+  }
+}
+
+/* Derive the ON-TRIP statement days from the earner-payments components.
+   ─────────────────────────────────────────────────────────────────────────
+   The REST payments surface is the one API that carries Uber's statement view
+   — net fares, tips, tolls, cash collected — and it lands in
+   driver_earnings_component per driver-week. This turns those periods into
+   driver_statement_day rows (source='uber_rest'), the table every on-trip
+   figure reads, spreading each week evenly over its days the same way the
+   payout resolution spreads its periods.
+
+   Component semantics, read from the tree itself: net_fare is the fare income
+   net of commission (the on-trip net, excluding tips), tip and toll (Salik)
+   ride separately, cash_collected arrives NEGATIVE — it is money already in
+   the driver's hand. Categories the mapping does not name (taxes, surcharges,
+   promos) are deliberately left out rather than guessed at: an unmapped
+   dirham is invisible here but still present in the payout, and inventing a
+   column for it would be the exact sin the ledger reconciliation exists to
+   catch.
+
+   Delete-and-rebuild of the uber_rest slice only: the ledger slice (reference
+   data) and any future source are other writers' rows. */
+export async function refreshStatements(db = pool) {
+  await db.query('BEGIN');
+  try {
+    await db.query(`DELETE FROM driver_statement_day WHERE source = 'uber_rest'`);
+    /* Same resolution as the payout view: periods first, then one winner per
+       day — the FINEST period covering it. The table holds report windows on
+       several grids (weekly now; three-day and longer run-stamps from before
+       the weekly fix), and two grids covering one day must not both spread
+       into it, nor an arbitrary one win. */
+    const r = await db.query(`
+      WITH per AS (
+        SELECT platform, coalesce(fleet_id, 'ecosine') AS fleet_id, driver_ext_id,
+               max(driver_name) AS driver_name, period_start, period_end,
+               (period_end - period_start + 1)::numeric AS days,
+               sum(amount) FILTER (WHERE category = 'net_fare')        AS net,
+               sum(amount) FILTER (WHERE category = 'tip')             AS tips,
+               sum(amount) FILTER (WHERE category = 'toll')            AS salik,
+               -sum(amount) FILTER (WHERE category = 'cash_collected') AS cash
+        FROM driver_earnings_component
+        WHERE category IN ('net_fare', 'tip', 'toll', 'cash_collected')
+        GROUP BY platform, fleet_id, driver_ext_id, period_start, period_end
+        HAVING sum(amount) FILTER (WHERE category = 'net_fare') IS NOT NULL
+      ),
+      resolved AS (
+        SELECT DISTINCT ON (p.platform, p.fleet_id, p.driver_ext_id, d.day)
+               p.platform, p.fleet_id,
+               coalesce(p.driver_name, p.driver_ext_id) AS driver_name,
+               p.driver_ext_id, d.day::date AS day,
+               p.net / p.days AS net, p.tips / p.days AS tips,
+               p.salik / p.days AS salik, p.cash / p.days AS cash
+        FROM per p
+        CROSS JOIN LATERAL generate_series(p.period_start, p.period_end, interval '1 day') AS d(day)
+        ORDER BY p.platform, p.fleet_id, p.driver_ext_id, d.day,
+                 (p.period_end - p.period_start) ASC, p.period_start ASC
+      ),
+      /* One person can hold two platform accounts (a real case in this fleet:
+         the same driver as "…Ghulam Qadir" and "…khan"). Their names may fold
+         to one key, and the table is keyed per person-day — so account rows
+         folding together are SUMMED, never last-write-wins. */
+      folded AS (
+        SELECT platform, fleet_id, max(driver_name) AS driver_name,
+               max(driver_ext_id) AS driver_ext_id, day,
+               sum(net) AS net, sum(tips) AS tips, sum(salik) AS salik, sum(cash) AS cash
+        FROM resolved
+        GROUP BY platform, fleet_id, lower(regexp_replace(driver_name, '\\s+', ' ', 'g')), day
+      )
+      INSERT INTO driver_statement_day
+        (platform, fleet_id, driver_name, driver_ext_id, day,
+         net, tips, salik, cash, source, pseudo)
+      SELECT platform, fleet_id, driver_name, driver_ext_id, day,
+             net, tips, salik, cash, 'uber_rest', false
+      FROM folded
+      ON CONFLICT (platform, fleet_id, name_key, day, source) DO UPDATE SET
+        net = EXCLUDED.net, tips = EXCLUDED.tips, salik = EXCLUDED.salik,
+        cash = EXCLUDED.cash, driver_ext_id = EXCLUDED.driver_ext_id,
+        ingested_at = now()`);
     await db.query('COMMIT');
     return r.rowCount ?? 0;
   } catch (e) {
