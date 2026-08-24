@@ -20,6 +20,7 @@ import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
+import { custodyOverWindow, custodyCountOverWindow } from '../api/custody_sql.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -177,5 +178,46 @@ check('an empty window has no completion percentage', empty.completion_pct === n
 check('an empty window has no coverage percentage', empty.priced_pct === null, String(empty.priced_pct));
 
 server.close();
+console.log('\nproduct-by-vehicle resolves custody once per plate');
+
+/* Both custody columns were correlated subqueries in the select list, so they
+   ran once per output ROW — up to six hundred rows, twice, each grouping
+   vehicle_driver_day again. At a ninety-day window that stopped being slow and
+   became a 500: the statement hit the pool timeout and the page showed nothing.
+
+   The rewrite has to return exactly what the subqueries did, so the check is
+   the old form against the new one on the same fixture, rather than a
+   restatement of what the new one is supposed to produce. The new SQL is read
+   from the shipped source; a copy in this file would drift and stop testing
+   anything. */
+{
+  const F2 = "t.local_day BETWEEN $1::date AND $2::date"
+    + " AND ($3::text IS NULL OR t.platform=$3) AND ($4::text IS NULL OR t.fleet_id=$4)";
+  const oldSql = `SELECT t.plate, t.product, count(*)::int trips,
+        round(sum(t.distance_km)::numeric,0) km, round(avg(t.distance_km)::numeric,1) avg_km,
+        ${custodyOverWindow('t.plate')} AS driver_refs,
+        ${custodyCountOverWindow('t.plate')} AS driver_n
+   FROM trip_norm t WHERE ${F2} AND t.plate IS NOT NULL AND t.product IS NOT NULL
+   GROUP BY t.plate, t.product ORDER BY t.plate, trips DESC LIMIT 600`;
+
+  const serverSrc = readFileSync('api/server.js', 'utf8');
+  const at = serverSrc.indexOf("app.get('/api/product/by-vehicle'");
+  let newSql = serverSrc.slice(serverSrc.indexOf('`WITH agg AS (', at) + 1);
+  newSql = newSql.slice(0, newSql.indexOf('`, range(req)')).replace('${F}', F2);
+
+  const P = ['2026-08-01', '2026-08-31', null, null];
+  const before = (await db.query(oldSql, P)).rows;
+  const after = (await db.query(newSql, P)).rows;
+  check('the rewrite returns the same number of rows',
+    before.length === after.length && before.length > 0, `${before.length} vs ${after.length}`);
+  check('and the same values in the same order',
+    JSON.stringify(before) === JSON.stringify(after),
+    JSON.stringify(after.slice(0, 1)));
+  check('custody is resolved in one pass, not per row',
+    !/custodyOverWindow|custodyCountOverWindow/.test(
+      serverSrc.slice(at, serverSrc.indexOf('range(req)', at))),
+    'a correlated subquery is back in the select list');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

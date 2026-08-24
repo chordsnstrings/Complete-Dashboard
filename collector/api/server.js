@@ -2120,15 +2120,55 @@ app.get('/api/earnings/tips', wrap(async (req, res) => res.json(await q(
   winDays(req)))));
 
 // product-tier economics: which assets serve which tier
+/* Custody resolved once per plate, not once per row.
+   ─────────────────────────────────────────────────────────────────────────
+   "This car does 80% Economy" is a finding about how a vehicle is dispatched,
+   and the row named only the car — so each row carries the people who held it.
+   Both of those came from correlated subqueries in the select list, which
+   means they ran once per output ROW: up to six hundred rows, twice, each one
+   grouping vehicle_driver_day again. At a ninety-day window that stopped
+   being slow and started being a 500, because the statement hit the pool's
+   timeout and the page showed nothing at all.
+
+   The same answer in one pass: aggregate the trips, take the six hundred rows
+   the page will show, and resolve custody for exactly those plates once. The
+   window function ranks each plate's people so the top three can be selected
+   without a second grouping, and the distinct count is taken over all of them
+   rather than the three — the original counted every driver, not the ones it
+   listed. */
 app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
-  `SELECT t.plate, t.product, count(*)::int trips, round(sum(t.distance_km)::numeric,0) km,
-          round(avg(t.distance_km)::numeric,1) avg_km,
-          -- "This car does 80% econom" is a finding about how it is being
-          -- dispatched and driven, and the row named only the car.
-          ${custodyOverWindow('t.plate')} AS driver_refs,
-          ${custodyCountOverWindow('t.plate')} AS driver_n
-   FROM trip_norm t WHERE ${F} AND t.plate IS NOT NULL AND t.product IS NOT NULL
-   GROUP BY t.plate, t.product ORDER BY t.plate, trips DESC LIMIT 600`, range(req)))));
+  `WITH agg AS (
+     SELECT t.plate, t.product, count(*)::int trips,
+            round(sum(t.distance_km)::numeric,0) km,
+            round(avg(t.distance_km)::numeric,1) avg_km
+       FROM trip_norm t
+      WHERE ${F} AND t.plate IS NOT NULL AND t.product IS NOT NULL
+      GROUP BY t.plate, t.product
+      ORDER BY t.plate, trips DESC
+      LIMIT 600),
+   held AS (
+     SELECT v.plate, v.driver_name, v.driver_ext_id, count(DISTINCT v.day)::int days
+       FROM vehicle_driver_day v
+      WHERE v.plate IN (SELECT plate FROM agg)
+        AND v.day BETWEEN $1::date AND $2::date
+        AND v.driver_name IS NOT NULL
+      GROUP BY v.plate, v.driver_name, v.driver_ext_id),
+   ranked AS (
+     SELECT h.*, row_number() OVER (PARTITION BY h.plate
+                                    ORDER BY h.days DESC, h.driver_name) rn
+       FROM held h),
+   per_plate AS (
+     SELECT r.plate,
+            jsonb_agg(jsonb_build_object('name', r.driver_name, 'id', r.driver_ext_id,
+                                         'days', r.days)
+                      ORDER BY r.days DESC, r.driver_name)
+              FILTER (WHERE r.rn <= 3) AS driver_refs,
+            count(DISTINCT r.driver_ext_id)::int AS driver_n
+       FROM ranked r GROUP BY r.plate)
+   SELECT a.plate, a.product, a.trips, a.km, a.avg_km,
+          p.driver_refs, coalesce(p.driver_n, 0) AS driver_n
+     FROM agg a LEFT JOIN per_plate p ON p.plate = a.plate
+    ORDER BY a.plate, a.trips DESC`, range(req)))));
 
 /* ───────────────── world events + causal attribution ───────────────── */
 // "What was happening when the numbers moved" — candidates, not proof.
