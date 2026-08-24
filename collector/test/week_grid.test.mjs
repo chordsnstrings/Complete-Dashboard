@@ -138,5 +138,30 @@ check('and keeps the start it was given', +short[0] === +D('2026-08-21T02:58:00Z
 const exact = rosterWindow(D('2026-07-25T00:00:00Z'), D('2026-08-24T00:00:00Z'));
 check('a window exactly at the limit is not clamped further', days(exact) === 31, String(days(exact)));
 
+console.log('\nyango asks in weeks too');
+
+/* Yango's summary endpoint aggregates whatever range it is asked. Asked for a
+   backfill's year it answered with one 366-day totals row per driver, which
+   sql/schema_v23.sql then spread at a flat rate across every month on record —
+   months before Yango carried a single trip included. Same law as Uber: the
+   window a report is asked for is the key it is stored under, so the ask has
+   to be a fixed calendar week, not the run's own bounds. */
+const yango = readFileSync('src/sources/yango.js', 'utf8');
+const yfn = yango.slice(yango.indexOf('async function pullDrivers'));
+const ybody = yfn.slice(0, yfn.indexOf('\nasync function ', 1) > 0 ? yfn.indexOf('\nasync function ', 1) : yfn.length);
+check('the yango summary is asked per calendar week', /weekChunks\(from, to\)/.test(ybody));
+check('and each row is stamped with the week, not the run',
+  /period_start: iso\(start\), period_end: iso\(end\)/.test(ybody));
+check('a driver with no work that week writes no row',
+  /r\.trips \|\| 0\) > 0 \|\| \(r\.earnings \|\| 0\) > 0 \|\| \(r\.hours_online \|\| 0\) > 0/.test(ybody),
+  'idle drivers would expand seven rows of zeros per week');
+
+/* And the smears already stored are deleted, not merely outgrown: the fixed
+   collectors write NEW rows beside the old ones (the window is the key), and
+   the resolution keeps giving the smear every day nothing honest covers. */
+const v24 = readFileSync('sql/schema_v24.sql', 'utf8');
+check('the migration removes windows no provider legitimately issues',
+  /DELETE FROM driver_performance\s+WHERE period_end - period_start > 62/.test(v24));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
