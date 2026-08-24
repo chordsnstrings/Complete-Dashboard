@@ -142,10 +142,13 @@ export const dtStr = (v) => (v ? `${dayStr(v)} ${timeStr(v)}` : '—');
    happened on that ride" is one click from any number that mentions it. No
    plate — a hotel booking before dispatch, an unmatched statement line — and
    it degrades to the plain timestamp rather than a link to nowhere. */
-export const tripTime = (plate, at) => (plate && at
-  ? `<a class="lnk" href="${href('vehicle', plate, 'movement')}?day=${dubaiDay(at)}" `
-    + `title="Replay ${esc(plate)} on this day">${esc(dtStr(at))}</a>`
-  : esc(dtStr(at)));
+export const tripTime = (plate, at) => {
+  const day = plate && at ? dubaiDay(at) : null;
+  return day
+    ? `<a class="lnk" href="${href('vehicle', plate, 'movement')}?day=${day}" `
+      + `title="Replay ${esc(plate)} on this day">${esc(dtStr(at))}</a>`
+    : esc(dtStr(at));
+};
 
 
 // 7.5 → "07:30", which reads as a clock time rather than a decimal

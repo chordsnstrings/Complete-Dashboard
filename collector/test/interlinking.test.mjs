@@ -147,9 +147,12 @@ console.log('\nrule 4: a trip leads to its telemetry');
 {
   const ui = readFileSync('api/public/ui.js', 'utf8');
   check('tripTime links the replay preselected to the trip day',
-    /href\('vehicle', plate, 'movement'\)}\?day=\$\{dubaiDay\(at\)/.test(ui));
-  check('and degrades to plain text without a plate',
-    /plate && at\s*\?/.test(ui) && /: esc\(dtStr\(at\)\)/.test(ui));
+    /href\('vehicle', plate, 'movement'\)}\?day=\$\{day\}/.test(ui));
+  /* Behaviour, not source shape: the crash this guards against was a STRING
+     timestamp reaching Intl — test/formatters.test.mjs renders tripTime with
+     real row shapes. Here it is enough that the degrade branch exists. */
+  check('and degrades to plain text without a valid plate and day',
+    /: esc\(dtStr\(at\)\)/.test(ui));
 
   /* Scoped to tables that ARE trips — the ones showing a pickup and dropoff.
      The jobs table has a 'Requested' column too (when a human queued a

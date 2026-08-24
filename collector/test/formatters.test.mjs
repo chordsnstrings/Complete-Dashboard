@@ -8,7 +8,7 @@
    - `Number('') === 0`, so an empty string rendered as a confident "0" rather
      than "no data".
    - Minutes were rounded independently of hours, so 23:59:42 rendered "23:60". */
-import { fmt, pct, hourStr, money } from '../api/public/ui.js';
+import { fmt, pct, hourStr, money, tripTime } from '../api/public/ui.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -41,6 +41,29 @@ check('money formats with its currency', money(1234, 'AED') === 'AED 1,234', mon
 check('a rate keeps its decimals', money(2.7, 'AED', 2) === 'AED 2.70', money(2.7, 'AED', 2));
 check('missing money is not zero', money(null) === '—', money(null));
 check('Infinity money is not rendered', money(Infinity) === '—', money(Infinity));
+
+console.log('\ntripTime: the replay link takes what an API row actually carries');
+
+/* requested_at arrives as an ISO STRING, and Intl.DateTimeFormat.format()
+   accepts only Dates and numbers — handed the string it threw "Invalid time
+   value" and the whole Drivers trips tab rendered its error state. The unit
+   suite passed because nothing here called the helper with a row's real
+   shape; the browser smoke that would have caught it did not get re-run for
+   that change. This is the check that makes the unit suite enough. */
+{
+  const ok = tripTime('L45235', '2026-08-24T02:14:11.000Z');
+  check('a string timestamp renders a link, not a throw',
+    /href=.*vehicle.*movement\?day=2026-08-24/.test(ok), ok.slice(0, 90));
+  check('the day in the link is the DUBAI day of the instant',
+    ok.includes('day=2026-08-24'), '02:14 UTC is 06:14 in Dubai — same date here, but computed via TZ');
+  const night = tripTime('L45235', '2026-08-23T21:30:00.000Z');
+  check('and an evening UTC instant lands on the next Dubai date',
+    night.includes('day=2026-08-24'), night.slice(0, 90));
+  check('no plate degrades to plain text', !/href/.test(tripTime(null, '2026-08-24T02:14:11Z')));
+  check('garbage time degrades to plain text, never a broken link',
+    !/href/.test(tripTime('L45235', 'not-a-time')));
+  check('null time does not throw either', !/href/.test(tripTime('L45235', null)));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
