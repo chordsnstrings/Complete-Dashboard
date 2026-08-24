@@ -19,7 +19,7 @@ import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { analyticsRoutes } from '../api/analytics_routes.js';
-import { refreshPayouts } from '../src/rollup.js';
+import { refreshPayouts, refreshRollups } from '../src/rollup.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -654,6 +654,126 @@ const W = 'from=2026-08-01&to=2026-08-31';
     tainted.gaps[0]?.verdict === 'window_failed', String(tainted.gaps[0]?.verdict));
   check('and the failed days are counted apart from the answered ones',
     tainted.gaps[0]?.days_failed === 10, String(tainted.gaps[0]?.days_failed));
+}
+
+/* ── the same calendar, precomputed ──────────────────────────────────────
+   source_day_coverage groups the whole trip table by platform and day and
+   takes two COUNT DISTINCTs in every bucket. At a week that is nothing; at a
+   year it ran past the gateway, so the wide windows this page exists for were
+   the only ones it could not answer. It reads rollup_day now, and keeps the
+   view as the fallback for a database whose rollup has not run yet.
+
+   Two statements answering one question is the arrangement that quietly stops
+   agreeing, so both are read out of the shipped source and run against the
+   same rows. A copy of either in this file would drift and stop testing
+   anything.
+
+   The fixture is the shapes that make the two disagree, not a tidy one: a
+   person with two accounts on one platform, a channel that names its drivers
+   and never numbers them, the same person and car on the same day under two
+   fleets, and a source with no drivers at all. */
+{
+  await q(`DELETE FROM trip`);
+  await q(`DELETE FROM collection_run`);
+  const cov = (o) => q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+       requested_at, status)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'completed')`,
+    [o.platform, o.id, o.fleet || 'ecosine', o.plate, o.drv ?? null, o.name ?? null,
+     `2026-09-0${o.day}T10:00:00+04:00`]);
+
+  // Two Uber accounts belonging to one human, and a second human. The
+  // provider counts three drivers that day; the fleet employs two.
+  await cov({ platform: 'uber', id: 'a1', plate: 'L1', drv: 'u1', name: 'Kashif Ali', day: 1 });
+  await cov({ platform: 'uber', id: 'a2', plate: 'L2', drv: 'u2', name: 'Kashif Ali', day: 1 });
+  await cov({ platform: 'uber', id: 'a3', plate: 'L1', drv: 'u3', name: 'Nauman Hassan', day: 1 });
+  // The same man in the same car on the same day, once for each fleet. Summing
+  // the two per-fleet rollup rows would report two cars and two drivers; the
+  // fleet '*' row is computed over the union and reports one of each.
+  await cov({ platform: 'uber', id: 'a4', plate: 'L1', drv: 'u1', name: 'Kashif Ali', day: 3 });
+  await cov({ platform: 'uber', id: 'a5', plate: 'L1', drv: 'u9', name: 'Kashif Ali', day: 3, fleet: 'egari' });
+  // The hotel channel names its drivers and never numbers them. Two women
+  // worked this day and the old count called it zero.
+  await cov({ platform: 'hotel', id: 'b1', plate: 'L4', name: 'Dana Noor', day: 2 });
+  await cov({ platform: 'hotel', id: 'b2', plate: 'L4', name: 'Dana Noor', day: 2 });
+  await cov({ platform: 'hotel', id: 'b3', plate: 'L5', name: 'Mona Said', day: 2 });
+  // And the other direction: a row the provider numbered but never named. A
+  // person is a name in this product, so that row names nobody.
+  await cov({ platform: 'yango', id: 'c1', plate: 'L6', drv: 'y1', name: 'Tariq Afzal', day: 4 });
+  await cov({ platform: 'yango', id: 'c2', plate: 'L6', drv: 'y2', day: 4 });
+  // Telematics: a plate, every day, and no driver anywhere in it.
+  for (let d = 1; d <= 5; d++) await cov({ platform: 'fms', id: `t${d}`, plate: 'L1', day: d });
+
+  const CW = 'from=2026-09-01&to=2026-09-05';
+  const before = await get(`/api/coverage/calendar?${CW}`);
+
+  /* Both statements, lifted from the file that ships them. */
+  const routeSrc = readFileSync('api/analytics_routes.js', 'utf8');
+  const at = routeSrc.indexOf("app.get('/api/coverage/calendar'");
+  const statement = (marker) => {
+    const s = routeSrc.indexOf(marker, at);
+    if (at < 0 || s < 0) throw new Error(`could not find ${marker} in api/analytics_routes.js`);
+    return routeSrc.slice(s, routeSrc.indexOf('`', s));
+  };
+  const rollupSql = statement('SELECT r.platform AS source');
+  const liveSql = statement('SELECT source, to_char(day');
+  check('the fast path reads the rollup and the slow one is still there to fall back to',
+    /FROM rollup_day/.test(rollupSql) && /FROM source_day_coverage/.test(liveSql),
+    `${rollupSql.slice(0, 48)} | ${liveSql.slice(0, 48)}`);
+
+  const P = ['2026-09-01', '2026-09-05'];
+  const live = await q(liveSql, P);
+  await refreshRollups({ db });
+  const rolled = await q(rollupSql, P);
+
+  check('the rollup answers with the same days, in the same order',
+    live.length === rolled.length && live.length === 9
+    && live.every((r, i) => r.source === rolled[i].source && r.day === rolled[i].day),
+    `${live.length} vs ${rolled.length}`);
+  check('and with the same row counts and the same cars on every one of them',
+    live.every((r, i) => Number(r.rows) === Number(rolled[i].rows)
+      && Number(r.plates) === Number(rolled[i].plates)),
+    JSON.stringify(live.map((r, i) => [r.source, r.day, r.rows, rolled[i].rows,
+      r.plates, rolled[i].plates]).filter((x) => x[2] !== x[3] || x[4] !== x[5])));
+  check('the total across every collector is the rows that were collected',
+    rolled.reduce((a, r) => a + Number(r.rows), 0) === 15,
+    String(rolled.reduce((a, r) => a + Number(r.rows), 0)));
+  check('the stored all-platforms row is not read back as a collector of its own',
+    !rolled.some((r) => r.source === '*'), JSON.stringify(rolled.map((r) => r.source)));
+
+  /* The one measure that moves, and every direction it moves in. */
+  const at2 = (rows, source, day) => rows.find((r) => r.source === source && r.day === day);
+  check('two accounts belonging to one man are one driver, not two',
+    Number(at2(live, 'uber', '2026-09-01').drivers) === 3
+    && Number(at2(rolled, 'uber', '2026-09-01').drivers) === 2,
+    `${at2(live, 'uber', '2026-09-01').drivers} vs ${at2(rolled, 'uber', '2026-09-01').drivers}`);
+  check('a day two named drivers worked is no longer reported as nobody',
+    Number(at2(live, 'hotel', '2026-09-02').drivers) === 0
+    && Number(at2(rolled, 'hotel', '2026-09-02').drivers) === 2,
+    `${at2(live, 'hotel', '2026-09-02').drivers} vs ${at2(rolled, 'hotel', '2026-09-02').drivers}`);
+  check('one man driving for two fleets in one car is one driver and one car',
+    Number(at2(rolled, 'uber', '2026-09-03').drivers) === 1
+    && Number(at2(rolled, 'uber', '2026-09-03').plates) === 1,
+    JSON.stringify(at2(rolled, 'uber', '2026-09-03')));
+  check('a row the provider numbered but never named names nobody',
+    Number(at2(live, 'yango', '2026-09-04').drivers) === 2
+    && Number(at2(rolled, 'yango', '2026-09-04').drivers) === 1,
+    `${at2(live, 'yango', '2026-09-04').drivers} vs ${at2(rolled, 'yango', '2026-09-04').drivers}`);
+  check('a source that carries no driver still reports none, on either path',
+    live.filter((r) => r.source === 'fms').every((r, i) => Number(r.drivers) === 0
+      && Number(rolled.filter((x) => x.source === 'fms')[i].drivers) === 0));
+
+  /* And the endpoint itself: everything the page reads other than that one
+     count has to be the same sentence whichever path answered it. */
+  const after = await get(`/api/coverage/calendar?${CW}`);
+  const exceptDrivers = (c) => JSON.stringify(c, (k, v) => (k === 'drivers' ? undefined : v));
+  check('the page is told the same spans, gaps and totals from either path',
+    exceptDrivers(before) === exceptDrivers(after),
+    `${exceptDrivers(before).slice(0, 120)} | ${exceptDrivers(after).slice(0, 120)}`);
+  check('and the answer really did come from the rollup this time',
+    after.sources.find((s) => s.source === 'hotel').days[0].drivers === 2
+    && before.sources.find((s) => s.source === 'hotel').days[0].drivers === 0,
+    JSON.stringify(after.sources.find((s) => s.source === 'hotel').days));
 }
 
 server.close();

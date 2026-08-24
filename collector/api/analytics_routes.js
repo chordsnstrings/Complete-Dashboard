@@ -705,14 +705,62 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      that hold thousands. */
   app.get('/api/coverage/calendar', wrap(async (req, res) => {
     const [from, to] = range(req);
-    const rows = await q(
-      // to_char, not the raw date: the driver hands a DATE back as a JS Date
-      // whose string form is "Tue Aug 01 2026 …", and slicing ten characters
-      // off that yields "Tue Aug 01" — which then parses as the year 2001 and
-      // moved every gap in this report a quarter of a century into the past.
-      `SELECT source, to_char(day, 'YYYY-MM-DD') AS day, rows, plates, drivers
+    /* The day grain, precomputed.
+       ─────────────────────────────────────────────────────────────────────
+       source_day_coverage is an aggregate over the entire trip table. It
+       groups every collected row by platform and Dubai day and takes two
+       COUNT DISTINCTs in each bucket, and no index narrows that, because a
+       year-long window genuinely touches every row. At seven days it is
+       cheap; at three hundred and sixty-five it is two hundred thousand rows
+       hashed into fifteen hundred buckets each carrying two distinct sets,
+       and it ran past the gateway's seventy-five seconds. The windows this
+       page exists for — the wide ones, where a four-month hole is visible at
+       all — were the only windows it could not answer.
+
+       rollup_day already holds this, at this grain, refreshed after every
+       collection: its per-platform rows carry every row that landed on a day,
+       the distinct plates that drove it, and the people who drove them. So
+       the page reads those, and computes the grain live only when the rollup
+       has nothing for the window — a fresh database, or a deploy that lands
+       before the first collection. The fallback is the ORIGINAL query rather
+       than a restatement of it, because a fast path and a slow path written as
+       two different statements are two answers to one question, and only one
+       of them ever gets fixed.
+
+       Which rollup rows: a source IS a platform, so the stored platform '*'
+       row is excluded — it is the total across every collector, not a
+       collector. fleet_id '*' is the row that is wanted, because the question
+       here is whether a SOURCE was collecting at all, not whether it was
+       collecting for one fleet.
+
+       One measure changes, and for the better. The view counted distinct
+       driver_ext_id — the provider's number for an account — so a driver the
+       provider names but never numbers did not exist to it, and a hotel day
+       worked by four named drivers reported zero drivers. Zero and unknown are
+       different facts, and this page of all pages should not confuse them.
+       rollup_day counts distinct PEOPLE, folded across a person's several
+       platform accounts, which is what every other page in this product counts
+       and what this calendar's tooltip has always claimed to say. */
+    const rollupReady = (await q(
+      `SELECT 1 FROM rollup_day
+        WHERE day BETWEEN $1::date AND $2::date
+          AND platform <> '*' AND fleet_id = '*' LIMIT 1`, [from, to])).length > 0;
+    /* to_char on either path, not the raw date: the driver hands a DATE back
+       as a JS Date whose string form is "Tue Aug 01 2026 …", and slicing ten
+       characters off that yields "Tue Aug 01" — which then parses as the year
+       2001 and moved every gap in this report a quarter of a century into the
+       past. */
+    const coverageSql = rollupReady
+      ? `SELECT r.platform AS source, to_char(r.day, 'YYYY-MM-DD') AS day,
+                r.trips AS rows, r.vehicles AS plates, r.drivers
+         FROM rollup_day r
+         WHERE r.day BETWEEN $1::date AND $2::date
+           AND r.platform <> '*' AND r.fleet_id = '*'
+         ORDER BY 1, 2`
+      : `SELECT source, to_char(day, 'YYYY-MM-DD') AS day, rows, plates, drivers
        FROM source_day_coverage
-       WHERE day BETWEEN $1::date AND $2::date ORDER BY source, day`, [from, to]);
+       WHERE day BETWEEN $1::date AND $2::date ORDER BY source, day`;
+    const rows = await q(coverageSql, [from, to]);
     const bySource = new Map();
     for (const r of rows) {
       const s = bySource.get(r.source) || { source: r.source, days: [], total: 0 };
