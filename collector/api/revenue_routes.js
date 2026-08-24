@@ -44,6 +44,9 @@ export function revenueRoutes(app, { q, wrap, range }) {
          physical trip seen by the tracker and has no fare by definition. */
       q(`SELECT platform,
                 count(*)::int bookings,
+                /* The days this channel worked in the window — the denominator
+                   payout coverage is measured against. See api/income_sql.js. */
+                count(DISTINCT local_day)::int booking_days,
                 count(*) FILTER (WHERE has_fare)::int priced_bookings,
                 round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
                 round(sum(distance_km) FILTER (WHERE has_fare AND has_distance)::numeric,0) priced_km,
@@ -113,14 +116,14 @@ export function revenueRoutes(app, { q, wrap, range }) {
     const byPlatform = new Map();
     const row = (pl) => {
       if (!byPlatform.has(pl)) {
-        byPlatform.set(pl, { platform: pl, bookings: 0, priced_bookings: 0, fares: null,
+        byPlatform.set(pl, { platform: pl, bookings: 0, booking_days: 0, priced_bookings: 0, fares: null,
           priced_km: null, km: null, drivers: 0, vehicles: 0, payouts: null, cash: null,
           payout_periods: 0, components: null, tips: null });
       }
       return byPlatform.get(pl);
     };
     for (const f of fares) Object.assign(row(f.platform), {
-      bookings: f.bookings, priced_bookings: f.priced_bookings, fares: num(f.fares),
+      bookings: f.bookings, booking_days: f.booking_days, priced_bookings: f.priced_bookings, fares: num(f.fares),
       priced_km: num(f.priced_km), km: num(f.km), drivers: f.drivers, vehicles: f.vehicles,
       first_at: f.first_at, last_at: f.last_at,
     });

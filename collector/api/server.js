@@ -341,6 +341,7 @@ app.get('/api/kpis', wrap(async (req, res) => {
 
   const share = (n, d) => (d ? +((n / d) * 100).toFixed(1) : null);
   const payoutDays = Math.max(0, ...payRows.map((r) => r.payout_days || 0));
+  const workedDays = Math.max(0, ...fareRows.map((r) => r.booking_days || 0));
   res.json({
     ...t, ...v, ...a,
     /* What the fleet took in, and the two kinds of money it is made of.
@@ -352,10 +353,14 @@ app.get('/api/kpis', wrap(async (req, res) => {
     payout_days: payoutDays,
     payout_drivers: payRows.reduce((acc, r) => acc + Number(r.drivers || 0), 0) || null,
     payout_platforms: payRows.map((r) => r.platform).sort(),
-    /* How much of the window the payout statements actually span. Three days of
-       payout on a thirty-day window is not a thirty-day figure, and without
-       this the combined total reads as complete when it is a tenth covered. */
-    payout_coverage_pct: share(Math.min(payoutDays, windowDays), windowDays),
+    /* How much of the fleet's working days the payout statements actually span.
+       Three days of payout on thirty days of work is not a thirty-day figure,
+       and without this the combined total reads as complete when it is a tenth
+       covered. Against the days WORKED, not the calendar window: the all-time
+       window is a 36,526-day sentinel, and dividing by that reported a complete
+       record as 0.1% covered. Same rule as api/income_sql.js coverage(). */
+    payout_coverage_pct: share(Math.min(payoutDays, workedDays || windowDays),
+      workedDays || windowDays),
     priced_pct: share(t.priced_trips, t.trips),
     attributed_pct: share(t.attributed_trips, t.trips),
   });

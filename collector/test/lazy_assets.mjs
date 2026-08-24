@@ -16,15 +16,13 @@
      node mockapi.mjs &                 node test/lazy_assets.mjs
      node test/preview.mjs &            SMOKE_BASE=http://localhost:8100 …
      node bin/live-ui.mjs &             SMOKE_BASE=http://localhost:8100 … */
-import { chromium } from 'playwright';
+import { launchChromium } from './browser.mjs';
 
 const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';
 const MAPLESS = ['overview', 'vehicles', 'finance', 'roster'];
 const MAPPED = ['map', 'vehicle/L45235/movement', 'driver/drv-0/territory'];
 
-const browser = await chromium.launch({
-  ...(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {}),
-});
+const browser = await launchChromium();
 
 /* A fresh context per route, because the point is what a COLD visit pays. Share
    one page and the second map view fetches nothing — Leaflet is already on the

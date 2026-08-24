@@ -433,6 +433,29 @@ const get = async (p) => {
   check('the payout coverage is stated, not implied',
     k.payout_coverage_pct != null && k.payout_coverage_pct <= 100,
     String(k.payout_coverage_pct));
+
+  /* The all-time window is a sentinel spanning 2000-01-01..2100-01-01 — 36,526
+     days. Measured against THAT, every channel with a month of statements read
+     as 0.1% covered and fell to partial_payout, and the Revenue page told a
+     reader that 99.9% of the channel's money "has not been collected yet" about
+     data that was complete. Coverage is measured against the days the channel
+     actually worked, so an open window and a tight one agree. */
+  const kAll = await get('/api/kpis');
+  const revAll = await get('/api/revenue');
+  check('an open window does not report complete channels as barely covered',
+    (revAll.platforms || []).filter((r) => r.payouts != null)
+      .every((r) => r.payout_coverage_pct == null || r.payout_coverage_pct > 5),
+    JSON.stringify((revAll.platforms || []).map((r) => [r.platform, r.payout_coverage_pct])));
+  check('nor does the KPI headline coverage', 
+    kAll.payout_coverage_pct == null || kAll.payout_coverage_pct > 5,
+    String(kAll.payout_coverage_pct));
+  check('and the all-time combined figure still matches across pages',
+    Math.abs(num(kAll.accounted) - num(revAll.totals?.accounted)) < 1,
+    `kpis ${kAll.accounted} vs revenue ${revAll.totals?.accounted}`);
+  check('the coverage base is reported so the percentage can be checked',
+    (revAll.platforms || []).filter((r) => r.payout_coverage_pct != null)
+      .every((r) => r.payout_coverage_base > 0 && r.payout_coverage_days <= r.payout_coverage_base),
+    JSON.stringify((revAll.platforms || []).map((r) => [r.platform, r.payout_coverage_days, r.payout_coverage_base])));
   check('and it is measured over the days statements actually cover',
     k.payout_days != null && k.payout_days <= 31, String(k.payout_days));
 

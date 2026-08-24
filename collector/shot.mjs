@@ -1,5 +1,5 @@
-import { chromium } from 'playwright';
-const b = await chromium.launch({ executablePath: process.env.PW_CHROME });
+import { launchChromium } from './test/browser.mjs';
+const b = await launchChromium();
 const p = await b.newPage({ viewport: { width: 1440, height: 1000 } });
 for (const r of process.argv.slice(2)) {
   await p.goto(`http://localhost:8099/#${r}`, { waitUntil: 'domcontentloaded' });

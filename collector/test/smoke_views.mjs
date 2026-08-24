@@ -9,7 +9,8 @@
      node mockapi.mjs &                 # port 8099
      node test/smoke_views.mjs
 
-   Set PW_CHROME to point at a Chromium binary if Playwright cannot find one.
+   Chromium is found by test/browser.mjs even when Playwright's own registry
+   misses (a version drift against the preinstalled build); PW_CHROME overrides.
 
    Three targets, in increasing order of what they prove:
 
@@ -22,7 +23,7 @@
    The last is the one worth running before shipping a UI change. Fixture data
    is tidy by construction; production has the nulls, the numeric strings, the
    name collisions and the 89%-Uber shape that actually break a render. */
-import { chromium } from 'playwright';
+import { launchChromium } from './browser.mjs';
 
 const ROUTES = [
   'overview', 'demand', 'day/2026-08-14', 'day/not-a-date', 'drivers',
@@ -115,10 +116,8 @@ console.log(`  substituting driver=${SUB['drv-0'] || '(none found)'} `
    page loads. Passed through when it is set and the target is not local. */
 const proxy = process.env.HTTPS_PROXY && !/^https?:\/\/(localhost|127\.)/.test(BASE)
   ? { server: process.env.HTTPS_PROXY } : undefined;
-const browser = await chromium.launch({
-  ...(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {}),
-  ...(proxy ? { proxy } : {}),
-});
+// Chromium is resolved by test/browser.mjs — PW_CHROME still wins when set.
+const browser = await launchChromium({ ...(proxy ? { proxy } : {}) });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 let bad = 0;
 

@@ -33,7 +33,10 @@ export const platformFares = (windowPredicate) => `
   SELECT platform,
          count(*)::int bookings,
          count(*) FILTER (WHERE has_fare)::int priced_bookings,
-         round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares
+         round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
+         /* The days this channel actually worked inside the window. This is the
+            denominator payout coverage needs — see coverage() below. */
+         count(DISTINCT local_day)::int booking_days
   FROM trip_norm
   WHERE ${windowPredicate} AND is_booking
   GROUP BY 1`;
@@ -58,13 +61,33 @@ export const platformPayouts = () => `
 
 /* The coverage a figure was measured over. A fare covers BOOKINGS and a payout
    covers DAYS, and both have to be stated against the window or a number drawn
-   from three of its thirty days reads as the whole month. */
+   from three of its thirty days reads as the whole month.
+
+   The payout denominator is the days the channel actually WORKED in the window,
+   not the calendar length of the window. Two reasons, and the second is not an
+   edge case:
+
+     An open window — no `days`, no from/to — resolves to 2000-01-01..2100-01-01,
+     a sentinel spanning 36,526 days. Against that every channel reported "net
+     payout covering only 205 of the window's 36,526 days (0.6%)" and every one
+     of them fell to partial_payout. Nothing was wrong with the data.
+
+     And a channel that started mid-window, or ran three days a week, is not
+     half-covered because the calendar says thirty days. "Of the days this
+     channel worked, how many does a statement cover" is the question the
+     number is trying to answer.
+
+   Falls back to the window length when the channel reported no bookings at all,
+   where there is nothing better and nothing to be wrong about. */
 export function coverage(r, windowDays) {
+  const base = r.booking_days > 0 ? r.booking_days : windowDays;
   return {
     fare_coverage_pct: r.bookings
       ? Math.round((r.priced_bookings / r.bookings) * 1000) / 10 : null,
     payout_coverage_pct: r.payout_days
-      ? Math.round((Math.min(r.payout_days, windowDays) / windowDays) * 1000) / 10 : null,
+      ? Math.round((Math.min(r.payout_days, base) / base) * 1000) / 10 : null,
+    payout_coverage_days: r.payout_days ? Math.min(r.payout_days, base) : null,
+    payout_coverage_base: r.payout_days ? base : null,
   };
 }
 
@@ -88,7 +111,8 @@ export function chooseBasis(r, windowDays) {
        was never collected — which is the whole gap, not a rounding. */
     r.basis = 'partial_payout';
     r.best = r.payouts;
-    r.basis_note = `net payout covering only ${r.payout_days} of the window’s ${windowDays} days `
+    r.basis_note = `net payout covering only ${r.payout_coverage_days} of the `
+      + `${r.payout_coverage_base} day(s) this channel worked `
       + `(${r.payout_coverage_pct}%) — the rest of this channel’s money has not been collected yet`;
   } else if (r.priced_bookings) {
     r.basis = 'partial_fares';

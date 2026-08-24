@@ -470,7 +470,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const byPlat = new Map();
     const plat = (name) => {
       if (!byPlat.has(name)) {
-        byPlat.set(name, { platform: name, bookings: 0, priced_bookings: 0,
+        byPlat.set(name, { platform: name, bookings: 0, booking_days: 0, priced_bookings: 0,
           fares: null, payouts: null, payout_days: 0 });
       }
       return byPlat.get(name);
