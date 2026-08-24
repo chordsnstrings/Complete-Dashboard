@@ -4,12 +4,14 @@
 <meta charset="utf-8">
 <title>Fleet Dashboard</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Karla:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
-<!-- Leaflet vendored locally: the map must not depend on a third-party CDN being up. -->
-<link rel="stylesheet" href="/vendor/leaflet.css">
-<script src="/vendor/leaflet.js" defer></script>
+<!-- Fonts served from this origin. From fonts.googleapis.com a cold visit paid
+     two DNS lookups and two TLS handshakes to a third party before the stylesheet
+     naming the files could be read, then two more before the files arrived — the
+     largest fixed delay left in a first paint on a phone, and none of it work.
+     See fonts.css. -->
+<link rel="preload" href="/fonts/fraunces-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/karla-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/fonts.css">
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>

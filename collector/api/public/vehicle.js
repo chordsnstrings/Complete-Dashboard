@@ -224,7 +224,7 @@ async function tabMovement(root, plate) {
   [verd.body, park.body, seg.body].forEach(loading);
 
   const mv = await qAll('/api/vehicle/movement', { plate });
-  const map = makeMap(node, { zoom: 10 });
+  const map = await makeMap(node, { zoom: 10 });
 
   /* The replay dropdown is built from days that already have stored fixes, so
      the day currently in progress is either missing or half-there. An operator

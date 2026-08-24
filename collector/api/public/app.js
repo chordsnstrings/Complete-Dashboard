@@ -1345,7 +1345,7 @@ V.map = async (root) => {
   wrap.append(node); root.append(wrap);
   const legend = el('div', 'legend'); root.append(legend);
 
-  const map = makeMap(node);
+  const map = await makeMap(node);
   let layer = null;
   // Assigned once the day list exists, below; the live-map click handler is
   // defined before that and calls it through this binding.

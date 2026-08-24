@@ -14,7 +14,52 @@ const DUBAI = [25.2048, 55.2708];
 
 const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 
-export function makeMap(node, { zoom = 10 } = {}) {
+/* Leaflet, fetched the first time a map is actually drawn.
+   ─────────────────────────────────────────────────────────────────────────
+   It was loaded by index.html on every page: 44kb of script and 4kb of CSS
+   downloaded, parsed and executed on the overview, the roster, the settlement
+   page and every other view with no map on it — which is most of them. Three
+   views draw a map.
+
+   Loaded here instead, once, and shared: the promise is cached so two panels on
+   one page do not each fetch it, and a failure is not cached, so a map that
+   failed to load because the connection dropped can be retried by opening the
+   page again.
+
+   Still vendored locally rather than from a CDN — the reason for that has not
+   changed, only when it is fetched. */
+let leafletReady = null;
+export function ensureLeaflet() {
+  if (window.L) return Promise.resolve(window.L);
+  if (leafletReady) return leafletReady;
+  leafletReady = new Promise((resolve, reject) => {
+    const link = document.createElement('link');
+    link.rel = 'stylesheet'; link.href = '/vendor/leaflet.css';
+    document.head.append(link);
+    const js = document.createElement('script');
+    js.src = '/vendor/leaflet.js';
+    js.onload = () => {
+      if (!window.L) return reject(new Error('leaflet loaded but L is undefined'));
+      // Leaflet works out where its marker images live by reading a background-image
+      // off a probe element styled by leaflet.css. Injected together, the script can
+      // win the race against the stylesheet and the probe comes back empty, which
+      // gives a broken-image marker for the first fix. Stating the path removes the
+      // race entirely — we know where we put the files.
+      window.L.Icon.Default.imagePath = '/vendor/images/';
+      resolve(window.L);
+    };
+    js.onerror = () => reject(new Error('leaflet failed to load'));
+    document.head.append(js);
+  }).catch((e) => {
+    // Not cached: a dropped connection should not disable maps for the session.
+    leafletReady = null;
+    throw e;
+  });
+  return leafletReady;
+}
+
+export async function makeMap(node, { zoom = 10 } = {}) {
+  await ensureLeaflet();
   // zoomSnap:0 is what actually makes "fit the points" fit. By default Leaflet
   // rounds the fitted zoom DOWN to a whole number, so a spread needing z=11.9
   // renders at z=11 and the markers sit in the middle of a half-empty panel.

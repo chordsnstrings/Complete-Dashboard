@@ -1,5 +1,6 @@
 // Read/settings API + static dashboard host.
 import express from 'express';
+import compression from 'compression';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { pool, migrate } from '../src/db.js';
@@ -26,6 +27,27 @@ process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', {
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const app = express();
+
+/* Nothing was compressed. The front end is 528kb of JavaScript and CSS on disk
+   and 528kb was what went down the wire — app.js alone is 137kb, and it is on
+   the critical path of every view. Gzipped the same bundle is 152kb. On a phone
+   that difference is most of the wait before anything is drawn, and the API's
+   JSON answers compress harder still: a directory response is mostly repeated
+   column names.
+
+   Mounted first so it wraps everything after it, cached API answers included.
+   The default filter already skips what must not be recompressed — woff2, the
+   marker PNGs — and skips bodies under 1kb, where the header costs more than
+   the saving. Nothing here streams, so there is no response left half-written
+   waiting on a flush. */
+app.use(compression({
+  /* The warmer and the stale-revalidate path fetch their own endpoints over
+     loopback to fill the cache. Nobody reads those bytes — the body is parsed
+     and dropped — so compressing them is CPU spent on the same box that is
+     meant to be answering readers. Twenty paths across four windows, every few
+     minutes. */
+  filter: (req, res) => req.get('x-warm') !== '1' && compression.filter(req, res),
+}));
 app.use(express.json({ limit: '256kb' }));
 
 /* Read responses are cached against a data version, not a clock — see
@@ -1995,9 +2017,15 @@ app.use('/api', (req, res) => res.status(404).json({
      - index.html is the thing that names the others. It revalidates every time,
        because serving a stale document is how a deploy fails to arrive at all. */
 const YEAR = 31536000;
-app.use('/vendor', express.static(join(__dir, 'public', 'vendor'), {
-  maxAge: YEAR * 1000, immutable: true,
-}));
+/* /vendor is a pinned copy of Leaflet and /fonts are woff2 subsets, both of
+   which change only when somebody deliberately vendors different ones. They are
+   content rather than code: nothing about a deploy alters them, so they are
+   immutable for a year instead of re-fetched every five minutes. */
+for (const dir of ['vendor', 'fonts']) {
+  app.use(`/${dir}`, express.static(join(__dir, 'public', dir), {
+    maxAge: YEAR * 1000, immutable: true,
+  }));
+}
 app.use(express.static(join(__dir, 'public'), {
   etag: true,
   setHeaders(res, path) {

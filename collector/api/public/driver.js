@@ -340,7 +340,7 @@ async function tabTerritory(root, id) {
   // "we have no positions for this person", which a paragraph in place of the
   // map does not — and it keeps the page from reflowing between drivers.
   {
-    const map = makeMap(node, { zoom: 10 });
+    const map = await makeMap(node, { zoom: 10 });
     const pts = [];
     const max = Math.max(1, ...terr.pickups.map((p) => p.n));
     terr.idle.forEach((s) => {

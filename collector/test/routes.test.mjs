@@ -72,7 +72,13 @@ const htmlTxt = readFileSync('api/public/index.html', 'utf8');
 check('no blanket svg sizing rule', !/^svg\{[^}]*width:100%/m.test(cssTxt));
 check('chart svg rule excludes the map panel', /\.panel:not\(\.mapwrap\) svg/.test(cssTxt));
 check('map panel carries the opt-out class', /panel mapwrap/.test(jsTxt));
-check('leaflet is vendored, not CDN', /vendor\/leaflet\.js/.test(htmlTxt) && !/unpkg\.com/.test(htmlTxt));
+/* Leaflet moved out of index.html and into map.js, where it is fetched the
+   first time a map is drawn — see test/assets.test.mjs, which is where the
+   lazy-load half is checked. What has not changed is that it is served from
+   this origin: a CDN outage must not take the map with it. */
+const mapTxt = readFileSync('api/public/map.js', 'utf8');
+check('leaflet is vendored, not CDN',
+  /vendor\/leaflet\.js/.test(mapTxt) && !/unpkg\.com|cdnjs|jsdelivr/.test(mapTxt + htmlTxt));
 check('nav css targets the real markup (a, .grp)', /#nav a\{/.test(cssTxt) && /#nav \.grp\{/.test(cssTxt));
 check('map view is registered', /id: 'map'/.test(jsTxt));
 
