@@ -1115,7 +1115,49 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
        WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
        ORDER BY plate, day, trips DESC NULLS LAST, driver_name
      ),
-     /* Distance driven by that PERSON on those days, so a rate can be computed
+     people AS (
+       SELECT coalesce(c.driver_name, '(unattributed)') AS driver_name,
+              max(c.driver_ext_id) AS driver_ext_id,
+              /* Who this row is about, carried down so the distance below can be
+                 asked for them and nobody else. It is a function of the grouping
+                 key — vehicle_driver_day generates person_key out of the same
+                 driver_name — so every row in a group agrees on it and max() is
+                 choosing between identical values. */
+              max(c.person_key) AS person,
+              count(*)::int alerts,
+              sum((ev.alert_type ILIKE '%brake%')::int)::int harsh_brake,
+              sum((ev.alert_type ILIKE '%accel%')::int)::int harsh_accel,
+              sum((ev.alert_type ILIKE '%turn%')::int)::int sharp_turn,
+              sum((ev.alert_type ILIKE '%speed%')::int)::int overspeed,
+              count(DISTINCT ev.plate)::int plates,
+              /* Which cars, not just how many. A row saying somebody has 18
+                 harsh-braking events across 4 plates is not something anybody
+                 can look into until they know which 4 — and "plates: 4" is a
+                 number you cannot click. Capped at three with the count kept
+                 beside it, so a truncated list admits that it is one. */
+              (array_agg(DISTINCT ev.plate ORDER BY ev.plate))[1:3] AS plate_list,
+              bool_or(c.driver_name IS NOT NULL) AS named,
+              count(*) FILTER (WHERE c.driver_name IS NULL)::int nameless
+       FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
+       GROUP BY 1
+     ),
+     /* The hundred rows the page prints, and the three figures printed under
+        them. Those figures used to be a second request to the database, and a
+        second request here is not a cheap one: it replayed the whole alert scan
+        and the whole windowed custody fold — the two most expensive things this
+        endpoint does — to arrive at three numbers. They ride on the list now,
+        the way the driver directory's population count already does.
+
+        They count over every group rather than over the hundred, which is the
+        whole point of them, so the window runs before the cap does. */
+     shown AS (
+       SELECT *,
+              count(*) FILTER (WHERE named) OVER ()::int AS _drivers,
+              sum(alerts) OVER ()::int AS _alerts,
+              sum(nameless) OVER ()::int AS _unattributed
+       FROM people ORDER BY alerts DESC LIMIT 100
+     ),
+     /* Distance driven by that PERSON over the window, so a rate can be computed
         over bookings rather than over bookings plus their telematics twins.
 
         Grouped on the folded name, not the raw one. Grouping on the raw string
@@ -1130,51 +1172,50 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
           /api/kpis scans the same trips in 0.67 — the difference was entirely
           the regex. sql/schema_v20.sql stores the identical expression on both
           trip and vehicle_driver_day, so this is the same answer as an index
-          lookup rather than a computation. */
+          lookup rather than a computation.
+
+          The join is load-bearing and cannot go: local_day, is_booking and
+          has_distance are trip_norm's, and person_key is the base table's,
+          because a view's star is frozen at creation — sql/schema_v18.sql says
+          so at length. What could go is the work. Both restrictions below are
+          on t, and neither changes a row of the answer.
+
+          One is the window, which t did not have. Every predicate here was on
+          n, so the planner had nothing to narrow t by and read all 215,000 trip
+          rows for it whatever the window said — at a week that is the entire
+          cost of this endpoint. t and n are the SAME ROW: the join key is
+          trip's primary key, so a window true of one is true of the other, and
+          saying it twice lets both sides use trip_local_day_idx.
+
+          The other is the hundred people. This aggregated every driver in the
+          fleet to decorate a list ordered by something distance has no part in,
+          so seven of every eight sums it computed were for somebody the page
+          was never going to name. */
        SELECT t.person_key AS person, sum(n.distance_km) AS km
-       FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
-       WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.has_distance
+       FROM trip_norm n ${JOIN_TRIP}
+       WHERE t.person_key IN (SELECT person FROM shown WHERE person IS NOT NULL)
+         AND ${DAYWIN('t.requested_at')}
+         AND n.local_day BETWEEN $1::date AND $2::date AND n.is_booking AND n.has_distance
          AND n.driver_name IS NOT NULL AND btrim(n.driver_name) <> ''
        GROUP BY 1
      )
-     SELECT coalesce(c.driver_name, '(unattributed)') AS driver_name,
-            max(c.driver_ext_id) AS driver_ext_id,
-            count(*)::int alerts,
-            sum((ev.alert_type ILIKE '%brake%')::int)::int harsh_brake,
-            sum((ev.alert_type ILIKE '%accel%')::int)::int harsh_accel,
-            sum((ev.alert_type ILIKE '%turn%')::int)::int sharp_turn,
-            sum((ev.alert_type ILIKE '%speed%')::int)::int overspeed,
-            count(DISTINCT ev.plate)::int plates,
-            /* Which cars, not just how many. A row saying somebody has 18
-               harsh-braking events across 4 plates is not something anybody can
-               look into until they know which 4 — and "plates: 4" is a number
-               you cannot click. Capped at three with the count kept beside it,
-               so a truncated list admits that it is one. */
-            (array_agg(DISTINCT ev.plate ORDER BY ev.plate))[1:3] AS plate_list,
-            round(max(km.km)::numeric, 0) AS booked_km,
-            round((count(*) * 100.0 / nullif(max(km.km), 0))::numeric, 2) AS per_100km
-     FROM ev
-     LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
-     LEFT JOIN km ON km.person = c.person_key
-     GROUP BY 1 ORDER BY alerts DESC LIMIT 100`, [from, to]);
+     SELECT s.driver_name, s.driver_ext_id, s.alerts,
+            s.harsh_brake, s.harsh_accel, s.sharp_turn, s.overspeed,
+            s.plates, s.plate_list,
+            round(km.km::numeric, 0) AS booked_km,
+            round((s.alerts * 100.0 / nullif(km.km, 0))::numeric, 2) AS per_100km,
+            s._drivers, s._alerts, s._unattributed
+     FROM shown s LEFT JOIN km ON km.person = s.person
+     ORDER BY s.alerts DESC`, [from, to]);
   /* Named drivers, counted over the whole window rather than over the returned
      rows, and counted the way the list groups: by custody name, excluding the
      "(unattributed)" bucket, which is not a person. */
-  const [t] = await q(
-    `WITH ev AS (
-       SELECT plate, (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
-       FROM alert WHERE ${DAYWIN('occurred_at')}),
-     custody AS (
-       SELECT DISTINCT ON (plate, day) plate, day, driver_name
-       FROM vehicle_driver_day
-       WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
-       ORDER BY plate, day, trips DESC NULLS LAST, driver_name)
-     SELECT count(DISTINCT c.driver_name)::int drivers,
-            count(*)::int alerts,
-            count(*) FILTER (WHERE c.driver_name IS NULL)::int unattributed
-     FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day`, [from, to]);
-  res.json({ rows, totals: t, shown: rows.length,
-    truncated: (t?.drivers ?? 0) > rows.filter((r) => r.driver_name !== '(unattributed)').length });
+  const totals = rows.length
+    ? { drivers: rows[0]._drivers, alerts: rows[0]._alerts, unattributed: rows[0]._unattributed }
+    : { drivers: 0, alerts: 0, unattributed: 0 };
+  for (const r of rows) { delete r._drivers; delete r._alerts; delete r._unattributed; }
+  res.json({ rows, totals, shown: rows.length,
+    truncated: totals.drivers > rows.filter((r) => r.driver_name !== '(unattributed)').length });
 }));
 
 // Who was driving this plate, day by day (handovers included).
