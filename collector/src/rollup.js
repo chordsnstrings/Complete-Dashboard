@@ -330,6 +330,15 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
 export async function refreshPayouts(db = pool) {
   await db.query('BEGIN');
   try {
+    /* The pool caps every statement at two minutes so a runaway page query
+       cannot hold a connection hostage — the right default for readers, and
+       the wrong one here: this rebuild is the one deliberately-heavy statement
+       in the system, and it shares the database with the backfills that make
+       it necessary. Under that load it was cancelled mid-rebuild; the
+       transaction rolled back cleanly, readers kept the previous table, and
+       the pass reported an error every cycle until the load passed. SET LOCAL
+       scopes the longer allowance to this transaction alone. */
+    await db.query("SET LOCAL statement_timeout = '600000'").catch(() => {});
     await db.query('DELETE FROM driver_payout_day');
     const r = await db.query(`
       INSERT INTO driver_payout_day
@@ -373,6 +382,8 @@ export async function refreshPayouts(db = pool) {
 export async function refreshStatements(db = pool) {
   await db.query('BEGIN');
   try {
+    // Same allowance as refreshPayouts, for the same reason.
+    await db.query("SET LOCAL statement_timeout = '600000'").catch(() => {});
     await db.query(`DELETE FROM driver_statement_day WHERE source = 'uber_rest'`);
     /* Same resolution as the payout view: periods first, then one winner per
        day — the FINEST period covering it. The table holds report windows on
