@@ -12,7 +12,7 @@
    the fleet portal knows its documents, and only the combination answers
    "is this asset earning, and is it legal to be on the road". */
 
-import { peopleCount, personKey, peopleCountStored, JOIN_TRIP } from './custody_sql.js';
+import { peopleCount, personKey } from './custody_sql.js';
 import { win, winDays } from './window.js';
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome } from './income_sql.js';
@@ -44,41 +44,96 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   app.get('/api/vehicles/directory', wrap(async (req, res) => {
     const [from, to] = winDays(req);
     res.json(await q(
-      `WITH plates AS (
-         SELECT DISTINCT plate FROM (
-           SELECT plate FROM trip WHERE plate IS NOT NULL AND plate <> ''
-           UNION SELECT plate FROM telemetry_snapshot
-           UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL
-         ) s
+      `WITH RECURSIVE driven AS (
+         /* Which plates has this fleet ever put on the road? The question has
+            no window in it and never can — a car that last earned in March is
+            a row on this page and a car that has never earned is a different
+            row — so asked plainly it reads every trip the fleet has ever
+            taken, a third of a gigabyte of them at production's row count, to
+            learn two hundred and fifty short strings. The collector is writing
+            to that table while the page loads, which leaves the visibility map
+            stale, so even the index on plate cannot be read on its own and the
+            planner falls back to the heap.
+
+            The driver directory answers its own unbounded question from a
+            precomputed table, because "when did this person last drive" is a
+            maximum over every row and no index can skip to it. This one is not
+            that question. The distinct values of an indexed column are what a
+            B-tree already holds, in order, so the register descends
+            trip_plate_idx once per plate instead of once per trip: a few
+            hundred pages rather than forty thousand, with nothing to refresh,
+            nothing to fall back to, and nothing that can drift.
+
+            The trip table is aliased x here, not t, because t is the name the
+            shared join in custody_sql gives it everywhere else in this API.
+            Two relations answering to one name in a single statement is how a
+            join condition quietly points at the wrong one, and this file has
+            been bitten by that already. */
+         (SELECT min(plate) AS plate FROM trip WHERE plate IS NOT NULL AND plate <> '')
+         UNION ALL
+         SELECT (SELECT min(x.plate) FROM trip x WHERE x.plate > d.plate)
+           FROM driven d WHERE d.plate IS NOT NULL
        ),
-       t AS (
+       plates AS (
+         /* UNION already answers DISTINCT; the register is a set. */
+         SELECT plate FROM driven WHERE plate IS NOT NULL
+         UNION SELECT plate FROM telemetry_snapshot
+         UNION SELECT plate FROM vehicle_document WHERE plate IS NOT NULL
+       ),
+       by_account AS (
          /* Bookings and telematics journeys counted apart, and distance guarded.
             Summing them showed a 2-3.5x overcount as "trips" and rendered a
             193,027 km odometer row as 1.6 million km against one car. */
-         /* Every column qualified: trip_norm is SELECT t.* over trip, so the
-            join puts two of each base column in scope and an unqualified one is
-            ambiguous. Postgres rejects the statement rather than choosing, which
-            is the good outcome and how this was caught. */
-         SELECT n.plate,
+         /* One vehicle, one day, one platform, one account: the grain every
+            question below is really asked at, and a window holds several times
+            fewer of these than it holds trips.
+
+            Reducing first is what pays for the head-count. Two records are one
+            human only after the account fold, and the fold is two nested
+            regexes — nineteen twentieths of the cost if it runs on every trip
+            in a year. The stored column holds that exact value, but reaching
+            it means joining the base table, because trip_norm is SELECT t.*
+            and a view's column list is frozen at its creation; that join is a
+            second sequential read of the whole trip table, and over a wide
+            window it was doubling the bytes this request reads in order to
+            fetch one text column. Folded here instead, once per surviving row,
+            it costs neither. */
+         SELECT n.plate, n.local_day, n.platform, n.driver_ext_id, n.driver_name,
                 count(*) FILTER (WHERE n.is_booking)::int trips,
                 count(*) FILTER (WHERE NOT n.is_booking)::int telematics_journeys,
-                count(DISTINCT n.local_day) FILTER (WHERE n.is_booking)::int days,
-                count(DISTINCT n.local_day)::int days_moved,
-                round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
-                round(sum(n.distance_km) FILTER (WHERE NOT n.is_booking AND n.has_distance)::numeric,0) telematics_km,
-                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+                sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance) km,
+                sum(n.distance_km) FILTER (WHERE NOT n.is_booking AND n.has_distance) telematics_km,
+                sum(n.price) FILTER (WHERE n.has_fare) revenue,
                 count(*) FILTER (WHERE n.has_fare)::int priced_trips,
-                /* The stored fold, via the base table. Computed per row this
-                   was the directory's whole cost over a wide window: 76 seconds
-                   across the full record. See peopleCountStored. */
-                ${peopleCountStored()}::int drivers,
-                count(DISTINCT n.platform)::int platforms,
                 max(n.requested_at) FILTER (WHERE n.is_booking) last_trip,
                 max(n.requested_at) last_movement,
                 min(n.fleet_id) fleet_id
-         FROM trip_norm n ${JOIN_TRIP}
+         FROM trip_norm n
          WHERE n.local_day BETWEEN $1::date AND $2::date AND n.plate IS NOT NULL AND n.plate <> ''
-         GROUP BY n.plate
+         GROUP BY n.plate, n.local_day, n.platform, n.driver_ext_id, n.driver_name
+       ),
+       work AS (
+         /* The counts and the money add up across those rows; the DISTINCT
+            questions — how many days, how many platforms, how many people —
+            are asked of the grain that already carries them. A day counts as
+            worked when any account booked on it, which is what the test on
+            trips says. */
+         SELECT a.plate,
+                sum(a.trips)::int trips,
+                sum(a.telematics_journeys)::int telematics_journeys,
+                count(DISTINCT a.local_day) FILTER (WHERE a.trips > 0)::int days,
+                count(DISTINCT a.local_day)::int days_moved,
+                round(sum(a.km)::numeric,0) km,
+                round(sum(a.telematics_km)::numeric,0) telematics_km,
+                round(sum(a.revenue)::numeric,0) revenue,
+                sum(a.priced_trips)::int priced_trips,
+                count(DISTINCT ${personKey('a.driver_ext_id', 'a.driver_name')})::int drivers,
+                count(DISTINCT a.platform)::int platforms,
+                max(a.last_trip) last_trip,
+                max(a.last_movement) last_movement,
+                min(a.fleet_id) fleet_id
+         FROM by_account a
+         GROUP BY a.plate
        ),
        tel AS (
          SELECT DISTINCT ON (plate) plate, captured_at last_fix, polled_at, status, speed
@@ -94,13 +149,13 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          GROUP BY plate
        )
        SELECT p.plate,
-              coalesce(t.trips,0) trips,
-              coalesce(t.telematics_journeys,0) telematics_journeys,
-              coalesce(t.days,0) days, coalesce(t.days_moved,0) days_moved,
-              t.km, t.telematics_km, t.revenue, coalesce(t.priced_trips,0) priced_trips,
-              coalesce(t.drivers,0) drivers, coalesce(t.platforms,0) platforms,
-              t.last_trip, t.last_movement,
-              coalesce(t.fleet_id, v.fleet_id, vp.fleet_id) fleet_id,
+              coalesce(w.trips,0) trips,
+              coalesce(w.telematics_journeys,0) telematics_journeys,
+              coalesce(w.days,0) days, coalesce(w.days_moved,0) days_moved,
+              w.km, w.telematics_km, w.revenue, coalesce(w.priced_trips,0) priced_trips,
+              coalesce(w.drivers,0) drivers, coalesce(w.platforms,0) platforms,
+              w.last_trip, w.last_movement,
+              coalesce(w.fleet_id, v.fleet_id, vp.fleet_id) fleet_id,
               coalesce(v.make, vp.make) make, coalesce(v.model, vp.model) model,
               coalesce(v.year, vp.year) AS year,
               tel.last_fix, tel.status, tel.speed,
@@ -115,14 +170,14 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               -- not link to them because the id was dropped here.
               cd.driver_name current_driver, cd.driver_ext_id current_driver_id, cd.as_of driver_as_of
        FROM plates p
-       LEFT JOIN t   ON t.plate = p.plate
+       LEFT JOIN work w ON w.plate = p.plate
        LEFT JOIN tel ON tel.plate = p.plate
        LEFT JOIN doc ON doc.plate = p.plate
        LEFT JOIN al  ON al.plate = p.plate
        LEFT JOIN vehicle v ON v.plate = p.plate
        LEFT JOIN vehicle_profile vp ON vp.plate = p.plate
        LEFT JOIN vehicle_current_driver cd ON cd.plate = p.plate
-       ORDER BY coalesce(t.trips,0) DESC, p.plate
+       ORDER BY coalesce(w.trips,0) DESC, p.plate
        LIMIT 500`, [from, to]));
   }));
 

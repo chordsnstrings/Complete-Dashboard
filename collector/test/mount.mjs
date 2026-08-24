@@ -148,6 +148,24 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   }
 
   const server = app.listen(0);
+  /* Idle keep-alive sockets are never reaped here, and that is the point.
+     Node closes one after five seconds; the client pools it and reuses it. Both
+     of those are timers, and a test that spends half a minute inside PGlite —
+     replaying every schema file, seeding a wide fleet — blocks the event loop
+     so neither timer runs until it unblocks, and then they run in whichever
+     order they please. When the server's close wins, the next request goes out
+     on a socket the server has already dropped and the fetch fails with
+     ECONNRESET, in a test whose only crime was doing its CPU work between two
+     requests instead of before them.
+
+     It reads as a failure of whichever assertion happens to sit after the long
+     block — route_smoke's fleet-size check, most recently — and it moves when
+     the suite's scheduling moves, which is what makes it so expensive to
+     chase: it is reproducible on unmodified code by blocking the loop for
+     twenty seconds before any fetch, and not otherwise. These servers live for
+     the length of one test process and are never reaped, so a socket held open
+     costs nothing. */
+  server.keepAliveTimeout = 0;
   const port = server.address().port;
   return {
     app, q, server, port, mounted, deps, mountSource,
