@@ -100,8 +100,15 @@ export async function makeMap(node, { zoom = 10 } = {}) {
    size. This keeps the padding in pixels, caps the zoom so a lone point doesn't
    land on a rooftop, and re-fits whenever the container is resized. */
 export function fitTo(map, points, { maxZoom = 15, padding = [28, 28] } = {}) {
+  /* A tracker reporting 0,0 has no satellite lock; it is not sitting in the
+     Gulf of Guinea. One such point in a Dubai fleet stretches the bounds
+     across two continents and renders every real position as a single pixel —
+     which looks exactly like a map that failed to load. Excluded from the
+     FRAMING here, where every map in this product passes: a caller that has
+     already dropped the bad fix loses nothing, and one that has not keeps a
+     usable map. */
   const pts = (points || []).filter((p) => p && p[0] != null && p[1] != null &&
-    isFinite(p[0]) && isFinite(p[1]));
+    isFinite(p[0]) && isFinite(p[1]) && !(Math.abs(p[0]) < 0.5 && Math.abs(p[1]) < 0.5));
   if (!pts.length) { map.setView(DUBAI, 10); return; }
   const b = L.latLngBounds(pts);
   const apply = () => {

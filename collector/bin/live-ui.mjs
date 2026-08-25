@@ -21,12 +21,27 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 const UP = process.env.UPSTREAM || 'https://fleet-dashboard-wpeqb.ondigitalocean.app';
-const pub = join(dirname(fileURLToPath(import.meta.url)), 'api', 'public');
+/* `..`, because this file lives in bin/ and the dashboard lives in api/public.
+   Without it every asset resolved to collector/bin/api/public, which does not
+   exist: express.static matched nothing, the catch-all fell through to
+   sendFile of an index.html that is not there, and the bridge served a
+   Node ENOENT page for every route while the API half worked perfectly. The
+   smoke run against it reported the same failure for all eighty views, which
+   reads as a broken build rather than a broken path. */
+const pub = join(dirname(fileURLToPath(import.meta.url)), '..', 'api', 'public');
 const app = express();
 app.get('/api/*', async (req, res) => {
   try {
     const r = await fetch(`${UP}${req.originalUrl}`, { headers: { accept: 'application/json' } });
     const body = await r.text();
+    /* An endpoint this working tree declares and the deployed build does not
+       comes back as the API's own 404 JSON, and the page renders its error box
+       with "no such endpoint" in it — which is right, and easy to misread as a
+       bug in the page. Named here so the operator running the bridge sees it
+       in the terminal as what it is: a route that has not deployed yet. */
+    if (r.status === 404 && body.includes('no such endpoint')) {
+      console.log(`  ↯ ${req.path} is not on ${UP} yet — the page will show its error state`);
+    }
     res.status(r.status).type(r.headers.get('content-type') || 'application/json').send(body);
   } catch (e) { res.status(502).json({ error: String(e).slice(0, 200) }); }
 });

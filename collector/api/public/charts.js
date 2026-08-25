@@ -166,11 +166,17 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
 }
 
 /* ── line / area (trend) ── */
-export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) => fmt(v), onClick } = {}) {
+/* `max` pins the top of the scale. Without it the axis is headroom over the
+   largest value — right for a count, wrong for anything with a ceiling: a
+   cumulative SHARE topped out at 100% drew a gridline labelled 114%, which is
+   a value the series cannot take. Given, the headroom is skipped and the axis
+   says what the measure's maximum actually is. */
+export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) => fmt(v), onClick, max: fixedMax } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 30;
-  const vals = data.map((d) => +d[y]); const max = Math.max(...vals) * 1.14 || 1;
+  const vals = data.map((d) => +d[y]);
+  const max = fixedMax || Math.max(...vals) * 1.14 || 1;
   const iw = W - pl - pr, ih = H - pt - pb;
   const X = (i) => pl + (data.length === 1 ? iw / 2 : iw * i / (data.length - 1));
   const Y = (v) => pt + ih - ih * v / max;

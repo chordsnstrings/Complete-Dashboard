@@ -12,6 +12,7 @@ import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, platformStatements, fleetIncome } from './income_sql.js';
 import { startWarmer } from './warm.js';
 import { log } from '../src/log.js';
+import { economicsRoutes } from './economics_routes.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
 import { analyticsRoutes, analystRoutes } from './analytics_routes.js';
@@ -2477,6 +2478,20 @@ app.get('/api/schema/raw-values', wrap(async (req, res) => {
 /* ───────────────── per-driver detail pages ───────────────── */
 // Registered before the catch-all, like every other /api route.
 driverRoutes(app, { q, wrap, endOfDay });
+
+/* ───────────────── unit economics ─────────────────
+   The whole fleet as a ranking rather than one entity at a time: what each
+   asset and each person earned per day worked, per km and per booking, and
+   which of them earned nothing. The attribution that puts Uber's weekly driver
+   payout onto a vehicle already existed with a plate bound into it; these are
+   the same arithmetic unbound, which is what makes a table sortable.
+
+   Registered here, below the per-driver marker, and not a line above it: that
+   comment is the END boundary test/mount.mjs slices server.js at, so a module
+   call placed before it lands inside the slice — where the harness mounts route
+   modules by discovery and the imported name does not exist. Every test over
+   the whole API then dies with ReferenceError before its first assertion. */
+economicsRoutes(app, { q, wrap, range });
 
 /* ───────────────── per-vehicle detail pages ───────────────── */
 vehicleRoutes(app, { q, wrap, endOfDay });
