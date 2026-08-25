@@ -242,8 +242,15 @@ async function corpGuests(host) {
       { label: 'Passenger records', value: fmt(g.total_guests), sub: `across ${fmt(g.total_bookings)} bookings` },
       { label: 'Bookings with a room number', value: fmt(g.bookings_with_room),
         sub: g.total_bookings ? pct((g.bookings_with_room / g.total_bookings) * 100, 1) + ' of bookings' : null },
-      { label: 'Rooms seen more than once', value: fmt(g.repeat_rooms ?? g.rooms.length),
-        sub: g.repeat_bookings ? `${fmt(g.repeat_bookings)} bookings between them` : null,
+      /* With the denominator. "21 rooms seen more than once" is a different
+         claim depending on whether the channel has ever named 25 rooms or
+         2,500, and distinct_rooms has been in this payload all along. */
+      { label: 'Rooms seen more than once', value: g.distinct_rooms
+        ? `${fmt(g.repeat_rooms ?? g.rooms.length)} of ${fmt(g.distinct_rooms)}`
+        : fmt(g.repeat_rooms ?? g.rooms.length),
+        sub: [g.repeat_bookings ? `${fmt(g.repeat_bookings)} bookings between them` : null,
+          g.distinct_rooms ? `${fmt(g.distinct_rooms)} distinct rooms named in this window` : null]
+          .filter(Boolean).join(' · ') || null,
         tone: (g.repeat_rooms ?? g.rooms.length) ? 'good' : null },
       { label: 'Repeat travel', value: 'not measurable', tone: 'warn' },
     ]));

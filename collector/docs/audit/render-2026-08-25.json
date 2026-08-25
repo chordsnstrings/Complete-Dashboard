@@ -1,6 +1,6 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-08-25T17:45:25.275Z",
+  "at": "2026-08-25T19:53:57.712Z",
   "widths": [
     1500,
     1180,
@@ -25,6 +25,83 @@
     {
       "route": "unit/drivers",
       "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Licence\" is empty in 220 of 247 rows"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":247,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":6,\"tables\":1,\"charts\":0}"
@@ -42,6 +119,83 @@
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":72,\"explained\":true,\"title\":\"Top performers\",\"kpis\":4,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Standing\" is empty in 37 of 40 rows"
     },
     {
       "route": "low-performers",
@@ -74,9 +228,37 @@
     {
       "route": "demand",
       "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 521 (unknown)"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "521 /api/context?from=2026-07-27&to=2026-08-25"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"Demand\",\"kpis\":4,\"tables\":1,\"charts\":3}"
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"explained\":true,\"title\":\"Demand\",\"kpis\":0,\"tables\":0,\"charts\":3}"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 72 of 84 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 69 of 80 rows"
     },
     {
       "route": "day/2026-08-24",
@@ -95,6 +277,13 @@
     {
       "route": "drivers",
       "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 330 of 361 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":390,\"explained\":true,\"title\":\"Drivers\",\"kpis\":0,\"tables\":3,\"charts\":1}"
@@ -104,35 +293,35 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":103,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":5,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":104,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":5,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-08-25",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":103,\"explained\":true,\"title\":\"August 25 vs the day before\",\"kpis\":5,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":104,\"explained\":true,\"title\":\"August 25 vs the day before\",\"kpis\":5,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-08-25/2026-08-24",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":103,\"explained\":true,\"title\":\"August 25 vs August 24\",\"kpis\":5,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":104,\"explained\":true,\"title\":\"August 25 vs August 24\",\"kpis\":5,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-08-25/2026-08-24?cut=full",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":103,\"explained\":true,\"title\":\"August 25 vs August 24\",\"kpis\":5,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":104,\"explained\":true,\"title\":\"August 25 vs August 24\",\"kpis\":5,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/not-a-date",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":103,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":5,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":104,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":5,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
@@ -172,9 +361,65 @@
     {
       "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
       "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":264,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":268,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 251 of 280 rows"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Reason given\" is empty in 248 of 280 rows"
     },
     {
       "route": "roster",
@@ -182,6 +427,13 @@
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":280,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Km\" is empty in 111 of 113 rows"
     },
     {
       "route": "roster/pipeline",
@@ -249,9 +501,135 @@
     {
       "route": "vehicle/L36397/safety",
       "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":63,\"explained\":false,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "vehicle/L36397/compliance",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
     },
     {
       "route": "vehicle/L36397/compliance",
@@ -263,9 +641,86 @@
     {
       "route": "vehicle/L36397/trips",
       "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fare\" is empty in 391 of 400 rows"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":400,\"explained\":false,\"title\":\"L36397\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
     },
     {
       "route": "platforms",
@@ -279,7 +734,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":94,\"explained\":true,\"title\":\"Platforms\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":95,\"explained\":true,\"title\":\"Platforms\",\"kpis\":4,\"tables\":2,\"charts\":0}"
     },
     {
       "route": "platforms/funnel",
@@ -293,7 +748,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":119,\"explained\":true,\"title\":\"Corridors\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":119,\"explained\":true,\"title\":\"Corridors\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "finance",
@@ -382,6 +837,13 @@
     {
       "route": "property/673dc94395448356a777f1ec/guests",
       "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Room\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":40,\"explained\":true,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
@@ -434,6 +896,34 @@
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":15,\"explained\":false,\"title\":\"Revenue by channel\",\"kpis\":7,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Tips\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Salik\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Cash collected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Δ bank − expected\" is empty in 12 of 13 rows"
     },
     {
       "route": "reconcile",
@@ -538,7 +1028,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":179,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":178,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/plate/L36397",
@@ -569,25 +1059,32 @@
       "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":320,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
-      "route": "segment/L44284/2026-08-25T17:00:14.397Z",
+      "route": "segment/L77062/2026-08-25T18:24:34.620Z",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"L44284\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":24,\"explained\":true,\"title\":\"L77062\",\"kpis\":4,\"tables\":6,\"charts\":1}"
     },
     {
-      "route": "segment/L44284/2026-08-25T17:00:14.397Z",
+      "route": "segment/L77062/2026-08-25T18:24:34.620Z",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"L44284\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":24,\"explained\":true,\"title\":\"L77062\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 35 of 40 rows"
     },
     {
       "route": "slot/2/19",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":43,\"explained\":true,\"title\":\"Tuesday 19:00\",\"kpis\":7,\"tables\":3,\"charts\":3}"
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":40,\"explained\":true,\"title\":\"Tuesday 19:00\",\"kpis\":7,\"tables\":3,\"charts\":3}"
     },
     {
       "route": "slot/0/3",
@@ -608,7 +1105,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":60,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":61,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "safety/vehicles",
@@ -641,9 +1138,142 @@
     {
       "route": "sources",
       "width": 1500,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "sources",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":58,\"explained\":true,\"title\":\"Data sources\",\"kpis\":0,\"tables\":5,\"charts\":0}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":43,\"explained\":true,\"title\":\"Data sources\",\"kpis\":0,\"tables\":4,\"charts\":0}"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
     },
     {
       "route": "coverage",
@@ -662,9 +1292,86 @@
     {
       "route": "settings",
       "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Detail\" is empty in 9 of 11 rows"
+    },
+    {
+      "route": "settings",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":10,\"explained\":true,\"title\":\"Settings\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":11,\"explained\":true,\"title\":\"Settings\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
     },
     {
       "route": "insights/severity/critical",
@@ -711,6 +1418,139 @@
     {
       "route": "drivers?days=7&fleet=egari",
       "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 340 of 361 rows"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":386,\"explained\":true,\"title\":\"Drivers\",\"kpis\":0,\"tables\":2,\"charts\":1}"
@@ -732,30 +1572,1444 @@
     {
       "route": "segments/verdict/unauthorized?days=180",
       "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
-      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Licence\" is empty in 220 of 247 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Standing\" is empty in 37 of 40 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 72 of 84 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 69 of 80 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 330 of 361 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "roster",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 251 of 280 rows"
+    },
+    {
+      "route": "roster",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Reason given\" is empty in 248 of 280 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Km\" is empty in 111 of 113 rows"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fare\" is empty in 391 of 400 rows"
+    },
+    {
+      "route": "platforms",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Room\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Tips\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Salik\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Cash collected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Δ bank − expected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "coverage",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "settings",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Detail\" is empty in 9 of 11 rows"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 340 of 361 rows"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Licence\" is empty in 220 of 247 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Standing\" is empty in 37 of 40 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 72 of 84 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 69 of 80 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 330 of 361 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "roster",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 251 of 280 rows"
+    },
+    {
+      "route": "roster",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Reason given\" is empty in 248 of 280 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Km\" is empty in 111 of 113 rows"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/compliance",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fare\" is empty in 391 of 400 rows"
+    },
+    {
+      "route": "platforms",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "platforms",
+      "width": 820,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: net::ERR_CONNECTION_RESET"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Room\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Tips\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Salik\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Cash collected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Δ bank − expected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "segments/verdict/authorized",
       "width": 820,
       "sev": "e",
       "code": "stuck-loading",
-      "detail": "6 panel(s) still on the skeleton"
+      "detail": "1 panel(s) still on the skeleton"
     },
     {
-      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "route": "segments/verdict/authorized",
       "width": 820,
-      "sev": "w",
-      "code": "chartless-panel",
-      "detail": "When the day starts"
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel, and nothing explaining why"
     },
     {
-      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "route": "segments/plate/L36397",
       "width": 820,
-      "sev": "w",
-      "code": "chartless-panel",
-      "detail": "Trips per day"
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.waitForTimeout: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/day/2026-08-24",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segment/L77062/2026-08-25T18:24:34.620Z",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segment/L77062/2026-08-25T18:24:34.620Z",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "slot/0/3",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "slot/9/99",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "safety",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "safety/vehicles",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "safety/events",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "live",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "map",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "sources",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "coverage",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "providers",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "settings",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "insights/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "providers/uber/trips/Surge%20multiplier",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "map/replay/L36397",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "overview?days=90&platform=uber",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "unit/assets?days=7&platform=uber",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
     }
   ]
 }

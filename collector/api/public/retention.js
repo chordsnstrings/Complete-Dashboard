@@ -117,9 +117,22 @@ export async function renderRetention(root) {
       sub: recruited ? `${Math.round((kept / recruited) * 100)}% of everybody who joined since the record began` : null,
       tone: !recruited ? null
         : kept / recruited >= 0.6 ? 'good' : kept / recruited >= 0.4 ? 'warn' : 'critical' },
+    /* Both halves of the tenure, on the tile.
+       ─────────────────────────────────────────────────────────────────────
+       "Typical run before stopping: 5 months" on its own describes a fleet
+       that turns over twice a year. It is a median over the 122 people who
+       HAVE stopped, and the 107 still working are ten months in and counting —
+       the payload has carried both since it was built, and only the leavers'
+       half was on the tile. The other half was in a note at the very bottom of
+       the page, below three tables, which is not where anybody reading a KPI
+       row is looking. */
     { label: 'Typical run before stopping', value: t.median_months_leavers != null
       ? `${t.median_months_leavers} month${t.median_months_leavers === 1 ? '' : 's'}` : '—',
-      sub: `over ${fmt(t.leavers)} people who have stopped` },
+      sub: `over ${fmt(t.leavers)} people who have stopped`
+        + (t.median_months_so_far_stayers != null
+          ? ` · the ${fmt(t.stayers)} still working are ${t.median_months_so_far_stayers} months `
+            + 'in and counting' : '')
+        + (d.people_total ? ` · ${fmt(d.people_total)} people on record` : '') },
   ]));
 
   /* The question the headcount cannot answer, answered — over the months where

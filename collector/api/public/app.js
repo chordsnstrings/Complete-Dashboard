@@ -2104,10 +2104,28 @@ V.live = async (root) => {
   const located = rows.filter(hasFix);
   const noLock = rows.length - located.length;
   const feeds = [...new Set(rows.map((r) => r.source).filter(Boolean))];
+  /* "Fresh 80 of 130" invites the reading that the other fifty are a few
+     minutes behind. Measured live, 23 of them last reported more than a DAY
+     ago and the worst has been dark for weeks — which is a different problem
+     with a different owner. The API has returned a silent count since the
+     freshness query was written ("so a page can say which vehicles have gone
+     quiet instead of quietly dropping them") and no page ever used it; this is
+     the same measurement taken from the rows on screen, so the tile and the
+     table cannot disagree. */
+  const DAY_MIN = 1440;
+  const silent = rows.filter((r) => r.fix_age_min != null && r.fix_age_min >= DAY_MIN);
+  const worstDays = silent.length
+    ? Math.floor(Math.max(...silent.map((r) => r.fix_age_min)) / DAY_MIN) : 0;
   kh.innerHTML = [
     ['Vehicles tracked', fmt(located.length),
       `with a usable fix${noLock ? ` · ${fmt(noLock)} reporting no satellite lock` : ''}`],
     ['Fresh (<11 min)', fmt(fresh), `of ${fmt(rows.length)} reporting at all`],
+    /* Not the same fact as "not fresh". A car in a basement is minutes behind;
+       these have stopped reporting altogether. */
+    ['Silent over a day', fmt(silent.length),
+      silent.length
+        ? `last fix more than 24h ago · the quietest ${worstDays >= 1 ? `${fmt(worstDays)} day${worstDays === 1 ? '' : 's'} ago` : 'today'}`
+        : 'every tracker has reported in the last 24 hours'],
     ['Moving', fmt(moving), 'speed > 3 km/h'],
     ['Engaged', sensed.length ? `${fmt(engaged)} of ${fmt(sensed.length)}` : fmt(engaged),
       sensed.length
@@ -2166,6 +2184,27 @@ V.live = async (root) => {
       render: (r) => `<span class="tag ${r.stale ? 'warn' : 'ok'}">${
         r.fix_age_min != null ? `${fmt(r.fix_age_min)} min` : (r.stale ? 'stale' : 'live')}</span>` },
     { label: 'Last fix', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
+    /* When WE last asked, beside when the tracker last SAW it.
+       ─────────────────────────────────────────────────────────────────────
+       These two answer different questions and only one of them was on screen.
+       A fix two weeks old with a poll one minute old means the provider is
+       still listing the vehicle and still handing back the same ancient
+       reading — the failure the freshness query in api/server.js was rewritten
+       to expose, because polled_at satisfies a dormant vehicle forever. A fix
+       and a poll that are BOTH old means our collector stopped asking. One is
+       the fleet's problem and one is ours, and the page could not tell them
+       apart. */
+    { label: 'Last polled', key: 'poll_age_min', num: true,
+      absent: 'no feed here records when it was last polled',
+      render: (r) => {
+        if (r.poll_age_min == null) return '<span class="ent-off">—</span>';
+        const stalePoll = r.poll_age_min >= 60;
+        const gap = r.fix_age_min != null && r.fix_age_min - r.poll_age_min >= 1440;
+        return `<span class="tag ${stalePoll ? 'warn' : 'dim'}" title="${stalePoll
+          ? 'nothing has asked this feed for over an hour — that is our collector, not the vehicle'
+          : gap ? 'we asked a moment ago and got back a fix that is over a day old — the provider is still listing this vehicle and reporting nothing new about it'
+            : 'when this feed was last polled'}">${fmt(r.poll_age_min)} min</span>`;
+      } },
     /* 129 markers with no clustering means the ones underneath cannot be
        clicked at all — a click on the fourth marker timed out because a
        different vehicle's path was on top of it. A row here is the reliable

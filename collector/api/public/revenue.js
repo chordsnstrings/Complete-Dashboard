@@ -16,7 +16,7 @@
    collector that needs a credential, and naming it is the point. */
 import { empty, fmt, hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, pct,
-  dayStr, dateStr, sourceLabel, countOf, plural } from './ui.js';
+  dayStr, dateStr, dtStr, sourceLabel, countOf, plural } from './ui.js';
 import { q, href, hrefFilter, state } from './data.js';
 
 const BASIS = {
@@ -191,6 +191,49 @@ export async function renderRevenue(root) {
       + 'here, on the overview, on each vehicle and each driver — is over what did land, and understates '
       + 'what the fleet actually took. The Data sources page shows which collector is failing and why.'));
     host.append(mp.panel);
+  }
+
+  /* ── a channel that reported NOTHING ─────────────────────────────────── */
+  /* The panel above is built from `live`, which is d.platforms filtered to
+     bookings > 0 — and the endpoint returns a row only for a channel that has
+     rows. So a channel whose collector is being REFUSED produces no row at
+     all, matches no filter, and disappears from the money page entirely.
+
+     Measured live: bolt is configured on both fleets and has never delivered a
+     booking, because the FI roster answers 503 NOT_AUTHORIZED for ecosine and
+     egari's portal token is invalid. /api/revenue has been returning that in
+     `silent_platforms` — platform, status, the error text and when it was last
+     tried — and this page showed none of it. A reader saw three channels and
+     concluded the fleet has three.
+
+     Zero and absent are different facts, and on the page that totals the money
+     the difference is whether a channel is small or shut. */
+  const silent = d.silent_platforms || [];
+  if (silent.length) {
+    const sp = panel('Channels that reported nothing at all',
+      'Configured on this fleet, carrying no booking in this window, and failing at the door. '
+      + 'These are not small channels — they are channels nothing is reaching.');
+    sp.body.append(tableFrom(silent, [
+      { label: 'Channel', key: 'platform', render: (r) => esc(sourceLabel(r.platform)) },
+      { label: 'Collector', key: 'collection_status',
+        render: (r) => pill(r.collection_status || 'never run',
+          r.collection_status === 'ok' ? 'ok' : r.collection_status ? 'bad' : 'warn') },
+      { label: 'Last attempt', key: 'collection_at',
+        render: (r) => (r.collection_at ? esc(dtStr(r.collection_at))
+          : '<span class="ent-off" title="no collection run has ever been recorded for this channel">never</span>') },
+      { label: 'What the channel said', key: 'collection_error',
+        render: (r) => (r.collection_error
+          ? `<span class="wrap dim">${esc(r.collection_error)}</span>`
+          : '<span class="ent-off" title="the run finished without an error and still returned nothing">nothing — it simply returned no rows</span>') },
+    ]));
+    sp.body.append(note(`${countOf(silent.length, 'channel')} on this fleet ${
+      plural(silent.length, 'is', 'are')} configured and silent. Nothing on this page counts `
+      + 'them, so every total here is the fleet MINUS whatever they carry — which is unknown '
+      + 'rather than zero. The Data sources page shows the credential or endpoint behind each.', 'warn'));
+    const l = el('p', 'cap');
+    l.innerHTML = `<a class="lnk" href="${href('sources')}">Which collector is failing and why →</a>`;
+    sp.body.append(l);
+    host.append(sp.panel);
   }
 
   /* ── the payout tree ─────────────────────────────────────────────────── */
