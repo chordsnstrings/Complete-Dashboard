@@ -293,10 +293,17 @@ console.log('\nthe page cannot offer a control the endpoint does not honour');
 {
   const appSrc = readFileSync('api/public/app.js', 'utf8');
   const uiSrc = readFileSync('api/public/reconcile.js', 'utf8');
+  /* The three lists moved from the shell into api/public/data.js, because
+     href() has to agree with them: an address must not carry a filter its
+     destination page hides. The shell still does the hiding — it reads
+     hidesRange()/hidesChannel() from there — so both halves are checked. */
+  const dataSrc = readFileSync('api/public/data.js', 'utf8');
   check('the reconciliation view hides the range selector',
-    /const noRange = \[[^\]]*'reconcile'/.test(appSrc) && /#fRange/.test(appSrc));
+    /NO_RANGE = \[[^\]]*'reconcile'/.test(dataSrc)
+    && /#fRange/.test(appSrc) && /hidesRange/.test(appSrc));
   check('while keeping the platform and fleet filters it does honour',
-    !/const noFilter = \[[^\]]*'reconcile'/.test(appSrc));
+    !/NO_FILTER = \[[^\]]*'reconcile'/.test(dataSrc)
+    && !/NO_PLATFORM_FLEET = \[[^\]]*'reconcile'/.test(dataSrc));
   check('and the page asks for nothing but month, platform and fleet',
     !/\bfrom=|\bdays=|state\.days/.test(uiSrc));
   check('the gap is presented as the difference of two named figures',

@@ -14,10 +14,12 @@
    Every panel here answers over *all* of a person's platform accounts, because
    the server folds Uber/Yango/Bolt ids that share a name into one identity. */
 
-import { barChart, areaChart, donut, hbars, heatmap, empty } from './charts.js';
+import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
-  dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime } from './ui.js';
-import { qAll, href } from './data.js';
+  dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
+  sourceLabel, plural, countOf } from './ui.js';
+import { qAll, href, currentGen, alive } from './data.js';
+import { dubaiDay } from './tz.js';
 import { makeMap, fitTo } from './map.js';
 
 export const DRIVER_TABS = [
@@ -34,25 +36,55 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 /* ── percentile bars: where this driver sits in the fleet ─────────────────
    A bar is the driver's percentile, and the tick is the fleet median (always
    the 50th percentile — drawn so the bar has something to be read against). */
-function percentileBars(host, metrics) {
+/* The ordinal suffix was hardcoded "th", so every bar read "72th", "93th",
+   "91th". And the tooltip carried a bare number with no unit — "Distance
+   driven: 1,963.7" of what — while the cancellation metric is inverted on the
+   server (low is good) with nothing on screen to say so, which put "0 —  fleet
+   median 11" beside a 100th percentile and read as a contradiction. */
+const ordinal = (n) => {
+  const v = Math.round(Number(n));
+  if (!Number.isFinite(v)) return '';
+  const t = v % 100;
+  if (t >= 11 && t <= 13) return 'th';
+  return ['th', 'st', 'nd', 'rd'][v % 10] || 'th';
+};
+const METRIC_UNIT = { km: 'km', distance: 'km', revenue: 'AED', earnings: 'AED',
+  fare: 'AED', trips: 'trips', bookings: 'bookings', days: 'days', hours: 'h',
+  rate: '%', pct: '%', completion: '%', cancellation: '%', acceptance: '%', rating: '★' };
+const unitFor = (m) => {
+  if (m.unit) return m.unit;
+  const l = String(m.label || '').toLowerCase();
+  return Object.entries(METRIC_UNIT).find(([k]) => l.includes(k))?.[1] || '';
+};
+
+function percentileBars(host, metrics, opts = {}) {
   host.innerHTML = '';
   if (!metrics.length) return empty(host);
   const wrap = el('div', 'pbars');
   metrics.forEach((m, i) => {
     const p = Math.max(0, Math.min(100, m.percentile));
     const tone = p >= 75 ? '--good' : p >= 40 ? '--s1' : p >= 20 ? '--warn' : '--critical';
+    const u = unitFor(m);
+    const inverted = m.higher_is_better === false || /cancel|reject|no.?show/i.test(m.label || '');
     const row = el('div', 'pbar');
     row.innerHTML = `
-      <div class="pb-l">${esc(m.label)}</div>
+      <div class="pb-l">${esc(m.label)}${u ? `<span class="dim"> (${esc(u)})</span>` : ''}</div>
       <div class="pb-track">
         <i style="width:${p}%;background:var(${tone});animation-delay:${i * 55}ms"></i>
         <span class="pb-mid" title="fleet median"></span>
       </div>
-      <div class="pb-v num">${p}<small>th</small></div>`;
-    row.title = `${m.label}: ${fmt(m.value, 1)} — fleet median ${fmt(m.median, 1)}`;
+      <div class="pb-v num">${p}<small>${ordinal(p)}</small></div>`;
+    row.title = `${m.label}: ${fmt(m.value, 1)}${u ? ' ' + u : ''} — fleet median `
+      + `${fmt(m.median, 1)}${u ? ' ' + u : ''}`
+      + (inverted ? '. Lower is better here, so a high percentile means FEWER of them.' : '')
+      + (opts.note && /revenue|fare|earn/i.test(m.label || '') ? ` ${opts.note}` : '');
     wrap.append(row);
   });
   host.append(wrap);
+  if (metrics.some((m) => /cancel|reject|no.?show/i.test(m.label || ''))) {
+    host.append(el('p', 'cap', 'On the cancellation bar a HIGH percentile is good: it is ranked so that '
+      + 'fewer cancellations sits further right, like every other bar here.'));
+  }
 }
 
 /* ── first trip of each day, plotted as a clock ───────────────────────────
@@ -167,12 +199,35 @@ function dualSeries(host, days) {
 }
 
 /* ── identity header, shown above every tab ──────────────────────────────── */
+/* A licence date shared by most of the roster is what this source writes when
+   the field was never filled in — 77 people carry licence number 123456 and
+   the same expiry. Counted as an expiry it accuses them of driving illegally,
+   which is what the directory toolbar and this pill both did while the
+   compliance page, running the same check, reported `expired: 0`. Two halves
+   of one product disagreeing about whether 77 people can legally drive.
+
+   Recognised from the row where the endpoint says so, and from the tell-tale
+   placeholder licence number until it does, so this reads correctly both
+   before and after the server grows the field. */
+const isPlaceholderLicence = (c) => !!(c.licence_placeholder
+  || (c.placeholder_date && String(c.licence_expires || '').slice(0, 10) === String(c.placeholder_date).slice(0, 10))
+  || /^0*123456$/.test(String(c.licence_no || '')));
+
 function identityCard(p) {
   const c = p.compliance?.[0] || {};
   const wrap = el('div', 'idcard');
   const initials = (p.name || '?').split(' ').filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase();
   const lic = c.licence_days_left;
-  const licTone = lic == null ? null : lic < 0 ? 'bad' : lic < 30 ? 'warn' : 'ok';
+  const placeholder = isPlaceholderLicence(c);
+  const licTone = placeholder ? null : lic == null ? null : lic < 0 ? 'bad' : lic < 30 ? 'warn' : 'ok';
+  /* Accounts, counted from the accounts the profile RETURNS. It was the length
+     of `p.accounts`, which is derived from trip rows — so a Bolt driver who
+     plainly has an account and has taken no trip read "ACCOUNTS 0" on their
+     own page, beside a Bolt pill. */
+  const accN = (p.accounts || []).length;
+  const idN = (p.ids || []).length;
+  const platN = (p.platforms || []).length;
+  const accounts = Math.max(accN, idN, platN);
   wrap.innerHTML = `
     <div class="av">${esc(initials)}</div>
     <div class="idmeta">
@@ -181,17 +236,25 @@ function identityCard(p) {
         ${(p.platforms || []).map((x) => pill(x, 'plat')).join('')}
         ${p.span?.fleet_id ? pill(p.span.fleet_id, 'plat') : ''}
         ${c.state ? pill(c.state, c.state === 'active' ? 'ok' : 'warn') : ''}
-        ${lic != null ? pill(`licence ${lic < 0 ? `expired ${Math.abs(lic)}d ago` : `${lic}d left`}`, licTone) : ''}
+        ${placeholder
+    ? '<span class="pill" title="This source writes 2026-01-01 with licence number 123456 when the field was never filled in. It is a gap in the record, not an expiry.">licence date not filled in</span>'
+    : lic != null ? pill(`licence ${lic < 0 ? `expired ${Math.abs(lic)}d ago` : `${lic}d left`}`, licTone) : ''}
       </div>
       <div class="idfacts">
         ${c.phone ? `<span><b>Phone</b> ${esc(c.phone)}</span>` : ''}
         ${c.licence_no ? `<span><b>Licence</b> ${esc(c.licence_no)}</span>` : ''}
         ${c.emirates_id ? `<span><b>Emirates ID</b> ${esc(c.emirates_id)}</span>` : ''}
         ${c.device_brand ? `<span><b>Device</b> ${esc(c.device_brand)} ${esc(c.device_model || '')}</span>` : ''}
-        <span><b>First seen</b> ${dayStr(p.span?.first_trip)}</span>
-        <span><b>Last seen</b> ${dtStr(p.span?.last_trip)}</span>
-        <span><b>Accounts</b> ${(p.accounts || []).length}</span>
+        <span><b>First seen</b> ${dateStr(p.span?.first_trip)}</span>
+        <span><b>Last seen</b> ${p.span?.last_trip ? `${dateStr(p.span.last_trip)} ${timeStr(p.span.last_trip)}` : '—'}</span>
+        <span><b>Accounts</b> ${fmt(accounts)}${accN !== accounts
+    ? `<span class="dim" title="${accN} of them have taken a trip we hold"> · ${accN} with trips</span>` : ''}</span>
       </div>
+      ${(p.standing || []).length ? `<div class="idsub">${(p.standing || []).map((s) => {
+    const tone = /suspend|deact|block/i.test(s.state || '') ? 'bad' : s.state === 'active' ? 'ok' : 'warn';
+    return `<span class="pill ${tone}" title="${esc([s.platform, s.reason, s.plate ? `holds ${s.plate}` : null]
+      .filter(Boolean).join(' · '))}">${esc(s.platform)}: ${esc(s.state || 'no state')}</span>`;
+  }).join('')}</div>` : ''}
     </div>`;
   return wrap;
 }
@@ -201,7 +264,13 @@ async function tabOverview(root, id, prof) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
   const stand = panel('Standing in the fleet', 'Percentile against every driver with 5+ trips in this window'); g1.append(stand.panel);
-  const veh = panel('Vehicles held', 'Days in custody, from the trip record'); g1.append(veh.panel);
+  /* Lifetime, on a page whose every other panel is the selected window — and
+     sorted by days held, so the car this person is driving today sat fourth
+     behind three they gave back in March. The window is stated and the sort
+     is by recency. */
+  const veh = panel('Vehicles held — over the whole record',
+    'Not this window. Newest custody first, so the car they are in now is the first row.');
+  g1.append(veh.panel);
   const g2 = el('div', 'grid g2'); root.append(g2);
   const start = panel('When the day starts', 'First trip of each working day'); g2.append(start.panel);
   const hm = panel('Weekday × hour', 'Where this driver’s trips actually fall'); g2.append(hm.panel);
@@ -241,30 +310,54 @@ async function tabOverview(root, id, prof) {
     k.rating ? { label: 'Rating', value: fmt(k.rating, 2), sub: 'platform-reported', tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' } : null,
   ]));
 
-  percentileBars(stand.body, st.metrics || []);
-  stand.body.append(el('p', 'cap', `Compared against ${st.n_peers || 0} drivers active in this window.`));
+  /* The revenue bar ranks a driver against a fleet whose median fare is zero,
+     because Uber publishes no fare per trip — so a hotel driver with four
+     priced bookings scores 98th, an Uber-only driver scores nothing at all,
+     and neither number compares to the other. Captioned rather than dropped:
+     the bar is real about the fares it measured, and it is the sentence that
+     was missing. */
+  const moneyBar = (st.metrics || []).some((m) => /revenue|fare|earn/i.test(m.label || ''));
+  percentileBars(stand.body, st.metrics || [], {
+    note: 'Fares only — most of this fleet\'s work carries no fare, so this percentile is not comparable.' });
+  if (!(st.metrics || []).length) {
+    stand.body.append(note(k.trips
+      ? `${fmt(k.trips)} trips in this window, which is fewer than the five a ranking needs — this person `
+        + 'is not ranked rather than ranked badly.'
+      : 'No trip in this window, so there is nothing to rank. Widen the range above.'));
+  } else {
+    stand.body.append(el('p', 'cap',
+      `Compared against ${countOf(st.n_peers || 0, 'driver')} with five or more trips in this window.`
+      + (moneyBar
+        ? ' The revenue bar is over FARES only: Uber publishes no fare per trip and is most of this '
+          + 'fleet\'s work, so the fleet median it is measured against is near zero and a driver who '
+          + 'works one priced channel outranks one who works none. Read it as a rank among priced '
+          + 'bookings, not as a rank by earnings.'
+        : '')));
+  }
 
   veh.body.innerHTML = '';
   // Narrow panel — the date range rides in the row tooltip rather than forcing
   // a horizontal scrollbar onto four columns that matter more.
-  const vt = tableFrom((prof.vehicles || []).slice(0, 8), [
+  // Newest custody first: "which car are they in now" is the question this
+  // panel is opened for, and days-held answered a different one.
+  const heldRows = [...(prof.vehicles || [])]
+    .sort((a, b) => String(b.last_day || '').localeCompare(String(a.last_day || '')));
+  const vt = tableFrom(heldRows.slice(0, 8), [
     /* entity(), not a hand-rolled anchor: href() drops falsy parts, so a null
        plate produced `#vehicle` — a link with empty text that silently opened
        the whole vehicle directory instead of saying there was nothing to open. */
     { label: 'Plate', key: 'plate',
       render: (r) => entity('vehicle', r.plate, r.plate)
-        + (r.ever_primary ? ' <span class="dim">●</span>' : '') },
+        + (r.ever_primary ? ' <span class="dim" title="primary holder on at least one day">●</span>' : '') },
+    { label: 'Last held', key: 'last_day', render: (r) => dateStr(r.last_day) },
     { label: 'Days', key: 'days', num: true },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-  ], { compact: true });
-  vt.querySelectorAll('tbody tr').forEach((tr, i) => {
-    const r = prof.vehicles[i];
-    tr.title = `${r.plate} · held ${dayStr(r.first_day)} → ${dayStr(r.last_day)}` +
-      `${r.ever_primary ? ' · primary driver on at least one day' : ''}`;
-  });
+  ], { compact: true, sortable: true, sortId: 'held', defaultSort: { key: 'last_day', dir: 'desc' } });
   veh.body.append(vt);
-  veh.body.append(el('p', 'cap', '● marks a vehicle this driver was the primary holder of. Hover a row for the dates.'));
+  veh.body.append(el('p', 'cap', '● marks a vehicle this driver was the primary holder of. '
+    + `Custody is over the whole record, not the window above${heldRows.length > 8
+      ? ` — showing the ${fmt(Math.min(8, heldRows.length))} most recent of ${fmt(heldRows.length)}` : ''}.`));
 
   startScatter(start.body, daily);
   heatmap(hm.body, hmap);
@@ -296,7 +389,9 @@ async function tabActivity(root, id) {
 
   tbl.body.innerHTML = '';
   tbl.body.append(tableFrom([...daily].reverse(), [
-    { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
+    // A day is an address, and it was the one cell in the row that was not.
+    { label: 'Day', key: 'day',
+      render: (r) => entity('day', String(r.day).slice(0, 10), dayStr(r.day)) },
     { label: 'First', key: '_f', render: (r) => hourStr(r.first_hour) },
     { label: 'Last', key: '_l', render: (r) => hourStr(r.last_hour) },
     { label: 'Span', key: 'span_h', num: true, render: (r) => (r.span_h ? `${fmt(r.span_h, 1)} h` : '—') },
@@ -319,16 +414,31 @@ async function tabActivity(root, id) {
   ]));
 
   cust.body.innerHTML = '';
-  cust.body.append(tableFrom(custody.slice(0, 60), [
-    { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
+  const custRows = Array.isArray(custody) ? custody : (custody.rows || []);
+  const custTotal = Array.isArray(custody) ? null : custody.total;
+  const custShown = custRows.slice(0, 60);
+  cust.body.append(tableFrom(custShown, [
+    { label: 'Day', key: 'day',
+      render: (r) => entity('day', String(r.day).slice(0, 10), dayStr(r.day)) },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
-    { label: 'Platform', key: 'platform' },
+    { label: 'Platform', key: 'platform', render: (r) => esc(sourceLabel(r.platform)) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'First', key: '_a', render: (r) => timeStr(r.first_trip_at) },
-    { label: 'Last', key: '_b', render: (r) => timeStr(r.last_trip_at) },
-    { label: 'Primary', key: 'is_primary', render: (r) => (r.is_primary ? '●' : '—') },
-  ]));
+    { label: 'First', key: 'first_trip_at', render: (r) => timeStr(r.first_trip_at) },
+    { label: 'Last', key: 'last_trip_at', render: (r) => timeStr(r.last_trip_at) },
+    { label: 'Primary', key: 'is_primary',
+      render: (r) => (r.is_primary ? '<span title="primary holder of this vehicle on this day">●</span>' : '—') },
+  ], { sortable: true, sortId: 'custody', defaultSort: { key: 'day', dir: 'desc' } }));
+  /* The table was cut to sixty of however many the endpoint returned — which
+     is itself capped — and said nothing, so 60 of 256 days read as the whole
+     of a driver's custody history. */
+  if (custRows.length > custShown.length || (custTotal && custTotal > custShown.length)) {
+    cust.body.append(el('p', 'cap',
+      `Showing the ${fmt(custShown.length)} most recent of ${fmt(custTotal ?? custRows.length)} custody `
+      + `${plural(custTotal ?? custRows.length, 'day')} in this window`
+      + (custTotal && custTotal > custRows.length
+        ? ', and the server sent only the newest of those.' : '.')));
+  }
 }
 
 /* ── tab: territory ──────────────────────────────────────────────────────── */
@@ -379,11 +489,23 @@ async function tabTerritory(root, id) {
     if (!pts.length) {
       mapP.body.append(note('No positioned trips for this driver in this window. Uber supplies pickup coordinates; the FMS telematics feed does not, so a telematics-only driver has nothing to plot.'));
     }
+    /* The denominator the map is drawn over. A one-cluster map sat beside a
+       table of 139 pickups across 25 areas, and the "no positioned trips" note
+       fired only at exactly zero — so a driver with 138 unpositioned pickups
+       and one positioned saw a map that looked like their whole territory. */
+    const areaTrips = (terr.areas || []).reduce((a, x) => a + (+x.n || 0), 0);
+    const plotted = terr.pickups.reduce((a, x) => a + (+x.n || 0), 0);
     mapP.body.append(el('div', 'legend', `
       <span><i style="background:var(--s1)"></i>pickups</span>
       <span><i style="background:var(--s3)"></i>drop-offs</span>
       <span><i style="border:1.5px dashed var(--s5);background:none"></i>waiting spots</span>
       ${pts.length ? `<span>${terr.pickups.length} pickup clusters · ${terr.idle.length} waiting spots</span>` : ''}`));
+    if (pts.length && areaTrips > plotted) {
+      mapP.body.append(el('p', 'cap',
+        `${fmt(plotted)} of ${fmt(areaTrips)} pickups carry coordinates and are on this map. The other `
+        + `${fmt(areaTrips - plotted)} have an address and no position — the table beside this is over `
+        + 'all of them, so it will name areas the map does not show.'));
+    }
   }
 
   areas.body.innerHTML = '';
@@ -391,11 +513,31 @@ async function tabTerritory(root, id) {
     { label: 'Area', key: 'area' },
     { label: 'Pickups', key: 'n', num: true },
     { label: 'Avg trip', key: 'avg_km', num: true, render: (r) => (r.avg_km ? `${fmt(r.avg_km, 1)} km` : '—') },
-    { label: 'Avg fare', key: 'avg_fare', num: true, render: (r) => (r.avg_fare ? money(r.avg_fare) : '—') },
-  ], { compact: true }));
+    { label: 'Avg fare', key: 'avg_fare', num: true,
+      render: (r) => (r.avg_fare ? money(r.avg_fare)
+        : '<span class="ent-off" title="no pickup in this area carries a fare — Uber’s export has no fare column">—</span>') },
+  ], { compact: true, sortable: true, sortId: 'areas', defaultSort: { key: 'n', dir: 'desc' } }));
+  if ((terr.areas || []).length > 12) {
+    areas.body.append(el('p', 'cap',
+      `The 12 busiest of ${countOf(terr.areas.length, 'area')} this driver picked up in.`));
+  }
 
   dmix.body.innerHTML = '';
-  hbars(dmix.body, mix.distance, { label: 'label', value: 'n', seq: true, valueFmt: (v) => `${fmt(v)} trips` });
+  /* The distance mix carried an average fare per bucket and the chart threw it
+     away — "short hops or long runs" is only half the question, and the other
+     half is whether the short ones pay. */
+  const dist = (mix.distance || []).map((d) => ({ ...d }));
+  hbars(dmix.body, dist, { label: 'label', value: 'n', seq: true, signed: false,
+    valueFmt: (v) => `${fmt(v)} trips` });
+  if (dist.some((d) => d.avg_fare != null)) {
+    dmix.body.append(tableFrom(dist, [
+      { label: 'Trip length', key: 'label' },
+      { label: 'Trips', key: 'n', num: true },
+      { label: 'Avg fare', key: 'avg_fare', num: true,
+        render: (r) => (r.avg_fare != null ? money(r.avg_fare, 'AED', 2)
+          : '<span class="ent-off" title="no trip in this bucket reports a fare">—</span>') },
+    ], { compact: true }));
+  }
 }
 
 /* ── tab: earnings ───────────────────────────────────────────────────────── */
@@ -413,7 +555,18 @@ async function tabEarnings(root, id) {
     qAll('/api/driver/daily', { id }), qAll('/api/driver/kpis', { id }),
   ]);
 
-  const cash = mix.payment.find((p) => /cash/i.test(p.label));
+  /* Every cash label, summed — not the first one `.find` happens to hit.
+     /api/driver/mix returns payment labels ordered by count, so `.find(/cash/i)`
+     always landed on Uber's bare `cash` bucket, whose revenue is null because
+     that export carries no fare column. The tile printed a dash while
+     `cash-driver` (10 trips, AED 395) and `pos-driver` (1, AED 30) sat two rows
+     below it, and the components panel further down showed a cash clawback of
+     AED 343 the fleet was owed. */
+  const CASH_LABEL = /(^|[^a-z])cash([^a-z]|$)|cash-driver|cash-supervisor|pos-driver/i;
+  const cashRows = (mix.payment || []).filter((p) => CASH_LABEL.test(String(p.label || '')));
+  const cashTrips = cashRows.reduce((a, p) => a + (+p.n || 0), 0);
+  const cashKnown = cashRows.filter((p) => p.revenue != null);
+  const cashValue = cashKnown.length ? cashKnown.reduce((a, p) => a + (+p.revenue || 0), 0) : null;
   kpiHost.replaceWith(kpiRow([
     /* Every money figure here is over the trips that CARRY a fare, which on a
        driver working mostly Uber is a small fraction of their work — the Uber
@@ -430,8 +583,24 @@ async function tabEarnings(root, id) {
     { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },
     { label: 'Tips', value: money(e.tips), sub: e.tip_pct != null ? `${pct(e.tip_pct, 1)} of net fare` : 'no tip data yet',
       tone: e.tip_pct == null ? null : e.tip_pct >= 3 ? 'good' : e.tip_pct >= 1 ? 'warn' : null },
-    { label: 'Cash collected', value: money(k.cash_earnings ?? (cash ? cash.revenue : null)),
-      sub: cash ? `${fmt(cash.n)} cash trips` : 'card only' },
+    { label: 'Cash collected', value: (() => {
+      // The clawback line in the payout breakdown is the same money seen from
+      // the other side, and is the only figure present when no cash trip
+      // carries a fare.
+      const fromComponents = (e.components || [])
+        .filter((c) => /cash/i.test(c.category))
+        .reduce((a, c) => a + Math.abs(+c.amount || 0), 0);
+      const v = k.cash_earnings ?? cashValue ?? (fromComponents || null);
+      return v ? money(v) : (cashTrips ? 'not reported' : money(0));
+    })(),
+    sub: cashTrips
+      ? `${countOf(cashTrips, 'cash trip')} across ${cashRows.map((p) => p.label).join(', ')}`
+        + (cashKnown.length < cashRows.length
+          ? ` — ${countOf(cashRows.length - cashKnown.length, 'of those labels reports', 'of those labels report')}`
+            + ' no fare at all'
+          : '')
+      : 'no cash booking in this window',
+    tone: cashTrips && cashKnown.length < cashRows.length ? 'warn' : null },
     // Priced fares over the distance of the priced trips. Dividing by the whole
     // distance mixes two populations and understates it by however much of the
     // work carries no fare.
@@ -447,34 +616,75 @@ async function tabEarnings(root, id) {
   if (!e.components.length) {
     comp.body.append(note('No earnings breakdown for this driver yet. Uber publishes components per payout period; they appear once a period covering this window has been collected.'));
   } else {
-    // Components come signed: fares and tips add, cash already collected and
-    // fees subtract. Drawing every bar the same way would present a deduction
-    // as income, so the sign decides the colour and stays in the label.
-    const max = Math.max(...e.components.map((c) => Math.abs(+c.amount))) || 1;
-    const rows = el('div', 'hbars');
-    e.components.forEach((c, i) => {
-      const v = +c.amount, neg = v < 0;
-      const r = el('div', 'hb');
-      r.innerHTML = `<div class="k" title="${esc(c.parent || '')}">${esc(c.category.replace(/_/g, ' '))}</div>
-        <div class="track"><div class="fill" style="width:${(Math.abs(v) / max * 100).toFixed(1)}%;
-          background:var(${neg ? '--s2' : i === 0 ? '--b600' : '--b400'});animation-delay:${i * 45}ms"></div></div>
-        <div class="v num">${neg ? '−' : ''}${money(Math.abs(v), c.currency)}</div>`;
-      r.title = `${c.category.replace(/_/g, ' ')} — ${c.parent || 'component'} — ${neg ? 'deducted from' : 'added to'} the payout`;
-      rows.append(r);
-    });
-    comp.body.append(rows);
-    comp.body.append(el('div', 'legend', `
-      <span><i style="background:var(--b500)"></i>added to the payout</span>
-      <span><i style="background:var(--s2)"></i>deducted (cash already taken, fees)</span>`));
+    /* Roots as bars, children nested beneath the root they belong to.
+       Charted as siblings, this driver's "refunds 33.54" sat beside its own
+       two parts — toll 29.40 and airport_fee_partner 4.14 — and all three were
+       bars, so the same AED 33.54 was drawn twice and the bars summed to more
+       than the payout they decompose. `parent` was carried into a title
+       attribute and used for nothing else. */
+    const roots = e.components.filter((c) => !c.parent);
+    const kids = e.components.filter((c) => c.parent);
+    if (roots.length) {
+      hbars(comp.body, roots.map((c) => ({ label: String(c.category).replace(/_/g, ' '), n: +c.amount || 0 })), {
+        valueFmt: (v) => money(v, roots[0].currency || 'AED'),
+        legend: [['--b400', 'added to the payout'], ['--s2', 'deducted (cash already taken, fees)']] });
+      const net = roots.reduce((a, c) => a + (+c.amount || 0), 0);
+      comp.body.append(el('p', 'cap',
+        `${countOf(roots.length, 'top-level component')} netting to ${money(net)}. `
+        + 'Anything listed below is INSIDE one of them and is not added again.'));
+    }
+    if (kids.length) {
+      comp.body.append(tableFrom(kids.map((c) => ({
+        within: String(c.parent).replace(/_/g, ' '),
+        label: String(c.category).replace(/_/g, ' '),
+        amount: +c.amount || 0, currency: c.currency,
+      })), [
+        { label: 'Within', key: 'within' },
+        { label: 'Component', key: 'label' },
+        { label: 'Amount', key: 'amount', num: true,
+          render: (r) => `${r.amount < 0 ? '−' : ''}${money(Math.abs(r.amount), r.currency || 'AED', 2)}` },
+      ], { compact: true, sortable: true, sortId: 'dcomp' }));
+    }
+    if (!roots.length) {
+      comp.body.append(el('p', 'cap', 'Every component here names a parent that was not returned for '
+        + 'this window, so these are parts of a payout rather than the payout.'));
+    }
   }
 
   pay.body.innerHTML = '';
-  donut(pay.body, mix.payment.slice(0, 6));
+  /* donut() folds its own tail into "Other (N)" and prints the true total in
+     the ring. Slicing to six before handing it over defeated that: the centre
+     read "218 total" from six slices while the eleven the driver actually has
+     sum to 229 — the page's own Trips tile. */
+  donut(pay.body, mix.payment, { max: 6 });
 
   line.body.innerHTML = '';
   const withRev = daily.filter((d) => d.revenue != null && +d.revenue > 0);
   if (!withRev.length) line.body.append(note('No fare values on this driver’s trips in this window — the telematics and hotel feeds carry fares, the Uber trip export does not.'));
-  else areaChart(line.body, withRev.map((d) => ({ label: dayStr(d.day), v: +d.revenue })), { x: 'label', y: 'v', valueFmt: (v) => money(v) });
+  else {
+    /* A day with no fare is plotted as a ZERO, not skipped.
+       Filtering to priced days made a 31-day window draw four bars with an
+       x-axis reading "Aug 7 · Aug 19 · Aug 23 · Aug 25" — twelve-day holes
+       rendered as adjacent bars, which reads as four consecutive days of work.
+       The full series is built here and the caption says how much of it
+       carries a fare at all. */
+    const byDay = new Map(daily.map((d) => [String(d.day).slice(0, 10), d]));
+    const days = daily.map((d) => String(d.day).slice(0, 10)).sort();
+    const series = [];
+    if (days.length) {
+      for (let t = Date.parse(`${days[0]}T12:00:00Z`); t <= Date.parse(`${days[days.length - 1]}T12:00:00Z`); t += 864e5) {
+        const key = dubaiDay(new Date(t));
+        const d = byDay.get(key);
+        series.push({ label: key, v: d && d.revenue != null ? +d.revenue : 0, worked: !!d });
+      }
+    }
+    barChart(line.body, series, { x: 'label', y: 'v', valueFmt: (v) => money(v),
+      colorFor: (d) => (d.v > 0 ? '--b400' : d.worked ? '--surface-3' : '--surface-2') });
+    line.body.append(el('p', 'cap',
+      `${countOf(withRev.length, 'day')} of ${fmt(series.length)} in this window carry a fare. `
+      + 'The rest are drawn at zero rather than left out, so a gap looks like a gap — pale bars are days '
+      + 'this driver worked with no fare recorded, and the faintest are days they did not work.'));
+  }
 
   per.body.innerHTML = '';
   /* These are the statements the platform published, and they OVERLAP: a
@@ -490,27 +700,46 @@ async function tabEarnings(root, id) {
      the note explains. */
   const displaced = e.periods.filter((r) => r.days_used != null && r.days_used < r.period_days);
   const counted = e.periods.reduce((a, r) => a + Number(r.counted ?? r.earnings ?? 0), 0);
+  /* A column that can never carry a value is worse than an absent one: it
+     reads as "we looked and this driver has no acceptance rate". Neither
+     `acceptance_rate` nor `rating` is in this endpoint's SELECT, so both were
+     a column of dashes on every driver on the fleet. Rendered only where the
+     payload actually carries one, and explained once underneath when it does
+     not. */
+  const hasAccept = e.periods.some((r) => r.acceptance_rate != null);
+  const hasRating = e.periods.some((r) => r.rating != null);
   per.body.append(tableFrom(e.periods, [
-    { label: 'Platform', key: 'platform' },
-    { label: 'Period', key: '_p', render: (r) => `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` },
+    { label: 'Platform', key: 'platform', render: (r) => esc(sourceLabel(r.platform)) },
+    { label: 'Period', key: 'period_start', render: (r) => `${dateStr(r.period_start)} → ${dateStr(r.period_end)}` },
     { label: 'Days', key: 'days_used', num: true,
       render: (r) => (r.days_used == null ? '—'
         : r.days_used === r.period_days ? String(r.period_days)
-        : `<span class="tag warn">${r.days_used} of ${r.period_days}</span>`) },
+        : `<span class="tag warn" title="the other ${r.period_days - r.days_used} day(s) are covered by another statement">${r.days_used} of ${r.period_days}</span>`) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Online', key: 'hours_online', num: true, render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
     { label: 'On trip', key: 'hours_on_trip', num: true, render: (r) => (r.hours_on_trip ? `${fmt(r.hours_on_trip, 1)} h` : '—') },
-    { label: 'Accept', key: 'acceptance_rate', num: true, render: (r) => (r.acceptance_rate != null ? pct(r.acceptance_rate * 100) : '—') },
+    ...(hasAccept ? [{ label: 'Accept', key: 'acceptance_rate', num: true,
+      render: (r) => (r.acceptance_rate != null ? pct(r.acceptance_rate * 100) : '—') }] : []),
     { label: 'Statement', key: 'earnings', num: true, render: (r) => money(r.earnings) },
     { label: 'Counted', key: 'counted', num: true, render: (r) => money(r.counted ?? r.earnings) },
     { label: 'Cash', key: 'cash_earnings', num: true, render: (r) => money(r.cash_earnings) },
-    { label: 'Rating', key: 'rating', num: true, render: (r) => (r.rating ? fmt(r.rating, 2) : '—') },
-  ]));
-  per.body.append(el('p', 'cap', `${money(counted)} counted across ${fmt(e.periods.length)} statement(s)`
+    ...(hasRating ? [{ label: 'Rating', key: 'rating', num: true,
+      render: (r) => (r.rating ? fmt(r.rating, 2) : '—') }] : []),
+  ], { sortable: true, sortId: 'periods', defaultSort: { key: 'period_start', dir: 'desc' } }));
+  per.body.append(el('p', 'cap', `${money(counted)} counted across ${countOf(e.periods.length, 'statement')}`
     + (displaced.length
       ? ` — ${fmt(displaced.length)} of them overlap another statement, and only the days no other `
         + 'statement covers are counted. Adding the Statement column instead would count those days twice.'
-      : '. None of them overlap, so Statement and Counted agree.')));
+      : '. None of them overlap, so Statement and Counted agree.')
+    + ((hasAccept && hasRating) ? ''
+      : ` Acceptance and rating are ${(!hasAccept && !hasRating) ? 'both ' : ''}absent from this report — `
+        + 'the platform publishes them on a different surface, so no column is drawn for them rather '
+        + 'than a column of dashes that reads as zero.')
+    + (Math.abs(counted - Number(k.reported_earnings || 0)) > 1 && k.reported_earnings
+      ? ` The Platform-earnings tile above reads ${money(k.reported_earnings)}: that is the sum of the `
+        + 'statements as published, and this is the part of them that falls inside the window — a '
+        + 'statement straddling the edge contributes only its days inside it.'
+      : '')));
 }
 
 /* ── tab: quality ────────────────────────────────────────────────────────── */
@@ -540,8 +769,27 @@ async function tabQuality(root, id) {
     { label: 'Acceptance', value: k.acceptance_rate != null ? pct(k.acceptance_rate * 100) : '—', sub: 'platform-reported' },
     { label: 'Rating', value: k.rating ? fmt(k.rating, 2) : '—', sub: 'platform-reported' },
     { label: 'Harsh events', value: fmt(totalAlerts), sub: qy.alert_km ? `over ${fmt(qy.alert_km)} km` : 'no matched distance' },
-    { label: 'Per 100 km', value: qy.alerts_per_100km != null ? fmt(qy.alerts_per_100km, 1) : '—', sub: 'comparable across drivers',
-      tone: qy.alerts_per_100km == null ? null : qy.alerts_per_100km <= 5 ? 'good' : qy.alerts_per_100km <= 15 ? 'warn' : 'critical' },
+    /* Against the FLEET, where the fleet figure exists, rather than against a
+       hardcoded 5/15 scale. 29.5 per 100 km was painted critical under a
+       sub-label reading "comparable across drivers" with nothing on the page
+       to compare it to — and on a fleet whose own rate is 30, critical is the
+       wrong word for average. Falls back to the constant scale, saying so, so
+       this reads correctly before the fleet baseline is returned. */
+    (() => {
+      const v = qy.alerts_per_100km;
+      const base = qy.fleet_alerts_per_100km;
+      if (v == null) return { label: 'Per 100 km', value: '—', sub: 'no matched distance to rate over' };
+      if (base == null) {
+        return { label: 'Per 100 km', value: fmt(v, 1),
+          sub: 'against a fixed 5 / 15 scale — the fleet\'s own rate is not published on this endpoint',
+          tone: v <= 5 ? 'good' : v <= 15 ? 'warn' : null };
+      }
+      const ratio = base > 0 ? v / base : null;
+      return { label: 'Per 100 km', value: fmt(v, 1),
+        sub: `fleet median ${fmt(base, 1)}`
+          + (ratio ? ` — ${ratio >= 1 ? `${fmt(ratio, 1)}x it` : `${fmt(1 / ratio, 1)}x better`}` : ''),
+        tone: ratio == null ? null : ratio <= 0.7 ? 'good' : ratio <= 1.3 ? null : ratio <= 2 ? 'warn' : 'critical' };
+    })(),
   ]));
 
   cx.body.innerHTML = '';
@@ -585,12 +833,16 @@ async function tabQuality(root, id) {
 async function tabTrips(root, id) {
   const p = panel('Trip records', 'The underlying rows, newest first — every platform this driver appears on');
   root.append(p.panel); loading(p.body);
-  const rows = await qAll('/api/driver/trips', { id, limit: 500 });
+  const LIMIT = 500;
+  const rows = await qAll('/api/driver/trips', { id, limit: LIMIT });
   p.body.innerHTML = '';
-  if (!rows.length) return empty(p.body);
+  if (!rows.length) {
+    return empty(p.body, 'No trip on any channel for this driver in this window. Widen the range above '
+      + '— this person may simply not have worked in it.');
+  }
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="tq" type="search" placeholder="Filter by address, plate, status or product…">
-    <span class="cap" id="tn">${rows.length} trips</span>`;
+    <span class="cap" id="tn"></span>`;
   p.body.append(bar);
   const host = el('div'); p.body.append(host);
   const cols = [
@@ -609,15 +861,41 @@ async function tabTrips(root, id) {
        text stays the provider's own word. */
     { label: 'Status', key: 'status', render: (r) => pill(r.status || '—',
       r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null) },
-    { label: 'Fare', key: 'price', num: true, render: (r) => (r.price ? money(r.price, r.currency) : '—') },
+    { label: 'Fare', key: 'price', num: true,
+      render: (r) => (r.price ? money(r.price, r.currency)
+        : `<span class="ent-off" title="${r.platform === 'uber'
+          ? 'Uber’s trip export carries no fare column at all — this driver was paid for it, weekly, under Earnings'
+          : 'no fare recorded on this booking'}">—</span>`) },
   ];
-  const draw = (list) => { host.innerHTML = ''; host.append(tableFrom(list.slice(0, 400), cols)); };
-  draw(rows);
+  const DRAW = 400;
+  /* The toolbar said 500 and the table drew 400 of them, out of roughly 1,200
+     the driver actually has — three different numbers, one of them stated and
+     none of them the truth. Every count is over the same list now, and the
+     sentence names both ceilings. */
+  const draw = (list, term) => {
+    host.innerHTML = '';
+    host.append(tableFrom(list.slice(0, DRAW), cols,
+      { sortable: true, sortId: 'dtrips', defaultSort: { key: 'requested_at', dir: 'desc' } }));
+    if (!list.length) {
+      host.innerHTML = '';
+      host.append(note(`No trip here matches “${term}”. That is a filter over the `
+        + `${fmt(rows.length)} trips on this page, not a statement about the window.`));
+      return;
+    }
+    const caps = [];
+    if (list.length > DRAW) caps.push(`showing the ${fmt(DRAW)} newest of ${fmt(list.length)} matching`);
+    if (rows.length >= LIMIT) caps.push(`the server sent the ${fmt(LIMIT)} newest trips in this window, `
+      + 'so older ones are not on this page at all');
+    if (caps.length) host.append(el('p', 'cap', `${caps.join('; ')}.`));
+  };
+  const count = (n) => { bar.querySelector('#tn').textContent = `${fmt(n)} of ${fmt(rows.length)} trips`; };
+  count(rows.length);
+  draw(rows, '');
   bar.querySelector('#tq').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
     const list = t ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(t)) : rows;
-    bar.querySelector('#tn').textContent = `${list.length} trips`;
-    draw(list);
+    count(list.length);
+    draw(list, t);
   };
 }
 
@@ -670,12 +948,43 @@ export async function renderDriverDirectory(root) {
   const active = rows.filter((r) => r.active_in_window);
   const idle = rows.filter((r) => !r.active_in_window && r.ever_driven);
   const never = rows.filter((r) => !r.ever_driven);
-  const expired = rows.filter((r) => r.licence_days_left != null && r.licence_days_left < 0);
-  bar.querySelector('#dn').textContent =
-    `${rows.length} drivers · ${active.length} drove in this window`
-    + (idle.length ? ` · ${idle.length} did not` : '')
-    + (never.length ? ` · ${never.length} never have` : '')
-    + (expired.length ? ` · ${expired.length} with an expired licence` : '');
+  /* A licence date the source writes when the field was never filled in is not
+     an expiry. 77 people here carry licence number 123456 and the same date,
+     and this toolbar counted every one of them as illegal to drive — while
+     #compliance, running the same check with the placeholder excluded, reported
+     zero. Two pages of one product disagreeing about whether 77 people can
+     legally work.
+
+     Detected the way the server detects it (api/server.js): the MODAL date,
+     when one date covers at least half the rows that carry one and there are
+     at least five of them. Real expiries are spread across the calendar; a
+     single date shared by half the roster is a default value. Computed here
+     rather than only server-side so the two pages agree today, and the
+     endpoint's own flag wins the moment it starts sending one. */
+  const dated = rows.map((r) => String(r.licence_expires || '').slice(0, 10)).filter(Boolean);
+  const tally = new Map();
+  dated.forEach((d) => tally.set(d, (tally.get(d) || 0) + 1));
+  const [modalDate, modalN] = [...tally.entries()].sort((a, b) => b[1] - a[1])[0] || [null, 0];
+  const inferredPlaceholder = (modalN >= 5 && modalN >= dated.length * 0.5) ? modalDate : null;
+  const placeholderRow = (r) => {
+    if (r.licence_placeholder != null) return !!r.licence_placeholder;
+    const d = String(r.licence_expires || '').slice(0, 10);
+    if (!d) return false;
+    if (r.placeholder_date) return d === String(r.placeholder_date).slice(0, 10);
+    if (/^0*123456$/.test(String(r.licence_no || ''))) return true;
+    return d === inferredPlaceholder;
+  };
+  const notFilled = rows.filter(placeholderRow);
+  const expired = rows.filter((r) => r.licence_days_left != null && r.licence_days_left < 0 && !placeholderRow(r));
+  const summary = (n) => `${fmt(n)} of ${fmt(rows.length)} drivers`
+    + (n === rows.length
+      ? ` · ${fmt(active.length)} drove in this window`
+        + (idle.length ? ` · ${fmt(idle.length)} did not` : '')
+        + (never.length ? ` · ${fmt(never.length)} never have` : '')
+        + (expired.length ? ` · ${countOf(expired.length, 'expired licence')}` : '')
+        + (notFilled.length ? ` · ${fmt(notFilled.length)} with no real licence date on file` : '')
+      : '');
+  bar.querySelector('#dn').textContent = summary(rows.length);
 
   // the top few as cards, because a leaderboard is read as a ranking
   grid.innerHTML = '';
@@ -694,49 +1003,121 @@ export async function renderDriverDirectory(root) {
     grid.append(c);
   });
 
+  /* A person's STANDING, from the platform's own roster. 24 to 28 people here
+     are suspended or deactivated and the directory rendered them as "no trip"
+     — indistinguishable from somebody on leave, on the page an operator opens
+     to find the ones not earning. */
+  const STATE_TONE = (s) => (/suspend|deact|block|reject/i.test(s || '') ? 'bad'
+    : /waitlist|onboard|pending|applied/i.test(s || '') ? 'warn' : 'ok');
+  const anyFleet = rows.some((r) => r.fleet_id);
+  const anyState = rows.some((r) => r.platform_state || r.can_earn != null);
+  const anyLifetime = rows.some((r) => r.lifetime_trips != null);
   const cols = [
     { label: '#', key: '_i', render: (r) => String(rows.indexOf(r) + 1) },
-    { label: 'In this window', key: '_a', render: (r) => (r.active_in_window
-      ? pill('drove', 'ok')
-      : r.ever_driven ? pill('no trip', 'warn') : pill('never driven', 'bad')) },
+    { label: 'In this window', key: '_a',
+      sortValue: (r) => (r.active_in_window ? 2 : r.ever_driven ? 1 : 0),
+      render: (r) => (r.active_in_window
+        ? pill('drove', 'ok')
+        : r.ever_driven ? pill('no trip', 'warn') : pill('never driven', 'bad')) },
+    ...(anyState ? [{ label: 'Standing', key: 'platform_state',
+      render: (r) => (r.platform_state
+        ? pill(r.platform_state, STATE_TONE(r.platform_state))
+        : (r.can_earn === false
+          ? pill('cannot earn', 'bad')
+          : '<span class="ent-off" title="no platform published a standing for this person">not reported</span>')) }] : []),
     { label: 'Driver', key: 'driver_name',
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+    // On a two-fleet operator, which fleet. It is on every row and was drawn
+    // nowhere.
+    ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',
+      render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id), 'plat')
+        : '<span class="ent-off" title="no trip of theirs names a fleet">—</span>') }] : []),
     { label: 'Platforms', key: '_p', render: (r) => (r.platforms || []).map((p) => pill(p, 'plat')).join('') },
     { label: 'Usual vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },
+    ...(anyLifetime ? [{ label: 'Trips ever', key: 'lifetime_trips', num: true,
+      render: (r) => (r.lifetime_trips == null
+        ? '<span class="ent-off" title="we hold no trip history for this person’s platforms">not observed</span>'
+        : fmt(r.lifetime_trips)) }] : []),
+    { label: 'Completed', key: 'completed', num: true,
+      render: (r) => (r.completed == null
+        ? '<span class="ent-off" title="no platform of theirs reports an outcome">—</span>'
+        : fmt(r.completed)) },
     { label: 'Days', key: 'days', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+    { label: 'Fares', key: 'revenue', num: true,
+      render: (r) => (r.revenue
+        ? `${money(r.revenue)}${r.priced_trips != null
+          ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
+        : '<span class="ent-off" title="no booking of theirs reports a fare — Uber’s export has no fare column">—</span>') },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
+    { label: 'Rating', key: 'rating', num: true,
+      render: (r) => (r.rating != null ? fmt(r.rating, 2)
+        : '<span class="ent-off" title="no platform of theirs publishes a rating">—</span>') },
+    { label: 'First trip', key: 'first_trip',
+      render: (r) => (r.first_trip ? dateStr(r.first_trip)
+        : '<span class="ent-off">never</span>') },
     /* dayStr has no year, and this dashboard offers a 12-month window: "21 Oct"
        and "21 Aug" sat side by side with nothing to say which year, so a driver
        who last drove ten months ago read as current. The lifetime last trip is
        shown when there is none in the window, because that is the number that
        answers "is this person still with us". */
-    { label: 'Last trip', key: 'last_trip', render: (r) => {
-      const v = r.last_trip || r.last_ever;
-      if (!v) return '<span class="ent-off">never</span>';
-      const ago = Math.floor((Date.now() - Date.parse(v)) / 864e5);
-      return `${dateStr(v)} <small class="dim">${fmt(ago)}d ago</small>`;
-    } },
-    { label: 'Licence', key: '_l', render: (r) => (r.licence_days_left == null ? '—'
-      : pill(r.licence_days_left < 0 ? `expired` : `${r.licence_days_left}d`, r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok')) },
+    { label: 'Last trip', key: 'last_trip',
+      sortValue: (r) => (r.last_trip || r.last_ever ? Date.parse(r.last_trip || r.last_ever) : null),
+      render: (r) => {
+        const v = r.last_trip || r.last_ever;
+        if (!v) return '<span class="ent-off">never</span>';
+        const ago = Math.floor((Date.now() - Date.parse(v)) / 864e5);
+        return `${dateStr(v)} <small class="dim">${fmt(ago)}d ago</small>`;
+      } },
+    /* A grey pill, not a red one. The 77 rows carrying the source's default
+       date were painted EXPIRED, which accuses somebody of driving illegally
+       on the strength of a field nobody filled in. */
+    { label: 'Licence', key: 'licence_days_left', num: true,
+      sortValue: (r) => (placeholderRow(r) ? null : r.licence_days_left),
+      render: (r) => {
+        if (placeholderRow(r)) {
+          return '<span class="pill" title="this source writes a default date with licence number 123456 '
+            + 'when the field was never filled in — a gap in the record, not an expiry">not filled in</span>';
+        }
+        if (r.licence_days_left == null) {
+          return '<span class="ent-off" title="this person’s platforms publish no licence expiry">—</span>';
+        }
+        return pill(r.licence_days_left < 0 ? 'expired' : `${r.licence_days_left}d`,
+          r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok');
+      } },
   ];
-  const draw = (list) => {
+  const draw = (list, term) => {
     tblP.body.innerHTML = '';
-    const t = tableFrom(list, cols);
-    t.querySelectorAll('tbody tr').forEach((tr, i) => {
-      tr.style.cursor = 'pointer';
-      tr.onclick = (ev) => { if (ev.target.tagName !== 'A') location.hash = href('driver', list[i].driver_ext_id); };
-    });
-    tblP.body.append(t);
+    if (!list.length) {
+      /* Names the search, not the date range. "No data for this range yet" on
+         a search with no match blames the window for a typo. */
+      tblP.body.append(note(`No driver matches “${term}”. Searching name, plate and platform across the `
+        + `${fmt(rows.length)} people on the books — everyone is loaded, so this is the whole roster and `
+        + 'not a page of it.'));
+      return;
+    }
+    tblP.body.append(tableFrom(list, cols, {
+      sortable: true, sortId: 'dir', defaultSort: { key: 'trips', dir: 'desc' },
+      onRow: (r) => { location.hash = href('driver', r.driver_ext_id); },
+    }));
   };
-  draw(rows);
+  draw(rows, '');
   bar.querySelector('#dq').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
     const list = t ? rows.filter((r) => `${r.driver_name} ${r.plate} ${(r.platforms || []).join(' ')}`.toLowerCase().includes(t)) : rows;
-    bar.querySelector('#dn').textContent = `${list.length} drivers`;
-    draw(list);
+    bar.querySelector('#dn').textContent = summary(list.length);
+    draw(list, t);
   };
+  if (notFilled.length) {
+    tblP.panel.append(note(`${countOf(notFilled.length, 'person', 'people')} here carry `
+      + (inferredPlaceholder
+        ? `${dateStr(`${inferredPlaceholder}T12:00:00`)} as their licence expiry — one date shared by `
+          + `${Math.round((modalN / Math.max(1, dated.length)) * 100)}% of everybody who has one, which is `
+          + 'a field nobody filled in rather than a fleet that all expires on the same day. '
+        : 'the source\'s default licence date rather than a real one. ')
+      + 'They are marked "not filled in" and are NOT counted as expired — the Compliance page counts '
+      + 'them the same way, so the two agree.', 'warn'));
+  }
   return rows;
 }

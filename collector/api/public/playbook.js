@@ -14,7 +14,7 @@
 
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money,
-         entity, custody, custodyAsOf } from './ui.js';
+         entity, custody, custodyAsOf, dateStr, countOf, plural } from './ui.js';
 import { q, href, store } from './data.js';
 
 const GROUPS = [
@@ -52,12 +52,35 @@ export async function renderPlaybook(root) {
 
   const t = d.totals || {};
   const fleet = d.fleet || {};
+  /* Which window produced this list. `d.window` is the response's first key and
+     the page printed it nowhere — so "13 vehicles took no booking at all this
+     window" is a different list at 7, 30 and 365 days, with nothing on screen
+     to say which one you are reading. */
+  if (d.window) {
+    const w = Array.isArray(d.window) ? d.window : [d.window.from, d.window.to];
+    if (w[0] && w[1]) {
+      root.append(el('p', 'cap',
+        `Everything on this page is over ${dateStr(`${String(w[0]).slice(0, 10)}T12:00:00`)} → `
+        + `${dateStr(`${String(w[1]).slice(0, 10)}T12:00:00`)}`
+        + (d.window_days ? ` (${countOf(d.window_days, 'Dubai day')})` : '')
+        + '. Widening the range changes which items appear AND how big each one is sized.'));
+    }
+  }
   root.append(kpiRow([
     { label: 'Things to do', value: fmt(d.actions.length),
       sub: `${d.actions.filter((a) => a.horizon === 'today' || a.horizon === 'this week').length} this week or sooner` },
     { label: 'Money already earned', value: money(t.aed_measured),
       sub: 'measured — these rows carry a price', tone: t.aed_measured ? 'warn' : null },
-    { label: 'Idle capacity', value: fmt(t.bookings_ceiling), sub: 'bookings/month, at the fleet median',
+    /* Named for the unit the server actually computed. The ceilings are per
+       WINDOW — the same 31 blocked vehicles are sized 1,163 at seven days and
+       51,336 at a year — so a tile reading "bookings/month" is only true at
+       one of the five ranges the page offers. It says what it is until the
+       server normalises it. */
+    { label: 'Idle capacity', value: fmt(t.bookings_ceiling),
+      sub: t.ceiling_unit
+        ? esc(t.ceiling_unit)
+        : `bookings at the fleet median, over ${d.window_days ? countOf(d.window_days, 'day') : 'this window'}`
+          + ' — not per month; it scales with the range above',
       tone: t.bookings_ceiling ? 'warn' : null },
     { label: 'Vehicles earning', value: `${fmt(fleet.earning)} of ${fmt(fleet.vehicles_seen)}`,
       sub: fleet.median_bookings ? `median ${fmt(fleet.median_bookings)} bookings each` : null,

@@ -20,7 +20,7 @@
 
 import { donut, hbars, areaChart, stackedBar, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
-  dayStr, dtStr, money, pct, tripTime } from './ui.js';
+  dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural } from './ui.js';
 import { q, qAll, href, state } from './data.js';
 
 export const CORP_TABS = [
@@ -70,11 +70,29 @@ async function corpOverview(host) {
           tone: grossMargin > 0 ? 'good' : 'critical' }
       : { label: 'Booked in advance', value: pct(s.scheduled_pct, 1),
           sub: `${fmt(s.scheduled_trips)} of ${fmt(s.bookings)} bookings` },
+    /* With the share of bookings it was measured on. "889 km" is a total over
+       whatever fraction reported both ends, and the fraction was returned and
+       not shown. */
     { label: 'Unpaid approach', value: s.deadhead_km == null ? '—' : `${fmt(s.deadhead_km)} km`,
-      sub: s.deadhead_ratio_pct != null ? `${pct(s.deadhead_ratio_pct, 1)} of paid distance` : null,
+      sub: [s.deadhead_ratio_pct != null ? `${pct(s.deadhead_ratio_pct, 1)} of paid distance` : null,
+        s.deadhead_measured_pct != null
+          ? `measured on ${pct(s.deadhead_measured_pct, 0)} of bookings`
+          : null].filter(Boolean).join(' · ') || null,
       tone: s.deadhead_ratio_pct > 20 ? 'warn' : null },
     { label: 'Given away', value: fmt(s.foc_trips), sub: 'complimentary bookings',
       tone: s.foc_trips > 0 ? 'warn' : null },
+    /* Three figures the summary returns and the page never drew. An
+       authorisation rate is the control this channel exists to enforce, and a
+       booking that ends outside Dubai is a dispatch problem with an address. */
+    s.authorized_pct != null
+      ? { label: 'Carried an authorisation', value: pct(s.authorized_pct, 1),
+        sub: 'of bookings at properties that require one',
+        tone: s.authorized_pct < 50 ? 'warn' : null }
+      : null,
+    s.outside_dubai
+      ? { label: 'Ended outside Dubai', value: fmt(s.outside_dubai),
+        sub: 'a booking the driver has to come back from empty', tone: 'warn' }
+      : null,
     { label: 'Client concentration', value: s.concentration_hhi == null ? '—' : fmt(s.concentration_hhi),
       sub: s.top_property ? `${s.top_property} is ${pct(s.top_property_share_pct, 0)}` : null,
       tone: s.concentration_hhi > 2500 ? 'warn' : null },
@@ -125,8 +143,9 @@ async function corpOverview(host) {
       valueFmt: (v) => `${fmt(v, 2)} km`,
       onClick: () => { location.hash = href('corporate', 'approach', 'daypart'); },
     });
-    body.append(el('p', 'cap', 'A straight line understates road distance, so treat these as a floor. '
-      + 'It is the only measure of positioning cost anywhere in this dataset.'));
+    body.append(el('p', 'cap', 'Approach only — driver to pickup. A straight line understates road '
+      + 'distance, so treat these as a floor, and the return leg (usually the larger of the two) is on '
+      + 'the Approach legs tab. It is the only measure of positioning cost anywhere in this dataset.'));
   });
 
   add(g, 'Booked ahead or called on the spot', null, async (body) => {
@@ -190,8 +209,8 @@ async function corpProperties(host) {
     { label: 'Scheduled', key: 'scheduled_pct', num: true, render: (r) => pct(r.scheduled_pct, 0) },
     { label: 'Hourly', key: 'hourly', num: true },
     { label: 'Given away', key: 'foc', num: true },
-    { label: 'Last booking', key: 'last_at', render: (r) => dayStr(r.last_at) },
-  ]));
+    { label: 'Last booking', key: 'last_at', render: (r) => dateStr(r.last_at) },
+  ], { sortable: true, sortId: 'props', defaultSort: { key: 'revenue', dir: 'desc' } }));
   host.append(note(rows.some((r) => r.cost != null && r.cost !== r.revenue)
     ? 'Margin is revenue minus the cost this channel reports per booking.'
     : 'There is no margin column because there is no cost: this report returns a single money figure per '
@@ -237,14 +256,21 @@ async function corpGuests(host) {
             + (r.properties > 1 ? ` <span class="dim">+${r.properties - 1} more</span>` : '') },
         { label: 'Bookings', key: 'bookings', num: true },
         { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
-        { label: 'First', key: 'first_at', render: (r) => dayStr(r.first_at) },
-        { label: 'Last', key: 'last_at', render: (r) => dayStr(r.last_at) },
-      ]));
+        { label: 'First', key: 'first_at', render: (r) => dateStr(r.first_at) },
+        { label: 'Last', key: 'last_at', render: (r) => dateStr(r.last_at) },
+      ], { sortable: true, sortId: 'rooms', defaultSort: { key: 'bookings', dir: 'desc' } }));
       host.append(p);
     }
     const { panel: p2, body: b2 } = panel('Every passenger record',
       'One row per booking, because that is what this channel issues.');
-    b2.append(tableFrom(g.guests, GUEST_COLS));
+    b2.append(tableFrom(g.guests, GUEST_COLS,
+      { sortable: true, sortId: 'guests', defaultSort: { key: 'bookings', dir: 'desc' },
+        capped: g.total_guests > g.guests.length ? `all ${fmt(g.total_guests)} records` : null }));
+    if (g.total_guests > g.guests.length) {
+      b2.append(el('p', 'cap',
+        `Showing ${fmt(g.guests.length)} of ${countOf(g.total_guests, 'passenger record')}, busiest first. `
+        + 'The tiles above are over all of them.'));
+    }
     host.append(p2);
     return;
   }
@@ -259,7 +285,13 @@ async function corpGuests(host) {
   host.append(note('A short window understates repeat business by construction: a guest who books once a '
     + 'quarter looks like a stranger inside a 30-day range. Widen the range above to see the real pattern.'));
   if (!g.guests.length) return empty(host, 'No passenger identified in this window');
-  host.append(tableFrom(g.guests, GUEST_COLS));
+  host.append(tableFrom(g.guests, GUEST_COLS,
+    { sortable: true, sortId: 'guests2', defaultSort: { key: 'bookings', dir: 'desc' },
+      capped: g.total_guests > g.guests.length ? `all ${fmt(g.total_guests)} guests` : null }));
+  if (g.total_guests > g.guests.length) {
+    host.append(el('p', 'cap',
+      `Showing ${fmt(g.guests.length)} of ${countOf(g.total_guests, 'guest')}, busiest first.`));
+  }
 }
 
 const GUEST_COLS = [
@@ -330,8 +362,11 @@ async function corpLeakage(host, kind = state.sub) {
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Approach', key: 'deadhead_km', num: true, render: (r) => (r.deadhead_km == null ? '—' : `${fmt(r.deadhead_km, 1)} km`) },
     { label: 'Room', key: 'room_no' },
-    { label: 'Authorised', key: 'has_authorization', render: (r) => (r.has_authorization ? 'yes' : 'no') },
-  ]));
+    { label: 'Authorised', key: 'has_authorization',
+      render: (r) => (r.has_authorization
+        ? '<span class="tag ok">yes</span>'
+        : '<span class="tag warn">no</span>') },
+  ], { sortable: true, sortId: `leak-${kind}`, defaultSort: { key: 'requested_at', dir: 'desc' } }));
 }
 
 /* ── approach legs ────────────────────────────────────────────────────── */
@@ -383,22 +418,51 @@ async function corpApproach(host) {
       + 'the two, so the fleet\u2019s unpaid running has been understated by more than half.'));
   }
 
-  const { panel: p, body: chart } = panel('Unpaid kilometres, both directions',
-    'Approach and return side by side. A group with nothing measured is left out rather than drawn as zero.');
+  /* Titled for what it draws. "Unpaid kilometres, both directions" sat over a
+     chart of one leg, corrected by a caption underneath — a heading that has
+     to be walked back by the sentence below it is a heading that is wrong. */
+  const { panel: p, body: chart } = panel('The approach leg, by ' + by,
+    'Driver to pickup only. The return leg — usually the larger of the two — is the column beside it '
+    + 'in the table below, because a group with only one leg measured cannot be summed with one that '
+    + 'has both.');
   hbars(chart, rows.slice(0, 15).map((r) => ({ label: r.label, n: +r.deadhead_km || 0 })),
-    { valueFmt: (v) => `${fmt(v, 1)} km`, color: '--s3' });
-  if (anyReturn) {
-    chart.append(el('p', 'cap', 'Bars above are the approach leg; the return column in the table below is the other half.'));
-  }
+    { valueFmt: (v) => `${fmt(v, 1)} km`, color: '--s3', signed: false });
+  chart.append(el('p', 'cap', rows.length > 15
+    ? `The 15 largest of ${countOf(rows.length, 'group')}, by total approach kilometres.`
+    : `All ${countOf(rows.length, 'group')}, by total approach kilometres.`));
   body.append(p);
+  /* The per-BOOKING column. Ranked by total, a property with 900 bookings at
+     0.23 km each outranks one with 40 at 4.78 — and the second is the dispatch
+     finding. `avg_deadhead_km` was returned and drawn nowhere. */
+  const perBooking = [...rows].filter((r) => r.avg_deadhead_km != null)
+    .sort((a, b) => (+b.avg_deadhead_km || 0) - (+a.avg_deadhead_km || 0));
+  if (perBooking.length > 1) {
+    const worst = perBooking[0], best = perBooking[perBooking.length - 1];
+    if (+worst.avg_deadhead_km > +best.avg_deadhead_km * 2) {
+      body.append(note(`Per booking rather than in total: ${esc(worst.label)} averages `
+        + `${fmt(worst.avg_deadhead_km, 2)} km of approach against ${esc(best.label)}'s `
+        + `${fmt(best.avg_deadhead_km, 2)} km — `
+        + `${fmt((+worst.avg_deadhead_km) / Math.max(0.01, +best.avg_deadhead_km), 0)}x. `
+        + 'The bars above rank by total, which puts the busiest group first rather than the most '
+        + 'expensive one to serve; sort the "Approach per booking" column below to see it the other way.'));
+    }
+  }
   body.append(tableFrom(rows, [
     { label: APPROACH_BY.find((b) => b.id === by).label.replace('By ', ''), key: 'label',
       render: (r) => (by === 'property' ? esc(r.label) : esc(r.label)) },
     { label: 'Bookings', key: 'bookings', num: true },
     { label: 'Measured', key: 'measured', num: true, render: (r) => `${fmt(r.measured)} <small class="dim">${pct((r.measured / r.bookings) * 100, 0)}</small>` },
     { label: 'Approach km', key: 'deadhead_km', num: true, render: (r) => fmt(r.deadhead_km, 1) },
+    { label: 'Approach per booking', key: 'avg_deadhead_km', num: true,
+      render: (r) => (r.avg_deadhead_km == null
+        ? '<span class="ent-off" title="no booking in this group reports where the driver set off from">—</span>'
+        : `${fmt(r.avg_deadhead_km, 2)} km`) },
     { label: 'Return km', key: 'return_km', num: true,
       render: (r) => (r.measured_return ? fmt(r.return_km, 1) : '<span class="dim">not reported</span>') },
+    { label: 'Return per booking', key: 'avg_return_km', num: true,
+      render: (r) => (r.avg_return_km == null
+        ? '<span class="ent-off" title="this channel reports no driver end position for this group">—</span>'
+        : `${fmt(r.avg_return_km, 2)} km`) },
     { label: 'Avg both legs', key: 'avg_both_km', num: true,
       render: (r) => (r.measured_both
         ? `${fmt(r.avg_both_km, 2)} km <small class="dim">over ${fmt(r.measured_both)}</small>`
@@ -407,7 +471,7 @@ async function corpApproach(host) {
     { label: 'Approach ÷ paid', key: 'ratio_pct', num: true, render: (r) => pct(r.ratio_pct, 1) },
     { label: 'Both ÷ paid', key: 'both_ratio_pct', num: true,
       render: (r) => (r.measured_both ? pct(r.both_ratio_pct, 1) : '<span class="dim">—</span>') },
-  ]));
+  ], { sortable: true, sortId: `approach-${by}`, defaultSort: { key: 'deadhead_km', dir: 'desc' } }));
   body.append(note('Every one of these kilometres is driven with nobody paying. "Both ÷ paid" is '
     + 'computed only over bookings that report BOTH ends — adding a measured approach to an '
     + 'unmeasured return and dividing by every booking would produce a confident understatement, '
@@ -431,7 +495,8 @@ async function corpApproach(host) {
       { label: 'Over 15 km', key: 'over_15km', num: true,
         render: (r) => (r.over_15km ? `<span class="pill warn">${fmt(r.over_15km)}</span>` : '—') },
       { label: 'Avg paid trip', key: 'avg_paid_km', num: true, render: (r) => `${fmt(r.avg_paid_km, 1)} km` },
-    ], { compact: true }));
+    ], { compact: true, sortable: true, sortId: 'strand',
+      defaultSort: { key: 'avg_return_km', dir: 'desc' } }));
     sb.append(el('p', 'cap',
       'A short paid trip that ends somewhere with a long return is worse than a long one that ends '
       + `on a rank. Compare the last two columns: ${esc(stranding[0].place)} averages `
@@ -454,23 +519,51 @@ export async function renderProperty(root, id, tab = 'overview', onDetail) {
   try { d = await qAll('/api/corporate/property', { id }); }
   catch (e) {
     host.innerHTML = '';
-    host.append(note(/404/.test(e.message)
-      ? 'No bookings for that property inside this window. Widen the range above.'
-      : `Could not load: ${e.message}`));
+    /* A property that does not exist and a property that was quiet are
+       different sentences. A 404 on an id means nothing in the record matches
+       it at all — a merged partner, or a stale link — and telling the reader
+       to widen the range sends them looking for something that is not there. */
+    if (/404|not found/i.test(e.message)) {
+      const box = el('div', 'empty');
+      box.innerHTML = '<b>No property with that id</b>Nothing in the record matches it — it may have '
+        + 'been merged into another partner, or the link may be stale. This is not a quiet window.';
+      const back = el('p', 'cap');
+      back.innerHTML = `<a class="lnk" href="${href('corporate', 'properties')}">Every property that books</a>`;
+      box.append(back);
+      host.append(box);
+      return;
+    }
+    host.append(note(`Could not load: ${e.message}`, 'err'));
     return;
   }
   onDetail?.(d.profile);
   host.innerHTML = '';
 
   if (tab === 'guests') {
+    /* The same caveat #corporate/guests carries. This channel's "guest id" is
+       issued per BOOKING, so 40 hex ids under a heading reading "Passengers"
+       are 40 bookings and not 40 people — and this page said nothing. */
+    host.append(note('This channel issues a passenger id per BOOKING, not per person, so a row here is '
+      + 'one booking. A returning guest appears as several rows and there is no way to tell them from '
+      + 'several different guests. The room number is the only thing on this channel that recurs.'));
     host.append(tableFrom(d.guests, [
-      { label: 'Guest', key: 'guest_id', render: (r) => `<code>${esc(String(r.guest_id).slice(-8))}</code>` },
-      { label: 'Room', key: 'room_no' },
+      { label: 'Record', key: 'guest_id', render: (r) => `<code>${esc(String(r.guest_id).slice(-8))}</code>` },
+      { label: 'Room', key: 'room_no',
+        render: (r) => (r.room_no ? esc(r.room_no)
+          : '<span class="ent-off" title="this booking records no room number">—</span>') },
       { label: 'Bookings', key: 'bookings', num: true },
       { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
-      { label: 'First', key: 'first_at', render: (r) => dayStr(r.first_at) },
-      { label: 'Last', key: 'last_at', render: (r) => dayStr(r.last_at) },
-    ]));
+      { label: 'First', key: 'first_at', render: (r) => dateStr(r.first_at) },
+      { label: 'Last', key: 'last_at', render: (r) => dateStr(r.last_at) },
+    ], { sortable: true, sortId: 'pguests', defaultSort: { key: 'bookings', dir: 'desc' },
+      capped: ((d.guests_total ?? d.profile?.guests) > d.guests.length)
+        ? `all ${fmt(d.guests_total ?? d.profile?.guests)} records` : null }));
+    const gTotal = d.guests_total ?? d.profile?.guests;
+    if (gTotal && gTotal > d.guests.length) {
+      host.append(el('p', 'cap',
+        `Showing ${fmt(d.guests.length)} of ${countOf(gTotal, 'passenger record')} this property placed, `
+        + 'busiest first.'));
+    }
     return;
   }
   if (tab === 'drivers') {
@@ -478,8 +571,11 @@ export async function renderProperty(root, id, tab = 'overview', onDetail) {
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
       { label: 'Bookings', key: 'bookings', num: true },
       { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
-      { label: 'Avg approach', key: 'avg_deadhead_km', num: true, render: (r) => (r.avg_deadhead_km == null ? '—' : `${fmt(r.avg_deadhead_km, 2)} km`) },
-    ]));
+      { label: 'Avg approach', key: 'avg_deadhead_km', num: true,
+        render: (r) => (r.avg_deadhead_km == null
+          ? '<span class="ent-off" title="none of their bookings here records where they set off from">—</span>'
+          : `${fmt(r.avg_deadhead_km, 2)} km`) },
+    ], { sortable: true, sortId: 'pdrivers', defaultSort: { key: 'bookings', dir: 'desc' } }));
     host.append(note('Approach distance varies more by where a driver waits than by who they are — '
       + 'read a high average here as a positioning question first.'));
     return;
@@ -497,17 +593,56 @@ export async function renderProperty(root, id, tab = 'overview', onDetail) {
     { label: 'Last booking', value: dayStr(pr.last_at) },
   ]));
   const g = grid(); host.append(g);
-  add(g, 'Bookings per day', null, (body) => {
+  add(g, 'Bookings and revenue per day', 'Two series, because a quiet day of expensive charters and a '
+    + 'busy day of short hops are the same bar on a booking count.', (body) => {
     body.innerHTML = '';
-    areaChart(body, d.daily, { x: 'day', y: 'bookings' });
+    const a = el('div'); const b = el('div');
+    body.append(el('p', 'cap', 'Bookings'), a);
+    areaChart(a, d.daily, { x: 'day', y: 'bookings' });
+    if (d.daily.some((x) => x.revenue != null)) {
+      body.append(el('p', 'cap', 'Revenue'), b);
+      areaChart(b, d.daily, { x: 'day', y: 'revenue', color: '--s3', valueFmt: (v) => money(v) });
+    }
   });
-  add(g, 'What they book', null, (body) => {
+  /* Counts AND money. "hourly 14 bookings" is 5% of the bookings and 11.7% of
+     the revenue, and the donut charted only the first — so the booking type
+     this property is actually worth money on was the smallest slice. Both
+     `types[].revenue` and `payments[].revenue` came back and were dropped. */
+  add(g, 'What they book', 'Bookings by type, with what each type is worth.', (body) => {
     body.innerHTML = '';
-    donut(body, d.types.map((t) => ({ label: String(t.label || '—').replace(/_/g, ' '), n: t.n })));
+    const rows = d.types.map((t) => ({ label: String(t.label || '—').replace(/_/g, ' '), n: t.n, revenue: t.revenue }));
+    donut(body, rows);
+    if (rows.some((r) => r.revenue != null)) {
+      const tot = rows.reduce((a, r) => a + (+r.revenue || 0), 0);
+      body.append(tableFrom(rows, [
+        { label: 'Type', key: 'label' },
+        { label: 'Bookings', key: 'n', num: true },
+        { label: 'Revenue', key: 'revenue', num: true,
+          render: (r) => (r.revenue == null
+            ? '<span class="ent-off" title="no booking of this type reports a fare">—</span>'
+            : `${money(r.revenue)}<span class="dim"> · ${pct(tot ? (r.revenue / tot) * 100 : 0, 1)}</span>`) },
+      ], { compact: true, sortable: true, sortId: 'ptypes', defaultSort: { key: 'revenue', dir: 'desc' } }));
+    }
   });
   add(g, 'How they settle', 'The provider’s own label, and what it means for us.', (body) => {
     body.innerHTML = '';
-    hbars(body, d.payments.map((p2) => ({ label: `${p2.label} — ${p2.label_class || 'unclassified'}`, n: p2.n })));
+    const rows = d.payments.map((p2) => ({
+      label: `${p2.label} — ${p2.label_class || 'unclassified'}`, n: p2.n,
+      revenue: p2.revenue, cls: p2.label_class }));
+    hbars(body, rows, { signed: false });
+    const owed = rows.filter((r) => ['on_account', 'salary'].includes(r.cls));
+    if (owed.length) {
+      /* Money this property owes, on the property's own page. It was in the
+         payload and the only place it surfaced was #settlement/receivables,
+         where this hotel is spread across eight rows. */
+      const amount = owed.reduce((a, r) => a + (+r.revenue || 0), 0);
+      const line = el('p', 'cap');
+      line.innerHTML = `${countOf(owed.reduce((a, r) => a + r.n, 0), 'booking')} settled AFTER the ride`
+        + (amount ? `, worth ${esc(money(amount))}` : '')
+        + ` — <a class="lnk" href="${href('settlement', 'receivables')}">what is outstanding across every `
+        + 'counterparty</a>.';
+      body.append(line);
+    }
   });
   add(g, 'When they travel', null, (body) => {
     body.innerHTML = '';

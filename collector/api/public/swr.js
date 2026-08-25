@@ -40,6 +40,22 @@ const cacheable = (url) => {
   return !NEVER.some((p) => path.startsWith(p));
 };
 
+/* Answers that are worth caching and that legitimately differ every time.
+   ─────────────────────────────────────────────────────────────────────────
+   /api/map/days is a list of replayable days with a FIX COUNT on each, and the
+   tracker polls every five minutes — so today's row is different on almost
+   every load. That is a real change and the cache is right to store it, but it
+   is not a change worth redrawing the page for: the redraw re-issues every
+   request the view makes, including the ones nothing caches, which is how
+   #map came to fetch /api/live, /api/status and /api/map/days three times on a
+   single visit. The shell skips the redraw when everything that moved is on
+   this list. */
+export const VOLATILE = ['/api/map/days'];
+export const volatilePath = (url) => {
+  const path = String(url).split('?')[0];
+  return VOLATILE.some((p) => path.startsWith(p));
+};
+
 /* One read and one write of the whole store per operation. localStorage is
    synchronous and on the main thread, so this is deliberately a single small
    JSON blob rather than a key per entry — fifteen separate reads on every page

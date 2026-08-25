@@ -11,25 +11,55 @@
    across a hole here is wrong, and the honest thing to do is show the hole. */
 
 import { empty, fmt } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, dayStr, dateStr } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, dayStr, dateStr,
+  sourceLabel, countOf, plural } from './ui.js';
 import { dubaiDay } from './tz.js';
-import { q } from './data.js';
+import { q, api, state, href, currentGen, alive } from './data.js';
 
 export async function renderCoverage(root) {
   root.innerHTML = '';
   loading(root);
-  const c = await q('/api/coverage/calendar');
+  const gen = currentGen();
+  /* The whole observed history, always — the window HIGHLIGHTS, it does not
+     bound.
+     ─────────────────────────────────────────────────────────────────────────
+     At the default thirty days the fms panel read "No missing day inside this
+     source's collecting span" and the KPI read "MISSING DAYS 1"; at 365 the
+     same panel read "GAP STARTS Sep 24 / GAP ENDS Feb 22 / 152". A page whose
+     entire subject is the difference between a quiet week and a week nobody
+     collected must not itself hide a five-month hole behind a date range —
+     and #sources links here with the words "152 days", landing on the version
+     that denies it. Every figure below is over the record; the selected window
+     is stated separately beside it. */
+  const [all, win] = await Promise.all([
+    api('/api/coverage/calendar?from=2000-01-01&to=' + encodeURIComponent(dubaiDay())),
+    q('/api/coverage/calendar').catch(() => null),
+  ]);
+  if (!alive(gen)) return;
+  const c = all;
   root.innerHTML = '';
-  if (!c.sources.length) return empty(root, 'No source has written a dated row in this window');
+  if (!c.sources.length) return empty(root, 'No source has ever written a dated row.');
 
   const holed = c.sources.filter((s) => s.missing_days > 0);
+  const winHoled = win ? win.sources.filter((s) => s.missing_days > 0) : [];
   root.append(kpiRow([
-    { label: 'Sources with data', value: fmt(c.sources.length) },
+    { label: 'Sources with data', value: fmt(c.sources.length), sub: 'over the whole record' },
     { label: 'Sources with a hole', value: fmt(holed.length),
-      tone: holed.length ? 'warn' : 'good' },
-    { label: 'Missing days', value: fmt(c.sources.reduce((a, s) => a + s.missing_days, 0)),
-      sub: 'inside each source’s own collecting span', tone: holed.length ? 'warn' : null },
-    { label: 'Rows in window', value: fmt(c.sources.reduce((a, s) => a + s.total_rows, 0)) },
+      sub: 'over the whole record', tone: holed.length ? 'warn' : 'good' },
+    { label: 'Missing days, all history', value: fmt(c.sources.reduce((a, s) => a + s.missing_days, 0)),
+      sub: 'inside each source’s own collecting span, over everything collected',
+      tone: holed.length ? 'warn' : null },
+    /* The window, beside the record rather than instead of it. */
+    win
+      ? { label: `Missing days in the last ${fmt(state.days)} days`,
+        value: fmt(win.sources.reduce((a, s) => a + s.missing_days, 0)),
+        sub: winHoled.length
+          ? `${winHoled.map((s) => sourceLabel(s.source)).join(', ')}`
+          : 'every source collected every day of the selected range',
+        tone: winHoled.length ? 'warn' : 'good' }
+      : { label: `Missing days in the last ${fmt(state.days)} days`, value: '—',
+        sub: 'the windowed calendar could not be read' },
+    { label: 'Rows on record', value: fmt(c.sources.reduce((a, s) => a + s.total_rows, 0)) },
   ]));
 
   /* ── the hole that is not a collection failure ──────────────────────────
@@ -96,9 +126,13 @@ export async function renderCoverage(root) {
   }
 
   c.sources.forEach((s) => {
-    const { panel: p, body } = panel(s.source,
-      `${fmt(s.total_rows)} rows over ${fmt(s.days_with_data)} days · `
-      + `${dayStr(s.first_day)} → ${dayStr(s.last_day)} · median ${fmt(s.median_rows_per_day)}/day`);
+    /* A real name, and an anchor. The heading was the raw database key —
+       "uber", "fms" — as a panel title, and #sources links to a source's
+       section here with no way to reach it. */
+    const { panel: p, body } = panel(sourceLabel(s.source),
+      `${countOf(s.total_rows, 'row')} over ${countOf(s.days_with_data, 'day')} · `
+      + `${dateStr(s.first_day)} → ${dateStr(s.last_day)} · median ${fmt(s.median_rows_per_day)}/day`);
+    p.id = `src-${s.source}`;
     // One cell per day between the first and last day this source wrote
     // anything. Intensity is rows against that source's own median, because a
     // source polling 130 vehicles every five minutes and a source pulling a
@@ -128,7 +162,15 @@ export async function renderCoverage(root) {
         } else {
           cell.title = `${key} — nothing collected`;
         }
-        strip.append(cell);
+        /* 791 cells each carrying a day's counts, and not one of them
+           clickable, on a product where #day/<date> is a real address.
+           display:contents so the anchor does not become a grid item of its
+           own and shift every cell after it. */
+        const link = el('a', 'cal-day');
+        link.href = href('day', key);
+        link.title = cell.title;
+        link.append(cell);
+        strip.append(link);
       }
     }
     body.append(strip);
@@ -139,8 +181,10 @@ export async function renderCoverage(root) {
          requested. The live FMS gap is the first kind: every window covering
          those 155 days was asked for and came back empty with no error. */
       body.append(tableFrom(s.gaps, [
-        { label: 'Gap starts', key: 'from', render: (g) => dayStr(g.from) },
-        { label: 'Gap ends', key: 'to', render: (g) => dayStr(g.to) },
+        // The bounds of a gap are the two days worth opening: the last one
+        // that worked and the first one that did not.
+        { label: 'Gap starts', key: 'from', render: (g) => entity('day', String(g.from).slice(0, 10), dateStr(g.from)) },
+        { label: 'Gap ends', key: 'to', render: (g) => entity('day', String(g.to).slice(0, 10), dateStr(g.to)) },
         { label: 'Days missing', key: 'days', num: true },
         { label: 'Was it asked for?', key: 'verdict', render: (g) => ({
           asked_and_empty: '<span class="tag ok">asked — provider returned nothing</span>',
@@ -157,24 +201,38 @@ export async function renderCoverage(root) {
                g.days_failed ? `<span class="dim">${fmt(g.days_failed)} failed</span>` : null,
                g.days_unrequested ? `<span class="dim">${fmt(g.days_unrequested)} never asked</span>` : null,
               ].filter(Boolean).join('<br>') || '—') },
-      ], { compact: true }));
+      ], { compact: true, sortable: true, sortId: `gaps-${s.source}`,
+        defaultSort: { key: 'days', dir: 'desc' } }));
       const askedDays = s.gaps_asked_and_empty || 0;
       const neverDays = s.gaps_never_asked || 0;
       const failedDays = s.gaps_window_failed || 0;
       const lines = [];
-      if (askedDays) lines.push(`${fmt(askedDays)} of these days were requested and the provider `
-        + 'returned no rows and no error. That is the provider\u2019s answer, not our bug — it is '
-        + 'the date this source started reporting, and re-running the collector will not change it.');
+      if (askedDays) lines.push(`${countOf(askedDays, 'of these days was', 'of these days were')} `
+        + 'requested and the provider returned no rows and no error. That is the provider\u2019s answer, '
+        + 'not our bug — it is the date this source started reporting, and re-running the collector '
+        + 'will not change it.');
       if (failedDays) lines.push(`${fmt(failedDays)} fall inside a window whose request FAILED. `
         + 'Those are worth re-running, and the reason is on the Data sources page.');
-      if (neverDays) lines.push(`${fmt(neverDays)} have no record of ever being requested — either the `
-        + 'backfill has not reached them or it was cut short before it did.');
+      if (neverDays) lines.push(`${countOf(neverDays, 'day has', 'days have')} no record of ever being `
+        + 'requested — either the backfill has not reached them or it was cut short before it did.');
       if (lines.length) body.append(el('p', 'cap', lines.join(' ')));
     } else {
-      body.append(el('p', 'cap', 'No missing day inside this source’s collecting span.'));
+      body.append(el('p', 'cap',
+        'No missing day inside this source’s collecting span, over the whole record.'));
     }
     root.append(p);
   });
+
+  /* Arrive at the source somebody came here to look at. #sources links here as
+     `#coverage?days=365#src-fms`; without this the reader lands at the top of a
+     page eight panels long and has to find it again. */
+  const anchor = (location.hash.match(/#(src-[^?&#]+)$/) || [])[1];
+  if (anchor) {
+    requestAnimationFrame(() => {
+      const target = document.getElementById(decodeURIComponent(anchor));
+      if (target) target.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+  }
 
   root.append(note('A gap is only counted between a source’s own first and last day. A source that '
     + 'started collecting in March is not missing January — it has no history there, which is a '

@@ -146,8 +146,15 @@ console.log('\nrule 4: a trip leads to its telemetry');
    a trips table renders its timestamp through tripTime, never bare dtStr. */
 {
   const ui = readFileSync('api/public/ui.js', 'utf8');
+  /* The day goes THROUGH href(), not after it. Concatenating "?day=…" onto an
+     href that already carried "?days=365" produced two question marks in one
+     address, and URLSearchParams read a single `days` key whose value was
+     "365?day=2026-08-25" — so the window reset to 30 and the day was dropped.
+     href()'s fourth argument merges into the same query string. */
   check('tripTime links the replay preselected to the trip day',
-    /href\('vehicle', plate, 'movement'\)}\?day=\$\{day\}/.test(ui));
+    /href\('vehicle', plate, 'movement', \{ day \}\)/.test(ui));
+  check('and never builds an address with two query strings',
+    !/href\([^)]*\)\}\?/.test(ui), 'a second "?" appended after href()');
   /* Behaviour, not source shape: the crash this guards against was a STRING
      timestamp reaching Intl — test/formatters.test.mjs renders tripTime with
      real row shapes. Here it is enough that the degrade branch exists. */

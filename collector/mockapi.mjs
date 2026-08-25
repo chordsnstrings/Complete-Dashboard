@@ -2175,6 +2175,16 @@ app.get('/api/schema/raw-fields', (req, r) => r.json({
   ],
 }));
 
+/* The drill-down behind "Fields we are not keeping". `#providers` links every
+   unkept field to it, so the browser smoke has to be able to render it. */
+app.get('/api/schema/raw-values', (req, r) => {
+  if (!req.query.key) return r.status(400).json({ error: 'key required' });
+  return r.json([
+    { value: '1.0', n: 3120 }, { value: '1.4', n: 410 }, { value: '2.1', n: 66 },
+    { value: '', n: 12 },
+  ]);
+});
+
 app.get('/api/settings', (_, r) => r.json([
   /* Unset in the API's own environment but held by the collector — the case
      that made this page tell an operator to re-capture a working session. */

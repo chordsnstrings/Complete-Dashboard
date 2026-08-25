@@ -58,7 +58,10 @@ const EXEMPT = {
     + 'kept for the same reason, and it 404s an unknown plate now rather than rendering it as a car that '
     + 'did nothing',
   '/api/finance/daily': 'the same series as /api/trips/daily, which the finance view already draws',
-  '/api/schema/raw-values': 'drill-down called with a key from /api/schema/raw-fields, not by literal path',
+  '/api/vehicles': 'the busiest-first form of /api/vehicles/directory, which is what both panels on '
+    + '#vehicles now read — the directory already returns plate and trips for every vehicle, and asking '
+    + 'the same question twice cost 12s of a 44s cold load at a 365-day window. Kept as a route because '
+    + 'it is an address somebody may have bookmarked',
 };
 
 check('routes were found to check', routes.length > 40, String(routes.length));

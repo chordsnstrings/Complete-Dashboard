@@ -31,7 +31,8 @@
    timing shows up as paired over/under days, a missing statement week as a
    run of dashes. */
 import { empty } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, fmt, pct } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, fmt, pct,
+  countOf, plural } from './ui.js';
 import { api, state, href } from './data.js';
 
 const MONTH_LABEL = (m) => {
@@ -177,7 +178,24 @@ export async function renderReconcile(root, month) {
   // Newest first for the monthly view — reconciliation starts from the latest
   // statement — and calendar order inside a month, which is how a month reads.
   const rows = month ? d.rows : [...d.rows].reverse();
-  mp.body.append(tableFrom(rows, COLS(keyCol)));
+  mp.body.append(tableFrom(rows, COLS(keyCol),
+    { sortable: true, sortId: month ? 'recon-days' : 'recon-months' }));
+  /* Why consecutive days are byte-identical. A payout period is weekly and the
+     day grain spreads it evenly across its days, so seven rows carrying the
+     same figures are ONE statement, not seven days that happened to match —
+     and a reader reconciling them one at a time is checking the same number
+     seven times. */
+  if (month) {
+    const dup = rows.filter((r, i) => i > 0
+      && r.bank_payout != null && r.bank_payout === rows[i - 1].bank_payout
+      && r.ontrip_net === rows[i - 1].ontrip_net).length;
+    if (dup) {
+      mp.body.append(el('p', 'cap',
+        `${countOf(dup, 'day')} here ${plural(dup, 'repeats', 'repeat')} the figures of the day before. `
+        + 'That is not a coincidence: a platform pays by the WEEK, and a weekly statement spread across '
+        + 'its days gives every day in the period the same numbers. Reconcile a period, not a day.'));
+    }
+  }
   host.append(mp.panel);
 
   host.append(el('p', 'cap', esc(d.note)));

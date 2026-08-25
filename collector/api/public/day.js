@@ -79,8 +79,22 @@ export async function renderDay(root, day, onDetail) {
   ]));
 
   if (!h.bookings && !h.telematics) {
-    root.append(note('Nothing at all is recorded for this day. If a source is listed above as silent, '
-      + 'that is the reason; otherwise the fleet did not move.'));
+    /* Before the record began is not "the fleet did not move". A date earlier
+       than anything collected has every coverage row outside its span, and the
+       page told the reader the fleet stood still. */
+    const outside = (d.coverage || []).length && (d.coverage || []).every((r) => !r.inside_span);
+    root.append(note(outside
+      ? 'This date is before anything was collected. No source has history reaching back here, so there '
+        + 'is nothing to show and nothing to conclude — it is not a day the fleet stood still.'
+      : 'Nothing at all is recorded for this day. If a source is listed below as silent, that is the '
+        + 'reason; otherwise the fleet did not move.', outside ? 'warn' : null));
+    if (outside) {
+      const link = el('p', 'cap');
+      const first = (d.coverage || []).map((r) => r.first_day).filter(Boolean).sort()[0];
+      link.innerHTML = (first ? `The record starts on ${esc(dayStr(first))}. ` : '')
+        + `<a class="lnk" href="${href('coverage')}">Which days each source actually collected</a>.`;
+      root.append(link);
+    }
   }
 
   const g = el('div', 'grid'); root.append(g);
@@ -92,17 +106,32 @@ export async function renderDay(root, day, onDetail) {
     return body;
   };
 
+  /* The weekday of the day being read, so an hour bar can open the slot it
+     belongs to. `day` is already a Dubai calendar date; anchoring it at noon
+     UTC (16:00 in Dubai) puts the instant far enough from both midnights that
+     the UTC weekday and the Dubai weekday cannot disagree. */
+  const dowOf = new Date(`${day}T12:00:00Z`).getUTCDay();
+
   add('Through the day', 'Bookings by Dubai-local hour, with the telematics journeys behind them.', (b) => {
     if (!d.hours.length) return empty(b, 'No trip carries an hour on this day');
+    /* `#demand/hour/14` is not a page. V.demand reads neither state.param nor
+       state.sub, so clicking the 14:00 bar rendered the ordinary thirty-day
+       Demand view with the day and the hour both discarded — the reader's
+       click was silently thrown away. `#slot/<dow>/<hour>` is the real page,
+       and it is the one the demand heatmap already opens. */
     barChart(b, d.hours, { x: 'hour', y: 'bookings',
       valueFmt: (v) => `${fmt(v)} bookings`,
-      onClick: (r) => { location.hash = href('demand', 'hour', String(r.hour)); } });
+      onClick: (r) => { location.hash = href('slot', String(dowOf), String(r.hour)); } });
     const peak = d.hours.reduce((a, r) => (r.bookings > (a?.bookings ?? -1) ? r : a), null);
     const cancelled = d.hours.reduce((a, r) => a + r.cancelled, 0);
-    b.append(el('p', 'cap', [
-      peak ? `Busiest hour ${String(peak.hour).padStart(2, '0')}:00 with ${fmt(peak.bookings)} bookings.` : null,
+    const cap = el('p', 'cap');
+    cap.innerHTML = [
+      peak ? `Busiest hour <a class="lnk" href="${href('slot', String(dowOf), String(peak.hour))}">`
+        + `${String(peak.hour).padStart(2, '0')}:00</a> with ${fmt(peak.bookings)} bookings.` : null,
       cancelled ? `${fmt(cancelled)} bookings did not complete.` : null,
-    ].filter(Boolean).join(' ')));
+      'An hour opens as a rostering question — who covers it every week, not only on this day.',
+    ].filter(Boolean).join(' ');
+    b.append(cap);
   });
 
   add('Against the fortnight around it', 'The same day of the previous and next week, so this one has something to be read against.', (b) => {
@@ -192,7 +221,7 @@ export async function renderDay(root, day, onDetail) {
       { label: 'Acceleration', key: 'harsh_accel', num: true },
       { label: 'Turns', key: 'sharp_turn', num: true },
       { label: 'Speeding', key: 'overspeed', num: true },
-    ]));
+    ], { sortable: true, sortId: 'dayAlerts', defaultSort: { key: 'n', dir: 'desc' } }));
     root.append(ap.panel);
   }
 
@@ -208,7 +237,8 @@ export async function renderDay(root, day, onDetail) {
       render: (r) => (r.plates || []).slice(0, 3).map((p2) => entity('vehicle', p2, p2)).join(' ') },
     { label: 'On the road', key: 'first_trip',
       render: (r) => `${timeStr(r.first_trip)} – ${timeStr(r.last_trip)}` },
-  ]));
+  ], { sortable: true, sortId: 'dayDrivers', defaultSort: { key: 'trips', dir: 'desc' },
+    capped: h.drivers > d.drivers.length ? `all ${fmt(h.drivers)} who drove` : null }));
   /* The list is capped; the headline counts are measured over the whole day.
      A table that shows 120 of 180 people and says nothing reads as the roster. */
   if (h.drivers > d.drivers.length) {
@@ -228,7 +258,7 @@ export async function renderDay(root, day, onDetail) {
        somebody you can ring. */
     { label: 'Driver that day', key: 'driver_refs', render: (r) => custody(r) },
     { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
-  ]));
+  ], { sortable: true, sortId: 'dayVeh', defaultSort: { key: 'bookings', dir: 'desc' } }));
   if (h.vehicles > d.vehicles.length) {
     vp.body.append(el('p', 'cap',
       `Showing the ${fmt(d.vehicles.length)} busiest of ${fmt(h.vehicles)} vehicles that moved.`));

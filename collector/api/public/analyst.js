@@ -49,6 +49,27 @@ export async function renderAnalyst(root) {
   ]));
 
   if (!d.findings.length) {
+    /* Three different nothings, and the page told one story for all of them.
+       "Has not run yet" is a scheduling delay somebody waits out; a model
+       credential that is not set is a configuration nobody is going to wait
+       into existence, and this fleet has the second — every pass count is
+       zero because ARK_API_KEY is unset on the API. Read from a `configured`
+       flag where the endpoint supplies one, and inferred from "no pass has
+       ever run" where it does not. */
+    const unconfigured = d.configured === false
+      || (!d.runs && !d.model && !(d.confirmed || d.refuted || d.immaterial || d.unsupported));
+    if (unconfigured) {
+      host.append(note('The analyst is not configured on this deployment. It needs a model credential — '
+        + 'the pass is a model call, so with no key nothing can run, and this page will stay empty '
+        + 'however long you wait. It is not a scheduling delay.', 'warn'));
+      const link = el('p', 'cap');
+      link.innerHTML = `The key is set in the API environment, not in the database — `
+        + `<a class="lnk" href="${href('settings')}">Settings</a> lists what the collector holds, and `
+        + `<a class="lnk" href="${href('insights')}">the action list</a> is the rule-based findings, `
+        + 'which need no model at all and are running.';
+      host.append(link);
+      return;
+    }
     host.append(note(d.runs
       ? 'No finding in this category for this window. Widen the range above, or look at the other tabs — '
         + 'a pass that produced nothing here still produced something.'

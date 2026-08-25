@@ -55,6 +55,16 @@ const ROUTES = [
   'segment/L45235/2026-08-03T04:00:00.000Z', 'segment/L45235/not-a-time',
   'slot/2/19', 'slot/0/3', 'slot/9/99',
   'safety', 'safety/vehicles', 'safety/events', 'live', 'map', 'sources', 'coverage', 'providers', 'settings',
+  /* The action list's facets are addresses now, so a filtered list can be sent
+     to the person who has to act on it. A category nobody has is included on
+     purpose: the empty state must say "nothing has this severity", not "no data
+     for this range". */
+  'insights/severity/critical', 'insights/safety', 'insights/nosuchcategory',
+  /* One raw field's values — the drill-down behind "Fields we are not keeping",
+     which was the most valuable number on #providers and unopenable. */
+  'providers/uber/trips/Surge%20multiplier',
+  // The map's own state is an address: mode, plate and day.
+  'map/replay/L45235',
   // The window and platform filters now live in the address. A link carrying
   // them has to render the same as one that does not.
   'overview?days=90&platform=uber', 'drivers?days=7&fleet=egari',

@@ -128,26 +128,53 @@ export function fitTo(map, points, { maxZoom = 15, padding = [28, 28] } = {}) {
 export function renderLive(map, rows, onPick) {
   const layer = L.layerGroup().addTo(map);
   const pts = [];
+  /* Two vehicles at the same rank round to the same pixel, and the one
+     underneath cannot be clicked at all — a click on the fourth marker timed
+     out because a different vehicle's shape was intercepting the pointer.
+     Co-located markers are pushed onto a small deterministic spiral: the same
+     plate lands in the same place on every load, and every one of them can be
+     reached. A cluster plugin would be better and we do not vendor one. */
+  const seen = new Map();
+  const nudge = (lat, lng) => {
+    const key = `${(+lat).toFixed(4)},${(+lng).toFixed(4)}`;
+    const n = seen.get(key) || 0;
+    seen.set(key, n + 1);
+    if (!n) return [+lat, +lng];
+    const a = n * 2.399963;                          // golden angle, so the ring fills evenly
+    const rad = 0.00016 * Math.sqrt(n);              // ≈18m per step at this latitude
+    return [+lat + rad * Math.cos(a), +lng + rad * Math.sin(a)];
+  };
   for (const r of rows) {
     if (r.lat == null || r.lng == null) continue;
+    // 0,0 is a tracker with no satellite lock, not a vehicle in the Atlantic.
+    if (Math.abs(+r.lat) < 0.5 && Math.abs(+r.lng) < 0.5) continue;
     const seat = r.seat_occupied;
     const seatUnknown = seat === null || seat === undefined;
     const engaged = seat === true || /engag/i.test(r.status || '');
     const moving = Number(r.speed) > 3;
-    const colour = r.stale ? css('--ink-3') : engaged ? css('--s3') : moving ? css('--s1') : css('--s5');
-    const m = L.circleMarker([r.lat, r.lng], {
+    /* Four states, not three. "Moving, empty" was asserted for every vehicle
+       whose feed carries no seat sensor — 82 of 130 — which is a measurement
+       claim about hardware that does not exist. renderJourney has drawn the
+       unknown case separately for a while; this had not caught up. */
+    const colour = r.stale ? css('--ink-3')
+      : engaged ? css('--s3')
+        : moving ? (seatUnknown ? css('--b300') : css('--s1'))
+          : css('--s5');
+    const at = nudge(r.lat, r.lng);
+    const m = L.circleMarker(at, {
       radius: engaged ? 7 : 6, color: '#fff', weight: 1.5,
       fillColor: colour, fillOpacity: r.stale ? 0.45 : 0.95,
     }).addTo(layer);
     m.bindTooltip(
       `<b>${r.plate}</b>${r.current_driver ? '<br>' + r.current_driver : ''}` +
       `<br>${r.status || '—'} · ${r.speed != null ? r.speed + ' km/h' : 'no speed'}` +
-      `<br>${seatUnknown && !/engag/i.test(r.status || '') ? 'seat sensor not reported'
-        : engaged ? 'passenger on board' : 'empty'}`
+      `<br>${seatUnknown && !/engag/i.test(r.status || '') ? 'seat sensor not reported by this feed'
+        : engaged ? 'passenger on board' : 'seat sensor reports empty'}`
       + `${r.stale ? `<br><i>last fix ${r.fix_age_min != null ? `${r.fix_age_min} min ago` : 'is stale'}</i>` : ''}`,
-      { direction: 'top' });
+      // Sticky, so a marker under the pointer keeps its label while you aim.
+      { direction: 'top', sticky: true });
     if (onPick) m.on('click', () => onPick(r));
-    pts.push([r.lat, r.lng]);
+    pts.push(at);
   }
   fitTo(map, pts, { maxZoom: 14 });
   return layer;
