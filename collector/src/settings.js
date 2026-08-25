@@ -27,6 +27,36 @@ function dec(blob) {
   } catch { return null; }
 }
 
+/* The values the code falls back to when neither the settings table nor the
+   environment has one.
+   ─────────────────────────────────────────────────────────────────────────
+   src/config.js calls get('FMS_ECOSINE_USER', 'ecosinetranspor') — a working
+   username, supplied by the code — and describeSettings reported the key as
+   source "unset", configured false, which the Settings page paints amber. Two
+   of the three warnings on that page were credentials that are present and in
+   daily use: FMS has collected 41,809 trip rows with them. An operator reading
+   amber goes looking for a credential that is not missing.
+
+   Declared here rather than in config.js, and config.js reads THIS, so there
+   is one place a default lives. Two copies of "what the fallback is" is how
+   the page and the collector come to disagree about whether a thing is set. */
+export const SETTING_DEFAULTS = {
+  FMS_BASE: 'http://103.185.74.197/currentinfotest/ItlService.svc',
+  FMS_ECOSINE_USER: 'ecosinetranspor',
+  FMS_EGARI_USER: 'egariluxury',
+  CABMAN_URL: 'https://app.cabman.ae/dtcabmanrestservice/api/trackingServices/GetIVDData',
+  CABMAN_ECOSINE_ID: '81',
+  CABMAN_ECOSINE_USER: 'admin_ecosine',
+  CABMAN_CRON: '*/5 * * * *',
+  YANGO_BASE: 'https://fleet.yango.com',
+  HOTEL_BASE: 'https://whale-app-iofbt.ondigitalocean.app',
+  HOTEL_DOMAIN: 'hotel.ecosine.ae',
+  ARK_BASE_URL: 'https://ark.ap-southeast.bytepluses.com/api/v3',
+  ARK_MODEL: 'glm-5-2-260617',
+  BACKFILL_MONTHS: '12',
+  INCREMENTAL_DAYS: '3',
+};
+
 // The full catalogue the Settings page renders. `secret:true` values are never returned in clear.
 export const SETTING_DEFS = [
   { key: 'FMS_ECOSINE_USER', group: 'FMS / InfoTrack', label: 'Ecosine username', secret: false },
@@ -125,10 +155,13 @@ export async function recordCredentialVisibility(component, db = pool) {
   const rows = SETTING_DEFS.map((d) => {
     const fromDb = cache[d.key] != null;
     const fromEnv = !!process.env[d.key];
+    // A code default counts as configured here too, for the same reason it
+    // does on the page: get() will resolve it and the collector will use it.
+    const hasDefault = SETTING_DEFAULTS[d.key] != null;
     return {
       component, key: d.key,
-      configured: fromDb || fromEnv,
-      source: fromDb ? 'settings' : fromEnv ? 'environment' : 'unset',
+      configured: fromDb || fromEnv || hasDefault,
+      source: fromDb ? 'settings' : fromEnv ? 'environment' : hasDefault ? 'default' : 'unset',
     };
   });
   for (const r of rows) {
@@ -159,10 +192,21 @@ export async function describeSettings() {
   } catch { elsewhere = {}; }
   return SETTING_DEFS.map((d) => {
     const fromDb = cache[d.key] != null && updated[d.key] != null;
-    const val = cache[d.key] ?? process.env[d.key] ?? '';
+    /* A code default is a THIRD source, and it was being reported as no source
+       at all. get() resolves settings > environment > default, so a key with a
+       default is configured whether or not anyone has typed it in; saying
+       "unset" about a username FMS is authenticating with right now sends an
+       operator to fix something that works. */
+    const dflt = SETTING_DEFAULTS[d.key];
+    const val = cache[d.key] ?? process.env[d.key] ?? dflt ?? '';
     return {
       key: d.key, group: d.group, label: d.label, hint: d.hint || null, secret: !!d.secret,
-      source: fromDb ? 'settings' : (process.env[d.key] ? 'environment' : 'unset'),
+      source: fromDb ? 'settings' : process.env[d.key] ? 'environment' : dflt != null ? 'default' : 'unset',
+      /* What the code would fall back to, so a reader can tell an operator's
+         value from the one that shipped with the deploy. Never for a secret:
+         no secret has a default, and if one ever did, publishing it here would
+         be the leak this whole file exists to avoid. */
+      default_value: !d.secret && dflt != null ? dflt : null,
       configured: !!val,
       value: d.secret ? (val ? `••••••••${String(val).slice(-4)}` : '') : val,
       updated_at: updated[d.key] || null,

@@ -442,7 +442,14 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       types: types.map((t) => ({ ...t, revenue: round(t.revenue, 0), avg_km: round(t.avg_km, 1) })),
       payments: payments.map((x) => ({ ...x, revenue: round(x.revenue, 0), label_class: LABEL[x.settlement_class] || null })),
       guests: guests.map((g) => ({ ...g, revenue: round(g.revenue, 0) })),
+      /* 40 of a property's 478 passengers were listed with nothing saying so.
+         profile.guests is the count over the whole window, so the cap is
+         checkable against it rather than against the list's own length. */
+      guests_shown: guests.length,
+      guests_truncated: (profile?.guests ?? 0) > guests.length,
       drivers: drivers.map((d) => ({ ...d, revenue: round(d.revenue, 0), avg_deadhead_km: round(d.avg_deadhead_km, 2) })),
+      drivers_shown: drivers.length,
+      drivers_truncated: (profile?.drivers ?? 0) > drivers.length,
       dayparts,
     });
   }));
@@ -525,6 +532,11 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         span_days: r.first_at && r.last_at
           ? Math.round((Date.parse(r.last_at) - Date.parse(r.first_at)) / 864e5) : null,
       })),
+      /* 300 of 875 guest rows reached the page. total_guests is the count over
+         the window, so a reader can see the cap bite instead of taking 300 for
+         the channel's whole passenger list. */
+      guests_shown: rows.length,
+      guests_truncated: (all?.guests ?? 0) > rows.length,
       total_guests: all?.guests ?? 0,
       total_bookings: all?.bookings ?? 0,
       bookings_with_room: all?.with_room ?? 0,
@@ -1414,15 +1426,21 @@ export function analystRoutes(app, { q, wrap, range }) {
     const [from, to] = range(req);
     const verdicts = String(req.query.verdict || 'confirmed').split(',')
       .filter((v) => ['confirmed', 'refuted', 'immaterial', 'unsupported'].includes(v));
+    /* analyst_finding records the fleet it was generated for and the chip on
+       #analyst reached this route and was dropped. Platform is deliberately
+       not applied: a finding is a claim about a metric and a segment, and the
+       segment may itself BE a platform — narrowing the list by one would hide
+       every finding about the others rather than narrowing anything. */
     const rows = await q(
       `SELECT * FROM analyst_finding
        WHERE window_start >= $1::date AND window_end <= $2::date
          AND ($3::text[] IS NULL OR verdict = ANY($3))
+         AND ($4::text IS NULL OR fleet_id = $4)
        ORDER BY created_at DESC,
                 CASE verdict WHEN 'confirmed' THEN 0 WHEN 'refuted' THEN 1
                              WHEN 'immaterial' THEN 2 ELSE 3 END,
                 abs(coalesce(effect_pct, 0)) DESC
-       LIMIT 300`, [from, to, verdicts.length ? verdicts : null]);
+       LIMIT 300`, [from, to, verdicts.length ? verdicts : null, req.query.fleet || null]);
     // The unit belongs to the metric, not to a guess at the front end: a page
     // deriving "%" from a column name printed a distance difference as a bare
     // number and a fare difference as a percentage.
@@ -1438,8 +1456,18 @@ export function analystRoutes(app, { q, wrap, range }) {
               count(*) FILTER (WHERE verdict = 'unsupported')::int unsupported,
               count(DISTINCT run_id)::int runs, max(created_at) last_run, max(model) model
        FROM analyst_finding
-       WHERE window_start >= $1::date AND window_end <= $2::date`, [from, to]);
-    res.json({ ...counts, findings: rows });
+       WHERE window_start >= $1::date AND window_end <= $2::date
+         AND ($3::text IS NULL OR fleet_id = $3)`, [from, to, req.query.fleet || null]);
+    res.json({
+      ...counts, findings: rows,
+      fleet: req.query.fleet || null,
+      /* Whether the model that writes these is configured at all. An empty
+         list means "no finding" only when the generator can run; with
+         ARK_API_KEY unset it means the pass has never happened, and the page
+         described that as a scheduling delay. */
+      configured: !!process.env.ARK_API_KEY,
+      platform_applies: false,
+    });
   }));
 
   /* What the checker is allowed to check, published so the rules are readable

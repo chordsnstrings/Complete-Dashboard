@@ -28,6 +28,7 @@ import { reconcileRoutes } from './reconcile_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
+import { RAW_ALIASES } from '../src/probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
 
@@ -968,7 +969,8 @@ app.get('/api/track', wrap(async (req, res) => {
 /* ───────────────────── map: where was the fleet, when ───────────────────── */
 // Which plates have a replayable trail on a given day, and who was driving.
 app.get('/api/map/days', wrap(async (req, res) => {
-  res.json(await q(
+  const plate = req.query.plate ? req.query.plate.toUpperCase().replace(/[\s-]+/g, '') : null;
+  const rows = await q(
     /* The driver named against a day must be the driver who held the car ON
        THAT DAY. This joined vehicle_current_driver — a view that is DISTINCT ON
        (plate) ORDER BY day DESC, i.e. whoever holds the car NOW — so every
@@ -1002,8 +1004,27 @@ app.get('/api/map/days', wrap(async (req, res) => {
        ORDER BY v.is_primary DESC, v.trips DESC NULLS LAST LIMIT 1) vdd ON true
      LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
      ORDER BY d.day DESC, d.fixes DESC LIMIT 400`,
-    [req.query.plate ? req.query.plate.toUpperCase().replace(/[\s-]+/g, '') : null,
-     ...win(req)]));
+    [plate, ...win(req)]);
+  /* The map's day picker reached exactly 400 rows in production, which is what
+     a cap looks like when it has bitten and nothing says so — the day a reader
+     is looking for is simply not in the menu, with no hint that it exists. */
+  const [t] = await q(
+    `SELECT count(*)::int n FROM (
+       SELECT 1 FROM telemetry_snapshot t
+        WHERE t.lat IS NOT NULL AND ($1::text IS NULL OR t.plate = $1)
+          AND t.captured_at BETWEEN $2 AND $3
+        GROUP BY (t.captured_at AT TIME ZONE 'Asia/Dubai')::date, t.plate
+       HAVING count(*) >= 2) g`, [plate, ...win(req)]);
+  /* Still a bare array, deliberately, unlike the other capped lists in this
+     commit. Those have a front-end item pairing with them; the map's day
+     picker does not, and a page nobody is rewriting must not be handed a shape
+     it cannot read. The three facts ride on the row instead — every row in one
+     response describes the same list, so repeating them is redundant rather
+     than ambiguous. */
+  res.json(rows.map((r) => ({
+    ...r, total: t?.n ?? rows.length, shown: rows.length,
+    truncated: (t?.n ?? 0) > rows.length,
+  })));
 }));
 
 // A day's journey for one vehicle, split into segments wherever the car stopped
@@ -2368,6 +2389,12 @@ app.get('/api/context', wrap(async (req, res) => {
    agreeing, silently, on a tile that makes a legal claim. A total is a count,
    not a length. */
 app.get('/api/compliance/vehicles', wrap(async (req, res) => {
+  /* Fleet, from the vehicle's profile — this route already joins
+     vehicle_profile, so narrowing is a predicate rather than a new join. A
+     document belongs to a car and a car belongs to a fleet; it is reported BY
+     a source ('fms'), which is not a booking channel, so the platform chip is
+     deliberately not applied. */
+  const vFleet = req.query.fleet || null;
   const rows = await q(
     `SELECT d.plate, d.doc_type, d.status, d.expires_at,
             (d.expires_at::date - now()::date) AS days_left,
@@ -2380,7 +2407,8 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => {
      LEFT JOIN vehicle_profile p ON p.platform=d.platform AND p.vehicle_ext_id=d.vehicle_ext_id
      LEFT JOIN vehicle_current_driver cd ON cd.plate = d.plate
      WHERE d.expires_at IS NOT NULL
-     ORDER BY d.expires_at ASC LIMIT 300`);
+       AND ($1::text IS NULL OR coalesce(d.fleet_id, p.fleet_id) = $1)
+     ORDER BY d.expires_at ASC LIMIT 300`, [vFleet]);
   const [t] = await q(
     `SELECT count(*)::int total,
             count(*) FILTER (WHERE expires_at::date < now()::date)::int expired,
@@ -2390,11 +2418,14 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => {
                                AND expires_at::date <= now()::date + 45)::int within_45,
             count(DISTINCT plate)::int vehicles,
             count(DISTINCT doc_type)::int doc_types
-     FROM vehicle_document WHERE expires_at IS NOT NULL`);
+     FROM vehicle_document
+     WHERE expires_at IS NOT NULL AND ($1::text IS NULL OR fleet_id = $1)`, [vFleet]);
   const types = await q(
     `SELECT doc_type, count(*)::int n FROM vehicle_document
-     WHERE expires_at IS NOT NULL AND doc_type IS NOT NULL GROUP BY 1 ORDER BY n DESC`);
-  res.json({ rows, totals: t, doc_types: types,
+     WHERE expires_at IS NOT NULL AND doc_type IS NOT NULL
+       AND ($1::text IS NULL OR fleet_id = $1)
+     GROUP BY 1 ORDER BY n DESC`, [vFleet]);
+  res.json({ rows, totals: t, doc_types: types, fleet: vFleet,
     shown: rows.length, truncated: (t?.total ?? 0) > rows.length });
 }));
 
@@ -2408,15 +2439,11 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => {
 
    A repeated date is a data-quality problem, not a compliance one, and it is
    returned as such. */
-app.get('/api/compliance/drivers', wrap(async (_, res) => {
-  const rows = await q(
-    `SELECT platform, c.driver_ext_id, full_name, phone, licence_no, licence_expires,
-            (licence_expires - now()::date) AS days_left, state, suspension_reason, rating,
-            -- A licence expiring in six days is a CAR that stops earning in six
-            -- days. The row named the person and left the asset to be worked
-            -- out by hand, which is the difference between a list and a plan.
-            ${vehicleLatest('c.driver_ext_id')} AS vehicle
-     FROM driver_compliance c ORDER BY licence_expires ASC NULLS LAST LIMIT 300`);
+app.get('/api/compliance/drivers', wrap(async (req, res) => {
+  /* The fleet chip reached this page and was dropped. driver_compliance
+     records which fleet's credentials collected the row, and on a two-fleet
+     operator the compliance list was both fleets under one heading. */
+  const fleet = req.query.fleet || null;
   const [mode] = await q(
     /* to_char, not the raw date. node-postgres hands a DATE back as a JS Date,
        and String(thatDate).slice(0, 10) is "Thu Jan 01" — which then fails to
@@ -2425,11 +2452,40 @@ app.get('/api/compliance/drivers', wrap(async (_, res) => {
     `SELECT to_char(licence_expires, 'YYYY-MM-DD') AS licence_expires, count(*)::int n,
             (SELECT count(*)::int FROM driver_compliance WHERE licence_expires IS NOT NULL) AS with_date,
             count(DISTINCT licence_no)::int distinct_numbers
-     FROM driver_compliance WHERE licence_expires IS NOT NULL
-     GROUP BY licence_expires ORDER BY n DESC LIMIT 1`);
+     FROM driver_compliance
+     WHERE licence_expires IS NOT NULL AND ($1::text IS NULL OR fleet_id = $1)
+     GROUP BY licence_expires ORDER BY n DESC LIMIT 1`, [fleet]);
   // One date on more than half the rows is a default, not a coincidence.
   const share = mode && mode.with_date ? mode.n / mode.with_date : 0;
   const placeholder = share >= 0.5 && mode.n >= 5;
+  const ph = placeholder ? mode.licence_expires : null;
+  /* The list, ordered so the placeholder rows are not the first thing a reader
+     sees. 77 of the live rows carry the identical never-filled-in date, and
+     ordering by licence_expires ASC put every one of them at the top of a page
+     whose job is to show whose licence lapses next — 77 rows of a data-quality
+     artefact above the driver who actually stops working on Thursday. They are
+     still here, at the end, flagged, because a licence nobody has entered is
+     its own to-do.
+
+     Each row says whether its own date is the placeholder, so the front end
+     can render it as "not filled in" rather than as a red EXPIRED pill — the
+     toolbar said "77 with an expired licence" while this endpoint's own
+     totals said expired: 0. */
+  const rows = await q(
+    `SELECT platform, c.driver_ext_id, full_name, phone, licence_no, licence_expires,
+            c.fleet_id,
+            (licence_expires - now()::date) AS days_left, state, suspension_reason, rating,
+            ($1::text IS NOT NULL
+             AND to_char(licence_expires,'YYYY-MM-DD') = $1) AS licence_placeholder,
+            -- A licence expiring in six days is a CAR that stops earning in six
+            -- days. The row named the person and left the asset to be worked
+            -- out by hand, which is the difference between a list and a plan.
+            ${vehicleLatest('c.driver_ext_id')} AS vehicle
+     FROM driver_compliance c
+     WHERE ($2::text IS NULL OR c.fleet_id = $2)
+     ORDER BY ($1::text IS NOT NULL
+               AND to_char(licence_expires,'YYYY-MM-DD') = $1) ASC,
+              licence_expires ASC NULLS LAST LIMIT 300`, [ph, fleet]);
   /* Counted in the database, excluding the placeholder date, rather than by
      filtering the 300 rows the page happened to receive. "Driver licences
      expired — stand down until renewed" is the single most consequential
@@ -2445,14 +2501,18 @@ app.get('/api/compliance/drivers', wrap(async (_, res) => {
                                AND ($1::text IS NULL OR to_char(licence_expires,'YYYY-MM-DD') <> $1)
                                AND licence_expires >= now()::date
                                AND licence_expires <= now()::date + 45)::int within_45,
+            count(*) FILTER (WHERE licence_expires IS NOT NULL
+                               AND $1::text IS NOT NULL
+                               AND to_char(licence_expires,'YYYY-MM-DD') = $1)::int placeholder,
             count(*) FILTER (WHERE licence_expires IS NULL)::int no_date_at_all
-     FROM driver_compliance`, [placeholder ? mode.licence_expires : null]);
+     FROM driver_compliance WHERE ($2::text IS NULL OR fleet_id = $2)`, [ph, fleet]);
   res.json({
     drivers: rows,
     totals: t,
     shown: rows.length,
     truncated: (t?.total ?? 0) > rows.length,
-    placeholder_date: placeholder ? mode.licence_expires : null,
+    fleet,
+    placeholder_date: ph,
     placeholder_rows: placeholder ? mode.n : 0,
     rows_with_a_date: mode?.with_date ?? 0,
     caveat: placeholder
@@ -2707,8 +2767,37 @@ app.get('/api/schema/raw-fields', wrap(async (req, res) => {
   const cols = (await q(
     `SELECT column_name FROM information_schema.columns WHERE table_name = $1`, [table]))
     .map((c) => c.column_name);
-  const norm = (k) => k.toLowerCase().replace(/[^a-z0-9]/g, '');
-  const mapped = new Set(cols.map(norm));
+  /* Name-matching alone said the opposite of the truth.
+     ─────────────────────────────────────────────────────────────────────────
+     norm() strips non-alphanumerics and compares against the column list, so
+     "Trip request time" can never match requested_at. Thirteen of Uber's
+     fifteen fields therefore rendered "RAW ONLY" — Trip UUID, Number plate,
+     Driver UUID, Trip distance, Trip request time, Trip drop-off time, Trip
+     status, both addresses, Product type — every one of which the collector
+     maps. The single most useful column on this page was inverted.
+
+     src/probe.js solved this for its own report with per-surface alias maps
+     and its header explains why at length. The maps are now shared rather than
+     copied, so the two answers to the same question cannot drift, and the
+     Uber trip export's names were added to them. */
+  const normKey = (k) => k.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const mapped = new Set(cols.map(normKey));
+  const aliasSets = RAW_ALIASES[table] || {};
+  const aliases = new Set(Object.entries(aliasSets)
+    .filter(([pl]) => !platform || pl === platform)
+    .flatMap(([, m]) => Object.keys(m))
+    .map(normKey));
+  /* Which alias table answered, so a reader can tell "we map this" from "we
+     have a column with that name". A false "unmapped" costs a glance; a false
+     "mapped" hides a field for ever, so a key matched only by an alias says
+     so. */
+  const aliasFor = (k) => {
+    for (const [pl, m] of Object.entries(aliasSets)) {
+      if (platform && pl !== platform) continue;
+      for (const [name, col] of Object.entries(m)) if (normKey(name) === normKey(k)) return col;
+    }
+    return null;
+  };
 
   res.json({
     table, platform, rows_with_raw: n, sampled: Math.min(sample, n),
@@ -2717,10 +2806,9 @@ app.get('/api/schema/raw-fields', wrap(async (req, res) => {
       fill_pct: r.present ? Math.round((r.filled / r.present) * 100) : 0,
       distinct_values: r.distinct_values,
       examples: r.examples || [],
-      // A loose match: "Trip request time" against requested_at will not hit,
-      // which is fine — a false "unmapped" costs a glance, a false "mapped"
-      // hides a field.
-      already_a_column: mapped.has(norm(r.key)),
+      already_a_column: mapped.has(normKey(r.key)) || aliases.has(normKey(r.key)),
+      // The column it lands in, where a name alone would not have found it.
+      mapped_to: mapped.has(normKey(r.key)) ? r.key : aliasFor(r.key),
     })),
   });
 }));

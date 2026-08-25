@@ -182,6 +182,47 @@ const BOLT_DRIVER_ALIASES = {
   driver_uuid: 'driver_ext_id', first_name: 'full_name', last_name: 'full_name',
   phone: 'phone', state: 'state',
 };
+/* Uber's trip export names every column in English prose, so norm() — which
+   strips non-alphanumerics and compares against information_schema — can never
+   match "Trip request time" to requested_at. /api/schema/raw-fields did
+   exactly that comparison and reported THIRTEEN of Uber's fifteen fields as
+   "RAW ONLY", including Trip UUID, Number plate, Driver UUID, Trip distance,
+   Trip request time, Trip drop-off time, Trip status, both addresses and
+   Product type — every one of which the collector maps. The single most useful
+   column on the Data sources page said the opposite of the truth. */
+const UBER_TRIP_ALIASES = {
+  'Trip UUID': 'external_id', 'Trip ID': 'external_id',
+  'Number plate': 'plate', 'Vehicle plate': 'plate', 'License plate': 'plate',
+  'Driver UUID': 'driver_ext_id', 'Driver ID': 'driver_ext_id',
+  'Driver First Name': 'driver_name', 'Driver Last Name': 'driver_name',
+  'Driver name': 'driver_name',
+  'Trip request time': 'requested_at', 'Request time': 'requested_at',
+  'Trip drop-off time': 'ended_at', 'Drop-off time': 'ended_at',
+  'Trip distance': 'distance_km', 'Distance (km)': 'distance_km',
+  'Trip duration': 'duration_s', 'Trip Duration': 'duration_s',
+  'Trip status': 'status', 'Product type': 'product',
+  'Pick-up address': 'pickup_addr', 'Drop-off address': 'dropoff_addr',
+  'Payment type': 'payment_type', 'Organization': 'fleet_id',
+  'Vehicle UUID': 'vehicle_ext_id',
+};
+
+/* The alias tables, by the shape they describe, so a reader OTHER than the
+   probe can use them. /api/schema/raw-fields answers the same question about
+   the same payloads — "what does this provider send that we have nowhere to
+   put" — and was matching on names alone, so it disagreed with the probe about
+   thirteen Uber fields. One table, two readers. */
+export const RAW_ALIASES = {
+  trip: {
+    uber: UBER_TRIP_ALIASES, fms: FMS_TRIP_ALIASES,
+    hotel: HOTEL_TRIP_ALIASES, yango: YANGO_TRIP_ALIASES,
+  },
+  driver_performance: { bolt: BOLT_DRIVER_ALIASES, yango: {} },
+  alert: { fms: { 'Plate No': 'plate', 'Alert Name': 'alert_type',
+    'Alert Date Time': 'occurred_at', Slno: 'external_id' } },
+  telemetry_snapshot: { cabman: { VehicleID: 'plate', gmt: 'captured_at', state: 'ignition',
+    SeatSensorValue: 'seat_occupied', Status: 'status' } },
+  vehicle_profile: {},
+};
 
 export function surfaces({ from, to }) {
   const list = [];

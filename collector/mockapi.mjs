@@ -23,13 +23,21 @@ app.get('/api/live', (_, r) => r.json(plates.map((p, i) => ({
   current_driver: drivers[i], driver_as_of: '2026-08-21',
 }))));
 
-app.get('/api/map/days', (_, r) => r.json(plates.map((p, i) => ({
-  day: '2026-08-21', plate: p, fixes: 40 - i, driver_name: drivers[i], fleet_id: 'ecosine',
-  first_fix: '2026-08-21T02:10:00Z', last_fix: '2026-08-21T19:40:00Z',
-  max_speed: 90 - i * 3, occupied_fixes: 20 - i,
-  // The id, so the day list can open the person rather than only name them.
-  driver_ext_id: `drv-${i}`, driver_trips: 12 - i, current_driver_name: drivers[i],
-}))));
+/* The replay day picker reached exactly 400 rows in production, which is what
+   a cap looks like when it has bitten and nothing says so: the day a reader is
+   looking for is simply not in the menu. */
+app.get('/api/map/days', (_, r) => {
+  const rows = plates.map((p, i) => ({
+    day: '2026-08-21', plate: p, fixes: 40 - i, driver_name: drivers[i], fleet_id: 'ecosine',
+    first_fix: '2026-08-21T02:10:00Z', last_fix: '2026-08-21T19:40:00Z',
+    max_speed: 90 - i * 3, occupied_fixes: 20 - i,
+    // The id, so the day list can open the person rather than only name them.
+    driver_ext_id: `drv-${i}`, driver_trips: 12 - i, current_driver_name: drivers[i],
+  }));
+  // A bare array: the map's day picker has no front-end item pairing with this
+  // change, so the three facts ride on the row rather than reshaping it.
+  r.json(rows.map((x) => ({ ...x, total: rows.length, shown: rows.length, truncated: false })));
+});
 
 app.get('/api/map/journey', (req, res) => {
   const pts = []; let lat = 25.11, lng = 55.20;
@@ -219,6 +227,9 @@ app.get('/api/compliance/vehicles', (_, r) => {
       within_7: rows.filter((x) => dl(x) >= 0 && dl(x) <= 7).length,
       within_45: rows.filter((x) => dl(x) > 7 && dl(x) <= 45).length },
     doc_types: [{ doc_type: 'registration', n: rows.length + 40 }],
+    // Which fleet was asked for. Both chips reached this page and neither
+    // narrowed it, so a two-fleet operator read one list under either heading.
+    fleet: null,
     shown: rows.length, truncated: true });
 });
 app.get('/api/compliance/drivers', (_, r) => r.json({
@@ -228,22 +239,28 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
     // Six rows carrying the identical placeholder the source writes when the
     // field was never filled in, plus two real dates.
     ...Array.from({ length: 6 }, (_, i) => ({ platform: 'hotel', driver_ext_id: `d${10 + i}`,
-      full_name: drivers[i], phone: '+9715000000', licence_no: '123456',
+      full_name: drivers[i], phone: '+9715000000', licence_no: '123456', fleet_id: 'ecosine',
       licence_expires: '2026-01-01', days_left: -232, state: 'active',
+      /* Not expired — never entered. The directory counted all 77 of these into
+         "77 with an expired licence" and painted red pills, while this endpoint
+         reported expired: 0 about the same people. */
+      licence_placeholder: true,
       suspension_reason: null, rating: 4.8 - i * 0.05,
       // A licence expiring is a CAR that stops earning. The row names it.
       vehicle: { plate: plates[i % plates.length], day: '2026-08-21' } })),
     { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', phone: '+9715000001',
       licence_no: 'AE1802580', licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
+      fleet_id: 'egari', licence_placeholder: false,
       suspension_reason: 'documents under review', rating: 4.71,
       vehicle: { plate: plates[2], day: '2026-08-19' } },
     { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', phone: null,
       licence_no: 'AE9911', licence_expires: '2026-08-01', days_left: -20, state: 'active',
+      fleet_id: 'ecosine', licence_placeholder: false,
       suspension_reason: null, rating: null,
       // Nobody has held this person's car in the window we have custody for.
       vehicle: null },
   ],
-  placeholder_date: '2026-01-01', placeholder_rows: 6, rows_with_a_date: 8,
+  fleet: null, placeholder_date: '2026-01-01', placeholder_rows: 6, rows_with_a_date: 8,
   caveat: '6 of 8 licence dates are the identical value 2026-01-01, which is what this source writes '
     + 'when the field was never filled in. They are a data-quality problem, not expired licences, and '
     + 'are counted separately below rather than as people who must stand down.',
@@ -297,6 +314,10 @@ app.get('/api/drivers/directory', (_, r) => r.json([
     // What the PROVIDER says about them, which is not the same as whether they
     // drove: somebody can be waitlisted and still have last month's trips.
     platform_state: i === 3 ? 'suspended' : 'active', can_earn: i !== 3,
+    /* Not expired — never entered: the identical placeholder date this source
+       writes for an unset field. The toolbar counted 77 of them as expired
+       licences while /api/compliance/drivers reported expired: 0. */
+    licence_placeholder: false,
     /* WHICH platform said it. 241 of the people in the live directory have
        never driven — the panel exists for them — and every column describing
        them was blank because the source platform was dropped on the way out. */
@@ -349,6 +370,15 @@ app.get('/api/driver/profile', (req, r) => {
     ],
     accounts: [{ platform: 'uber', driver_ext_id: req.query.id, trips: 380, first_trip: dayISO(DAYS), last_trip: dayISO(0) },
       ...(i % 3 === 0 ? [{ platform: 'yango', driver_ext_id: `y-${i}`, trips: 40, first_trip: dayISO(20), last_trip: dayISO(1) }] : [])],
+    /* What each platform says about this person's standing. The route never
+       touched driver_platform_state, so a suspended driver's own page could
+       not show that they were suspended, why, or the plate they still hold —
+       all of which #roster/blocked shows about the same person. */
+    standing: [{ platform: 'uber', fleet_id: 'ecosine',
+      state: i === 3 ? 'suspended' : 'active', state_raw: i === 3 ? 'BLOCKED' : 'ONBOARDING_STATUS_ACTIVE',
+      state_reason: i === 3 ? 'documents under review' : null,
+      plate: plates[i % plates.length], vehicle_ext_id: `veh-${i}`,
+      score: i === 3 ? null : 88 - i, can_earn: i !== 3, observed_at: new Date().toISOString() }],
   });
 });
 
@@ -431,6 +461,12 @@ app.get('/api/driver/territory', (req, r) => {
       avg_km: +rnd(6, 22).toFixed(1), avg_fare: +rnd(22, 88).toFixed(2) })),
     idle: [{ lat: 25.253, lng: 55.365, fixes: 88 }, { lat: 25.078, lng: 55.139, fixes: 41 },
       { lat: 25.196, lng: 55.276, fixes: 22 }],
+    /* One cluster on a map beside a table of 139 pickups across 25 areas is not
+       a contradiction — most channels report no coordinate — but the page could
+       not say so, and its "no positioned trips" note fired only at zero. */
+    coverage: { bookings: 420 - seed * 37, positioned: Math.round((420 - seed * 37) * 0.31),
+      addressed: Math.round((420 - seed * 37) * 0.62), positioned_pct: 31,
+      unpositioned_platforms: ['uber'] },
   });
 });
 
@@ -488,6 +524,10 @@ app.get('/api/driver/quality', (req, r) => {
       { alert_type: 'Harsh Acceleration', n: 14, latest: new Date().toISOString() },
       { alert_type: 'Harsh Cornering', n: 6, latest: new Date().toISOString() }],
     alert_km: 3410 - i * 240, alerts_per_100km: +(((87 + i * 5) / (3410 - i * 240)) * 100).toFixed(1),
+    /* What the fleet does, so a rate has something to be high AGAINST. The page
+       painted this critical from a hardcoded 5/15 scale under a sub-label
+       reading "comparable across drivers" — comparable to a constant. */
+    fleet_alerts_per_100km: 2.6, fleet_alert_km: 184200, fleet_alerts: 4790,
   });
 });
 
@@ -513,11 +553,12 @@ app.get('/api/driver/trips', (req, r) => {
 });
 
 app.get('/api/driver/custody', (req, r) => {
-  const seed = idIndex(req.query.id);
-  r.json(dailyFor(req.query.id).slice().reverse().map((d) => ({
+  // 60 of 256 rows reached the Activity tab with nothing saying so.
+  const rows = dailyFor(req.query.id).slice().reverse().map((d) => ({
     day: d.day, plate: d.plates, platform: 'uber', trips: d.trips, km: d.km, revenue: d.revenue,
     first_trip_at: d.first_trip_at, last_trip_at: d.last_trip_at, is_primary: true,
-  })));
+  }));
+  r.json({ rows, total: rows.length, shown: rows.length, truncated: false });
 });
 
 
@@ -1345,8 +1386,11 @@ app.get('/api/corporate/property', (req, res) => {
       { label: 'posted-for-salary', settlement_class: 'salary', label_class: 'Salary deduction', n: 120, revenue: 12960 }],
     guests: Array.from({ length: 18 }, (_, i) => ({ guest_id: `guest-${1000 + i}`, bookings: 9 - (i % 8),
       revenue: (9 - (i % 8)) * 112, room_no: String(1200 + i), first_at: dayISO(60 - i), last_at: dayISO(i) })),
+    /* 40 of a property's 478 passengers were listed with nothing saying so. */
+    guests_shown: 18, guests_truncated: true,
     drivers: drivers.map((d, i) => ({ driver_name: d, driver_ext_id: `drv-${i}`, bookings: 60 - i * 6,
       avg_deadhead_km: 1.8 + i * 0.4, revenue: (60 - i * 6) * 110 })),
+    drivers_shown: drivers.length, drivers_truncated: false,
     dayparts: [{ label: 'night', n: 90 }, { label: 'morning', n: 210 }, { label: 'midday', n: 160 },
       { label: 'evening', n: 180 }, { label: 'late', n: 56 }],
   });
@@ -1358,6 +1402,8 @@ app.get('/api/corporate/guests', (_, r) => r.json({
     property: hotels[i % hotels.length].name, partner_id: 'h-palm', room_no: String(900 + i),
     purpose: i % 5 === 0 ? 'AIRPORT TRANSFER' : null, first_at: dayISO(90 - i), last_at: dayISO(i % 30),
     km: (8 - (i % 7)) * 14, span_days: 90 - i - (i % 30) })),
+  // 300 of 875 guest rows reached the page, with nothing saying so.
+  guests_shown: 40, guests_truncated: true,
   total_guests: 812, total_bookings: 1253, repeat_guests: 214, repeat_rate_pct: 26.4,
   bookings_from_repeat_pct: 48.1, bookings_with_room: 168, distinct_rooms: 139,
   id_is_per_booking: false, caveat: null,
@@ -1584,7 +1630,14 @@ app.get('/api/analyst/findings', (req, r) => {
   const want = String(req.query.verdict || 'confirmed').split(',');
   r.json({ confirmed: 2, refuted: 1, immaterial: 1, unsupported: 1, runs: 3,
     last_run: new Date().toISOString(), model: 'glm-5-2-260617',
-    findings: all.filter((f) => want.includes(f.verdict)) });
+    findings: all.filter((f) => want.includes(f.verdict)),
+    fleet: null,
+    /* Whether the model that writes these is configured at all. An empty list
+       means "no finding" only when the generator can run; with ARK_API_KEY
+       unset it means the pass has never happened, and the page described that
+       as a scheduling delay. */
+    configured: true,
+    platform_applies: false });
 });
 app.get('/api/analyst/rules', (_, r) => r.json({
   metrics: [

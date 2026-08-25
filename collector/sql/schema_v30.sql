@@ -48,6 +48,18 @@ CREATE INDEX IF NOT EXISTS trip_receivable_local_day_idx
 CREATE INDEX IF NOT EXISTS insight_latest_idx
   ON insight (code, entity_type, entity_id, computed_at DESC);
 
+-- #retention could not be narrowed to a fleet, because its rollup had none.
+--
+-- rollup_person_month is keyed on (person_key, month) and carried `platforms`
+-- but no fleet, so /api/retention answered identically for both businesses.
+-- An ARRAY, matching `platforms`, rather than a key column: a person who drove
+-- for both fleets in one month is ONE person, and splitting the row would fold
+-- them into two humans on the page whose entire subject is whether people
+-- stay.
+ALTER TABLE rollup_person_month ADD COLUMN IF NOT EXISTS fleets TEXT[];
+COMMENT ON COLUMN rollup_person_month.fleets IS
+  'Every fleet this person took a booking for in this month. An array, not a key: one human who worked both fleets is still one row, because splitting it would double them in a cohort.';
+
 -- A finding that names seven people and identifies none of them.
 --
 -- drivers_online_no_trips is the most severe row on the live list: "Uber
