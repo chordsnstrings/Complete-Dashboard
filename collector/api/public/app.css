@@ -133,12 +133,31 @@ a{color:var(--accent-ink)}
 
 #nav{display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;margin:0 -4px}
 
-/* group heading — quiet, spaced, clearly not an item */
+/* group heading — now a control, not a label.
+   It was pointer-events:none, which was right when a group was decoration.
+   Twenty-nine destinations do not fit any laptop's sidebar, so the heading
+   opens and closes its group and has to look pressable and take focus. The
+   tighter padding is the other half: 16px of lead on seven groups was 112px
+   of the ~570px available spent on whitespace. */
 #nav .grp{
+  display:flex;align-items:center;gap:7px;width:calc(100% - 8px);margin:0 4px;
   font-family:"IBM Plex Mono",monospace;font-size:.6rem;letter-spacing:.18em;text-transform:uppercase;
-  color:var(--ink-3);padding:16px 12px 6px;pointer-events:none;
+  color:var(--ink-3);padding:9px 8px 5px;
+  background:none;border:0;border-radius:var(--r-sm);cursor:pointer;text-align:left;
 }
-#nav .grp:first-child{padding-top:2px}
+#nav .grp:first-child{padding-top:3px}
+#nav .grp .caret{font-size:.7rem;line-height:1;opacity:.55;width:8px}
+/* The count only appears when the group is shut — it answers "what am I not
+   seeing", which is the one question a collapsed group raises. */
+#nav .grp .n{
+  margin-left:auto;font-size:.6rem;opacity:.5;font-variant-numeric:tabular-nums;
+}
+#nav .grp:hover:not(:disabled){color:var(--ink-2);background:var(--surface-2)}
+#nav .grp:hover:not(:disabled) .caret{opacity:.9}
+#nav .grp:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+/* The group you are inside cannot be closed, so it must not invite the click. */
+#nav .grp:disabled{cursor:default;color:var(--ink-3)}
+#nav .grp:disabled .caret{opacity:.3}
 
 #nav a{
   display:flex;align-items:center;gap:11px;

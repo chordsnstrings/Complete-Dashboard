@@ -192,42 +192,35 @@ function componentTree(components) {
 }
 
 const VIEWS = [
-  /* The landing page, and it leads the list because it is the first screen.
-     The question this product exists to answer is which assets and which
-     people make money and which do not; every other view is a narrower
-     version of it. What used to sit here is the Fleet activity page below —
-     volume and mix, which is a different and lesser question, and which led
-     with a revenue figure drawn from trip.price on a fleet whose dominant
-     channel prices nothing per trip. */
-  { id: 'unit', label: 'Unit economics', ic: '◆', grp: 'Analyse', sub: 'What every vehicle and every driver earned per day worked, per km and per booking — and which of them earned nothing' },
-  { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Analyse', sub: 'Volume, mix and quality across every platform — the work behind the money' },
-  { id: 'demand', label: 'Demand', ic: '◷', grp: 'Analyse', sub: 'When trips happen — by day, hour and weekday' },
-  { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'Analyse', sub: 'Per-driver output, quality and cross-platform activity' },
-  { id: 'roster', label: 'Roster & supply', ic: '☰', grp: 'Analyse', sub: 'Who is on the books across all four platforms, and who is earning nothing' },
-  { id: 'retention', label: 'Joiners & leavers', ic: '⇅', grp: 'Analyse', sub: 'Whether a falling driver count is people leaving or nobody arriving — a headcount cannot tell them apart' },
-  { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Analyse', sub: 'Utilisation and revenue per vehicle' },
-  { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Analyse', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
-  { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Analyse', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
-  { id: 'revenue', label: 'Revenue by channel', ic: '◇', grp: 'Analyse', sub: 'What each platform actually tells us about money — and which ones tell us nothing' },
-  { id: 'reconcile', label: 'Reconciliation', ic: '⇌', grp: 'Analyse', sub: 'Every month on record: what the platforms wired against what their own statements say they owed' },
-  { id: 'finance', label: 'Finance', ic: '◈', grp: 'Analyse', sub: 'Revenue, payment mix and the transaction ledger' },
-  { id: 'settlement', label: 'Settlement', ic: '◫', grp: 'Analyse', sub: 'Who settles the fare and when — cash in hand, and what is outstanding' },
-  { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Analyse', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
-  { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Analyse', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
-  { id: 'forecast', label: 'Forecast', ic: '◠', grp: 'Analyse', sub: 'What next month looks like, day by day, and how much of that is a guess' },
-  { id: 'playbook', label: 'To-do list', ic: '☑', grp: 'Operate', sub: 'What to do this month to earn more — each item with the arithmetic that sized it' },
-  { id: 'capacity', label: 'Rota gaps', ic: '◫', grp: 'Operate', sub: 'Where next month’s forecast work lands, against who currently covers that hour' },
-  { id: 'insights', label: 'Action list', ic: '✦', grp: 'Operate', sub: 'What needs doing, ranked by what it costs to ignore' },
-  { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Operate', sub: 'Claims a model proposed and the database judged — with the numbers that decided each one' },
-  { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'Operate', sub: 'Documents and licences with an expiry date attached' },
-  { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Operate', sub: 'Seat occupied, vehicle moved — but no booking on any channel' },
-  { id: 'safety', label: 'Safety', ic: '△', grp: 'Operate', sub: 'Harsh-driving events from the telematics layer' },
-  { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Operate', sub: 'Realtime positions — CABMAN refreshes every 5 minutes' },
-  { id: 'map', label: 'Map & replay', ic: '◍', grp: 'Operate', sub: 'Where every vehicle is now, and where it went on any given day' },
-  { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Operate', sub: 'Collector health, coverage and history depth' },
-  { id: 'coverage', label: 'Collection gaps', ic: '▦', grp: 'Operate', sub: 'Which days each source actually collected — a hole here makes every rate across it wrong' },
-  { id: 'providers', label: 'What each API offers', ic: '⌗', grp: 'Operate', sub: 'Every field each provider sends, and the ones we currently have nowhere to put' },
-  { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Configure', sub: 'Credentials and collection schedule' },
+  { id: 'unit', label: 'Unit economics', ic: '◆', grp: 'Money', sub: 'What every vehicle and every driver earned per day worked, per km and per booking — and which of them earned nothing' },
+  { id: 'revenue', label: 'Revenue by channel', ic: '◇', grp: 'Money', sub: 'What each platform actually tells us about money — and which ones tell us nothing' },
+  { id: 'reconcile', label: 'Reconciliation', ic: '⇌', grp: 'Money', sub: 'Every month on record: what the platforms wired against what their own statements say they owed' },
+  { id: 'finance', label: 'Finance', ic: '◈', grp: 'Money', sub: 'Revenue, payment mix and the transaction ledger' },
+  { id: 'settlement', label: 'Settlement', ic: '◫', grp: 'Money', sub: 'Who settles the fare and when — cash in hand, and what is outstanding' },
+  { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Money', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
+  { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Work', sub: 'Volume, mix and quality across every platform — the work behind the money' },
+  { id: 'demand', label: 'Demand', ic: '◷', grp: 'Work', sub: 'When trips happen — by day, hour and weekday' },
+  { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Work', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
+  { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Work', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
+  { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'People', sub: 'Per-driver output, quality and cross-platform activity' },
+  { id: 'roster', label: 'Roster & supply', ic: '☰', grp: 'People', sub: 'Who is on the books across all four platforms, and who is earning nothing' },
+  { id: 'retention', label: 'Joiners & leavers', ic: '⇅', grp: 'People', sub: 'Whether a falling driver count is people leaving or nobody arriving — a headcount cannot tell them apart' },
+  { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'People', sub: 'Documents and licences with an expiry date attached' },
+  { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Assets', sub: 'Utilisation and revenue per vehicle' },
+  { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Assets', sub: 'Seat occupied, vehicle moved — but no booking on any channel' },
+  { id: 'safety', label: 'Safety', ic: '△', grp: 'Assets', sub: 'Harsh-driving events from the telematics layer' },
+  { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Assets', sub: 'Realtime positions — CABMAN refreshes every 5 minutes' },
+  { id: 'map', label: 'Map & replay', ic: '◍', grp: 'Assets', sub: 'Where every vehicle is now, and where it went on any given day' },
+  { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Decide', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
+  { id: 'forecast', label: 'Forecast', ic: '◠', grp: 'Decide', sub: 'What next month looks like, day by day, and how much of that is a guess' },
+  { id: 'playbook', label: 'To-do list', ic: '☑', grp: 'Decide', sub: 'What to do this month to earn more — each item with the arithmetic that sized it' },
+  { id: 'capacity', label: 'Rota gaps', ic: '◫', grp: 'Decide', sub: 'Where next month’s forecast work lands, against who currently covers that hour' },
+  { id: 'insights', label: 'Action list', ic: '✦', grp: 'Decide', sub: 'What needs doing, ranked by what it costs to ignore' },
+  { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Decide', sub: 'Claims a model proposed and the database judged — with the numbers that decided each one' },
+  { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Trust', sub: 'Collector health, coverage and history depth' },
+  { id: 'coverage', label: 'Collection gaps', ic: '▦', grp: 'Trust', sub: 'Which days each source actually collected — a hole here makes every rate across it wrong' },
+  { id: 'providers', label: 'What each API offers', ic: '⌗', grp: 'Trust', sub: 'Every field each provider sends, and the ones we currently have nowhere to put' },
+  { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Set up', sub: 'Credentials and collection schedule' },
 ];
 
 /* ─────────── shell ─────────── */
@@ -242,15 +235,56 @@ const PARENT = { driver: 'drivers', vehicle: 'vehicles', property: 'corporate', 
   action: 'insights', slot: 'demand', segments: 'unauthorized', segment: 'unauthorized' };
 const DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+/* Which groups are open. Measured, not guessed: twenty-nine destinations laid
+   out flat need about 1,250px of nav, and #nav gets 712px on a 900px laptop,
+   570px on a 768px one and 522px on a 13-inch browser with a toolbar. So a
+   third of the product was below the fold at every realistic window height,
+   and the fold landed in the middle of a group.
+
+   Collapsing solves it, but only if the state survives navigation — a sidebar
+   that snaps shut every time you click is worse than a long one. It is kept
+   per browser, and the group holding the current page is ALWAYS open whatever
+   was stored, so no route can be reached and then hidden. */
+const NAV_KEY = 'fleet.nav.open';
+const navOpen = () => {
+  try {
+    const raw = localStorage.getItem(NAV_KEY);
+    if (raw) return new Set(JSON.parse(raw));
+  } catch { /* private window, cleared storage, quota — open everything */ }
+  return null;
+};
+const navToggle = (grp, open) => {
+  const cur = navOpen() || new Set(VIEWS.map((v) => v.grp));
+  open ? cur.add(grp) : cur.delete(grp);
+  try { localStorage.setItem(NAV_KEY, JSON.stringify([...cur])); } catch { /* ignore */ }
+};
+
 function renderNav() {
   const nav = $('#nav'); nav.innerHTML = '';
   const lit = PARENT[state.view] || state.view;
-  let grp = null;
-  VIEWS.forEach((v) => {
-    if (v.grp !== grp) { grp = v.grp; nav.append(el('div', 'grp', grp)); }
-    const a = el('a', v.id === lit ? 'on' : '', `<span class="ic">${v.ic}</span>${v.label}`);
-    a.href = href(v.id);
-    nav.append(a);
+  const here = (VIEWS.find((v) => v.id === lit) || {}).grp;
+  const stored = navOpen();
+  const groups = [...new Set(VIEWS.map((v) => v.grp))];
+  groups.forEach((grp) => {
+    const items = VIEWS.filter((v) => v.grp === grp);
+    const open = grp === here || (stored ? stored.has(grp) : true);
+    const head = el('button', `grp${open ? ' open' : ''}`,
+      `<span class="caret">${open ? '▾' : '▸'}</span>${grp}`
+      + (open ? '' : `<span class="n">${items.length}</span>`));
+    head.type = 'button';
+    head.setAttribute('aria-expanded', String(open));
+    /* The group of the page you are on cannot be collapsed out from under you:
+       clicking it would hide the thing that is lit. */
+    if (grp === here) head.disabled = true;
+    head.onclick = () => { navToggle(grp, !open); renderNav(); };
+    nav.append(head);
+    if (!open) return;
+    items.forEach((v) => {
+      const a = el('a', v.id === lit ? 'on' : '', `<span class="ic">${v.ic}</span>${v.label}`);
+      a.href = href(v.id);
+      a.title = v.sub || v.label;
+      nav.append(a);
+    });
   });
 }
 function setHeader(detail) {
