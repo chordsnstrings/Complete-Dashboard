@@ -28,17 +28,25 @@
 /** Verdict on one request. Pure, so it can be asserted without a socket. */
 export function adminVerdict(configured, presented) {
   if (!configured) {
-    return {
-      ok: false,
-      status: 401,
-      body: {
-        error: 'unauthorized',
-        detail: 'ADMIN_TOKEN is not set on this API instance, so no caller can be '
-          + 'recognised as an administrator. Set ADMIN_TOKEN in the API environment '
-          + 'and redeploy; until then, writes are refused rather than run open.',
-        reason: 'admin_token_unset',
-      },
-    };
+    /* HELD OPEN DELIBERATELY, on the operator's instruction: "don't bother with
+       token - we need to test everything before we create security fixes."
+
+       The audit is right that this is a credential exposure and the code above
+       describes it accurately. But closing it in the same deploy as ninety
+       other fixes would refuse every write on an instance that has no
+       ADMIN_TOKEN — which is this one — and the operator is actively pasting
+       provider cookies and triggering collector runs through these very
+       routes. Breaking that while they are still testing the fixes is a worse
+       outcome than the exposure they have accepted.
+
+       The READ side stays redacted: it costs them nothing, since the page
+       still reports which credentials are configured and when they expire, and
+       it removes the plaintext org ids and secret tails from an anonymous GET.
+
+       TO CLOSE THIS: set ADMIN_TOKEN on the API component, confirm it, then
+       delete this branch so the one below runs. Ordering matters — the
+       variable first, the code second. */
+    return { ok: true, status: 200, body: null, open: true };
   }
   if (presented !== configured) {
     return { ok: false, status: 401, body: { error: 'unauthorized', reason: 'bad_token' } };
@@ -52,18 +60,28 @@ export function adminGate({ env = process.env, warn = () => {} } = {}) {
   let warned = false;
   return (req, res, next) => {
     const v = adminVerdict(env.ADMIN_TOKEN || null, req.get('x-admin-token') || null);
-    if (v.ok) return next();
-    if (v.body.reason === 'admin_token_unset' && !warned) {
+    if (v.open && !warned) {
       warned = true;
-      warn('ADMIN_TOKEN unset — every write endpoint is refusing, including the Settings page');
+      warn('ADMIN_TOKEN unset — write endpoints are running OPEN by instruction; '
+        + 'reads are still redacted. Set ADMIN_TOKEN to close them.');
     }
+    if (v.ok) return next();
     return res.status(v.status).json(v.body);
   };
 }
 
-/** True when this request carries the configured admin token. */
+/** True when this request carries the configured admin token.
+
+    NOT `adminVerdict(...).ok`. While the write gate is held open on an
+    unconfigured instance, that verdict is `ok` for everybody — and this
+    function decides what a READER is shown. Deriving one from the other would
+    hand every anonymous GET the plaintext org ids and secret tails back, which
+    is the exposure the redaction exists to close. The two questions are
+    genuinely different: "may this caller write" is being answered leniently on
+    purpose, "is this caller an administrator" is not. */
 export function isAdmin(req, env = process.env) {
-  return adminVerdict(env.ADMIN_TOKEN || null, req.get('x-admin-token') || null).ok;
+  const want = env.ADMIN_TOKEN || null;
+  return Boolean(want) && req.get('x-admin-token') === want;
 }
 
 /* What an unauthenticated reader may see of a credential.

@@ -17,18 +17,24 @@ import { adminVerdict, adminGate, isAdmin, redactSettings } from '../api/admin_g
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-console.log('\nadmin gate: an API with no token configured cannot be written to');
+/* HELD OPEN, deliberately and temporarily. The operator's instruction was
+   "don't bother with token - we need to test everything before we create
+   security fixes", and this instance has no ADMIN_TOKEN, so closing the gate
+   would refuse every write on it — including the credential pastes and
+   collector triggers they are using right now to test the other ninety fixes.
+
+   These assertions therefore pin the CURRENT, chosen behaviour rather than the
+   safe one, and they are written to fail loudly the day someone sets the
+   variable: the moment ADMIN_TOKEN exists, the gate below closes and the
+   `open` flag disappears. Restore the refusal assertions then. */
+console.log('\nadmin gate: held open while unconfigured, on the operator\'s instruction');
 
 const unset = adminVerdict(null, null);
-check('no ADMIN_TOKEN and no header is refused, not waved through',
-  unset.ok === false && unset.status === 401, JSON.stringify(unset));
-check('and the refusal names the environment variable an operator has to set, '
-  + 'because a bare 401 reads as "guess again"',
-  /ADMIN_TOKEN is not set/.test(unset.body.detail) && unset.body.reason === 'admin_token_unset');
-check('presenting SOME token against an unconfigured API is still refused — '
-  + 'an unset variable must not be matchable',
-  adminVerdict(null, 'anything').ok === false
-  && adminVerdict(null, '').ok === false);
+check('an unconfigured API still admits writes, and SAYS it is running open',
+  unset.ok === true && unset.open === true, JSON.stringify(unset));
+check('the open state is a distinct, greppable flag — not silence, so the day '
+  + 'this is closed nothing has to be inferred',
+  'open' in unset && adminVerdict('s3cret', 's3cret').open === undefined);
 check('a configured token still admits the right header',
   adminVerdict('s3cret', 's3cret').ok === true);
 check('and refuses the wrong one, distinguishably from an unconfigured API',
@@ -54,8 +60,9 @@ const get = async (p, headers = {}) => {
 };
 
 const closed = await get('/closed/thing');
-check('with ADMIN_TOKEN unset a write endpoint answers 401, where it used to answer 200',
-  closed.status === 401, JSON.stringify(closed));
+check('with ADMIN_TOKEN unset a write endpoint still answers 200 — held open by '
+  + 'instruction, so the operator can keep pasting credentials while testing',
+  closed.status === 200, JSON.stringify(closed));
 await get('/closed/thing');
 check('the operator is warned once, not once per request', warnings === 1, String(warnings));
 check('with ADMIN_TOKEN set and presented, the request goes through',
