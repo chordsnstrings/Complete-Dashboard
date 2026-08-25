@@ -58,10 +58,15 @@ export async function renderRoster(root) {
   host.append(kpiRow([
     { label: 'People on the books', value: fmt(t.people),
       sub: t.multi_platform ? `${fmt(t.multi_platform)} work on more than one platform` : null },
-    { label: 'Drove in this window', value: fmt(t.working), tone: 'good' },
+    /* A count with no denominator is half a number. This tile sits beside
+       "able to earn, earning nothing" and "recruited, never driven", and the
+       three of them only mean anything against the size of the roster. */
+    { label: 'Drove in this window', value: fmt(t.working),
+      sub: t.people ? `of ${fmt(t.people)} people on the roster` : null, tone: 'good' },
     { label: 'Able to earn, earning nothing', value: fmt(t.idle_this_window),
       tone: t.idle_this_window ? 'warn' : null, sub: 'a licence and a slot standing still' },
     { label: 'Recruited, never driven', value: fmt(t.never_started),
+      sub: t.people ? `of ${fmt(t.people)} — no booking on any channel, ever` : 'no booking on any channel, ever',
       tone: t.never_started ? 'critical' : null },
     { label: 'Still waiting to start', value: fmt(t.in_pipeline), sub: 'onboarding or waitlisted' },
     t.unclassified
@@ -246,10 +251,15 @@ async function rosterStates(host) {
   const d = await q('/api/roster/states');
   host.innerHTML = '';
   host.append(kpiRow([
-    { label: 'Roster rows', value: fmt(d.rows) },
+    /* Rows, not people: a person with an account on two channels is two rows,
+       and the roster page above this one counts people. The two numbers differ
+       and nothing said which was which. */
+    { label: 'Roster rows', value: fmt(d.rows),
+      sub: 'one per platform account — a person on two channels is two rows' },
     { label: 'Oldest observation', value: d.oldest_observation ? dtStr(d.oldest_observation) : '—',
       sub: 'a roster nobody has refreshed describes the past' },
-    { label: 'Newest observation', value: d.newest_observation ? dtStr(d.newest_observation) : '—' },
+    { label: 'Newest observation', value: d.newest_observation ? dtStr(d.newest_observation) : '—' ,
+      sub: 'how current the standings on this page are'},
     { label: 'Words we could not classify', value: fmt((d.unrecognised_words || []).length),
       tone: (d.unrecognised_words || []).length ? 'warn' : 'good',
       sub: 'a mapping we could add' },

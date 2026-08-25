@@ -76,11 +76,20 @@ export async function renderDay(root, day, onDetail) {
         : 'no fare and no payout statement reaches this day' },
     { label: 'Fares', value: money(h.revenue),
       sub: h.priced ? `over ${fmt(h.priced)} priced bookings` : 'no booking that day reports a fare' },
-    { label: 'Drivers out', value: fmt(h.drivers) },
-    { label: 'Vehicles used', value: fmt(h.vehicles) },
+    /* Both counts, with what they are a rate over. "84 drivers" and "80
+       vehicles" on their own are two numbers with no shape; the interesting
+       fact on a day page is how hard each of them worked, and both figures
+       needed for that are already in this payload. */
+    { label: 'Drivers out', value: fmt(h.drivers),
+      sub: h.drivers && h.bookings
+        ? `${fmt(h.bookings / h.drivers, 1)} bookings each on average` : null },
+    { label: 'Vehicles used', value: fmt(h.vehicles),
+      sub: h.vehicles && h.booked_km
+        ? `${fmt(Math.round(h.booked_km / h.vehicles))} booked km each on average` : null },
     { label: 'Telematics journeys', value: fmt(h.telematics),
       sub: `${fmt(h.telematics_km)} km — the same physical trips, seen by the trackers` },
-    { label: 'First / last booking', value: h.first_at ? `${timeStr(h.first_at)} – ${timeStr(h.last_at)}` : '—' },
+    { label: 'First / last booking', value: h.first_at ? `${timeStr(h.first_at)} – ${timeStr(h.last_at)}` : '—' ,
+      sub: 'Dubai time — the working day this page describes'},
   ]));
 
   if (!h.bookings && !h.telematics) {

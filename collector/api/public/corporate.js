@@ -252,7 +252,14 @@ async function corpGuests(host) {
           g.distinct_rooms ? `${fmt(g.distinct_rooms)} distinct rooms named in this window` : null]
           .filter(Boolean).join(' · ') || null,
         tone: (g.repeat_rooms ?? g.rooms.length) ? 'good' : null },
-      { label: 'Repeat travel', value: 'not measurable', tone: 'warn' },
+      /* A tile reading "not measurable" with nothing beside it is a tile that
+         looks broken. The reason is one line down in `g.caveat` and belongs
+         here: this channel issues a NEW passenger id per booking, so two rides
+         by the same person are two strangers and no repeat rate can be
+         computed from them at all. */
+      { label: 'Repeat travel', value: 'not measurable', tone: 'warn',
+        sub: `this channel issues a new passenger id per booking — ${fmt(g.total_guests)} ids `
+          + `across ${fmt(g.total_bookings)} rides, so the same person twice is two strangers` },
     ]));
     host.append(note(g.caveat));
     if (g.rooms.length) {
@@ -295,7 +302,8 @@ async function corpGuests(host) {
     { label: 'Booked more than once', value: fmt(g.repeat_guests), sub: pct(g.repeat_rate_pct, 1) + ' of guests' },
     { label: 'Bookings from repeat guests', value: pct(g.bookings_from_repeat_pct, 1),
       tone: g.bookings_from_repeat_pct > 40 ? 'good' : null },
-    { label: 'Bookings per guest', value: g.total_guests ? fmt(g.total_bookings / g.total_guests, 2) : '—' },
+    { label: 'Bookings per guest', value: g.total_guests ? fmt(g.total_bookings / g.total_guests, 2) : '—',
+      sub: g.total_guests ? `${fmt(g.total_bookings)} rides across ${fmt(g.total_guests)} guests` : null },
   ]));
   host.append(note('A short window understates repeat business by construction: a guest who books once a '
     + 'quarter looks like a stranger inside a 30-day range. Widen the range above to see the real pattern.'));
