@@ -1103,3 +1103,37 @@ The rest of what the three widths reported is honest: six `slow-panel` notices,
 which is the report this pass added rather than a fault, and one
 `stuck-loading` on `#sources` at 1180px — `/api/coverage` cold, which is twenty
 seconds of real work and now says so on its own skeleton.
+
+### The pass, closed
+
+Re-run after those two fixes, against production, with the deployed assets
+byte-identical to the working tree:
+
+```
+312 page-renders across 3 widths, 0 routes with findings
+```
+
+| harness | result |
+|---|---|
+| `bin/numbers-audit.mjs` | 0 findings across 104 routes |
+| `bin/render-audit.mjs` | 0 findings across 312 page-renders |
+| `bin/live-audit.mjs` | 52 / 52 invariants |
+| `bin/page-audit.mjs` | 785 calls over 5 windows, 0 failing |
+| `bin/cap-audit.mjs` | 45 handlers, 7 at their cap, 0 silently |
+| `bin/slice-audit.mjs` | 17 cut lists, 0 undisclosed |
+| `bin/link-audit.mjs` | 104 routes, 0 malformed links |
+| `npm test` | 72 files, 2,301 assertions |
+
+One finding is deliberately left standing. `page-audit` reports that `#segments`
+offers a range control whose endpoint does not move between 7 and 365 days, and
+that is true: CABMAN's seat sensor has a few days of history, so however wide
+the window those are the same segments. The page says so in its own caption.
+Hiding the control would be wrong — it starts working the day that history
+accumulates, and a control removed for today's data is a control nobody puts
+back.
+
+Two data limits remain, and each now says so on the page it affects: Uber's
+earner-payments surface serves only the CURRENT payment period, so
+reconciliation's statement side is August alone; and Bolt is configured on both
+fleets and refused at the door, which was invisible on the money page and now
+has a panel carrying the collector's own error text.

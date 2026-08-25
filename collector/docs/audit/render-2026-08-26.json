@@ -1,6 +1,6 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-08-25T22:00:39.447Z",
+  "at": "2026-08-25T22:34:28.862Z",
   "widths": [
     1500,
     1180,
@@ -104,28 +104,21 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":33,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-08-26",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"August 26 vs the day before\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":33,\"explained\":true,\"title\":\"August 26 vs the day before\",\"kpis\":7,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-08-26/2026-08-25",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"August 26 vs August 25\",\"kpis\":7,\"tables\":3,\"charts\":2}"
-    },
-    {
-      "route": "compare/2026-08-26/2026-08-25?cut=full",
-      "width": 1500,
-      "sev": "w",
-      "code": "clipped-text",
-      "detail": "1: 44 vs 6,454 km"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":33,\"explained\":true,\"title\":\"August 26 vs August 25\",\"kpis\":7,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-08-26/2026-08-25?cut=full",
@@ -139,21 +132,21 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":33,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":8,\"tables\":1,\"charts\":3}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":5,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":8,\"tables\":1,\"charts\":3}"
     },
     {
       "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":58,\"explained\":true,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":59,\"explained\":true,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/territory",
@@ -181,7 +174,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":264,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":265,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "roster",
@@ -524,7 +517,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":49,\"explained\":true,\"title\":\"Unauthorized trips\",\"kpis\":8,\"tables\":2,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":59,\"explained\":true,\"title\":\"Unauthorized trips\",\"kpis\":8,\"tables\":2,\"charts\":2}"
     },
     {
       "route": "segments",
@@ -538,14 +531,14 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":41,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/verdict/authorized",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":187,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":185,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/plate/L36397",
@@ -648,16 +641,9 @@
     {
       "route": "sources",
       "width": 1500,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
-    },
-    {
-      "route": "sources",
-      "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":58,\"explained\":true,\"title\":\"Data sources\",\"kpis\":0,\"tables\":5,\"charts\":0}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":68,\"explained\":true,\"title\":\"Data sources\",\"kpis\":0,\"tables\":5,\"charts\":0}"
     },
     {
       "route": "coverage",
@@ -748,49 +734,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
-    },
-    {
-      "route": "live",
-      "width": 1180,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
-    },
-    {
-      "route": "sources",
-      "width": 1180,
-      "sev": "e",
-      "code": "stuck-loading",
-      "detail": "3 panel(s) still on the skeleton"
-    },
-    {
-      "route": "coverage",
-      "width": 1180,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
-    },
-    {
-      "route": "vehicle/L36397/movement",
-      "width": 820,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
-    },
-    {
-      "route": "safety",
-      "width": 820,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
-    },
-    {
-      "route": "live",
-      "width": 820,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":41,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     }
   ]
 }
