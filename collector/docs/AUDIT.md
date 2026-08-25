@@ -550,3 +550,56 @@ adds a LIMIT.
 Forty-two findings, every one logged above with what was measured, what was
 changed, and why.
 
+## The second question: does the page show the numbers it was given?
+
+The render sweep passed 312 renders clean — and Reconciliation was still hiding
+seven months of bank payouts totalling **AED 2.1M**. Nothing was wrong with the
+render. The figures were fetched, they were rendered, and they were off the
+right-hand edge of a table whose identity column had scrolled off the left.
+
+That is a whole class of defect the render audit cannot see, and it is there
+because of a decision *in* the render audit: `.tscroll` is allowed to scroll, so
+its overflow check exempts it. The exemption hid this.
+
+### Pass 14 — the layout that made correct numbers meaningless
+
+| # | finding | fix |
+|---|---|---|
+| 43 | a wide table's FIRST column scrolled away with the numbers. Reconciliation showed thirteen rows of money with no month against any of them; Drivers showed distances and payouts with nobody's name in sight | the identity column is `position:sticky` — one DOM and one row height, rather than a second frozen table that drifts out of step |
+| 44 | the absence notes were appended INSIDE the scroller, so on a phone the reader met a sentence beginning halfway through — *"rows carry one; the ledger only carries…"* — with its subject off the left edge | they sit outside it at panel width; `tableFrom` still returns one element, because two hundred call sites do `body.append(tableFrom(...))` |
+| 45 | four columns sharing one reason printed it four times, which reads as four separate faults | grouped by reason with the columns named in front; the "N of M rows carry one" count is stated only when the reason covers exactly one column |
+| 46 | **the reason itself was wrong** — "the ledger only carries money from 6 February 2026" is true of the BANK side and false for the four columns it sat under | measured: bank payouts 6 Feb → 30 Aug 2026 (206 days, AED 2,105,263); earnings components **August only**, zero rows Feb–Jul. The on-trip figures start in August and the bank column beside them starts in February |
+
+**Verified on production**, not inferred: all seventeen deployed JS/CSS files
+are byte-identical to the local tree, so a bridge render *is* the deployed site.
+Chromium cannot reach the DigitalOcean host directly in this environment
+(`bin/live-ui.mjs` records why), and the byte comparison is what closes that gap.
+
+### `bin/numbers-audit.mjs`
+
+Captures every `/api/` response a page fetches, walks the JSON for money and
+counts, and checks the figures reached the screen. It flags a value only when
+**all** of these hold:
+
+1. the payload row carries an identity (a plate, a person, a month),
+2. a table on the page is showing a row whose **first cell** is that identity,
+3. that table has a column for the field — not a *derived* one,
+4. and the value appears nowhere on the page, in any cell or chart label.
+
+Every one of those four gates exists because the version without it was wrong:
+
+| the check without it reported | why it was wrong |
+|---|---|
+| 196 of 197 figures missing on Drivers | the normaliser split `3,387` into `3 387` and matched neither |
+| 267 of 302 missing on `#unit` | the page fetches the asset ledger for a tab it is not showing |
+| `fix_age_min` and a tier's km missing | not every field in a payload is meant to be a column |
+| six figures missing on `#revenue` | a platform name is not unique — `uber` has a row per fleet and per month |
+| four more on `#revenue` | the top-level payout components are drawn as a **chart**, and a chart label is shown |
+| `Alerts /100km should be 1507` | the column is a rate and the field is a count |
+| `Bakht Zada Sharif · Money in should be 7898` | his name was in the **Held by** column of a *vehicle* row |
+
+Stated plainly: the numbers audit has so far found **one** real defect — the
+reconciliation one — and everything after it was tuning out false positives. A
+harness that cries wolf gets switched off, so each gate is written down with the
+finding that forced it.
+
