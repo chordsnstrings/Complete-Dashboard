@@ -31,6 +31,7 @@ import { renderRevenue } from './revenue.js';
 import { renderReconcile } from './reconcile.js';
 import { renderEconomics, UNIT_TABS } from './economics.js';
 import { renderPerformers, renderPerformer } from './performers.js';
+import { renderCompare } from './compare.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -201,6 +202,7 @@ const VIEWS = [
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Money', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
   { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Work', sub: 'Volume, mix and quality across every platform — the work behind the money' },
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Work', sub: 'When trips happen — by day, hour and weekday' },
+  { id: 'compare', label: 'Today vs yesterday', ic: '⧉', grp: 'Work', sub: 'Two days beside each other, cut at the same Dubai minute so a partial today is not read as a collapse' },
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Work', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
   { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Work', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
   { id: 'top-performers', label: 'Top performers', ic: '▲', grp: 'People', sub: 'Who last complete week went well for, and what they did differently' },
@@ -320,6 +322,31 @@ function setHeader(detail) {
     $('#viewSub').textContent = 'Every source that saw this day — including whether each one was collecting';
     crumb.innerHTML = `<a href="${href('demand')}">Demand</a><span>/</span><b>${esc(state.param || '')}</b>`;
     crumb.style.display = 'flex';
+  } else if (state.view === 'performer') {
+    /* Without this the drill-down fell through to the final else, VIEWS has no
+       'performer' entry, and `|| VIEWS[0]` retitled one person's week as "Unit
+       economics" — the wrong page name in the largest type on the screen, on
+       every visit. */
+    $('#viewTitle').textContent = detail?.name || 'One person’s week';
+    $('#viewSub').textContent = 'Day by day: what they drove, where they picked up, how long they '
+      + 'carried someone and how long they waited between jobs';
+    crumb.innerHTML = `<a href="${href('top-performers')}">Top performers</a><span>/</span>`
+      + `<b>${esc(detail?.name || state.param || '')}</b>`;
+    crumb.style.display = 'flex';
+  } else if (state.view === 'compare') {
+    /* The default is today against yesterday, but the page takes any two days,
+       and a header that still said "Today vs yesterday" over a comparison of
+       the 3rd and the 10th would be a lie in the largest type on the screen. */
+    const named = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v || '')
+      ? new Date(`${v}T12:00:00Z`).toLocaleDateString(undefined,
+        { day: 'numeric', month: 'long', timeZone: TZ })
+      : null);
+    const A = named(state.param), B = named(state.sub);
+    $('#viewTitle').textContent = A && B ? `${A} vs ${B}`
+      : A ? `${A} vs the day before` : 'Today vs yesterday';
+    $('#viewSub').textContent = 'Both days counted up to the same Dubai minute, so a day that '
+      + 'has not finished is not read as a fall';
+    crumb.style.display = 'none';
   } else if (state.view === 'slot') {
     const dow = Number(state.param), hour = Number(state.sub);
     const named = Number.isInteger(dow) && dow >= 0 && dow <= 6
@@ -1004,6 +1031,12 @@ V.slot = async (root) => {
     return empty(root, 'A slot address is #slot/<weekday 0-6>/<hour 0-23>.');
   }
   await renderSlot(root, dow, hour);
+};
+
+/* Two days beside each other. `#compare/<a>/<b>`, both optional: with neither
+   it is today against yesterday, which is the question this page exists for. */
+V.compare = async (root) => {
+  await renderCompare(root, state.param, state.sub);
 };
 
 V.day = async (root) => {

@@ -55,12 +55,21 @@ function ticks(max, n = 3) {
    and a range, and drew neither, so "223,400 next year" appeared without the
    126,200–320,500 it actually sits inside. Where a datum carries both, a
    whisker is drawn through the bar and the tooltip states the range. */
+/* `max` fixes the top of the scale from outside.
+   ─────────────────────────────────────────────────────────────────────────
+   Two charts of the same measure drawn one above the other are read as a
+   comparison, and two independently scaled axes make that reading wrong: a
+   peak of 5 and a peak of 7 both fill their own plot, so the taller day looks
+   identical to the shorter one. #compare draws exactly that pair, so it passes
+   the larger of the two maxima to both. Everywhere else the default — scale to
+   this series — is still what a single chart wants. */
 export function barChart(host, data, { x, y, label, color = '--b400', colorFor, onClick,
-  valueFmt = (v) => fmt(v), lo = null, hi = null } = {}) {
+  valueFmt = (v) => fmt(v), lo = null, hi = null, max: fixedMax = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
-  const raw = Math.max(...data.map((d) => Math.max(+d[y] || 0, hi ? +d[hi] || 0 : 0))) || 1;
+  const raw = fixedMax != null && fixedMax > 0 ? fixedMax
+    : Math.max(...data.map((d) => Math.max(+d[y] || 0, hi ? +d[hi] || 0 : 0))) || 1;
   const marks = ticks(raw <= 3 ? raw : raw * 1.12);
   const max = marks[marks.length - 1] || 1;
   const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length, bw = Math.min(step * 0.62, 44);
@@ -91,7 +100,14 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
     // 30-day range showed a chart with no dates at all under a caption inviting
     // you to click a specific day. Thin them instead, the way areaChart does.
     const every = Math.max(1, Math.ceil(data.length / 12));
-    if (i % every === 0 || i === data.length - 1) {
+    /* …and the forced last label is dropped when thinning already drew one
+       right next to it. On a 24-bar chart every is 2, so 22:00 is drawn by the
+       rule and 23:00 by the exception — and the two print on top of each other
+       as "22:0023:00". Only draw the tail when it is a full step clear of the
+       last thinned label. */
+    const lastThinned = Math.floor((data.length - 1) / every) * every;
+    const isTail = i === data.length - 1 && (data.length - 1) - lastThinned >= every;
+    if (i % every === 0 || isTail) {
       svg.append(txt(bx + bw / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
     }
   });

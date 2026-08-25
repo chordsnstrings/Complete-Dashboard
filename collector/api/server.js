@@ -26,6 +26,7 @@ import { capacityRoutes } from './capacity_routes.js';
 import { revenueRoutes } from './revenue_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
 import { performerRoutes } from './performer_routes.js';
+import { compareRoutes } from './compare_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
@@ -2901,6 +2902,12 @@ revenueRoutes(app, { q, wrap, range });
    ledger reconciliation proved to 0.7%. */
 reconcileRoutes(app, { q, wrap, rollupGrainSql });
 performerRoutes(app, { q, wrap });
+
+/* Two days against each other, cut at the same Dubai minute. The cut is the
+   whole reason this is a route and not a subtraction on the client: comparing
+   a seven-hour today against a twenty-four-hour yesterday reports a collapse
+   every single morning. */
+compareRoutes(app, { q, wrap });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

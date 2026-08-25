@@ -73,11 +73,11 @@ export function performerRoutes(app, { q, wrap }) {
     const [from, to] = weekOf(req);
     const p = [from, to, id];
 
-    const [days, areas, hours, platforms, ids] = await Promise.all([
+    const [days, areas, hours, platforms, ids, gaps] = await Promise.all([
       /* The week, day by day. count(DISTINCT) nothing here — one row per Dubai
          day already — but the first and last request are what make a shift
          visible, and a shift is the thing these pages are about. */
-      q(`SELECT n.local_day AS day,
+      q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day,
                 count(*) FILTER (WHERE n.is_booking)::int bookings,
                 count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
                 count(*) FILTER (WHERE n.outcome = 'not_completed')::int cancelled,
@@ -127,6 +127,12 @@ export function performerRoutes(app, { q, wrap }) {
 
       /* Per platform, with the basis named. Never summed here. */
       q(`SELECT n.platform,
+                /* The person's name, carried by the query that already reads
+                   their rows rather than by a query of its own. Without it the
+                   drill-down's own header could not name whose week it was, and
+                   fell back to the first entry in the nav list — so one
+                   person's week was titled "Unit economics". */
+                max(n.driver_name) AS driver_name,
                 count(*) FILTER (WHERE n.is_booking)::int bookings,
                 round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric, 0) km,
                 round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2) fares,
@@ -143,6 +149,47 @@ export function performerRoutes(app, { q, wrap }) {
            FROM driver_payout_day
           WHERE day BETWEEN $1::date AND $2::date AND driver_ext_id = $3
           GROUP BY 1, 2`, p),
+
+      /* The gaps BETWEEN bookings, which is where a driver's day actually goes.
+         ─────────────────────────────────────────────────────────────────────
+         Measured live on six drivers: the best of them spent 51% of his span
+         not carrying anyone, the worst 92%. On-trip time alone cannot show
+         that — a page reporting "1.7 hours on trip" says nothing about whether
+         those hours came out of five or fifteen.
+
+         lag() over the day, so the gap is from the END of one booking to the
+         REQUEST of the next. coalesce(ended_at, requested_at) because a
+         booking with no end time still happened and still occupies its slot;
+         treating it as instantaneous is better than dropping the row and
+         inventing one enormous gap that spans it.
+
+         A NEGATIVE gap is a real event, not dirty data: a driver dispatched to
+         the next rider before dropping the current one. Kept, and counted
+         separately, because it is the signature of a busy corridor. */
+      q(`WITH t AS (
+           SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day, n.requested_at,
+                  coalesce(n.ended_at, n.requested_at) AS ended_at
+             FROM trip_norm n
+            WHERE n.local_day BETWEEN $1::date AND $2::date
+              AND n.driver_ext_id = $3 AND n.is_booking
+         ), g AS (
+           SELECT day,
+                  extract(epoch FROM (requested_at
+                    - lag(ended_at) OVER (PARTITION BY day ORDER BY requested_at))) AS gap_s
+             FROM t
+         )
+         SELECT day,
+                count(*) FILTER (WHERE gap_s IS NOT NULL)::int gaps,
+                /* OVERLAPS is a reserved word — it is SQL's own interval
+                   operator — so as a bare column alias it is a syntax error at
+                   the NEXT token, which points at the line after the mistake.
+                   Quoted, it is just a name. */
+                count(*) FILTER (WHERE gap_s < 0)::int AS "overlaps",
+                round((sum(gap_s) FILTER (WHERE gap_s > 0) / 60)::numeric, 0) wait_min,
+                round((max(gap_s) FILTER (WHERE gap_s > 0) / 60)::numeric, 0) longest_min,
+                round((percentile_cont(0.5) WITHIN GROUP (ORDER BY gap_s)
+                       FILTER (WHERE gap_s > 0) / 60)::numeric, 0) median_min
+           FROM g GROUP BY 1 ORDER BY 1`, p),
     ]);
 
     const onTrip = days.reduce((a, d) => a + (num(d.on_trip_s) || 0), 0);
@@ -151,8 +198,17 @@ export function performerRoutes(app, { q, wrap }) {
 
     res.json({
       week: [from, to],
-      days: days.map((d) => ({
+      days: days.map((d) => {
+        /* Both sides are TEXT from to_char, not Dates. Postgres hands a
+           `date` back as a JS Date and String(Date) is "Mon Aug 25 2026 …" —
+           two Dates compare fine that way, but only by luck, and the moment
+           one side changes type every day silently stops matching and every
+           waiting figure reads as null. */
+        const gp = gaps.find((x) => x.day === d.day) || {};
+        return {
         ...d,
+        wait_min: num(gp.wait_min), longest_wait_min: num(gp.longest_min),
+        median_wait_min: num(gp.median_min), overlaps: gp.overlaps || 0,
         km: num(d.km), fares: num(d.fares),
         on_trip_min: d.on_trip_s == null ? null : Math.round(num(d.on_trip_s) / 60),
         /* Elapsed is first-request to last-dropoff. It is NOT a shift: it
@@ -160,12 +216,16 @@ export function performerRoutes(app, { q, wrap }) {
            elapsed is the one utilisation figure this data can honestly carry. */
         elapsed_min: d.first_trip && d.last_trip
           ? Math.round((new Date(d.last_trip) - new Date(d.first_trip)) / 60000) : null,
-      })),
+      }; }),
       areas,
       platform_status: hours,
+      driver_ext_id: req.query.id || null,
+      name: (platforms.find((x) => x.driver_name) || {}).driver_name || null,
       platforms: platforms.map((x) => ({ ...x, km: num(x.km), fares: num(x.fares) })),
       payouts: ids.map((x) => ({ ...x, payout: num(x.payout) })),
       on_trip_min: Math.round(onTrip / 60),
+      wait_min: gaps.reduce((a, x) => a + (num(x.wait_min) || 0), 0),
+      overlaps: gaps.reduce((a, x) => a + (x.overlaps || 0), 0),
       /* Stated, not hidden: a duration average over the trips that HAVE one. */
       timed_bookings: timed,
       bookings: booked,

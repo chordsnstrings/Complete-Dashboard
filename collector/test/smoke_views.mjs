@@ -32,6 +32,11 @@ const ROUTES = [
      deliberately has none, so the branch that says so is rendered too. */
   'top-performers', 'low-performers', 'performer/drv-0', 'performer/drv-9',
   'overview', 'demand', 'day/2026-08-14', 'day/not-a-date', 'drivers',
+  /* Compare, in all four shapes it is reachable in: no days at all (today
+     against yesterday), one day, two days, and the reader's override that
+     drops the like-for-like cut. */
+  'compare', 'compare/2026-08-25', 'compare/2026-08-25/2026-08-24',
+  'compare/2026-08-25/2026-08-24?cut=full', 'compare/not-a-date',
   'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/territory',
   'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',
   'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked', 'roster/states',

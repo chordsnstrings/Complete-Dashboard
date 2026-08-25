@@ -315,6 +315,8 @@ app.get('/api/performer', (req, r) => {
   const solo = String(req.query.id || '').endsWith('9');
   return r.json({
     week: ['2026-08-17', '2026-08-23'],
+    driver_ext_id: String(req.query.id || 'drv-0'),
+    name: solo ? 'Roy Vellespen Ocdol' : 'Ahmed Tarig Mohamed',
     days: [0, 1, 2, 3, 4].map((i) => ({
       day: `2026-08-${17 + i}`, bookings: 12 - i, completed: 11 - i, cancelled: i % 2,
       km: 140 - i * 9, fares: i === 0 ? 320 : null,
@@ -322,6 +324,14 @@ app.get('/api/performer', (req, r) => {
       last_trip: `2026-08-${17 + i}T16:${20 + i}:00.000Z`,
       plates: ['L44251'], platforms: ['uber'],
       on_trip_min: 300 - i * 20, elapsed_min: 720,
+      /* The gaps between bookings. Day 3 deliberately reports none — a day
+         with one booking has no gap to measure — and day 1 reports an
+         overlap, because on this fleet a next request often precedes the
+         previous dropoff and the waiting column must not go negative. */
+      wait_min: i === 3 ? null : 300 + i * 15,
+      longest_wait_min: i === 3 ? null : 90 + i * 10,
+      median_wait_min: i === 3 ? null : 18 + i,
+      gaps: i === 3 ? 0 : 11 - i, overlaps: i === 1 ? 2 : 0,
     })),
     areas: [{ area: 'Business Bay', picked_up: 22, stayed: 6 },
       { area: 'Downtown Dubai', picked_up: 14, stayed: 3 },
@@ -335,7 +345,81 @@ app.get('/api/performer', (req, r) => {
     payouts: [{ platform: 'uber', driver_ext_id: 'drv-0', payout: 1840.25, payout_days: 7,
       period_start: '2026-08-17', period_end: '2026-08-23' }],
     on_trip_min: 1240, timed_bookings: 50, bookings: 54, duration_coverage_pct: 93,
+    wait_min: 1290, overlaps: 2,
     note: '4 of 54 bookings carry no end time, so on-trip minutes are measured over the rest.',
+  });
+});
+
+/* Two days beside each other. The fixture is built so the page's awkward
+   branches are all reachable: one driver worked the earlier day and has not
+   appeared on the later one, one is new on the later day, one channel reports
+   a fare and the other reports none, and the cut is partial so the
+   "still running" caption and the whole-day footnote both render. */
+app.get('/api/compare', (req, r) => {
+  const a = /^\d{4}-\d{2}-\d{2}$/.test(req.query.a || '') ? req.query.a : '2026-08-25';
+  const b = /^\d{4}-\d{2}-\d{2}$/.test(req.query.b || '') ? req.query.b : '2026-08-24';
+  const full = String(req.query.cut || '') === 'full';
+  const cut = full ? 1440 : 795;
+  const at = (day, h, m) => `${day}T${String(h - 4).padStart(2, '0')}:${String(m).padStart(2, '0')}:00.000Z`;
+  const side = (day, n, k) => ({
+    bookings: n, completed: n - 1, cancelled: 1, km: k, fares: n > 6 ? 210 : null,
+    first_trip: at(day, 6, 12), last_trip: at(day, 12, 40),
+    on_trip_min: n * 21, wait_min: n * 12, longest_wait_min: 55, overlaps: n > 8 ? 1 : 0,
+    platforms: ['uber'], plates: ['L44251'],
+  });
+  const person = (i, name, onA, onB) => ({
+    pk: `drv-${i}`, driver_ext_id: `drv-${i}`, driver_name: name, fleet_id: 'ecosine',
+    a: onA ? side(a, 11 - i, 120 - i * 8) : { bookings: 0, completed: 0, cancelled: 0, km: null,
+      fares: null, first_trip: null, last_trip: null, on_trip_min: null, wait_min: null,
+      longest_wait_min: null, overlaps: 0, platforms: [], plates: [] },
+    b: onB ? side(b, 8 - i, 96 - i * 6) : { bookings: 0, completed: 0, cancelled: 0, km: null,
+      fares: null, first_trip: null, last_trip: null, on_trip_min: null, wait_min: null,
+      longest_wait_min: null, overlaps: 0, platforms: [], plates: [] },
+    worked_a: onA, worked_b: onB,
+    plates: ['L44251'], platforms: ['uber'],
+    d_bookings: (onA ? 11 - i : 0) - (onB ? 8 - i : 0),
+    d_km: 0, d_on_trip_min: 0, d_wait_min: 0,
+  });
+  const roster = [person(0, drivers[0], true, true), person(1, drivers[1], true, true),
+    person(2, drivers[2], false, true), person(3, drivers[3], true, false)];
+  return r.json({
+    days: [a, b],
+    is_today: { a: true, b: false },
+    cut_minutes: cut, cut_label: full ? '24:00' : '13:15',
+    cut_mode: full ? 'full' : 'now',
+    cut_note: full ? 'Both days counted in full.'
+      : 'Both days counted up to 13:15 Dubai, so a fall means less work done by the same hour '
+        + '— not a day that has not finished yet.',
+    totals: {
+      a: { bookings: 34, completed: 31, cancelled: 3, telematics: 12, km: 410, fares: 640,
+        priced: 4, drivers: 3, vehicles: 4, first_at: at(a, 5, 2), last_at: at(a, 13, 1),
+        on_trip_min: 690, timed: 30 },
+      b: { bookings: 41, completed: 38, cancelled: 3, telematics: 15, km: 505, fares: 820,
+        priced: 6, drivers: 3, vehicles: 4, first_at: at(b, 4, 51), last_at: at(b, 13, 8),
+        on_trip_min: 810, timed: 37 },
+    },
+    full_day: { a: { day: a, bookings: 34, km: 410, fares: 640, drivers: 3 },
+      b: { day: b, bookings: 58, km: 720, fares: 1180, drivers: 4 } },
+    hours: [...Array(24).keys()].map((h) => ({
+      hour: h, a: h < 13 ? (h % 5) + 1 : 0, b: (h % 6) + 1,
+      a_cancelled: h === 9 ? 1 : 0, b_cancelled: 0, past_cut: h * 60 >= cut })),
+    platforms: [
+      { platform: 'uber', a: { n: 28, completed: 26, cancelled: 2, km: 340, fares: null },
+        b: { n: 33, completed: 31, cancelled: 2, km: 400, fares: null }, d: -5 },
+      { platform: 'hotel', a: { n: 6, completed: 5, cancelled: 1, km: 70, fares: 640 },
+        b: { n: 8, completed: 7, cancelled: 1, km: 105, fares: 820 }, d: -2 },
+    ],
+    drivers: roster,
+    stopped: [{ driver_ext_id: 'drv-2', driver_name: drivers[2], bookings: 6, plates: ['L44251'] }],
+    started: [{ driver_ext_id: 'drv-3', driver_name: drivers[3], bookings: 8, plates: ['L45235'] }],
+    collectors: [
+      { source: 'uber', last_run: new Date(Date.now() - 6e5).toISOString(),
+        last_ok: new Date(Date.now() - 6e5).toISOString(), rows_24h: 412 },
+      /* Deliberately stale, so the warning branch and the pill both render. */
+      { source: 'bolt', last_run: new Date(Date.now() - 5 * 864e5).toISOString(),
+        last_ok: null, rows_24h: 0 },
+    ],
+    fleet: req.query.fleet || null, platform: req.query.platform || null,
   });
 });
 

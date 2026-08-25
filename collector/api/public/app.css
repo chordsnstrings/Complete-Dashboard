@@ -954,3 +954,21 @@ a.insight-row:hover{border-color:var(--accent)}
    in Dubai, so app.js leaves it empty for them. */
 .tz-note { font-size: 11px; color: var(--ink-3); align-self: center; letter-spacing: .02em; }
 .tz-note:empty { display: none; }
+
+/* ── #compare: two days beside each other ─────────────────────────────────
+   A delta needs a direction the eye reads before the number: green is the way
+   the fleet wants it to move, which for waiting and cancellations is DOWN, so
+   the colour is chosen by the caller and not by the sign. */
+.dl{font-variant-numeric:tabular-nums;font-weight:600;white-space:nowrap}
+.dl.up{color:var(--good)}
+.dl.dn{color:var(--critical)}
+/* A date picker that reads as a label with a control in it, so the two day
+   choices on #compare look like one sentence rather than two form fields. */
+.pick{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)}
+.pick input[type=date]{
+  font:inherit;font-size:13px;color:var(--ink);background:var(--surface);
+  border:1px solid var(--rule);border-radius:7px;padding:5px 8px}
+.pick input[type=date]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.half{margin:0 0 12px}
+.half h4{margin:0 0 4px;font-size:13px;font-weight:650;color:var(--ink)}
+.half p{margin:0;font-size:13px;line-height:1.7}

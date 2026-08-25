@@ -204,15 +204,19 @@ export { weekEnd, MIN_DAYS, MIN_BOOKINGS };
    platform status happens to exist it is shown as observations, not hours. */
 export async function renderPerformer(root, id) {
   const kh = el('div', 'kpis'); root.append(kh);
-  const g = el('div', 'grid g23'); root.append(g);
+  /* Full width. Ten columns of a day — including the two waiting columns —
+     do not fit in 2fr of a 2:1 split, and the ones pushed off the edge were
+     the vehicle and the longest gap: exactly the columns that explain a day
+     that went badly. */
   const dayP = panel('The week, day by day',
-    'Bookings, distance and time carrying someone — one row per Dubai day');
-  g.append(dayP.panel);
+    'Bookings, distance, time carrying someone and time waiting — one row per Dubai day');
+  root.append(dayP.panel);
+  const g = el('div', 'grid g2'); root.append(g);
   const platP = panel('Where the work came from', 'Per channel, with what each one reports');
   g.append(platP.panel);
   const areaP = panel('Where they picked up',
     'Areas parsed from the address text each channel returns — a grouping, not a coordinate');
-  root.append(areaP.panel);
+  g.append(areaP.panel);
   const statusP = panel('What the platform said',
     'Uber driver status, polled every five minutes — present only where the fleet has it');
   root.append(statusP.panel);
@@ -232,6 +236,10 @@ export async function renderPerformer(root, id) {
         : 'no booking reports an end time' },
     { label: 'Of time on the road', value: elapsed ? `${Math.round((onTrip / elapsed) * 100)}%` : '—',
       sub: 'on-trip against first request to last dropoff — the rest is waiting or repositioning' },
+    { label: 'Waiting between jobs', value: p.wait_min ? `${fmt(p.wait_min / 60, 1)} h` : '—',
+      sub: elapsed && p.wait_min
+        ? `${Math.round((p.wait_min / elapsed) * 100)}% of the road time, summed gap by gap`
+        : 'measured from each dropoff to the next request' },
   ]));
 
   dayP.body.innerHTML = '';
@@ -248,9 +256,29 @@ export async function renderPerformer(root, id) {
         render: (r) => (r.on_trip_min ? `${fmt(r.on_trip_min / 60, 1)} h` : '—') },
       { label: 'Elapsed', key: 'elapsed_min', num: true,
         render: (r) => (r.elapsed_min ? `${fmt(r.elapsed_min / 60, 1)} h` : '—') },
+      /* Waiting is the sum of the gaps BETWEEN bookings, not elapsed minus on
+         trip: the two differ whenever a day's bookings overlap, and on this
+         fleet they overlap often enough that the subtraction goes negative. */
+      { label: 'Waiting', key: 'wait_min', num: true,
+        render: (r) => (r.wait_min
+          ? `${fmt(r.wait_min / 60, 1)} h<span class="dim"> · ${r.elapsed_min
+            ? `${Math.round((r.wait_min / r.elapsed_min) * 100)}%` : '—'}</span>`
+          : '—') },
+      { label: 'Longest gap', key: 'longest_wait_min', num: true,
+        render: (r) => (r.longest_wait_min
+          ? `${fmt(r.longest_wait_min / 60, 1)} h<span class="dim"> · med ${
+            r.median_wait_min != null ? `${fmt(r.median_wait_min)}m` : '—'}</span>`
+          : '—') },
       { label: 'Vehicle', key: 'plates',
         render: (r) => (r.plates || []).map((x) => entity('vehicle', x, x)).join(', ') || '—' },
     ]));
+    /* An overlap is a real dispatch, not dirty data — the next request came in
+       before the current dropoff — so it is stated rather than smoothed away.
+       It is also why waiting is summed from the positive gaps only. */
+    if (p.overlaps) {
+      dayP.body.append(el('p', 'cap', esc(`${p.overlaps} booking${p.overlaps === 1 ? '' : 's'} `
+        + 'started before the previous one ended, so waiting is summed over the positive gaps only.')));
+    }
     if (p.note) dayP.body.append(el('p', 'cap', esc(p.note)));
   }
 
@@ -310,6 +338,10 @@ export async function renderPerformer(root, id) {
       + 'and the earliest observation is the first time we looked and saw them, not the moment '
       + 'they logged in.'));
   }
+  /* The shell titles a detail page from what its view RETURNS — see render()
+     in app.js. Returning the name is what stops this page being titled after
+     whatever happens to be first in the nav. */
+  return { name: p.name || id };
 }
 
 const hhmm = (ts) => {

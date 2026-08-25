@@ -131,7 +131,14 @@ for (const f of UI) {
   for (const m of src.matchAll(/href\(\s*'([a-z-]+)'/g)) targets.add(m[1]);
   for (const m of src.matchAll(/entity\(\s*'([a-z-]+)'/g)) targets.add(m[1]);
 }
-const declared = new Set([...app.matchAll(/V\.([a-zA-Z]+)\s*=/g)].map((m) => m[1]));
+/* Both registration forms. A view whose id contains a hyphen cannot be written
+   `V.top-performers`, so it is registered as `V['top-performers']` — and this
+   scan saw only the dotted form, which made a link to a page that exists read
+   as a link to a page that does not. */
+const declared = new Set([
+  ...[...app.matchAll(/V\.([a-zA-Z]+)\s*=/g)].map((m) => m[1]),
+  ...[...app.matchAll(/V\[\s*'([a-z-]+)'\s*\]\s*=/g)].map((m) => m[1]),
+]);
 const missing = [...targets].filter((t) => !declared.has(t));
 check('every view a link points at is actually registered',
   missing.length === 0, missing.join(', '));

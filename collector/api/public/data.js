@@ -185,7 +185,16 @@ const DEFAULTS = { days: 30, platform: '', fleet: '' };
    reading "egari" above a card reading ECOSINE described nothing. `coverage`
    is here because /api/coverage and /api/coverage/calendar ignore both — it
    comes off this list the day they stop ignoring them. */
-export const NO_RANGE = ['reconcile'];
+/* #compare carries its own two days in the address, so a range chip on it is
+   a control that changes nothing — and one that would quietly ride along into
+   every link leaving the page. The channel filter stays: comparing two days
+   for one fleet, or one platform, is the second question anybody asks. */
+export const NO_RANGE = ['reconcile', 'compare',
+  /* All three performer pages are a fixed Monday-to-Sunday week, chosen by the
+     page and named in its caption. A range chip above them changes nothing and
+     reads as though it does — and worse, rides along into every link leaving
+     the page. */
+  'top-performers', 'low-performers', 'performer'];
 export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage'];
 export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
   'compliance', 'forecast', 'retention', 'capacity'];
@@ -242,6 +251,10 @@ export function parseHash(h = location.hash.slice(1)) {
        preselect it. A malformed value is null, and the page falls back to the
        newest replayable day exactly as if no day had been asked for. */
     day: /^\d{4}-\d{2}-\d{2}$/.test(search.get('day') || '') ? search.get('day') : null,
+    /* Where #compare cuts both days. 'full' is the reader deliberately asking
+       for a partial today against a whole yesterday; anything else means the
+       like-for-like default, which is the current Dubai minute. */
+    cut: search.get('cut') === 'full' ? 'full' : null,
   };
 }
 export function navigate(view, param, sub) {
