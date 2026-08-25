@@ -9,8 +9,11 @@ up later is a finding that gets found again.
 ```bash
 node bin/live-ui.mjs &                  # bridges the local UI to the production API
 node bin/render-audit.mjs               # every route, three widths, DOM-level checks
-node bin/page-audit.mjs                 # every endpoint behind every view
+node bin/page-audit.mjs                 # every endpoint behind every view, five windows
 node bin/live-audit.mjs                 # every arithmetic invariant
+node bin/numbers-audit.mjs              # every figure fetched reached the screen
+node bin/cap-audit.mjs                  # every server LIMIT that is biting
+node bin/slice-audit.mjs                # every list the PAGE cut
 node test/smoke_views.mjs               # every route renders at all
 ```
 
@@ -25,8 +28,11 @@ findings, so two passes can be diffed rather than re-read.
 | `bin/page-audit.mjs` | the endpoints answer | what the page does with the answer |
 | `bin/live-audit.mjs` | the numbers add up | numbers that are absent |
 | `bin/render-audit.mjs` | the page is legible and complete | whether the figures are right |
+| `bin/numbers-audit.mjs` | a figure the page fetched reached the screen | a figure nothing fetched |
+| `bin/cap-audit.mjs` | a server `LIMIT` is or is not biting | a cut the PAGE made |
+| `bin/slice-audit.mjs` | a list the page cut says so | a cut made in the query |
 
-All four are needed. A view can pass the first three and still be a bad page:
+All seven are needed. A view can pass the first three and still be a bad page:
 four panels of which three say "no data", a table silently capped at forty rows
 out of nine hundred, a column of dashes where money should be, or nine columns
 running off the edge of a half-width panel.
@@ -45,6 +51,9 @@ running off the edge of a half-width panel.
 10. **wrong-title** — a view titled after another view: the router failing while rendering perfectly.
 11. **js-error** / **api-error** — thrown exceptions and 4xx/5xx from the page's own fetches.
 12. **blank-page** — no KPI, no table, no chart, no panel.
+13. **slow-panel** — a skeleton that fills only after a second settle: not broken, but the reader waits.
+14. **index-pinned** — a scrolling table whose pinned first column is a rank rather than the row's identity (`bin/numbers-audit.mjs`).
+15. **window-drift** — an identity fact that changes with the range selector under a label that does not name a window (`bin/numbers-audit.mjs`).
 
 ---
 
