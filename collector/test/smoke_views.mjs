@@ -26,6 +26,8 @@
 import { launchChromium } from './browser.mjs';
 
 const ROUTES = [
+  // The first screen and its two ledgers.
+  'unit', 'unit/assets', 'unit/drivers', 'unit/nonsense',
   'overview', 'demand', 'day/2026-08-14', 'day/not-a-date', 'drivers',
   'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/territory',
   'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',
@@ -56,6 +58,7 @@ const ROUTES = [
   // The window and platform filters now live in the address. A link carrying
   // them has to render the same as one that does not.
   'overview?days=90&platform=uber', 'drivers?days=7&fleet=egari',
+  'unit?days=90&fleet=ecosine', 'unit/assets?days=7&platform=uber',
   'segments/verdict/unauthorized?days=180',
 ];
 const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';
@@ -100,6 +103,21 @@ const substituted = ROUTES.map((r) => {
   }
   return out;
 });
+/* SMOKE_ONLY narrows the sweep to the routes whose address contains it.
+   ─────────────────────────────────────────────────────────────────────────
+   Against the mock the full ninety are free. Against PRODUCTION they are not:
+   ninety page loads is around a thousand requests to a one-vCPU database in
+   ten minutes, and it falls over part-way through — so a run made to prove one
+   new page renders against real data instead reports fifteen unrelated views
+   timing out, and says nothing about any of them. Reviewing one page group is
+   the common case for the production target; this makes it possible. */
+const only = process.env.SMOKE_ONLY;
+const routes = only ? substituted.filter((r) => r.includes(only)) : substituted;
+if (only && !routes.length) {
+  console.log(`  no route matches SMOKE_ONLY=${only}`);
+  process.exit(1);
+}
+if (only) console.log(`  SMOKE_ONLY=${only}: ${routes.length} of ${substituted.length} routes`);
 /* Say what is actually answering. Three servers can serve this UI — the mock,
    the preview against a seeded Postgres, and a proxy to production — and they
    all default to the same port. A run that silently hit a leftover process on
@@ -122,7 +140,7 @@ const browser = await launchChromium({ ...(proxy ? { proxy } : {}) });
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 let bad = 0;
 
-for (const route of substituted) {
+for (const route of routes) {
   const errs = [];
   const onErr = (e) => errs.push(String(e.message || e));
   page.on('pageerror', onErr);
@@ -169,6 +187,6 @@ for (const route of substituted) {
   page.off('pageerror', onErr);
 }
 
-console.log(`\n${substituted.length - bad}/${substituted.length} views rendered against ${BASE}`);
+console.log(`\n${routes.length - bad}/${routes.length} views rendered against ${BASE}`);
 await browser.close();
 process.exit(bad ? 1 : 0);

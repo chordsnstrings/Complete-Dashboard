@@ -2443,6 +2443,185 @@ app.get('/api/capacity', (_, r) => {
   });
 });
 
+/* ── unit economics ───────────────────────────────────────────────────────
+   The two ledgers the first screen is built from. Deliberately not tidy: the
+   shapes that break a render are the ones production has and a fixture usually
+   does not, so this carries a car that earned nothing while its papers are
+   current, a car the tracker watched drive with no booking behind it, a car
+   with no position at all, a driver who drove and was never paid, and a person
+   holding two accounts. Every rate with no denominator is null rather than
+   zero, which is what the page renders as an em-dash with a reason. */
+const uWindowDays = 30;
+const uAssets = plates.map((pl, i) => {
+  const still = i === 7;                       // never moved, papers current
+  const movedUnpaid = i === 6;                 // tracker saw it drive, nothing paid
+  const bookings = still || movedUnpaid ? 0 : 470 - i * 44;
+  const km = still || movedUnpaid ? null : 6100 - i * 420;
+  const daysEarning = still || movedUnpaid ? 0 : 27 - i;
+  const daysMoved = still ? 0 : movedUnpaid ? 12 : 27 - i;
+  const payouts = still || movedUnpaid ? null : 15800 - i * 1100;
+  const fares = i % 3 === 0 && !still && !movedUnpaid ? 900 - i * 40 : null;
+  const money = payouts == null && fares == null ? null : (payouts || 0) + (fares || 0);
+  const rt = (a, b) => (b > 0 && a != null ? Math.round((a / b) * 100) / 100 : null);
+  return {
+    plate: pl, fleet_id: i % 3 ? 'ecosine' : 'egari',
+    make: vehSpec[i][0], model: vehSpec[i][1], year: vehSpec[i][2],
+    bookings, telematics_journeys: movedUnpaid ? 38 : Math.round(bookings * 1.3),
+    km, measured_bookings: Math.round(bookings * 0.9),
+    days_earning: daysEarning, days_moved: daysMoved,
+    idle_days: uWindowDays - daysMoved, window_days: uWindowDays,
+    drivers: still || movedUnpaid ? 0 : 1 + (i % 3),
+    money, fares, payouts, attributed: payouts,
+    money_platforms: money == null ? [] : (fares ? ['hotel', 'uber'] : ['uber']),
+    aed_per_earning_day: rt(money, daysEarning),
+    aed_per_km: rt(money, km),
+    aed_per_booking: rt(money, bookings),
+    forgone_at_own_rate: daysEarning && money
+      ? Math.round((money / daysEarning) * (uWindowDays - daysMoved)) : null,
+    alerts: 120 - i * 11, alerts_per_100km: rt((120 - i * 11) * 100, km),
+    any_even_split: i === 2,
+    soonest_expiry: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
+    doc_days_left: i === 1 ? -12 : 5 + i * 14,
+    last_trip: bookings ? new Date(Date.now() - i * 72e5).toISOString() : null,
+    last_fix: i === 5 ? null : new Date(Date.now() - i * 6e4).toISOString(),
+    stale: i === 7, status: i % 3 === 0 ? 'Engaged' : 'Active',
+    // One vehicle with no position at all, so the map's own caption is exercised.
+    lat: i === 5 ? null : rnd(25.05, 25.30), lng: i === 5 ? null : rnd(55.10, 55.42),
+    current_driver: still || movedUnpaid ? null : drivers[i],
+    current_driver_id: still || movedUnpaid ? null : 'drv-' + i,
+    driver_as_of: new Date().toISOString(),
+    band: money ? 'earning' : daysMoved > 0 ? 'moved_unpaid' : 'still',
+  };
+}).sort((a, b) => (b.money ?? 0) - (a.money ?? 0));
+
+app.get('/api/economics/assets', (_, r) => {
+  const sum = (f) => Math.round(uAssets.reduce((a, x) => a + (Number(f(x)) || 0), 0) * 100) / 100;
+  const money = sum((x) => x.money);
+  const earningDays = uAssets.reduce((a, x) => a + x.days_earning, 0);
+  const km = sum((x) => x.km);
+  const bookings = uAssets.reduce((a, x) => a + x.bookings, 0);
+  r.json({
+    window: [dayISO(uWindowDays), dayISO(0)], window_days: uWindowDays,
+    rows: uAssets,
+    by_platform: [
+      { platform: 'uber', bookings: Math.round(bookings * 0.92), priced_bookings: 0, booking_days: 30,
+        fares: null, km: Math.round(km * 0.94), payouts: sum((x) => x.payouts), payout_days: 30,
+        vehicles: 6, basis: 'payout',
+        basis_note: 'net payout, after the platform commission — this channel reports no fare at all',
+        money: sum((x) => x.payouts), aed_per_km: 2.74, best: sum((x) => x.payouts),
+        fare_coverage_pct: 0, payout_coverage_pct: 100, payout_coverage_days: 30,
+        payout_coverage_base: 30 },
+      { platform: 'hotel', bookings: Math.round(bookings * 0.08),
+        priced_bookings: Math.round(bookings * 0.08), booking_days: 22, fares: sum((x) => x.fares),
+        km: Math.round(km * 0.06), payouts: null, payout_days: 0, vehicles: 3, basis: 'fares',
+        basis_note: 'fares reported on every booking', money: sum((x) => x.fares), aed_per_km: 9.42,
+        best: sum((x) => x.fares), fare_coverage_pct: 100, payout_coverage_pct: null,
+        payout_coverage_days: null, payout_coverage_base: null },
+    ],
+    totals: {
+      vehicles: uAssets.length,
+      earning: uAssets.filter((x) => x.band === 'earning').length,
+      moved_unpaid: uAssets.filter((x) => x.band === 'moved_unpaid').length,
+      still: uAssets.filter((x) => x.band === 'still').length,
+      idle_but_documented: uAssets.filter((x) => !x.money && x.doc_days_left >= 0).length,
+      money, fares: sum((x) => x.fares), payouts: sum((x) => x.payouts),
+      attributed: sum((x) => x.attributed),
+      km, bookings,
+      earning_vehicle_days: earningDays,
+      idle_vehicle_days: uAssets.reduce((a, x) => a + x.idle_days, 0),
+      aed_per_earning_day: Math.round((money / earningDays) * 100) / 100,
+      aed_per_km: Math.round((money / km) * 100) / 100,
+      aed_per_booking: Math.round((money / bookings) * 100) / 100,
+      forgone_at_own_rate: sum((x) => x.forgone_at_own_rate),
+      unplaced_payouts: 9140.22, unplaced_pct: 8.4, unplaced_note: null,
+    },
+    coverage: {
+      first_payout_day: '2026-02-06', last_payout_day: dayISO(0),
+      unpayable_bookings: 0, unpayable_days: 0,
+      note: 'Bank payouts exist from 2026-02-06. The Uber earnings API serves nothing earlier, so '
+        + 'bookings before that date carry no money and never will.',
+    },
+  });
+});
+
+app.get('/api/economics/drivers', (_, r) => {
+  const rt = (a, b) => (b > 0 && a != null ? Math.round((a / b) * 100) / 100 : null);
+  const rows = [
+    ...drivers.map((name, i) => {
+      const unpaid = i === 5;                  // drove all month, no statement reaches them
+      const bookings = 420 - i * 37;
+      const daysWorked = 26 - i;
+      const km = 5400 - i * 380;
+      const payouts = unpaid ? null : 14200 - i * 900;
+      const fares = i % 3 === 0 ? 640 - i * 30 : null;
+      const money = payouts == null && fares == null ? null : (payouts || 0) + (fares || 0);
+      return {
+        driver_ext_id: 'drv-' + i, driver_name: name,
+        ids: i % 3 === 0 ? ['drv-' + i, 'y-' + i] : ['drv-' + i],
+        accounts: i % 3 === 0 ? 2 : 1,
+        platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
+        fleet_id: i % 3 ? 'ecosine' : 'egari',
+        money, payouts, fares, cash: i % 2 ? 320 + i * 40 : null,
+        bookings, completed: Math.round(bookings * 0.95),
+        completion_pct: 97 - i, km, vehicles: 1 + (i % 2),
+        plates: [{ plate: plates[i % plates.length], days: daysWorked }]
+          .concat(i % 2 ? [{ plate: plates[(i + 3) % plates.length], days: 4 }] : []),
+        days_worked: daysWorked, payout_days: unpaid ? 0 : daysWorked,
+        idle_days: uWindowDays - daysWorked, window_days: uWindowDays,
+        aed_per_day_worked: rt(money, daysWorked),
+        aed_per_booking: rt(money, bookings),
+        aed_per_km: rt(money, km),
+        bookings_per_day: rt(bookings, daysWorked),
+        // Uber reports no online hours at all, so this is null for everyone the
+        // fleet actually runs on. The column says why rather than showing 0.
+        aed_per_hour_online: null, hours_online: null,
+        alerts: 40 - i * 3, alerts_per_100km: rt((40 - i * 3) * 100, km),
+        state: i === 3 ? 'suspended' : 'active',
+        platform_state: i === 3 ? 'suspended' : 'active', can_earn: i !== 3,
+        licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9,
+        last_trip: new Date(Date.now() - i * 36e5).toISOString(),
+        band: money ? 'earning' : 'drove_unpaid',
+      };
+    }),
+    /* On the books, no trip and no money — the row a ledger built from the trip
+       table can never contain. */
+    { driver_ext_id: 'drv-idle', driver_name: 'Saeed Al Mansoori', ids: ['drv-idle'], accounts: 1,
+      platforms: [], fleet_id: 'ecosine', money: null, payouts: null, fares: null, cash: null,
+      bookings: 0, completed: 0, completion_pct: null, km: null, vehicles: 0, plates: [],
+      days_worked: 0, payout_days: 0, idle_days: uWindowDays, window_days: uWindowDays,
+      aed_per_day_worked: null, aed_per_booking: null, aed_per_km: null, bookings_per_day: null,
+      aed_per_hour_online: null, hours_online: null, alerts: 0, alerts_per_100km: null,
+      state: 'active', platform_state: 'active', can_earn: true,
+      licence_expires: '2026-06-01', licence_days_left: -81, last_trip: null, band: 'idle' },
+  ].sort((a, b) => (b.money ?? 0) - (a.money ?? 0));
+  const sum = (f) => Math.round(rows.reduce((a, x) => a + (Number(f(x)) || 0), 0) * 100) / 100;
+  const money = sum((x) => x.money);
+  const worked = rows.reduce((a, x) => a + x.days_worked, 0);
+  const bookings = rows.reduce((a, x) => a + x.bookings, 0);
+  r.json({
+    window: [dayISO(uWindowDays), dayISO(0)], window_days: uWindowDays, rows,
+    totals: {
+      people: rows.length,
+      earning: rows.filter((x) => x.band === 'earning').length,
+      drove_unpaid: rows.filter((x) => x.band === 'drove_unpaid').length,
+      idle: rows.filter((x) => x.band === 'idle').length,
+      money, payouts: sum((x) => x.payouts), fares: sum((x) => x.fares),
+      bookings, km: sum((x) => x.km), worked_days: worked,
+      aed_per_day_worked: Math.round((money / worked) * 100) / 100,
+      aed_per_booking: Math.round((money / bookings) * 100) / 100,
+      aed_per_km: Math.round((money / sum((x) => x.km)) * 100) / 100,
+      people_with_hours: 0,
+      hours_note: 'No platform on this fleet reports online hours, so there is no hourly rate to compute.',
+    },
+    coverage: {
+      first_payout_day: '2026-02-06', last_payout_day: dayISO(0),
+      unpayable_bookings: 0, unpayable_days: 0,
+      note: 'Bank payouts exist from 2026-02-06. The Uber earnings API serves nothing earlier, so '
+        + 'bookings before that date carry no money and never will.',
+    },
+  });
+});
+
 // Anything not fixtured above answers with an empty list rather than a 404,
 // so a new page renders its own empty state instead of the view error box.
 app.get(/^\/api\//, (_, r) => r.json([]));

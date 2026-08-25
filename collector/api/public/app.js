@@ -27,6 +27,7 @@ import { renderRetention } from './retention.js';
 import { renderCapacity } from './capacity.js';
 import { renderRevenue } from './revenue.js';
 import { renderReconcile } from './reconcile.js';
+import { renderEconomics, UNIT_TABS } from './economics.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -102,7 +103,15 @@ function paymentDonut(host, detail) {
 }
 
 const VIEWS = [
-  { id: 'overview', label: 'Overview', ic: '◱', grp: 'Analyse', sub: 'Fleet-wide performance across every platform' },
+  /* The landing page, and it leads the list because it is the first screen.
+     The question this product exists to answer is which assets and which
+     people make money and which do not; every other view is a narrower
+     version of it. What used to sit here is the Fleet activity page below —
+     volume and mix, which is a different and lesser question, and which led
+     with a revenue figure drawn from trip.price on a fleet whose dominant
+     channel prices nothing per trip. */
+  { id: 'unit', label: 'Unit economics', ic: '◆', grp: 'Analyse', sub: 'What every vehicle and every driver earned per day worked, per km and per booking — and which of them earned nothing' },
+  { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Analyse', sub: 'Volume, mix and quality across every platform — the work behind the money' },
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Analyse', sub: 'When trips happen — by day, hour and weekday' },
   { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'Analyse', sub: 'Per-driver output, quality and cross-platform activity' },
   { id: 'roster', label: 'Roster & supply', ic: '☰', grp: 'Analyse', sub: 'Who is on the books across all four platforms, and who is earning nothing' },
@@ -183,6 +192,18 @@ function setHeader(detail) {
     $('#viewSub').textContent = `${tab.label} — every booking this property placed, with its cost as well as its price`;
     crumb.innerHTML = `<a href="${href('corporate', 'properties')}">Corporate &amp; hotels</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
     crumb.style.display = 'flex';
+  } else if (state.view === 'unit') {
+    /* Three tabs of one page, so the subtitle names which of the three is on
+       screen. The title does not change: a reader who followed a link to the
+       full vehicle ledger is still on Unit economics, and retitling the page
+       per tab would make the two read as separate destinations. */
+    const tab = UNIT_TABS.find((t) => t.id === (state.param || 'overview')) || UNIT_TABS[0];
+    const v = VIEWS.find((x) => x.id === 'unit');
+    $('#viewTitle').textContent = v.label;
+    $('#viewSub').textContent = state.param
+      ? `${tab.label} — every row carries a rate, and every column ranks by it`
+      : v.sub;
+    crumb.style.display = 'none';
   } else {
     const v = VIEWS.find((x) => x.id === state.view) || VIEWS[0];
     $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
@@ -607,6 +628,8 @@ V.playbook = async (root) => renderPlaybook(root);
 V.forecast = async (root) => renderForecast(root);
 V.retention = async (root) => renderRetention(root);
 V.capacity = async (root) => renderCapacity(root);
+/* The first screen: the fleet as a ledger rather than as a trip count. */
+V.unit = async (root) => renderEconomics(root);
 V.revenue = async (root) => renderRevenue(root);
 // `#reconcile` is every month; `#reconcile/<YYYY-MM>` is that month's days.
 V.reconcile = async (root) => renderReconcile(root, state.param);
@@ -2250,7 +2273,7 @@ async function render() {
   const root = $('#view'); root.innerHTML = '';
   root.scrollIntoView?.({ block: 'start' });
   try {
-    const detail = await (V[state.view] || V.overview)(root);
+    const detail = await (V[state.view] || V.unit)(root);
     setHeader(detail);                      // detail pages only know their title after fetching
     animateView(root);
   } catch (e) {
@@ -2332,7 +2355,10 @@ if (store.get('theme')) document.documentElement.setAttribute('data-theme', stor
 function applyRoute() {
   const r = parseHash();
   const known = VIEWS.some((v) => v.id === r.view) || !!V[r.view];
-  state.view = known ? r.view : 'overview';
+  /* An empty or unknown address lands on the ledger, not on the activity
+     page. This is the whole point of the reshuffle: somebody opening the
+     product with no address in mind should be looking at what earns. */
+  state.view = known ? r.view : 'unit';
   state.param = r.param; state.sub = r.sub;
   // The address is the authority. A link with no filter in it means the
   // defaults, not "whatever the last page happened to be showing" — otherwise

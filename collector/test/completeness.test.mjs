@@ -114,6 +114,11 @@ const EXEMPT_LIST = new Set([
      actionable version is alertsByVehicle beside it, which does name one, and
      that IS checked below. */
   '/api/day.alerts',
+  /* The cars one person held, nested inside that person's own ledger row. The
+     driver is the row this list hangs off, so naming them again on each plate
+     would repeat the subject three times per row. The rule this exists for —
+     a plate the reader cannot trace to a human — is satisfied one level up. */
+  '/api/economics/drivers.rows[].plates',
 ]);
 
 const plateNoDriver = [], driverNoVehicle = [], nameNoId = [], broke = [];

@@ -19,7 +19,7 @@ export const store = {
 };
 
 export const state = {
-  view: 'overview', param: null, sub: null,
+  view: 'unit', param: null, sub: null,
   days: 30, platform: '', fleet: '',
   admin: store.get('adminToken'),
 };
