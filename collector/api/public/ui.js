@@ -206,14 +206,29 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
 
 /* A row of headline numbers. Values may carry a `sub` line and a `tone`
    (good / warn / serious / critical) that colours the number. */
+/* Roughly what fits on one line of a 158px tile at the smallest size the
+   clamp will go to. Past it the value wraps instead of being clipped: a figure
+   cut off at the card edge is not a figure at all, and `overflow:hidden` on
+   the tile means the reader does not even get an ellipsis to warn them.
+   Measured against the values that overflowed — "12:00 AM – 11:57 PM" (19)
+   and "+AED 37,286 · 150.9%" (20) — and against the ones the nowrap rule
+   exists to protect, of which the longest is "AED 257,122" (11). */
+const KPI_ONE_LINE = 14;
+
 export function kpiRow(items) {
   const host = el('div', 'kpis');
-  host.innerHTML = items.filter(Boolean).map((k) => `
+  host.innerHTML = items.filter(Boolean).map((k) => {
+    /* Measured on the TEXT, so a value carrying markup is judged by what the
+       reader actually sees rather than by the length of its span tags. */
+    const plain = String(k.html ? k.html.replace(/<[^>]*>/g, '') : (k.value ?? '—'));
+    const long = plain.length > KPI_ONE_LINE ? ' long' : '';
+    return `
     <div class="kpi${k.tone ? ' t-' + k.tone : ''}">
       <div class="l">${esc(k.label)}</div>
-      <div class="n num">${k.html || esc(k.value ?? '—')}</div>
+      <div class="n num${long}">${k.html || esc(k.value ?? '—')}</div>
       ${k.sub ? `<div class="s">${esc(k.sub)}</div>` : ''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
   return host;
 }
 
@@ -328,10 +343,18 @@ export const dayStr = (v) => {
     ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: TZ })
     : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ });
 };
+/* 24-hour, explicitly.
+   ─────────────────────────────────────────────────────────────────────────
+   Left to the viewer's locale this rendered "12:00 AM" on an en-US browser —
+   eight characters where "00:00" is five, which is what overflowed the
+   "First / last booking" tile on #day by 31px and clipped it. It was also the
+   only 12-hour clock in the product: the demand axis, the shift bars, the
+   compare page and every hour label are 24-hour, so one tile disagreed with
+   every chart beside it about what time a shift started. */
 export const timeStr = (v) => {
   const d = asDate(v);
-  return d ? d.toLocaleTimeString(undefined,
-    { hour: '2-digit', minute: '2-digit', timeZone: TZ }) : '—';
+  return d ? d.toLocaleTimeString('en-GB',
+    { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: TZ }) : '—';
 };
 export const dtStr = (v) => (asDate(v) ? `${dayStr(v)} ${timeStr(v)}` : '—');
 

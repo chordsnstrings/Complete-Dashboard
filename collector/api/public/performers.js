@@ -127,6 +127,12 @@ export async function renderPerformers(root, band) {
       { label: 'Standing', key: 'state',
         render: (r) => (r.state ? pill(r.state, r.can_earn === false ? 'warn' : null) : '—') },
     ], { onRow: (r) => { location.hash = `#performer/${encodeURIComponent(r.driver_ext_id)}`; } }));
+    /* A table that ends on exactly forty rows is a table somebody cut, and
+       nothing on the page said so — the reader had no way to tell "these are
+       the ranked drivers" from "these are the first forty of them". */
+    listP.body.append(el('p', 'cap', esc(ranked.length > 40
+      ? `Showing the top 40 of ${fmt(ranked.length)} ranked drivers.`
+      : `All ${fmt(ranked.length)} ranked drivers.`)));
   }
 
   shapeP.body.innerHTML = '';
@@ -168,6 +174,10 @@ export async function renderPerformers(root, band) {
       { label: 'Money in', key: 'money', num: true, render: (r) => money(r.money) },
       { label: 'Why not ranked', key: 'why' },
     ]));
+    if (rest.length > 40) {
+      outP.body.append(el('p', 'cap', esc(
+        `Showing 40 of ${fmt(rest.length)} people who drove but did not clear the threshold.`)));
+    }
   }
 
   if (!top) {

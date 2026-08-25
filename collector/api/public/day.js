@@ -202,6 +202,16 @@ export async function renderDay(root, day, onDetail) {
           : r.verdict === 'authorized' ? 'ok' : 'warn') },
       { label: 'Why', key: 'verdict_reason', render: (r) => esc(String(r.verdict_reason || '').slice(0, 120)) },
     ]));
+    /* A table that ends on exactly sixty rows is a table somebody cut. Without
+       this, a day with 140 flagged intervals rendered identically to a day
+       with 60, and the reader would take the last row as the last one there
+       is. */
+    const segTotal = d.capped?.segments;
+    if (segTotal && segTotal > d.segments.length) {
+      sp.body.append(el('p', 'cap', esc(
+        `Showing ${fmt(d.segments.length)} of ${fmt(segTotal)} occupancy intervals on this day, `
+        + 'unauthorized and unverifiable ones first.')));
+    }
     root.append(sp.panel);
   }
 
@@ -222,6 +232,12 @@ export async function renderDay(root, day, onDetail) {
       { label: 'Turns', key: 'sharp_turn', num: true },
       { label: 'Speeding', key: 'overspeed', num: true },
     ], { sortable: true, sortId: 'dayAlerts', defaultSort: { key: 'n', dir: 'desc' } }));
+    const alertTotal = d.capped?.alerts_by_vehicle;
+    if (alertTotal && alertTotal > d.alertsByVehicle.length) {
+      ap.body.append(el('p', 'cap', esc(
+        `Showing the ${fmt(d.alertsByVehicle.length)} vehicles with the most events, of `
+        + `${fmt(alertTotal)} that recorded any on this day.`)));
+    }
     root.append(ap.panel);
   }
 

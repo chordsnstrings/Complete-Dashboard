@@ -128,7 +128,12 @@ const PROBE = () => {
   /* 5. A table cut off without saying so. Row counts that land exactly on a
         round number are almost always a LIMIT, and a reader has no way to tell
         "these are all of them" from "these are the first forty". */
-  const CAPS = [10, 12, 15, 20, 24, 25, 30, 40, 50, 60, 100, 120, 200, 400];
+  /* Round numbers a LIMIT actually uses. Ten and twelve are deliberately not
+     here: a twelve-row table is far more often twelve months or twelve
+     categories than a LIMIT 12, and flagging those buried the real caps —
+     forty ranked drivers, sixty occupancy intervals — under twenty false
+     ones. Every value below appears as a literal LIMIT somewhere in api/. */
+  const CAPS = [20, 25, 30, 40, 50, 60, 90, 100, 120, 150, 200, 300, 400, 500, 600];
   [...root.querySelectorAll('table')].forEach((t) => {
     const n = t.querySelectorAll('tbody tr').length;
     if (!CAPS.includes(n)) return;

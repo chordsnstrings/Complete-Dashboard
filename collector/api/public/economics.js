@@ -345,7 +345,13 @@ async function moneyTab(root) {
       { label: 'Journeys seen', key: 'telematics_journeys', num: true,
         render: (r) => (r.telematics_journeys
           ? `<b>${fmt(r.telematics_journeys)}</b>` : fmt(0)) },
+      /* On the IDLE panel this is empty for every row by construction — a
+         vehicle listed here has taken no booking — so one sentence says it
+         better than thirty-one identical dashes. On any panel where some of
+         them have driven, the column comes back on its own. */
       { label: 'Last trip', key: 'last_trip',
+        absent: 'none of these vehicles has ever taken a booking on any channel — that is what '
+          + 'puts them on this list',
         render: (r) => (r.last_trip ? dayStr(r.last_trip)
           : absent('no booking on this plate in the whole record we hold')) },
       { label: 'Papers', key: 'doc_days_left', num: true,

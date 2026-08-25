@@ -493,6 +493,8 @@ async function corpApproach(host) {
       { label: 'Avg return', key: 'avg_return_km', num: true, render: (r) => `${fmt(r.avg_return_km, 2)} km` },
       { label: 'Worst', key: 'worst_km', num: true, render: (r) => `${fmt(r.worst_km, 1)} km` },
       { label: 'Over 15 km', key: 'over_15km', num: true,
+        absent: 'no approach in this window exceeded 15 km — the column marks the outliers, and '
+          + 'in this range there are none',
         render: (r) => (r.over_15km ? `<span class="pill warn">${fmt(r.over_15km)}</span>` : '—') },
       { label: 'Avg paid trip', key: 'avg_paid_km', num: true, render: (r) => `${fmt(r.avg_paid_km, 1)} km` },
     ], { compact: true, sortable: true, sortId: 'strand',

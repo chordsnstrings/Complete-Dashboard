@@ -19,6 +19,22 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
   sourceLabel, plural, countOf } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
+
+/* Why a whole column is empty, in the words the page prints under it.
+   ─────────────────────────────────────────────────────────────────────────
+   Shared constants rather than a sentence per table, because the SAME absence
+   shows up on the directory, the daily table, the statement table and the trip
+   ledger — and four differently-worded explanations of one missing field read
+   as four separate problems. Each was verified against the live database
+   before it was written here; none of them says "no data". */
+const UBER_FARE = 'Uber\'s trip export carries no fare column at all, and Uber is most of this '
+  + 'fleet\'s work — the money for these trips is in the weekly statement under Earnings';
+const UBER_HOURS = 'no channel reports hours to this fleet: Uber publishes hours_online for 9 of '
+  + '241 people and none for the rest, and driver_performance is written from the earnings '
+  + 'breakdown, which carries trips, distance and money only';
+const NO_DURATION = 'no source fills trip.duration_s — Uber\'s export carries a request time and '
+  + 'a dropoff time and nothing between them, and the hotel channel the same, so a trip\'s own '
+  + 'duration is not something any channel reports';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo } from './map.js';
 
@@ -495,8 +511,10 @@ async function tabActivity(root, id) {
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Cancelled', key: 'cancelled', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
-    { label: 'Online', key: 'hours_online', num: true, render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
+    { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
+      render: (r) => (r.revenue ? money(r.revenue) : '—') },
+    { label: 'Online', key: 'hours_online', num: true, absent: UBER_HOURS,
+      render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
     /* A day may span two vehicles — a handover — so this is a comma-joined
        list, and each plate in it is its own page. */
     { label: 'Vehicle', key: 'plates', render: (r) => (r.plates
@@ -813,13 +831,18 @@ async function tabEarnings(root, id) {
         : r.days_used === r.period_days ? String(r.period_days)
         : `<span class="tag warn" title="the other ${r.period_days - r.days_used} day(s) are covered by another statement">${r.days_used} of ${r.period_days}</span>`) },
     { label: 'Trips', key: 'trips', num: true },
-    { label: 'Online', key: 'hours_online', num: true, render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
-    { label: 'On trip', key: 'hours_on_trip', num: true, render: (r) => (r.hours_on_trip ? `${fmt(r.hours_on_trip, 1)} h` : '—') },
+    { label: 'Online', key: 'hours_online', num: true, absent: UBER_HOURS,
+      render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
+    { label: 'On trip', key: 'hours_on_trip', num: true, absent: UBER_HOURS,
+      render: (r) => (r.hours_on_trip ? `${fmt(r.hours_on_trip, 1)} h` : '—') },
     ...(hasAccept ? [{ label: 'Accept', key: 'acceptance_rate', num: true,
       render: (r) => (r.acceptance_rate != null ? pct(r.acceptance_rate * 100) : '—') }] : []),
     { label: 'Statement', key: 'earnings', num: true, render: (r) => money(r.earnings) },
     { label: 'Counted', key: 'counted', num: true, render: (r) => money(r.counted ?? r.earnings) },
-    { label: 'Cash', key: 'cash_earnings', num: true, render: (r) => money(r.cash_earnings) },
+    { label: 'Cash', key: 'cash_earnings', num: true,
+      absent: 'no statement in this window separates the cash the driver already took from the '
+        + 'net figure — where a channel does report it, the column comes back',
+      render: (r) => money(r.cash_earnings) },
     ...(hasRating ? [{ label: 'Rating', key: 'rating', num: true,
       render: (r) => (r.rating ? fmt(r.rating, 2) : '—') }] : []),
   ], { sortable: true, sortId: 'periods', defaultSort: { key: 'period_start', dir: 'desc' } }));
@@ -954,7 +977,8 @@ async function tabTrips(root, id) {
     { label: 'From', key: 'pickup_addr' },
     { label: 'To', key: 'dropoff_addr' },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
-    { label: 'Minutes', key: 'duration_s', num: true, render: (r) => (r.duration_s ? fmt(r.duration_s / 60) : '—') },
+    { label: 'Minutes', key: 'duration_s', num: true, absent: NO_DURATION,
+      render: (r) => (r.duration_s ? fmt(r.duration_s / 60) : '—') },
     { label: 'Product', key: 'product' },
     { label: 'Pay', key: 'payment_type' },
     /* The pill used to be green unless the word "cancel" appeared, so Bolt's
@@ -963,7 +987,7 @@ async function tabTrips(root, id) {
        text stays the provider's own word. */
     { label: 'Status', key: 'status', render: (r) => pill(r.status || '—',
       r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null) },
-    { label: 'Fare', key: 'price', num: true,
+    { label: 'Fare', key: 'price', num: true, absent: UBER_FARE,
       render: (r) => (r.price ? money(r.price, r.currency)
         : `<span class="ent-off" title="${r.platform === 'uber'
           ? 'Uber’s trip export carries no fare column at all — this driver was paid for it, weekly, under Earnings'

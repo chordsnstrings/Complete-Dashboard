@@ -38,7 +38,7 @@ export function dayRoutes(app, { q, wrap }) {
 
     const [
       headline, hours, platforms, drivers, vehicles, tiers, settlement,
-      alerts, alertsByVehicle, segments, coverage, context, neighbours, corridors,
+      alerts, alertsByVehicle, segments, coverage, context, neighbours, corridors, totalsRow,
     ] = await Promise.all([
       q(`SELECT count(*) FILTER (WHERE is_booking)::int bookings,
                 count(*) FILTER (WHERE NOT is_booking)::int telematics,
@@ -142,7 +142,14 @@ export function dayRoutes(app, { q, wrap }) {
                 count(*)::int trips
          FROM trip_ext WHERE ${D} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
          GROUP BY 1, 2 ORDER BY trips DESC LIMIT 20`, p),
+      /* The real sizes of the two capped lists above. Counted rather than
+         inferred from the returned arrays, which are exactly the caps. */
+      q(`SELECT (SELECT count(DISTINCT plate)::int FROM alert
+                  WHERE occurred_at >= ${T0} AND occurred_at < ${T1} AND plate IS NOT NULL) AS alert_plates,
+                (SELECT count(*)::int FROM occupancy_segment
+                  WHERE started_at >= ${T0} AND started_at < ${T1}) AS segments`, p),
     ]);
+    const totals = totalsRow[0] || {};
 
     const h = headline[0] || {};
     const near = neighbours.map((n) => ({ day: String(n.day).slice(0, 10), bookings: n.bookings }));
@@ -221,6 +228,17 @@ export function dayRoutes(app, { q, wrap }) {
       alerts,
       alertsByVehicle,
       segments,
+      /* How many there ACTUALLY are, beside the capped lists above.
+         ─────────────────────────────────────────────────────────────────
+         The vehicle-alert table stops at 40 rows and the occupancy table at
+         60, and neither said so: a day with 140 flagged vehicles rendered
+         exactly the same page as a day with 40. A cap the reader cannot see
+         is a wrong total, because they will read the last row as the last
+         one there is. */
+      capped: {
+        alerts_by_vehicle: Number(totals?.alert_plates ?? alertsByVehicle.length),
+        segments: Number(totals?.segments ?? segments.length),
+      },
       corridors: corridors.filter((c) => c.from_area !== '(unrecorded)' || c.to_area !== '(unrecorded)'),
       coverage,
       collection: {

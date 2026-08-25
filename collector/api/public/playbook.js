@@ -205,8 +205,17 @@ function actionCard(a, d) {
         ? ` <span class="dim">+${fmt(r.driver_n - (r.driver_refs || []).length)} more</span>` : ''),
     };
     const LABEL = { driver_refs: 'driven by', held_by: 'held by' };
+    /* Columns are built from whatever keys the finding's evidence carries, so a
+       field the generator emits but never fills becomes a column of dashes —
+       "last booking" was empty in all twelve rows of one action. The reason
+       cannot be specific here, because the shape is different for every rule;
+       what it CAN say is that the evidence itself carries nothing, which is
+       the difference between "these vehicles have no last booking" and "this
+       page failed to show one". */
     const cols = Object.keys(a.detail[0]).filter((k) => !HIDDEN.has(k)).map((k) => ({
       label: LABEL[k] || k.replace(/_/g, ' '), key: k,
+      absent: `the evidence behind this finding carries no ${LABEL[k] || k.replace(/_/g, ' ')} `
+        + 'for any of its rows',
       render: RENDER[k] || ((r) => (r[k] == null ? '—' : esc(String(r[k])))),
     }));
     const tbl = tableFrom(a.detail, cols, { compact: true });

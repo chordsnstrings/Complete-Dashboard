@@ -160,6 +160,8 @@ export async function renderRoster(root) {
         : fmt(r.completed)) },
     ...(anyKm ? [{ label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) }] : []),
     { label: 'Fares', key: 'revenue', num: true,
+      absent: 'nobody in this group has a booking that reports a fare — Uber\'s trip export '
+        + 'carries no fare column, and on the pipeline and idle lists Uber is all of the work',
       render: (r) => (r.revenue ? money(r.revenue)
         : '<span class="ent-off" title="no booking of theirs reports a fare — Uber’s export has no fare column">—</span>') },
     /* "not observed" is reserved for a genuinely absent value. This printed it
@@ -191,7 +193,12 @@ export async function renderRoster(root) {
         ? `${dateStr(r.observed_at)}<span class="dim" title="a roster nobody has refreshed describes the past"> ${
           fmt(Math.floor((Date.now() - Date.parse(r.observed_at)) / 864e5))}d ago</span>`
         : '<span class="ent-off">not recorded</span>') }] : []),
+    /* A reason is a fact about a SUSPENSION. Filtered to the pipeline or the
+       idle list — people who are on the books and simply not driving — nobody
+       has one, and 113 dashes under "Reason given" reads as a missing feed. */
     { label: 'Reason given', key: 'reason',
+      absent: 'no channel gave a reason for anybody in this group — a reason is attached to a '
+        + 'suspension, and nobody here is suspended',
       render: (r) => (r.reason
         ? `<span class="wrap" title="${esc(r.reason)}">${esc(String(r.reason).slice(0, 90))}${
           String(r.reason).length > 90 ? '…' : ''}</span>`

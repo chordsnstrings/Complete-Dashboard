@@ -716,7 +716,12 @@ V.demand = async (root) => {
         ? `<span class="pill ${r.temp_max >= 44 ? 'bad' : r.temp_max >= 41 ? 'warn' : 'ok'}">${r.temp_max.toFixed(1)}°C</span>` : '—') },
       { label: 'Rain', key: 'precipitation', num: true, render: (r) => (r.precipitation ? `${r.precipitation} mm` : '—') },
       { label: 'Wind', key: 'wind_max', num: true, render: (r) => (r.wind_max != null ? `${Math.round(r.wind_max)} km/h` : '—') },
-      { label: 'Calendar', key: '_c', render: (r) => [
+      /* Holidays and Ramadan come from calendar_day, which is loaded per year
+         from a public source. A window with no marked day in it is the normal
+         case, not a gap — said in one line rather than in thirty dashes. */
+      { label: 'Calendar', key: '_c',
+        absent: 'no public holiday, Ramadan day or forecast day falls in this window',
+        render: (r) => [
         r.is_holiday ? pill(r.holiday_name || 'holiday', 'warn') : null,
         r.is_ramadan ? pill('Ramadan', 'warn') : null,
         r.is_forecast ? pill('forecast', null) : null,
@@ -835,6 +840,8 @@ V.drivers = async (root) => {
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
       ...plats.map((pl) => ({ label: pl, key: col(pl), num: true })),
       { label: 'Telematics', key: 'telematics_journeys', num: true,
+        absent: 'none of these people drove a vehicle with a tracker in it — a telematics '
+          + 'journey is attributed through the car, and not every car on this fleet has one',
         render: (r) => (r.telematics_journeys ? fmt(r.telematics_journeys) : '—') },
       { label: 'Bookings', key: 'booking_trips', num: true },
       { label: 'Accounts', key: 'accounts', num: true },
@@ -2090,9 +2097,15 @@ V.live = async (root) => {
         : '<span class="ent-off" title="this feed does not report an odometer">—</span>') },
     /* 0 is what the FMS feed sends when it has nothing to say, and it was
        rendered as a flat battery on cars doing 68 km/h. */
+    /* The API nulls an FMS zero now — it is an absent reading, not an empty
+       tank — so a column that is empty for every vehicle drops out with one
+       sentence instead of showing 130 explained dashes. */
     { label: 'Charge', key: 'fuel_level', num: true,
-      render: (r) => (r.fuel_level == null || (+r.fuel_level === 0 && r.source === 'fms')
-        ? '<span class="ent-off" title="this feed reports no fuel or charge level — a 0 here is an absent reading, not an empty tank">—</span>'
+      absent: 'no tracker on this fleet reports a fuel or charge level: the FMS feed sends a '
+        + 'zero for every vehicle, which is an absent reading rather than an empty tank, and '
+        + 'CABMAN and Uber send no level at all',
+      render: (r) => (r.fuel_level == null
+        ? '<span class="ent-off" title="this feed reports no fuel or charge level">—</span>'
         : `${fmt(r.fuel_level)}%`) },
     { label: 'A/C', key: 'ac_on',
       render: (r) => (r.ac_on == null

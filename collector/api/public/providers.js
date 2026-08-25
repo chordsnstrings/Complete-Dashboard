@@ -263,8 +263,17 @@ export async function renderProviders(root) {
                 ? 'the probe samples a fixed number of records, so this is a floor'
                 : 'counted over every sampled record'}">${fmt(f.distinct_seen)}${capped ? '+' : ''}</span>`;
             } },
+          /* A JSON null in a sample renders as the WORD "null" in a chip, which
+             is indistinguishable from a provider that literally sends the
+             four-character string "null" — and fourteen of those appeared on
+             this page. Marked as an absence instead, so the two readings stay
+             apart: the chip says what it is, and a real string keeps its
+             quotes-free chip. */
           { label: 'Values', key: 'values', render: (f) => (f.values
-            ? f.values.map((v) => `<span class="chip">${esc(v)}</span>`).join(' ')
+            ? f.values.map((v) => (v == null || v === 'null'
+              ? '<span class="chip dim" title="the provider sent no value in this field for the '
+                + 'sampled records — a JSON null, not the text &quot;null&quot;">(no value)</span>'
+              : `<span class="chip">${esc(v)}</span>`)).join(' ')
             : '<span class="dim">wide — an identifier or free text, contents not recorded</span>') },
           { label: 'Kept', key: 'k', render: (f) => (s.unmapped?.includes(f.key)
             ? pill('no', 'warn') : pill('yes', 'ok')) },

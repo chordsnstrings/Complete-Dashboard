@@ -939,7 +939,20 @@ app.get('/api/vehicles', wrap(async (req, res) => {
 
 app.get('/api/live', wrap(async (_, res) => res.json(await q(
   `SELECT s.plate, s.fleet_id, s.source, s.captured_at, s.polled_at, s.lat, s.lng, s.speed, s.status,
-          s.seat_occupied, s.fuel_level, s.ac_on, s.odometer,
+          s.seat_occupied, s.ac_on, s.odometer,
+          /* A zero from FMS is an ABSENT READING, not an empty tank.
+             ─────────────────────────────────────────────────────────────
+             Measured live: 83 of 130 vehicles carry a fuel_level and every
+             single one of them is 0, and all 83 are the FMS feed. The front
+             end already knew this and rendered a dash with an explanation —
+             which is 130 explained dashes in a column headed "Charge".
+
+             Nulled here instead, at the one place that knows which feed the
+             row came from, so the column reads as ABSENT rather than as a
+             fleet of flat batteries. CABMAN and Uber report no level at all,
+             so their rows were already null. */
+          CASE WHEN s.source = 'fms' AND coalesce(s.fuel_level, 0) = 0
+               THEN NULL ELSE s.fuel_level END AS fuel_level,
           /* Staleness is a property of the FIX, not of our poll. CABMAN returns
              the last known position of every vehicle on every cycle, so a
              tracker that died in April 2024 still gets a fresh polled_at every

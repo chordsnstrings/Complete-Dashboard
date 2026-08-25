@@ -2026,6 +2026,10 @@ app.get('/api/day', (req, r) => {
     /* The same events against the person driving. Grouped by type it is the
        shape of the day; grouped by vehicle with custody attached it is a list
        of conversations to have tomorrow. */
+    /* Real sizes beside the capped lists, so the "showing 6 of 41" captions on
+       #day are reachable from the fixture. A mock that always returns
+       everything cannot exercise a truncation notice. */
+    capped: { alerts_by_vehicle: 41, segments: 88 },
     alertsByVehicle: plates.slice(0, 6).map((p2, i) => ({
       plate: p2, n: 14 - i * 2, harsh_brake: 6 - i, harsh_accel: 4 - i,
       sharp_turn: 3, overspeed: 1 + i,

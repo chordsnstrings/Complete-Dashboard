@@ -544,6 +544,8 @@ async function tabEarnings(root, plate) {
          for the same car and the same range, and neither number was labelled. */
       { label: 'Trips in the payout period', key: 'trips', num: true },
       { label: 'Period', key: 'period_start',
+        absent: 'no statement attributed to this vehicle carries period bounds — the channel '
+          + 'sent an amount and the days it covers without saying which days those are',
         render: (r) => (r.period_start
           ? `${dateStr(r.period_start)} → ${dateStr(r.period_end)}`
           : '<span class="ent-off" title="the statement carries no period bounds">—</span>') },

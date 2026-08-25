@@ -308,6 +308,13 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   letter-spacing:-.02em;line-height:1.18;margin-top:4px;font-variant-numeric:tabular-nums;
   white-space:nowrap;
 }
+/* …and a value that cannot fit on one line wraps rather than being cut off.
+   The tile is overflow:hidden, so a clipped figure gets not even an ellipsis
+   to warn the reader it is incomplete: "+AED 37,286 · 150.9%" simply ended
+   mid-number at the card edge. kpiRow() adds this class by measuring the
+   value's plain text, so the nowrap rule above still protects every ordinary
+   money figure, which is what it was written for. */
+.kpi .n.long{white-space:normal;font-size:clamp(1rem, 8.5cqi, 1.3rem);overflow-wrap:anywhere}
 .kpi .d{font-size:.75rem;color:var(--ink-2);margin-top:2px}
 .kpi .d b{font-weight:600;color:var(--ink)}
 .kpi.ok .n{color:var(--good)} .kpi.warn .n{color:var(--warn)} .kpi.err .n{color:var(--critical)}

@@ -193,6 +193,17 @@ export async function renderRetention(root) {
     for (let k = 0; k < maxOffset; k++) {
       const r = c.retained[k];
       if (!r) { tds.push('<td class="num dim">·</td>'); continue; }
+      /* A cohort of NOBODY has no retention rate. June 2026 has size 0 —
+         nobody started that month — so the API correctly returns pct: null,
+         and this printed the four-letter word "null" followed by a percent
+         sign, twice, in the middle of a heat grid. A rate over an empty
+         denominator is not a number and must not be drawn as one: no shading,
+         and the cell says what it means. */
+      if (r.pct == null) {
+        tds.push(`<td class="num dim" title="${esc(MONTH(r.m))}: nobody started in `
+          + `${esc(MONTH(c.cohort))}, so there is no rate to compute">—</td>`);
+        continue;
+      }
       // Intensity from the retention itself, so the shape is readable at a glance.
       const a = 0.08 + 0.62 * (r.pct / 100);
       tds.push(`<td class="num" style="background:color-mix(in srgb, var(--b400) ${Math.round(a * 100)}%, transparent)"
@@ -231,6 +242,8 @@ export async function renderRetention(root) {
       { label: 'First', key: 'first_month', render: (r) => MONTH(r.first_month) },
       { label: 'Last', key: 'last_month', render: (r) => MONTH(r.last_month) },
       { label: 'Channels', key: 'platforms',
+        absent: 'rollup_person_month stores the platforms a person worked, and no row in this '
+          + 'cohort has one — the monthly rollup that fills it has not run over these months',
         render: (r) => ((r.platforms || []).map(sourceLabel).join(', ')
           || '<span class="ent-off" title="no platform named on their bookings">—</span>') },
       /* Which car they walked away from. A leaver who still holds a vehicle is
