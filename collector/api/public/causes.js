@@ -20,7 +20,7 @@
 import { empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, fmt, pct,
   sourceLabel, countOf, plural } from './ui.js';
-import { api, href, hrefFilter } from './data.js';
+import { api, qChan, href, hrefFilter } from './data.js';
 
 const MONTH = (m) => {
   const [y, mm] = String(m).slice(0, 7).split('-');
@@ -186,7 +186,13 @@ export async function renderCauses(root) {
   const evP = panel('Known context', 'Seasonal, religious and regional events that move Dubai demand'); root.append(evP.panel);
   [trend.body, brk.body, gapP.body, evP.body].forEach(loading);
 
-  const t = await api('/api/trend/monthly');
+  /* The chips, sent. Both of these bind fleet and platform server-side — the
+     handlers say so, having been fixed for exactly this — and the page was
+     asking through bare api(), so choosing a fleet on the page whose subject is
+     why the numbers moved described both businesses under one fleet's heading.
+     qChan sends the channel filters and NOT a window: these three endpoints are
+     whole-record by construction, which is why #causes hides the range. */
+  const t = await qChan('/api/trend/monthly');
   const months = t.months || [];
   /* Events bounded to the RECORD, not to a hardcoded 2024→2027. The panel
      fetched four years and rendered 22 rows spanning 2024 to 2028 — including
@@ -203,7 +209,7 @@ export async function renderCauses(root) {
     ? `${lastMonth}-${String(new Date(Date.UTC(+lastMonth.slice(0, 4), +lastMonth.slice(5, 7), 0)).getUTCDate()).padStart(2, '0')}`
     : '2027-12-31';
   const [breaks, events] = await Promise.all([
-    api('/api/breaks').catch(() => []),
+    qChan('/api/breaks').catch(() => []),
     api(`/api/events?from=${encodeURIComponent(evFrom)}&to=${encodeURIComponent(evTo)}`).catch(() => []),
   ]);
   const observed = months.filter((m) => !m.no_data);

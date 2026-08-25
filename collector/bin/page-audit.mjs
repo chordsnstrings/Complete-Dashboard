@@ -252,6 +252,20 @@ function junk(json) {
   return [...new Set(bad)].slice(0, 4);
 }
 
+/* What each endpoint answered, per view and per window, so the run can ask a
+   question no single window can: does the range selector on this page actually
+   govern anything? See the range-honesty pass at the bottom. */
+const answers = new Map();          // `${view}|${W}` -> Map(path -> fingerprint)
+const fingerprint = (j) => (j == null ? 'null' : JSON.stringify(j).length + ':'
+  + JSON.stringify(j).slice(0, 400));
+/* Whether an answer is empty enough that comparing two windows proves nothing.
+   /api/analyst/findings returns every count at zero because no analyst run has
+   ever happened on this fleet; identical at 7 days and at 365 says the endpoint
+   has no data, not that it ignores the window. */
+const barren = (j) => j == null || emptiness(j) != null
+  || (Array.isArray(j) && !j.length);
+const bodies = new Map();           // `${view}|${W}` -> Map(path -> json)
+
 const byWindow = [];
 for (const W of WINDOWS) {
 WIN = windowQs(W);
@@ -306,6 +320,8 @@ for (const view of VIEWS) {
     .filter((r) => r.have.size > 0 && [...r.want].some((p) => !r.have.has(p)))
     .map((r) => `${r.path} — ${[...r.have].join('+')} only, missing `
       + `${[...r.want].filter((p) => !r.have.has(p)).join(', ')}`);
+  answers.set(`${view}|${W}`, new Map(results.map((r) => [r.path, fingerprint(r.json)])));
+  bodies.set(`${view}|${W}`, new Map(results.map((r) => [r.path, r.json])));
   report.push({ view, endpoints: ps.length, broken, refused, blank, junky, partial });
 }
 
@@ -346,6 +362,107 @@ for (const w of byWindow) {
   console.log(`  ${(w.window === 'all' ? 'all time' : `${w.window}d`).padEnd(10)}`
     + `${String(w.calls).padStart(5)} calls   ${w.bad ? `${w.bad} view(s) with an error` : 'clean'}`);
 }
+
+/* ── does the range selector on this page govern anything? ─────────────────
+   Every view either shows the date-range control or hides it, and data.js says
+   which: NO_RANGE plus NO_FILTER. That list is a CLAIM about the endpoints
+   behind the page, and nothing checked it.
+
+   Both directions are a lie the reader cannot detect:
+
+     - a control that changes nothing. The reader moves it from 30 days to a
+       year, every number stays where it was, and they conclude the fleet did
+       nothing in the other eleven months. #reconcile earned its place on
+       NO_RANGE this way — its rows are whole months, and a thirty-day window
+       spanning two partial ones is the exact mismatch its delta column exists
+       to catch.
+     - a page with no control whose numbers move anyway. Then the figures
+       depend on a window the reader cannot see and was never shown.
+
+   So the answers from the narrowest and widest windows are compared per
+   endpoint. Nothing here is automatically a fault — an endpoint may honestly
+   have the same answer at 7 days and at 365 because that is all the data there
+   is — which is why it reports the count and names the endpoints rather than
+   failing the run. What it makes visible is a page whose control is decoration
+   and a page whose numbers have a hidden scope. */
+const NARROW = WINDOWS.includes('7') ? '7' : WINDOWS[0];
+const WIDE = WINDOWS.includes('365') ? '365' : WINDOWS[WINDOWS.length - 1];
+if (NARROW !== WIDE) {
+  /* Read from data.js rather than restated here: a copy of this list is a copy
+     that disagrees with the product within a week, and the whole point is to
+     check the product's own claim. */
+  const dataSrc = readFileSync(`${PUB}/data.js`, 'utf8');
+  const listOf = (name) => {
+    const m = dataSrc.match(new RegExp(`export const ${name} = \\[([\\s\\S]*?)\\];`));
+    return m ? [...m[1].matchAll(/'([a-z-]+)'/g)].map((x) => x[1]) : [];
+  };
+  const hidden = new Set([...listOf('NO_RANGE'), ...listOf('NO_FILTER')]);
+
+  /* Only the calls that CARRY the window.
+     ───────────────────────────────────────────────────────────────────────
+     This tool appends from/to to everything it calls, so an endpoint that
+     honours a window looks window-dependent whether or not the page ever sends
+     one. That reported eight views as having a hidden scope, and seven of them
+     call their endpoints through bare api() and send no window at all.
+
+     `q()` and `qAll()` are the two helpers in data.js that inject
+     windowDates(); a path reached through either is a path the PAGE is
+     windowing. `q(path, { from, to })` overrides the injected pair with its
+     own — #performer picks its Monday-to-Sunday week that way — so a call site
+     passing from/to is windowed by the page and not by the reader's selector,
+     and is not counted. */
+  const windowedBy = (view) => {
+    const { text } = sourceFor(view);
+    const out = new Set();
+    for (const m of text.matchAll(/\bq(?:All)?\(\s*[`'"](\/api\/[a-z0-9/_-]+)[`'"]\s*(,([^)]*))?\)/gi)) {
+      if (m[3] && /\bfrom\s*:/.test(m[3])) continue;      // brings its own window
+      out.add(m[1]);
+    }
+    return out;
+  };
+
+  console.log(`\n${'='.repeat(78)}\nrange honesty — ${NARROW}d against ${WIDE}d`);
+  console.log('Does the date-range control on each page govern the numbers on it?');
+  console.log('Counted over the calls the page makes through q()/qAll(), which are the');
+  console.log('ones that carry the reader’s window; an endpoint empty in BOTH windows is');
+  console.log('skipped, because identical-and-empty proves nothing either way.\n');
+  console.log('view                 control   windowed calls that move');
+  console.log('─'.repeat(78));
+  let quiet = 0, loud = 0;
+  for (const view of VIEWS) {
+    const a = answers.get(`${view}|${NARROW}`), b = answers.get(`${view}|${WIDE}`);
+    const ja = bodies.get(`${view}|${NARROW}`), jb = bodies.get(`${view}|${WIDE}`);
+    if (!a || !b || !a.size) continue;
+    const carries = windowedBy(view);
+    const asked = [...a.keys()].filter((path) => carries.has(path) && b.has(path)
+      && !(barren(ja.get(path)) && barren(jb.get(path))));
+    if (!asked.length) {
+      console.log(`${view.padEnd(20)} ${(hidden.has(view) ? 'hidden' : 'shown').padEnd(9)} `
+        + `${carries.size ? 'nothing comparable — every windowed call is empty in both'
+          : 'sends no window on any call'}`);
+      continue;
+    }
+    const moved = asked.filter((path) => a.get(path) !== b.get(path));
+    const shows = !hidden.has(view);
+    const line = `${view.padEnd(20)} ${(shows ? 'shown' : 'hidden').padEnd(9)} `
+      + `${moved.length} of ${asked.length}`;
+    if (shows && moved.length === 0) {
+      quiet += 1;
+      console.log(`${line}   ← the control is on screen and changes nothing`);
+      asked.slice(0, 4).forEach((x) => console.log(`      · ${x}`));
+    } else if (!shows && moved.length) {
+      loud += 1;
+      console.log(`${line}   ← no control, but the reader’s window still governs these`);
+      moved.slice(0, 4).forEach((x) => console.log(`      · ${x}`));
+    } else {
+      console.log(line);
+    }
+  }
+  console.log('─'.repeat(78));
+  console.log(`${quiet} view(s) offer a range control that changes nothing, `
+    + `${loud} are governed by one they do not offer`);
+}
+
 const totalBad = byWindow.reduce((a, w) => a + w.bad, 0);
 console.log(`\n${byWindow.length} windows, ${byWindow.reduce((a, w) => a + w.calls, 0)} calls, ${totalBad} failing`);
 process.exit(totalBad ? 1 : 0);

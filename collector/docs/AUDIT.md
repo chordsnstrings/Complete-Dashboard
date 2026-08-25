@@ -754,3 +754,52 @@ that held still across the identical pair and differs at 365 is windowed.
 Verified it can fail: relabelling **In this window** to **Recent** makes it
 report `"55 trips over 7 days in 3 cars" at 7d, "3,281 trips over 261 days in 6
 cars" at 365d`. Restored, it is silent.
+
+## 2026-08-25 — three filter controls that governed nothing
+
+Every view either shows the date-range control or hides it, and `data.js` says
+which. That list is a *claim* about the endpoints behind each page, and nothing
+checked it. `bin/page-audit.mjs` now does, by comparing what each endpoint
+answered at 7 days against 365.
+
+Getting the check honest took two guards. The audit appends `from`/`to` to
+everything it calls, so at first eight views looked like they had a hidden
+window — and seven of them reach their endpoints through bare `api()` and send
+no window at all. Only calls made through `q()`/`qAll()` carry the reader's
+window, so only those are counted, and a call that passes its own `from`/`to`
+(`#performer` picking its Monday-to-Sunday week) is windowed by the page rather
+than by the selector. The second guard: an endpoint empty in *both* windows is
+skipped. `/api/analyst/findings` returns every count at zero because no analyst
+run has ever happened on this fleet — identical at 7 and at 365 says it has no
+data, not that it ignores the window.
+
+Eight findings became three, and all three were real:
+
+| Page | What its endpoints take | Fix |
+|---|---|---|
+| `#causes` | `/api/trend/monthly`, `/api/breaks`, `/api/events` — whole record by construction | range hidden (`NO_RANGE`) |
+| `#map` | `/api/live` takes nothing, `/api/map/days` takes a plate | all three hidden (`NO_FILTER`) |
+| `#segment` | `/api/segment` takes a plate and an instant | all three hidden (`NO_FILTER`) |
+
+A control that governs nothing is worse than a missing one: the reader moves it
+from 30 days to a year, every number stays where it was, and concludes the fleet
+did nothing in the other eleven months. It also rides along into every link
+leaving the page.
+
+### And a chip the server was already waiting for
+
+`#causes` was the opposite failure. Both `/api/trend/monthly` and `/api/breaks`
+bind `fleet` and `platform` — the handlers say so in their own comments, having
+been fixed for exactly this — and the page called them through bare `api()`,
+sending neither. So on a two-fleet operator, the page whose subject is *why the
+numbers moved* described both businesses under one fleet's heading, and the chip
+above it did nothing.
+
+New `qChan()` in `data.js` sends the channel filters and no window, which is
+what a whole-record page that is still one fleet's needs. Verified against
+production: all fleets 237,778 trips; egari 69,585; ecosine 168,193 — which add
+up exactly.
+
+`test/warm.test.mjs` learned about `qChan`: with no chip set it produces the
+bare path with no query string, so it counts as a bare call and
+`/api/trend/monthly` keeps its warm key.

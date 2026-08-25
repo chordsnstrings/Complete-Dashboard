@@ -179,6 +179,29 @@ export function unfiltered(extra = {}) {
 }
 export const qAll = (path, extra) => api(`${path}?${unfiltered(extra)}`);
 
+/* The channel chips WITHOUT the window — for pages whose subject is the whole
+   record but which are still one fleet's or one channel's.
+   ─────────────────────────────────────────────────────────────────────────
+   #causes is the case that needed it. Its three endpoints are whole-record by
+   construction: a monthly trend, change detection across that trend, and the
+   events bounded to the months actually observed. So the date range does not
+   apply and the page is on NO_RANGE. But /api/trend/monthly and /api/breaks
+   both bind fleet and platform — the server comments say so, having been fixed
+   for exactly this — and the page was calling them through bare api(), sending
+   neither. The chips were on screen, the server was ready to honour them, and
+   choosing "egari" changed nothing on the page whose whole job is explaining
+   why the numbers moved. */
+export function channels(extra = {}) {
+  const p = new URLSearchParams(clean(extra));
+  if (state.platform) p.set('platform', state.platform);
+  if (state.fleet) p.set('fleet', state.fleet);
+  return p.toString();
+}
+export const qChan = (path, extra) => {
+  const qs = channels(extra);
+  return api(qs ? `${path}?${qs}` : path);
+};
+
 /* ── routing ───────────────────────────────────────────────────────────── */
 /* `#<view>[/<param>[/<sub>]][?days=&platform=&fleet=]`.
    The window and the platform/fleet filters used to live only in `state`, so
@@ -207,14 +230,26 @@ const DEFAULTS = { days: 30, platform: '', fleet: '' };
    every link leaving the page. The channel filter stays: comparing two days
    for one fleet, or one platform, is the second question anybody asks. */
 export const NO_RANGE = ['reconcile', 'compare',
+  /* #causes is thirteen months of trend, the breaks detected across them, and
+     the events bounded to the months actually observed. Not one of its three
+     endpoints takes a window, so the selector above it was a control that
+     changed nothing — and worse, rode along into every link leaving the page.
+     Its channel chips stay: a fleet's trend is its own, and the server binds
+     both fleet and platform on two of the three. */
+  'causes',
   /* All three performer pages are a fixed Monday-to-Sunday week, chosen by the
      page and named in its caption. A range chip above them changes nothing and
      reads as though it does — and worse, rides along into every link leaving
      the page. */
   'top-performers', 'low-performers', 'performer'];
 export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage'];
+/* #map is a live position feed with its own plate-and-day picker, and #segment
+   is one occupancy segment addressed by plate and instant. /api/live takes no
+   parameters at all, /api/map/days takes a plate, /api/segment takes a plate
+   and a timestamp — so all three controls above these two pages governed
+   nothing on them. */
 export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
-  'compliance', 'forecast', 'retention', 'capacity'];
+  'compliance', 'forecast', 'retention', 'capacity', 'map', 'segment'];
 
 export const hidesRange = (v) => NO_FILTER.includes(v) || NO_RANGE.includes(v);
 export const hidesChannel = (v) => NO_FILTER.includes(v) || NO_PLATFORM_FLEET.includes(v);

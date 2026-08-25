@@ -137,10 +137,21 @@ console.log('\nit warms the keys the pages actually ask for');
     .flatMap((m) => declared(m[1]));
   check('the warmer declares both kinds of key', bare.length > 0 && windowed.length > 0);
 
-  /* How each path is CALLED in the UI: api() sends no window, q()/qAll() do. */
+  /* How each path is CALLED in the UI: api() sends no window, q()/qAll() do.
+
+     qChan() counts as BARE. It sends the platform and fleet chips and no
+     window, so with neither chip set — which is how every page opens, and the
+     only state the warmer fills a key for — it produces the bare path exactly:
+     `/api/trend/monthly`, no query string at all. Treating it as windowed
+     would declare /api/trend/monthly over-warmed and take the warm key away
+     from the request that actually arrives.
+
+     A chip that IS set makes its own cache key, and the warmer has never
+     filled per-fleet keys for any path in this list; that is unchanged by
+     qChan and is not what this check is about. */
   const ui = readdirSync('api/public').filter((f) => f.endsWith('.js'))
     .map((f) => readFileSync(`api/public/${f}`, 'utf8')).join('\n');
-  const calledBare = (path) => new RegExp(`\\bapi\\('${path.replace(/[/?]/g, '\\$&')}'`).test(ui);
+  const calledBare = (path) => new RegExp(`\\b(?:api|qChan)\\('${path.replace(/[/?]/g, '\\$&')}'`).test(ui);
   const calledWindowed = (path) => new RegExp(`\\b(?:q|qAll)\\('${path.replace(/[/?]/g, '\\$&')}'`).test(ui);
 
   /* Called bare ⇒ warmed bare, whether or not it is ALSO called with a window.
