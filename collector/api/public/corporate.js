@@ -258,7 +258,7 @@ async function corpGuests(host) {
           + 'that travelled more than once. The tile above counts all of them.'));
       }
       body.append(tableFrom(g.rooms, [
-        { label: 'Room', key: 'room_no', absent: ROOM, absent: ROOM },
+        { label: 'Room', key: 'room_no', absent: ROOM },
         { label: 'Property', key: 'property',
           render: (r) => entity('property', r.partner_id, r.property)
             + (r.properties > 1 ? ` <span class="dim">+${r.properties - 1} more</span>` : '') },
@@ -566,7 +566,7 @@ export async function renderProperty(root, id, tab = 'overview', onDetail) {
       + 'several different guests. The room number is the only thing on this channel that recurs.'));
     host.append(tableFrom(d.guests, [
       { label: 'Record', key: 'guest_id', render: (r) => `<code>${esc(String(r.guest_id).slice(-8))}</code>` },
-      { label: 'Room', key: 'room_no',
+      { label: 'Room', key: 'room_no', absent: ROOM,
         render: (r) => (r.room_no ? esc(r.room_no)
           : '<span class="ent-off" title="this booking records no room number">—</span>') },
       { label: 'Bookings', key: 'bookings', num: true },

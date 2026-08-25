@@ -714,10 +714,16 @@ V.demand = async (root) => {
         : '<span class="ent-off" title="no booking on this day reports a fare — Uber’s export has no fare column">—</span>') },
       { label: 'Max temp', key: 'temp_max', num: true, render: (r) => (r.temp_max != null
         ? `<span class="pill ${r.temp_max >= 44 ? 'bad' : r.temp_max >= 41 ? 'warn' : 'ok'}">${r.temp_max.toFixed(1)}°C</span>` : '—') },
+      /* Zero millimetres IS the measurement, and on this fleet it is 28 of 30
+         days. Rendered as an em-dash it read as "not recorded", which on a
+         column beside a temperature and a wind speed is the opposite of what a
+         dry day means. The `absent` stays for the case the weather feed itself
+         is missing, where every value would be null rather than zero. */
       { label: 'Rain', key: 'precipitation', num: true,
-        absent: 'no rain was recorded on these days — Dubai has a handful of wet days a year, so '
-          + 'an empty column here is the weather, not a missing feed',
-        render: (r) => (r.precipitation ? `${r.precipitation} mm` : '—') },
+        absent: 'no weather was recorded for these days — the daily feed is loaded per year from '
+          + 'a public source, so a whole column of blanks means it has not run for this range',
+        render: (r) => (r.precipitation ? `${r.precipitation} mm`
+          : (r.precipitation === 0 ? '<span class="dim">0 mm</span>' : '—')) },
       { label: 'Wind', key: 'wind_max', num: true, render: (r) => (r.wind_max != null ? `${Math.round(r.wind_max)} km/h` : '—') },
       /* Holidays and Ramadan come from calendar_day, which is loaded per year
          from a public source. A window with no marked day in it is the normal

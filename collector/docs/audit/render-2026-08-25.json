@@ -1,38 +1,31 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-08-25T16:29:46.327Z",
+  "at": "2026-08-25T16:58:48.613Z",
   "widths": [
     1500
   ],
-  "routes": 4,
+  "routes": 3,
   "findings": [
     {
-      "route": "drivers",
+      "route": "demand",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":390,\"explained\":true,\"title\":\"Drivers\",\"kpis\":0,\"tables\":3,\"charts\":1}"
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"Demand\",\"kpis\":4,\"tables\":1,\"charts\":3}"
     },
     {
-      "route": "vehicles",
+      "route": "day/2026-08-24",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":170,\"explained\":true,\"title\":\"Vehicles\",\"kpis\":6,\"tables\":2,\"charts\":0}"
+      "detail": "{\"panels\":12,\"empty_panels\":0,\"rows\":268,\"explained\":true,\"title\":\"Monday, August 24, 2026\",\"kpis\":8,\"tables\":5,\"charts\":4}"
     },
     {
-      "route": "roster/pipeline",
+      "route": "property/673dc94395448356a777f1ec/guests",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":113,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":0}"
-    },
-    {
-      "route": "slot/2/19",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":43,\"explained\":true,\"title\":\"Tuesday 19:00\",\"kpis\":7,\"tables\":3,\"charts\":3}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":40,\"explained\":true,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
     }
   ]
 }

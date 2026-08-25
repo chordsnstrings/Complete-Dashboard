@@ -15,6 +15,11 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
   dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel } from './ui.js';
 import { api, href, state } from './data.js';
 
+/* Why a fare column on this page can be almost entirely empty. Shared between
+   the drivers table and the vehicles table, which have the same answer. */
+const FARE_ABSENT = 'Uber\'s trip export carries no fare column at all, and Uber is most of this '
+  + 'fleet\'s work — the money for those bookings reaches the fleet in the weekly statement';
+
 const shift = (day, n) => {
   const d = new Date(`${day}T12:00:00Z`);
   d.setUTCDate(d.getUTCDate() + n);
@@ -248,7 +253,8 @@ export async function renderDay(root, day, onDetail) {
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Did not complete', key: 'cancelled', num: true },
-    { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+    { label: 'Fares', key: 'revenue', num: true, absent: FARE_ABSENT,
+      render: (r) => money(r.revenue) },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'Channels', key: 'platforms', render: (r) => esc((r.platforms || []).join(', ')) },
     { label: 'Vehicles', key: 'plates',
@@ -275,7 +281,8 @@ export async function renderDay(root, day, onDetail) {
        this page most likely to start a conversation, and "drivers: 2" is not
        somebody you can ring. */
     { label: 'Driver that day', key: 'driver_refs', render: (r) => custody(r) },
-    { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+    { label: 'Fares', key: 'revenue', num: true, absent: FARE_ABSENT,
+      render: (r) => money(r.revenue) },
   ], { sortable: true, sortId: 'dayVeh', defaultSort: { key: 'bookings', dir: 'desc' } }));
   if (h.vehicles > d.vehicles.length) {
     vp.body.append(el('p', 'cap',

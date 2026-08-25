@@ -449,3 +449,26 @@ its table where it used to print several hundred em-dashes.
 | stuck-loading | 1 | **0** |
 | **total** | **471** | **54 warnings, 0 errors** |
 
+### Pass 10 — 25 Aug 2026, the fifth sweep: the last twelve
+
+```
+312 page-renders across 3 widths, 3 routes with findings
+sparse-column 12 · 0 errors
+```
+
+Three routes left, and two of them were the same bug in a third place.
+
+| # | finding | fix |
+|---|---|---|
+| 35 | `#demand`'s Rain column — **28 of 30 days are zero, not null.** Zero millimetres IS the measurement, and rendering it as an em-dash reads as "not recorded" on a column sitting beside a temperature and a wind speed | `0 mm`, dimmed. The `absent` sentence stays for the case where the *weather feed* is missing — every value null rather than zero — and now says that instead |
+| 36 | `#day`'s two Fares columns (drivers and vehicles) never declared `absent` | one shared constant, because both tables have the same answer |
+| 37 | `#property/<id>/guests` Room, and a `{ absent: ROOM, absent: ROOM }` duplicate from an over-eager patch | declared once |
+
+**The zero-rendered-as-a-dash bug has now appeared four times** — `over_15km`,
+`telematics_journeys`, `fuel_level` and `precipitation`. Each time the pattern
+is `value ? render : '—'`, which is correct for a null and wrong for a zero, and
+each time the column sat beside other columns that *were* measurements, so the
+dash read as "not measured". It is the single most common defect this audit
+found, and it is invisible without rendering the page: the API is right, the
+formatter is right in isolation, and only the column in context is wrong.
+
