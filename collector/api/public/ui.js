@@ -85,6 +85,28 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
   if (!rows.length) { const d = el('div'); empty(d); return d; }
   const wrap = el('div', 'tscroll');
   const t = el('table', compact ? 'compact' : null);
+
+  /* A column that is empty in EVERY row is not a column.
+     ───────────────────────────────────────────────────────────────────────
+     The drivers directory carried a Rating column that was null for all 360
+     people, because nothing in the collector writes driver_platform_state.
+     rating — no channel reports one to this fleet. Rendered, that is three
+     hundred and sixty em-dashes taking the width of a real column, and a
+     reader is left to decide whether the fleet has no ratings or the page is
+     broken. Neither reading is available from the dashes themselves.
+
+     So a column may declare `absent`: the sentence to print if it turns out to
+     be empty everywhere. The column is then dropped — its width goes to the
+     columns that DO carry numbers — and the sentence is printed under the
+     table. A column with no `absent` is kept as it is, dashes and all, because
+     silently dropping a column the caller did not think about would hide a
+     collection failure rather than report it. */
+  const isBlank = (v) => v == null || v === '' || v === '—'
+    || (Array.isArray(v) && v.length === 0);
+  const dead = cols.filter((c) => c.absent && c.key
+    && rows.every((r) => isBlank(r[c.key])));
+  cols = cols.filter((c) => !dead.includes(c));
+
   const byKey = (k) => cols.find((c) => c.key === k);
 
   let active = sortable ? (readSorts().get(sortId) || defaultSort) : null;
@@ -156,6 +178,14 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
   };
   paint();
   wrap.append(t);
+  if (dead.length) {
+    /* Named one per line rather than joined, because each is a different
+       missing source and a reader needs to know which. */
+    const d = el('div', 'cap tabsent');
+    d.innerHTML = dead.map((c) =>
+      `<span><b>${esc(c.label)}</b> — ${esc(c.absent)}</span>`).join('');
+    wrap.append(d);
+  }
   if (sortable && capped) {
     wrap.append(el('p', 'cap tsort-note',
       `Sorting re-orders the ${rows.length} rows on screen, not ${esc(capped)} — the rows that reach `

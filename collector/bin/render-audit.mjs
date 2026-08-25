@@ -213,8 +213,14 @@ for (const width of WIDTHS) {
     }
   });
 
+  let n = 0;
   for (const route of routes) {
     live.js.length = 0; live.net.length = 0;
+    /* Printed as it goes. A silent hour-long run is indistinguishable from a
+       hung one, and the first version of this WAS effectively hung — it was
+       started before a deploy, so every page met a restarting API and sat on
+       the sixty-second navigation timeout. */
+    process.stderr.write(`\r[${width}px ${++n}/${routes.length}] ${route.slice(0, 46).padEnd(46)}`);
     let probe;
     try {
       await page.goto(`${BASE}/#${route}`, { waitUntil: 'domcontentloaded', timeout: 60000 });

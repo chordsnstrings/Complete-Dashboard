@@ -131,3 +131,46 @@ the transaction. A slow `DELETE` does not merely fail — it takes every `ALTER`
 in the file down with it, silently, and the damage shows up somewhere else
 entirely as a 500 on an unrelated page.
 
+### Pass 3 — 25 Aug 2026, columns that are empty in every row
+
+Probing the live endpoints for fields that are null in **every** row:
+
+```
+/api/drivers/directory   360 rows   rating   null on all 360
+/api/roster              279 people rating, acceptance_rate, cancellation_rate,
+                                    completion_rate, hours_online, earnings — all 0% filled
+/api/compliance/drivers  114 rows   rating   null on all 114
+```
+
+**Why they are empty**, which is the part the page could not say: `stateRow()`
+in `src/roster.js` — the builder every source writes `driver_platform_state`
+through — sets state, reason, plate, vehicle and `can_earn`, and no score.
+Uber's roster endpoint (`/v1/vehicle-suppliers/drivers/actions`) returns
+onboarding status and a vehicle; its earnings breakdown returns trips, distance
+and money. Nothing in the collector writes a rating because no channel this
+fleet is connected to reports one.
+
+360 em-dashes under a heading that says "Rating" is worse than no column. A dash
+could mean this driver has no rating, or the fleet has none, or the collector is
+broken, or the page is — and a column that is empty in every row has nothing to
+compare against, so the reader cannot tell which.
+
+| # | finding | fix |
+|---|---|---|
+| 10 | `rating` is null for all 360 drivers; the column renders 360 dashes | `tableFrom` columns may declare `absent`: the column is dropped and the reason printed under the table |
+| 11 | six roster metrics (`rating`, three rates, `hours_online`, `earnings`) are structurally unwritable — `stateRow()` has no field for them | recorded below as collector work; the UI now states it rather than implying it |
+
+The mechanism is **opt-in on purpose**. Dropping any column that happens to be
+empty would hide a collection failure the day a source stops reporting; a column
+with no `absent` keeps its dashes, because the caller has not said what an
+absence there would mean. Zero is never empty — a rating of zero is a rating and
+a count of zero is a finding.
+
+Guarded by `test/absent_columns.test.mjs` (18 assertions, run in Chromium
+against the real module rather than a DOM shim).
+
+**Follow-up, not done here:** filling those six columns is collector work
+against endpoints we have not proven exist. `REPORT_TYPE_PAYMENTS_ORDER` and
+`analytics-data/query` are the two candidates already identified for fares and
+hours. Until one is proven, the honest thing is the sentence, not a dash.
+

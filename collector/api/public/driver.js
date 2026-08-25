@@ -1164,7 +1164,17 @@ export async function renderDriverDirectory(root) {
           ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
         : '<span class="ent-off" title="Uber publishes no fare per trip, and Uber is most of this fleet’s work — the money is in Paid">—</span>') },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
+    /* Measured on the live fleet: rating is null for all 360 people, because
+       nothing in the collector writes it — Uber's roster endpoint returns
+       onboarding status and a vehicle, not a score, and the earnings breakdown
+       returns trips, distance and money. So on production this column is 360
+       em-dashes wide, and `absent` turns it into one sentence under the table
+       instead. On a database where some channel DOES report one, the column
+       comes back on its own. */
     { label: 'Rating', key: 'rating', num: true,
+      absent: 'no channel this fleet is connected to reports a driver rating — '
+        + 'Uber\'s roster returns onboarding status and a vehicle, and its earnings '
+        + 'breakdown returns trips, distance and money',
       render: (r) => (r.rating != null ? fmt(r.rating, 2)
         : '<span class="ent-off" title="no platform of theirs publishes a rating">—</span>') },
     { label: 'First trip', key: 'first_trip',

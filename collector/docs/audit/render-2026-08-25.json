@@ -1,136 +1,866 @@
 {
-  "base": "http://localhost:8099",
-  "at": "2026-08-25T13:39:32.146Z",
+  "base": "http://localhost:8100",
+  "at": "2026-08-25T14:01:45.635Z",
   "widths": [
-    1500
+    1500,
+    1180,
+    820
   ],
-  "routes": 33,
+  "routes": 104,
   "findings": [
+    {
+      "route": "unit",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Last trip\" is empty in all 31 rows"
+    },
+    {
+      "route": "unit",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
     {
       "route": "unit",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":26,\"title\":\"Unit economics\",\"kpis\":8,\"tables\":6,\"charts\":3}"
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":74,\"title\":\"Unit economics\",\"kpis\":8,\"tables\":6,\"charts\":3}"
+    },
+    {
+      "route": "unit/assets",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":140,\"title\":\"Unit economics\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Licence\" is empty in 220 of 247 rows"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":247,\"title\":\"Unit economics\",\"kpis\":6,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Last trip\" is empty in all 31 rows"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":74,\"title\":\"Unit economics\",\"kpis\":8,\"tables\":6,\"charts\":3}"
+    },
+    {
+      "route": "top-performers",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "top-performers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":72,\"title\":\"Top performers\",\"kpis\":4,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Standing\" is empty in 37 of 40 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":72,\"title\":\"Low performers\",\"kpis\":4,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "What the platform said"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":1,\"rows\":7,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":5,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "What the platform said"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":1,\"rows\":7,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":5,\"tables\":2,\"charts\":0}"
     },
     {
       "route": "overview",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":8,\"title\":\"Fleet activity\",\"kpis\":6,\"tables\":1,\"charts\":4}"
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":12,\"title\":\"Fleet activity\",\"kpis\":6,\"tables\":1,\"charts\":4}"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Calendar\" is empty in all 30 rows"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Rain\" is empty in 28 of 30 rows"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":30,\"title\":\"Demand\",\"kpis\":4,\"tables\":1,\"charts\":3}"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "kpi +31px"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 72 of 84 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 69 of 80 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 60 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "clipped-text",
+      "detail": "1: 12:00 AM – 11:57 PM"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":12,\"empty_panels\":0,\"rows\":268,\"title\":\"Monday, August 24, 2026\",\"kpis\":8,\"tables\":5,\"charts\":4}"
+    },
+    {
+      "route": "day/not-a-date",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "day/not-a-date",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Day\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Rating\" is empty in all 360 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Telematics\" is empty in all 4 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Hrs online\" is empty in all 25 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 329 of 360 rows"
     },
     {
       "route": "drivers",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":23,\"title\":\"Drivers\",\"kpis\":0,\"tables\":3,\"charts\":1}"
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":389,\"title\":\"Drivers\",\"kpis\":0,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "compare",
+      "width": 1500,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
     },
     {
       "route": "compare",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":4,\"title\":\"Today vs yesterday\",\"kpis\":5,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":3,\"rows\":10,\"title\":\"Today vs yesterday\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     },
     {
-      "route": "finance",
+      "route": "compare/2026-08-25",
+      "width": 1500,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":13,\"title\":\"Finance\",\"kpis\":8,\"tables\":2,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":3,\"rows\":10,\"title\":\"August 25 vs the day before\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24",
+      "width": 1500,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":3,\"rows\":10,\"title\":\"August 25 vs August 24\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24?cut=full",
+      "width": 1500,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24?cut=full",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24?cut=full",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":3,\"rows\":10,\"title\":\"August 25 vs August 24\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 1500,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":3,\"rows\":10,\"title\":\"Today vs yesterday\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":8,\"tables\":1,\"charts\":3}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 30 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Online\" is empty in all 30 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":59,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/territory",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Avg fare\" is empty in all 12 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/territory",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":12,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Online\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"On trip\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cash\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":5,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":3,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Minutes\" is empty in all 262 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fare\" is empty in all 262 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":262,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 250 of 279 rows"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Reason given\" is empty in 247 of 279 rows"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":279,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 112 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Reason given\" is empty in all 112 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Km\" is empty in 110 of 112 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":112,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster/idle",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 46 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Reason given\" is empty in all 46 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":46,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster/blocked",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 32 rows"
+    },
+    {
+      "route": "roster/blocked",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":32,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster/states",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "roster/states",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":10,\"title\":\"Roster & supply\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "vehicles",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"drop_off\" is empty in 25 of 30 rows"
+    },
+    {
+      "route": "vehicles",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":170,\"title\":\"Vehicles\",\"kpis\":6,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "vehicle/L36397",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"title\":\"L36397\",\"kpis\":10,\"tables\":0,\"charts\":5}"
+    },
+    {
+      "route": "vehicle/L36397/drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":67,\"title\":\"L36397\",\"kpis\":0,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "vehicle/L36397/movement",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Movement periods — across the window"
+    },
+    {
+      "route": "vehicle/L36397/movement",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":52,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "vehicle/L36397/earnings",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Period\" is empty in all 3 rows"
+    },
+    {
+      "route": "vehicle/L36397/earnings",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":3,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":63,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "vehicle/L36397/compliance",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"title\":\"L36397\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fare\" is empty in 391 of 400 rows"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":400,\"title\":\"L36397\",\"kpis\":0,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "platforms",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":5,\"title\":\"Platforms\",\"kpis\":0,\"tables\":1,\"charts\":2}"
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":7,\"title\":\"Platforms\",\"kpis\":0,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "platforms/tiers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":94,\"title\":\"Platforms\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":10,\"title\":\"Platforms\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "corridors",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":36,\"title\":\"Corridors\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":119,\"title\":\"Corridors\",\"kpis\":4,\"tables\":1,\"charts\":0}"
     },
     {
-      "route": "safety",
+      "route": "finance",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "finance",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":9,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":46,\"title\":\"Finance\",\"kpis\":8,\"tables\":3,\"charts\":2}"
     },
     {
-      "route": "live",
+      "route": "settlement",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":8,\"title\":\"Live fleet\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"title\":\"Settlement\",\"kpis\":4,\"tables\":0,\"charts\":1}"
     },
     {
-      "route": "map",
+      "route": "settlement/cash",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":2}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":117,\"title\":\"Settlement\",\"kpis\":4,\"tables\":1,\"charts\":0}"
     },
     {
-      "route": "sources",
+      "route": "settlement/receivables",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":24,\"title\":\"Data sources\",\"kpis\":0,\"tables\":5,\"charts\":0}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":11,\"title\":\"Settlement\",\"kpis\":3,\"tables\":1,\"charts\":0}"
     },
     {
-      "route": "coverage",
+      "route": "corporate",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":6,\"empty_panels\":0,\"title\":\"Collection gaps\",\"kpis\":5,\"tables\":4,\"charts\":0}"
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"title\":\"Corporate & hotels\",\"kpis\":10,\"tables\":0,\"charts\":3}"
     },
     {
-      "route": "providers",
+      "route": "corporate/properties",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":20,\"title\":\"What each API offers\",\"kpis\":6,\"tables\":6,\"charts\":0}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":6,\"title\":\"Corporate & hotels\",\"kpis\":0,\"tables\":1,\"charts\":0}"
     },
     {
-      "route": "settings",
+      "route": "corporate/guests",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":3,\"title\":\"Settings\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":311,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
     },
     {
-      "route": "insights",
+      "route": "corporate/leakage",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":3,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Corporate & hotels\",\"kpis\":5,\"tables\":0,\"charts\":0}"
     },
     {
-      "route": "analyst",
+      "route": "corporate/leakage/complimentary",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cost\" is empty in all 10 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Room\" is empty in all 10 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":10,\"title\":\"Corporate & hotels\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     },
     {
-      "route": "playbook",
+      "route": "corporate/approach",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Over 15 km\" is empty in all 22 rows"
+    },
+    {
+      "route": "corporate/approach",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":21,\"title\":\"To-do list\",\"kpis\":5,\"tables\":5,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":28,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
     },
     {
-      "route": "capacity",
+      "route": "corporate/approach/daypart",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Over 15 km\" is empty in all 22 rows"
+    },
+    {
+      "route": "corporate/approach/daypart",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":204,\"title\":\"Rota gaps\",\"kpis\":5,\"tables\":3,\"charts\":1}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":27,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":3,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":8,\"tables\":1,\"charts\":4}"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Room\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":40,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":18,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "causes",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":12,\"title\":\"Why it moved\",\"kpis\":5,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "forecast",
@@ -150,148 +880,3130 @@
       "route": "retention",
       "width": 1500,
       "sev": "e",
-      "code": "dead-column",
-      "detail": "\"Channels\" is empty in all 5 rows"
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
     },
     {
       "route": "retention",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/retention?from=2026-07-27&to=2026-08-25"
+    },
+    {
+      "route": "retention",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "retention",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Joiners & leavers\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "playbook",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"last booking\" is empty in all 12 rows"
+    },
+    {
+      "route": "playbook",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":65,\"title\":\"To-do list\",\"kpis\":5,\"tables\":7,\"charts\":0}"
+    },
+    {
+      "route": "capacity",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Cover to spare here"
+    },
+    {
+      "route": "capacity",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":1,\"rows\":188,\"title\":\"Rota gaps\",\"kpis\":5,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "revenue",
       "width": 1500,
       "sev": "w",
       "code": "silent-cap",
       "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
     },
     {
-      "route": "retention",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":29,\"title\":\"Joiners & leavers\",\"kpis\":5,\"tables\":4,\"charts\":1}"
-    },
-    {
       "route": "revenue",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":4,\"title\":\"Revenue by channel\",\"kpis\":7,\"tables\":3,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":15,\"title\":\"Revenue by channel\",\"kpis\":7,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Tips\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Salik\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Cash collected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Δ bank − expected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "w",
+      "code": "clipped-text",
+      "detail": "1: +AED 36,454 · 143.9%"
     },
     {
       "route": "reconcile",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":6,\"title\":\"Reconciliation\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":13,\"title\":\"Reconciliation\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1500,
+      "sev": "w",
+      "code": "clipped-text",
+      "detail": "1: +AED 33,536 · 208.4%"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":31,\"title\":\"Reconciliation\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "insights",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "insights",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "insights",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Nothing to action"
+    },
+    {
+      "route": "insights",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":1,\"title\":\"Action list\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights?code=idle_vehicle"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Finding\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights?code=nope"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Finding\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/refuted",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/immaterial",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/unsupported",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/rules",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":13,\"title\":\"Analyst\",\"kpis\":3,\"tables\":2,\"charts\":0}"
     },
     {
       "route": "compliance",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":16,\"title\":\"Compliance\",\"kpis\":7,\"tables\":2,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":211,\"title\":\"Compliance\",\"kpis\":7,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained trips | Flagged segments"
     },
     {
       "route": "unauthorized",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":21,\"title\":\"Unauthorized trips\",\"kpis\":8,\"tables\":2,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":2,\"rows\":39,\"title\":\"Unauthorized trips\",\"kpis\":8,\"tables\":1,\"charts\":2}"
     },
     {
-      "route": "roster",
+      "route": "segments",
       "width": 1500,
       "sev": "w",
-      "code": "sparse-column",
-      "detail": "\"Reason given\" is empty in 7 of 8 rows"
-    },
-    {
-      "route": "roster",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":8,\"title\":\"Roster & supply\",\"kpis\":7,\"tables\":1,\"charts\":1}"
-    },
-    {
-      "route": "vehicles",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":16,\"title\":\"Vehicles\",\"kpis\":6,\"tables\":2,\"charts\":0}"
-    },
-    {
-      "route": "corporate",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":6,\"empty_panels\":0,\"title\":\"Corporate & hotels\",\"kpis\":10,\"tables\":0,\"charts\":3}"
-    },
-    {
-      "route": "settlement",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"title\":\"Settlement\",\"kpis\":4,\"tables\":0,\"charts\":1}"
-    },
-    {
-      "route": "demand",
-      "width": 1500,
-      "sev": "w",
-      "code": "sparse-column",
-      "detail": "\"Rain\" is empty in 30 of 31 rows"
-    },
-    {
-      "route": "demand",
-      "width": 1500,
-      "sev": "w",
-      "code": "sparse-column",
-      "detail": "\"Calendar\" is empty in 30 of 31 rows"
-    },
-    {
-      "route": "demand",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":31,\"title\":\"Demand\",\"kpis\":5,\"tables\":1,\"charts\":3}"
-    },
-    {
-      "route": "causes",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":11,\"title\":\"Why it moved\",\"kpis\":5,\"tables\":2,\"charts\":1}"
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy"
     },
     {
       "route": "segments",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":68,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":320,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
-      "route": "top-performers",
+      "route": "segments/verdict/unauthorized",
       "width": 1500,
       "sev": "w",
       "code": "empty-panel",
-      "detail": "Not ranked"
+      "detail": "Vehicles with unexplained occupancy | Segments — verdict unauthorized"
     },
     {
-      "route": "top-performers",
+      "route": "segments/verdict/unauthorized",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":1,\"rows\":14,\"title\":\"Top performers\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+      "detail": "{\"panels\":5,\"empty_panels\":2,\"rows\":20,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
     },
     {
-      "route": "low-performers",
+      "route": "segments/verdict/authorized",
       "width": 1500,
       "sev": "w",
       "code": "empty-panel",
-      "detail": "Not ranked"
+      "detail": "Vehicles with unexplained occupancy"
     },
     {
-      "route": "low-performers",
+      "route": "segments/verdict/authorized",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":1,\"rows\":14,\"title\":\"Low performers\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":161,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segments/plate/L36397",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy | Segments — plate L36397"
+    },
+    {
+      "route": "segments/plate/L36397",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":2,\"rows\":20,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "segments/day/2026-08-24",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy"
+    },
+    {
+      "route": "segments/day/2026-08-24",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":85,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy | Segments — driver Ahmed"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":2,\"rows\":20,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":320,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segment/L36397/2026-08-24T04:00:00.000Z",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "route": "segment/L36397/2026-08-24T04:00:00.000Z",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/segment?plate=L36397&at=2026-08-24T04%3A00%3A00.000Z"
+    },
+    {
+      "route": "segment/L36397/2026-08-24T04:00:00.000Z",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "segment/L36397/2026-08-24T04:00:00.000Z",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"L36397\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "segment/L36397/not-a-time",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    },
+    {
+      "route": "segment/L36397/not-a-time",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "400 /api/segment?plate=L36397&at=not-a-time"
+    },
+    {
+      "route": "segment/L36397/not-a-time",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "segment/L36397/not-a-time",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"L36397\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":40,\"title\":\"Tuesday 19:00\",\"kpis\":7,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "slot/0/3",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 16 rows"
+    },
+    {
+      "route": "slot/0/3",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":16,\"title\":\"Sunday 03:00\",\"kpis\":7,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "slot/9/99",
+      "width": 1500,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "slot/9/99",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"One hour of the week\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "safety",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":60,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "safety/vehicles",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":63,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "safety/events",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"title\":\"Safety\",\"kpis\":5,\"tables\":0,\"charts\":2}"
+    },
+    {
+      "route": "live",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Charge\" is empty in all 130 rows"
+    },
+    {
+      "route": "live",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":130,\"title\":\"Live fleet\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "map",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":2}"
+    },
+    {
+      "route": "sources",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":58,\"title\":\"Data sources\",\"kpis\":0,\"tables\":5,\"charts\":0}"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"title\":\"Collection gaps\",\"kpis\":5,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "kpi t-critical +13px"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":19,\"empty_panels\":0,\"rows\":188,\"title\":\"What each API offers\",\"kpis\":6,\"tables\":13,\"charts\":0}"
+    },
+    {
+      "route": "settings",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":10,\"title\":\"Settings\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Nothing to action"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":1,\"title\":\"Action list\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "insights/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "insights/safety",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "insights/safety",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Nothing to action"
+    },
+    {
+      "route": "insights/safety",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":1,\"title\":\"Action list\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 1500,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 1500,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Nothing to action"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":1,\"title\":\"Action list\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "providers/uber/trips/Surge%20multiplier",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"title\":\"What each API offers\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "map/replay/L36397",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":2}"
+    },
+    {
+      "route": "overview?days=90&platform=uber",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":12,\"title\":\"Fleet activity\",\"kpis\":6,\"tables\":1,\"charts\":4}"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Rating\" is empty in all 360 rows"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Hrs online\" is empty in all 25 rows"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 339 of 360 rows"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":385,\"title\":\"Drivers\",\"kpis\":0,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Last trip\" is empty in all 26 rows"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":69,\"title\":\"Unit economics\",\"kpis\":7,\"tables\":6,\"charts\":3}"
+    },
+    {
+      "route": "unit/assets?days=7&platform=uber",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":140,\"title\":\"Unit economics\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy | Segments — verdict unauthorized"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":2,\"rows\":20,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "unit",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Last trip\" is empty in all 31 rows"
+    },
+    {
+      "route": "unit",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Licence\" is empty in 220 of 247 rows"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Last trip\" is empty in all 31 rows"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "top-performers",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Standing\" is empty in 37 of 40 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "What the platform said"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "What the platform said"
+    },
+    {
+      "route": "demand",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Calendar\" is empty in all 30 rows"
+    },
+    {
+      "route": "demand",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Rain\" is empty in 28 of 30 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "kpi +26px"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 72 of 84 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 69 of 80 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 60 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "clipped-text",
+      "detail": "1: 12:00 AM – 11:57 PM"
+    },
+    {
+      "route": "day/not-a-date",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Rating\" is empty in all 360 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Telematics\" is empty in all 4 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Hrs online\" is empty in all 25 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 329 of 360 rows"
+    },
+    {
+      "route": "compare",
+      "width": 1180,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25",
+      "width": 1180,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24",
+      "width": 1180,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24?cut=full",
+      "width": 1180,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24?cut=full",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 1180,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 30 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Online\" is empty in all 30 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/territory",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Avg fare\" is empty in all 12 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Online\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"On trip\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cash\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Minutes\" is empty in all 262 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fare\" is empty in all 262 rows"
+    },
+    {
+      "route": "roster",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 250 of 279 rows"
+    },
+    {
+      "route": "roster",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Reason given\" is empty in 247 of 279 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 112 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Reason given\" is empty in all 112 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Km\" is empty in 110 of 112 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 46 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Reason given\" is empty in all 46 rows"
+    },
+    {
+      "route": "roster/blocked",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 32 rows"
+    },
+    {
+      "route": "roster/states",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "roster/states",
+      "width": 1180,
+      "sev": "w",
+      "code": "clipped-text",
+      "detail": "2: Aug 24 09:56 PM | Aug 25 05:42 PM"
+    },
+    {
+      "route": "vehicles",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"drop_off\" is empty in 25 of 30 rows"
+    },
+    {
+      "route": "vehicle/L36397/movement",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Movement periods — across the window"
+    },
+    {
+      "route": "vehicle/L36397/earnings",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Period\" is empty in all 3 rows"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fare\" is empty in 391 of 400 rows"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "finance",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cost\" is empty in all 10 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Room\" is empty in all 10 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "corporate/approach",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Over 15 km\" is empty in all 22 rows"
+    },
+    {
+      "route": "corporate/approach/daypart",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Over 15 km\" is empty in all 22 rows"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec",
+      "width": 1180,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "1 panel(s) still on the skeleton"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Room\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "forecast",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "retention",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "retention",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/retention?from=2026-07-27&to=2026-08-25"
+    },
+    {
+      "route": "retention",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "playbook",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"last booking\" is empty in all 12 rows"
+    },
+    {
+      "route": "capacity",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Cover to spare here"
+    },
+    {
+      "route": "revenue",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "kpi +37px"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Tips\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Salik\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Cash collected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Δ bank − expected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 1180,
+      "sev": "w",
+      "code": "clipped-text",
+      "detail": "1: +AED 36,454 · 143.9%"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1180,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "kpi +40px"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 1180,
+      "sev": "w",
+      "code": "clipped-text",
+      "detail": "1: +AED 33,536 · 208.4%"
+    },
+    {
+      "route": "insights",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "insights",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "insights",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Nothing to action"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights?code=idle_vehicle"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights?code=nope"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained trips | Flagged segments"
+    },
+    {
+      "route": "segments",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy | Segments — verdict unauthorized"
+    },
+    {
+      "route": "segments/verdict/authorized",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy"
+    },
+    {
+      "route": "segments/plate/L36397",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy | Segments — plate L36397"
+    },
+    {
+      "route": "segments/day/2026-08-24",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy | Segments — driver Ahmed"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy"
+    },
+    {
+      "route": "segment/L36397/2026-08-24T04:00:00.000Z",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 404 (Not Found)"
+    },
+    {
+      "route": "segment/L36397/2026-08-24T04:00:00.000Z",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "404 /api/segment?plate=L36397&at=2026-08-24T04%3A00%3A00.000Z"
+    },
+    {
+      "route": "segment/L36397/2026-08-24T04:00:00.000Z",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "segment/L36397/not-a-time",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 400 (Bad Request)"
+    },
+    {
+      "route": "segment/L36397/not-a-time",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "400 /api/segment?plate=L36397&at=not-a-time"
+    },
+    {
+      "route": "segment/L36397/not-a-time",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "slot/0/3",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 16 rows"
+    },
+    {
+      "route": "slot/9/99",
+      "width": 1180,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "live",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Charge\" is empty in all 130 rows"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "e",
+      "code": "overflow",
+      "detail": "kpi t-critical +37px"
+    },
+    {
+      "route": "providers",
+      "width": 1180,
+      "sev": "w",
+      "code": "clipped-text",
+      "detail": "1: Aug 25 11:09 AM"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Nothing to action"
+    },
+    {
+      "route": "insights/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "insights/safety",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "insights/safety",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Nothing to action"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 1180,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 1180,
+      "sev": "e",
+      "code": "api-error",
+      "detail": "500 /api/insights"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Nothing to action"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Rating\" is empty in all 360 rows"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Hrs online\" is empty in all 25 rows"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 1180,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 339 of 360 rows"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1180,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Last trip\" is empty in all 26 rows"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 1180,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 1180,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Vehicles with unexplained occupancy | Segments — verdict unauthorized"
+    },
+    {
+      "route": "unit",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Last trip\" is empty in all 31 rows"
+    },
+    {
+      "route": "unit",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "unit",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/assets",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Licence\" is empty in 220 of 247 rows"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Last trip\" is empty in all 31 rows"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "top-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "top-performers",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Standing\" is empty in 37 of 40 rows"
+    },
+    {
+      "route": "low-performers",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 820,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "What the platform said"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 820,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "What the platform said"
+    },
+    {
+      "route": "overview",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "demand",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Calendar\" is empty in all 30 rows"
+    },
+    {
+      "route": "demand",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "demand",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Rain\" is empty in 28 of 30 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 72 of 84 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 69 of 80 rows"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 60 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "day/2026-08-24",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 40 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "day/not-a-date",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "day/not-a-date",
+      "width": 820,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Rating\" is empty in all 360 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Telematics\" is empty in all 4 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Hrs online\" is empty in all 25 rows"
+    },
+    {
+      "route": "drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "drivers",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 329 of 360 rows"
+    },
+    {
+      "route": "compare",
+      "width": 820,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "compare",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25",
+      "width": 820,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "compare/2026-08-25",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24",
+      "width": 820,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24?cut=full",
+      "width": 820,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24?cut=full",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "compare/2026-08-25/2026-08-24?cut=full",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 820,
+      "sev": "e",
+      "code": "mostly-empty",
+      "detail": "3 of 5 panels have no data: Hour by hour | Who moved | By channel"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 30 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Online\" is empty in all 30 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/territory",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Avg fare\" is empty in all 12 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/territory",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Online\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"On trip\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cash\" is empty in all 5 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Minutes\" is empty in all 262 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fare\" is empty in all 262 rows"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "roster",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "roster",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fares\" is empty in 250 of 279 rows"
+    },
+    {
+      "route": "roster",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Reason given\" is empty in 247 of 279 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 112 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Reason given\" is empty in all 112 rows"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "roster/pipeline",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Km\" is empty in 110 of 112 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 46 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Reason given\" is empty in all 46 rows"
+    },
+    {
+      "route": "roster/idle",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "roster/blocked",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Fares\" is empty in all 32 rows"
+    },
+    {
+      "route": "roster/blocked",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "roster/states",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "roster/states",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "vehicles",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "vehicles",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"drop_off\" is empty in 25 of 30 rows"
+    },
+    {
+      "route": "vehicle/L36397",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "vehicle/L36397/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "vehicle/L36397/movement",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "vehicle/L36397/movement",
+      "width": 820,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Movement periods — across the window"
+    },
+    {
+      "route": "vehicle/L36397/earnings",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Period\" is empty in all 3 rows"
+    },
+    {
+      "route": "vehicle/L36397/earnings",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "vehicle/L36397/compliance",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Fare\" is empty in 391 of 400 rows"
+    },
+    {
+      "route": "platforms",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "platforms/tiers",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "corridors",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "finance",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "finance",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "settlement",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "settlement/cash",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "settlement/receivables",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "corporate",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "corporate/properties",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "corporate/leakage",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Cost\" is empty in all 10 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Room\" is empty in all 10 rows"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 10 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "corporate/approach",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Over 15 km\" is empty in all 22 rows"
+    },
+    {
+      "route": "corporate/approach",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "corporate/approach/daypart",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Over 15 km\" is empty in all 22 rows"
+    },
+    {
+      "route": "corporate/approach/daypart",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Room\" is empty in 35 of 40 rows"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/drivers",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "causes",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "forecast",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "forecast",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "retention",
+      "width": 820,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null%"
+    },
+    {
+      "route": "retention",
+      "width": 820,
+      "sev": "e",
+      "code": "bad-value",
+      "detail": "null%"
+    },
+    {
+      "route": "retention",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Channels\" is empty in all 7 rows"
+    },
+    {
+      "route": "retention",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "retention",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "playbook",
+      "width": 820,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"last booking\" is empty in all 12 rows"
+    },
+    {
+      "route": "playbook",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "capacity",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3836px wider than the window"
+    },
+    {
+      "route": "capacity",
+      "width": 820,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Cover to spare here"
+    },
+    {
+      "route": "revenue",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "revenue",
+      "width": 820,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Tips\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Salik\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Cash collected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile",
+      "width": 820,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Δ bank − expected\" is empty in 12 of 13 rows"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3838px wider than the window"
+    },
+    {
+      "route": "insights",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 820,
+      "sev": "e",
+      "code": "page-overflow",
+      "detail": "body is 3837px wider than the window"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 820,
+      "sev": "e",
+      "code": "blank-page",
+      "detail": "no kpi, table, chart or panel"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.waitForTimeout: Target page, context or browser has been closed"
+    },
+    {
+      "route": "analyst",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "analyst/refuted",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "analyst/immaterial",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "analyst/unsupported",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "analyst/rules",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "compliance",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "unauthorized",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/verdict/authorized",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/plate/L36397",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/day/2026-08-24",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segment/L36397/2026-08-24T04:00:00.000Z",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segment/L36397/not-a-time",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "slot/0/3",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "slot/9/99",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "safety",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "safety/vehicles",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "safety/events",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "live",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "map",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "sources",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "coverage",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "providers",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "settings",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "insights/safety",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "providers/uber/trips/Surge%20multiplier",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "map/replay/L36397",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "overview?days=90&platform=uber",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "unit/assets?days=7&platform=uber",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 820,
+      "sev": "e",
+      "code": "crashed",
+      "detail": "page.goto: Target page, context or browser has been closed"
     }
   ]
 }
