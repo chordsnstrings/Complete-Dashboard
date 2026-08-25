@@ -1098,6 +1098,14 @@ export async function renderDriverDirectory(root) {
   loading(tblP.body); loading(grid);
 
   const rows = await qAll('/api/drivers/directory');
+  /* Position in the ranking the endpoint returned — busiest first — stamped on
+     the row rather than counted at paint time. tableFrom re-orders the array it
+     is given IN PLACE when a column header is clicked, and it is handed a
+     filtered copy when the search box has text in it, so anything derived from
+     indexOf() renumbers 1..n on every sort and every keystroke. A number that
+     means "47th busiest of 361" has to be fixed to the person, not to the row
+     they happen to be occupying. */
+  rows.forEach((r, i) => { r._rank = i + 1; });
   const active = rows.filter((r) => r.active_in_window);
   const idle = rows.filter((r) => !r.active_in_window && r.ever_driven);
   const never = rows.filter((r) => !r.ever_driven);
@@ -1166,7 +1174,20 @@ export async function renderDriverDirectory(root) {
   const anyState = rows.some((r) => r.platform_state || r.can_earn != null);
   const anyLifetime = rows.some((r) => r.lifetime_trips != null);
   const cols = [
-    { label: '#', key: '_i', render: (r) => String(rows.indexOf(r) + 1) },
+    /* The NAME first, with the rank inside it.
+       ─────────────────────────────────────────────────────────────────────
+       This table scrolls sideways on anything narrower than a laptop, and the
+       first column is the one that stays pinned — so with `#` leading, a phone
+       showed a frozen column of 1, 2, 3 while the person each row is about
+       scrolled away behind three narrow columns. Every number on screen and
+       nobody's name against any of it.
+
+       The rank goes in the same cell rather than into its own: it is a
+       property of the row's position, not a fact about the driver, and it
+       costs a pinned column's width to say what a reader can count. */
+    { label: 'Driver', key: 'driver_name',
+      render: (r) => `<span class="rk" title="${fmt(r._rank)} of ${fmt(rows.length)} by trips in this window">${fmt(r._rank)}</span>`
+        + entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'In this window', key: '_a',
       sortValue: (r) => (r.active_in_window ? 2 : r.ever_driven ? 1 : 0),
       render: (r) => (r.active_in_window
@@ -1178,8 +1199,6 @@ export async function renderDriverDirectory(root) {
         : (r.can_earn === false
           ? pill('cannot earn', 'bad')
           : '<span class="ent-off" title="no platform published a standing for this person">not reported</span>')) }] : []),
-    { label: 'Driver', key: 'driver_name',
-      render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     // On a two-fleet operator, which fleet. It is on every row and was drawn
     // nowhere.
     ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',

@@ -1067,3 +1067,13 @@ a.insight-row:hover{border-color:var(--accent)}
    notes are not, so they stay at panel width while the columns scroll. */
 .tblock{min-width:0}
 .tblock > .tscroll{margin-bottom:0}
+
+/* A row's rank, inside the cell that names the row. Its own column would cost
+   the width of the one column that stays pinned when a wide table scrolls —
+   and a frozen column of 1, 2, 3 tells the reader nothing about whose row
+   they are looking at. */
+.rk{
+  display:inline-block;min-width:1.6em;margin-right:7px;text-align:right;
+  font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--ink-3);
+  font-variant-numeric:tabular-nums;
+}

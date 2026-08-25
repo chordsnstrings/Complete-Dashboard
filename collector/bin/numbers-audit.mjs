@@ -160,12 +160,28 @@ for (const route of routes) {
       const c = t.querySelector('tbody td:first-child');
       return !c || getComputedStyle(c).position !== 'sticky';
     });
+    /* …and one whose pinned column is an INDEX rather than an identity. The
+       drivers directory led with '#', so a phone froze a column of 1, 2, 3
+       while the person each row is about scrolled away behind three narrow
+       columns: every number on screen and nobody's name against any of it.
+       A pinned column that says nothing is worse than none, because it looks
+       like the fix is already in. */
+    const indexPinned = [...root.querySelectorAll('.tscroll')].filter((w) => {
+      const t = w.querySelector('table');
+      if (!t || w.scrollWidth <= w.clientWidth + 2) return false;
+      const head = (t.querySelector('thead th')?.textContent || '').trim();
+      if (/^(#|no\.?|rank|idx)$/i.test(head)) return true;
+      /* Or unlabelled cells that are all bare small integers. */
+      const cells = [...t.querySelectorAll('tbody td:first-child')].slice(0, 12)
+        .map((c) => c.textContent.trim());
+      return cells.length >= 4 && cells.every((v) => /^\d{1,3}$/.test(v));
+    }).map((w) => (w.closest('.panel')?.querySelector('h3') || {}).textContent?.trim().slice(0, 34) || '?');
     /* The whole page as digits, charts included. A figure drawn as a bar
        label — the revenue page draws its top-level payout components as an
        hbars chart and tables only their children — is SHOWN, and a check that
        reads table cells alone called four of those missing. The last gate is
        "nowhere on the page", not "not in this cell". */
-    return { tables, looseTables: loose.length, page: norm(root.innerText).split(/\s+/).filter(Boolean) };
+    return { tables, looseTables: loose.length, indexPinned, page: norm(root.innerText).split(/\s+/).filter(Boolean) };
   });
 
   /* Does this table have a column for that field? Compared on words, so
@@ -199,8 +215,28 @@ for (const route of routes) {
     }) || null;
   };
 
+  /* One body per URL, and it is the LAST one.
+     ─────────────────────────────────────────────────────────────────────────
+     data.js is stale-while-revalidate: when a cached copy exists it paints
+     from that immediately and revalidates behind it, so a single page load
+     produces TWO responses for the same endpoint. Both were being walked, and
+     the figures compared against the DOM came from a mixture of the two.
+
+     Measured on #unit/drivers: the held copy said Bakht Zada Sharif earned
+     7,898 and the fresh one 7,911. The page painted the held figure, the
+     revalidation came back changed, the page redrew with 7,911 — everything
+     working exactly as designed — and the audit reported eight drivers whose
+     money was "unshown", naming the number that had been correct for about a
+     second. Six of those eight were the same story.
+
+     What the reader ends up looking at is the last answer, so that is the one
+     the DOM has to agree with. Keeping the earlier body would make this
+     harness report the product as broken every time a cache warmed up. */
+  const latest = new Map();
+  seen.forEach(([u, body]) => latest.set(u, body));
+
   const pairs = [];
-  seen.forEach(([u, body]) => rowFigures(body).forEach((f) => pairs.push({ ...f, url: u.split('?')[0] })));
+  latest.forEach((body, u) => rowFigures(body).forEach((f) => pairs.push({ ...f, url: u.split('?')[0] })));
 
   const onPage = new Set(dom.page);
   const anywhere = (v) => onPage.has(String(v)) || onPage.has(String(v - 1)) || onPage.has(String(v + 1));
@@ -238,6 +274,11 @@ for (const route of routes) {
       detail: `${missing.length} figure(s) have a column on this page, sit in a row it is `
         + 'showing, and are not in that row',
       examples: [...new Set(missing.map((f) => `${f.id} · ${f.col} should be ${f.n} (${f.url} ${f.key})`))].slice(0, 6) });
+  }
+  if (dom.indexPinned?.length) {
+    findings.push({ route, code: 'index-pinned',
+      detail: `${dom.indexPinned.length} scrolling table(s) pin a rank or index instead of the `
+        + `row's identity: ${dom.indexPinned.join(' | ')}` });
   }
   if (dom.looseTables) {
     findings.push({ route, code: 'unreachable',

@@ -107,10 +107,16 @@ export async function renderPerformers(root, band) {
       /* tableFrom's render takes the ROW only — no index. The rank is stamped
          onto the row before it gets here, which is also what makes it survive
          a column sort: the number means position in THIS ranking, not the
-         order the browser happens to be showing. */
-      { label: '#', key: 'rank', num: true },
+         order the browser happens to be showing.
+
+         It rides inside the name rather than leading in a column of its own.
+         This table is thirteen columns wide and scrolls on every screen
+         narrower than a laptop; the first column is the one that stays pinned,
+         and pinning the rank froze 1, 2, 3 on screen while the person each row
+         is about scrolled out of sight. */
       { label: 'Driver', key: 'driver_name',
-        render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+        render: (r) => `<span class="rk">${r.rank}</span>`
+          + entity('driver', r.driver_ext_id, r.driver_name) },
       { label: 'Fleet', key: 'fleet_id', render: (r) => (r.fleet_id ? pill(r.fleet_id) : '—') },
       { label: 'Platforms', key: 'platforms',
         render: (r) => (r.platforms || []).map((x) => pill(x)).join(' ') || '—' },

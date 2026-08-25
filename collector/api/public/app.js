@@ -534,16 +534,24 @@ V.overview = async (root) => {
      rank below somebody who did less. Tolerant of the old bare-array shape so
      a stale cached bundle does not blank the panel. */
   const lbRows = Array.isArray(drivers) ? drivers : (drivers.rows || []);
-  const top = lbRows.slice(0, 12);
+  /* Rank stamped on the row, not counted from its position: tableFrom sorts
+     the array in place, so a number derived from indexOf() renumbers itself
+     the moment a reader sorts by Km and stops meaning anything. */
+  const top = lbRows.slice(0, 12).map((r, i) => ({ ...r, _rank: i + 1 }));
   /* The ranking the panel is actually showing, named honestly. The endpoint
      ranks by total bookings; when it starts returning `completed_trips` and
      ordering by it (the fix is on the server list) this says so instead of
      going on claiming something that had not been true. */
   const ranksByCompleted = top.some((r) => r.completed_trips != null);
   lead.body.append(tableFrom(top, [
-    { label: '#', key: '_i', render: (r) => String(top.indexOf(r) + 1) },
+    /* Name first, rank inside it. The first column is the one that stays put
+       when a wide table scrolls sideways, and a frozen column of 1, 2, 3 names
+       nobody — the reader ends up with every number on screen and no idea
+       whose they are. The rank is a property of the row's position, not a fact
+       about the driver, so it does not earn a column of its own. */
     { label: 'Driver', key: 'driver_name',
-      render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
+      render: (r) => `<span class="rk">${r._rank}</span>`
+        + entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Channels', key: 'platforms',
       render: (r) => esc((r.platforms || (r.platform ? [r.platform] : [])).join(', ')) },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
@@ -3220,8 +3228,15 @@ V.settings = async (root) => {
       if (!d.jobs.length) { empty(jp.body, 'Nothing has been requested by hand'); return; }
       const TONE = { queued: 'info', running: 'warn', done: 'ok', failed: 'err' };
       jp.body.append(tableFrom(d.jobs, [
-        { label: 'Job', key: 'id', num: true },
-        { label: 'What', key: 'mode' },
+        /* What the run WAS, with its serial number inside the cell. This table
+           is nine columns wide and scrolls on a phone, and the first column is
+           the one that stays pinned — so leading with the id froze 11, 10, 9 on
+           screen while the two facts a reader opens this panel for, what ran
+           and whether it worked, scrolled out of sight. A job id identifies the
+           row to the database; it does not identify it to a person. */
+        { label: 'What', key: 'mode',
+          render: (r) => `<span class="rk" title="job ${esc(String(r.id))}">${esc(String(r.id))}</span>`
+            + esc(r.mode ?? '—') },
         { label: 'State', key: 'status', render: (r) => pill(r.status, TONE[r.status]) },
         /* Who asked. Every row on this fleet reads "unauthenticated", which is
            a finding about the admin gate rather than about the run — and it was

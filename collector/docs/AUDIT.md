@@ -649,3 +649,56 @@ holds trips **in a payout period**. Same identity, same column name, different
 scope — and no generic rule separates them without knowing what each page means.
 Recorded rather than suppressed, so the next reader knows it has been looked at.
 
+
+## 2026-08-25 — the pinned column named nobody
+
+A phone renders the drivers directory at 412px. The table is fourteen columns
+wide, so it scrolls sideways inside `.tscroll`, and `app.css` pins the first
+column so the reader keeps hold of which row they are reading.
+
+Four tables led with a row number. On a phone that froze `1, 2, 3, 4 …` on
+screen while the person each row is about scrolled away behind three narrow
+columns — every figure visible, none of them attachable to anybody. It is the
+defect behind *"drivers are not showing fares either. what did you audit?"*:
+the fares were rendered, four columns to the right of a pinned row counter.
+
+| Page | Table | Was pinned | Now pinned |
+|---|---|---|---|
+| `#drivers` | All drivers | `#` | Driver |
+| `#overview` | Top drivers | `#` | Driver |
+| `#top-performers`, `#low-performers` | Ranked highest / lowest | `#` | Driver |
+| `#settings` | Requested runs | Job id | What ran |
+
+The rank did not disappear — it moved inside the identity cell as
+`<span class="rk">`. A rank is a property of the row's POSITION, and it was
+costing the width of the one column that survives a scroll to say something a
+reader can count.
+
+Two things had to be true for that to be safe:
+
+- **The rank must come from the row, not from `indexOf()`.** `tableFrom`
+  re-orders the array it is handed IN PLACE on every sort, and the drivers
+  directory hands it a *filtered copy* when the search box has text in it. A
+  number derived from a position in that array renumbers itself 1..n on every
+  sort and every keystroke. `_rank` is stamped once, on the order the endpoint
+  returned, so "47th busiest of 361" stays attached to the person.
+- **`.rk` needs a `min-width`.** Without it ranks 1 and 12 push their names to
+  different columns and the list stops reading as a list.
+
+`test/pinned_identity.test.mjs` (37 assertions) holds both rules against the
+source, plus the sticky-column rule they exist for. Verified at 390px against
+production through `bin/live-ui.mjs`: all four now pin a name.
+
+### The harness was reading two answers at once
+
+`bin/numbers-audit.mjs` reported eight drivers on `#unit/drivers` whose money
+was "unshown". It was not. `data.js` is stale-while-revalidate: a warm cache
+means one page load produces TWO responses for the same endpoint. The held copy
+said Bakht Zada Sharif earned 7,898 and the fresh one 7,911; the page painted
+the held figure, the revalidation came back changed, and the page redrew with
+7,911 — working exactly as designed. The audit had walked both bodies and was
+looking for a number that had been correct for about a second.
+
+The audit now keeps only the LAST body per URL, because that is the one the
+reader ends up looking at. Without it, this harness reports the product as
+broken every time a cache warms up.

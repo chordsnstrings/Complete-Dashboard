@@ -1,15 +1,6 @@
 {
   "base": "http://localhost:8100",
   "width": 412,
-  "at": "2026-08-25T18:21:38.121Z",
-  "findings": [
-    {
-      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
-      "code": "unshown",
-      "detail": "1 figure(s) have a column on this page, sit in a row it is showing, and are not in that row",
-      "examples": [
-        "uber · Trips should be 3294 (/api/driver/profile trips)"
-      ]
-    }
-  ]
+  "at": "2026-08-25T18:47:34.348Z",
+  "findings": []
 }
