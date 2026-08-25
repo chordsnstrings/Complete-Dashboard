@@ -12,7 +12,8 @@
 
 import { empty, fmt, barChart, hbars, donut, areaChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
-         dayStr, dateStr, hourStr, money, pct, sourceLabel, countOf, plural } from './ui.js';
+         dayStr, dateStr, hourStr, money, pct, sourceLabel, countOf, plural,
+         UBER_FARE } from './ui.js';
 import { q, href } from './data.js';
 
 /* How many occurrences a rate needs before it is a rate.
@@ -181,7 +182,7 @@ export async function renderSlot(root, dow, hour) {
     pp.body.append(tableFrom(d.platforms, [
       { label: 'Platform', key: 'platform' },
       { label: 'Trips', key: 'trips', num: true },
-      { label: 'Fares', key: 'revenue', num: true,
+      { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
         render: (r) => (r.priced_n ? money(r.revenue) : '<span class="dim">no fare column</span>') },
     ], { compact: true }));
   } else empty(pp.body, 'No platform data');

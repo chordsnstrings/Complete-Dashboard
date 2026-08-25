@@ -17,7 +17,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
-  sourceLabel, plural, countOf } from './ui.js';
+  sourceLabel, plural, countOf, UBER_FARE, UBER_HOURS, NO_DURATION } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 
 /* Why a whole column is empty, in the words the page prints under it.
@@ -27,14 +27,9 @@ import { qAll, href, currentGen, alive } from './data.js';
    ledger — and four differently-worded explanations of one missing field read
    as four separate problems. Each was verified against the live database
    before it was written here; none of them says "no data". */
-const UBER_FARE = 'Uber\'s trip export carries no fare column at all, and Uber is most of this '
-  + 'fleet\'s work — the money for these trips is in the weekly statement under Earnings';
-const UBER_HOURS = 'no channel reports hours to this fleet: Uber publishes hours_online for 9 of '
-  + '241 people and none for the rest, and driver_performance is written from the earnings '
-  + 'breakdown, which carries trips, distance and money only';
-const NO_DURATION = 'no source fills trip.duration_s — Uber\'s export carries a request time and '
-  + 'a dropoff time and nothing between them, and the hotel channel the same, so a trip\'s own '
-  + 'duration is not something any channel reports';
+/* Moved to ui.js. Nine tables in five other files render the same columns and
+   explained none of them; a sentence that lives in one view is a sentence the
+   other views do not say. */
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo } from './map.js';
 

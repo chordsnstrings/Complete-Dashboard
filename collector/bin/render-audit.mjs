@@ -137,8 +137,20 @@ const PROBE = () => {
        that explains itself is a column doing its job, and flagging it anyway
        is how a harness teaches people to ignore it. The empty column itself is
        still reported when nothing explains it. */
-    const said = txt((t.closest('.tscroll') || t.parentElement || {}).querySelector
-      ? (t.closest('.tscroll') || t.parentElement).querySelector('.tabsent') || {} : {});
+    /* Looked for in the table's BLOCK, not inside the scroller.
+       ─────────────────────────────────────────────────────────────────────
+       ui.js used to append the .tabsent line inside .tscroll, and it was moved
+       out: a note is prose and has no business being as wide as a fourteen-
+       column table, so tableFrom now wraps the scroller and its notes in a
+       .tblock and the note is a SIBLING of .tscroll. This kept looking inside
+       the scroller, found nothing, and reported 51 sparse columns that were
+       each explaining themselves one line below the table — including all four
+       of the reconciliation money columns, which share a single sentence.
+
+       Both are checked, so the note is found wherever tableFrom decides to put
+       it, and the panel is the last resort for a caller that prints its own. */
+    const near = t.closest('.tblock') || t.closest('.panel') || t.closest('.tscroll') || t.parentElement;
+    const said = near && near.querySelector ? txt(near.querySelector('.tabsent') || {}) : '';
     heads.forEach((h, i) => {
       const cells = rows.map((r) => txt(r.children[i] || {}));
       const dashes = cells.filter((c) => c === '—' || c === '-' || c === '').length;

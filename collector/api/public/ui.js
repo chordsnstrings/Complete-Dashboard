@@ -485,6 +485,27 @@ export const hourStr = (h) => {
   const hh = ((Math.floor(total / 60) % 24) + 24) % 24, mm = ((total % 60) + 60) % 60;
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 };
+/* ── why a column is mostly dashes, said once ──────────────────────────────
+   These are the `absent` sentences for the three gaps that recur across the
+   whole product. They lived in driver.js, where four tables used them, and
+   nine more tables in five other files rendered the SAME columns with no
+   explanation at all — a Fares column empty in 330 of 361 rows on #drivers,
+   251 of 280 on #roster, 391 of 400 on a vehicle's trips.
+
+   That column is the user's own report: "drivers are not showing fares
+   either". They were not, they cannot, and nothing on the page said so —
+   which reads as a broken page rather than as a fact about Uber's export.
+   Shared here so the sentence is the same wherever the gap is. */
+export const UBER_FARE = 'Uber\'s trip export carries no fare column at all, and Uber is most of '
+  + 'this fleet\'s work — the money for these trips is in the weekly payout statement, not on the '
+  + 'trip, so a fare exists only on the hotel and Yango rows';
+export const UBER_HOURS = 'no channel reports hours to this fleet: Uber publishes hours_online for '
+  + '9 of 241 people and none for the rest, and driver_performance is written from the earnings '
+  + 'breakdown, which carries trips, distance and money only';
+export const NO_DURATION = 'no source fills trip.duration_s — Uber\'s export carries a request time '
+  + 'and a dropoff time and nothing between them, and the hotel channel the same, so a trip\'s own '
+  + 'duration is not something any channel reports';
+
 // `d` is decimals: whole dirhams for totals, two for rates like revenue-per-km
 // where rounding to the nearest dirham destroys the number.
 export const money = (v, cur = 'AED', d = 0) => {

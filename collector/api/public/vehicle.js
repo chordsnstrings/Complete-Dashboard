@@ -16,7 +16,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
-  custodyAsOf, sourceLabel, plural, countOf, asList } from './ui.js';
+  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE } from './ui.js';
 import { qAll, href, parseHash, currentGen, alive } from './data.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
@@ -258,7 +258,8 @@ async function tabDrivers(root, plate) {
       { label: 'As primary', key: 'primary_days', num: true },
       { label: 'Trips', key: 'trips', num: true },
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-      { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue ? money(r.revenue) : '—') },
+      { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
+        render: (r) => (r.revenue ? money(r.revenue) : '—') },
       { label: 'Held', key: 'last_day',
         sortValue: (r) => (r.last_day ? Date.parse(r.last_day) : null),
         render: (r) => `${dateStr(r.first_day)} → ${dateStr(r.last_day)}` },
@@ -944,7 +945,7 @@ export async function renderVehicleDirectory(root) {
           ? `<span class="dim" title="the tracker saw ${fmt(Math.round((r.telematics_km / r.km - 1) * 100))}% more distance than the bookings account for"> · +${
             Math.round((r.telematics_km / r.km - 1) * 100)}%</span>` : ''}`;
       } },
-    { label: 'Fares', key: 'revenue', num: true,
+    { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
       render: (r) => (r.revenue
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim" title="bookings on this vehicle that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`

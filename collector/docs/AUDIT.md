@@ -857,3 +857,53 @@ today, which is exactly when to wire it up.
 
 **`/api/retention` → the other half of tenure**, and **`/api/corporate/guests` →
 `distinct_rooms`** as the denominator for "21 rooms seen more than once".
+
+## 2026-08-25 — "drivers are not showing fares either"
+
+They were not, they cannot, and nothing on the page said so.
+
+`bin/render-audit.mjs` reported 51 sparse columns — a Fares column empty in 330
+of 361 rows on `#drivers`, 251 of 280 on `#roster`, 391 of 400 on a vehicle's
+trips. Two separate faults were behind that number.
+
+**The harness had gone blind.** `tableFrom` prints a `.tabsent` line under any
+table whose columns declared why they can be empty, and the render audit looked
+for it inside `.tscroll`. An earlier fix moved those notes OUT of the scroller —
+a note is prose and has no business being as wide as a fourteen-column table —
+into a `.tblock` wrapper, so the note became a *sibling* of `.tscroll`. The
+audit found nothing and flagged columns that were explaining themselves one line
+below the table, including all four reconciliation money columns, which share a
+single sentence. It now looks in the block, then the panel, then the scroller.
+
+**Five Fares columns genuinely had no explanation** — on `#day`, `#slot`,
+`#vehicle`, and the platform breakdown. The sentence existed: `UBER_FARE` in
+`driver.js`, used by four tables there while nine tables in five other files
+rendered the same column silently. It moved to `ui.js` with `UBER_HOURS` and
+`NO_DURATION`. A sentence that lives in one view is a sentence the other views
+do not say.
+
+## 2026-08-25 — the empty string is not a licence plate
+
+`normPlate` returned `''` for anything that normalised away, so `trip.plate`
+recorded "no vehicle" two ways and every guard downstream was written for one of
+them. Over a year, 47 of 150 people on `/api/drivers/cross-platform` carried a
+blank in their plate list. `array_agg(DISTINCT …)` sorts ascending, so `''`
+sorted **first** and always took one of the three slots the query keeps — "the
+three cars they drove" was two cars and a blank. `count(DISTINCT plate)` counted
+it as a vehicle; `mode() WITHIN GROUP` could return it as the car somebody
+mostly drives. `/api/kpis` guarded with `AND n.plate <> ''` and thirty other
+aggregates did not, so two endpoints answering the same question about the same
+day could disagree by one — each looking right on its own page.
+
+Fixed at the one function all seven collectors pass a plate through, not at the
+thirty aggregates that consume it. `sql/schema_v32.sql` nulls the history and
+adds `CHECK (plate <> '')`. FMS's two synthetic `external_id`s coalesce to `''`
+so their bytes stay identical and stored journeys are not re-inserted.
+
+Verified on production after deploy: 47 rows with a blank → **0**. Wisal
+Muhammad now reads two cars, not three.
+
+The first version of the regression test demanded the guard at all thirty call
+sites. That is the rule `trip_norm`'s own comment argues against — "a rule
+applied in fifty places is applied in forty-nine" — so it tests the two things
+that make the guards unnecessary instead.

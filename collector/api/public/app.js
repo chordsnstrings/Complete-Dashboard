@@ -5,7 +5,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
-  sourceLabel, tierLabel, plural, countOf } from './ui.js';
+  sourceLabel, tierLabel, plural, countOf, UBER_FARE } from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
@@ -729,7 +729,8 @@ V.demand = async (root) => {
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
       /* The fare column with the denominator it was computed over: on a
          mostly-Uber day this is a handful of bookings, not the day. */
-      { label: 'Fares', key: 'revenue', num: true, render: (r) => (r.revenue
+      { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
+        render: (r) => (r.revenue
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim"> · ${fmt(r.priced_trips)} of ${fmt(r.trips)} priced</span>` : ''}`
         : '<span class="ent-off" title="no booking on this day reports a fare — Uber’s export has no fare column">—</span>') },
@@ -1658,7 +1659,8 @@ V.finance = async (root) => {
       { label: 'Tier', key: 'label' },
       { label: 'Trips', key: 'n', num: true, render: (r) => fmt(r.n) },
       { label: 'Priced', key: 'priced_n', num: true, render: (r) => `${fmt(r.priced_n)} of ${fmt(r.n)}` },
-      { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+      { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
+        render: (r) => money(r.revenue) },
       { label: 'Share of revenue', key: '_sr', num: true, render: (r) => pct(((+r.revenue || 0) / totalRev) * 100, 1) },
       { label: 'Per priced trip', key: '_pt', num: true,
         sortValue: (r) => perTrip(r),
