@@ -1,6 +1,15 @@
 {
   "base": "http://localhost:8100",
   "width": 412,
-  "at": "2026-08-25T18:47:34.348Z",
-  "findings": []
+  "at": "2026-08-25T19:11:17.790Z",
+  "findings": [
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "code": "window-drift",
+      "detail": "1 identity fact(s) change with the range selector under a label that does not name a window",
+      "examples": [
+        "Recent: \"55 trips over 7 days in 3 cars\" at 7d, \"3,281 trips over 261 days in 6 cars\" at 365d"
+      ]
+    }
+  ]
 }

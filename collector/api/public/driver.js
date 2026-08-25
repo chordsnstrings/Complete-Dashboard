@@ -331,6 +331,32 @@ function identityCard(p) {
   const idN = (p.ids || []).length;
   const platN = (p.platforms || []).length;
   const accounts = Math.max(accN, idN, platN);
+
+  /* Two spans on one card, and they were being read as one.
+     ───────────────────────────────────────────────────────────────────────
+     /api/driver/profile answers with BOTH: `span` is the selected window and
+     `accounts[].trips` is everything on record. Measured on one driver:
+
+       days=7    span.trips    54    first_trip 2026-08-19
+       days=30   span.trips   266    first_trip 2026-07-27
+       days=365  span.trips  3280    first_trip 2025-08-27
+       accounts[0].trips      3295   first_trip 2025-08-24   (unmoved)
+
+     The card printed span.first_trip under the heading "First seen" — so a
+     driver who has been on Uber since August 2025 was introduced as first seen
+     in July 2026, and moving the range selector changed the date they were
+     hired. On the page that identifies a person, that is the wrong fact under
+     the right word.
+
+     So the two are separated and both are drawn. First and last trip come from
+     the ACCOUNT record, which does not move; trips, days worked and cars held
+     are the window's, and say so. Every tab below is a slice of this person,
+     and none of those slices meant anything without the whole to divide by. */
+  const evTrips = (p.accounts || []).reduce((a, x) => a + (+x.trips || 0), 0) || null;
+  const dates = (k) => (p.accounts || []).map((a) => a[k]).filter(Boolean).sort();
+  const firstEver = dates('first_trip')[0] || p.span?.first_trip;
+  const lastEver = dates('last_trip').pop() || p.span?.last_trip;
+
   wrap.innerHTML = `
     <div class="av">${esc(initials)}</div>
     <div class="idmeta">
@@ -348,8 +374,12 @@ function identityCard(p) {
         ${c.licence_no ? `<span><b>Licence</b> ${esc(c.licence_no)}</span>` : ''}
         ${c.emirates_id ? `<span><b>Emirates ID</b> ${esc(c.emirates_id)}</span>` : ''}
         ${c.device_brand ? `<span><b>Device</b> ${esc(c.device_brand)} ${esc(c.device_model || '')}</span>` : ''}
-        <span><b>First seen</b> ${dateStr(p.span?.first_trip)}</span>
-        <span><b>Last seen</b> ${p.span?.last_trip ? `${dateStr(p.span.last_trip)} ${timeStr(p.span.last_trip)}` : '—'}</span>
+        <span><b>First trip</b> ${dateStr(firstEver)}<span class="dim" title="the first trip on record for this person's platform account — it does not move with the range selector"> ever</span></span>
+        <span><b>Last trip</b> ${lastEver ? `${dateStr(lastEver)} ${timeStr(lastEver)}` : '—'}</span>
+        ${evTrips ? `<span><b>Trips</b> ${fmt(evTrips)}<span class="dim" title="every trip on record for this person, in every window"> ever</span></span>` : ''}
+        ${p.span?.trips != null ? `<span><b>In this window</b> ${fmt(p.span.trips)} trip${p.span.trips === 1 ? '' : 's'}${
+  p.span.days_worked != null ? ` over ${fmt(p.span.days_worked)} day${p.span.days_worked === 1 ? '' : 's'}` : ''}${
+  p.span.vehicles ? ` in ${fmt(p.span.vehicles)} car${p.span.vehicles === 1 ? '' : 's'}` : ''}</span>` : ''}
         <span><b>Accounts</b> ${fmt(accounts)}${accN !== accounts
     ? `<span class="dim" title="${accN} of them have taken a trip we hold"> · ${accN} with trips</span>` : ''}</span>
       </div>
@@ -656,7 +686,7 @@ async function tabTerritory(root, id) {
 }
 
 /* ── tab: earnings ───────────────────────────────────────────────────────── */
-async function tabEarnings(root, id) {
+async function tabEarnings(root, id, prof) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const comp = panel('Earnings components', 'As the platform breaks them down — fares, tips, tolls, adjustments'); g.append(comp.panel);
@@ -846,6 +876,27 @@ async function tabEarnings(root, id) {
     ...(hasRating ? [{ label: 'Rating', key: 'rating', num: true,
       render: (r) => (r.rating ? fmt(r.rating, 2) : '—') }] : []),
   ], { sortable: true, sortId: 'periods', defaultSort: { key: 'period_start', dir: 'desc' } }));
+  /* How much of this person's work these statements actually describe.
+     ─────────────────────────────────────────────────────────────────────────
+     Uber's earner-payments surface answers for the CURRENT payment period and
+     returns an empty list for every older window, so a driver with 3,295 trips
+     on record can have four of them covered by a statement. The Trips column
+     below is per period; the lifetime figure is in the profile the page has
+     already fetched, and it was the difference between "this is what they
+     earned" and "this is what we can see of what they earned". Printed as a
+     fraction so the second reading is the only one available. */
+  const accTrips = (prof?.accounts || []).reduce((a, x) => a + (+x.trips || 0), 0)
+    || (prof?.span?.trips ?? 0);
+  const perTrips = e.periods.reduce((a, r) => a + (+r.trips || 0), 0);
+  if (accTrips && perTrips) {
+    per.body.append(el('p', 'cap',
+      `These statements account for ${fmt(perTrips)} of this driver's ${fmt(accTrips)} trips on record`
+      + ` — ${pct(perTrips / accTrips * 100, 1)} of their work. The rest is not unpaid: it is work `
+      + 'whose payout statement no platform surface will serve any more. Uber answers for the current '
+      + 'payment period and returns an empty list for every older window, however wide the request, so '
+      + 'this fraction grows a week at a time from the day collection started and can never be '
+      + 'backfilled.'));
+  }
   per.body.append(el('p', 'cap', `${money(counted)} counted across ${countOf(e.periods.length, 'statement')}`
     + (displaced.length
       ? ` — ${fmt(displaced.length)} of them overlap another statement, and only the days no other `
@@ -1070,8 +1121,19 @@ export async function renderDriver(root, id, tab = 'overview') {
   head.innerHTML = '';
   head.append(identityCard(prof));
   head.append(tabBar(DRIVER_TABS, tab, (t) => href('driver', id, t === 'overview' ? null : t)));
-  if ((prof.accounts || []).length > 1) {
-    head.append(el('p', 'cap', `This person appears on ${prof.accounts.length} platform accounts (${prof.accounts.map((a) => `${a.platform}: ${a.trips} trips`).join(', ')}). Everything below is the combined picture.`));
+  /* The SPLIT between accounts, which the identity card cannot show.
+     ─────────────────────────────────────────────────────────────────────────
+     The card now carries the whole-person figures — trips ever, first trip,
+     last trip — so a single-account driver needs nothing here: the line would
+     restate the card in a longer sentence. What the card cannot say is which
+     channel the work came from when there is more than one, and that is what
+     changes how everything below is read. */
+  const accs = (prof.accounts || []).filter((a) => a.platform);
+  if (accs.length > 1) {
+    const each = accs.map((a) => `${sourceLabel(a.platform)} ${fmt(a.trips)} trip${a.trips === 1 ? '' : 's'}`
+      + (a.first_trip ? ` since ${dateStr(a.first_trip)}` : '')).join(' · ');
+    head.append(el('p', 'cap', `This person drives on ${fmt(accs.length)} platform accounts — ${each}. `
+      + 'Everything below is the combined picture.'));
   }
 
   const fn = TABS[tab] || tabOverview;

@@ -287,6 +287,73 @@ for (const route of routes) {
   }
   page.off('response', onResp);
 }
+
+/* ── a fact that moves under a label that promised it would not ────────────
+   Entity pages carry an identity card: the block that says who or what this
+   page is about. Everything in it reads as a property of the thing — and some
+   of it was coming out of a payload field that the range selector changes.
+
+   Measured on one driver's card before this check existed:
+
+     days=7    "First seen 19 Aug 2026"   trips  54
+     days=30   "First seen 27 Jul 2026"   trips 266
+     days=365  "First seen 27 Aug 2025"   trips 3280
+
+   The person had been on Uber since 24 August 2025 the whole time. Moving the
+   range selector changed the date they were hired.
+
+   So each entity route is loaded at two windows and its card compared fact by
+   fact. A fact whose VALUE differs between the two is windowed, and it has to
+   say so — a label naming the window is the whole fix, and it is what makes
+   the number readable rather than merely correct. */
+const CARD_ROUTES = [...new Set(ROUTES
+  .filter((r) => /^(driver|vehicle|performer|property)\/[^/]+$/.test(r)).map(sub))];
+const cardFacts = async (route, days) => {
+  await page.goto(`${BASE}/#${route}?days=${days}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.waitForTimeout(SETTLE);
+  return page.evaluate(() => [...document.querySelectorAll('.idcard .idfacts > span')].map((n) => {
+    const b = n.querySelector('b');
+    return { label: (b?.textContent || '').trim(), value: n.textContent.replace(b?.textContent || '', '').trim() };
+  }));
+};
+/* The words that make a windowed fact honest. A label carrying one of these is
+   telling the reader the number belongs to the range they chose. */
+const NAMES_WINDOW = /window|range|selected|period|this week|so far|last \d/i;
+
+for (const route of CARD_ROUTES) {
+  process.stderr.write(`\r[card] ${route.slice(0, 44).padEnd(44)}`);
+  let a, wide, again;
+  /* THREE loads, not two: 7d, 365d, then 7d again.
+     ───────────────────────────────────────────────────────────────────────
+     This is a live fleet. Its drivers take trips while the audit is running,
+     so a two-load comparison reported "Trips: 3,295 at 7d, 3,296 at 365d" —
+     a driver who completed one trip during the fifteen seconds between the two
+     page loads, on a figure that is not windowed at all. Comparing 7d against
+     7d isolates what MOVED from what the window CHANGED: a fact that differs
+     between the two identical loads is volatile and says nothing, and only a
+     fact that held still across them and differs at 365d is windowed. */
+  try {
+    a = await cardFacts(route, 7);
+    wide = await cardFacts(route, 365);
+    again = await cardFacts(route, 7);
+  } catch { continue; }
+  if (!a.length || a.length !== wide.length || a.length !== again.length) continue;
+
+  const drifted = a.map((f, i) => ({ f, w: wide[i], v: again[i] }))
+    .filter(({ f, w, v }) => w.label === f.label && v.label === f.label
+      && v.value === f.value                       // held still while the clock ran
+      && w.value !== f.value                       // …and moved when the window did
+      && !NAMES_WINDOW.test(f.label));
+  if (drifted.length) {
+    findings.push({ route, code: 'window-drift',
+      detail: `${drifted.length} identity fact(s) change with the range selector under a label `
+        + 'that does not name a window',
+      examples: drifted.map(({ f, w }) =>
+        `${f.label}: "${f.value}" at 7d, "${w.value}" at 365d`.slice(0, 140)).slice(0, 6) });
+  }
+}
+process.stderr.write('\r'.padEnd(70) + '\r');
+
 await browser.close();
 process.stderr.write('\r'.padEnd(70) + '\r');
 

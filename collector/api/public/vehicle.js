@@ -35,6 +35,18 @@ const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v
 const docTone = (d) => (d == null ? null : d < 0 ? 'bad' : d < 30 ? 'warn' : 'ok');
 
 /* ── identity header ─────────────────────────────────────────────────────── */
+/* Everything in `span` moves with the range selector, and only one of it was
+   drawn — as a bare "Drivers 3", which reads as how many people have ever held
+   this car. Measured on L36397:
+
+     days=7     trips   87   journeys  47   days_worked   7   first_trip 2026-08-19
+     days=365   trips 3987   journeys 986   days_worked 342   first_trip 2025-08-26
+
+   So the count changed under a label that promised it would not, and the four
+   figures beside it — including the telematics journey count, which is the
+   only place on the page the twin feed is quantified — were fetched on every
+   visit and shown nowhere. They are drawn together now, under a heading that
+   names the window they belong to. */
 function identityCard(p) {
   const s = p.spec || {}, t = p.telemetry;
   const soonest = (p.documents || []).find((d) => d.days_left != null);
@@ -66,7 +78,18 @@ function identityCard(p) {
     ? `<span><b>Charge</b> ${fmt(t.fuel_level)}%</span>`
     : '<span><b>Charge</b> <span class="ent-off" title="this vehicle’s feed reports no fuel or charge level — a 0 here is an absent reading, not an empty tank">not reported</span></span>'}
         <span><b>Last fix</b> ${t?.last_fix ? `${dateStr(t.last_fix)} ${timeStr(t.last_fix)}` : '—'}</span>
-        <span><b>Drivers</b> ${fmt(p.span?.drivers ?? 0)}</span>
+        ${/* first_trip stays INSIDE the window sentence. Given its own heading
+              it read as the day the car entered service, and it is not: at
+              days=30 it says 27 July 2026 and at days=365 it says 26 August
+              2025 — the same defect one line up, moved down a line. Nothing in
+              this payload knows when the car started; saying so is better than
+              printing a date that quietly means something else. */''}
+        <span><b>In this window</b> ${fmt(p.span?.trips ?? 0)} trip${p.span?.trips === 1 ? '' : 's'}${
+  p.span?.days_worked != null ? ` over ${fmt(p.span.days_worked)} day${p.span.days_worked === 1 ? '' : 's'}` : ''
+}${p.span?.drivers != null ? ` · ${fmt(p.span.drivers)} driver${p.span.drivers === 1 ? '' : 's'}` : ''}${
+  p.span?.telematics_journeys != null
+    ? ` · ${fmt(p.span.telematics_journeys)} telematics journey${p.span.telematics_journeys === 1 ? '' : 's'}`
+    : ''}${p.span?.first_trip ? `<span class="dim" title="the earliest trip inside the selected range, not the day the car entered service"> from ${dateStr(p.span.first_trip)}</span>` : ''}</span>
       </div>
     </div>`;
   return wrap;

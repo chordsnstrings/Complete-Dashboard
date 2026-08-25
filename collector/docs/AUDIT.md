@@ -702,3 +702,55 @@ looking for a number that had been correct for about a second.
 The audit now keeps only the LAST body per URL, because that is the one the
 reader ends up looking at. Without it, this harness reports the product as
 broken every time a cache warms up.
+
+## 2026-08-25 — the identity card was a window in disguise
+
+`/api/driver/profile` answers with two spans and the card was reading the wrong
+one. Measured on one driver:
+
+| | days=7 | days=30 | days=365 |
+|---|---|---|---|
+| `span.trips` | 54 | 266 | 3,280 |
+| `span.first_trip` | 19 Aug 2026 | 27 Jul 2026 | 27 Aug 2025 |
+| `accounts[0].trips` | 3,295 | 3,295 | 3,295 |
+| `accounts[0].first_trip` | 24 Aug 2025 | 24 Aug 2025 | 24 Aug 2025 |
+
+The card printed `span.first_trip` under the heading **First seen**. A driver
+who had been on Uber since August 2025 was introduced as first seen in July
+2026, and moving the range selector changed the date they were hired.
+
+Now the two are separated and both drawn. **First trip**, **Last trip** and
+**Trips … ever** come from the account record, which does not move.
+**In this window** carries what the range selector governs — trips, days
+worked, cars held — and names it.
+
+Three figures were in the payload and drawn nowhere at all: lifetime trips,
+days worked, cars held. Every tab below a driver card is a *slice* of that
+person, and none of those slices meant anything without the whole to divide by.
+
+The same shape on `#vehicle`: `span.drivers` was the only member of `span` on
+screen, as a bare **Drivers 3** that reads as everyone who has ever held the
+car. At 7 days it is 87 trips and 47 telematics journeys; at 365 it is 3,987
+and 986. The vehicle payload has no lifetime source, so *everything* from
+`span` is windowed and the card now says so — including the telematics journey
+count, which is the only place on the page the twin feed is quantified.
+
+On `#driver/<id>/earnings` the payout table now says what fraction of the
+person's work the statements describe: **219 of 3,295 trips — 6.6%**. Uber's
+earner-payments surface answers for the current payment period and returns an
+empty list for every older window, so the rest is not unpaid, it is
+unrecoverable. Without the fraction the table read as "this is what they
+earned" instead of "this is what we can see of what they earned".
+
+### The check that holds it
+
+`bin/numbers-audit.mjs` gained **window-drift**: each entity route is loaded at
+7 days, at 365, and at 7 again. The repeat matters — this is a live fleet, and a
+two-load comparison reported `Trips: 3,295 at 7d, 3,296 at 365d` for a driver
+who completed one trip during the fifteen seconds between the loads. Comparing
+7d against 7d separates what MOVED from what the window CHANGED: only a fact
+that held still across the identical pair and differs at 365 is windowed.
+
+Verified it can fail: relabelling **In this window** to **Recent** makes it
+report `"55 trips over 7 days in 3 cars" at 7d, "3,281 trips over 261 days in 6
+cars" at 365d`. Restored, it is silent.
