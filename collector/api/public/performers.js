@@ -125,6 +125,8 @@ export async function renderPerformers(root, band) {
       { label: 'Completed', key: 'completion_pct', num: true,
         render: (r) => (r.completion_pct == null ? '—' : `${fmt(r.completion_pct)}%`) },
       { label: 'Standing', key: 'state',
+        absent: 'no channel published a standing for these people — the roster snapshot carries '
+          + 'one only for accounts a provider has judged',
         render: (r) => (r.state ? pill(r.state, r.can_earn === false ? 'warn' : null) : '—') },
     ], { onRow: (r) => { location.hash = `#performer/${encodeURIComponent(r.driver_ext_id)}`; } }));
     /* A table that ends on exactly forty rows is a table somebody cut, and

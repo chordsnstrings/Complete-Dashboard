@@ -8,7 +8,7 @@
    - `Number('') === 0`, so an empty string rendered as a confident "0" rather
      than "no data".
    - Minutes were rounded independently of hours, so 23:59:42 rendered "23:60". */
-import { fmt, pct, hourStr, money, tripTime } from '../api/public/ui.js';
+import { fmt, pct, hourStr, money, tripTime, tierLabel } from '../api/public/ui.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -64,6 +64,29 @@ console.log('\ntripTime: the replay link takes what an API row actually carries'
     !/href/.test(tripTime('L45235', 'not-a-time')));
   check('null time does not throw either', !/href/.test(tripTime('L45235', null)));
 }
+
+/* ── two database enums in a header row of product names ──────────────────
+   The tier table on #vehicles builds its columns from whatever the channels
+   call their products, and the channels do not agree on a convention. Uber
+   sends "Comfort" and "Black"; the hotel channel sends "drop_off" and
+   "pick_and_drop". So the header row read
+
+     Electric · UberX · Comfort · Black · pick_and_drop · drop_off
+
+   — four product names and two enum values, side by side. tierLabel touches
+   only the raw shape, because re-casing "UberX" to "Uberx" would be the same
+   mistake in the other direction. */
+console.log('\ntier labels: raw enums are for the database, not the header row');
+check('an underscored enum becomes words', tierLabel('drop_off') === 'Drop Off', tierLabel('drop_off'));
+check('and a longer one too', tierLabel('pick_and_drop') === 'Pick And Drop', tierLabel('pick_and_drop'));
+check('a product name already written for a reader is left exactly alone',
+  tierLabel('UberX') === 'UberX' && tierLabel('Comfort') === 'Comfort'
+  && tierLabel('Uber Black') === 'Uber Black', tierLabel('UberX'));
+check('a single lowercase word is not an enum and is not touched',
+  tierLabel('electric') === 'electric', tierLabel('electric'));
+check('an absent tier is a dash, not the word undefined',
+  tierLabel(null) === '—' && tierLabel(undefined) === '—' && tierLabel('') === '—');
+check('a digit inside an enum survives', tierLabel('tier_2_black') === 'Tier 2 Black', tierLabel('tier_2_black'));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

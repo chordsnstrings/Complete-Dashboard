@@ -5,7 +5,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
-  sourceLabel, plural, countOf } from './ui.js';
+  sourceLabel, tierLabel, plural, countOf } from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
@@ -714,7 +714,10 @@ V.demand = async (root) => {
         : '<span class="ent-off" title="no booking on this day reports a fare — Uber’s export has no fare column">—</span>') },
       { label: 'Max temp', key: 'temp_max', num: true, render: (r) => (r.temp_max != null
         ? `<span class="pill ${r.temp_max >= 44 ? 'bad' : r.temp_max >= 41 ? 'warn' : 'ok'}">${r.temp_max.toFixed(1)}°C</span>` : '—') },
-      { label: 'Rain', key: 'precipitation', num: true, render: (r) => (r.precipitation ? `${r.precipitation} mm` : '—') },
+      { label: 'Rain', key: 'precipitation', num: true,
+        absent: 'no rain was recorded on these days — Dubai has a handful of wet days a year, so '
+          + 'an empty column here is the weather, not a missing feed',
+        render: (r) => (r.precipitation ? `${r.precipitation} mm` : '—') },
       { label: 'Wind', key: 'wind_max', num: true, render: (r) => (r.wind_max != null ? `${Math.round(r.wind_max)} km/h` : '—') },
       /* Holidays and Ramadan come from calendar_day, which is loaded per year
          from a public source. A window with no marked day in it is the normal
@@ -1140,7 +1143,10 @@ V.vehicles = async (root) => {
       { label: 'Driven by', key: 'driver_refs', render: (r) => custody(r)
         + (r.driver_n > (r.driver_refs || []).length
           ? ` <span class="dim">+${fmt(r.driver_n - (r.driver_refs || []).length)}</span>` : '') },
-      ...tiers.map((t) => ({ label: t, key: t, num: true,
+      /* tierLabel, not the raw key: the hotel channel's product names are
+         database enums (drop_off, pick_and_drop) and they were sitting in the
+         header row beside Uber's Comfort and Black. */
+      ...tiers.map((t) => ({ label: tierLabel(t), key: t, num: true,
         render: (r) => (r[t] ? `${fmt(r[t])}<span class="dim"> · ${Math.round((r[t] / r.total) * 100)}%</span>` : '—') })),
       { label: 'Total', key: 'total', num: true, render: (r) => fmt(r.total) },
     ], { sortable: true, sortId: 'vtier', defaultSort: { key: 'total', dir: 'desc' } }));

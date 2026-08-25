@@ -12,7 +12,7 @@ import { TZ } from './tz.js';
 
 import { barChart, donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
-  dayStr, dtStr, timeStr, money, pct, custody } from './ui.js';
+  dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel } from './ui.js';
 import { api, href, state } from './data.js';
 
 const shift = (day, n) => {
@@ -149,7 +149,7 @@ export async function renderDay(root, day, onDetail) {
 
   add('Which channel', null, (b) => {
     if (!d.platforms.length) return empty(b);
-    donut(b, d.platforms.map((r) => ({ label: r.platform, n: r.n })), {
+    donut(b, d.platforms.map((r) => ({ label: sourceLabel(r.platform), n: r.n })), {
       onClick: (x) => { location.hash = href('platforms'); } });
   });
 
@@ -160,7 +160,9 @@ export async function renderDay(root, day, onDetail) {
     });
   }
   if (d.tiers.length) {
-    add('Uber product tier', null, (b) => donut(b, d.tiers.map((r) => ({ label: r.tier, n: r.n }))));
+    /* tierLabel: the same raw enums that reached the #vehicles header row
+       reach this legend — "drop_off" beside "Comfort". */
+    add('Uber product tier', null, (b) => donut(b, d.tiers.map((r) => ({ label: tierLabel(r.tier), n: r.n }))));
   }
   if (d.alerts.length) {
     add('Harsh-driving events', 'From the telematics layer, on this day only.', (b) => {

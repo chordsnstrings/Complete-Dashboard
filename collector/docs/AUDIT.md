@@ -330,3 +330,43 @@ every stored raw record — so it is the first to suffer. That is why the slow
 panel now says so, and why the missing `alive()` guard was worth fixing on its
 own merits. But the smoke failure is the bridge, not the page.
 
+### Pass 7 — 25 Aug 2026, columns that are *mostly* empty
+
+`sparse-column` was the largest remaining category (54), and between "every row"
+and "most rows" there is no difference to the reader: **330 dashes under Fares
+out of 361 drivers looks exactly as broken as 361 would.**
+
+But the column has to stay — thirty-one people *do* have a fare, and which ones
+(the hotel and Yango drivers) is the finding. So the same `absent` sentence a
+dead column prints is now printed with the count in front of it:
+
+> **Fares** — 31 of 361 rows carry one; Uber's trip export carries no fare
+> column at all, and Uber is most of this fleet's work.
+
+One declaration serves both states. A quarter is the line: above it a column
+reads as populated with gaps, which is ordinary; below it the gaps are the
+story. A table of fewer than eight rows says nothing at all — one of five is not
+a pattern.
+
+| # | finding | fix |
+|---|---|---|
+| 27 | 18 distinct mostly-empty columns, each a wall of dashes with no explanation | `tableFrom` counts what is filled and prints "N of M rows carry one" plus the reason |
+| 28 | `Licence` (220 of 247 empty), `Rain` (28 of 30), `Standing` (37 of 40), and reconciliation's `Tips` / `Salik` / `Cash collected` / `Δ bank − expected` (12 of 13 months each) | each declares why — the money columns share one constant, because four wordings for one absence read as four separate problems |
+
+#### 29 — two database enums in a row of product names
+
+The tier table on `#vehicles` builds its columns from whatever the channels call
+their products, and the channels do not agree on a convention. Uber sends
+`Comfort` and `Black`; the hotel channel sends `drop_off` and `pick_and_drop`.
+The header row read:
+
+```
+Electric · UberX · Comfort · Black · pick_and_drop · drop_off
+```
+
+Four product names and two database enum values, side by side. `tierLabel()`
+touches **only the raw shape** — re-casing `UberX` to `Uberx` would be the same
+mistake in the other direction. The same enums reached the `#day` tier legend,
+and `#day` and `#slot` were labelling their platform donuts with raw keys rather
+than `sourceLabel()`.
+

@@ -177,7 +177,7 @@ export async function renderSlot(root, dow, hour) {
   const pp = panel('Which channel brings this hour', 'Share of the slot, not of the day');
   g2.append(pp.panel);
   if (d.platforms.length) {
-    donut(pp.body, d.platforms.map((r) => ({ label: r.platform, n: r.trips })));
+    donut(pp.body, d.platforms.map((r) => ({ label: sourceLabel(r.platform), n: r.trips })));
     pp.body.append(tableFrom(d.platforms, [
       { label: 'Platform', key: 'platform' },
       { label: 'Trips', key: 'trips', num: true },

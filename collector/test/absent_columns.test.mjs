@@ -108,6 +108,33 @@ const zero = await run(build, { rows: rows(0), cols: COLS });
 check('but ZERO does not — a rating of zero is a rating, and a count of zero is a finding',
   zero.hasRating, zero.heads.join(','));
 
+console.log('\nabsent columns: mostly-empty says so too');
+
+/* Between "every row" and "most rows" there is no difference to the reader:
+   330 dashes out of 361 looks exactly as broken as 361 would. But the column
+   has to stay, because the rows that DO carry a value are the finding. */
+const mostly = await run(build, { cols: COLS,
+  rows: [...Array(19)].map((_, i) => ({ name: `d${i}`, trips: 1, rating: null, fares: 1 }))
+    .concat([{ name: 'x', trips: 1, rating: 4.9, fares: 1 }]) });
+check('a column filled in 1 of 20 rows is KEPT — the one row is the finding',
+  mostly.hasRating, mostly.heads.join(','));
+check('and the table says how many carry a value',
+  /1 of 20 rows carry one/.test(mostly.note), mostly.note);
+check('followed by the same reason the empty case would have given',
+  /no channel reports a driver rating/.test(mostly.note), mostly.note);
+
+const half = await run(build, { cols: COLS,
+  rows: [...Array(20)].map((_, i) => ({ name: `d${i}`, trips: 1, rating: i % 2 ? 4.9 : null, fares: 1 })) });
+check('a column filled in half its rows says nothing — gaps are ordinary there',
+  !half.note, half.note);
+
+const tiny = await run(build, { cols: COLS,
+  rows: [{ name: 'a', trips: 1, rating: 4.9, fares: 1 }, { name: 'b', trips: 1, rating: null, fares: 1 },
+    { name: 'c', trips: 1, rating: null, fares: 1 }, { name: 'd', trips: 1, rating: null, fares: 1 },
+    { name: 'e', trips: 1, rating: null, fares: 1 }] });
+check('and a five-row table says nothing either — one of five is not a pattern',
+  !tiny.note, tiny.note);
+
 console.log('\nabsent columns: it is opt-in, deliberately');
 
 const noReason = await run(build, { rows: rows(null),

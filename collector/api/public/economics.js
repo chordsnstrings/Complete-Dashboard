@@ -637,6 +637,8 @@ async function driversTab(root) {
       render: (r) => (r.alerts_per_100km == null ? absent('no distance to measure against')
         : fmt(r.alerts_per_100km, 1)) },
     { label: 'Licence', key: 'licence_days_left', num: true,
+      absent: 'most of these people have no licence expiry on file — the compliance record comes '
+        + 'from the channel that onboarded them, and the channels report it for a minority',
       render: (r) => (r.licence_days_left == null ? absent('no licence expiry on file')
         : pill(r.licence_days_left < 0 ? 'expired' : `${fmt(r.licence_days_left)}d`,
           r.licence_days_left < 0 ? 'bad' : r.licence_days_left < 30 ? 'warn' : 'ok')) },

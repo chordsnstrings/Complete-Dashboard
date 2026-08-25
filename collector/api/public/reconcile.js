@@ -35,6 +35,13 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, fmt, pct
   countOf, plural } from './ui.js';
 import { api, state, href } from './data.js';
 
+/* Why a money column can be empty for a whole year of months. Stated once and
+   shared, because four columns on this page have the same answer and four
+   wordings for one absence read as four separate problems. */
+const MONEY_FROM = 'the ledger only carries money from 6 February 2026 — earlier months were '
+  + 'never collected, so a blank here is a month before the statements begin rather than a month '
+  + 'in which nothing was paid';
+
 const MONTH_LABEL = (m) => {
   const [y, mm] = String(m).split('-');
   return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+mm - 1]} ${y}`;
@@ -83,15 +90,15 @@ const COLS = (keyCol) => [
     render: (r) => (r.trips == null ? '<span class="dim">—</span>' : fmt(r.trips)) },
   { label: 'On-trip net', key: 'ontrip_net', num: true,
     render: (r) => orDash(r.ontrip_net, 'no statement') },
-  { label: 'Tips', key: 'tips', num: true, render: (r) => orDash(r.tips, '') },
-  { label: 'Salik', key: 'salik', num: true, render: (r) => orDash(r.salik, '') },
-  { label: 'Cash collected', key: 'cash_collected', num: true,
+  { label: 'Tips', key: 'tips', num: true, absent: MONEY_FROM, render: (r) => orDash(r.tips, '') },
+  { label: 'Salik', key: 'salik', num: true, absent: MONEY_FROM, render: (r) => orDash(r.salik, '') },
+  { label: 'Cash collected', key: 'cash_collected', num: true, absent: MONEY_FROM,
     render: (r) => orDash(r.cash_collected, '') },
   { label: 'Expected payout', key: 'expected_payout', num: true,
     render: (r) => withCompared(r.expected_payout, r.expected_covered, 'needs the statement') },
   { label: 'Bank payout', key: 'bank_payout', num: true,
     render: (r) => withCompared(r.bank_payout, r.bank_covered, 'no payout reported') },
-  { label: 'Δ bank − expected', key: 'delta', num: true, render: deltaPill },
+  { label: 'Δ bank − expected', key: 'delta', num: true, absent: MONEY_FROM, render: deltaPill },
   /* The column that explains the one before it. A delta drawn over 53 of the
      189 drivers the bank paid that day is a different claim from one drawn
      over all of them, and the number is the difference between "the platform

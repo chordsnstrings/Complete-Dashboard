@@ -103,9 +103,25 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
      collection failure rather than report it. */
   const isBlank = (v) => v == null || v === '' || v === '—'
     || (Array.isArray(v) && v.length === 0);
-  const dead = cols.filter((c) => c.absent && c.key
-    && rows.every((r) => isBlank(r[c.key])));
+  const filled = (c) => rows.reduce((n, r) => n + (isBlank(r[c.key]) ? 0 : 1), 0);
+  const dead = cols.filter((c) => c.absent && c.key && filled(c) === 0);
   cols = cols.filter((c) => !dead.includes(c));
+
+  /* …and a column that is MOSTLY empty says so too.
+     ───────────────────────────────────────────────────────────────────────
+     Between "every row" and "most rows" there is no difference to the reader:
+     330 dashes under Fares out of 361 drivers looks exactly as broken as 361
+     would. But the column has to stay — thirty-one people DO have a fare, and
+     they are the hotel and Yango drivers, which is the finding. So the same
+     `absent` sentence is printed with the count in front of it: "31 of 361
+     rows carry one", and then why the rest do not.
+
+     A quarter is the line. Above it a column reads as populated with gaps,
+     which is ordinary; below it the gaps are the story. */
+  const SPARSE = 0.25;
+  const sparse = cols.filter((c) => c.absent && c.key && rows.length >= 8
+    && filled(c) / rows.length < SPARSE)
+    .map((c) => ({ col: c, n: filled(c) }));
 
   const byKey = (k) => cols.find((c) => c.key === k);
 
@@ -178,12 +194,15 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
   };
   paint();
   wrap.append(t);
-  if (dead.length) {
+  if (dead.length || sparse.length) {
     /* Named one per line rather than joined, because each is a different
        missing source and a reader needs to know which. */
     const d = el('div', 'cap tabsent');
-    d.innerHTML = dead.map((c) =>
-      `<span><b>${esc(c.label)}</b> — ${esc(c.absent)}</span>`).join('');
+    d.innerHTML = [
+      ...dead.map((c) => `<span><b>${esc(c.label)}</b> — ${esc(c.absent)}</span>`),
+      ...sparse.map(({ col, n }) => `<span><b>${esc(col.label)}</b> — ${fmt(n)} of `
+        + `${fmt(rows.length)} rows carry one; ${esc(col.absent)}</span>`),
+    ].join('');
     wrap.append(d);
   }
   if (sortable && capped) {
@@ -366,6 +385,25 @@ export const SOURCE_LABEL = {
   cabman: 'CABMAN', ecosine: 'Ecosine', egari: 'Egari',
 };
 export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()] || String(s || '—');
+
+/* A product tier as a person reads it.
+   ─────────────────────────────────────────────────────────────────────────
+   These are column HEADINGS built from whatever the channels call their
+   products, and the channels do not agree on a convention: Uber sends
+   "Comfort" and "Black", the hotel channel sends "drop_off" and
+   "pick_and_drop". So the tier table on #vehicles read
+   "Electric · UberX · Comfort · Black · pick_and_drop · drop_off" — four
+   product names and two database enum values, side by side, in the header row.
+
+   Only the raw shape is touched: a value already written for a reader keeps
+   its own capitalisation, because "UberX" is not "Uberx" and re-casing it
+   would be the same class of mistake in the other direction. */
+export const tierLabel = (t) => {
+  const s = String(t ?? '').trim();
+  if (!s) return '—';
+  if (!/^[a-z0-9]+(_[a-z0-9]+)+$/.test(s)) return s;      // already human, or a proper name
+  return s.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+};
 
 /* "yango is missing 1 days" and "1 have no record of ever being requested".
    Takes the count so the caller cannot forget to look at it. */
