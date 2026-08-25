@@ -224,9 +224,21 @@ export async function renderCoverage(root) {
   });
 
   /* Arrive at the source somebody came here to look at. #sources links here as
-     `#coverage?days=365#src-fms`; without this the reader lands at the top of a
-     page eight panels long and has to find it again. */
-  const anchor = (location.hash.match(/#(src-[^?&#]+)$/) || [])[1];
+     `#coverage?days=365&at=src-fms`; without this the reader lands at the top
+     of a page eight panels long and has to find it again.
+
+     It used to be a second '#' — `#coverage?days=365#src-fms` — and parseHash
+     splits the hash on its first '?' and hands everything after it to
+     URLSearchParams, so `days` came out as "365#src-fms", failed validation
+     and fell back to thirty. The link said "the whole record" and opened one
+     month of it. The old shape is still read, because a bookmark or a pasted
+     link from before this fix should still land in the right place. */
+  /* Not `q` — that name is the query helper imported from data.js at the top
+     of this file, and a `const q` anywhere in the function puts every earlier
+     use of it in the temporal dead zone. The page rendered "Cannot access 'q'
+     before initialization" and its own error box. */
+  const hashQuery = new URLSearchParams((location.hash.split('?')[1] || '').split('#')[0]);
+  const anchor = hashQuery.get('at') || (location.hash.match(/#(src-[^?&#]+)$/) || [])[1];
   if (anchor) {
     requestAnimationFrame(() => {
       const target = document.getElementById(decodeURIComponent(anchor));

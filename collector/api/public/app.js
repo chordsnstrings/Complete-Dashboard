@@ -3079,7 +3079,16 @@ V.sources = async (root) => {
        "MISSING DAYS 1" and denies the 152-day gap the link was named after. */
     { label: 'Missing', key: '_m', render: (r) => (!r.cal ? '—'
       : r.cal.missing_days
-        ? `<a class="lnk" href="${href('coverage', null, null, { days: 365 })}#src-${encodeURIComponent(r.src)}">`
+        /* The anchor rides in the QUERY, not as a second '#'.
+           ─────────────────────────────────────────────────────────────────
+           This built `#coverage?days=365#src-fms`, and parseHash splits the
+           hash on its first '?' and hands the rest to URLSearchParams — so
+           `days` came out as the string "365#src-fms", failed the
+           [7,30,90,180,365] check, and fell back to the default. The link
+           promised the whole record and delivered thirty days, silently, on
+           the page whose subject is what is missing from the record. One hash,
+           one query, and `days` parses. */
+        ? `<a class="lnk" href="${href('coverage', null, null, { days: 365, at: `src-${r.src}` })}">`
           + `${countOf(r.cal.missing_days, 'day')}</a>`
         : pill('none', 'ok')) },
     { label: 'Largest gap', key: '_g', render: (r) => {

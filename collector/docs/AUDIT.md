@@ -14,6 +14,7 @@ node bin/live-audit.mjs                 # every arithmetic invariant
 node bin/numbers-audit.mjs              # every figure fetched reached the screen
 node bin/cap-audit.mjs                  # every server LIMIT that is biting
 node bin/slice-audit.mjs                # every list the PAGE cut
+node bin/link-audit.mjs                 # every internal link is a well-formed address
 node test/smoke_views.mjs               # every route renders at all
 ```
 
@@ -31,8 +32,9 @@ findings, so two passes can be diffed rather than re-read.
 | `bin/numbers-audit.mjs` | a figure the page fetched reached the screen | a figure nothing fetched |
 | `bin/cap-audit.mjs` | a server `LIMIT` is or is not biting | a cut the PAGE made |
 | `bin/slice-audit.mjs` | a list the page cut says so | a cut made in the query |
+| `bin/link-audit.mjs` | every link is a well-formed address | whether it leads anywhere useful |
 
-All seven are needed. A view can pass the first three and still be a bad page:
+All eight are needed. A view can pass the first three and still be a bad page:
 four panels of which three say "no data", a table silently capped at forty rows
 out of nine hundred, a column of dashes where money should be, or nine columns
 running off the edge of a half-width panel.
@@ -1044,3 +1046,32 @@ leaves the broken-image icon in place.
 
 Findings across all 104 routes at 412px: **1 js-error (this), 2 slow-panel** —
 and slow-panel is the honest report the harness gained this pass, not a fault.
+
+## 2026-08-26 — a link that promised a year and delivered a month
+
+New `bin/link-audit.mjs` walks every route and reads every internal `href` for
+the shapes a hash router builds by accident: a doubled `?` or `#`, a
+stringified `undefined` or `null`, a doubled slash, `[object Object]`. A
+malformed hash does not fail — it goes somewhere plausible and wrong.
+
+One route had one. `#sources` linked to Collection gaps as
+`#coverage?days=365#src-fms`: a query, then an anchor. `parseHash` splits the
+hash on its **first** `?` and hands the rest to `URLSearchParams`, so `days`
+came out as the string `"365#src-fms"`, failed the `[7,30,90,180,365]` check,
+and fell back to thirty. The link said *over the whole record* and opened one
+month of it — on the page whose entire subject is what is missing from the
+record, where a month-shaped gap and a year-shaped gap are different findings.
+
+Now `#coverage?days=365&at=src-fms`: one hash, one query, `days` parses, and
+the page still scrolls to the source you came to look at. The old shape is
+still read, so a bookmark from before this fix lands in the right place.
+
+Worth recording because it nearly shipped: the first version of the fix named
+its local `const q`, which is the query helper imported at the top of
+`coverage.js`. Every earlier use of `q` in that function fell into the temporal
+dead zone and the whole view rendered "Cannot access 'q' before
+initialization". Caught by rendering the page rather than by reading the diff.
+
+**All 104 routes now report zero on the numbers sweep**, and zero at 412px on
+the render sweep apart from two `slow-panel` notices, which are the honest
+report this pass added rather than faults.
