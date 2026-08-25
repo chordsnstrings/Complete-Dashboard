@@ -22,6 +22,29 @@ import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr
   sourceLabel, countOf, plural } from './ui.js';
 import { api, qChan, href, hrefFilter } from './data.js';
 
+/* How much of a partial month is actually in the record.
+   ─────────────────────────────────────────────────────────────────────────
+   The tooltip asked for `days_covered` and `days_in_month`, and the endpoint
+   returns neither: it sends `days_in_record`. So every partial bar fell through
+   to "the record starts or stops inside this month" and the number was never
+   drawn — on the page whose headline finding is a +377% break, which exists
+   because August 2025 holds ELEVEN days against September's thirty. That is the
+   number that turns the break from a collapse into an artefact, and it was
+   fetched on every visit and shown nowhere.
+
+   The month's own length is arithmetic on the month string — day 0 of the next
+   month — and involves no clock reading and no timezone. */
+const daysInMonth = (m) => {
+  const [y, mm] = String(m || '').split('-').map(Number);
+  return (y && mm) ? new Date(Date.UTC(y, mm, 0)).getUTCDate() : null;
+};
+const partialDays = (m) => {
+  const have = m.days_in_record ?? m.days_covered;
+  if (have == null) return '';
+  const all = m.days_in_month ?? daysInMonth(m.m);
+  return all ? `${fmt(have)} of ${fmt(all)} days collected` : `${fmt(have)} day(s) collected`;
+};
+
 const MONTH = (m) => {
   const [y, mm] = String(m).slice(0, 7).split('-');
   return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+mm - 1]} ${y.slice(2)}`;
@@ -110,8 +133,7 @@ function trendChart(host, months, onPick) {
         data-rise style="animation-delay:${i * 30}ms"
         data-m="${esc(m.m)}"><title>${MONTH(m.m)} — ${fmt(m.trips)} trips${
         m.drivers_known ? `, ${m.drivers} drivers` : ', no driver attribution'}${
-        part ? ` — PARTIAL: ${m.days_covered != null && m.days_in_month != null
-          ? `${m.days_covered} of ${m.days_in_month} days collected` : 'the record starts or stops inside this month'}`
+        part ? ` — PARTIAL: ${partialDays(m) || 'the record starts or stops inside this month'}`
           : ''}</title></rect>`);
     }
     out.push(`<text x="${(x + bw / 2).toFixed(1)}" y="${H - 24}" font-size="10" fill="var(--ink-3)" text-anchor="middle">${MONTH(m.m)}</text>`);
@@ -375,8 +397,9 @@ export async function renderCauses(root) {
          month of work worth nothing and reasonably concludes the fleet had a
          bad month. */
       + (row.income_missing ? ' — no platform statement covers this month; its money is not recoverable' : '')
-      + (row.partial_month ? ' — a PARTIAL month: the record starts or stops inside it, so it holds fewer '
-        + 'days than the months beside it and should not be compared with them directly' : '')
+      + (row.partial_month ? ` — a PARTIAL month${partialDays(row) ? `: ${partialDays(row)}` : ''}. `
+        + 'The record starts or stops inside it, so it holds fewer days than the months beside it '
+        + 'and should not be compared with them directly' : '')
       + (near.length ? ` — ${countOf(near.length, 'break')} ${plural(near.length, 'touches', 'touch')} this month.` : '');
     trend.body.append(d);
   });
