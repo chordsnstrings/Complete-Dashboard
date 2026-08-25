@@ -319,6 +319,30 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        ),
        who AS (
          SELECT driver_ext_id, max(driver_name) AS driver_name FROM ids GROUP BY 1
+       ),
+       /* What actually reached the fleet for this person's work.
+          ─────────────────────────────────────────────────────────────────────
+          The revenue column beside this one is sum(trip.price), and the Uber
+          trip export has no fare column at all (sql/schema_v18.sql:73). Uber is
+          236,000 of the fleet's 253,000 trips, so on a seven-day window 101
+          people drove and 21 had a fare — eighty rows of a table whose job is
+          to rank people showed a dash in the only money column it had.
+
+          The money exists; it is simply not a fare. driver_payout_day carries
+          what each account was PAID, and that is what an operator ranking
+          drivers is actually asking about. Keyed on the account id and summed
+          over the window's days, so overlapping report periods cannot double
+          count — that resolution already happened when the table was built
+          (sql/schema_v23.sql). */
+       pay AS (
+         SELECT driver_ext_id,
+                round(sum(earnings)::numeric, 0) AS payout,
+                count(DISTINCT day)::int AS payout_days
+           FROM driver_payout_day
+          WHERE day BETWEEN $1::date AND $2::date
+            AND ($3::text IS NULL OR platform = $3)
+            AND ($4::text IS NULL OR fleet_id = $4)
+          GROUP BY 1
        )
        /* The lifetime figures come from the CTE at the top of this statement:
           the last trip EVER, so "has not driven in this window" and "has never
@@ -330,6 +354,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               coalesce(w.trips, 0) AS trips, coalesce(w.completed, 0) AS completed,
               coalesce(w.bookable, 0) AS bookable, coalesce(w.days, 0) AS days,
               w.km, w.revenue, coalesce(w.priced_trips, 0) AS priced_trips,
+              pay.payout, coalesce(pay.payout_days, 0) AS payout_days,
               w.last_trip, w.first_trip, w.plate, w.fleet_id,
               coalesce(w.platforms, ARRAY[]::text[]) AS platforms,
               ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
@@ -348,6 +373,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               dps.platform AS state_platform, dps.plate AS state_plate
        FROM who
        LEFT JOIN work w ON w.driver_ext_id = who.driver_ext_id
+       LEFT JOIN pay ON pay.driver_ext_id = who.driver_ext_id
        LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
@@ -373,6 +399,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       cur.lifetime_trips += r.lifetime_trips;
       cur.km = +(cur.km || 0) + +(r.km || 0);
       cur.revenue = +(cur.revenue || 0) + +(r.revenue || 0);
+      /* Payouts DO sum across a person's accounts: two provider ids are two
+         separate statements for the same human, and both reached the fleet. */
+      if (r.payout != null) cur.payout = +(cur.payout || 0) + +r.payout;
+      cur.payout_days = Math.max(cur.payout_days || 0, r.payout_days || 0);
       cur.platforms = [...new Set([...cur.platforms, ...(r.platforms || [])])];
       if ((r.driver_name || '').length > (cur.driver_name || '').length) cur.driver_name = r.driver_name;
       if (r.last_trip > cur.last_trip) cur.last_trip = r.last_trip;

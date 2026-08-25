@@ -193,6 +193,33 @@ check('assets arrive ranked by money', ordered);
 check('people arrive ranked by money',
   D.rows.every((r, i) => i === 0 || (D.rows[i - 1].money ?? 0) >= (r.money ?? 0)));
 
+/* ── a person's days cannot exceed the window ──────────────────────────────
+   KASHIF ALI AYYUB KHAN holds a Uber id and a hotel id. The people query
+   groups on the ACCOUNT, so he arrives twice, and the fold used to ADD the two
+   per-account day counts: 7 + 6 = 13 days worked inside a SEVEN-day window.
+
+   That is not a cosmetic overcount. The Unit-economics page gates its
+   best-earning and worst-earning tables on "at least 10 days driven", and at
+   days=7 he was the ONLY person in a fleet of 246 who cleared it — so he was
+   the single row on both lists at once, presented as simultaneously the best
+   and the worst earner in the fleet. Every multi-account driver inflates the
+   same way; he was simply the one who crossed a threshold.
+
+   The union is the fix, and this is the assertion that catches the sum. */
+{
+  const w = { from: '2026-08-19', to: '2026-08-25' };
+  const r = await get(`/api/economics/drivers?from=${w.from}&to=${w.to}`);
+  const rows = r.rows || [];
+  const over = rows.filter((x) => (x.days_worked || 0) > (x.window_days || 7));
+  check('nobody works more days than the window holds',
+    over.length === 0,
+    over.slice(0, 3).map((x) => `${x.driver_name} ${x.days_worked}>${x.window_days}`).join(', '));
+  const multi = rows.filter((x) => (x.platforms || []).length > 1);
+  check('and a driver on two platforms is still one person with one set of days',
+    multi.every((x) => (x.days_worked || 0) <= (x.window_days || 7)),
+    multi.slice(0, 3).map((x) => `${x.driver_name} ${x.platforms} ${x.days_worked}`).join(' | '));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close(); await db.close();
 process.exit(fail ? 1 : 0);

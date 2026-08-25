@@ -1045,11 +1045,27 @@ export async function renderDriverDirectory(root) {
         : fmt(r.completed)) },
     { label: 'Days', key: 'days', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
+    /* PAID, not FARED. This column was sum(trip.price) and Uber's export has no
+       fare column, so on a seven-day window 101 people drove and 21 had a
+       number here — eighty rows of dashes in the only money column a table
+       whose whole job is ranking people had. The money was never missing; it
+       is a payout, not a fare, and it lives in driver_payout_day.
+
+       Fares stay, as a second line, because on the hotel channel they are what
+       the property was charged and that is a different and real quantity. When
+       a driver has both, both are shown; the dash now means what it says. */
+    { label: 'Paid', key: 'payout', num: true,
+      render: (r) => (r.payout
+        ? `${money(r.payout)}${r.payout_days
+          ? `<span class="dim" title="days inside this window that a payout statement covers"> · ${fmt(r.payout_days)}d</span>` : ''}`
+        : (r.trips
+          ? '<span class="ent-off" title="this person drove in this window but no payout statement reaches them — see Reconciliation">—</span>'
+          : '<span class="ent-off" title="no trips in this window">—</span>')) },
     { label: 'Fares', key: 'revenue', num: true,
       render: (r) => (r.revenue
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
-        : '<span class="ent-off" title="no booking of theirs reports a fare — Uber’s export has no fare column">—</span>') },
+        : '<span class="ent-off" title="Uber publishes no fare per trip, and Uber is most of this fleet’s work — the money is in Paid">—</span>') },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
     { label: 'Rating', key: 'rating', num: true,
       render: (r) => (r.rating != null ? fmt(r.rating, 2)

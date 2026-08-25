@@ -603,7 +603,18 @@ export function economicsRoutes(app, { q, wrap, range }) {
                 count(*) FILTER (WHERE is_booking)::int bookings,
                 count(*) FILTER (WHERE outcome = 'completed')::int completed,
                 count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable,
-                count(DISTINCT local_day)::int days_worked,
+                /* The DAYS, not a count of them. This query groups on PK, which is
+                   the ACCOUNT (a provider id where there is one), so a person
+                   holding two platform accounts gets two rows — and the JS
+                   below folds those rows together by person. Summing two
+                   per-account counts then counts a day worked on both
+                   platforms twice: KASHIF ALI AYYUB KHAN, who holds a Uber id
+                   and a hotel id, reported days_worked 13 inside a SEVEN-day
+                   window, which is what made him the only driver on earth to
+                   pass an "at least 10 days driven" gate at days=7 — and so
+                   the only row on BOTH the best-earning and worst-earning
+                   lists at once. A union cannot double-count; a sum can. */
+                array_agg(DISTINCT local_day) AS worked_days,
                 round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
                 round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
                 count(*) FILTER (WHERE has_fare)::int priced_bookings,
@@ -696,7 +707,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
       if (!people.has(k)) {
         people.set(k, { key: k, driver_name: name || id, driver_ext_id: id, ids: [],
           platforms: new Set(), payouts: null, cash: null, payout_days: 0,
-          bookings: 0, completed: 0, bookable: 0, days_worked: 0, km: 0, fares: 0,
+          bookings: 0, completed: 0, bookable: 0, days_worked: 0, worked: new Set(), km: 0, fares: 0,
           priced_bookings: 0, vehicles: 0, plates: [], alerts: 0, reported_km: 0,
           hours_online: null,
           fleet_id: null, last_trip: null });
@@ -712,13 +723,11 @@ export function economicsRoutes(app, { q, wrap, range }) {
     for (const w of work) {
       const r = person(w.driver_name, w.driver_ext_id);
       r.bookings += w.bookings; r.completed += w.completed; r.bookable += w.bookable;
-      /* Days worked is a UNION across a person's accounts, not a max: taking
-         the larger of two per-account counts discards every day worked on one
-         platform and not the other. Summed here would double-count a day
-         worked on both, so the query above is already grouped on the person
-         fold — one row per person per window — and this only ever adds the
-         one row a person has. */
-      r.days_worked += w.days_worked;
+      /* A genuine union. The premise this line used to carry — "the query
+         above is already grouped on the person fold, so this only ever adds
+         the one row a person has" — was wrong: it groups on PK, the account.
+         Anyone with two provider ids arrives here twice. */
+      (w.worked_days || []).forEach((d) => r.worked.add(String(d).slice(0, 10)));
       r.km += Number(w.km || 0);
       r.fares = add(r.fares, w.fares) ?? 0;
       r.priced_bookings += w.priced_bookings;
@@ -751,7 +760,8 @@ export function economicsRoutes(app, { q, wrap, range }) {
          — different rides on different channels. Within one channel they are
          never both present: no platform this fleet works reports both. */
       const money = round((r.payouts || 0) + (r.fares || 0), 2) || null;
-      const idleDays = Math.max(0, windowDays - r.days_worked);
+      r.days_worked = r.worked.size;
+    const idleDays = Math.max(0, windowDays - r.days_worked);
       return {
         driver_ext_id: r.ids[0] || r.driver_ext_id || null,
         driver_name: r.driver_name,

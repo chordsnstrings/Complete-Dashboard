@@ -307,7 +307,13 @@ app.get('/api/drivers/directory', (_, r) => r.json([
   ...drivers.map((name, i) => ({
     driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name, fleet_id: i % 3 ? 'ecosine' : 'egari',
     trips: 420 - i * 37, completed: 400 - i * 36, bookable: 420 - i * 37,
-    days: 26 - i, km: 5400 - i * 380, revenue: 14200 - i * 900, priced_trips: 60 - i * 5,
+    days: 26 - i, km: 5400 - i * 380, revenue: i === 7 ? null : 14200 - i * 900, priced_trips: i === 7 ? 0 : 60 - i * 5,
+    /* Most drivers have a payout and no fare — the production shape, where
+       Uber is most of the work and publishes no fare per trip. Two of them
+       carry a fare and no payout, and one carries neither, so the table's
+       three distinct empty states are all reachable from the mock. */
+    payout: i === 1 || i === 4 ? null : 11800 - i * 700,
+    payout_days: i === 1 || i === 4 ? 0 : Math.max(1, 26 - i),
     last_trip: new Date(Date.now() - i * 36e5).toISOString(),
     last_ever: new Date(Date.now() - i * 36e5).toISOString(), lifetime_trips: 900 - i * 60,
     first_trip: dayISO(DAYS), completion_pct: 97 - i, platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
