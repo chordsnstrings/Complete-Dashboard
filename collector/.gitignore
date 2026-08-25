@@ -2,3 +2,10 @@ node_modules/
 .env
 *.log
 test/*.png
+
+# Scratch workspaces written by agents while measuring: bench harnesses, .orig
+# copies of a file under test, throwaway fixtures. Transient by construction —
+# an agent builds one to prove a before/after and abandons it. Ignored rather
+# than committed so a measurement in progress never lands in the branch.
+.bench/
+.verify/
