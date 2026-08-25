@@ -1075,3 +1075,31 @@ initialization". Caught by rendering the page rather than by reading the diff.
 **All 104 routes now report zero on the numbers sweep**, and zero at 412px on
 the render sweep apart from two `slow-panel` notices, which are the honest
 report this pass added rather than faults.
+
+## 2026-08-26 — the three-width sweep
+
+Everything above was measured at 412px, where the reported bugs were. Running
+all three widths found two more, both of the same kind: a number the page
+showed incompletely and did not say so.
+
+**`#compare`'s Distance tile clipped at 1500px.** `KPI_ONE_LINE` decides when a
+value wraps instead of running off the card, and it was 14. The tile read
+`44 vs 6,454 km` — fourteen characters exactly, so `> 14` was false, so nowrap,
+so five pixels of the number lived outside an `overflow:hidden` card. Not even
+an ellipsis to say it was incomplete.
+
+A threshold tuned to the character fails on the next character, and it fails
+*invisibly* — the tile looks like a tile and the number in it is wrong. Twelve
+now, with margin. `.long` is not a punishment: it permits wrapping and drops the
+font a step, and `white-space:normal` breaks only where it must, so a value that
+fits still occupies one line. Everything the nowrap rule was written for
+("AED 257,122", eleven) stays under the threshold.
+
+**`#drivers` leaderboard cards** clipped a name to 133px of 247 with an ellipsis
+and no `title`, so "Mohammed Selim Shafiqur Rahman" was unrecoverable without
+opening the card. It carries its own name as a title now.
+
+The rest of what the three widths reported is honest: six `slow-panel` notices,
+which is the report this pass added rather than a fault, and one
+`stuck-loading` on `#sources` at 1180px — `/api/coverage` cold, which is twenty
+seconds of real work and now says so on its own skeleton.
