@@ -370,3 +370,40 @@ mistake in the other direction. The same enums reached the `#day` tier legend,
 and `#day` and `#slot` were labelling their platform donuts with raw keys rather
 than `sourceLabel()`.
 
+### Pass 8 — 25 Aug 2026, the third sweep
+
+| code | pass 1 | pass 3 |
+|---|---:|---:|
+| page-overflow | 105 | **0** |
+| dead-column | 85 | **0** |
+| silent-cap | 75 | **0** |
+| bad-value | 48 | **0** |
+| empty-panel | 44 | **3** |
+| blank-page | 18 | **0** |
+| mostly-empty | 15 | **0** |
+| clipped-text | 8 | **0** |
+| overflow | 7 | **0** |
+| js-error / api-error | 12 | **0** |
+| sparse-column | 53 | 54 |
+| stuck-loading | 1 | 1 |
+| **total** | **471** | **58** |
+
+Routes with any finding: **103 → 15**. Ten of thirteen categories are at zero.
+
+The 54 remaining `sparse-column` findings are from a pass that ran *before* the
+sparse disclosure shipped — every one of those columns now prints "N of M rows
+carry one" and the reason. The next sweep measures that.
+
+| # | finding | fix |
+|---|---|---|
+| 30 | `#vehicle/<plate>/movement` — an empty segment table fell through to `tableFrom`'s default, "No data for this range yet", on a page that has just drawn a map of that vehicle's parking | says what IS held: "5 days of fixes are stored and 44 stationary periods were found — the tracker was reporting; it never saw a run of fixes with the seat occupied" |
+| 31 | `/api/live` picked one row per plate with `ORDER BY plate, polled_at DESC`. CABMAN returns the last known position of **every** vehicle on **every** cycle, so all 130 rows in a cycle tie on `polled_at` — and which one Postgres keeps under a tie is arbitrary. The map could show a position older than one already in the table, and the staleness banner would agree with it, because it read the chosen row's own `captured_at` | orders on `captured_at`, the only column that orders *positions*; a fix captured in the future is a tracker whose clock runs ahead rather than a newer position, so those sort last; `polled_at` breaks the remaining ties so the result is deterministic. `test/live_fix.test.mjs`, 10 assertions |
+
+#### The one finding that stays unreproducible
+
+`stuck-loading` on `#driver/<id>/earnings` at 820px — one render out of 312, and
+not reproducible standalone in two attempts at a 9-second settle. Same shape as
+the `#sources` smoke failure in Pass 6: a single late render in a long run
+through a bridge that proxies every request to production. Recorded rather than
+"fixed", because there is nothing to fix until it reproduces.
+

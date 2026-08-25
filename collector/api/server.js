@@ -964,7 +964,22 @@ app.get('/api/live', wrap(async (_, res) => res.json(await q(
           round(extract(epoch FROM now() - s.captured_at) / 60)::int AS fix_age_min,
           round(extract(epoch FROM now() - s.polled_at) / 60)::int AS poll_age_min,
           cd.driver_name AS current_driver, cd.as_of AS driver_as_of
-   FROM (SELECT DISTINCT ON (plate) * FROM telemetry_snapshot ORDER BY plate, polled_at DESC) s
+   /* The newest FIX, not the newest poll.
+      ─────────────────────────────────────────────────────────────────────
+      CABMAN returns the last known position of every vehicle on every cycle,
+      so polled_at is fresh for all 130 plates every five minutes whether or
+      not the tracker actually reported. Ordering by it means every row in a
+      cycle ties, and which one DISTINCT ON keeps is then arbitrary — the map
+      could show a position older than one already held, and nothing on the
+      page would say so. captured_at is what the tracker says the time was,
+      which is the only column that orders positions.
+
+      A fix captured in the FUTURE is a tracker whose clock runs ahead of ours,
+      not a newer position, so those sort last rather than winning forever —
+      the same distinction api/../src/reconcile.js draws between skew and age.
+      polled_at breaks the remaining ties, so the result is deterministic. */
+   FROM (SELECT DISTINCT ON (plate) * FROM telemetry_snapshot
+          ORDER BY plate, (captured_at <= now()) DESC, captured_at DESC, polled_at DESC) s
    LEFT JOIN vehicle_current_driver cd ON cd.plate = s.plate
    ORDER BY s.plate`))));
 

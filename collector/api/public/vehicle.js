@@ -424,7 +424,21 @@ async function tabMovement(root, plate) {
      go to find out why. The start time is the segment's address. */
   const segShown = mv.segments.slice(0, 60);
   const anyReason = mv.segments.some((r) => r.verdict_reason);
-  seg.body.append(tableFrom(segShown, [
+  /* An empty table here fell through to tableFrom's default, "No data for this
+     range yet" — which on a page that has just drawn a map of this vehicle's
+     parking is simply confusing. A segment is built from a RUN of fixes with
+     the seat occupied; a car that was tracked all month and never carried
+     anybody produces none, and that is the answer rather than a gap. It says
+     what IS held instead, so the reader can tell the two apart. */
+  if (!mv.segments.length) {
+    empty(seg.body, mv.days.length
+      ? `No occupancy interval was built for ${plate} in this window. `
+        + `${fmt(mv.days.length)} day(s) of fixes are stored and `
+        + `${fmt(mv.parked.length)} stationary period(s) were found — the tracker was reporting; `
+        + 'it never saw a run of fixes with the seat occupied.'
+      : `No telemetry at all is stored for ${plate} in this window, so nothing could be built `
+        + 'from it. Collection gaps says whether CABMAN was running.');
+  } else seg.body.append(tableFrom(segShown, [
     { label: 'Started', key: 'started_at',
       render: (r) => `<a href="${href('segment', plate, r.started_at)}">${esc(`${dateStr(r.started_at)} ${timeStr(r.started_at)}`)}</a>` },
     { label: 'Ended', key: 'ended_at', render: (r) => timeStr(r.ended_at) },
