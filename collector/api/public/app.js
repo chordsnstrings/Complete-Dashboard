@@ -1727,13 +1727,24 @@ V.finance = async (root) => {
        first place — above a driver who took AED 30 on AED 506. A ratio needs
        a base before it means anything, so the tone is withheld below a floor
        and the row says why rather than disappearing. */
-    const FARE_FLOOR = 300;
+    /* The floor is the SERVER'S, and it excludes rather than merely untoning.
+       ─────────────────────────────────────────────────────────────────────
+       /api/earnings/tips has `HAVING sum(net_fare) >= 300`, so a driver below
+       the floor never reaches this page at all. It returns fare_floor,
+       excluded_n and total so the page can say so — its own comment asks for
+       exactly the sentence below — and the page instead hardcoded 300 again
+       and counted the received rows that fall under it. That count is always
+       ZERO, because the server already removed them, so the branch explaining
+       a short list could never fire and the seven drivers it dropped were
+       invisible. One filter, applied twice, disclosed at neither end. */
+    const FARE_FLOOR = tipRows?.fare_floor ?? 300;
+    const excluded = tipRows?.excluded_n ?? 0;
+    const rankedTotal = tipRows?.total ?? tipList.length;
     const ranked = [...tipList].sort((a, b) => {
       const af = +a.fare >= FARE_FLOOR, bf = +b.fare >= FARE_FLOOR;
       if (af !== bf) return af ? -1 : 1;
       return (+b.tip_pct || 0) - (+a.tip_pct || 0);
     });
-    const thin = ranked.filter((r) => !(+r.fare >= FARE_FLOOR)).length;
     tips.body.append(tableFrom(ranked.slice(0, 30), [
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name || r.driver_ext_id) },
       { label: 'Tips', key: 'tips', num: true, render: (r) => money(r.tips, 'AED', 2) },
@@ -1747,11 +1758,18 @@ V.finance = async (root) => {
             + `${(+r.tip_pct).toFixed(2)}%</span>`;
       } },
     ], { sortable: true, sortId: 'tips' }));
+    const SHOWN = Math.min(30, ranked.length);
     tips.body.append(el('p', 'cap',
-      `Tip rate is tips as a share of net fare. It is only toned above ${money(FARE_FLOOR)} of net fare — `
-      + `${thin ? `${countOf(thin, 'driver')} here ${plural(thin, 'is', 'are')} below that and shown grey` : 'every driver here clears that'}, `
+      `Tip rate is tips as a share of net fare. It is only toned above ${money(FARE_FLOOR)} of net fare, `
       + 'because a 15% rate on AED 63 outranks a 6% rate on AED 506 while meaning less. '
-      + 'It reflects the ride experience more than the route, which is what makes it coachable.'));
+      + 'It reflects the ride experience more than the route, which is what makes it coachable.'
+      + (rankedTotal > SHOWN
+        ? ` Showing the ${fmt(SHOWN)} highest of ${countOf(rankedTotal, 'ranked driver')}.` : '')
+      + (excluded
+        ? ` ${countOf(excluded, 'driver')} took less than ${money(FARE_FLOOR)} of net fare in this `
+          + `window and ${plural(excluded, 'is', 'are')} not ranked at all — the rate would be a `
+          + 'ratio over a base too small to compare.'
+        : '')));
   }
 
   led.body.innerHTML = '';
