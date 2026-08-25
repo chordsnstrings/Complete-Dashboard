@@ -259,7 +259,17 @@ const report = [];
 for (const view of VIEWS) {
   const { text, delegates, resolved } = sourceFor(view);
   const all = paths(text);
-  const ps = all.filter((p) => !/^\/api\/(settings|probe)/.test(p));
+  /* Excluded because calling them has an effect, not because they are hard.
+     `/api/settings/*` holds credential writes and the run trigger, and every
+     `/api/probe/<provider>/<surface>` reaches out to a provider on request.
+
+     `/api/probe/results` does neither — it reads the stored results of the
+     nightly probe pass out of the database — and the blanket /api/probe prefix
+     was taking it with them. That left the Providers page as the one view of
+     thirty-six this tool never called at all, reported as "1 endpoint, all
+     excluded", which reads like a decision rather than a hole. */
+  const ps = all.filter((p) => !/^\/api\/settings/.test(p)
+    && !/^\/api\/probe\/(?!results)/.test(p));
   if (!ps.length) {
     /* Three different things used to print as "static page": a view with no
        calls, a view whose calls were all filtered out, and a view whose module
