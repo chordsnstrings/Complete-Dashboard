@@ -45,13 +45,28 @@ check('it warmed a substantial number of pages', seen.length > 30, String(seen.l
 const dubai = (d) => new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 const to = dubai(new Date());
-const from30 = dubai(new Date(Date.now() - 29 * 864e5));
+
+/* The multiplier is READ OFF the front end, not restated here.
+   ─────────────────────────────────────────────────────────────────────────
+   This check used to hardcode `29 * 864e5` — which is api/warm.js's own
+   arithmetic, not the browser's. api/public/data.js:117 sends
+   `now - days * 864e5`, one day wider, so for every windowed path the warmer
+   had been filling a key no page would ever request, and this test confirmed
+   only that warm.js agreed with itself. It passed for as long as the warmer
+   warmed nothing. Both files are read now, so the two can no longer drift
+   apart without something failing. */
+const uiSrc = readFileSync('api/public/data.js', 'utf8');
+check('the front end still computes its window the way this test reads it',
+  /dubaiDay\(new Date\(now - state\.days \* 864e5\)\)/.test(uiSrc),
+  'api/public/data.js windowDates() has changed shape — re-read it before trusting the checks below');
+const uiFrom = (days) => dubai(new Date(Date.now() - days * 864e5));
+
 check('the default window is the Dubai one the front end computes',
-  seen.some((u) => u.includes(`from=${from30}&to=${to}`)),
+  seen.some((u) => u.includes(`from=${uiFrom(30)}&to=${to}`)),
   seen.slice(0, 2).join(' | '));
-check('and it covers the other two windows the UI offers',
-  seen.some((u) => u.includes(`from=${dubai(new Date(Date.now() - 6 * 864e5))}`))
-  && seen.some((u) => u.includes(`from=${dubai(new Date(Date.now() - 89 * 864e5))}`)));
+check('and it covers the other windows the UI offers',
+  [7, 90, 365].every((d) => seen.some((u) => u.includes(`from=${uiFrom(d)}&to=${to}`))),
+  [7, 90, 365].map((d) => `${d}:${uiFrom(d)}`).join(' '));
 
 /* A path with an existing query string must gain the window with & and not a
    second ?, or the request is malformed and warms nothing. */
@@ -63,7 +78,7 @@ console.log('\nwarm: the pages are actually warm afterwards');
 
 /* The real test. Ask for what a browser would ask for and it must come back
    from the cache — which is only true if the warmer used the same key. */
-const r = await fetch(`http://127.0.0.1:${port}/api/kpis?from=${from30}&to=${to}`);
+const r = await fetch(`http://127.0.0.1:${port}/api/kpis?from=${uiFrom(30)}&to=${to}`);
 check('a page the warmer touched answers from the cache on the first real request',
   r.headers.get('x-cache') === 'hit', String(r.headers.get('x-cache')));
 
@@ -111,10 +126,15 @@ console.log('\nit warms the keys the pages actually ask for');
    two files: warm.js is right only relative to how data.js asks. */
 {
   const warmSrc = readFileSync('api/warm.js', 'utf8');
+  /* Only strings that look like a path. Written as /'([^']+)'/ this matched
+     the apostrophe in any prose comment inside the array and read the rest of
+     the sentence as an endpoint — which then shifted every following entry by
+     one and reported a real path as unwarmed. */
+  const declared = (block) => [...block.matchAll(/'(\/api\/[^']*)'/g)].map((x) => x[1]);
   const bare = [...warmSrc.matchAll(/const BARE_PATHS = \[([^\]]+)\]/gs)]
-    .flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]));
+    .flatMap((m) => declared(m[1]));
   const windowed = [...warmSrc.matchAll(/const PATHS = \[([^\]]+)\]/gs)]
-    .flatMap((m) => [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]));
+    .flatMap((m) => declared(m[1]));
   check('the warmer declares both kinds of key', bare.length > 0 && windowed.length > 0);
 
   /* How each path is CALLED in the UI: api() sends no window, q()/qAll() do. */

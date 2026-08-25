@@ -39,6 +39,14 @@ const PATHS = [
   '/api/drivers/leaderboard', '/api/drivers/directory', '/api/drivers/cross-platform',
   '/api/roster',
   '/api/vehicles', '/api/vehicles/directory',
+  /* The landing page. Both were absent, so every window of the FIRST screen
+     anybody sees was always computed live — and they are the two heaviest
+     queries here. Safe to warm only since they stopped reading the trip heap:
+     at production shape a cold 365-day pair is now about two seconds of
+     database work between them, where before it was seven and could not be
+     cached at all — a statement cancelled at the two-minute pool timeout
+     returns a 500, and api/cache.js stores only 200s. */
+  '/api/economics/assets', '/api/economics/drivers',
   '/api/forecast', '/api/retention', '/api/capacity',
   '/api/playbook', '/api/revenue',
   '/api/alerts/by-driver', '/api/alerts/by-vehicle',
@@ -82,9 +90,25 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
   let running = false;
   let stopped = false;
 
+  /* The window the BROWSER computes, which is the only one worth warming.
+     ─────────────────────────────────────────────────────────────────────
+     This was `days - 1`, matching daysWindow() in api/window.js — and the
+     front end does not use daysWindow(). api/public/data.js:117 sends
+     `now - days * 864e5`, so for every windowed path in the list below the
+     warmer has been filling a key one day narrower than the one a browser
+     asks for: /api/kpis?from=2026-07-27 warmed, /api/kpis?from=2026-07-26
+     requested. Seventeen paths times four windows of work per pass, and not
+     one of those entries was ever read by a page.
+
+     It is invisible from either side. The warmer logs a successful pass, the
+     cache fills up, and the pages are simply never warm — which is exactly
+     the failure this file's header describes and the reason the windows are
+     computed here rather than assumed. Matched to the client, because the
+     client is who has to be served; changing data.js instead would shift the
+     window every page in the product reports on. */
   const windowQs = (days) => {
     const to = dubaiDay(new Date());
-    const from = dubaiDay(new Date(Date.now() - (days - 1) * 864e5));
+    const from = dubaiDay(new Date(Date.now() - days * 864e5));
     return `from=${from}&to=${to}`;
   };
 

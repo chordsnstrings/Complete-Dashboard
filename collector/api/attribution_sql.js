@@ -83,25 +83,54 @@ export const attributedEarnings = ({ platformFilter = '', extra = '' } = {}) => 
   /* The denominator, per period. A period whose vehicle-days record no trips
      at all still has to divide by something, so it falls back to an equal
      split across those days — the driver was in those cars, we simply have no
-     basis to prefer one. Recorded as such via basis below. */
-  den AS (
-    SELECT platform, driver_ext_id, period_start, period_end,
-           sum(trips) AS total_trips, count(*) AS n_days
-    FROM vd GROUP BY 1,2,3,4
+     basis to prefer one. Recorded as such via basis below.
+
+     A WINDOW, not a self-join back onto an aggregate of the same CTE.
+     ─────────────────────────────────────────────────────────────────────
+     It used to be a den CTE, SELECT ... FROM vd GROUP BY 1,2,3,4, joined back
+     with USING (platform, driver_ext_id, period_start, period_end). That join
+     is where the endpoint died under a platform filter. The planner has no
+     statistics for a CTE scan: it estimated ONE row on each side of the join
+     — the real numbers were 7,507 and 1,223 — and one row against one row
+     makes a nested loop with a join filter look free. Measured at production
+     shape on /api/economics/assets?days=365&platform=uber: Rows Removed by
+     Join Filter: 9,158,540, and 308 SECONDS against 1.2 for the same page with
+     no filter. The unfiltered call escaped only because a wider estimate
+     bought it a hash join by luck, which is not a property to rely on.
+
+     The rows are already grouped the way the denominator needs them, so there
+     is nothing to join TO: one partitioned pass computes both aggregates and
+     leaves each row carrying its own period's totals. All four partition
+     columns are NOT NULL on driver_payout_day and are grouped by in the
+     driver_payout view, so the join could never have dropped a row either —
+     the values are identical, and now they cost one sort instead of a
+     quadratic. Same query, filtered: 308s to 0.36s.
+
+     The window is computed BEFORE the day filter below, which is the whole
+     point of the two levels — the weights must divide by the driver's WHOLE
+     period, including the days outside the requested window. WHERE runs
+     before window functions, so filtering here would silently rescale a
+     straddling period to 100% inside the window. */
+  weighted AS (
+    SELECT vd.*,
+           sum(vd.trips) OVER period AS total_trips,
+           count(*)      OVER period AS n_days
+    FROM vd
+    WINDOW period AS (PARTITION BY vd.platform, vd.driver_ext_id,
+                                   vd.period_start, vd.period_end)
   )
   SELECT vd.plate, vd.day, vd.platform, vd.driver_ext_id, vd.driver_name, vd.fleet_id,
          vd.trips, vd.km,
          vd.period_start, vd.period_end,
          vd.earnings AS period_earnings,
-         CASE WHEN den.total_trips > 0 THEN vd.trips::numeric / den.total_trips
-              ELSE 1.0 / nullif(den.n_days, 0) END AS share,
-         vd.earnings * CASE WHEN den.total_trips > 0 THEN vd.trips::numeric / den.total_trips
-                            ELSE 1.0 / nullif(den.n_days, 0) END AS attributed,
-         vd.cash_earnings * CASE WHEN den.total_trips > 0 THEN vd.trips::numeric / den.total_trips
-                                 ELSE 1.0 / nullif(den.n_days, 0) END AS attributed_cash,
-         CASE WHEN den.total_trips > 0 THEN 'trips' ELSE 'even' END AS basis
-  FROM vd
-  JOIN den USING (platform, driver_ext_id, period_start, period_end)
+         CASE WHEN vd.total_trips > 0 THEN vd.trips::numeric / vd.total_trips
+              ELSE 1.0 / nullif(vd.n_days, 0) END AS share,
+         vd.earnings * CASE WHEN vd.total_trips > 0 THEN vd.trips::numeric / vd.total_trips
+                            ELSE 1.0 / nullif(vd.n_days, 0) END AS attributed,
+         vd.cash_earnings * CASE WHEN vd.total_trips > 0 THEN vd.trips::numeric / vd.total_trips
+                                 ELSE 1.0 / nullif(vd.n_days, 0) END AS attributed_cash,
+         CASE WHEN vd.total_trips > 0 THEN 'trips' ELSE 'even' END AS basis
+  FROM weighted vd
   WHERE vd.day BETWEEN $1::date AND $2::date
   ${extra}`;
 
