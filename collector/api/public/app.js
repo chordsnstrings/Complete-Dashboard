@@ -897,7 +897,13 @@ V.drivers = async (root) => {
     ], { sortable: true, sortId: 'cross', defaultSort: { key: 'booking_trips', dir: 'desc' } }));
     xp.body.append(el('p', 'cap',
       `${fmt(multiN)} of ${fmt(popN)} people in this window work more than one channel`
-      + (cross.truncated ? `, from the ${fmt(people.length)} busiest shown here. ` : '. ')
+      /* Two different cuts, and the sentence named neither of the numbers on
+         screen. The endpoint sends the 150 busiest people, and this TABLE then
+         shows the 15 busiest of the multi-channel ones — so a reader counting
+         fifteen rows was reading a sentence about a hundred and fifty. */
+      + (multi.length > 15 ? `, and the ${fmt(Math.min(15, multi.length))} busiest of them are `
+        + 'listed below' : '')
+      + (cross.truncated ? `, drawn from the ${fmt(people.length)} busiest people in the window. ` : '. ')
       + 'Columns cover every platform with data, so the booking total is the sum of what is shown; '
       + 'telematics journeys are counted apart because they are the same physical trips seen by the tracker.'));
   }

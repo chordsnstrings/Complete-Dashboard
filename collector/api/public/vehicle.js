@@ -279,6 +279,14 @@ async function tabDrivers(root, plate) {
     { label: 'Last', key: '_b', render: (r) => timeStr(r.last_trip_at) },
     { label: 'Primary', key: 'is_primary', render: (r) => (r.is_primary ? '●' : '—') },
   ], { sortable: true, sortId: 'vcustdays', defaultSort: { key: 'day', dir: 'desc' } }));
+  /* A table that ends on exactly 120 rows is a table somebody cut, and nothing
+     here said so — on a car with a year of custody that is four months of days
+     silently missing from the bottom of the list. */
+  if (dd.days.length > 120) {
+    tl.body.append(el('p', 'cap',
+      `The 120 most recent of ${countOf(dd.days.length, 'day')} on which somebody held this `
+      + 'vehicle. Sort by Day ascending to reach the earliest of them.'));
+  }
 }
 
 /* ── tab: movement ───────────────────────────────────────────────────────── */

@@ -942,3 +942,35 @@ that is the answer). A page cannot retry; it has already rendered its error box.
 Findings at 412px after both: `sparse-column` 51 → **1**, and that one — the
 `Detail` column on `#settings`, blank for every run that succeeded — now says
 so.
+
+## 2026-08-26 — the cut a database audit cannot see
+
+`bin/cap-audit.mjs` asks the database whether a handler's `LIMIT` is biting, and
+it reports zero silent caps. It cannot see this class at all: a page that
+receives every row and renders `rows.slice(0, 30)`.
+
+New `bin/slice-audit.mjs` reads every `.slice(0, N)` handed to `tableFrom` and
+looks for a disclosure near it. Seventeen tables cut a list; two said nothing:
+
+- **`#drivers` cross-platform** — the endpoint sends the 150 busiest people, the
+  table shows the 15 busiest multi-channel ones, and the caption named neither.
+  A reader counting fifteen rows was reading a sentence about a hundred and
+  fifty.
+- **`#vehicle/<plate>/drivers`** — 120 custody days with no caption at all. On a
+  car with a year of history that is four months silently missing from the
+  bottom of the list.
+
+Calibrating the check took one adjustment worth recording. A caption is appended
+"right after" its table — on the far side of the column list, and a column list
+is as long as the table is wide. The cross-platform table is nine columns with
+four multi-line renders, putting the slice 34 lines from its sentence; at a
+26-line window the check reported a table that discloses. Sixty is still local
+enough that it cannot reach the next panel.
+
+And `#finance`: `/api/earnings/tips` has `HAVING sum(net_fare) >= 300`, so seven
+drivers never reach the page. The endpoint returns `fare_floor`, `excluded_n`
+and `total` so the page can say so — its own comment asks for the sentence — and
+the page hardcoded 300 again and counted the *received* rows below it. That
+count is always zero, because the server already removed them, so the branch
+explaining a short list could never fire. One filter, applied twice, disclosed
+at neither end.
