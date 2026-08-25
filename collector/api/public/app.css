@@ -591,13 +591,44 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 
 /* shift bars ─ first trip to last trip, one row per day */
 .shifts{display:flex;flex-direction:column;gap:5px}
-.shift{display:grid;grid-template-columns:62px 1fr 96px 38px;align-items:center;gap:11px;font-size:.79rem}
+.shift{display:grid;grid-template-columns:62px 1fr 96px 48px 80px 32px;align-items:center;gap:11px;font-size:.79rem}
 .sh-d{color:var(--ink-3);font-family:"IBM Plex Mono",monospace;font-size:.7rem;white-space:nowrap}
-.sh-track{position:relative;height:11px;background:var(--surface-2);border-radius:4px}
+.sh-track{position:relative;height:13px;background:var(--surface-2);border-radius:4px}
+/* THREE STATES, THREE COLOURS.
+   ─────────────────────────────────────────────────────────────────────────
+   .w is the shift span, drawn first and behind everything: what shows through
+   it is the WAITING, which is why waiting needs no segments of its own — it is
+   the part of the day nothing else covers. Amber rather than a grey, because
+   it is a finding, not a background: on this fleet it is most of the shift.
+   .j is a job, request to dropoff. .u is a booking whose dropoff the channel
+   never sent — hatched, so missing data can never be read as either. */
 .sh-track>i{
-  position:absolute;top:0;bottom:0;border-radius:4px;background:var(--s1);opacity:.8;
+  position:absolute;top:0;bottom:0;border-radius:3px;
   transform-origin:left;animation:growX .5s var(--ease-out) backwards;
 }
+.sh-track>i.w{background:var(--warn);opacity:.30}
+.sh-track>i.j{background:var(--s1);opacity:.95}
+.sh-track>i.u{
+  background:repeating-linear-gradient(135deg,
+    var(--ink-3) 0 2px, var(--surface) 2px 5px);
+  box-shadow:inset 0 0 0 1px var(--ink-3);
+  opacity:.7;
+}
+/* Same classes as the bars, so a colour cannot be changed in one place and
+   explained in another. */
+.lgnd{display:flex;flex-wrap:wrap;gap:14px;margin:0 0 10px;font-size:.72rem;color:var(--ink-2)}
+.lgnd span{display:inline-flex;align-items:center;gap:6px}
+.lgnd .sw{width:14px;height:10px;border-radius:3px;display:inline-block}
+.lgnd .sw.w{background:var(--warn);opacity:.30}
+.lgnd .sw.j{background:var(--s1);opacity:.95}
+.lgnd .sw.u{background:repeating-linear-gradient(135deg,
+  var(--ink-3) 0 2px, transparent 2px 5px);opacity:.55}
+.sh-j{font-family:"IBM Plex Mono",monospace;font-size:.72rem;text-align:right;color:var(--s1);white-space:nowrap}
+.sh-w{font-family:"IBM Plex Mono",monospace;font-size:.72rem;text-align:right;color:var(--warn);white-space:nowrap}
+/* The header borrows the row grid so the columns cannot drift apart, and drops
+   the numeric colours so it reads as a label rather than as another day. */
+.sh-head{color:var(--ink-3);font-size:.66rem;letter-spacing:.04em;text-transform:uppercase;margin-bottom:2px}
+.sh-head>div{color:inherit;font-family:"IBM Plex Mono",monospace}
 .sh-v{font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--ink-2);text-align:right}
 .sh-t{font-family:"IBM Plex Mono",monospace;font-size:.75rem;text-align:right;color:var(--ink)}
 
@@ -640,7 +671,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
   .idcard{flex-direction:column;gap:12px}
   .pbar{grid-template-columns:1fr 44px;grid-template-areas:"l l" "t v"}
   .pb-l{grid-area:l} .pb-track{grid-area:t} .pb-v{grid-area:v}
-  .shift{grid-template-columns:54px 1fr 34px}
+  .shift{grid-template-columns:54px 1fr 42px 56px 30px}
   .sh-v{display:none}
 }
 

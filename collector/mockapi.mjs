@@ -549,6 +549,61 @@ app.get('/api/driver/kpis', (req, r) => {
 
 app.get('/api/driver/daily', (req, r) => r.json(dailyFor(req.query.id)));
 
+/* The day as it was actually spent. The fixture makes all three states
+   reachable: normal jobs with gaps between them, one booking with no dropoff
+   (hatched), one that runs past midnight (clamped to the end of the day), and
+   one overlapping pair — which is what a real dispatch looks like when the
+   next rider is assigned before the current one is dropped. */
+app.get('/api/driver/shift', (req, r) => {
+  const solo = String(req.query.id || '').endsWith('9');
+  const days = [];
+  for (let i = 0; i < 14; i++) {
+    const day = dayISO(13 - i);
+    const jobs = [];
+    let t = 300 + (i % 5) * 45;                       // first request, 05:00-08:00
+    const n = 4 + (i % 4);
+    for (let k = 0; k < n; k++) {
+      const len = 25 + ((i + k) % 4) * 12;
+      jobs.push({ s: t, e: t + len, over: false, platform: k % 3 ? 'uber' : 'hotel',
+        plate: 'L44251', outcome: 'completed' });
+      t += len + 30 + ((i + k) % 5) * 22;             // then a gap
+    }
+    // One booking whose dropoff the channel never sent.
+    if (i % 4 === 1) jobs.push({ s: t, e: null, over: false, platform: 'uber', plate: 'L44251', outcome: 'completed' });
+    // One overlapping dispatch: assigned before the previous job ended.
+    if (i % 5 === 2 && jobs.length > 1) {
+      const prev = jobs[jobs.length - 1];
+      jobs.push({ s: prev.s + 10, e: prev.s + 55, over: false, platform: 'uber', plate: 'L44251', outcome: 'completed' });
+    }
+    // One night job that runs past midnight and is clamped to the day's end.
+    if (i % 6 === 3) jobs.push({ s: 1390, e: 1440, over: true, platform: 'uber', plate: 'L44251', outcome: 'completed' });
+    const known = jobs.filter((j) => j.e != null);
+    let onJob = 0, wait = 0, longest = 0, overlaps = 0, cursor = null;
+    [...jobs].sort((a, b) => a.s - b.s).forEach((j) => {
+      if (j.e == null) return;
+      onJob += j.e - j.s;
+      if (cursor != null) {
+        const gap = j.s - cursor;
+        if (gap < 0) overlaps += 1; else { wait += gap; longest = Math.max(longest, gap); }
+      }
+      cursor = Math.max(cursor ?? j.e, j.e);
+    });
+    const first = Math.min(...jobs.map((j) => j.s));
+    const last = known.length ? Math.max(...known.map((j) => j.e)) : first;
+    days.push({ day, jobs, bookings: jobs.length, on_job_min: onJob, wait_min: wait,
+      longest_wait_min: longest, overlaps, unknown_end: jobs.length - known.length,
+      first_min: first, last_min: last, span_min: last - first });
+  }
+  return r.json({
+    days: solo ? days.slice(-3) : days,
+    basis: 'A job runs from the request to the dropoff, so it contains the drive to the rider '
+      + 'and the wait for them as well as the ride itself. Uber\'s export carries two timestamps '
+      + 'and no pickup time, and the hotel channel the same, so the ride cannot be separated '
+      + 'from the approach on any booking channel.',
+    unknown_end: days.reduce((a, x) => a + x.unknown_end, 0),
+  });
+});
+
 app.get('/api/driver/heatmap', (req, r) => {
   const seed = idIndex(req.query.id), out = [];
   for (let dow = 0; dow < 7; dow++) for (let h = 5; h < 24; h++) {

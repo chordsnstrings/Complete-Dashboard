@@ -135,29 +135,116 @@ function startScatter(host, days) {
   host.append(el('p', 'cap', `Shaded band = the middle half of start times (${hourStr(qa)}–${hourStr(qb)}). Each dot is one working day.`));
 }
 
-/* ── the shift bar: first trip → last trip, one row per day ─────────────── */
-function shiftBars(host, days) {
+/* ── the day as it was actually spent, one row per day ────────────────────
+   This was one solid bar per day from the first trip to the last, captioned
+   "the working window". A span is not a working window: eight trips spread
+   across 05:19–23:10 drew exactly the same bar as eight done back to back,
+   and on this fleet the difference is most of the day. Measured live on six
+   drivers for 25 August, the share of the span spent NOT carrying anyone ran
+   from 51% to 92% — the single largest fact about how a shift is spent, and
+   the old bar hid all of it behind one colour.
+
+   Now the bar is the day itself: each job drawn at its real position, the gaps
+   between them left as the track behind. Three states, three colours, stated
+   in a legend:
+
+     on job     request → dropoff, solid blue
+     waiting    between one dropoff and the next request, amber
+     no dropoff a booking whose end time the channel never sent, hatched
+
+   The third exists so that missing data is never quietly rendered as idleness.
+   Uber reports a dropoff on most trips and none on the others, and folding
+   those into the gaps would invent waiting that nobody can verify. */
+function shiftBars(host, days, meta = {}) {
   host.innerHTML = '';
-  /* Postgres returns `numeric` as a STRING. `first_hour + 0.25` therefore
-     concatenated ("6.5" + 0.25 = "6.50.25"), Math.max saw NaN, and every bar
-     rendered as width:NaN% with a "—" end time. The whole panel was dead on
-     every driver, and it looked like a styling problem. Coerce at the edge. */
-  const rows = days.filter((d) => Number.isFinite(+d.first_hour)).slice(-28);
+  const rows = (days || []).filter((d) => d.first_min != null).slice(-28);
   if (!rows.length) return empty(host);
+
+  /* A header row, because five numeric columns with no labels is a puzzle.
+     It uses the same grid as a shift row so the columns cannot drift apart. */
   const wrap = el('div', 'shifts');
+  const hd = el('div', 'shift sh-head');
+  hd.innerHTML = '<div class="sh-d"></div><div></div><div class="sh-v">first–last</div>'
+    + '<div class="sh-j">on job</div><div class="sh-w">waiting</div><div class="sh-t">jobs</div>';
+  wrap.append(hd);
   rows.forEach((d, i) => {
-    const a = +d.first_hour;
-    const b = Math.max(Number.isFinite(+d.last_hour) ? +d.last_hour : a, a + 0.25);
+    const pctOf = (m) => (m / 1440) * 100;
+    /* Drawn in ascending order of start so a later job paints over an earlier
+       overlapping one rather than under it. An overlap is real on this fleet —
+       the next rider assigned before the current is dropped — and the count is
+       shown rather than the geometry being fudged. */
+    const segs = [...d.jobs].sort((a, b) => a.s - b.s).map((j) => {
+      const known = j.e != null;
+      /* A floor, so a two-minute job is still visible — and a wider one for the
+         unknowns, which are a MARKER rather than a duration: drawn at their
+         real width they were four pixels of hatching that read as an artifact
+         of the track rather than as a booking. */
+      const w = known ? Math.max(j.e - j.s, 4) : 14;
+      return `<i class="${known ? 'j' : 'u'}" style="left:${pctOf(j.s)}%;width:${pctOf(w)}%;`
+        + `animation-delay:${i * 18}ms" title="${esc(hhmm(j.s))}–${known ? esc(hhmm(j.e)) : 'no dropoff reported'}`
+        + `${j.platform ? ' · ' + esc(j.platform) : ''}"></i>`;
+    }).join('');
+    /* The span, drawn behind the jobs. What shows through it IS the waiting,
+       which is why waiting needs no segments of its own — it is the part of
+       the shift nothing else covers. */
+    const span = `<i class="w" style="left:${pctOf(d.first_min)}%;`
+      + `width:${pctOf(Math.max(4, (d.last_min ?? d.first_min) - d.first_min))}%"></i>`;
+
+    const share = d.span_min ? Math.round((d.wait_min / d.span_min) * 100) : null;
     const r = el('div', 'shift');
     r.innerHTML = `<div class="sh-d">${dayStr(d.day)}</div>
-      <div class="sh-track"><i style="left:${(a / 24) * 100}%;width:${((b - a) / 24) * 100}%;animation-delay:${i * 25}ms"></i></div>
-      <div class="sh-v num">${hourStr(a)}–${hourStr(b)}</div>
-      <div class="sh-t num">${d.trips}</div>`;
-    r.title = `${dayStr(d.day)} · ${d.trips} trips · ${fmt(d.km)} km${d.holiday_name ? ' · ' + d.holiday_name : ''}`;
+      <div class="sh-track">${span}${segs}</div>
+      <div class="sh-v num">${hhmm(d.first_min)}–${d.last_min != null ? hhmm(d.last_min) : '—'}</div>
+      <div class="sh-j num">${d.on_job_min ? `${fmt(d.on_job_min / 60, 1)}h` : '<span class="dim">—</span>'}</div>
+      <div class="sh-w num">${d.wait_min ? `${fmt(d.wait_min / 60, 1)}h${
+        share != null ? ` <span class="dim">${share}%</span>` : ''}` : '<span class="dim">—</span>'}</div>
+      <div class="sh-t num">${d.bookings}</div>`;
+    r.title = `${dayStr(d.day)} · ${d.bookings} bookings · on job ${fmt(d.on_job_min / 60, 1)} h`
+      + ` · waiting ${fmt(d.wait_min / 60, 1)} h`
+      + (d.overlaps ? ` · ${d.overlaps} overlapping` : '')
+      + (d.unknown_end ? ` · ${d.unknown_end} with no dropoff` : '');
     wrap.append(r);
   });
+
+  host.append(legend([
+    ['j', 'on job — request to dropoff'],
+    ['w', 'waiting between jobs'],
+    ['u', 'no dropoff reported'],
+  ]));
   host.append(wrap);
-  host.append(el('p', 'cap', 'Bar spans the first to the last trip of the day (Dubai time) — not paid hours, but the working window the trips describe.'));
+
+  const onJob = rows.reduce((a, d) => a + (d.on_job_min || 0), 0);
+  const waited = rows.reduce((a, d) => a + (d.wait_min || 0), 0);
+  const span = rows.reduce((a, d) => a + (d.span_min || 0), 0);
+  host.append(el('p', 'cap', esc(
+    `Across these ${rows.length} days: ${fmt(onJob / 60, 1)} h on job, ${fmt(waited / 60, 1)} h `
+    + `waiting between jobs — ${span ? Math.round((waited / span) * 100) : 0}% of the time between `
+    + 'the first request and the last dropoff. '
+    + (meta.basis || ''))));
+  if (meta.unknown_end) {
+    host.append(el('p', 'cap', esc(
+      `${meta.unknown_end} booking${meta.unknown_end === 1 ? '' : 's'} in this window carry no `
+      + 'dropoff time. Those are hatched and left out of both totals rather than counted as waiting.')));
+  }
+}
+
+/* A legend that uses the SAME classes the bars do, so a colour can never be
+   changed in one place and explained in another. */
+function legend(items) {
+  const l = el('div', 'lgnd');
+  l.innerHTML = items.map(([cls, text]) =>
+    `<span><i class="sw ${esc(cls)}"></i>${esc(text)}</span>`).join('');
+  return l;
+}
+
+/* Minutes since Dubai midnight, as a clock. The value is already Dubai-local —
+   the API converted it — so this must NOT go through a Date, which would
+   reintroduce the viewer's own timezone into the one chart whose entire
+   subject is when somebody worked in Dubai. */
+function hhmm(min) {
+  if (min == null || !Number.isFinite(+min)) return '—';
+  const m = Math.max(0, Math.min(1440, Math.round(+min)));
+  return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 }
 
 /* ── online vs on-trip, one chart ─────────────────────────────────────────
@@ -367,17 +454,27 @@ async function tabOverview(root, id, prof) {
 
 /* ── tab: activity ───────────────────────────────────────────────────────── */
 async function tabActivity(root, id) {
+  /* Full width. Twenty-eight days of a 24-hour axis in half a page gives each
+     hour about eight pixels, so a thirty-minute job is four pixels wide and
+     the panel that exists to show WHEN somebody worked shows a smear. */
+  const sh = panel('How the day was spent',
+    'Each job at its real position, and the waiting between them'); root.append(sh.panel);
   const g0 = el('div', 'grid g2'); root.append(g0);
-  const sh = panel('Shift window by day', 'From first trip to last trip'); g0.append(sh.panel);
   const hrs = panel('Hours online vs on-trip', 'Only for days the platform reported hours'); g0.append(hrs.panel);
-  const dist = panel('Distance per day', 'Kilometres covered'); root.append(dist.panel);
+  const dist = panel('Distance per day', 'Kilometres covered'); g0.append(dist.panel);
   const tbl = panel('Day by day', 'Every working day, with the weather and calendar context for that date'); root.append(tbl.panel);
   const cust = panel('Vehicle custody', 'Which car, which day — handovers included'); root.append(cust.panel);
   [sh.body, hrs.body, dist.body, tbl.body, cust.body].forEach(loading);
 
-  const [daily, custody] = await Promise.all([qAll('/api/driver/daily', { id }), qAll('/api/driver/custody', { id })]);
+  /* qAll, not q. A detail page must ignore the platform and fleet chips:
+     "everything about this person" while a filter silently hides half their
+     work is a lie, and on this panel it would erase whole jobs from the middle
+     of a shift and redraw them as waiting. */
+  const [daily, custody, shift] = await Promise.all([
+    qAll('/api/driver/daily', { id }), qAll('/api/driver/custody', { id }),
+    qAll('/api/driver/shift', { id })]);
 
-  shiftBars(sh.body, daily);
+  shiftBars(sh.body, shift.days, shift);
 
   const withHours = daily.filter((d) => d.hours_online != null);
   hrs.body.innerHTML = '';
