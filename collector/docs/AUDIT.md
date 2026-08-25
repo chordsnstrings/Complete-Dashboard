@@ -500,3 +500,53 @@ Guarded by `test/components.test.mjs` (12 assertions) against a fixture of 500
 drivers × 2 components — 1,000 rows, which the old cap would have cut in half
 and split parents from children.
 
+### Pass 12 — 25 Aug 2026, the sixth sweep: clean
+
+```
+312 page-renders across 3 widths, 0 routes with findings
+exit code 0
+```
+
+**471 findings across 103 routes → 0.**
+
+### Pass 13 — the caps that were actually cutting
+
+A LIMIT is not a bug. A LIMIT that is *biting* and says nothing is, because the
+reader takes the last row as the last one there is — and any page that
+aggregates the list then prints a fleet figure over whatever happened to fit.
+
+That question cannot be answered from the source: `LIMIT 600` looks identical
+whether the table holds four hundred rows or four thousand. The first draft of
+this check was a source regex and it flagged **twenty handlers, seventeen of
+them `LIMIT 1` lookups** — the third time in this audit a static check has cried
+wolf, and the same lesson each time.
+
+So `bin/cap-audit.mjs` asks the database instead. Measured against production:
+
+```
+45 handlers carry a LIMIT above 1
+ 7 are at their cap
+ 0 silently
+```
+
+| # | finding | fix |
+|---|---|---|
+| 40 | `/api/product/by-vehicle` returned exactly 600 rows, a bare array. The front end pivots these into one row per plate and computes the fleet's concentration sentence — *"the top N vehicles take X% of the work"* — over **every** plate, not the thirty it lists. Cutting the input made that sentence wrong in the direction that flatters the fleet | no LIMIT at all: (plate, product) pairs on a 140-vehicle fleet cannot exceed a few hundred, so the cap saved nothing and cost the tail |
+| 41 | `/api/map/days` returned exactly 400 and **disclosed it on every row** — `total`, `shown`, `truncated` — and the day picker ignored all three. A vehicle whose days fell past the cap showed a short menu, or none, with nothing to distinguish that from a car that was never tracked | the picker reads them: *"the picker holds the 400 newest days across the fleet of 463 — narrow the range to reach older ones"* |
+| 42 | three more endpoints were at their cap and already disclosing it (`corporate/guests`, `drivers/performance`, `settlement/cash-exposure`) — false positives of a probe that looked for a key literally named `total` | none needed; recorded so the next probe does not chase them |
+
+`bin/cap-audit.mjs` joins the other four harnesses. Run it after any change that
+adds a LIMIT.
+
+## Where the audit ended
+
+| harness | result |
+|---|---|
+| `bin/render-audit.mjs` | 312 renders, **0 findings** |
+| `bin/cap-audit.mjs` | 45 capped handlers, **0 silent** |
+| `npm test` | 69 files, **2,240 assertions, 0 failing** |
+| `test/smoke_views.mjs` | 104 routes render against production |
+
+Forty-two findings, every one logged above with what was measured, what was
+changed, and why.
+

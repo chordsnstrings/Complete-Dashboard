@@ -2693,8 +2693,19 @@ app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
        FROM trip_norm t
       WHERE ${F} AND t.plate IS NOT NULL AND t.product IS NOT NULL
       GROUP BY t.plate, t.product
-      ORDER BY t.plate, trips DESC
-      LIMIT 600),
+      /* No LIMIT. It was 600, and production returned exactly 600 — a cap that
+         has bitten. The rows are (plate, product) pairs: a hundred and forty
+         vehicles across six product tiers is under nine hundred at the very
+         most, so the cap saved nothing and cost the tail.
+
+         And it cost it in the worst place. api/public/app.js pivots these into
+         one row per plate and computes the fleet's concentration sentence —
+         "the top N vehicles take X% of the work" — over EVERY plate, not over
+         the thirty it lists. Cutting the input made that sentence wrong in the
+         direction that flatters the fleet, over a set nobody could see. Same
+         defect as /api/earnings/components, which capped a total at four
+         hundred rows and printed it as the fleet's. */
+      ORDER BY t.plate, trips DESC),
    held AS (
      SELECT v.plate, v.driver_name, v.driver_ext_id, count(DISTINCT v.day)::int days
        FROM vehicle_driver_day v

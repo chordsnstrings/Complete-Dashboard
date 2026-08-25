@@ -2375,9 +2375,21 @@ V.map = async (root) => {
       return `<option value="${esc(r.day)}">${esc(dayStr(r.day))} · ${r.fixes} fixes${esc(who)}</option>`;
     }).join('') || '<option value="">no stored days for this vehicle</option>';
     const cur = rows[0]?.current_driver_name;
+    /* The API says whether its own list was cut — total/shown/truncated ride on
+       every row — and this note ignored it. The picker reached exactly 400 rows
+       in production, and the rows are grouped by plate here, so a vehicle whose
+       days fell past the cap shows a SHORT menu or an empty one with nothing to
+       distinguish that from a car that was never tracked. The day a reader is
+       looking for is simply absent. */
+    const cut = rows[0]?.truncated ? rows[0] : null;
     dayNote.textContent = rows.length
       ? `${rows.length} replayable day(s)` + (cur ? ` · held today by ${cur}` : '')
-      : 'This vehicle has no stored trail.';
+        + (cut ? ` · the picker holds the ${fmt(cut.shown)} newest days across the fleet of `
+          + `${fmt(cut.total)} — narrow the range to reach older ones` : '')
+      : (cut
+        ? `No day for this vehicle is in the picker. It holds the ${fmt(cut.shown)} newest days `
+          + `across the whole fleet, of ${fmt(cut.total)} — narrow the range to reach this one.`
+        : 'This vehicle has no stored trail.');
   };
   refillDays = fillDays;
   fillDays();

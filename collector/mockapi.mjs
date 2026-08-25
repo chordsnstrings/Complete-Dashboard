@@ -34,9 +34,14 @@ app.get('/api/map/days', (_, r) => {
     // The id, so the day list can open the person rather than only name them.
     driver_ext_id: `drv-${i}`, driver_trips: 12 - i, current_driver_name: drivers[i],
   }));
-  // A bare array: the map's day picker has no front-end item pairing with this
-  // change, so the three facts ride on the row rather than reshaping it.
-  r.json(rows.map((x) => ({ ...x, total: rows.length, shown: rows.length, truncated: false })));
+  /* A bare array: the map's day picker has no front-end item pairing with this
+     change, so the three facts ride on the row rather than reshaping it.
+
+     Truncated ON PURPOSE, so the note that says the picker was cut is reachable
+     from the fixture. Production reached exactly 400 rows, which is what a cap
+     looks like when it has bitten, and a mock that always returns everything
+     cannot exercise the branch that says so. */
+  r.json(rows.map((x) => ({ ...x, total: rows.length + 63, shown: rows.length, truncated: true })));
 });
 
 app.get('/api/map/journey', (req, res) => {
