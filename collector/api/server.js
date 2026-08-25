@@ -2589,13 +2589,32 @@ app.get('/api/recommendations', wrap(async (_, res) => {
    LIMIT are deliberately untouched here — both belong to the money-model
    work, and changing a predicate and a window in the same commit makes the
    money it moves impossible to attribute to either. */
+/* Aggregated to the FLEET, because that is the only thing that reads it.
+   ─────────────────────────────────────────────────────────────────────────
+   This returned one row per (driver, category) and kept the four hundred
+   largest by absolute value. Three things were wrong with that, and they
+   compounded:
+
+     - The cap was BINDING. Production returns exactly 400 rows, which is what
+       a cap looks like when it is cutting.
+     - It cut by |amount| across every driver at once, so a top-level component
+       for one driver could survive while its own children were cut, and a
+       child of another could survive without its parent.
+     - componentTree() in api/public/app.js then sums the roots and prints "the
+       N top-level components above net to AED …" — a confident fleet total
+       over an arbitrary truncated subset.
+
+   The consumer aggregates by (parent, category) on arrival and throws the
+   driver away, so the per-driver rows were never used for anything. Grouping
+   here instead makes the answer EXACT and about twenty rows rather than four
+   hundred, and removes the need for a cap at all. */
 app.get('/api/earnings/components', wrap(async (req, res) => res.json(await q(
-  `SELECT driver_ext_id, driver_name, category, parent,
-          round(sum(amount)::numeric,2) amount, currency
+  `SELECT category, parent, round(sum(amount)::numeric,2) amount, currency,
+          count(DISTINCT driver_ext_id)::int drivers
    FROM driver_earnings_component
    WHERE period_start >= $1 AND period_end <= $2
      AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
-   GROUP BY 1,2,3,4,6 ORDER BY abs(sum(amount)) DESC LIMIT 400`,
+   GROUP BY 1,2,4 ORDER BY abs(sum(amount)) DESC`,
   range(req)))));
 
 // per-driver tip rate — service quality expressed in money

@@ -472,3 +472,31 @@ dash read as "not measured". It is the single most common defect this audit
 found, and it is invisible without rendering the page: the API is right, the
 formatter is right in isolation, and only the column in context is wrong.
 
+### Pass 11 — 25 Aug 2026, a confident total over an arbitrary subset
+
+Not from the render sweep — from working the money model that the sweep's
+`silent-cap` check pointed at.
+
+`/api/earnings/components` returned one row per (driver, category) and kept the
+**four hundred largest by absolute value**. Production returned exactly 400
+rows, which is what a cap looks like when it is cutting.
+
+Three things compounded:
+
+- The cut was by `|amount|` **across every driver at once**, so a top-level
+  component for one driver could survive while its own children were cut, and a
+  child of another could survive without its parent.
+- `componentTree()` then sums the roots and prints *"the N top-level components
+  above net to AED …"* — a fleet total, stated plainly, over whatever fitted.
+- And the per-driver granularity **was never used**: `componentTree` folds on
+  `(parent, category)` the moment the rows arrive and throws the driver away.
+
+| # | finding | fix |
+|---|---|---|
+| 38 | a fleet payout breakdown computed over the 400 largest rows, with parents and children cut independently of each other | grouped by `(category, parent, currency)` in SQL — exact, no cap needed, ~20 rows instead of 400 |
+| 39 | the fold destroyed the one thing the aggregation could have added | the endpoint returns `drivers` per component, and the table shows it: a deduction everybody carries and one that applies to three drivers are different findings, and the amount alone cannot tell them apart |
+
+Guarded by `test/components.test.mjs` (12 assertions) against a fixture of 500
+drivers × 2 components — 1,000 rows, which the old cap would have cut in half
+and split parents from children.
+

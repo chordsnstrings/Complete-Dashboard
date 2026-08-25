@@ -140,8 +140,15 @@ function componentTree(components) {
   for (const c of components) {
     const key = `${c.parent || ''}|${c.category}`;
     const cur = agg.get(key)
-      || { label: String(c.category).replace(/_/g, ' '), parent: c.parent || null, amount: 0, currency: c.currency };
+      || { label: String(c.category).replace(/_/g, ' '), parent: c.parent || null,
+        amount: 0, currency: c.currency, drivers: null };
     cur.amount += +c.amount || 0;
+    /* How many people a component covers. The endpoint aggregates to the fleet
+       now, so this is the one thing the fold would otherwise destroy — and it
+       is the difference between a deduction everybody carries and one that
+       applies to three drivers. The max, not a sum, because the endpoint
+       returns one row per component already. */
+    if (c.drivers != null) cur.drivers = Math.max(cur.drivers ?? 0, +c.drivers || 0);
     agg.set(key, cur);
   }
   const all = [...agg.values()];
@@ -176,6 +183,7 @@ function componentTree(components) {
       const root = roots.find((r) => r.label === String(p).replace(/_/g, ' '));
       list.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)).forEach((c) => {
         rows.push({ within: String(p).replace(/_/g, ' '), label: c.label, amount: c.amount,
+          drivers: c.drivers,
           share: root && root.amount ? (c.amount / root.amount) * 100 : null });
       });
     }
@@ -188,6 +196,11 @@ function componentTree(components) {
         render: (r) => (r.share == null
           ? '<span class="ent-off" title="the parent component was not returned for this window">—</span>'
           : pct(r.share, 1)) },
+      /* A component everybody carries and one that applies to three drivers
+         are different findings, and the amount alone cannot tell them apart. */
+      { label: 'Drivers', key: 'drivers', num: true,
+        absent: 'this window predates the per-component driver count',
+        render: (r) => (r.drivers == null ? '—' : fmt(r.drivers)) },
     ], { compact: true, sortable: true, sortId: 'comp' }));
   }
   return host;

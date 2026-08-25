@@ -1202,13 +1202,20 @@ app.get('/api/mix', (req, r) => {
     { label: 'Electric', n: 151, revenue: 4400 }]);
 });
 
+/* Aggregated to the fleet, like the real endpoint: one row per
+   (category, parent), with the roots present so the tree can nest and net.
+   The per-driver shape this used to return was never read — componentTree()
+   folds on (parent, category) the moment it arrives. */
 app.get('/api/earnings/components', (_, r) => r.json([
-  { driver_ext_id: 'drv-0', driver_name: 'Ahmed Tarig Mohamed', category: 'net_fare', parent: 'earnings', amount: 52180, currency: 'AED' },
-  { driver_ext_id: 'drv-0', driver_name: 'Ahmed Tarig Mohamed', category: 'tip', parent: 'earnings', amount: 1642, currency: 'AED' },
-  { driver_ext_id: 'drv-1', driver_name: 'Muhammad Ashraf Bakhsh', category: 'promotion', parent: 'earnings', amount: 3410, currency: 'AED' },
-  { driver_ext_id: 'drv-1', driver_name: 'Muhammad Ashraf Bakhsh', category: 'toll_reimbursement', parent: 'reimbursements', amount: 980, currency: 'AED' },
-  { driver_ext_id: 'drv-2', driver_name: 'Najeeb Ullah Khan', category: 'cash_collected', parent: 'payouts', amount: -14800, currency: 'AED' },
-  { driver_ext_id: 'drv-2', driver_name: 'Najeeb Ullah Khan', category: 'service_fee', parent: 'payouts', amount: -9120, currency: 'AED' },
+  { category: 'earnings', parent: null, amount: 57232, currency: 'AED', drivers: 41 },
+  { category: 'payouts', parent: null, amount: -23920, currency: 'AED', drivers: 38 },
+  { category: 'reimbursements', parent: null, amount: 980, currency: 'AED', drivers: 12 },
+  { category: 'net_fare', parent: 'earnings', amount: 52180, currency: 'AED', drivers: 41 },
+  { category: 'tip', parent: 'earnings', amount: 1642, currency: 'AED', drivers: 22 },
+  { category: 'promotion', parent: 'earnings', amount: 3410, currency: 'AED', drivers: 9 },
+  { category: 'toll_reimbursement', parent: 'reimbursements', amount: 980, currency: 'AED', drivers: 12 },
+  { category: 'cash_collected', parent: 'payouts', amount: -14800, currency: 'AED', drivers: 38 },
+  { category: 'service_fee', parent: 'payouts', amount: -9120, currency: 'AED', drivers: 38 },
 ]));
 
 /* Ranked by tip RATE, so the ranking needs a fare base worth dividing by: the
