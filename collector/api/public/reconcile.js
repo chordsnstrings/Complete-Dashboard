@@ -35,12 +35,25 @@ import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, fmt, pct
   countOf, plural } from './ui.js';
 import { api, state, href } from './data.js';
 
-/* Why a money column can be empty for a whole year of months. Stated once and
-   shared, because four columns on this page have the same answer and four
-   wordings for one absence read as four separate problems. */
-const MONEY_FROM = 'the ledger only carries money from 6 February 2026 — earlier months were '
-  + 'never collected, so a blank here is a month before the statements begin rather than a month '
-  + 'in which nothing was paid';
+/* Why a money column can be empty for a whole year of months.
+   ─────────────────────────────────────────────────────────────────────────
+   The first version of this sentence said "the ledger only carries money from
+   6 February 2026", which is true of the BANK side and wrong for these four
+   columns. Measured on the live database:
+
+     bank payout          6 Feb 2026 → 30 Aug 2026, 206 days, AED 2,105,263
+     earnings components  August 2026 only — 0 rows for Feb–Jul
+
+   driver_statement_day, which every on-trip figure here reads, is built by
+   src/rollup.js from driver_earnings_component. So on-trip net, tips, Salik
+   and cash collected exist for exactly the months whose payout BREAKDOWN was
+   pulled, and that is one of thirteen. The bank column beside them is filled
+   for seven, which is why the two sides disagree about how much history this
+   page has — and why saying "the ledger starts in February" over a column
+   that starts in August was worse than saying nothing. */
+const MONEY_FROM = 'the payout BREAKDOWN behind these figures has only been collected for August '
+  + '2026 — the bank column beside them goes back to 6 February, so a blank here is a month whose '
+  + 'statement was never pulled rather than a month in which nothing was paid';
 
 const MONTH_LABEL = (m) => {
   const [y, mm] = String(m).split('-');

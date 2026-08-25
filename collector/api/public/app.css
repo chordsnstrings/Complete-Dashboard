@@ -1038,3 +1038,32 @@ a.insight-row:hover{border-color:var(--accent)}
 .tabsent{display:flex;flex-direction:column;gap:3px;margin:9px 0 0}
 .tabsent span{color:var(--ink-3)}
 .tabsent b{color:var(--ink-2);font-weight:600}
+
+/* ── the identity column stays put while the numbers scroll ───────────────
+   A wide table scrolls sideways inside .tscroll, which is right — but the
+   FIRST column is what every other cell is ABOUT, and it scrolled away with
+   them. On a phone the reconciliation table showed thirteen rows of money with
+   no month against any of them, and the drivers table showed distances and
+   payouts with nobody's name in sight. Every number was correct and none of
+   them meant anything.
+
+   Sticky rather than a second frozen table: one DOM, one row height, and no
+   drift between two halves. The header cell needs the higher z-index so it
+   stays put in both directions at the corner. */
+.tscroll{position:relative}
+.tscroll table td:first-child,
+.tscroll table th:first-child{
+  position:sticky;left:0;z-index:2;background:var(--surface);
+  /* A rule, so the reader sees a pinned column rather than an overlap. */
+  box-shadow:1px 0 0 var(--rule);
+}
+.tscroll table th:first-child{z-index:3;background:var(--surface-2)}
+/* A striped or hovered row must carry its own background through the pinned
+   cell, or the page shows through it as the table scrolls under. */
+.tscroll table tbody tr:nth-child(even) td:first-child{background:var(--paper-2)}
+.tscroll table tbody tr:hover td:first-child{background:var(--surface-2)}
+
+/* The table and the sentences that explain it. The scroller is inside; the
+   notes are not, so they stay at panel width while the columns scroll. */
+.tblock{min-width:0}
+.tblock > .tscroll{margin-bottom:0}

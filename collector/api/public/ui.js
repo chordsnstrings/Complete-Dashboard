@@ -85,6 +85,9 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
   if (!rows.length) { const d = el('div'); empty(d); return d; }
   const wrap = el('div', 'tscroll');
   const t = el('table', compact ? 'compact' : null);
+  /* Anything that explains the table rather than being part of it. Collected
+     here and attached outside the scroller at the end. */
+  const notes = [];
 
   /* A column that is empty in EVERY row is not a column.
      ───────────────────────────────────────────────────────────────────────
@@ -195,22 +198,56 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
   paint();
   wrap.append(t);
   if (dead.length || sparse.length) {
-    /* Named one per line rather than joined, because each is a different
-       missing source and a reader needs to know which. */
+    /* One line per REASON, not per column.
+       ───────────────────────────────────────────────────────────────────
+       Four columns of the reconciliation table share one answer — the ledger
+       does not go back that far — and printing it four times filled the
+       bottom of the panel with the same sentence, which reads as four
+       separate faults. Grouped by the sentence, with the columns named in
+       front of it. */
+    const byReason = new Map();
+    const add = (label, reason, count) => {
+      if (!byReason.has(reason)) byReason.set(reason, []);
+      byReason.get(reason).push({ label, count });
+    };
+    dead.forEach((c) => add(c.label, c.absent, null));
+    sparse.forEach(({ col, n }) => add(col.label, col.absent, n));
+
     const d = el('div', 'cap tabsent');
-    d.innerHTML = [
-      ...dead.map((c) => `<span><b>${esc(c.label)}</b> — ${esc(c.absent)}</span>`),
-      ...sparse.map(({ col, n }) => `<span><b>${esc(col.label)}</b> — ${fmt(n)} of `
-        + `${fmt(rows.length)} rows carry one; ${esc(col.absent)}</span>`),
-    ].join('');
-    wrap.append(d);
+    d.innerHTML = [...byReason.entries()].map(([reason, cols]) => {
+      const names = cols.map((c) => `<b>${esc(c.label)}</b>`).join(', ');
+      /* A count belongs to one column, so it is only stated when the reason
+         covers exactly one — "31 of 361 rows carry one" is meaningless spread
+         across four different columns. */
+      const carried = cols.length === 1 && cols[0].count != null
+        ? ` — ${fmt(cols[0].count)} of ${fmt(rows.length)} rows carry one;`
+        : ' —';
+      return `<span>${names}${carried} ${esc(reason)}</span>`;
+    }).join('');
+    /* Appended to the PANEL, not to the scrolling box.
+       Inside .tscroll it scrolled with the table: on a phone the reader saw a
+       sentence starting halfway through — "rows carry one; the ledger only
+       carries…" — with its own subject off the left edge. The note explains
+       the table; it is not part of it. */
+    notes.push(d);
   }
   if (sortable && capped) {
-    wrap.append(el('p', 'cap tsort-note',
+    notes.push(el('p', 'cap tsort-note',
       `Sorting re-orders the ${rows.length} rows on screen, not ${esc(capped)} — the rows that reach `
       + 'this page were chosen by the server before you got to choose the column.'));
   }
-  return wrap;
+  /* The scroller holds the table; the notes sit OUTSIDE it, at panel width.
+     Inside .tscroll they scrolled with the table, so on a phone the reader met
+     a sentence beginning halfway through — "rows carry one; the ledger only
+     carries…" — with its own subject off the left edge. A note explains the
+     table; it is not part of it.
+
+     Returned as one element either way, because two hundred call sites do
+     `body.append(tableFrom(...))` and a fragment would break every one. */
+  if (!notes.length) return wrap;
+  const block = el('div', 'tblock');
+  block.append(wrap, ...notes);
+  return block;
 }
 
 /* There is no `drill()` any more.

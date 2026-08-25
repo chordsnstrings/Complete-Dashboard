@@ -1,6 +1,6 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-08-25T17:20:55.115Z",
+  "at": "2026-08-25T17:45:25.275Z",
   "widths": [
     1500,
     1180,
@@ -538,7 +538,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":178,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":179,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/plate/L36397",
@@ -569,18 +569,18 @@
       "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":320,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
-      "route": "segment/L46706/2026-08-25T16:19:01.470Z",
+      "route": "segment/L44284/2026-08-25T17:00:14.397Z",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"L46706\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"L44284\",\"kpis\":4,\"tables\":6,\"charts\":1}"
     },
     {
-      "route": "segment/L46706/2026-08-25T16:19:01.470Z",
+      "route": "segment/L44284/2026-08-25T17:00:14.397Z",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"L46706\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"L44284\",\"kpis\":4,\"tables\":6,\"charts\":1}"
     },
     {
       "route": "slot/2/19",
@@ -735,6 +735,27 @@
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 820,
+      "sev": "e",
+      "code": "stuck-loading",
+      "detail": "6 panel(s) still on the skeleton"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 820,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "When the day starts"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 820,
+      "sev": "w",
+      "code": "chartless-panel",
+      "detail": "Trips per day"
     }
   ]
 }
