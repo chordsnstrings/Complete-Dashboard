@@ -40,6 +40,13 @@ await trip('cx', '2026-08-13', 20, { status: 'rider_cancelled', km: 0, price: 0 
 await trip('yg', '2026-08-13', 21, { platform: 'yango', product: 'Comfort', pay: 'cash', price: 60 });
 // a trip on a different plate, which must never leak into this vehicle's page
 await trip('x1', '2026-08-13', 10, { plate: OTHER, drv: 'd-omar', name: 'Omar Nasser' });
+/* An FMS telematics twin: the tracker's own record of a journey the ride
+   platform already reported. is_booking is false for it (sql/schema_v7.sql),
+   and on 2026-08-14 it is the ONLY trip row — so a query that reads raw `trip`
+   calls the 14th a day this car earned, and the idle-day tile then contradicts
+   the caption printed directly beneath it. */
+await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,requested_at,distance_km,status)
+         VALUES ('fms','fm1','ecosine',$1,'2026-08-14T07:00:00+04:00',190000,'completed')`, [PLATE]);
 
 // 2026-08-14: the tracker reports but nothing earned — an idle day
 await q(`INSERT INTO telemetry_snapshot (source,plate,captured_at,lat,lng,speed,status,fuel_level)
@@ -47,6 +54,15 @@ await q(`INSERT INTO telemetry_snapshot (source,plate,captured_at,lat,lng,speed,
                 ('cabman',$1,'2026-08-14T09:05:00+04:00',25.10,55.18,0,'Idle',88),
                 ('cabman',$1,'2026-08-14T09:10:00+04:00',25.10,55.18,0,'Idle',87),
                 ('cabman',$1,'2026-08-13T09:00:00+04:00',25.20,55.27,54,'Active',90)`, [PLATE]);
+/* Three polls on the 15th that came back with no satellite lock. They are
+   fixes, they are not positions: /api/map/journey draws only rows with a
+   latitude, so counting these in the replay picker promised a route that could
+   not be drawn — the live picker offered "Aug 25 · 119 fixes" against a replay
+   of 108. */
+await q(`INSERT INTO telemetry_snapshot (source,plate,captured_at,lat,lng,speed,status)
+         VALUES ('cabman',$1,'2026-08-15T09:00:00+04:00',NULL,NULL,0,'Idle'),
+                ('cabman',$1,'2026-08-15T09:05:00+04:00',NULL,NULL,0,'Idle'),
+                ('cabman',$1,'2026-08-15T09:10:00+04:00',NULL,NULL,0,'Idle')`, [PLATE]);
 
 // Note the 13th: Ali holds the car on Uber AND Yango that day, so custody has
 // TWO rows for one (plate, day). Joining alerts straight to this table would
@@ -96,7 +112,12 @@ check('a missing plate is a 400, not a 404', (await get('/api/vehicle/profile'))
 /* ── profile ────────────────────────────────────────────────────────────── */
 const prof = (await get(`/api/vehicle/profile?plate=${PLATE}&${W}`)).body;
 check('spec merges the fleet table and the platform profile', prof.spec.make === 'Tesla' && prof.spec.vin === '5YJ0000', JSON.stringify(prof.spec));
-check('trip span counted', prof.span.trips === 24, String(prof.span?.trips));
+/* 24 bookings, and the FMS twin is not one of them. This counted raw `trip`,
+   so L36397 reported span.trips 547 where the car took 325 bookings and the
+   tracker logged 222 twins of the same journeys. */
+check('trip span counts bookings, not telematics twins', prof.span.trips === 24, String(prof.span?.trips));
+check('and the twins are reported beside them rather than deleted',
+  prof.span.telematics_journeys === 1, String(prof.span?.telematics_journeys));
 check('both drivers counted', prof.span.drivers === 2, String(prof.span?.drivers));
 check('latest telemetry fix attached', prof.telemetry?.status === 'Idle', prof.telemetry?.status);
 check('documents sorted soonest-expiry first', prof.documents[0]?.doc_type === 'Vehicle Registration Form', prof.documents[0]?.doc_type);
@@ -108,8 +129,12 @@ check('kpi trips exclude other plates', k.trips === 24, String(k.trips));
 check('utilisation carried from the platform record', +k.utilisation === 0.55, String(k.utilisation));
 check('alerts counted for this plate only', k.alerts === 3, String(k.alerts));
 check('alerts normalised per 100km', k.alerts_per_100km > 0, String(k.alerts_per_100km));
-// 2026-08-14 has fixes but no trips; the four earning days do not count as idle
-check('an idle day is a day it reported but did not earn', k.idle_days === 1, String(k.idle_days));
+/* Two idle days: the 14th, where the tracker logged a journey and no booking
+   was taken, and the 15th, where it polled three times without a lock. The
+   four earning days do not count. This read raw `trip` and so counted the
+   14th's FMS twin as earning — the live tile said "Idle days 2" over its own
+   caption saying "5 day(s) with a tracker fix and no trip". */
+check('a telematics twin is not a day the car earned', k.idle_days === 2, String(k.idle_days));
 check('revenue per km derived', k.revenue_per_km > 0, String(k.revenue_per_km));
 
 /* ── an odometer row on this plate must not become this vehicle's distance ──
@@ -151,7 +176,13 @@ check('revenue per km derived', k.revenue_per_km > 0, String(k.revenue_per_km));
 
 /* ── daily spine ────────────────────────────────────────────────────────── */
 const daily = (await get(`/api/vehicle/daily?plate=${PLATE}&${W}`)).body;
-check('daily includes the day with no trips', daily.length === 5, String(daily.length));
+/* Six days now, not five: the 14th is a day the tracker logged a journey and
+   nothing was booked, which the daily spine already reports correctly as
+   trips 0 / telematics_journeys 1. */
+check('daily includes the day with no trips', daily.length === 6, String(daily.length));
+check('and the telematics-only day carries no bookings',
+  daily.find((d) => String(d.day).slice(0, 10) === '2026-08-14')?.trips === 0,
+  JSON.stringify(daily.find((d) => String(d.day).slice(0, 10) === '2026-08-14')));
 const idleDay = daily.find((d) => d.day.startsWith('2026-08-14'));
 check('the idle day shows fixes but zero trips', idleDay?.trips === 0 && idleDay?.fixes === 3, JSON.stringify(idleDay));
 const busy = daily.find((d) => d.day.startsWith('2026-08-13'));
@@ -173,7 +204,16 @@ const mv = (await get(`/api/vehicle/movement?plate=${PLATE}&${W}`)).body;
 check('occupancy segments returned newest first', mv.segments.length === 2 &&
   new Date(mv.segments[0].started_at) > new Date(mv.segments[1].started_at));
 check('segments summarised by verdict', mv.by_verdict.some((v) => v.verdict === 'unauthorized'));
+/* The 15th has three fixes and no coordinate on any of them. /api/map/journey
+   requires lat IS NOT NULL, so offering it here promised a replay that would
+   draw nothing — the live picker said "Aug 25 · 119 fixes" against a journey
+   of 108. A replayable day is a day with positions. */
 check('replayable days need at least three fixes', mv.days.length === 1 && mv.days[0].fixes === 3, JSON.stringify(mv.days));
+check('and a day of polls with no satellite lock is not replayable',
+  !mv.days.some((d) => String(d.day).slice(0, 10) === '2026-08-15'), JSON.stringify(mv.days));
+check('a movement segment carries the reason for its verdict and what could not be checked',
+  mv.segments.every((x) => 'verdict_reason' in x && 'unavailable_sources' in x),
+  JSON.stringify(Object.keys(mv.segments[0] || {})));
 check('parking clusters come from stationary fixes', mv.parked.length === 1 && mv.parked[0].fixes === 3, JSON.stringify(mv.parked));
 
 /* ── safety ─────────────────────────────────────────────────────────────── */
@@ -190,14 +230,39 @@ check('an alert is counted once even with two custody rows that day',
 check('attributed events never exceed the events that exist',
   sf.by_driver.reduce((a, r) => a + r.n, 0) === sf.by_type.reduce((a, r) => a + r.n, 0),
   `${sf.by_driver.reduce((a, r) => a + r.n, 0)} vs ${sf.by_type.reduce((a, r) => a + r.n, 0)}`);
-// km is the distance driven on those days, not the distance re-added per alert
-check('attributed km is per day, not per alert',
-  +sf.by_driver.find((d) => d.driver_name === 'Ali Rahman').km === 88, String(sf.by_driver[0]?.km));
+/* The denominator is the driver's distance ON THIS PLATE over the whole
+   window, not over the days they happened to trigger an alert. It summed
+   custody km inside the alert-day join, so Ali's rate was 2 events over the
+   88 km of one bad day rather than over the 220 km he actually drove
+   (66 + 66 + 88, the yango row on the 13th being the non-primary duplicate
+   custody collapses away). On the live fleet that printed 215.3 per 100 km for
+   a driver beside a vehicle rate of 34, and /api/vehicle/drivers-detail gave
+   2,459 km where this gave 459 for the same person on the same car. */
+check('the per-driver denominator is their whole window, not their alert days',
+  +sf.by_driver.find((d) => d.driver_name === 'Ali Rahman').booked_km === 220,
+  JSON.stringify(sf.by_driver));
+check('and km still names the same figure, so nothing reads two denominators',
+  +sf.by_driver.find((d) => d.driver_name === 'Ali Rahman').km === 220);
+check('the rate is computed from that denominator rather than left to the page',
+  +sf.by_driver.find((d) => d.driver_name === 'Ali Rahman').per_100km
+    === Math.round((2 * 100 / 220) * 100) / 100,
+  String(sf.by_driver.find((d) => d.driver_name === 'Ali Rahman').per_100km));
+check('the driver list says how many drivers there are and whether it was cut',
+  sf.by_driver_total === sf.by_driver.length && sf.by_driver_truncated === false
+  && sf.by_driver_alerts === sf.by_type.reduce((a, r) => a + r.n, 0),
+  JSON.stringify([sf.by_driver_total, sf.by_driver_truncated, sf.by_driver_alerts]));
+check('and so does the recent-alert list, which is capped at a hundred',
+  sf.recent_total === sf.recent.length && sf.recent_truncated === false,
+  JSON.stringify([sf.recent_total, sf.recent_shown]));
 check('recent alerts carry a location', sf.recent[0]?.location != null);
 
 /* ── mix ────────────────────────────────────────────────────────────────── */
 const mix = (await get(`/api/vehicle/mix?plate=${PLATE}&${W}`)).body;
-check('platform mix spans uber and yango', mix.platform.length === 2, String(mix.platform.length));
+check('platform mix spans uber, yango and the telematics feed',
+  mix.platform.length === 3, JSON.stringify(mix.platform.map((x) => x.label)));
+check('and the telematics feed contributes no bookings to it',
+  mix.platform.find((x) => x.label === 'fms')?.bookings === 0,
+  JSON.stringify(mix.platform.find((x) => x.label === 'fms')));
 check('product mix includes the Comfort trip', mix.product.some((r) => r.label === 'Comfort'));
 check('hourly profile returned', mix.hours.length > 3);
 
@@ -205,7 +270,9 @@ check('hourly profile returned', mix.hours.length > 3);
 const tr = (await get(`/api/vehicle/trips?plate=${PLATE}&${W}&limit=5`)).body;
 check('trip list honours the limit', tr.length === 5, String(tr.length));
 check('every trip belongs to this plate', tr.every((t) => t.plate === undefined || t.plate === PLATE));
-check('trips carry the driver name', tr.every((t) => t.driver_name));
+/* Every BOOKING carries a driver. A telematics journey does not: it is the
+   tracker's own record of a trip, with a plate and no person. */
+check('trips carry the driver name', tr.every((t) => t.driver_name || t.platform === 'fms'));
 
 /* ── directory ──────────────────────────────────────────────────────────── */
 const dir = (await get(`/api/vehicles/directory?${W}`)).body;

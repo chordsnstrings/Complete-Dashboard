@@ -27,6 +27,7 @@ import { revenueRoutes } from './revenue_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
+import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
 
@@ -718,6 +719,12 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
             count(DISTINCT n.driver_ext_id)::int accounts,
             mode() WITHIN GROUP (ORDER BY n.plate) AS plate,
             count(*)::int trips,
+            /* The rank the caption promises. This table sits under "Top
+               drivers" with a completion rate beside every row and was ordered
+               by TOTAL bookings, so rank 1 had 271 trips at 84% — 228
+               completed — above rank 2's 257 at 89%, which is 229. The list
+               was correct about a number it was not sorted by. */
+            count(*) FILTER (WHERE n.outcome='completed')::int completed_trips,
             round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric,0) km,
             round(avg(n.distance_km) FILTER (WHERE n.has_distance)::numeric,1) avg_km,
             round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
@@ -733,7 +740,7 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
        WHERE ${W('n')} AND coalesce(btrim(n.driver_name), '') <> ''
        GROUP BY t.person_key)
      SELECT *, count(*) OVER ()::int AS _people
-       FROM people ORDER BY trips DESC LIMIT 100`, p);
+       FROM people ORDER BY completed_trips DESC, trips DESC LIMIT 100`, p);
   const people = rows.length ? rows[0]._people : 0;
   for (const r of rows) delete r._people;
   res.json({ rows, people: people || rows.length, shown: rows.length,
@@ -1072,9 +1079,21 @@ app.get('/api/map/journey', wrap(async (req, res) => {
 }));
 
 /* ───────────────────────── safety ───────────────────────── */
+/* The fleet chip did nothing here. /api/alerts/summary with &platform=uber and
+   &fleet=egari came back byte-identical to unfiltered — 34,547 events — on a
+   two-fleet operator, so the Safety page showed one fleet's heading over both
+   fleets' events. alert.fleet_id is the same column /api/kpis already narrows
+   its own alert count by, so filtering on it here is what makes the safety
+   tile and the safety page agree.
+
+   Platform is deliberately NOT applied: a harsh-braking event comes from the
+   telematics box in the car, not from a booking channel, so there is no
+   channel to narrow it to. The front end says so on the page (F14) rather than
+   the endpoint pretending to have filtered. */
 app.get('/api/alerts/summary', wrap(async (req, res) => res.json(await q(
-  `SELECT alert_type, count(*)::int n FROM alert WHERE ${DAYWIN('occurred_at')}
-   GROUP BY 1 ORDER BY 2 DESC`, [range(req)[0], range(req)[1]]))));
+  `SELECT alert_type, count(*)::int n FROM alert
+   WHERE ${DAYWIN('occurred_at')} AND ($3::text IS NULL OR fleet_id = $3)
+   GROUP BY 1 ORDER BY 2 DESC`, [range(req)[0], range(req)[1], range(req)[3]]))));
 
 /* Harsh driving is a person's behaviour, not a plate's — so name whoever held
    the car ON THE DAY OF THE EVENT.
@@ -1091,46 +1110,67 @@ app.get('/api/alerts/summary', wrap(async (req, res) => res.json(await q(
    name. Unattributed events are counted and reported as such rather than being
    folded into somebody's total. */
 app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
-  const [from, to] = range(req);
+  const [from, to, , fleet] = range(req);
   const rows = await q(
+    /* "Most often" was alphabetical.
+       ─────────────────────────────────────────────────────────────────────
+       top_driver was (array_agg(driver_name ORDER BY driver_name))[1] — the
+       first name in the ALPHABET among everyone who held the car, presented in
+       a column headed "Most often". On L45255 that named the driver with 322
+       events over the one with 702, and somebody reading that column would
+       coach the wrong person. Ranked by their own event count now, with the
+       count returned so the claim can be checked. */
     `WITH ev AS (
        SELECT plate, alert_type,
               (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
-       FROM alert WHERE ${DAYWIN('occurred_at')}
+       FROM alert WHERE ${DAYWIN('occurred_at')} AND ($3::text IS NULL OR fleet_id = $3)
      ),
      custody AS (
        SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id
        FROM vehicle_driver_day
        WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
+         AND ($3::text IS NULL OR fleet_id = $3)
        ORDER BY plate, day, trips DESC NULLS LAST, driver_name
+     ),
+     joined AS (
+       SELECT ev.plate, ev.alert_type, c.driver_name, c.driver_ext_id
+       FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
+     ),
+     per_driver AS (
+       SELECT plate, driver_name, max(driver_ext_id) AS driver_ext_id, count(*)::int n
+       FROM joined WHERE driver_name IS NOT NULL GROUP BY 1, 2
+     ),
+     top AS (
+       SELECT DISTINCT ON (plate) plate, driver_name, driver_ext_id, n
+       FROM per_driver ORDER BY plate, n DESC, driver_name
      )
-     SELECT ev.plate,
+     SELECT j.plate,
             count(*)::int alerts,
-            sum((ev.alert_type ILIKE '%brake%')::int)::int harsh_brake,
-            sum((ev.alert_type ILIKE '%accel%')::int)::int harsh_accel,
-            sum((ev.alert_type ILIKE '%turn%')::int)::int sharp_turn,
-            sum((ev.alert_type ILIKE '%speed%')::int)::int overspeed,
+            sum((j.alert_type ILIKE '%brake%')::int)::int harsh_brake,
+            sum((j.alert_type ILIKE '%accel%')::int)::int harsh_accel,
+            sum((j.alert_type ILIKE '%turn%')::int)::int sharp_turn,
+            sum((j.alert_type ILIKE '%speed%')::int)::int overspeed,
             -- Everything the four buckets above do not catch, so the columns
             -- and the total can be reconciled instead of silently disagreeing.
-            count(*) FILTER (WHERE ev.alert_type NOT ILIKE '%brake%'
-                               AND ev.alert_type NOT ILIKE '%accel%'
-                               AND ev.alert_type NOT ILIKE '%turn%'
-                               AND ev.alert_type NOT ILIKE '%speed%')::int other,
-            count(*) FILTER (WHERE c.driver_name IS NULL)::int unattributed,
-            count(DISTINCT c.driver_name)::int drivers,
-            (array_agg(c.driver_name ORDER BY c.driver_name)
-               FILTER (WHERE c.driver_name IS NOT NULL))[1] AS top_driver,
-            (array_agg(c.driver_ext_id ORDER BY c.driver_name)
-               FILTER (WHERE c.driver_ext_id IS NOT NULL))[1] AS top_driver_id
-     FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day
-     GROUP BY ev.plate ORDER BY alerts DESC LIMIT 100`, [from, to]);
+            count(*) FILTER (WHERE j.alert_type NOT ILIKE '%brake%'
+                               AND j.alert_type NOT ILIKE '%accel%'
+                               AND j.alert_type NOT ILIKE '%turn%'
+                               AND j.alert_type NOT ILIKE '%speed%')::int other,
+            count(*) FILTER (WHERE j.driver_name IS NULL)::int unattributed,
+            count(DISTINCT j.driver_name)::int drivers,
+            max(t.driver_name) AS top_driver,
+            max(t.driver_ext_id) AS top_driver_id,
+            max(t.n)::int AS top_driver_alerts
+     FROM joined j LEFT JOIN top t ON t.plate = j.plate
+     GROUP BY j.plate ORDER BY alerts DESC LIMIT 100`, [from, to, fleet]);
   /* The page's "Vehicles involved" tile was the length of this list. The fleet
      runs about 130 vehicles against a cap of 100 — under the cap today, over it
      on any month where most of the fleet triggers something, and the tile would
      read exactly 100 with nothing to say it had been cut. */
   const [t] = await q(
     `SELECT count(DISTINCT plate)::int vehicles, count(*)::int alerts
-     FROM alert WHERE ${DAYWIN('occurred_at')}`, [from, to]);
+     FROM alert WHERE ${DAYWIN('occurred_at')}
+       AND ($3::text IS NULL OR fleet_id = $3)`, [from, to, fleet]);
   res.json({ rows, totals: t, shown: rows.length,
     truncated: (t?.vehicles ?? 0) > rows.length });
 }));
@@ -1138,16 +1178,17 @@ app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
 /* The same events, attributed to people rather than to plates. The safety page
    named nobody at all: it fetched a driver column and rendered only the plate. */
 app.get('/api/alerts/by-driver', wrap(async (req, res) => {
-  const [from, to] = range(req);
+  const [from, to, , fleet] = range(req);
   const rows = await q(
     `WITH ev AS (
        SELECT plate, alert_type, (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
-       FROM alert WHERE ${DAYWIN('occurred_at')}
+       FROM alert WHERE ${DAYWIN('occurred_at')} AND ($3::text IS NULL OR fleet_id = $3)
      ),
      custody AS (
        SELECT DISTINCT ON (plate, day) plate, day, driver_name, driver_ext_id, person_key
        FROM vehicle_driver_day
        WHERE day BETWEEN $1::date AND $2::date AND driver_name IS NOT NULL
+         AND ($3::text IS NULL OR fleet_id = $3)
        ORDER BY plate, day, trips DESC NULLS LAST, driver_name
      ),
      people AS (
@@ -1164,6 +1205,17 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
               sum((ev.alert_type ILIKE '%accel%')::int)::int harsh_accel,
               sum((ev.alert_type ILIKE '%turn%')::int)::int sharp_turn,
               sum((ev.alert_type ILIKE '%speed%')::int)::int overspeed,
+              /* The residual. Six of sixty rows in production failed
+                 alerts == brake + accel + turn + overspeed — Wunibie showed 703
+                 of 1,201 events and "(unattributed)" 1,852 of 2,314 — because
+                 anything the four ILIKE buckets miss was counted in the total
+                 and in no column. by-vehicle has carried this since it was
+                 written; this list did not, so the same events reconciled on
+                 one tab and not on the other. */
+              count(*) FILTER (WHERE ev.alert_type NOT ILIKE '%brake%'
+                                 AND ev.alert_type NOT ILIKE '%accel%'
+                                 AND ev.alert_type NOT ILIKE '%turn%'
+                                 AND ev.alert_type NOT ILIKE '%speed%')::int other,
               count(DISTINCT ev.plate)::int plates,
               /* Which cars, not just how many. A row saying somebody has 18
                  harsh-braking events across 4 plates is not something anybody
@@ -1235,13 +1287,13 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
        GROUP BY 1
      )
      SELECT s.driver_name, s.driver_ext_id, s.alerts,
-            s.harsh_brake, s.harsh_accel, s.sharp_turn, s.overspeed,
+            s.harsh_brake, s.harsh_accel, s.sharp_turn, s.overspeed, s.other,
             s.plates, s.plate_list,
             round(km.km::numeric, 0) AS booked_km,
             round((s.alerts * 100.0 / nullif(km.km, 0))::numeric, 2) AS per_100km,
             s._drivers, s._alerts, s._unattributed
      FROM shown s LEFT JOIN km ON km.person = s.person
-     ORDER BY s.alerts DESC`, [from, to]);
+     ORDER BY s.alerts DESC`, [from, to, fleet]);
   /* Named drivers, counted over the whole window rather than over the returned
      rows, and counted the way the list groups: by custody name, excluding the
      "(unattributed)" bucket, which is not a person. */
@@ -1539,9 +1591,62 @@ app.get('/api/sensor-health', wrap(async (req, res) => {
 }));
 
 /* ───────────────────────── ops / meta ───────────────────────── */
-app.get('/api/platforms', wrap(async (_, res) => res.json(await q(
-  `SELECT platform, fleet_id, count(*)::int trips, min(requested_at) earliest, max(requested_at) latest
-   FROM trip GROUP BY platform, fleet_id ORDER BY trips DESC`))));
+/* Coverage and history depth per channel, per fleet.
+   ─────────────────────────────────────────────────────────────────────────
+   Two faults, and they compounded. The count was `count(*)` over raw `trip`,
+   which counts FMS telematics rows as bookings — the table showed
+   uber/ecosine 166,579 beside fms/ecosine 24,132 and fms/egari 17,677, and
+   41,809 of those FMS rows are twins of trips already counted under uber. And
+   the count was ALL-TIME with no window at all, so the donut beside it read
+   "uber · 11,092" for the selected month while this table read 166,579 in the
+   same Share column.
+
+   Both are now stated rather than conflated: `bookings` excludes the twins,
+   `rows_seen` keeps the raw count so the telematics volume is still visible,
+   and an optional from/to gives the windowed figure the donut is drawn from.
+
+   And every configured channel appears, whether or not it has ever delivered
+   a row. Bolt has no trip anywhere in this database — Ecosine is refused with
+   COMPANIES_NOT_ALLOWED and Egari's token expired — so it had no row in a
+   table whose whole job is to inventory the sources, on the page an operator
+   would go to in order to find out. */
+app.get('/api/platforms', wrap(async (req, res) => {
+  const [from, to] = winDays(req);
+  const windowed = !!(req.query.from || req.query.to || req.query.days || req.query.day);
+  const [rows, health] = await Promise.all([
+    q(`SELECT platform, fleet_id,
+              count(*) FILTER (WHERE platform <> 'fms')::int bookings,
+              count(*)::int rows_seen,
+              count(*) FILTER (WHERE platform <> 'fms'
+                AND (requested_at AT TIME ZONE 'Asia/Dubai')::date
+                    BETWEEN $1::date AND $2::date)::int window_bookings,
+              min(requested_at) earliest, max(requested_at) latest
+       FROM trip GROUP BY platform, fleet_id ORDER BY bookings DESC, rows_seen DESC`, [from, to]),
+    q(channelHealthSql()),
+  ]);
+  const byHealth = channelHealth(health);
+  const seen = new Set(rows.map((r) => r.platform));
+  /* A configured channel with nothing behind it, carrying the collector's own
+     words. fleet_id is null because there is no row to take one from — the
+     absence is fleet-wide by construction. */
+  const missing = BOOKING_CHANNELS.filter((c) => !seen.has(c)).map((platform) => ({
+    platform, fleet_id: null, bookings: 0, rows_seen: 0, window_bookings: 0,
+    earliest: null, latest: null,
+  }));
+  /* Still a bare array. The page reads it as one, and the two facts a row
+     needs beside its counts — which window the windowed column covers, and
+     whether a window was asked for at all — ride on the row rather than
+     forcing every caller through a wrapper. `windowed` false means no range
+     was supplied, so window_bookings is the open window and identical to the
+     all-time figure; a page that drew it as "this month" would be wrong. */
+  res.json([...rows, ...missing].map((r) => ({
+    ...r,
+    window_from: from, window_to: to, windowed,
+    ...(byHealth.get(r.platform) || {
+      collection_status: null, collection_error: null, collection_at: null,
+    }),
+  })));
+}));
 
 /* The latest run per source and mode — including which of its windows failed.
    A run that wrote rows while most of its windows failed reported status='ok'

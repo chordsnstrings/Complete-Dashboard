@@ -191,7 +191,26 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      'finished', and testing for 'completed' scored every completed Bolt trip
      as a failure. */
   app.get('/api/drivers/directory', wrap(async (req, res) => {
+    /* range, not winDays. This read from/to and nothing else, so the platform
+       and fleet chips above the directory changed none of its 359 rows: with
+       Bolt selected the page stated that 118 people drove on Bolt and plotted
+       80 of them, on a channel with no trip anywhere in the database, and
+       &fleet=egari came back byte-identical to unfiltered on a two-fleet
+       operator.
+
+       A filter narrows the POPULATION as well as the work. With a platform
+       selected, "everyone we know of" is everyone who drove on that platform
+       in the window or holds a compliance or standing record on it — not
+       everyone in the fleet with their trips zeroed, which would report the
+       whole roster as idle on Bolt. */
+    /* range() lives in server.js and is not among this module's injected deps;
+       it is winDays plus the two chips, so it is spelled out here rather than
+       threading a new dependency through every route module. */
     const [from, to] = winDays(req);
+    const platform = req.query.platform || null;
+    const fleet = req.query.fleet || null;
+    const P = [from, to, platform, fleet];
+    const filtered = !!(platform || fleet);
     /* "Has this person ever driven, and when last" is the one question here
        with no window, so answering it live means grouping the entire trip
        history on every request — two hundred and fifteen thousand rows to
@@ -215,30 +234,6 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
            FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1`;
     const rows = await q(
       `WITH ever AS (${everSql}),
-       ids AS (
-         /* Everyone we know of, from any source, whether or not they drove.
-            A name with no id is still a person: the id is synthesised from the
-            canonical name so they key identically here, in the work CTE below,
-            and in vehicle_driver_day. Requiring an id here made those people
-            vanish from the directory entirely.
-
-            The trip branch reads the CTE above rather than scanning the table
-            a second time. The who CTE takes max(driver_name) per key, so
-            collapsing the several names a key may carry to their max here
-            leaves that maximum unchanged. */
-         SELECT driver_ext_id, driver_name FROM ever
-         UNION
-         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
-                         'name:' || ${CANON('full_name')}), full_name FROM driver_compliance
-           WHERE coalesce(btrim(full_name), '') <> ''
-         UNION
-         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
-                         'name:' || ${CANON('full_name')}), full_name FROM driver_platform_state
-           WHERE coalesce(btrim(full_name), '') <> ''
-       ),
-       who AS (
-         SELECT driver_ext_id, max(driver_name) AS driver_name FROM ids GROUP BY 1
-       ),
        work AS (
          /* The synthesised key from the STORED fold. Written with the fold
             inline it ran two nested regexes over every row in the window as
@@ -249,6 +244,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
             index's own predicate is what took this endpoint from 4.3s to 41s. */
          SELECT coalesce(nullif(btrim(n.driver_ext_id), ''),
                          'name:' || bt.person_key) AS driver_ext_id,
+                max(n.driver_name) AS work_name,
                 min(n.fleet_id) fleet_id,
                 count(*) FILTER (WHERE n.is_booking)::int trips,
                 count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
@@ -261,13 +257,49 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 array_agg(DISTINCT n.platform) platforms,
                 mode() WITHIN GROUP (ORDER BY n.plate) AS plate
          FROM trip_norm n JOIN trip bt ON bt.platform = n.platform AND bt.external_id = n.external_id
-         -- Grouped on the SAME synthesised key as the ids CTE above. Keyed on
+         -- Grouped on the SAME synthesised key as the ids CTE below. Keyed on
          -- the raw column, a driver named without an id had an ids row and no
          -- work to join to it, so they appeared with a permanent zero, which is
          -- worse than absent: it reads as somebody who did nothing.
          WHERE n.local_day BETWEEN $1::date AND $2::date
            AND coalesce(btrim(n.driver_name), '') <> ''
+           AND ($3::text IS NULL OR n.platform = $3)
+           AND ($4::text IS NULL OR n.fleet_id = $4)
          GROUP BY 1
+       ),
+       ids AS (
+         /* Everyone we know of, from any source, whether or not they drove.
+            A name with no id is still a person: the id is synthesised from the
+            canonical name so they key identically here, in the work CTE below,
+            and in vehicle_driver_day. Requiring an id here made those people
+            vanish from the directory entirely.
+
+            The trip branch reads the CTE above rather than scanning the table
+            a second time. The who CTE takes max(driver_name) per key, so
+            collapsing the several names a key may carry to their max here
+            leaves that maximum unchanged. */
+         /* The all-time branch carries no platform or fleet — driver_lifetime
+            is keyed on the person alone — so under a filter it would readmit
+            the whole roster with its work zeroed, which reads as "everybody is
+            idle on Bolt". Under a filter the population is exactly the people
+            the three filterable sources name. */
+         SELECT driver_ext_id, driver_name FROM ever
+           WHERE $3::text IS NULL AND $4::text IS NULL
+         UNION
+         SELECT w.driver_ext_id, w.work_name FROM work w
+         UNION
+         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                         'name:' || ${CANON('full_name')}), full_name FROM driver_compliance
+           WHERE coalesce(btrim(full_name), '') <> ''
+             AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
+         UNION
+         SELECT coalesce(nullif(btrim(driver_ext_id), ''),
+                         'name:' || ${CANON('full_name')}), full_name FROM driver_platform_state
+           WHERE coalesce(btrim(full_name), '') <> ''
+             AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
+       ),
+       who AS (
+         SELECT driver_ext_id, max(driver_name) AS driver_name FROM ids GROUP BY 1
        )
        /* The lifetime figures come from the CTE at the top of this statement:
           the last trip EVER, so "has not driven in this window" and "has never
@@ -284,13 +316,21 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
               dc.state, dc.licence_expires, dc.rating,
               (dc.licence_expires - now()::date) AS licence_days_left,
-              dps.state AS platform_state, dps.can_earn
+              /* Which platform said it. 241 of the people in this directory
+                 have never driven — the panel exists for them — and every
+                 column describing them was blank because the source platform
+                 was dropped on the way out. A compliance record from Uber and
+                 a standing from Bolt are different claims and the page could
+                 not tell them apart, or say which one it was showing. */
+              dc.platform AS compliance_platform,
+              dps.state AS platform_state, dps.can_earn,
+              dps.platform AS state_platform, dps.plate AS state_plate
        FROM who
        LEFT JOIN work w ON w.driver_ext_id = who.driver_ext_id
        LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
-       ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 800`, [from, to]);
+       ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 800`, P);
 
     /* Fold per-platform rows into one row per person, so the directory lists
        humans rather than accounts. Counts are carried through and the ratios
@@ -319,6 +359,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       if (r.last_ever > cur.last_ever) cur.last_ever = r.last_ever;
       cur.state = cur.state || r.state;
       cur.platform_state = cur.platform_state || r.platform_state;
+      cur.compliance_platform = cur.compliance_platform || r.compliance_platform;
+      cur.state_platform = cur.state_platform || r.state_platform;
+      cur.state_plate = cur.state_plate || r.state_plate;
+      if (cur.can_earn == null) cur.can_earn = r.can_earn;
       if (r.licence_days_left != null && (cur.licence_days_left == null || r.licence_days_left < cur.licence_days_left)) {
         cur.licence_days_left = r.licence_days_left; cur.licence_expires = r.licence_expires;
       }
@@ -334,8 +378,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       const dayRows = await q(
         `SELECT ${PKEY} AS driver_ext_id, local_day FROM trip_norm
          WHERE local_day BETWEEN $1::date AND $2::date
-           AND ${PKEY} = ANY($3)`,
-        [from, to, multi.flatMap((p) => p.ids)]);
+           AND ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
+           AND ${PKEY} = ANY($5)`,
+        [from, to, platform, fleet, multi.flatMap((x) => x.ids)]);
       const idToPerson = new Map();
       multi.forEach((p) => p.ids.forEach((id) => idToPerson.set(id, p)));
       const days = new Map();
@@ -692,16 +737,37 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        reader could not add them up and neither could we. See
        sql/schema_v23.sql; "counted" is the part of the period this window
        covers, which is the whole of it unless a finer report overlaps it. */
+    /* Counted means counted IN THIS WINDOW.
+       ─────────────────────────────────────────────────────────────────────
+       This read the driver_payout view, which sums every day of a period
+       (sql/schema_v23.sql:147-167), and selected periods by OVERLAP — so a
+       period running 2026-07-20 to 07-26 contributed all seven of its days to
+       a window that opens on 07-26. On one load the tile read reported_earnings
+       5,053.67 while the panel caption underneath it read "AED 6,592 counted
+       across 11 statement(s)": AED 1,538 apart, from the same payload.
+
+       driver_payout_day is already one row per day, so clamping is a matter of
+       bounding the day rather than the period. `earnings` stays the whole
+       period's figure — it is what the platform reported and the page shows it
+       as the period's own total — and `counted` is now the part of it that
+       falls inside the window, which is what the caption was always claiming
+       to add up. */
     const periods = await q(
-      `SELECT platform, period_start, period_end, period_days, days_used,
-              round(period_earnings::numeric,2) AS earnings,
-              round(earnings::numeric,2) AS counted,
-              round(cash_earnings::numeric,2) AS cash_earnings,
-              round(trips::numeric,0)::int AS trips,
-              round(hours_online::numeric,2) AS hours_online,
-              round(hours_on_trip::numeric,2) AS hours_on_trip
-       FROM driver_payout
-       WHERE driver_ext_id = ANY($3) AND period_end >= $1::date AND period_start <= $2::date
+      `SELECT platform, period_start, period_end, period_days,
+              count(*)::int AS days_used,
+              min(day) AS first_day_used, max(day) AS last_day_used,
+              round(max(period_earnings)::numeric,2) AS earnings,
+              round(sum(earnings)::numeric,2) AS counted,
+              round(sum(cash_earnings)::numeric,2) AS cash_earnings,
+              round(sum(trips)::numeric,0)::int AS trips,
+              round(sum(hours_online)::numeric,2) AS hours_online,
+              round(sum(hours_on_trip)::numeric,2) AS hours_on_trip,
+              /* True where the period straddles an edge of the window, so the
+                 page can say the row is a slice rather than a statement. */
+              (min(period_start) < $1::date OR max(period_end) > $2::date) AS clipped
+       FROM driver_payout_day
+       WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date
+       GROUP BY platform, period_start, period_end, period_days
        ORDER BY period_start DESC LIMIT 120`, p);
     const [tips] = await q(
       `SELECT round(sum(amount) FILTER (WHERE category='tip')::numeric,2) tips,
@@ -709,6 +775,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        FROM driver_earnings_component
        WHERE driver_ext_id = ANY($3) AND period_start >= $1::date AND period_end <= $2::date`, p);
     res.json({ components, periods,
+      /* The sum the caption prints, computed here rather than left to the page
+         to add up — the two disagreed by AED 1,538 in production. */
+      counted_total: periods.length
+        ? Math.round(periods.reduce((a, r) => a + Number(r.counted || 0), 0) * 100) / 100 : null,
+      counted_periods: periods.length,
+      counted_clipped: periods.filter((r) => r.clipped).length,
       tips: tips?.tips ?? null, fare: tips?.fare ?? null,
       tip_pct: tips?.fare > 0 ? +((tips.tips / tips.fare) * 100).toFixed(2) : null });
   }));

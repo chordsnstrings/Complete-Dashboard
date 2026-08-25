@@ -47,12 +47,39 @@ export function rosterRoutes(app, { q, wrap, range }) {
       `SELECT DISTINCT platform FROM trip WHERE driver_name IS NOT NULL`)).map((r) => r.platform));
 
     const rows = await q(
+      /* The fleet filter is applied to WORK, not to the credential set.
+         ─────────────────────────────────────────────────────────────────────
+         driver_platform_state.fleet_id records which fleet's credentials
+         collected the row, not which fleet the person drives for. Only Egari's
+         Bolt credentials work, so &fleet=egari returned exactly the Bolt
+         roster — 67 people, all platforms:["bolt"], working: 0 — byte-identical
+         to &platform=bolt, while /api/drivers/directory listed Egari drivers
+         with 162 trips in the same window. A supply page that answers "who is
+         idle at Egari" with "the people Egari's Bolt token could see" is
+         answering a different question in the same words.
+
+         So membership comes from the fleet a person actually drove for in the
+         window (`fleets`, below), and the credential fleet is the fallback for
+         somebody with no trips at all — where it is the only thing we hold.
+         The response says which of the two answered, because they are not the
+         same claim. */
       `WITH s AS (
          SELECT ${CANON} AS person, platform, driver_ext_id, full_name, state, state_raw,
-                state_reason, plate, vehicle_ext_id, score, can_earn, observed_at
+                state_reason, plate, vehicle_ext_id, score, can_earn, observed_at, fleet_id
          FROM driver_platform_state
-         WHERE ($3::text IS NULL OR platform = $3) AND ($4::text IS NULL OR fleet_id = $4)
+         WHERE ($3::text IS NULL OR platform = $3)
            AND coalesce(btrim(full_name), '') <> ''
+       ),
+       /* Every fleet this person took a booking for in the window, whatever
+          the filter — the set membership is tested against, so it cannot be
+          narrowed by the filter it is deciding. */
+       fleets AS (
+         SELECT t.person_key AS person,
+                array_remove(array_agg(DISTINCT n.fleet_id), NULL) AS fleets_worked
+         FROM trip_norm n ${JOIN_TRIP}
+         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
+           AND t.person_key IS NOT NULL AND t.person_key <> ''
+         GROUP BY 1
        ),
        -- Work inside the window, by the same folded name.
        /* The stored fold, via the base table. Computed per row this was the
@@ -91,6 +118,12 @@ export function rosterRoutes(app, { q, wrap, range }) {
        )
        SELECT s.person,
               max(s.full_name) AS name,
+              /* Which fleet they actually worked for, and which fleet's
+                 credentials described them. Returned because a filtered page
+                 has to be able to say which of the two put this row here. */
+              (array_agg(DISTINCT f.fleets_worked) FILTER (WHERE f.fleets_worked IS NOT NULL))[1]
+                AS fleets_worked,
+              array_remove(array_agg(DISTINCT s.fleet_id), NULL) AS credential_fleets,
               count(*)::int AS accounts,
               array_agg(DISTINCT s.platform ORDER BY s.platform) AS platforms,
               array_agg(DISTINCT s.state ORDER BY s.state) AS states,
@@ -127,14 +160,29 @@ export function rosterRoutes(app, { q, wrap, range }) {
        FROM s
        LEFT JOIN w    ON w.person = s.person
        LEFT JOIN ever e ON e.person = s.person
+       LEFT JOIN fleets f ON f.person = s.person
        GROUP BY s.person
+       HAVING $4::text IS NULL
+           OR bool_or(f.fleets_worked @> ARRAY[$4]::text[])
+           OR (bool_and(f.fleets_worked IS NULL) AND bool_or(s.fleet_id = $4))
        ORDER BY trips DESC, name`, p);
 
     const people = rows.map((r) => {
       const lifetime = r.lifetime_trips || 0;
       // Can we even see this person's work? If every platform they are on is
       // one we hold no trips for, a lifetime count of zero says nothing.
-      const activityKnown = (r.platforms || []).some((pl) => withTrips.has(pl));
+      /* Three ways to know somebody's output, not one.
+         ─────────────────────────────────────────────────────────────────
+         This asked only "do we collect trips for a platform they are on",
+         which is the right question for a Bolt-only driver and the wrong one
+         for anybody whose trips we are LOOKING AT. Hamza Iqbal Sajid Iqbal
+         rendered as "OUTPUT NOT OBSERVED" beside "TRIPS THIS WINDOW 169" and
+         "LAST DROVE Aug 24"; five of the busiest people on the roster were
+         filed that way, summing 183 trips in the window and 1,518 / 1,752 /
+         616 / 39 / 1,546 lifetime. Observed work is observation, whatever the
+         platform list says. */
+      const activityKnown = (r.platforms || []).some((pl) => withTrips.has(pl))
+        || (r.trips || 0) > 0 || lifetime > 0;
       /* Categories, in the order the claims get weaker.
 
          `bool_or` returns NULL only when EVERY platform declined to say — which
@@ -195,6 +243,15 @@ export function rosterRoutes(app, { q, wrap, range }) {
         multi_platform: people.filter((x) => (x.platforms || []).length > 1).length,
       },
       platforms_with_trips: [...withTrips].sort(),
+      /* What the fleet chip narrowed on. driver_platform_state.fleet_id is the
+         credential set that collected a standing, not the fleet somebody
+         drives for, and treating the two as one returned the Bolt roster for
+         &fleet=egari. */
+      fleet_basis: fleet
+        ? 'People who took a booking for this fleet inside the window, plus anyone with no '
+          + 'booking at all whose platform standing was collected under this fleet\'s '
+          + 'credentials — for them it is the only fleet we hold.'
+        : null,
       caveat: 'Platform accounts are folded into one person by name, because no provider shares an '
         + 'id with another. The accounts column shows how many were folded, so the join can be '
         + 'checked rather than trusted.'

@@ -445,6 +445,56 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('the response says the area was parsed, not looked up', /parsed from the address/.test(c.note));
   check('origins carry the morning and evening split',
     c.origins.every((o) => o.morning != null && o.evening != null));
+
+  /* Demand, not journeys. This counted raw trips, so the 40 FMS telematics
+     rows in this fixture — the tracker's own record of trips the ride
+     platforms already reported — were charted as corridors. On production at
+     days=7, FMS alone accounted for 187 of the 302 "corridors seen 3+ times"
+     and 805 of the top origin's 985 trips. */
+  check('a telematics twin is not a corridor',
+    !c.corridors.some((x) => (x.platforms || []).includes('fms'))
+    && !c.origins.some((o) => o.area === 'United Arab Emirates'),
+    JSON.stringify(c.corridors.filter((x) => (x.platforms || []).includes('fms'))));
+  const fmsOnly = await get(`/api/geo/corridors?${W}&platform=fms`);
+  check('and asking for the telematics feed alone returns no demand at all',
+    fmsOnly.corridors.length === 0 && fmsOnly.totals.corridors_all === 0,
+    JSON.stringify(fmsOnly.totals));
+  check('the note says so, since a reader cannot see the predicate',
+    /already reported/.test(c.note), c.note);
+
+  /* The printed denominator has to be the one the average used: `priced`
+     counted price IS NOT NULL while avg_fare also excluded complimentary
+     rides. */
+  check('complimentary rides are counted apart from priced ones',
+    c.corridors.every((x) => 'complimentary' in x && x.priced + x.complimentary <= x.trips),
+    JSON.stringify(c.corridors.map((x) => [x.trips, x.priced, x.complimentary])));
+  /* On the live fleet duration_measured is 0 on every corridor in every
+     window — duration_s is declared on the trip table and written by no
+     collector — so avg_min is a column of dashes with no denominator beside
+     it. Here the Uber rows carry a duration, so the count is the honest one
+     and the identity that matters is the pairing: an average with no rows
+     behind it must be null rather than zero. */
+  check('every corridor says how many rows carried a duration at all',
+    c.corridors.every((x) => typeof x.min_n === 'number')
+    && c.duration_measured === c.corridors.reduce((a, x) => a + x.min_n, 0),
+    String(c.duration_measured));
+  check('and a corridor with no measured duration reports no average minutes',
+    c.corridors.every((x) => x.min_n > 0 || x.avg_min == null),
+    JSON.stringify(c.corridors.filter((x) => !x.min_n).map((x) => x.avg_min)));
+
+  /* The KPI row and the origins panel are a roll-up of the same aggregate the
+     corridor list needs, so they can be asked for on their own and painted
+     while the list is still being ordered — cold at 365 days this endpoint
+     measured 8.45s and the page 7.9-14.4s, all of it one skeleton. */
+  const sum = await get(`/api/geo/corridors?${W}&part=summary`);
+  check('the summary half returns the tiles and the origins with no corridor list',
+    sum.corridors.length === 0 && sum.origins.length > 0
+    && sum.totals.corridors_all === c.totals.corridors_all,
+    JSON.stringify([sum.corridors.length, sum.origins.length]));
+  const list = await get(`/api/geo/corridors?${W}&part=corridors`);
+  check('and the corridor half returns the same list the whole answer does',
+    JSON.stringify(list.corridors) === JSON.stringify(c.corridors),
+    `${list.corridors.length} vs ${c.corridors.length}`);
 }
 
 /* ── the acceptance funnel ───────────────────────────────────────────────── */

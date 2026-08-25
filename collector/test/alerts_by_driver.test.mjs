@@ -98,8 +98,16 @@ const OLD_TOTALS = `WITH ev AS (
      FROM ev LEFT JOIN custody c ON c.plate = ev.plate AND c.day = ev.day`;
 
 const CARRIED = ['_drivers', '_alerts', '_unattributed'];
+/* `other` is new, and it is why this list can now be reconciled: six of sixty
+   rows in production failed alerts == brake + accel + turn + overspeed, because
+   anything the four ILIKE buckets miss was counted in the total and in no
+   column — "(unattributed)" showed 1,852 of 2,314 events. by-vehicle has
+   carried the residual since it was written. It is projected out of the
+   rewrite comparison below, which is about the query rewrite preserving the
+   values it already produced, and asserted on its own afterwards. */
+const ADDED = ['other'];
 const uncap = (s) => s.replace('LIMIT 100', '');
-const bare = (r) => { const c = { ...r }; for (const k of CARRIED) delete c[k]; return c; };
+const bare = (r) => { const c = { ...r }; for (const k of [...CARRIED, ...ADDED]) delete c[k]; return c; };
 // Order within a tie is the planner's, on both sides. Compare the sets.
 const sorted = (rows) => rows.map((r) => JSON.stringify(Object.entries(bare(r)).sort())).sort();
 
@@ -110,7 +118,13 @@ async function compare(label, { wide }) {
   await seedFleet(db, { wide });
   await rebuildCustody({ from: DAY0, to: DAY1, db });
   const q = (t, p) => db.query(t, p).then((r) => r.rows);
-  const P = [DAY0, DAY1];
+  /* Three binds now, not two: the route narrows alerts and custody by fleet.
+     The Safety page carried a fleet chip that changed nothing —
+     /api/alerts/summary with &fleet=egari was byte-identical to unfiltered on
+     a two-fleet operator — and /api/kpis has always narrowed its own alert
+     count by alert.fleet_id, so the tile and the page disagreed under a
+     filter. NULL here means "every fleet", which is what this fixture is. */
+  const P = [DAY0, DAY1, null];
 
   /* Events on a plate nobody was recorded driving. Every plate in both fixtures
      carries trips on every day, so without this the "(unattributed)" bucket —
@@ -122,7 +136,10 @@ async function compare(label, { wide }) {
              VALUES ('fms', $1, 'ecosine', 'NOBODY', 'Harsh Brake', $2)`,
     [`orphan-${i}`, `2026-08-0${i}T09:00:00+04:00`]);
 
-  const before = await q(uncap(OLD_ROWS), P);
+  // The snapshots of what shipped before predate the fleet predicate, so they
+  // take the two binds they were written with.
+  const P2 = P.slice(0, 2);
+  const before = await q(uncap(OLD_ROWS), P2);
   const after = await q(uncap(NEW), P);
   check('there are rows to compare at all', before.length > 0, String(before.length));
   check('the rewrite returns the same number of rows',
@@ -134,7 +151,7 @@ async function compare(label, { wide }) {
   /* The population figures the page prints underneath the table. They used to
      be their own query; they ride on the list now, and they must still be
      counted over everybody rather than over the rows that came back. */
-  const [oldT] = await q(OLD_TOTALS, P);
+  const [oldT] = await q(OLD_TOTALS, P2);
   const capped = await q(NEW, P);
   const newT = capped.length
     ? { drivers: capped[0]._drivers, alerts: capped[0]._alerts, unattributed: capped[0]._unattributed }
@@ -142,6 +159,14 @@ async function compare(label, { wide }) {
   check('the population figures are what the second query used to say',
     JSON.stringify(oldT) === JSON.stringify(newT),
     `${JSON.stringify(oldT)} vs ${JSON.stringify(newT)}`);
+
+  /* The residual, asserted on its own: every row must reconcile against its own
+     total, which is the check six of sixty production rows failed. */
+  check('every row\'s buckets sum to its own alert count',
+    after.every((r) => r.harsh_brake + r.harsh_accel + r.sharp_turn + r.overspeed
+      + r.other === r.alerts),
+    JSON.stringify(after.filter((r) => r.harsh_brake + r.harsh_accel + r.sharp_turn
+      + r.overspeed + r.other !== r.alerts).slice(0, 2)));
   check('and they are counted over every person, not over the capped list',
     newT.drivers >= capped.filter((r) => r.driver_name !== '(unattributed)').length,
     `${newT.drivers} vs ${capped.length}`);

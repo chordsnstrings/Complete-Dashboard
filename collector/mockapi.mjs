@@ -284,6 +284,11 @@ app.get('/api/drivers/directory', (_, r) => r.json([
     // What the PROVIDER says about them, which is not the same as whether they
     // drove: somebody can be waitlisted and still have last month's trips.
     platform_state: i === 3 ? 'suspended' : 'active', can_earn: i !== 3,
+    /* WHICH platform said it. 241 of the people in the live directory have
+       never driven — the panel exists for them — and every column describing
+       them was blank because the source platform was dropped on the way out. */
+    compliance_platform: 'uber', state_platform: i % 3 === 0 ? 'yango' : 'uber',
+    state_plate: plates[i % plates.length],
     plate: plates[i % plates.length], state: i === 3 ? 'suspended' : 'active',
     licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9, rating: 4.9 - i * 0.06,
     active_in_window: true, ever_driven: true,
@@ -445,7 +450,14 @@ app.get('/api/driver/earnings', (req, r) => {
       trips: 62 - w * 4, hours_online: 58.2 - w, hours_on_trip: 33.4 - w,
       earnings: 2350 - w * 120, cash_earnings: 400, acceptance_rate: .91, cancellation_rate: .04, rating: 4.88,
       // See /api/drivers/performance above: whole weeks, none displaced.
-      period_days: 7, days_used: 7, counted: 2350 - w * 120 })),
+      period_days: 7, days_used: 7, counted: 2350 - w * 120, clipped: false,
+      first_day_used: dayISO(7 * (w + 1)), last_day_used: dayISO(7 * w) })),
+    /* The caption's own total, computed where the rows are. It used to be added
+       up on the page from periods whose `counted` covered the WHOLE payout
+       period, so the tile read reported_earnings 5,053.67 beside a caption
+       saying "AED 6,592 counted across 11 statement(s)". */
+    counted_total: [0, 1, 2, 3].reduce((a, w) => a + (2350 - w * 120), 0),
+    counted_periods: 4, counted_clipped: 0,
     tips: 286 - i * 20, fare: 8420 - i * 400, tip_pct: +(((286 - i * 20) / (8420 - i * 400)) * 100).toFixed(2),
   });
 });
@@ -645,6 +657,14 @@ app.get('/api/vehicle/movement', (req, r) => {
       top_speed: Math.round(rnd(60, 128)), fixes: Math.round(rnd(5, 20)),
       verdict: n % 7 === 0 ? 'unauthorized' : n % 5 === 0 ? 'sensor_suspect' : 'authorized',
       matched_platform: n % 7 === 0 ? null : 'uber', low_confidence: n % 5 === 0,
+      /* The two fields that make a verdict readable. /api/segments returns
+         both and this per-vehicle table did not, so the same rows were
+         strictly poorer here than on the segments page: "assessed blind"
+         means nothing without naming the channel that could not be checked. */
+      verdict_reason: n % 7 === 0 ? 'no booking on any channel within 15 min'
+        : n % 5 === 0 ? 'telemetry clock is behind wall time' : 'matched uber trip',
+      unavailable_sources: n % 7 === 0 ? ['bolt'] : [],
+      max_gap_min: 4 + (n % 6), ignition_ratio: +(0.6 + (n % 4) * 0.1).toFixed(2),
       start_lat: 25.2, start_lng: 55.27, end_lat: 25.1, end_lng: 55.19,
     })),
     by_verdict: [{ verdict: 'authorized', n: 11, km: 214, minutes: 640 },
@@ -703,10 +723,20 @@ app.get('/api/vehicle/safety', (req, r) => {
       { alert_type: 'Sharp Turn', n: 9, latest: new Date().toISOString() }],
     // With the id, because a harsh-driving count against a name you cannot
     // open is a statistic rather than a conversation.
-    by_driver: [{ driver_name: drivers[i], driver_ext_id: `drv-${i}`, n: 78, km: 3400 },
+    /* km is the driver's distance ON THIS PLATE over the WHOLE window. It used
+       to be summed inside the alert-day join, so the denominator was the
+       distance driven on the days they triggered something — 322 events over
+       459 km, printed as 215.3 per 100 km beside a vehicle rate of 34, while
+       /api/vehicle/drivers-detail gave 2,459 km for the same person. */
+    by_driver: [{ driver_name: drivers[i], driver_ext_id: `drv-${i}`, n: 78,
+      km: 3400, booked_km: 3400, days_held: 21, per_100km: +((78 * 100) / 3400).toFixed(2) },
       { driver_name: drivers[(i + 4) % drivers.length],
-        driver_ext_id: `drv-${(i + 4) % drivers.length}`, n: 41, km: 2100 },
-      { driver_name: 'unattributed', driver_ext_id: null, n: 13, km: null }],
+        driver_ext_id: `drv-${(i + 4) % drivers.length}`, n: 41,
+        km: 2100, booked_km: 2100, days_held: 9, per_100km: +((41 * 100) / 2100).toFixed(2) },
+      { driver_name: 'unattributed', driver_ext_id: null, n: 13,
+        km: null, booked_km: null, days_held: null, per_100km: null }],
+    by_driver_total: 3, by_driver_shown: 3, by_driver_truncated: false, by_driver_alerts: 132,
+    recent_total: 40, recent_shown: 40, recent_truncated: false,
     daily: vDaily(req.query.plate).map((d) => ({ day: d.day, alerts: d.alerts })),
     recent: Array.from({ length: 40 }, (_, n) => ({
       alert_type: ['Overspeed', 'Harsh Braking', 'Harsh Acceleration', 'Sharp Turn'][n % 4],
@@ -1388,6 +1418,7 @@ app.get('/api/corporate/stranding', (_, r) => r.json(
     }))));
 app.get('/api/tiers/by-vehicle', (_, r) => r.json({
   fleet_premium_pct: 12.1,
+  total: plates.length, shown: plates.length, truncated: false,
   vehicles: plates.map((p, i) => {
     const trips = 400 - i * 40, black = i % 3 === 0 ? 0 : 30 - i * 3, comfort = i % 4 === 0 ? 2 : 20 - i * 2;
     const premium = black + comfort;
@@ -1457,10 +1488,22 @@ app.get('/api/geo/corridors', (_, r) => {
   r.json({
   totals: { corridors_3plus: 47, corridors_all: 210, origins_all: 63 },
   shown: 60, truncated: true, origins_shown: 40, origins_truncated: true,
-    note: 'Areas are parsed from the address text each provider returns, not from a place id.',
+    /* The tiles and the origins panel are a roll-up of the same aggregate the
+       corridor list needs, so they can be asked for on their own — cold at 365
+       days the live endpoint measured 8.45s and the page 7.9-14.4s of one
+       skeleton. */
+    part: 'all',
+    /* duration_s is declared on the trip table and written by no collector, so
+       avg_min is NULL on every corridor in every window. Said once rather than
+       drawn as a column of dashes. */
+    duration_measured: 0,
+    note: 'Areas are parsed from the address text each provider returns, not from a place id. '
+      + 'Bookings only — an FMS row is the tracker\'s own record of a journey a ride platform '
+      + 'already reported, and counting it would chart the same trip twice.',
     corridors: areas.flatMap((a, i) => areas.slice(0, 4).map((b, j) => ({
       from_area: a, to_area: b, trips: Math.max(3, 90 - i * 6 - j * 9),
-      avg_km: 8 + j * 4, avg_min: 18 + j * 7, priced: (i + j) % 3 ? 0 : 20,
+      avg_km: 8 + j * 4, avg_min: 18 + j * 7, min_n: 18 + j,
+      priced: (i + j) % 3 ? 0 : 20, complimentary: (i + j) % 5 === 0 ? 1 : 0,
       avg_fare: (i + j) % 3 ? null : 96 + j * 12, platforms: ['uber', 'fms'] }))).filter((c) => c.from_area !== c.to_area),
     origins: areas.map((area, i) => ({ area, trips: 420 - i * 34, morning: 200 - i * 18,
       evening: 180 - i * 12, avg_km: 11 + i * 0.5 })),
@@ -1616,6 +1659,10 @@ app.get('/api/roster', (_, r) => {
     // Which channels actually had trips in this window, so "idle" can mean
     // "did not work" rather than "the channel they work was not collected".
     platforms_with_trips: ['uber', 'yango', 'bolt', 'hotel'],
+    /* driver_platform_state.fleet_id is the credential set that collected a
+       standing, not the fleet somebody drives for — treating the two as one
+       returned the whole Bolt roster for &fleet=egari. */
+    fleet_basis: null,
     totals: { people: people.length, working: c('working'), idle_this_window: c('idle_this_window'),
       never_started: c('never_started'), in_pipeline: c('in_pipeline'), blocked: c('blocked'),
       holding_vehicle_while_blocked: people.filter((x) => x.holding_vehicle_while_blocked).length,
@@ -1759,13 +1806,16 @@ app.get('/api/alerts/by-driver', (_, r) => r.json({ totals: { drivers: 74, alert
   const km = (900 - i * 90);
   return { driver_name: name, driver_ext_id: `drv-${i}`, alerts: brake + accel + turn + over,
     harsh_brake: brake, harsh_accel: accel, sharp_turn: turn, overspeed: over,
+    /* The residual: everything the four buckets do not catch. Without it the
+       columns did not sum to the total on six of sixty live rows. */
+    other: 0,
     // WHICH cars, not just how many — "4 plates" is not something you can open.
     plates: 1 + (i % 2), plate_list: [plates[i % plates.length]].concat(
       i % 2 ? [plates[(i + 1) % plates.length]] : []),
     booked_km: km,
     per_100km: Math.round(((brake + accel + turn + over) * 100 / km) * 100) / 100 };
 }).concat([{ driver_name: '(unattributed)', driver_ext_id: null, alerts: 9, harsh_brake: 6,
-  harsh_accel: 2, sharp_turn: 1, overspeed: 0, plates: 4,
+  harsh_accel: 2, sharp_turn: 1, overspeed: 0, other: 0, plates: 4,
   plate_list: plates.slice(0, 3), booked_km: null, per_100km: null }]) }));
 
 
@@ -1779,8 +1829,13 @@ app.get('/api/alerts/by-vehicle', (_, r) => r.json({ totals: { vehicles: 118, al
   return { plate: p2, alerts: brake + accel + turn + over + other,
     harsh_brake: brake, harsh_accel: accel, sharp_turn: turn, overspeed: over, other,
     unattributed: i === 3 ? 4 : 0, drivers: 1 + (i % 2),
+    /* Ranked by their OWN event count, not alphabetically — the column is
+       headed "Most often" and used to return whichever custodian's name came
+       first in the alphabet, which on L45255 named the 322-event driver over
+       the 702-event one. */
     top_driver: i === 3 ? null : drivers[i % drivers.length],
-    top_driver_id: i === 3 ? null : `drv-${i % drivers.length}` };
+    top_driver_id: i === 3 ? null : `drv-${i % drivers.length}`,
+    top_driver_alerts: i === 3 ? null : Math.max(1, brake + accel - i) };
 }) }));
 
 
@@ -1793,6 +1848,11 @@ app.get('/api/drivers/leaderboard', (_, r) => r.json({
     person: name.toLowerCase(), driver_name: name, driver_ext_id: `drv-${i}`,
     platforms: i % 3 ? ['uber'] : ['uber', 'hotel'], accounts: i % 3 ? 1 : 2,
     plate: plates[i % plates.length], trips: 180 - i * 14, km: (180 - i * 14) * 12,
+    /* The column the ranking is actually over. This list is captioned with a
+       completion rate and was ordered by TOTAL bookings, so rank 1 could be
+       271 trips at 84% above rank 2's 257 at 89% — 228 completed against
+       229. */
+    completed_trips: Math.round((180 - i * 14) * (96 - i) / 100),
     avg_km: 12 + i * 0.3, revenue: i % 3 ? null : (180 - i * 14) * 96,
     // The denominator the completion rate is over — a percentage whose base is
     // missing cannot be checked, and Bolt's four failure states make it matter.
@@ -2169,13 +2229,30 @@ app.get('/api/sensor-health', (_, r) => r.json(plates.map((p, i) => ({
   judgeable: i !== 5,
 }))));
 
-app.get('/api/platforms', (_, r) => r.json([
-  { platform: 'uber', fleet_id: 'ecosine', trips: 30410, earliest: '2025-08-21T04:00:00Z', latest: '2026-08-21T18:00:00Z' },
-  { platform: 'fms', fleet_id: 'ecosine', trips: 38970, earliest: '2025-08-21T02:00:00Z', latest: '2026-08-21T19:00:00Z' },
-  { platform: 'hotel', fleet_id: 'ecosine', trips: 1256, earliest: '2026-07-07T05:00:00Z', latest: '2026-08-21T16:00:00Z' },
-  { platform: 'bolt', fleet_id: 'egari', trips: 67, earliest: '2026-08-18T06:00:00Z', latest: '2026-08-21T17:00:00Z' },
-  { platform: 'yango', fleet_id: 'egari', trips: 4, earliest: '2026-08-18T09:00:00Z', latest: '2026-08-21T12:00:00Z' },
-]));
+/* Bookings and raw rows are different counts and the coverage table conflated
+   them: `trips` was count(*) over the trip table, which counts FMS telematics
+   rows — 41,809 twins of trips already counted under uber — as bookings, and
+   it was all-time while the donut beside it was windowed. And a channel that
+   has never delivered a row had no row at all, on the page whose job is to
+   inventory the sources. */
+app.get('/api/platforms', (_, r) => {
+  const row = (platform, fleet_id, bookings, rows_seen, earliest, latest, health) => ({
+    platform, fleet_id, bookings, rows_seen,
+    window_bookings: Math.round(bookings * 0.09),
+    earliest, latest,
+    window_from: dayISO(30).slice(0, 10), window_to: dayISO(0).slice(0, 10), windowed: true,
+    collection_status: health?.status ?? 'ok', collection_error: health?.error ?? null,
+    collection_at: dayISO(0),
+  });
+  r.json([
+    row('uber', 'ecosine', 30410, 30410, '2025-08-21T04:00:00Z', '2026-08-21T18:00:00Z'),
+    row('fms', 'ecosine', 0, 38970, '2025-08-21T02:00:00Z', '2026-08-21T19:00:00Z'),
+    row('hotel', 'ecosine', 1256, 1256, '2026-07-07T05:00:00Z', '2026-08-21T16:00:00Z'),
+    row('yango', 'egari', 4, 4, '2026-08-18T09:00:00Z', '2026-08-21T12:00:00Z'),
+    row('bolt', null, 0, 0, null, null, { status: 'partial',
+      error: 'FI roster ecosine: code=503 NOT_AUTHORIZED hint=COMPANIES_NOT_ALLOWED' }),
+  ]);
+});
 
 app.get('/api/coverage', (_, r) => r.json({
   trips: [

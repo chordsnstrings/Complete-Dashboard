@@ -728,7 +728,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
   app.get('/api/tiers/by-vehicle', wrap(async (req, res) => {
     const p = range(req);
     const rows = await q(
-      `SELECT t.plate,
+      `WITH agg AS (
+       SELECT t.plate,
               count(*)::int trips,
               count(*) FILTER (WHERE t.uber_tier = 'Black')::int black,
               count(*) FILTER (WHERE t.uber_tier = 'Comfort')::int comfort,
@@ -738,20 +739,48 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               round(sum(t.distance_km) FILTER (WHERE t.has_distance)::numeric, 0) km,
               round(avg(t.distance_km) FILTER (WHERE t.has_distance)::numeric, 1) avg_km,
               max(vp.make) AS make, max(vp.model) AS model, max(vp.year)::int AS year,
-              max(vp.colour) AS colour,
-              /* Who ran this car over the window. "L45240 does 4% premium work
-                 against a fleet median of 31%" is a finding about a person as
-                 much as an asset, and the row used to name only the asset —
-                 leaving the reader to open the vehicle page and work backwards
-                 to who had it before they could act on anything. */
-              ${custodyOverWindow('t.plate')} AS driver_refs,
-              ${custodyCountOverWindow('t.plate')} AS driver_n
+              max(vp.colour) AS colour
        -- The window filter is applied inside a subquery rather than beside the
        -- join: vehicle_profile also has platform and fleet_id columns, and the
        -- shared filter names them bare, which makes the reference ambiguous.
        FROM (SELECT * FROM trip_ext WHERE ${F} AND platform = 'uber' AND plate IS NOT NULL) t
        LEFT JOIN vehicle_profile vp ON upper(replace(vp.plate, ' ', '')) = upper(replace(t.plate, ' ', ''))
-       GROUP BY t.plate ORDER BY trips DESC LIMIT 250`, p);
+       GROUP BY t.plate ORDER BY trips DESC LIMIT 250),
+       held AS (
+         SELECT v.plate, v.driver_name, v.driver_ext_id, count(DISTINCT v.day)::int days
+           FROM vehicle_driver_day v
+          WHERE v.plate IN (SELECT plate FROM agg)
+            AND v.day BETWEEN $1::date AND $2::date
+            AND v.driver_name IS NOT NULL
+          GROUP BY v.plate, v.driver_name, v.driver_ext_id),
+       ranked AS (
+         SELECT h.*, row_number() OVER (PARTITION BY h.plate
+                                        ORDER BY h.days DESC, h.driver_name) rn
+           FROM held h),
+       per_plate AS (
+         SELECT r.plate,
+                jsonb_agg(jsonb_build_object('name', r.driver_name, 'id', r.driver_ext_id,
+                                             'days', r.days)
+                          ORDER BY r.days DESC, r.driver_name)
+                  FILTER (WHERE r.rn <= 3) AS driver_refs,
+                count(DISTINCT r.driver_ext_id)::int AS driver_n
+           FROM ranked r GROUP BY r.plate)
+       /* Who ran this car over the window. "L45240 does 4% premium work against
+          a fleet median of 31%" is a finding about a person as much as an
+          asset, and the row used to name only the asset — leaving the reader
+          to open the vehicle page and work backwards to who had it before
+          they could act on anything.
+
+          Custody resolved ONCE for the 250 plates, not once per output row.
+          custodyOverWindow and custodyCountOverWindow are correlated
+          subqueries in the SELECT list, so each of them re-grouped
+          vehicle_driver_day for every plate on the page — 500 groupings to
+          decorate 250 rows. This tab measured 4,794ms cold at a 12-month
+          window. /api/product/by-vehicle already makes exactly this trade and
+          says why; this is the same shape. */
+       SELECT a.*, p2.driver_refs, coalesce(p2.driver_n, 0) AS driver_n
+         FROM agg a LEFT JOIN per_plate p2 ON p2.plate = a.plate
+        ORDER BY a.trips DESC`, p);
     const fleetPremium = rows.reduce((a, r) => a + r.premium, 0);
     const fleetTrips = rows.reduce((a, r) => a + r.trips, 0);
     const fleetPct = share(fleetPremium, fleetTrips);
@@ -767,8 +796,16 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       cur.best = Math.max(cur.best, r.trips >= 20 ? (r.premium / r.trips) * 100 : 0);
       byModel.set(k, cur);
     }
+    /* How many Uber-carrying vehicles there ARE, so the 250 the list stops at
+       cannot be read as the fleet. */
+    const [vt] = await q(
+      `SELECT count(DISTINCT plate)::int vehicles FROM trip_ext
+        WHERE ${F} AND platform = 'uber' AND plate IS NOT NULL`, p);
     res.json({
       fleet_premium_pct: fleetPct,
+      total: vt?.vehicles ?? rows.length,
+      shown: rows.length,
+      truncated: (vt?.vehicles ?? 0) > rows.length,
       vehicles: rows.map((r) => {
         const k = [r.make, r.model].filter(Boolean).join(' ') || '(unknown)';
         const m = byModel.get(k);
@@ -1119,6 +1156,18 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      cost a second scan. */
   app.get('/api/geo/corridors', wrap(async (req, res) => {
     const p = range(req);
+    /* Which half of the page is being asked for.
+       ─────────────────────────────────────────────────────────────────────
+       Cold at a 12-month window this endpoint measured 8.45s and the page 7.9
+       to 14.4s, all of it one skeleton. The KPI row and the origins panel are
+       a roll-up of the same aggregate the corridor list needs, so they can be
+       painted the moment it lands rather than after 120 corridor rows have
+       been ordered and cut. `part=summary` returns the totals and origins,
+       `part=corridors` the list; no `part` returns everything, which is what
+       every existing caller gets. */
+    const part = ['summary', 'corridors'].includes(req.query.part) ? req.query.part : null;
+    const wantCorridors = part !== 'summary';
+    const wantSummary = part !== 'corridors';
     const rows = await q(
       `WITH base AS (
          SELECT coalesce(${areaOf('pickup_addr')}, '(unrecorded)') AS from_area,
@@ -1126,8 +1175,23 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 count(*)::int AS trips,
                 round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) AS avg_km,
                 round(avg(duration_s)::numeric / 60, 1) AS avg_min,
-                count(*) FILTER (WHERE price IS NOT NULL)::int AS priced,
+                /* The denominator the average actually used. "priced" counted
+                   price IS NOT NULL while avg_fare additionally excluded
+                   complimentary rides, so the printed "N priced" was not the N
+                   the AED beside it was divided by. A complimentary ride has a
+                   price of zero that is not a price; counted separately rather
+                   than folded into either. */
+                count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int AS priced,
+                count(*) FILTER (WHERE is_complimentary)::int AS complimentary,
                 round(avg(price) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::numeric, 2) AS avg_fare,
+                /* How many rows carried a duration at all. avg_min is NULL on
+                   every corridor in every window because duration_s is never
+                   written by any collector, though sql/schema.sql:64 declares
+                   it and src/probe.js maps Uber's "Trip Duration" to it. A
+                   column of dashes with no denominator reads as "these trips
+                   took no time"; with the count beside it the page can say the
+                   field is not collected. */
+                count(duration_s)::int AS min_n,
                 array_agg(DISTINCT platform) AS platforms,
                 -- The pickup-only measures, carried at corridor grain so the
                 -- origins panel is a roll-up rather than another scan. The
@@ -1139,25 +1203,36 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 sum(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km,
                 count(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km_n
            FROM trip_ext
-          WHERE ${F} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
+          /* FB, not F. Every other demand endpoint in this product counts
+             bookings; this one counted raw trips, so FMS telematics twins —
+             the tracker's own record of journeys the ride platforms already
+             reported — were charted as demand. Measured at days=7: unfiltered
+             gave corridors_3plus 302 / corridors_all 3,303 / origins_all 703,
+             and &platform=fms ALONE gave 187 / 1,217 / 193, so FMS supplied
+             62% of "corridors seen 3+ times". The list carried rows like
+             "Dubai | United Arab Emirates, | 93 | fms", and the top origin
+             "Dubai" was 985 trips of which 805 were twins. */
+          WHERE ${FB} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
           GROUP BY 1, 2),
        corridor AS (
          SELECT row_number() OVER () AS seq, c.*
-           FROM (SELECT * FROM base WHERE trips >= 3 ORDER BY trips DESC LIMIT 120) c),
+           FROM (SELECT * FROM base WHERE ${wantCorridors ? 'trips >= 3' : 'false'}
+                  ORDER BY trips DESC LIMIT 120) c),
        origin AS (
          SELECT row_number() OVER () AS seq, o.*
            FROM (SELECT from_area AS area, sum(from_trips)::int AS trips,
                         sum(from_morning)::int AS morning, sum(from_evening)::int AS evening,
                         round((sum(from_km) / nullif(sum(from_km_n), 0))::numeric, 1) AS avg_km
-                   FROM base GROUP BY 1 HAVING sum(from_trips) > 0
+                   FROM base WHERE ${wantSummary ? 'true' : 'false'} GROUP BY 1
+                  HAVING sum(from_trips) > 0
                   ORDER BY trips DESC LIMIT 60) o)
-       SELECT 'corridor' AS kind, seq, from_area, to_area, trips, avg_km, avg_min, priced,
-              avg_fare, platforms, NULL::int AS morning, NULL::int AS evening,
+       SELECT 'corridor' AS kind, seq, from_area, to_area, trips, avg_km, avg_min, min_n, priced,
+              complimentary, avg_fare, platforms, NULL::int AS morning, NULL::int AS evening,
               NULL::int AS corridors_3plus, NULL::int AS corridors_all, NULL::int AS origins_all
          FROM corridor
        UNION ALL
-       SELECT 'origin', seq, area, NULL, trips, avg_km, NULL, NULL,
-              NULL, NULL, morning, evening,
+       SELECT 'origin', seq, area, NULL, trips, avg_km, NULL, NULL, NULL,
+              NULL, NULL, NULL, morning, evening,
               NULL, NULL, NULL
          FROM origin
        UNION ALL
@@ -1166,8 +1241,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           lists capped at 60 and 120 rows — right until the fleet works more
           than 120 distinct corridors, at which point both tiles quietly become
           the cap. One row, always, so an empty window still states its zeroes. */
-       SELECT 'total', 0, NULL, NULL, NULL, NULL, NULL, NULL,
-              NULL, NULL, NULL, NULL,
+       SELECT 'total', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+              NULL, NULL, NULL, NULL, NULL,
               count(*) FILTER (WHERE from_trips >= 3)::int,
               count(*) FILTER (WHERE from_trips > 0)::int,
               count(DISTINCT from_area) FILTER (WHERE from_trips > 0 AND from_area <> '(unrecorded)')::int
@@ -1182,14 +1257,18 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     };
     const corridors = rows.filter((r) => r.kind === 'corridor').map((r) => ({
       from_area: r.from_area, to_area: r.to_area, trips: r.trips, avg_km: r.avg_km,
-      avg_min: r.avg_min, priced: r.priced, avg_fare: r.avg_fare, platforms: r.platforms,
+      avg_min: r.avg_min, min_n: r.min_n, priced: r.priced, complimentary: r.complimentary,
+      avg_fare: r.avg_fare, platforms: r.platforms,
     }));
     const origins = rows.filter((r) => r.kind === 'origin').map((r) => ({
       area: r.from_area, trips: r.trips, morning: r.morning, evening: r.evening, avg_km: r.avg_km,
     }));
     const shown = corridors.filter((r) => r.from_area !== '(unrecorded)' || r.to_area !== '(unrecorded)');
     res.json({
-      note: 'Areas are parsed from the address text each provider returns, not from a place id.',
+      note: 'Areas are parsed from the address text each provider returns, not from a place id. '
+        + 'Bookings only — an FMS row is the tracker\'s own record of a journey a ride platform '
+        + 'already reported, and counting it would chart the same trip twice.',
+      part: part || 'all',
       corridors: shown,
       origins,
       totals: t,
@@ -1197,6 +1276,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       truncated: t.corridors_all > shown.length,
       origins_shown: origins.length,
       origins_truncated: t.origins_all > origins.length,
+      /* Duration is declared on the trip table and written by nothing, so
+         avg_min is NULL on every corridor in every window. Said once, here,
+         rather than left as a column of dashes. */
+      duration_measured: corridors.reduce((a, r) => a + (r.min_n || 0), 0),
     });
   }));
 
