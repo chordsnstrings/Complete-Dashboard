@@ -25,6 +25,7 @@ import { retentionRoutes } from './retention_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
 import { revenueRoutes } from './revenue_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
+import { performerRoutes } from './performer_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
@@ -2899,6 +2900,7 @@ revenueRoutes(app, { q, wrap, range });
    against on-trip net + tips + salik − cash, the identity the July 2026
    ledger reconciliation proved to 0.7%. */
 reconcileRoutes(app, { q, wrap, rollupGrainSql });
+performerRoutes(app, { q, wrap });
 
 /* ───────────────── live provider probes ─────────────────
    Read-only, allowlisted, shape-only. The question these answer — "does this

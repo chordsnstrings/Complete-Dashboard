@@ -30,6 +30,7 @@ import { renderCapacity } from './capacity.js';
 import { renderRevenue } from './revenue.js';
 import { renderReconcile } from './reconcile.js';
 import { renderEconomics, UNIT_TABS } from './economics.js';
+import { renderPerformers, renderPerformer } from './performers.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -202,6 +203,8 @@ const VIEWS = [
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Work', sub: 'When trips happen — by day, hour and weekday' },
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Work', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
   { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Work', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
+  { id: 'top-performers', label: 'Top performers', ic: '▲', grp: 'People', sub: 'Who last complete week went well for, and what they did differently' },
+  { id: 'low-performers', label: 'Low performers', ic: '▼', grp: 'People', sub: 'Who it did not — with what the data cannot tell you about why' },
   { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'People', sub: 'Per-driver output, quality and cross-platform activity' },
   { id: 'roster', label: 'Roster & supply', ic: '☰', grp: 'People', sub: 'Who is on the books across all four platforms, and who is earning nothing' },
   { id: 'retention', label: 'Joiners & leavers', ic: '⇅', grp: 'People', sub: 'Whether a falling driver count is people leaving or nobody arriving — a headcount cannot tell them apart' },
@@ -232,6 +235,7 @@ const VIEWS = [
    every one of them fell through to VIEWS[0] and titled itself "Unit
    economics", with the breadcrumb hidden and nothing lit in the sidebar. */
 const PARENT = { driver: 'drivers', vehicle: 'vehicles', property: 'corporate', day: 'demand',
+  performer: 'top-performers',
   action: 'insights', slot: 'demand', segments: 'unauthorized', segment: 'unauthorized' };
 const DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -986,6 +990,9 @@ V.retention = async (root) => renderRetention(root);
 V.capacity = async (root) => renderCapacity(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */
 V.unit = async (root) => renderEconomics(root);
+V['top-performers'] = async (root) => renderPerformers(root, 'top');
+V['low-performers'] = async (root) => renderPerformers(root, 'low');
+V.performer = async (root) => renderPerformer(root, state.param);
 V.revenue = async (root) => renderRevenue(root);
 // `#reconcile` is every month; `#reconcile/<YYYY-MM>` is that month's days.
 V.reconcile = async (root) => renderReconcile(root, state.param);

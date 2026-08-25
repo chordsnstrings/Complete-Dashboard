@@ -28,6 +28,9 @@ import { launchChromium } from './browser.mjs';
 const ROUTES = [
   // The first screen and its two ledgers.
   'unit', 'unit/assets', 'unit/drivers', 'unit/nonsense',
+  /* Both lists, and two drill-downs: drv-0 has an Uber status row, drv-9
+     deliberately has none, so the branch that says so is rendered too. */
+  'top-performers', 'low-performers', 'performer/drv-0', 'performer/drv-9',
   'overview', 'demand', 'day/2026-08-14', 'day/not-a-date', 'drivers',
   'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/territory',
   'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',

@@ -303,6 +303,42 @@ const dailyFor = (id) => {
   return out;
 };
 
+/* The performer pages. Shapes chosen to exercise what the real data does:
+   most bookings carry an end time and some do not, one channel prices its
+   trips and the other pays a statement, and the Uber status rows exist for
+   one org only — so the "no status for this person" branch is reachable. */
+app.get('/api/performer/weeks', (_, r) => r.json({
+  weeks: [{ week: '2026-08-17', to: '2026-08-23' }, { week: '2026-08-10', to: '2026-08-16' }],
+  latest_complete: '2026-08-17',
+}));
+app.get('/api/performer', (req, r) => {
+  const solo = String(req.query.id || '').endsWith('9');
+  return r.json({
+    week: ['2026-08-17', '2026-08-23'],
+    days: [0, 1, 2, 3, 4].map((i) => ({
+      day: `2026-08-${17 + i}`, bookings: 12 - i, completed: 11 - i, cancelled: i % 2,
+      km: 140 - i * 9, fares: i === 0 ? 320 : null,
+      first_trip: `2026-08-${17 + i}T04:${10 + i}:00.000Z`,
+      last_trip: `2026-08-${17 + i}T16:${20 + i}:00.000Z`,
+      plates: ['L44251'], platforms: ['uber'],
+      on_trip_min: 300 - i * 20, elapsed_min: 720,
+    })),
+    areas: [{ area: 'Business Bay', picked_up: 22, stayed: 6 },
+      { area: 'Downtown Dubai', picked_up: 14, stayed: 3 },
+      { area: '(unrecorded)', picked_up: 2, stayed: 0 }],
+    platform_status: solo ? [] : [
+      { day: '2026-08-18', status: 'ONTRIP', n: 9, first_seen: '2026-08-18T08:40:00.000Z', last_seen: '2026-08-18T15:10:00.000Z' },
+      { day: '2026-08-18', status: 'ONLINE', n: 14, first_seen: '2026-08-18T08:05:00.000Z', last_seen: '2026-08-18T16:02:00.000Z' },
+    ],
+    platforms: [{ platform: 'uber', bookings: 48, km: 600, fares: null, priced: 0 },
+      { platform: 'hotel', bookings: 6, km: 90, fares: 1320, priced: 6 }],
+    payouts: [{ platform: 'uber', driver_ext_id: 'drv-0', payout: 1840.25, payout_days: 7,
+      period_start: '2026-08-17', period_end: '2026-08-23' }],
+    on_trip_min: 1240, timed_bookings: 50, bookings: 54, duration_coverage_pct: 93,
+    note: '4 of 54 bookings carry no end time, so on-trip minutes are measured over the rest.',
+  });
+});
+
 app.get('/api/drivers/directory', (_, r) => r.json([
   ...drivers.map((name, i) => ({
     driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name, fleet_id: i % 3 ? 'ecosine' : 'egari',
