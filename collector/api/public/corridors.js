@@ -90,6 +90,19 @@ export async function renderCorridors(root) {
     root.append(box);
     return;
   }
+  /* The bucket this page drops, measured before it is dropped.
+     ─────────────────────────────────────────────────────────────────────
+     Filtering out '(unrecorded)' is right for a CHART — an unnamed bucket is
+     not a place and drawing it as the tallest bar would say the fleet's
+     busiest pickup point is nowhere. But on the live fleet it is 1,915
+     pickups of 8,468, which is 22.6% and LARGER than Al Garhoud, the busiest
+     area actually drawn. Silently removing a fifth of the data also moves
+     every share on this page: "share of every addressed pickup" divides by
+     the named total, so each area's percentage is overstated against the work
+     that really happened.
+
+     So it is dropped from the chart and STATED on the page. */
+  const unrecorded = c.origins.find((o) => o.area === '(unrecorded)');
   const named = c.origins.filter((o) => o.area !== '(unrecorded)');
   const shownOrigins = named.slice(0, SHOWN);
   /* The share is over EVERY named area the endpoint returned, not over the
@@ -109,11 +122,26 @@ export async function renderCorridors(root) {
       sub: named[0] ? `${pct((named[0].trips / totalOrigin) * 100, 1)} of every addressed pickup` : null },
     { label: 'Top 5 areas', value: pct((named.slice(0, 5).reduce((a, o) => a + o.trips, 0) / totalOrigin) * 100, 1),
       sub: `share of all ${fmt(named.length)} areas the server returned, not of the ${fmt(SHOWN)} drawn` },
+    /* The largest single bucket on the page, and the one every percentage
+       above it silently excludes. */
+    unrecorded && unrecorded.trips
+      ? { label: 'Pickups with no area', value: fmt(unrecorded.trips),
+        tone: unrecorded.trips > (named[0]?.trips || 0) ? 'warn' : null,
+        sub: `${pct((unrecorded.trips / (totalOrigin + unrecorded.trips)) * 100, 1)} of every pickup — `
+          + 'the address text carried no community, so these are in none of the figures beside this one' }
+      : null,
   ]));
 
   /* An area is a place, and a place with a name is something a dispatcher
      wants to open — the whole page had zero anchors on it. */
   hbars(b1, shownOrigins.map((o) => ({ label: o.area, n: o.trips })), { signed: false });
+  if (unrecorded && unrecorded.trips) {
+    b1.append(el('p', 'cap', esc(
+      `${fmt(unrecorded.trips)} further pickup(s) — `
+      + `${pct((unrecorded.trips / (totalOrigin + unrecorded.trips)) * 100, 1)} of the window — carry an `
+      + 'address with no community in it and are in none of these bars. Every share on this page is '
+      + 'over the addressed pickups only.')));
+  }
   b1.append(el('p', 'cap', named.length > SHOWN
     ? `The ${fmt(SHOWN)} busiest of ${countOf(named.length, 'area')} the server returned`
       + `${t.origins_all && t.origins_all > named.length

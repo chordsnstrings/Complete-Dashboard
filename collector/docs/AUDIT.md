@@ -603,3 +603,49 @@ reconciliation one — and everything after it was tuning out false positives. A
 harness that cries wolf gets switched off, so each gate is written down with the
 finding that forced it.
 
+### Pass 15 — the numbers sweep across all 104 routes
+
+```
+104 routes at 412px, 4 with findings
+```
+
+Three were the matcher, one was real.
+
+#### 47 — a fifth of every pickup, dropped without a word
+
+`#corridors` filters `(unrecorded)` out of its origins chart, which is right for
+a chart: an unnamed bucket is not a place, and drawing it would say the fleet's
+busiest pickup point is nowhere. On the live fleet that bucket is:
+
+```
+unrecorded pickups   1,915   22.6% of every pickup in the window
+named pickups        6,553   across 59 areas
+busiest named area   Al Garhoud, 1,696
+```
+
+**The dropped bucket is larger than the busiest area actually drawn.** And
+removing it silently moves every share on the page: "Busiest pickup area — X% of
+every addressed pickup" and "Top 5 areas" both divide by the named total, so
+each percentage is overstated against the work that really happened.
+
+It is still out of the chart, and it is now a KPI — *Pickups with no area:
+1,915, 22.6% of every pickup* — toned as a warning when it exceeds the busiest
+named area, with a line under the chart saying every share on the page is over
+the addressed pickups only.
+
+#### The three that were the matcher
+
+| reported | why it was wrong |
+|---|---|
+| `(unrecorded) · Trips should be 1915` on the corridors *table* | the figure is from the `origins` list; the table renders `corridors`. Two lists, one identity string. The page-wide gate caught that it was nowhere at all — which is how the real finding above surfaced |
+| `hotel · Priced should be 11595` | the tokeniser dropped two-letter words, so `priced_km` and `priced` looked identical. The column holds a count of bookings; the field is kilometres |
+| `On trip should be 11762` | `on_trip_s` is seconds and the column prints hours off `on_trip_min`. The row carries both, and the page may render whichever reads better |
+
+#### One known residual
+
+`#driver/<id>/earnings` reports `uber · Trips should be 3294` from
+`/api/driver/profile`. That is the driver's **lifetime** Uber trips; the column
+holds trips **in a payout period**. Same identity, same column name, different
+scope — and no generic rule separates them without knowing what each page means.
+Recorded rather than suppressed, so the next reader knows it has been looked at.
+

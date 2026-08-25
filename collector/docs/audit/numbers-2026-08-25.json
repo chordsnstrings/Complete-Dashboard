@@ -1,52 +1,14 @@
 {
   "base": "http://localhost:8100",
   "width": 412,
-  "at": "2026-08-25T18:08:33.315Z",
+  "at": "2026-08-25T18:21:38.121Z",
   "findings": [
     {
-      "route": "unit",
-      "code": "unshown",
-      "detail": "7 figure(s) have a column on this page, sit in a row it is showing, and are not in that row",
-      "examples": [
-        "Bakht Zada Sharif · Money in should be 7898 (/api/economics/drivers money)",
-        "Abusaad Siddiqui Akhlaque Ahmad · Money in should be 6077 (/api/economics/drivers money)",
-        "Khan Akbar Khan · Money in should be 2599 (/api/economics/drivers money)",
-        "Rana Jahanzaib Akbar · Money in should be 2491 (/api/economics/drivers money)",
-        "Muhammad Naseem Sadiq · Money in should be 2487 (/api/economics/drivers money)",
-        "Md muhmudul Hasan · Money in should be 2218 (/api/economics/drivers money)"
-      ]
-    },
-    {
-      "route": "unit/assets",
-      "code": "unshown",
-      "detail": "5 figure(s) have a column on this page, sit in a row it is showing, and are not in that row",
-      "examples": [
-        "L36397 · Alerts /100km should be 1507 (/api/economics/assets alerts)",
-        "L95161 · Alerts /100km should be 1009 (/api/economics/assets alerts)",
-        "L46208 · Alerts /100km should be 1617 (/api/economics/assets alerts)",
-        "L45255 · Alerts /100km should be 1108 (/api/economics/assets alerts)",
-        "L86970 · Alerts /100km should be 1201 (/api/economics/assets alerts)"
-      ]
-    },
-    {
-      "route": "finance",
-      "code": "unshown",
-      "detail": "9 figure(s) have a column on this page, sit in a row it is showing, and are not in that row",
-      "examples": [
-        "hotel · Share of revenue should be 13652 (/api/mix/detail revenue)",
-        "hotel · Share of revenue should be 6630 (/api/mix/detail revenue)",
-        "hotel · Share of revenue should be 19116 (/api/mix/detail revenue)",
-        "hotel · Share of revenue should be 11585 (/api/mix/detail revenue)",
-        "hotel · Share of revenue should be 5685 (/api/mix/detail revenue)",
-        "hotel · Share of revenue should be 7645 (/api/mix/detail revenue)"
-      ]
-    },
-    {
-      "route": "corridors",
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
       "code": "unshown",
       "detail": "1 figure(s) have a column on this page, sit in a row it is showing, and are not in that row",
       "examples": [
-        "(unrecorded) · Trips↓ should be 1915 (/api/geo/corridors trips)"
+        "uber · Trips should be 3294 (/api/driver/profile trips)"
       ]
     }
   ]

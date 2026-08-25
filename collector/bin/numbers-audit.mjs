@@ -91,10 +91,11 @@ function rowFigures(o, out = [], where = '') {
       if (!r || typeof r !== 'object') return;
       const id = identityOf(r);
       if (!id) return;
+      const siblings = Object.keys(r);
       for (const [k, v] of Object.entries(r)) {
         if (!isNum(v)) continue;
         const n = big(v);
-        if (n != null) out.push({ id, key: k, n, where });
+        if (n != null) out.push({ id, key: k, n, where, siblings });
       }
     });
     return out;
@@ -173,8 +174,15 @@ for (const route of routes) {
      a payload is meant to be a column, and treating them as one reported
      fix_age_min and a tier's kilometres as missing from tables that never
      offered them. */
-  const words = (x) => String(x).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ')
-    .filter((w) => w.length > 2 && !['the', 'per', 'and'].includes(w));
+  /* Two-letter tokens are kept on the KEY side. Dropping them made
+     `priced_km` and `priced` identical, so the audit demanded a kilometre
+     figure appear in a column headed "Priced" that correctly holds a count of
+     bookings. They are still dropped from headers, where "of", "in" and "by"
+     are noise. */
+  const NOISE = ['the', 'per', 'and', 'of', 'in', 'by', 'to', 'for'];
+  const tok = (x, min) => String(x).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().split(' ')
+    .filter((w) => w.length >= min && !NOISE.includes(w));
+  const words = (x) => tok(x, 3);
   /* A column showing a DERIVED quantity is not a column for the raw field.
      "Alerts /100km" is a rate and `alerts` is a count; "Share of revenue" is a
      percentage and `revenue` is an amount. Both matched on words alone and the
@@ -182,7 +190,7 @@ for (const route of routes) {
      something else. */
   const DERIVED = /[/%]|\bper\b|\bshare\b|\brate\b|\bavg\b|\baverage\b|\bper 100\b/i;
   const columnFor = (heads, key) => {
-    const kw = words(key);
+    const kw = tok(key, 2);
     if (!kw.length) return null;
     return heads.find((h) => {
       if (DERIVED.test(h)) return false;
@@ -197,8 +205,16 @@ for (const route of routes) {
   const onPage = new Set(dom.page);
   const anywhere = (v) => onPage.has(String(v)) || onPage.has(String(v - 1)) || onPage.has(String(v + 1));
 
+  /* A field the page shows in different UNITS is shown.
+     `on_trip_s` is seconds and the column prints hours off `on_trip_min`; both
+     are the same measurement and the row carries both. So a key is skipped
+     when its own row holds a sibling sharing its stem — the page is free to
+     render whichever of them reads better. */
+  const STEM = /_(s|ms|sec|secs|min|mins|hours|hrs|km|m|pct|percent)$/;
   const missing = [];
   for (const f of pairs) {
+    if (STEM.test(f.key) && f.siblings.some((k) => k !== f.key
+      && k.replace(STEM, '') === f.key.replace(STEM, ''))) continue;
     for (const t of dom.tables) {
       const col = columnFor(t.heads, f.key);
       if (!col) continue;
