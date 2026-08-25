@@ -1,0 +1,297 @@
+{
+  "base": "http://localhost:8099",
+  "at": "2026-08-25T13:39:32.146Z",
+  "widths": [
+    1500
+  ],
+  "routes": 33,
+  "findings": [
+    {
+      "route": "unit",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":26,\"title\":\"Unit economics\",\"kpis\":8,\"tables\":6,\"charts\":3}"
+    },
+    {
+      "route": "overview",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":8,\"title\":\"Fleet activity\",\"kpis\":6,\"tables\":1,\"charts\":4}"
+    },
+    {
+      "route": "drivers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":23,\"title\":\"Drivers\",\"kpis\":0,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "compare",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":4,\"title\":\"Today vs yesterday\",\"kpis\":5,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "finance",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":13,\"title\":\"Finance\",\"kpis\":8,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "platforms",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":5,\"title\":\"Platforms\",\"kpis\":0,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "corridors",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":36,\"title\":\"Corridors\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "safety",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":9,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "live",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":8,\"title\":\"Live fleet\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "map",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":2}"
+    },
+    {
+      "route": "sources",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":24,\"title\":\"Data sources\",\"kpis\":0,\"tables\":5,\"charts\":0}"
+    },
+    {
+      "route": "coverage",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"title\":\"Collection gaps\",\"kpis\":5,\"tables\":4,\"charts\":0}"
+    },
+    {
+      "route": "providers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":20,\"title\":\"What each API offers\",\"kpis\":6,\"tables\":6,\"charts\":0}"
+    },
+    {
+      "route": "settings",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":3,\"title\":\"Settings\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "insights",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":3,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "analyst",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "playbook",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":21,\"title\":\"To-do list\",\"kpis\":5,\"tables\":5,\"charts\":0}"
+    },
+    {
+      "route": "capacity",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":204,\"title\":\"Rota gaps\",\"kpis\":5,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "forecast",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "forecast",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":32,\"title\":\"Forecast\",\"kpis\":10,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "retention",
+      "width": 1500,
+      "sev": "e",
+      "code": "dead-column",
+      "detail": "\"Channels\" is empty in all 5 rows"
+    },
+    {
+      "route": "retention",
+      "width": 1500,
+      "sev": "w",
+      "code": "silent-cap",
+      "detail": "a table ends at exactly 12 rows and nothing says whether that is all of them"
+    },
+    {
+      "route": "retention",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":29,\"title\":\"Joiners & leavers\",\"kpis\":5,\"tables\":4,\"charts\":1}"
+    },
+    {
+      "route": "revenue",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":4,\"title\":\"Revenue by channel\",\"kpis\":7,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "reconcile",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":6,\"title\":\"Reconciliation\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "compliance",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":16,\"title\":\"Compliance\",\"kpis\":7,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "unauthorized",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":21,\"title\":\"Unauthorized trips\",\"kpis\":8,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Reason given\" is empty in 7 of 8 rows"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":8,\"title\":\"Roster & supply\",\"kpis\":7,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "vehicles",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":16,\"title\":\"Vehicles\",\"kpis\":6,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "corporate",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"title\":\"Corporate & hotels\",\"kpis\":10,\"tables\":0,\"charts\":3}"
+    },
+    {
+      "route": "settlement",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"title\":\"Settlement\",\"kpis\":4,\"tables\":0,\"charts\":1}"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Rain\" is empty in 30 of 31 rows"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
+      "sev": "w",
+      "code": "sparse-column",
+      "detail": "\"Calendar\" is empty in 30 of 31 rows"
+    },
+    {
+      "route": "demand",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":31,\"title\":\"Demand\",\"kpis\":5,\"tables\":1,\"charts\":3}"
+    },
+    {
+      "route": "causes",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":11,\"title\":\"Why it moved\",\"kpis\":5,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segments",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":68,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "top-performers",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Not ranked"
+    },
+    {
+      "route": "top-performers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":1,\"rows\":14,\"title\":\"Top performers\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "w",
+      "code": "empty-panel",
+      "detail": "Not ranked"
+    },
+    {
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":1,\"rows\":14,\"title\":\"Low performers\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    }
+  ]
+}

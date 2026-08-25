@@ -649,16 +649,27 @@ export async function computeInsights({ from, to } = {}) {
 
      Deleting here keeps exactly the row those readers already serve
      (DISTINCT ON ... ORDER BY computed_at DESC), so no number on any page
-     moves; only the sort behind it shrinks. sql/schema_v30.sql does the same
+     moves; only the sort behind it shrinks. sql/schema_v31.sql does the same
      delete once for the copies that had already accumulated, and explains why
-     the surviving set is provably the current answer. */
+     the surviving set is provably the current answer.
+
+     WRITTEN AS AN ANTI-JOIN, NOT A SELF-JOIN. This was
+     `DELETE FROM insight a USING insight b`, which compares every row against
+     every other row: at thirty thousand rows that is nine hundred million
+     pairs and it exceeded the two-minute statement timeout every time. So the
+     prune that was supposed to run after every generation never once
+     completed — which is precisely why the table was still 99.3% duplicates
+     while this code claimed to be pruning it. DISTINCT ON picks the survivors
+     with a single sort, and the tiebreak matches both migrations so the three
+     cannot disagree about which copy lives. */
   const pruned = await pool.query(
-    `DELETE FROM insight a USING insight b
-      WHERE a.code = b.code
-        AND a.entity_type IS NOT DISTINCT FROM b.entity_type
-        AND a.entity_id   IS NOT DISTINCT FROM b.entity_id
-        AND (a.computed_at < b.computed_at
-             OR (a.computed_at = b.computed_at AND a.id < b.id))`);
+    `WITH keep AS (
+       SELECT DISTINCT ON (code, entity_type, entity_id) id
+         FROM insight
+        ORDER BY code, entity_type, entity_id, computed_at DESC, id DESC
+     )
+     DELETE FROM insight i
+      WHERE NOT EXISTS (SELECT 1 FROM keep k WHERE k.id = i.id)`);
   out._pruned = pruned.rowCount || 0;
   log.info('insights', 'computed', out);
   return out;

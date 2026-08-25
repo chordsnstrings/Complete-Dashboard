@@ -41,7 +41,7 @@ import { applySchema } from './schema.mjs';
 import { seedFleet } from './fixture.mjs';
 import { rebuildCustody } from '../src/custody.js';
 import { mountAll } from './mount.mjs';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 let pass = 0; let fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -194,10 +194,21 @@ check('both read the stored fold off the base table',
 
 /* The endpoints are also the only ones that read trip through the covering
    index, which is only useful if the migration that creates it runs. */
-const dbSrc = readFileSync('src/db.js', 'utf8');
+/* The list lives in src/schema_files.js now — its own module, so db.js and
+   test/schema.mjs can both import it rather than one of them parsing it out of
+   the other's control flow. Asserted against the imported array rather than
+   against the text of whichever file happens to hold it this month. */
+const { SCHEMA_FILES } = await import('../src/schema_files.js');
 check('the covering index migration is in the list migrate() replays',
-  /schema_v30\.sql/.test(dbSrc),
+  SCHEMA_FILES.includes('schema_v30.sql'),
   'sql/schema_v30.sql exists but migrate() never runs it');
+check('and every schema file on disk is in that list — one nobody runs does nothing',
+  (() => {
+    const onDisk = readdirSync('sql').filter((f) => /^schema.*\.sql$/.test(f)).sort();
+    const missing = onDisk.filter((f) => !SCHEMA_FILES.includes(f));
+    return { ok: missing.length === 0, missing };
+  })().ok, JSON.stringify(readdirSync('sql')
+    .filter((f) => /^schema.*\.sql$/.test(f) && !SCHEMA_FILES.includes(f))));
 const idx = (await db.query(
   "SELECT indexdef FROM pg_indexes WHERE indexname = 'trip_econ_day_idx'")).rows;
 check('and it exists after the schema is applied', idx.length === 1,

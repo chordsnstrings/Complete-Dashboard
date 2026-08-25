@@ -11,17 +11,18 @@
    One source of truth. Adding a migration to src/db.js is now the only step. */
 import { readFileSync } from 'node:fs';
 
-const src = readFileSync(new URL('../src/db.js', import.meta.url), 'utf8');
-const list = src.match(/for \(const f of \[([^\]]+)\]\)/)?.[1];
-if (!list) throw new Error('could not find the schema file list in src/db.js — has migrate() changed shape?');
-
-export const SCHEMA_FILES = [...list.matchAll(/'([^']+\.sql)'/g)].map((m) => m[1]);
-if (SCHEMA_FILES.length < 10) throw new Error(`only found ${SCHEMA_FILES.length} schema files; the parse is wrong`);
+/* Imported, not parsed. This used to recover the list with a regex over
+   src/db.js's `for (const f of [...])`, which broke the moment that loop
+   changed shape — and took every database-backed test in the suite down with
+   it, all reporting "could not find the schema file list" rather than anything
+   about the code under test. */
+export { SCHEMA_FILES } from '../src/schema_files.js';
+import { SCHEMA_FILES as FILES } from '../src/schema_files.js';
 
 /* Apply every one of them to a PGlite instance, in order. */
 export async function applySchema(db) {
-  for (const f of SCHEMA_FILES) {
+  for (const f of FILES) {
     await db.exec(readFileSync(new URL(`../sql/${f}`, import.meta.url), 'utf8'));
   }
-  return SCHEMA_FILES;
+  return FILES;
 }

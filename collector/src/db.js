@@ -1,9 +1,11 @@
 // Postgres pool + migration + generic upsert helpers.
 import pg from 'pg';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { log } from './log.js';
+import { SCHEMA_FILES } from './schema_files.js';
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -45,18 +47,80 @@ export const pool = new pg.Pool(poolConfig());
    to do is refuse to be fatal. */
 pool.on('error', (err) => log.error('db', 'idle client error', { err: err.message, code: err.code }));
 
+
+/* Every deploy replayed all thirty-one files in full, and three of them are
+   expensive.
+   ─────────────────────────────────────────────────────────────────────────
+   The API answers 503 while migrate() runs, and migrate() was taking between
+   five and six minutes on every single deploy — so every deploy of this
+   product included six minutes of a dashboard that does not load. Not a slow
+   query somewhere: the same three statements timing out, failing, being logged
+   and swallowed, every boot, for months.
+
+   Two of them are the insight de-duplication in v15 and v31, which were
+   written as self-joins — `DELETE FROM insight a USING insight b` — over a
+   table holding thirty thousand rows. That is a quadratic comparison, roughly
+   nine hundred million row pairs, and it hits the two-minute statement timeout
+   without ever finishing. Both are rewritten below as anti-joins against the
+   set the read path already selects, which is O(n log n) and completes.
+
+   But the real fix is that a migration that has succeeded should not run
+   again. This ledger records the SHA-256 of each file's contents once it
+   applies cleanly, and skips it on the next boot. Keyed on the CONTENT and not
+   on the name, so editing a migration re-runs it exactly once — which is what
+   makes fixing the two DELETEs above deployable at all.
+
+   Everything here is still written to be safely re-runnable (IF NOT EXISTS,
+   OR REPLACE, guarded data changes), so the ledger is an optimisation and
+   never the thing correctness depends on. A file that fails is NOT recorded
+   and is retried on the next boot, exactly as before. */
+async function ledger() {
+  await pool.query(`CREATE TABLE IF NOT EXISTS schema_applied (
+    file       TEXT PRIMARY KEY,
+    sha        TEXT NOT NULL,
+    applied_at TIMESTAMPTZ DEFAULT now(),
+    ms         INT
+  )`);
+  await pool.query(`COMMENT ON TABLE schema_applied IS
+    'One row per schema file that has applied cleanly, keyed on the SHA-256 of its contents. A file whose hash matches is skipped at boot; editing one re-runs it once. A file that FAILS is not recorded, so it retries on the next boot.'`);
+  const { rows } = await pool.query('SELECT file, sha FROM schema_applied');
+  return new Map(rows.map((r) => [r.file, r.sha]));
+}
+
 export async function migrate() {
-  for (const f of ['schema.sql', 'schema_v2.sql', 'schema_v3.sql', 'schema_v4.sql', 'schema_v5.sql', 'schema_v6.sql', 'schema_v7.sql', 'schema_v8.sql', 'schema_v9.sql', 'schema_v10.sql', 'schema_v11.sql', 'schema_v12.sql', 'schema_v13.sql', 'schema_v14.sql', 'schema_v15.sql', 'schema_v16.sql', 'schema_v17.sql', 'schema_v18.sql', 'schema_v19.sql', 'schema_v20.sql', 'schema_v21.sql', 'schema_v22.sql', 'schema_v23.sql', 'schema_v24.sql', 'schema_v25.sql', 'schema_v26.sql', 'schema_v27.sql', 'schema_v28.sql', 'schema_v29.sql', 'schema_v30.sql', 'schema_v31.sql']) {
+  let applied;
+  try {
+    applied = await ledger();
+  } catch (e) {
+    /* No ledger is not a reason not to migrate. An older database, or a role
+       without CREATE, falls back to the previous behaviour: replay everything. */
+    log.error('db', 'schema ledger unavailable — replaying every file', { err: String(e).slice(0, 200) });
+    applied = new Map();
+  }
+
+  let ran = 0, skipped = 0;
+  for (const f of SCHEMA_FILES) {
+    const sql = readFileSync(join(__dir, '..', 'sql', f), 'utf8');
+    const sha = createHash('sha256').update(sql).digest('hex');
+    if (applied.get(f) === sha) { skipped += 1; continue; }
+    const t0 = Date.now();
     try {
-      const sql = readFileSync(join(__dir, '..', 'sql', f), 'utf8');
       await pool.query(sql);
-      log.info('db', `migrated ${f}`);
+      const ms = Date.now() - t0;
+      ran += 1;
+      log.info('db', `migrated ${f}`, { ms });
+      await pool.query(
+        `INSERT INTO schema_applied (file, sha, applied_at, ms) VALUES ($1, $2, now(), $3)
+         ON CONFLICT (file) DO UPDATE SET sha = EXCLUDED.sha, applied_at = now(), ms = EXCLUDED.ms`,
+        [f, sha, ms]).catch(() => { /* no ledger: still migrated, just not recorded */ });
     } catch (e) {
-      // v2 is additive; a failure there must not block the base schema/boot
-      log.error('db', `migration ${f} failed`, { err: String(e).slice(0, 200) });
+      /* Not recorded, so it is retried next boot. schema.sql is the only file
+         whose failure is fatal: everything else is additive. */
+      log.error('db', `migration ${f} failed`, { ms: Date.now() - t0, err: String(e).slice(0, 200) });
       if (f === 'schema.sql') throw e;
     }
   }
+  log.info('db', 'migrations complete', { ran, skipped, of: SCHEMA_FILES.length });
 }
 
 // Upsert one row into `table`, conflict on `conflict` columns, updating the rest.

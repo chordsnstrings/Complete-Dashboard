@@ -29,17 +29,30 @@
 --
 -- Deleting older copies is idempotent, so it needs no run-once guard: on a
 -- database already deduped it deletes nothing.
-DELETE FROM insight a USING insight b
-WHERE a.code = b.code
-  AND a.entity_type IS NOT DISTINCT FROM b.entity_type
-  AND a.entity_id   IS NOT DISTINCT FROM b.entity_id
-  AND (
-    (a.window_start IS NULL AND a.window_end IS NULL
-     AND b.window_start IS NULL AND b.window_end IS NULL)
-    OR a.entity_type = 'fleet'
-  )
-  AND (a.computed_at < b.computed_at
-       OR (a.computed_at = b.computed_at AND a.id < b.id));
+-- Written as an anti-join against the survivors, NOT as a self-join.
+--
+-- The original was `DELETE FROM insight a USING insight b`, which is a
+-- quadratic comparison: thirty thousand rows is nine hundred million pairs,
+-- and it hit the two-minute statement timeout without ever finishing. It
+-- therefore failed on EVERY boot since this file shipped — burning two of the
+-- five minutes a deploy spent answering 503, and never deduplicating anything,
+-- which is why the unique indexes below could never be created either.
+--
+-- DISTINCT ON picks the survivor with one sort, exactly the row the read path
+-- already selects, and the delete removes what is not in that set. Same
+-- outcome, O(n log n) instead of O(n squared).
+--
+-- The tiebreak is computed_at DESC then id DESC, matching schema_v31's purge,
+-- so the two cannot disagree about which copy survives.
+WITH keep AS (
+  SELECT DISTINCT ON (code, entity_type, entity_id) id
+    FROM insight
+   WHERE (window_start IS NULL AND window_end IS NULL) OR entity_type = 'fleet'
+   ORDER BY code, entity_type, entity_id, computed_at DESC, id DESC
+)
+DELETE FROM insight i
+ WHERE ((i.window_start IS NULL AND i.window_end IS NULL) OR i.entity_type = 'fleet')
+   AND NOT EXISTS (SELECT 1 FROM keep k WHERE k.id = i.id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS insight_nullwindow_uniq
   ON insight (code, entity_type, entity_id)

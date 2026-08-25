@@ -105,12 +105,18 @@ COMMENT ON COLUMN insight.refs IS
 --
 -- src/insights.js prunes after every run as well, so this is a one-off
 -- catch-up rather than the mechanism.
-DELETE FROM insight a USING insight b
-WHERE a.code = b.code
-  AND a.entity_type IS NOT DISTINCT FROM b.entity_type
-  AND a.entity_id   IS NOT DISTINCT FROM b.entity_id
-  AND (a.computed_at < b.computed_at
-       OR (a.computed_at = b.computed_at AND a.id < b.id));
+-- Anti-join, for the reason schema_v15 now records at length: the self-join
+-- this replaces is quadratic, and on thirty thousand rows it never finished
+-- inside the statement timeout. It failed on every boot, so the 29,430
+-- duplicates it describes were still there — and the two minutes it spent
+-- failing were two minutes of the API answering 503 on every deploy.
+WITH keep AS (
+  SELECT DISTINCT ON (code, entity_type, entity_id) id
+    FROM insight
+   ORDER BY code, entity_type, entity_id, computed_at DESC, id DESC
+)
+DELETE FROM insight i
+ WHERE NOT EXISTS (SELECT 1 FROM keep k WHERE k.id = i.id);
 
 -- The probe described 300 rows and reported a record count of 10,423.
 --

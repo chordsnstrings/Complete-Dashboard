@@ -25,60 +25,8 @@
    name collisions and the 89%-Uber shape that actually break a render. */
 import { launchChromium } from './browser.mjs';
 
-const ROUTES = [
-  // The first screen and its two ledgers.
-  'unit', 'unit/assets', 'unit/drivers', 'unit/nonsense',
-  /* Both lists, and two drill-downs: drv-0 has an Uber status row, drv-9
-     deliberately has none, so the branch that says so is rendered too. */
-  'top-performers', 'low-performers', 'performer/drv-0', 'performer/drv-9',
-  'overview', 'demand', 'day/2026-08-14', 'day/not-a-date', 'drivers',
-  /* Compare, in all four shapes it is reachable in: no days at all (today
-     against yesterday), one day, two days, and the reader's override that
-     drops the like-for-like cut. */
-  'compare', 'compare/2026-08-25', 'compare/2026-08-25/2026-08-24',
-  'compare/2026-08-25/2026-08-24?cut=full', 'compare/not-a-date',
-  'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/territory',
-  'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',
-  'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked', 'roster/states',
-  'vehicles', 'vehicle/L45235', 'vehicle/L45235/drivers', 'vehicle/L45235/movement',
-  'vehicle/L45235/earnings', 'vehicle/L45235/safety', 'vehicle/L45235/compliance',
-  'vehicle/L45235/trips',
-  'platforms', 'platforms/tiers', 'platforms/funnel',
-  'corridors', 'finance', 'settlement', 'settlement/cash', 'settlement/receivables',
-  'corporate', 'corporate/properties', 'corporate/guests',
-  'corporate/leakage', 'corporate/leakage/complimentary',
-  'corporate/approach', 'corporate/approach/daypart',
-  'property/h-palm', 'property/h-palm/guests', 'property/h-palm/drivers',
-  'causes', 'forecast', 'retention', 'playbook', 'capacity', 'revenue',
-  'reconcile', 'reconcile/2026-08',
-  'insights', 'action/idle_vehicle/L45235', 'action/nope/-',
-  'analyst', 'analyst/refuted', 'analyst/immaterial', 'analyst/unsupported', 'analyst/rules',
-  'compliance', 'unauthorized',
-  // Segments and slots: the pages that replaced the eleven modals. Every filter
-  // kind is a route, including one nobody would type, because a facet chip can
-  // produce any of them.
-  'segments', 'segments/verdict/unauthorized', 'segments/verdict/authorized',
-  'segments/plate/L45235', 'segments/day/2026-08-03', 'segments/driver/Ahmed',
-  'segments/nonsense/x',
-  'segment/L45235/2026-08-03T04:00:00.000Z', 'segment/L45235/not-a-time',
-  'slot/2/19', 'slot/0/3', 'slot/9/99',
-  'safety', 'safety/vehicles', 'safety/events', 'live', 'map', 'sources', 'coverage', 'providers', 'settings',
-  /* The action list's facets are addresses now, so a filtered list can be sent
-     to the person who has to act on it. A category nobody has is included on
-     purpose: the empty state must say "nothing has this severity", not "no data
-     for this range". */
-  'insights/severity/critical', 'insights/safety', 'insights/nosuchcategory',
-  /* One raw field's values — the drill-down behind "Fields we are not keeping",
-     which was the most valuable number on #providers and unopenable. */
-  'providers/uber/trips/Surge%20multiplier',
-  // The map's own state is an address: mode, plate and day.
-  'map/replay/L45235',
-  // The window and platform filters now live in the address. A link carrying
-  // them has to render the same as one that does not.
-  'overview?days=90&platform=uber', 'drivers?days=7&fleet=egari',
-  'unit?days=90&fleet=ecosine', 'unit/assets?days=7&platform=uber',
-  'segments/verdict/unauthorized?days=180',
-];
+import { ROUTES } from './routes_list.mjs';
+
 const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';
 
 /* The entity ids above are the mock's. Pointed at anything else — the preview

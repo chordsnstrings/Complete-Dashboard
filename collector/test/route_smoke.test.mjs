@@ -316,13 +316,31 @@ check('every route the source declares is actually registered on the app',
    only became visible when moving trip_ext's definition to a newer file made
    four of them error outright. */
 {
-  /* Naming a schema file literally is what makes a list hand-maintained.
-     Reading sql/ through SCHEMA_FILES is not — this file deliberately replays
-     the schema to prove it survives a second boot. */
+  /* What is banned is a test KEEPING ITS OWN LIST, not a test naming a file.
+     ───────────────────────────────────────────────────────────────────────
+     The original rule flagged any literal `schema_vN.sql`, which also caught
+     the two legitimate uses: an assertion that a specific migration is
+     registered ("schema_v30 exists but nothing runs it"), and a test whose
+     whole subject is one migration's SQL. Both of those read the real list as
+     well, and a test that consults SCHEMA_FILES cannot be running against a
+     stale schema — which is the entire failure this rule exists to prevent.
+
+     So the test is: does this file name schema files WITHOUT importing the
+     list? That still catches the nine stragglers that started it, each of
+     which hand-picked a prefix and stopped at v5 or v12. */
+  const NAMED = /['\`](?:sql\/)?schema(?:_v\d+)?\.sql['\`]/g;
   const stragglers = readdirSync('test')
     .filter((f) => f.endsWith('.test.mjs'))
-    .filter((f) => /['\`]schema(_v\d+)?\.sql['\`]/.test(readFileSync(`test/${f}`, 'utf8')));
-  check('no test names a schema file literally instead of reading the list from src/db.js',
+    .filter((f) => {
+      const src = readFileSync(`test/${f}`, 'utf8');
+      /* A LIST is an array literal holding two or more of them. Reading one
+         file to assert about its SQL — "schema_v20 defines person_key this
+         way", "schema_v26 rejects a week longer than seven days" — is not a
+         list and never goes stale: it names the file it is about. */
+      return [...src.matchAll(/\[([^\]]*)\]/g)]
+        .some((m) => (m[1].match(NAMED) || []).length >= 2);
+    });
+  check('no test keeps its own list of schema files instead of importing SCHEMA_FILES',
     stragglers.length === 0, stragglers.join(', '));
 }
 
