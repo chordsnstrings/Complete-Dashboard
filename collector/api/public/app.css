@@ -455,6 +455,18 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
   background-size:400% 100%;animation:shimmer 1.5s ease-in-out infinite;
   border-radius:var(--r-sm);height:13px;
 }
+/* The skeleton that admits it will be a while.
+   ─────────────────────────────────────────────────────────────────────────
+   `.skel` is a 13px shimmer bar, so the word "Loading…" inside it has never
+   been visible — which is right for the ordinary case, where the wait is
+   under a second and a label would be noise. It is wrong for /api/coverage,
+   which scans the whole record and leaves #sources on an identical grey box
+   for eleven seconds. This variant has room for a sentence and keeps the
+   shimmer, so it still reads as "working" rather than as "finished, empty". */
+.skel.says{
+  height:auto;min-height:38px;display:flex;align-items:center;padding:0 12px;
+  font-size:.79rem;color:var(--ink-3);line-height:1.5;
+}
 @keyframes shimmer{0%{background-position:100% 0}100%{background-position:-100% 0}}
 
 .empty{

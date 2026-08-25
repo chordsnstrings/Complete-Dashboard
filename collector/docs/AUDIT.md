@@ -983,3 +983,41 @@ the page hardcoded 300 again and counted the *received* rows below it. That
 count is always zero, because the server already removed them, so the branch
 explaining a short list could never fire. One filter, applied twice, disclosed
 at neither end.
+
+## 2026-08-26 — forty-nine broken pages that were map tiles
+
+The render audit's last standing finding was `js-error 49`, every one reading
+`Failed to load resource: net::ERR_CONNECTION_RESET`. Chromium's console line
+for a dead request names nothing, so fifty of them said "fifty pages are
+broken" and gave no way to find out what broke.
+
+Listening to `requestfailed` as well as to the console gives the URL, and the
+answer was immediate: **every one was an OpenStreetMap tile.** Chromium in this
+sandbox cannot reach a host that is not 127.0.0.1, and OSM's tile servers fail
+with `ERR_CONNECTION_RESET` rather than any of the proxy errors already in the
+noise filter. They load perfectly in a reader's browser. Suppressed by HOST
+rather than by error code, so a reset talking to the app itself is still a
+finding — and the unnamed console duplicate is dropped, because every request
+failure is now recorded with its URL and the bare line can only add something
+unactionable.
+
+**The `#segment` 404 was the audit's own.** `subSegment` writes the real
+(plate, `started_at`) pair into the route and `sub1` then replaces date tokens
+*anywhere* in the string — including inside the timestamp it had just written.
+`SUB` maps `2026-08-25` to today, so a segment that began at
+`2026-08-25T19:58:57.077Z` was requested at `…08-26T19:58:57.077Z` and the API
+answered, correctly, "no segment starts at that instant for that plate". The
+comment explaining the pair substitution described an order that defeats it.
+`subSegment` replaces the whole route, so running it *last* makes it immune.
+
+**`stuck-loading` on `#sources` was two panels and one invisible sentence.**
+`#sources` had already hand-rolled the fix for its field inventory — a
+`setTimeout` swapping in an explanation after 1.2s — and set `.skel` without any
+class giving the box a height, so the sentence went into a 13px shimmer bar
+where nobody could read it. That moved into `loading(host, message)`: the plain
+bar goes up first (a warm load must not flash a paragraph), the sentence
+replaces it only if the wait continues, and a panel that filled in the meantime
+is not overwritten by its own loading state. `test/slow_skeleton.test.mjs`
+holds all three in a real browser.
+
+Findings at 412px across all 104 routes: **0**.

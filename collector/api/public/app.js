@@ -2910,7 +2910,14 @@ V.sources = async (root) => {
     'Trend, Forecast and Retention read these rather than aggregating every trip on each load. '
     + 'Rebuilt after every collection and every fifteen minutes.');
   root.append(ru.panel);
-  [st.body, cv.body, ru.body].forEach(loading);
+  /* The coverage panel says how long it expects to be a skeleton.
+     /api/coverage groups the entire trip history with no window at all — its
+     own warmer comment calls it a twenty-second query and names it as the
+     cause of a 504 on this page — and eleven seconds of an anonymous grey bar
+     is indistinguishable from a panel that will never fill. */
+  [st.body, ru.body].forEach((h) => loading(h));
+  loading(cv.body, 'Reading the whole record — every trip, every alert, every fix, with no date '
+    + 'window at all. This is the slowest question the product asks and takes about ten seconds.');
   // This page hides the global range filter, so the coverage question is asked
   // over the full observed history rather than over an invisible window.
   // The Dubai day, not the UTC one — see api/public/tz.js.
@@ -3128,18 +3135,18 @@ V.sources = async (root) => {
     /* The field inventory over twelve months is the heaviest read on this
        page. Said out loud after a second, so a slow answer looks like a slow
        answer rather than a broken panel. Cleared by every path below. */
-    const slow = setTimeout(() => {
-      if (rawHost.querySelector('.skel')) {
-        rawHost.innerHTML = '<div class="skel">Reading the field inventory — this one is a scan '
-          + 'over every stored record in the window, so it is the slowest panel here.</div>';
-      }
-    }, 1200);
+    /* This is where the pattern started — a hand-rolled deferred message that
+       swapped the skeleton's innerHTML after 1.2s. It set `.skel` without
+       `.says`, so the sentence went into a 13px shimmer bar and no reader has
+       ever seen it. loading(host, message) does the same thing with the
+       styling, and every slow panel now behaves identically. */
+    loading(rawHost, 'Reading the field inventory — this one is a scan over every stored record '
+      + 'in the window, so it is the slowest panel here.');
     const to = dubaiDay();
     const from = +days ? dubaiDay(new Date(Date.now() - (+days - 1) * 864e5)) : '2000-01-01';
     try {
       const qs = new URLSearchParams({ from, to, ...(platform ? { platform } : {}) });
       const d = await api(`/api/schema/raw-fields?${qs}`);
-      clearTimeout(slow);
       if (!alive(gen)) return;
       rawHost.innerHTML = '';
       if (!d.fields?.length) {
@@ -3164,7 +3171,6 @@ V.sources = async (root) => {
         + 'normalised name, so a field the collector stores under a different name — "Trip request '
         + 'time" against `requested_at` — can be listed here and already be kept.'));
     } catch (e) {
-      clearTimeout(slow);
       if (!alive(gen)) return;
       rawHost.innerHTML = '';
       rawHost.append(note(`Could not read the field inventory: ${e.message}`));

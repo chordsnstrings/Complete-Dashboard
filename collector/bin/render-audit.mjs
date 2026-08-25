@@ -68,7 +68,20 @@ const sub1 = (r) => Object.entries(SUB).reduce((acc, [k, v]) =>
 const subSegment = (r) => (rs?.plate && rs?.started_at
   ? r.replace(/^segment\/[^/]+\/.+$/, `segment/${rs.plate}/${rs.started_at}`)
   : r);
-const sub = (r) => sub1(subSegment(r));
+/* Token pass FIRST, pair pass second.
+   ─────────────────────────────────────────────────────────────────────────
+   This was the other way round, and the comment above explaining why the pair
+   substitution exists was describing an order that defeats it. subSegment
+   writes the real (plate, started_at) into the route; sub1 then walks the SUB
+   table replacing date tokens ANYWHERE in the string, and SUB maps
+   '2026-08-25' to today — so a segment that began at 2026-08-25T19:58:57.077Z
+   was asked for at 2026-08-26T19:58:57.077Z and the API answered, correctly,
+   "no segment starts at that instant for that plate". The audit reported a
+   404 and a js-error on every pass, both of its own making.
+
+   subSegment replaces the whole route, so running it last makes it immune to
+   anything the token pass did to the placeholder. */
+const sub = (r) => subSegment(sub1(r));
 
 const routes = (ONLY || ROUTES).map(sub);
 
@@ -246,12 +259,42 @@ for (const width of WIDTHS) {
      dies with a certificate error — the web font, and nothing else. Suppressed
      by CAUSE rather than by muting console errors wholesale, so a genuine
      failed fetch still reports. */
-  const NOISE = /ERR_CERT_|ERR_PROXY|ERR_TUNNEL|ERR_NAME_NOT_RESOLVED|fonts\.(googleapis|gstatic)/;
+  /* Map tiles are the other half of this. Chromium here cannot reach a host
+     that is not 127.0.0.1, and OpenStreetMap's tile servers fail with
+     ERR_CONNECTION_RESET rather than any of the proxy errors above — so every
+     tile fetch on #map, #roster and #compliance was reported as a broken page,
+     forty-nine of them in one pass. They load perfectly in a reader's browser.
+     Matched on the HOST rather than on the error code, so a reset talking to
+     the app itself is still a finding. */
+  const NOISE = new RegExp([
+    'ERR_CERT_', 'ERR_PROXY', 'ERR_TUNNEL', 'ERR_NAME_NOT_RESOLVED',
+    'fonts\\.(googleapis|gstatic)',
+    'tile\\.openstreetmap\\.org', '\\.tile\\.', 'basemaps\\.',
+  ].join('|'));
   const keep = (t) => t && !NOISE.test(t);
   page.on('pageerror', (e) => { const t = String(e.message).slice(0, 160); if (keep(t)) live.js.push(t); });
   page.on('console', (m) => {
     if (m.type() !== 'error') return;
     const t = m.text().slice(0, 160);
+    /* Chromium logs a bare "Failed to load resource: net::ERR_…" alongside the
+       requestfailed event above, naming nothing. Every request failure is
+       already recorded WITH its URL, so this duplicate can only add an
+       unactionable line — and it is the line that survived the host filter,
+       because there is no host in it to match. Dropped; anything else the
+       console says is kept. */
+    if (/^Failed to load resource/.test(t)) return;
+    if (keep(t)) live.js.push(t);
+  });
+  /* A failed request, WITH its URL.
+     ─────────────────────────────────────────────────────────────────────────
+     Chromium's console line for a dead request is "Failed to load resource:
+     net::ERR_CONNECTION_RESET" and names nothing, so a run reporting fifty of
+     them says fifty pages are broken and gives no way to find out what broke.
+     `requestfailed` carries the URL and the error text; recorded here so the
+     finding is actionable instead of atmospheric. The console line is still
+     kept — it catches errors that never became a request at all. */
+  page.on('requestfailed', (r) => {
+    const t = `${r.failure()?.errorText || 'failed'} ${r.url().replace(BASE, '')}`.slice(0, 150);
     if (keep(t)) live.js.push(t);
   });
   page.on('response', (r) => {

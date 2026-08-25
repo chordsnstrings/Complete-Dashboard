@@ -22,7 +22,40 @@ export function panel(title, cap) {
   const body = el('div'); p.append(body);
   return { panel: p, body };
 }
-export const loading = (host) => { host.innerHTML = '<div class="skel">Loading…</div>'; };
+/* A skeleton, optionally saying how long it expects to be one.
+   ─────────────────────────────────────────────────────────────────────────
+   Every skeleton in this product looks the same, and one of them is not the
+   same: /api/coverage scans the whole record — its own warmer comment calls it
+   a twenty-second query, and #sources sits on that skeleton for eleven seconds
+   on a warm cache. Eleven seconds of an identical grey box is indistinguishable
+   from a panel that will never fill, and the render audit could not tell them
+   apart either.
+
+   So a caller that KNOWS its panel is slow can say so. Nothing else changes:
+   with no message this is the same one-line skeleton it has always been. */
+export const loading = (host, slow) => {
+  host.innerHTML = '<div class="skel">Loading…</div>';
+  if (!slow) return;
+  /* Said only if it turns out to BE slow.
+     ─────────────────────────────────────────────────────────────────────
+     Rendering the sentence immediately would flash a paragraph on every warm
+     load — /api/coverage answers in about a second warm and twenty cold — and
+     a panel that explains itself before there is anything to explain is noise.
+     So the ordinary bar goes up first and the explanation replaces it after a
+     beat, which is the shape #sources had already hand-rolled for its field
+     inventory. Doing it here means every slow panel behaves the same way, and
+     that one gets the styling its sentence needed: it was writing prose into a
+     13px shimmer bar, where nobody could read it.
+
+     Guarded on the skeleton still being the thing in the host, so a panel that
+     filled in the meantime is not overwritten by its own loading state. */
+  const bar = host.firstElementChild;
+  setTimeout(() => {
+    if (host.firstElementChild !== bar || !bar.isConnected) return;
+    bar.classList.add('says');
+    bar.textContent = slow;
+  }, 1200);
+};
 
 /* ── ranked tables you can actually rank ──────────────────────────────────
    Every table in this product is ordered by whatever the SQL chose, and the
