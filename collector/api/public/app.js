@@ -1370,8 +1370,16 @@ V.finance = async (root) => {
      this and the Settlement page cannot disagree about what cash is. */
   const settle = await q('/api/settlement/mix').catch(() => ({ classes: [] }));
   const cash = (settle.classes || []).find((c) => c.settlement_class === 'cash');
-  const tipTotal = tipRows.reduce((a, r) => a + (+r.tips || 0), 0);
-  const fareTotal = tipRows.reduce((a, r) => a + (+r.fare || 0), 0);
+  /* Tolerant of both shapes. The backend audit gave /api/earnings/tips the
+     {rows, total, shown, truncated} envelope every other list route carries —
+     the same change it made to /api/driver/custody and /api/funnel/drivers.
+     Two of those three were covered here and this one was not, so #finance
+     died on `tipRows.reduce is not a function` the moment the two halves of
+     the audit were merged. Neither half was wrong on its own; nobody ran the
+     smoke on the merge. */
+  const tipList = Array.isArray(tipRows) ? tipRows : (tipRows?.rows || []);
+  const tipTotal = tipList.reduce((a, r) => a + (+r.tips || 0), 0);
+  const fareTotal = tipList.reduce((a, r) => a + (+r.fare || 0), 0);
 
   /* Every money figure here covers only the trips that carry a fare. The Uber
      trip export has no fare column at all and telematics trips have none
@@ -1533,7 +1541,7 @@ V.finance = async (root) => {
 
   /* Tips are the one quality signal riders pay for directly. */
   tips.body.innerHTML = '';
-  if (!tipRows.length) {
+  if (!tipList.length) {
     tips.body.append(note('No tip data yet. Tips never appear in the trip feed — they come from the Uber payout breakdown, which fills in per payout period.'));
   } else {
     /* A rate over a tiny base is not a ranking.
@@ -1542,7 +1550,7 @@ V.finance = async (root) => {
        a base before it means anything, so the tone is withheld below a floor
        and the row says why rather than disappearing. */
     const FARE_FLOOR = 300;
-    const ranked = [...tipRows].sort((a, b) => {
+    const ranked = [...tipList].sort((a, b) => {
       const af = +a.fare >= FARE_FLOOR, bf = +b.fare >= FARE_FLOOR;
       if (af !== bf) return af ? -1 : 1;
       return (+b.tip_pct || 0) - (+a.tip_pct || 0);

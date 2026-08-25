@@ -57,9 +57,9 @@ const to = dubai(new Date());
    apart without something failing. */
 const uiSrc = readFileSync('api/public/data.js', 'utf8');
 check('the front end still computes its window the way this test reads it',
-  /dubaiDay\(new Date\(now - state\.days \* 864e5\)\)/.test(uiSrc),
+  /dubaiDay\(new Date\(now - \(state\.days - 1\) \* 864e5\)\)/.test(uiSrc),
   'api/public/data.js windowDates() has changed shape — re-read it before trusting the checks below');
-const uiFrom = (days) => dubai(new Date(Date.now() - days * 864e5));
+const uiFrom = (days) => dubai(new Date(Date.now() - (days - 1) * 864e5));
 
 check('the default window is the Dubai one the front end computes',
   seen.some((u) => u.includes(`from=${uiFrom(30)}&to=${to}`)),

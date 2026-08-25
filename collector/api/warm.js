@@ -108,7 +108,19 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
      window every page in the product reports on. */
   const windowQs = (days) => {
     const to = dubaiDay(new Date());
-    const from = dubaiDay(new Date(Date.now() - days * 864e5));
+    /* (days - 1), because a window is INCLUSIVE of both ends: seven days is
+       six days back plus today, which is what api/window.js:47 has always
+       documented and what api/public/data.js windowDates() now sends.
+
+       This line has been wrong in both directions within one afternoon. It
+       was `days - 1` while the front end sent `days`, so every warmed key was
+       one day narrow and every warm hit was a miss; the economics fix moved it
+       to `days` to match. The browser audit then fixed the front end — the
+       real bug, since it made every per-day rate in the product divide by N+1
+       — and this became one day wide instead. test/warm.test.mjs reads BOTH
+       files and fails when they disagree, which is the only reason this was
+       caught on the merge rather than in production. */
+    const from = dubaiDay(new Date(Date.now() - (days - 1) * 864e5));
     return `from=${from}&to=${to}`;
   };
 
