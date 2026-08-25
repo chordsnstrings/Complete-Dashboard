@@ -58,8 +58,17 @@ const SUB = {
   '2026-08-25': TODAY, '2026-08-24': YDAY, '2026-08-14': YDAY, '2026-08-03': YDAY,
   '2026-08-03T04:00:00.000Z': rs?.started_at || null,
 };
-const sub = (r) => Object.entries(SUB).reduce((acc, [k, v]) =>
+const sub1 = (r) => Object.entries(SUB).reduce((acc, [k, v]) =>
   (v ? acc.split(k).join(v) : acc), r);
+/* The segment address is (plate, started_at) and BOTH halves must come from
+   the SAME row, or the page 404s — which this audit then reported as a
+   js-error, an api-error and a blank page on every pass: six findings of its
+   own making. Substituted as a pair, before the per-token pass, because the
+   plate there is the segment's own and not the directory's first vehicle. */
+const subSegment = (r) => (rs?.plate && rs?.started_at
+  ? r.replace(/^segment\/[^/]+\/.+$/, `segment/${rs.plate}/${rs.started_at}`)
+  : r);
+const sub = (r) => sub1(subSegment(r));
 
 const routes = (ONLY || ROUTES).map(sub);
 
@@ -104,7 +113,15 @@ const PROBE = () => {
     push('e', 'mostly-empty', `${empties.length} of ${panels.length} panels have no data: `
       + empties.map((p) => head(p).slice(0, 40)).join(' | '));
   } else if (empties.length) {
-    push('w', 'empty-panel', empties.map((p) => head(p).slice(0, 40)).join(' | '));
+    /* A panel whose empty state EXPLAINS itself — "no vehicle carries an
+       unexplained segment in this range" — is a panel doing its job. The
+       generic default is the one worth chasing: it tells the reader nothing
+       about whether the answer is empty or the page is. */
+    const vague = empties.filter((p) => {
+      const e = txt(p.querySelector('.empty'));
+      return /No data for this range yet/i.test(e) || e.replace(/Nothing to show/i, '').trim().length < 12;
+    });
+    if (vague.length) push('w', 'empty-panel', vague.map((p) => head(p).slice(0, 40)).join(' | '));
   }
 
   /* 4. Missing numbers. A column that is entirely em-dashes is a column that
@@ -184,6 +201,11 @@ const PROBE = () => {
 
   /* 10. The page's own headline. A view whose title is another view's name is
          the router failing, and it looks like a working page. */
+  /* Did the page SAY something, even if it drew nothing? An empty state, a
+     note, or the shell's own failure box all count: the reader is told where
+     they are. */
+  out.stats.explained = Boolean(root.querySelector('.empty, .note, .failbox, .err'))
+    && txt(root).length > 20;
   out.stats.title = txt(document.querySelector('#viewTitle'));
   out.stats.kpis = root.querySelectorAll('.kpi').length;
   out.stats.tables = root.querySelectorAll('table').length;
@@ -252,8 +274,14 @@ for (const width of WIDTHS) {
        view with no KPI, no table, no chart and no empty state is a view that
        is not showing anything. */
     const s = probe.stats;
-    if (!s.kpis && !s.tables && !s.charts && !s.panels) {
-      findings.push({ route, width, sev: 'e', code: 'blank-page', detail: 'no kpi, table, chart or panel' });
+    /* An address that cannot resolve — a malformed day, an unknown finding, an
+       hour outside the week — SHOULD render one explanation and nothing else.
+       That is the page working. Counting it as blank flagged six correct
+       routes on every pass and buried whatever else was on them. A page with
+       no content AND no explanation is still a finding. */
+    if (!s.kpis && !s.tables && !s.charts && !s.panels && !s.explained) {
+      findings.push({ route, width, sev: 'e', code: 'blank-page',
+        detail: 'no kpi, table, chart or panel, and nothing explaining why' });
     }
     if (width === WIDTHS[0]) {
       findings.push({ route, width, sev: 'i', code: 'stats', detail: JSON.stringify(s) });

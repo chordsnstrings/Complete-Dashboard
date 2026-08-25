@@ -187,7 +187,13 @@ export async function renderRetention(root) {
   root.append(cp);
 
   const maxOffset = Math.max(...d.cohorts.map((c) => c.months_observed));
-  const tbl = el('div', 'tbl-wrap');
+  /* .tscroll, which is the class that actually scrolls — `.tbl-wrap` was
+     defined nowhere in app.css, so this cohort grid was a bare div and its
+     twelve month-columns pushed the panel 60px past its own edge and the
+     document 137px past the window. Every table built through tableFrom() gets
+     .tscroll for exactly this reason; this one is hand-built and was missing
+     it. */
+  const tbl = el('div', 'tscroll');
   const cells = d.cohorts.map((c) => {
     const tds = [];
     for (let k = 0; k < maxOffset; k++) {

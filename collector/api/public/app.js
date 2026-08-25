@@ -839,10 +839,13 @@ V.drivers = async (root) => {
     xp.body.append(tableFrom(multi.slice(0, 15), [
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
       ...plats.map((pl) => ({ label: pl, key: col(pl), num: true })),
+      /* Zero is a number, and here it is the whole finding: this person's work
+         is all bookings and no unexplained journeys. Rendered as an em-dash it
+         read as "not measured", which on a column beside three trip counts is
+         the opposite of what a zero means. */
       { label: 'Telematics', key: 'telematics_journeys', num: true,
-        absent: 'none of these people drove a vehicle with a tracker in it — a telematics '
-          + 'journey is attributed through the car, and not every car on this fleet has one',
-        render: (r) => (r.telematics_journeys ? fmt(r.telematics_journeys) : '—') },
+        render: (r) => (r.telematics_journeys ? fmt(r.telematics_journeys)
+          : (r.telematics_journeys === 0 ? '<span class="dim">0</span>' : '—')) },
       { label: 'Bookings', key: 'booking_trips', num: true },
       { label: 'Accounts', key: 'accounts', num: true },
     ], { sortable: true, sortId: 'cross', defaultSort: { key: 'booking_trips', dir: 'desc' } }));
@@ -866,7 +869,14 @@ V.drivers = async (root) => {
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Period', key: 'period_start', render: (r) => dayStr(r.period_start) },
     { label: 'Trips', key: 'trips', num: true },
-    { label: 'Hrs online', key: 'hours_online', num: true, render: (x) => x.hours_online ? (+x.hours_online).toFixed(1) : '—' },
+    /* Measured: null on all 300 records. The caption above already warns that
+       hours are published "rarely"; on this fleet the honest word is never, so
+       the column steps aside for the ones that carry figures. */
+    { label: 'Hrs online', key: 'hours_online', num: true,
+      absent: 'no channel published hours for any of these periods — Uber reports hours_online '
+        + 'for 9 of 241 people and none of them appear here, and the other channels report none '
+        + 'at all',
+      render: (x) => (x.hours_online ? (+x.hours_online).toFixed(1) : '—') },
     /* Statement and Counted, for the same reason as the driver page: these are
        report windows and they overlap, so the platform's own figure and the
        part of it that has not already been counted elsewhere are two different
@@ -2713,6 +2723,14 @@ V.compliance = async (root) => {
 };
 
 V.sources = async (root) => {
+  /* Guarded like every other long view. This one was not, and it is the
+     longest: five panels, six fetches and a nested draw. An abandoned render
+     goes on writing into panels the reader has already left — which is how the
+     browser smoke, navigating a hundred routes in one context, caught #sources
+     showing "Loading…" twenty seconds after it had been asked for, while the
+     same page opened on its own resolves in under a second every time.
+     See the comment on currentGen() in data.js for the whole hazard. */
+  const gen = currentGen();
   const st = panel('Collector health',
     'Last run per source. "partial" means the run wrote rows AND left windows unfetched — which is how '
     + 'a 299-day hole in the Uber trip history survived for months behind a run that said ok.');
@@ -2738,6 +2756,7 @@ V.sources = async (root) => {
   const [status, coverage, rollups, cacheStats] = await Promise.all([
     api('/api/status'), api('/api/coverage'), api('/api/rollups').catch(() => []),
     api('/api/cache-stats').catch(() => null)]);
+  if (!alive(gen)) return;
 
   ru.body.innerHTML = '';
   if (!rollups.length) {
@@ -2856,6 +2875,7 @@ V.sources = async (root) => {
      correctly already existed and was not called from here. */
   const cal = await api(`/api/coverage/calendar?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
     .catch(() => ({ sources: [] }));
+  if (!alive(gen)) return;
   const byCal = Object.fromEntries((cal.sources || []).map((s2) => [s2.source, s2]));
   const cov = [
     ...(coverage.trips || []).map((r) => ({ what: `trips · ${sourceLabel(r.platform)}`, src: r.platform,
@@ -2943,11 +2963,22 @@ V.sources = async (root) => {
   const rawHost = el('div'); rawP.body.append(rawHost);
   const drawRaw = async (platform, days) => {
     loading(rawHost);
+    /* The field inventory over twelve months is the heaviest read on this
+       page. Said out loud after a second, so a slow answer looks like a slow
+       answer rather than a broken panel. Cleared by every path below. */
+    const slow = setTimeout(() => {
+      if (rawHost.querySelector('.skel')) {
+        rawHost.innerHTML = '<div class="skel">Reading the field inventory — this one is a scan '
+          + 'over every stored record in the window, so it is the slowest panel here.</div>';
+      }
+    }, 1200);
     const to = dubaiDay();
     const from = +days ? dubaiDay(new Date(Date.now() - (+days - 1) * 864e5)) : '2000-01-01';
     try {
       const qs = new URLSearchParams({ from, to, ...(platform ? { platform } : {}) });
       const d = await api(`/api/schema/raw-fields?${qs}`);
+      clearTimeout(slow);
+      if (!alive(gen)) return;
       rawHost.innerHTML = '';
       if (!d.fields?.length) {
         rawHost.append(note(`No stored record from ${sourceLabel(platform) || 'any platform'} between `
@@ -2970,7 +3001,12 @@ V.sources = async (root) => {
         + 'only": they arrive from the provider and are not promoted to a column. Matching is by '
         + 'normalised name, so a field the collector stores under a different name — "Trip request '
         + 'time" against `requested_at` — can be listed here and already be kept.'));
-    } catch (e) { rawHost.innerHTML = ''; rawHost.append(note(`Could not read the field inventory: ${e.message}`)); }
+    } catch (e) {
+      clearTimeout(slow);
+      if (!alive(gen)) return;
+      rawHost.innerHTML = '';
+      rawHost.append(note(`Could not read the field inventory: ${e.message}`));
+    }
   };
   const rawWin = () => rawBar.querySelector('#rawWin').value;
   await drawRaw('uber', rawWin());

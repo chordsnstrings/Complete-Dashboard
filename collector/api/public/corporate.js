@@ -23,6 +23,14 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
   dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural } from './ui.js';
 import { q, qAll, href, state } from './data.js';
 
+/* Why a whole column is empty, in the words the page prints under it. Shared
+   so that the four tables carrying a Cost or a Room say the same thing — four
+   wordings for one absence read as four separate problems. */
+const COST = 'no booking in this group carries a cost — the hotel channel reports one on the '
+  + 'bookings it prices, and a complimentary ride is priced at nothing by definition';
+const ROOM = 'no booking in this group names a room — the hotel channel writes an empty string '
+  + 'into roomNumber more often than a number, and a blank is not a room';
+
 export const CORP_TABS = [
   { id: 'overview', label: 'Overview', ic: '◱' },
   { id: 'properties', label: 'Properties', ic: '❑' },
@@ -198,7 +206,7 @@ async function corpProperties(host) {
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
     { label: 'Avg fare', key: 'avg_fare', num: true, render: (r) => money(r.avg_fare, 'AED', 2) },
     ...(rows.some((r) => r.cost != null && r.cost !== r.revenue) ? [
-      { label: 'Cost', key: 'cost', num: true, render: (r) => money(r.cost) },
+      { label: 'Cost', key: 'cost', num: true, absent: COST, render: (r) => money(r.cost) },
       { label: 'Margin', key: 'm', num: true, render: (r) => (r.revenue != null && r.cost != null
         ? `${money(r.revenue - r.cost)} <small class="dim">${pct(((r.revenue - r.cost) / r.revenue) * 100, 0)}</small>` : '—') },
     ] : []),
@@ -250,7 +258,7 @@ async function corpGuests(host) {
           + 'that travelled more than once. The tile above counts all of them.'));
       }
       body.append(tableFrom(g.rooms, [
-        { label: 'Room', key: 'room_no' },
+        { label: 'Room', key: 'room_no', absent: ROOM },
         { label: 'Property', key: 'property',
           render: (r) => entity('property', r.partner_id, r.property)
             + (r.properties > 1 ? ` <span class="dim">+${r.properties - 1} more</span>` : '') },
@@ -297,7 +305,7 @@ async function corpGuests(host) {
 const GUEST_COLS = [
   { label: 'Record', key: 'guest_id', render: (r) => `<code>${esc(String(r.guest_id).slice(-8))}</code>` },
   { label: 'Property', key: 'property', render: (r) => entity('property', r.partner_id, r.property) },
-  { label: 'Room', key: 'room_no' },
+  { label: 'Room', key: 'room_no', absent: ROOM },
   { label: 'Bookings', key: 'bookings', num: true },
   { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
   { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
@@ -358,10 +366,10 @@ async function corpLeakage(host, kind = state.sub) {
     { label: 'Type', key: 'product', render: (r) => esc(String(r.product || '—').replace(/_/g, ' ')) },
     { label: 'Paid by', key: 'payment_type', render: (r) => esc(r.payment_type || '—') },
     { label: 'Fare', key: 'price', num: true, render: (r) => money(r.price) },
-    { label: 'Cost', key: 'cost', num: true, render: (r) => money(r.cost) },
+    { label: 'Cost', key: 'cost', num: true, absent: COST, render: (r) => money(r.cost) },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Approach', key: 'deadhead_km', num: true, render: (r) => (r.deadhead_km == null ? '—' : `${fmt(r.deadhead_km, 1)} km`) },
-    { label: 'Room', key: 'room_no' },
+    { label: 'Room', key: 'room_no', absent: ROOM },
     { label: 'Authorised', key: 'has_authorization',
       render: (r) => (r.has_authorization
         ? '<span class="tag ok">yes</span>'
@@ -492,10 +500,15 @@ async function corpApproach(host) {
       { label: 'Measured', key: 'measured', num: true },
       { label: 'Avg return', key: 'avg_return_km', num: true, render: (r) => `${fmt(r.avg_return_km, 2)} km` },
       { label: 'Worst', key: 'worst_km', num: true, render: (r) => `${fmt(r.worst_km, 1)} km` },
+      /* Zero is a NUMBER here, and a useful one: "no drop in this area left the
+         driver more than 15 km from the next job" is the answer, and it was
+         being rendered as an em-dash — which reads as "not measured" on a
+         column whose neighbours are all measurements. Twenty-two rows of that
+         made the column look broken rather than clean. */
       { label: 'Over 15 km', key: 'over_15km', num: true,
-        absent: 'no approach in this window exceeded 15 km — the column marks the outliers, and '
-          + 'in this range there are none',
-        render: (r) => (r.over_15km ? `<span class="pill warn">${fmt(r.over_15km)}</span>` : '—') },
+        render: (r) => (r.over_15km
+          ? `<span class="pill warn">${fmt(r.over_15km)}</span>`
+          : (r.over_15km === 0 ? '<span class="dim">0</span>' : '—')) },
       { label: 'Avg paid trip', key: 'avg_paid_km', num: true, render: (r) => `${fmt(r.avg_paid_km, 1)} km` },
     ], { compact: true, sortable: true, sortId: 'strand',
       defaultSort: { key: 'avg_return_km', dir: 'desc' } }));

@@ -275,3 +275,58 @@ The clock guard keeps the failure it was written for: a tracker running four
 hours behind still reads as 240 minutes of skew and still refuses verdicts, and
 it is a **median**, so one broken tracker cannot stop the fleet being judged.
 
+### Pass 6 — 25 Aug 2026, the second sweep
+
+Re-ran `bin/render-audit.mjs` against production after the first five passes.
+
+| code | pass 1 | pass 2 | |
+|---|---:|---:|---|
+| page-overflow | 105 | 2 | −103 |
+| dead-column | 85 | 27 | −58 |
+| silent-cap | 75 | **0** | −75 |
+| bad-value | 48 | **0** | −48 |
+| mostly-empty | 15 | **0** | −15 |
+| clipped-text | 8 | **0** | −8 |
+| empty-panel | 44 | 21 | −23 |
+| overflow | 7 | 3 | −4 |
+| sparse-column | 53 | 54 | +1 |
+| blank-page | 18 | 18 | 0 |
+| js/api-error | 12 | 12 | 0 |
+| **total** | **471** | **138** | **−333** |
+
+Routes with any finding: **103 → 33**.
+
+#### What the second pass found
+
+| # | finding | fix |
+|---|---|---|
+| 20 | `#retention`'s cohort grid used `.tbl-wrap`, a class **defined nowhere in app.css** — so twelve month-columns pushed the panel 60px past its edge and the document 137px past the window | `.tscroll`, which is the class that actually scrolls, and the one every `tableFrom` table already gets |
+| 21 | `.kpi .s` carries identifiers like `ecosine:getCompanyEarnings` — no spaces to break at, so it ran 18px past the tile and was clipped | `overflow-wrap:anywhere`; half an endpoint name is not an endpoint name |
+| 22 | `over_15km` and `telematics_journeys` are counts of **zero**, rendered as em-dashes. On a column whose neighbours are all measurements, a dash reads "not measured" — the opposite of what a zero means | zero renders as `0`; `absent` never fires on it, deliberately |
+| 23 | `Hrs online` on Platform performance records — null on all 300 | `absent`, naming the 9-of-241 measurement |
+| 24 | `Avg fare`, `Fare`, `Cost`, `Room`, slot `Fares` still bare | `absent` with the reason each was empty |
+| 25 | `V.sources` had **no `alive(gen)` guard** — the longest view in the product, five panels and six fetches, and an abandoned render went on writing into panels the reader had left | guarded after every await, like every other long view |
+| 26 | the field-inventory panel is the heaviest read on the page and sat on a bare skeleton | says what it is doing after 1.2s, so a slow answer looks slow rather than broken |
+
+#### Three findings that were the auditor's own fault
+
+Worth recording, because a harness that cries wolf gets ignored:
+
+- **`blank-page` ×18** — `#day/not-a-date`, `#slot/9/99`, `#action/nope/-` and friends render one explanation and nothing else. That is the page *working*. The check now passes when the page explains itself.
+- **`js-error` / `api-error` ×12** — the `#segment/<plate>/<at>` address needs both halves from the *same* row, and the substitution took the plate from one row and the timestamp from another. Six findings of the auditor's own making, every pass.
+- **`silent-cap` on 10- and 12-row tables** — twelve months and ten categories are far more often complete than a `LIMIT`. Twenty false positives were burying the real caps.
+
+#### One finding that is the *harness's* fault, not the product's
+
+`test/smoke_views.mjs` reports `#sources` — and sometimes `#providers` and
+`#settings` — as "still loading after 20s". **The failing set moves between
+runs** (3, then 1), and all four pages are clean in isolation at a 20-second
+settle with zero findings. `bin/live-ui.mjs` proxies every request to production
+through one Node process; 104 routes at roughly six requests each saturate it,
+and whichever page is in flight at the tail is the one that reports slow.
+
+`#sources` is genuinely the heaviest page — six fetches including a scan over
+every stored raw record — so it is the first to suffer. That is why the slow
+panel now says so, and why the missing `alive()` guard was worth fixing on its
+own merits. But the smoke failure is the bridge, not the page.
+

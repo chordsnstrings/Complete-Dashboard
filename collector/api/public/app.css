@@ -589,7 +589,11 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .lnk:hover{border-bottom-color:var(--accent)}
 
 /* KPI tones used by the shared kpiRow helper */
-.kpi .s{font-size:.75rem;color:var(--ink-2);margin-top:2px;line-height:1.35}
+/* The sub-line carries identifiers — "ecosine:getCompanyEarnings" — which have
+   no spaces to break at, so they ran 18px past the tile's edge and were clipped
+   by its overflow:hidden. Broken anywhere rather than truncated: half an
+   endpoint name is not an endpoint name. */
+.kpi .s{font-size:.75rem;color:var(--ink-2);margin-top:2px;line-height:1.35;overflow-wrap:anywhere}
 .kpi.t-good .n{color:var(--good)} .kpi.t-good::after{background:var(--good)}
 .kpi.t-warn .n{color:var(--warn)} .kpi.t-warn::after{background:var(--warn)}
 .kpi.t-serious .n{color:var(--serious)} .kpi.t-serious::after{background:var(--serious)}

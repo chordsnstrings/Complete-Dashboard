@@ -352,7 +352,10 @@ export async function renderSegment(root, plate, at) {
       { label: 'Outcome', key: 'outcome', render: (r) => (r.outcome
         ? `<span class="tag ${r.outcome === 'completed' ? 'ok' : 'warn'}">${esc(r.outcome)}</span>`
         : `<span class="tag dim">${esc(r.status || '—')}</span>`) },
-      { label: 'Fare', key: 'price', num: true, render: (r) => (r.price != null ? money(r.price) : '—') },
+      { label: 'Fare', key: 'price', num: true,
+        absent: 'none of the bookings around this interval carries a fare — Uber\'s trip export '
+          + 'has no fare column, and Uber is most of this fleet\'s work',
+        render: (r) => (r.price != null ? money(r.price) : '—') },
     ], { compact: true }));
     const offs = d.nearby_vehicle_trips.map((r) => r.gap_min).filter((n) => n != null);
     const spread = offs.length > 1 ? Math.max(...offs) - Math.min(...offs) : null;

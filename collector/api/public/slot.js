@@ -121,6 +121,8 @@ export async function renderSlot(root, dow, hour) {
             : `<span class="dim" title="over only ${r.trips} trip(s) in this hour — too small a base to judge">${r.completion_pct}%</span>`;
         } },
       { label: 'Fares', key: 'revenue', num: true,
+        absent: 'no booking in this hour carries a fare — Uber\'s export has no fare column, and '
+          + 'at this hour of the week Uber is all of the work',
         render: (r) => (r.revenue ? money(r.revenue)
           : '<span class="ent-off" title="no trip of theirs in this hour carries a fare">—</span>') },
     ], { compact: true, sortable: true, sortId: 'slotdrv', defaultSort: { key: 'trips', dir: 'desc' },

@@ -628,7 +628,7 @@ async function tabTerritory(root, id) {
     { label: 'Area', key: 'area' },
     { label: 'Pickups', key: 'n', num: true },
     { label: 'Avg trip', key: 'avg_km', num: true, render: (r) => (r.avg_km ? `${fmt(r.avg_km, 1)} km` : '—') },
-    { label: 'Avg fare', key: 'avg_fare', num: true,
+    { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
       render: (r) => (r.avg_fare ? money(r.avg_fare)
         : '<span class="ent-off" title="no pickup in this area carries a fare — Uber’s export has no fare column">—</span>') },
   ], { compact: true, sortable: true, sortId: 'areas', defaultSort: { key: 'n', dir: 'desc' } }));
@@ -648,7 +648,7 @@ async function tabTerritory(root, id) {
     dmix.body.append(tableFrom(dist, [
       { label: 'Trip length', key: 'label' },
       { label: 'Trips', key: 'n', num: true },
-      { label: 'Avg fare', key: 'avg_fare', num: true,
+      { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
         render: (r) => (r.avg_fare != null ? money(r.avg_fare, 'AED', 2)
           : '<span class="ent-off" title="no trip in this bucket reports a fare">—</span>') },
     ], { compact: true }));
