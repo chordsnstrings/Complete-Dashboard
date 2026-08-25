@@ -258,7 +258,7 @@ async function corpGuests(host) {
           + 'that travelled more than once. The tile above counts all of them.'));
       }
       body.append(tableFrom(g.rooms, [
-        { label: 'Room', key: 'room_no', absent: ROOM },
+        { label: 'Room', key: 'room_no', absent: ROOM, absent: ROOM },
         { label: 'Property', key: 'property',
           render: (r) => entity('property', r.partner_id, r.property)
             + (r.properties > 1 ? ` <span class="dim">+${r.properties - 1} more</span>` : '') },
@@ -365,7 +365,10 @@ async function corpLeakage(host, kind = state.sub) {
     { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Type', key: 'product', render: (r) => esc(String(r.product || '—').replace(/_/g, ' ')) },
     { label: 'Paid by', key: 'payment_type', render: (r) => esc(r.payment_type || '—') },
-    { label: 'Fare', key: 'price', num: true, render: (r) => money(r.price) },
+    { label: 'Fare', key: 'price', num: true,
+      absent: 'no booking in this group reports a fare — the hotel channel prices the bookings it '
+        + 'charges a property for, and a complimentary ride is not one of them',
+      render: (r) => money(r.price) },
     { label: 'Cost', key: 'cost', num: true, absent: COST, render: (r) => money(r.cost) },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Approach', key: 'deadhead_km', num: true, render: (r) => (r.deadhead_km == null ? '—' : `${fmt(r.deadhead_km, 1)} km`) },

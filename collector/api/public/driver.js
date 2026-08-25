@@ -1214,7 +1214,7 @@ export async function renderDriverDirectory(root) {
         : (r.trips
           ? '<span class="ent-off" title="this person drove in this window but no payout statement reaches them — see Reconciliation">—</span>'
           : '<span class="ent-off" title="no trips in this window">—</span>')) },
-    { label: 'Fares', key: 'revenue', num: true,
+    { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
       render: (r) => (r.revenue
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`

@@ -1147,6 +1147,8 @@ V.vehicles = async (root) => {
          database enums (drop_off, pick_and_drop) and they were sitting in the
          header row beside Uber's Comfort and Black. */
       ...tiers.map((t) => ({ label: tierLabel(t), key: t, num: true,
+        absent: `no vehicle in this table took a ${tierLabel(t)} booking in this window — the `
+          + 'column is here because some vehicle on the fleet did',
         render: (r) => (r[t] ? `${fmt(r[t])}<span class="dim"> · ${Math.round((r[t] / r.total) * 100)}%</span>` : '—') })),
       { label: 'Total', key: 'total', num: true, render: (r) => fmt(r.total) },
     ], { sortable: true, sortId: 'vtier', defaultSort: { key: 'total', dir: 'desc' } }));

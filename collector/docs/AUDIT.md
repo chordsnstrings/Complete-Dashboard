@@ -407,3 +407,45 @@ the `#sources` smoke failure in Pass 6: a single late render in a long run
 through a bridge that proxies every request to production. Recorded rather than
 "fixed", because there is nothing to fix until it reproduces.
 
+### Pass 9 — 25 Aug 2026, the fourth sweep: zero errors
+
+```
+312 page-renders across 3 widths, 13 routes with findings
+sparse-column 54
+exit code 0
+```
+
+**Every error category is at zero.** The auditor exits 0 for the first time —
+it returns 1 if any finding is severity `error`, and none is.
+
+What is left is 54 `sparse-column` warnings across 13 routes, and those are the
+columns the sparse disclosure was built for. Working through them:
+
+| # | finding | fix |
+|---|---|---|
+| 32 | the drivers directory's own `Fares` column (330 of 361 empty) never declared `absent` — the one I had added was on a different table | declared; it now reads **"Fares — 72 of 361 rows carry one; Uber's trip export carries no fare column at all, and Uber is most of this fleet's work — the money for these trips is in the weekly statement under Earnings"** |
+| 33 | `Km` on the roster pipeline (111 of 113), `Room` on property guests (35 of 40), `Fare` on vehicle trips (391 of 400) and on corporate trips, and every product-tier column on `#vehicles` | each declares why |
+| 34 | the auditor flagged a sparse column **even when the table already explained it** — a harness that reports the product doing the right thing is a harness people learn to ignore | `sparse-column` is suppressed when the table's own `.tabsent` line names that column; an unexplained empty column is still reported |
+
+Measured on production, the drivers directory now prints three sentences under
+its table where it used to print several hundred em-dashes.
+
+### Where the four sweeps ended up
+
+| code | pass 1 | pass 4 |
+|---|---:|---:|
+| page-overflow | 105 | **0** |
+| dead-column | 85 | **0** |
+| silent-cap | 75 | **0** |
+| sparse-column | 53 | 54 → disclosed |
+| bad-value | 48 | **0** |
+| empty-panel | 44 | **0** |
+| blank-page | 18 | **0** |
+| mostly-empty | 15 | **0** |
+| clipped-text | 8 | **0** |
+| overflow | 7 | **0** |
+| js-error | 6 | **0** |
+| api-error | 6 | **0** |
+| stuck-loading | 1 | **0** |
+| **total** | **471** | **54 warnings, 0 errors** |
+

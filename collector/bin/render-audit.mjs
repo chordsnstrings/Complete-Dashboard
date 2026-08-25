@@ -131,11 +131,19 @@ const PROBE = () => {
     const heads = [...t.querySelectorAll('thead th')].map(txt);
     const rows = [...t.querySelectorAll('tbody tr')];
     if (rows.length < 3) return;
+    /* What the table already SAYS about its own gaps. ui.js prints a .tabsent
+       line per column that declared why it can be empty — "Fares — 31 of 361
+       rows carry one; Uber's trip export carries no fare column". A column
+       that explains itself is a column doing its job, and flagging it anyway
+       is how a harness teaches people to ignore it. The empty column itself is
+       still reported when nothing explains it. */
+    const said = txt((t.closest('.tscroll') || t.parentElement || {}).querySelector
+      ? (t.closest('.tscroll') || t.parentElement).querySelector('.tabsent') || {} : {});
     heads.forEach((h, i) => {
       const cells = rows.map((r) => txt(r.children[i] || {}));
       const dashes = cells.filter((c) => c === '—' || c === '-' || c === '').length;
       if (dashes === cells.length) push('e', 'dead-column', `"${h}" is empty in all ${cells.length} rows`);
-      else if (dashes / cells.length > 0.8) {
+      else if (dashes / cells.length > 0.8 && !said.includes(h)) {
         push('w', 'sparse-column', `"${h}" is empty in ${dashes} of ${cells.length} rows`);
       }
     });

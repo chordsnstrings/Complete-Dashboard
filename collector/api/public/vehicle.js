@@ -760,7 +760,10 @@ async function tabTrips(root, plate) {
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Product', key: 'product' },
     { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', /cancel/i.test(r.status || '') ? 'warn' : 'ok') },
-    { label: 'Fare', key: 'price', num: true, render: (r) => (r.price ? money(r.price, r.currency) : '—') },
+    { label: 'Fare', key: 'price', num: true,
+      absent: 'Uber\'s trip export carries no fare column at all, and Uber is most of what this '
+        + 'vehicle carries — the money for those trips reaches the fleet in the weekly statement',
+      render: (r) => (r.price ? money(r.price, r.currency) : '—') },
   ];
   const DRAW = 400;
   const count = (n) => {

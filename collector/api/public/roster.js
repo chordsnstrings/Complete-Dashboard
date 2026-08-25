@@ -158,7 +158,10 @@ export async function renderRoster(root) {
       render: (r) => (r.completed == null
         ? '<span class="ent-off" title="no platform of theirs reports an outcome">—</span>'
         : fmt(r.completed)) },
-    ...(anyKm ? [{ label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) }] : []),
+    ...(anyKm ? [{ label: 'Km', key: 'km', num: true,
+      absent: 'nobody in this group has driven in this window, so there is no distance to report '
+        + '— that is what puts them on this list',
+      render: (r) => fmt(r.km) }] : []),
     { label: 'Fares', key: 'revenue', num: true,
       absent: 'nobody in this group has a booking that reports a fare — Uber\'s trip export '
         + 'carries no fare column, and on the pipeline and idle lists Uber is all of the work',
