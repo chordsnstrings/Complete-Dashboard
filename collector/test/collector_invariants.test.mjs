@@ -698,6 +698,48 @@ console.log('\na provider that refuses is not a provider with nothing');
     'an unchecked refusal is how five months of telematics went missing quietly');
   check('and still resolves rather than throwing, so callers that read a 4xx body keep working',
     /return \{ status: res\.status, ok: res\.ok, data, headers: res\.headers \}/.test(httpSrc));
+
+  /* ── the check must be able to see what it checks ────────────────────────
+     The refusal guard above shipped reading `r.ok` off the object FMS's own
+     `call()` returns — and `call()` returned only { status, data }. So `r.ok`
+     was undefined on every window, `!r.ok` was true on every window, and the
+     trip collector skipped all of them while filing each as a refusal. A live
+     run recorded it in the only way it could: `error: 'HTTP 200'`.
+
+     Only the alert path, which checked nothing, kept writing rows — so the run
+     looked half-healthy rather than broken, which is why the earlier tests,
+     the deploy, and a reading of /api/status all passed over it.
+
+     Asserting the guard exists is not enough; assert the field it reads is
+     actually returned. This compares the keys `call()` hands back against
+     every key its callers read, so any future wrapper that quietly narrows the
+     response fails here instead of in production. */
+  const ret = fms.match(/async function call\([\s\S]*?return \{([^}]*)\};/);
+  const returned = new Set((ret?.[1] || '').split(',').map((k) => k.split(':')[0].trim()).filter(Boolean));
+  /* Scoped to the call result, not to every variable in the file that happens
+     to be named r — the row mappers bind `r` too, and counting their
+     `r.requested_at` as a response field makes this fail for the wrong reason. */
+  const read = fms.split(/\n/).reduce((acc, line, i, all) => {
+    if (!/const r = await call\(/.test(line)) return acc;
+    for (const l of all.slice(i, i + 14)) {
+      for (const m of l.matchAll(/\br\.([a-zA-Z_]\w*)/g)) acc.push(m[1]);
+    }
+    return acc;
+  }, []);
+  const missing = [...new Set(read)].filter((k) => !returned.has(k));
+  check('fms call() returns every field its callers read off it',
+    returned.size > 0 && missing.length === 0,
+    `returns {${[...returned].join(',')}} but reads ${missing.join(',') || 'nothing extra'}`);
+  check('and ok is one of them, so the refusal guard is answerable',
+    returned.has('ok'), 'without it !r.ok is true for a 200 and every window is skipped');
+
+  /* The alert half had no status check at all, which is the original hole in
+     its other location: GetAlertData refused reads through `data?.Data || []`
+     as a quiet month exactly like GetTripPassenger did. */
+  check('the alert window checks status too, not just the trip window',
+    /alert window .* refused/.test(fms)
+    && !/\(\{ data \} = await call\('GetAlertData'/.test(fms),
+    'a refused alert window must not read as a month with no harsh braking');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

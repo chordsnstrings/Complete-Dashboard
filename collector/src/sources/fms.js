@@ -11,10 +11,22 @@ import { log } from '../log.js';
 
 const SRC = 'fms';
 
+/* `ok` is part of the answer, not decoration.
+   ─────────────────────────────────────────────────────────────────────────
+   This used to destructure only { status, data } and return only those. The
+   status check added to pullTrips then read `r.ok` off an object that never
+   carried it — undefined, so `!r.ok` was true for every window, including the
+   ones FMS answered perfectly. The trip collector skipped all of them and
+   filed each as a refusal, which is how a live run came to record
+   `error: 'HTTP 200'`: a 200 recorded as a failure.
+
+   The fix that hid a hole opened a bigger one — trips stopped being collected
+   at all, and only the alert path, which does not check status, kept writing.
+   Pass the flag through. */
 async function call(op, params) {
   const url = `${config.fms.base}/${op}?${qs(params)}`;
-  const { status, data } = await http(url, { timeoutMs: 120000 });
-  return { status, data };
+  const { status, ok, data } = await http(url, { timeoutMs: 120000 });
+  return { status, ok, data };
 }
 
 // ---- historical trips ----
@@ -118,10 +130,19 @@ async function pullAlerts(fleet, from, to) {
     chunks.push(chunk);
     let data;
     try {
-      ({ data } = await call('GetAlertData', {
+      const r = await call('GetAlertData', {
         username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
         fromdate: dotDate(s), todate: dotDate(e),
-      }));
+      });
+      /* Same check the trip loop makes, for the same reason: a refusal read
+         through `data?.Data || []` is indistinguishable from a quiet month. */
+      if (!r.ok) {
+        chunk.error = `HTTP ${r.status}${r.data?.Message ? `: ${String(r.data.Message).slice(0, 120)}` : ''}`;
+        log.warn(SRC, `alert window ${dotDate(s)}..${dotDate(e)} refused`,
+          { fleet: fleet.fleet, status: r.status });
+        continue;
+      }
+      data = r.data;
     } catch (err) {
       chunk.error = String(err).slice(0, 300);
       log.error(SRC, `alert window ${dotDate(s)}..${dotDate(e)} FAILED`,
