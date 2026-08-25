@@ -113,7 +113,23 @@ check('vehicle directory trips + unassigned = fleet trips',
 check('vehicles list total <= directory size', veh.total <= vdir.length, `${veh.total} vs ${vdir.length}`);
 const dir = (await get('/api/drivers/directory')).body || [];
 const lb = (await get('/api/drivers/leaderboard')).body;
-check('directory trips = leaderboard trips', sum(dir, 'trips') === sum(lb.rows, 'trips'), `${sum(dir, 'trips')} vs ${sum(lb.rows, 'trips')}`);
+/* The leaderboard returns a hundred rows and reports its population in a
+   separate field; the directory returns every driver we hold anything about,
+   most of whom did not drive in the window. Summing both and demanding they
+   match compared a page against a fleet, and failed live by exactly the 54
+   trips belonging to the 19 active drivers below the hundredth place.
+
+   The invariant worth asserting is the one that caught the 90-vs-89 split:
+   that the two pages fold a person's several platform accounts into one row
+   the same way. So compare the populations, and compare trips over the same
+   hundred people rather than over different sets. */
+const active = dir.filter((d) => Number(d.trips) > 0);
+check('directory active drivers = leaderboard people', active.length === lb.people,
+  `${active.length} vs ${lb.people}`);
+const top = active.map((d) => Number(d.trips) || 0).sort((a, b) => b - a)
+  .slice(0, lb.rows.length).reduce((a, b) => a + b, 0);
+check('leaderboard page trips = directory top rows', sum(lb.rows, 'trips') === top,
+  `${sum(lb.rows, 'trips')} vs ${top}`);
 check('directory people = leaderboard people', dir.filter((r) => (r.trips || 0) > 0).length === lb.people, `${dir.filter((r) => (r.trips || 0) > 0).length} vs ${lb.people}`);
 check('nobody appears twice on the ranking', new Set(lb.rows.map((r) => r.driver_name)).size === lb.rows.length, `${lb.rows.length} rows`);
 
