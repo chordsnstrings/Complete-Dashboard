@@ -930,11 +930,18 @@ app.get('/api/earnings/components', (_, r) => r.json([
   { driver_ext_id: 'drv-2', driver_name: 'Najeeb Ullah Khan', category: 'service_fee', parent: 'payouts', amount: -9120, currency: 'AED' },
 ]));
 
-app.get('/api/earnings/tips', (_, r) => r.json(drivers.map((name, i) => ({
-  driver_ext_id: `drv-${i}`, driver_name: name,
-  tips: +(420 - i * 44).toFixed(2), fare: 12800 - i * 900,
-  tip_pct: +(((420 - i * 44) / (12800 - i * 900)) * 100).toFixed(2),
-}))));
+/* Ranked by tip RATE, so the ranking needs a fare base worth dividing by: the
+   real endpoint has a 300-dirham floor and reports how many drivers it left
+   unranked, because the top row used to be whoever had the smallest fare. */
+app.get('/api/earnings/tips', (_, r) => {
+  const rows = drivers.map((name, i) => ({
+    driver_ext_id: `drv-${i}`, driver_name: name,
+    tips: +(420 - i * 44).toFixed(2), fare: 12800 - i * 900,
+    tip_pct: +(((420 - i * 44) / (12800 - i * 900)) * 100).toFixed(2),
+  }));
+  r.json({ rows, fare_floor: 300, excluded_n: 11, total: rows.length,
+    shown: rows.length, truncated: false });
+});
 
 app.get('/api/context', (_, r) => {
   const out = [];
@@ -983,6 +990,18 @@ app.get('/api/trips/daily', (_, r) => {
    earnings surfaces are collected. A fixture where every channel reports a fare
    would make the page look finished. */
 app.get('/api/revenue', (_, r) => {
+  /* Every configured channel appears, whether or not it delivered anything —
+     including the one that delivered nothing, which this page's own docstring
+     calls the most useful row on it and which used never to be returned at
+     all. Each row carries the collector's last verdict, so an empty channel
+     says WHY it is empty. */
+  const health = {
+    uber: { collection_status: 'ok', collection_error: null, collection_at: dayISO(0) },
+    hotel: { collection_status: 'ok', collection_error: null, collection_at: dayISO(0) },
+    yango: { collection_status: 'ok', collection_error: null, collection_at: dayISO(0) },
+    bolt: { collection_status: 'partial', collection_at: dayISO(0),
+      collection_error: 'FI roster ecosine: code=503 NOT_AUTHORIZED hint=COMPANIES_NOT_ALLOWED' },
+  };
   const platforms = [
     { platform: 'uber', bookings: 6142, priced_bookings: 0, fares: null, priced_km: null,
       km: 78400, drivers: 61, vehicles: 74, payouts: null, cash: null, payout_periods: 0,
@@ -1024,7 +1043,7 @@ app.get('/api/revenue', (_, r) => {
       first_period: null, last_period: null, payout_days: 0, payout_coverage_pct: null,
       basis: 'partial_fares',
       basis_note: 'fares on only 121 of 618 bookings (19.6%) — the rest of this channel’s money is not collected' },
-  ];
+  ].map((x) => ({ ...x, ...health[x.platform] }));
   const components = [
     { platform: 'uber', category: 'net_fare', parent: null, amount: 41200, drivers: 58 },
     { platform: 'uber', category: 'tip', parent: 'net_fare', amount: 1840, drivers: 34 },
@@ -1041,6 +1060,7 @@ app.get('/api/revenue', (_, r) => {
       + 'Every fleet-wide revenue figure in this product is over what did land, so all of them understate '
       + 'what the fleet took.',
     measured_platforms: ['hotel'],
+    silent_platforms: [],
   });
 });
 
@@ -1072,7 +1092,7 @@ app.get('/api/reconcile', (req, r) => {
       : round2(row.bank_covered != null ? row.bank_covered : row.bank_payout);
     const delta = expectedCovered == null || bankCovered == null ? null
       : round2(bankCovered - expectedCovered);
-    return { platform: req.query.platform || '*', ...row,
+    return { platform: req.query.platform || '*', accrual: false, ...row,
       expected_payout: expected, expected_covered: expectedCovered, bank_covered: bankCovered,
       matched_pairs: matched, matched_drivers: row.matched_drivers || 0,
       matched_days: row.matched_days || 0, bank_drivers: row.bank_drivers || 0,
@@ -1220,15 +1240,34 @@ app.get('/api/settlement/cash-exposure', (_, r) => r.json({
   total_cash_trips: 430, total_cash_value_known: 7300, value_known_pct: 20,
   caveat: '342 of 430 cash trips come from a channel that does not report a fare, so the value column is a floor, not the total.',
 }));
+/* One row per counterparty — the group key used to carry driver_ext_id, which
+   split one hotel into eight rows — and an ageing measured over the debt
+   rather than over the selected window, which is why oldest_days here exceeds
+   any range the page offers. */
 app.get('/api/settlement/receivables', (_, r) => r.json({
   counterparties: 41, priced_trips: 180, oldest_days: 96, shown: 8, truncated: true,
   rows: hotels.map((h, i) => ({ settlement_class: 'on_account', label: 'On account', counterparty: h.name,
-    partner_id: h.id, driver_ext_id: null, trips: 30 - i * 6, priced_trips: 30 - i * 6,
+    partner_id: h.id, driver_ext_id: null, driver_ids: [], drivers: 3 + i,
+    trips: 30 - i * 6, priced_trips: 30 - i * 6,
     amount: (30 - i * 6) * 110, oldest: dayISO(70 - i * 10), newest: dayISO(i),
     age_days: 70 - i * 10 })).concat([{ settlement_class: 'salary', label: 'Salary deduction',
-      counterparty: drivers[0], partner_id: null, driver_ext_id: 'drv-0', trips: 12, priced_trips: 12,
+      counterparty: drivers[0], partner_id: null, driver_ext_id: 'drv-0', driver_ids: ['drv-0'],
+      drivers: 1, trips: 12, priced_trips: 12,
       amount: 980, oldest: dayISO(41), newest: dayISO(3), age_days: 41 }]),
   total: 8250, total_trips: 84,
+  ageing: {
+    as_at: dayISO(0).slice(0, 10),
+    note: 'Nothing in this data records a receivable being settled, so every '
+      + 'receivable booking up to the end of the selected window is counted as '
+      + 'outstanding. Ageing is measured from the booking date.',
+    total_trips: 84,
+    buckets: [
+      { label: '0-30 days', trips: 41, amount: 4180 },
+      { label: '31-60 days', trips: 26, amount: 2640 },
+      { label: '61-90 days', trips: 12, amount: 1210 },
+      { label: 'over 90 days', trips: 5, amount: 220 },
+    ],
+  },
 }));
 app.get('/api/corporate/summary', (_, r) => r.json({
   bookings: 1253, priced: 1245, revenue: 138400, cost: 96200, has_cost: true, avg_fare: 111.2, km: 18600,
@@ -1427,9 +1466,14 @@ app.get('/api/geo/corridors', (_, r) => {
       evening: 180 - i * 12, avg_km: 11 + i * 0.5 })),
   });
 });
-app.get('/api/funnel/drivers', (_, r) => r.json(drivers.map((d, i) => ({
+/* One row per driver, not one per overlapping report period — and the state
+   comes from driver_platform_state, which is the only place it exists. */
+app.get('/api/funnel/drivers', (_, r) => {
+  const rows = drivers.map((d, i) => ({
   platform: i % 2 ? 'yango' : 'bolt', driver_name: d, driver_ext_id: `drv-${i}`,
-  period_start: dayISO(28), period_end: dayISO(0),
+  person_key: `drv-${i}`,
+  period_start: dayISO(28), period_end: dayISO(0), period_days: 29, periods_seen: 1 + (i % 3),
+  can_earn: i !== 6, state_raw: i === 6 ? 'BLOCKED' : 'ACTIVE',
   offered: 200 - i * 14, accepted: 150 - i * 12, completed: 120 - i * 10,
   cancelled_driver: 4 + i, cancelled_client: 8 + i, work_time_seconds: 360000 - i * 20000,
   price_cash: 3000 - i * 200, price_cashless: 1000 - i * 60, commission: -(800 - i * 50),
@@ -1438,7 +1482,9 @@ app.get('/api/funnel/drivers', (_, r) => r.json(drivers.map((d, i) => ({
   complete_pct: Math.round(((120 - i * 10) / (150 - i * 12)) * 1000) / 10,
   commission_cost: 800 - i * 50, gross: 4000 - i * 260, hours: Math.round((360000 - i * 20000) / 360) / 10,
   cash_pct: Math.round(((3000 - i * 200) / (4000 - i * 260)) * 1000) / 10,
-}))));
+  }));
+  r.json({ rows, total: rows.length, shown: rows.length, truncated: false });
+});
 
 
 /* ── analyst fixtures ────────────────────────────────────────────────────
@@ -2254,8 +2300,13 @@ app.get('/api/forecast', (req, r) => {
 app.get('/api/playbook', (req, r) => {
   const rate = Number(req.query.aed_per_trip) > 0 ? Number(req.query.aed_per_trip) : null;
   const median = 92;
-  const mk = (a) => ({ ...a, aed_modelled: rate && a.ceiling && /bookings/.test(a.ceiling_unit || '')
-    ? Math.round(a.ceiling * rate) : null });
+  /* `direction` decides which total an action's ceiling belongs to. Money
+     kept and money won are different quantities, and the old reduce matched
+     /bookings/ against ceiling_unit — which 'bookings/month protected' also
+     matches, so avoided loss was summed into "Modelled upside". */
+  const mk = (a) => ({ direction: 'gain', ...a,
+    aed_modelled: rate && a.ceiling && /bookings/.test(a.ceiling_unit || '')
+      ? Math.round(a.ceiling * rate) : null });
   const actions = [
     mk({ id: 'renew_documents', group: 'Protect', horizon: 'today',
       title: 'Renew 8 vehicle documents expiring within 7 days',
@@ -2263,6 +2314,7 @@ app.get('/api/playbook', (req, r) => {
         + 'the only item here that avoids a loss rather than chasing a gain.',
       basis: 'vehicle_document rows with an expiry date inside 45 days, counted in the database rather than '
         + 'from a capped list, because this tile makes a claim about whether a car may legally drive.',
+      direction: 'protect',
       size: 8, size_unit: 'vehicles', ceiling: 8 * median, ceiling_unit: 'bookings/month protected',
       aed_measured: null, certainty: 'measured', effort: 'low', link: '#compliance',
       detail: plates.slice(0, 6).map((p2, i) => ({ plate: p2, expires_at: `2026-08-${25 + (i % 5)}`, days_left: 3 + i })) }),
@@ -2311,7 +2363,11 @@ app.get('/api/playbook', (req, r) => {
         + 'otherwise set the target for every idle one.',
       size: 67, size_unit: 'vehicles', ceiling: 67 * median, ceiling_unit: 'bookings/month',
       aed_measured: null, certainty: 'ceiling', effort: 'high', link: '#vehicles',
-      detail: plates.slice(0, 6).map((p2, i) => ({ plate: p2, journeys: i * 3, last_booking: i > 3 ? null : '2026-07-1' + i })) }),
+      detail: plates.slice(0, 6).map((p2, i) => ({ plate: p2, journeys: i * 3,
+        last_booking: i > 3 ? null : '2026-07-1' + i,
+        driver_refs: i ? [{ name: drivers[i % drivers.length], id: `drv-${i}`, days: 4 }] : null,
+        driver_n: i ? 1 : 0,
+        held_by: i ? { name: drivers[i % drivers.length], id: `drv-${i}`, day: '2026-07-14' } : null })) }),
     mk({ id: 'reduce_cancellations', group: 'Improve', horizon: 'this month',
       title: 'Recover some of 412 bookings lost at the door (5.9%)',
       why: 'These were offered and did not complete — a rider no-show, a driver rejection, or a cancellation. '
@@ -2333,17 +2389,28 @@ app.get('/api/playbook', (req, r) => {
         { place: 'Al Qudra Rd', drops: 31, avg_return_km: 24.6 }] }),
   ];
   r.json({
-    window: ['2026-07-22', '2026-08-21'], actions,
+    window: ['2026-07-22', '2026-08-21'], window_days: 31, actions,
     fleet: { vehicles_seen: 131, earning: 64, moved_only: 28, still: 39, median_bookings: median,
+      median_bookings_window: median, median_unit: 'bookings per 30 days',
       // What capacity genuinely ADDED produces — about a third of the median
       // on this fleet, which is the live figure and the whole reason it is
       // reported beside the ceiling rather than folded into it.
       new_driver_first_month: 31, new_drivers_measured: 26 },
-    totals: {
-      aed_measured: actions.reduce((a, x) => a + (x.aed_measured || 0), 0),
-      aed_modelled: rate ? actions.reduce((a, x) => a + (x.aed_modelled || 0), 0) : null,
-      bookings_ceiling: actions.reduce((a, x) => a + (/bookings/.test(x.ceiling_unit || '') ? (x.ceiling || 0) : 0), 0),
-    },
+    totals: (() => {
+      const bk = (x) => (/bookings/.test(x.ceiling_unit || '') ? (x.ceiling || 0) : 0);
+      const gain = actions.filter((x) => x.direction !== 'protect');
+      const protect = actions.filter((x) => x.direction === 'protect');
+      const ceilGain = gain.reduce((a, x) => a + bk(x), 0);
+      return {
+        aed_measured: actions.reduce((a, x) => a + (x.aed_measured || 0), 0),
+        aed_modelled: rate ? gain.reduce((a, x) => a + (x.aed_modelled || 0), 0) : null,
+        aed_modelled_at_risk: rate ? protect.reduce((a, x) => a + (x.aed_modelled || 0), 0) : null,
+        bookings_ceiling: ceilGain,
+        bookings_ceiling_gain: ceilGain,
+        bookings_at_risk: protect.reduce((a, x) => a + bk(x), 0),
+        ceiling_unit: 'bookings per 30 days',
+      };
+    })(),
     assumption: rate
       ? { aed_per_trip: rate, note: 'Supplied by the caller. Every modelled figure is this rate times a ceiling.' }
       : { aed_per_trip: null, note: 'No revenue-per-booking rate supplied, so nothing is converted to money. '

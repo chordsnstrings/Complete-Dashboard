@@ -53,6 +53,8 @@
    rows. */
 import { personKey } from './custody_sql.js';
 
+import { dubaiDay } from './window.js';
+
 export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
   const num = (v) => (v == null ? null : Number(v));
   const r2 = (v) => Math.round(v * 100) / 100;
@@ -235,6 +237,10 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         : [];
     }
 
+    /* Dubai's calendar day, not the server's. Everything on this page is a
+       Dubai date, and a UTC "today" would let the last four hours of a Dubai
+       day be classed as the future. */
+    const TODAY = dubaiDay(new Date());
     const byKey = (rows) => new Map(rows.map((r) => [r[keyName], r]));
     const tripsBy = byKey(tripRows); const stmtBy = byKey(stmtRows); const payBy = byKey(payRows);
     const covBy = new Map(covRows.map((r) => [r.k, r]));
@@ -260,11 +266,35 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
          discrepancy the fleet does not have. */
       const delta = expectedCovered == null || bankCovered == null
         ? null : r2(bankCovered - expectedCovered);
-      const deltaPct = delta == null || !expectedCovered ? null
-        : Math.round((delta / Math.abs(expectedCovered)) * 1000) / 10;
+      /* A percentage needs a base worth dividing by, and this one had neither
+         sign nor size guard. On 2026-08-17 and 08-18 production returned
+         {expected_covered: -9.91, bank_covered: 5820.67, delta: 5830.58,
+         delta_pct: 58835.3} — a ratio against a base that is negative and a
+         thousandth the size of the number above it. 58,835% is not a
+         reconciliation result, it is a division by nearly nothing, and it sat
+         in a column of honest single-digit percentages.
+
+         Two guards: the base must be positive (a negative expectation means
+         the statement's deductions exceeded its earnings for the drivers we
+         could match, and a ratio to that has no reading), and it must be at
+         least 1% of the figure it is being compared with, below which the
+         percentage describes the base's noise rather than the gap. */
+      const usableBase = expectedCovered != null && expectedCovered > 0
+        && (bankCovered == null || Math.abs(expectedCovered) >= Math.abs(bankCovered) * 0.01);
+      const deltaPct = delta == null || !usableBase ? null
+        : Math.round((delta / expectedCovered) * 1000) / 10;
       return {
         [keyName]: k,
         platform: platform || '*',
+        /* True where the row is a day that has not happened yet. Uber's payout
+           periods are weekly and driver_payout_day spreads a period evenly
+           across ITS days, so a period running to the 30th writes rows for the
+           26th through the 30th on the 25th. Production published five of them
+           as reconciled fact, byte-identical to the 25th except trips:null —
+           ontrip_net 1745.11, bank_payout 2463.55, delta_pct 11.2,
+           matched_pairs 50 — and they inflated every month tile. They are an
+           accrual, they are real, and they are not a measurement. */
+        accrual: keyName === 'd' && k > TODAY,
         trips: t ? t.trips : null,
         ontrip_net: ontrip,
         tips,
@@ -283,13 +313,19 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         matched_drivers: c ? c.matched_drivers : 0,
         matched_days: c ? c.matched_days : 0,
         bank_drivers: c ? c.bank_drivers : 0,
-        delta,
-        delta_pct: deltaPct,
+        /* A day that has not happened cannot have a discrepancy: both sides of
+           it are the same forward projection of one payout period. */
+        delta: keyName === 'd' && k > TODAY ? null : delta,
+        delta_pct: keyName === 'd' && k > TODAY ? null : deltaPct,
       };
     });
 
+    /* Tiles are over what has happened. An accrued row's money is genuine and
+       stays in its row; adding it to a month total would report five days of
+       Uber's forward projection as five days the fleet worked. */
+    const settled = rows.filter((r) => !r.accrual);
     const sumOf = (key) => {
-      const xs = rows.map((r) => r[key]).filter((v) => v != null);
+      const xs = settled.map((r) => r[key]).filter((v) => v != null);
       return xs.length ? r2(xs.reduce((a, b) => a + b, 0)) : null;
     };
     const totals = {
@@ -312,8 +348,12 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
        bank payout against only the months that have a statement would report
        the statement surface's retention horizon as money the platform overpaid
        — a gap that is entirely ours. */
-    const reconcilable = rows.filter((r) => r.delta != null);
+    const reconcilable = settled.filter((r) => r.delta != null);
     totals.reconciled_rows = reconcilable.length;
+    /* Named so the page can say "five days of accrued payout are shown but not
+       counted" rather than leaving a reader to notice that the rows and the
+       tiles disagree. */
+    totals.accrual_rows = rows.length - settled.length;
     totals.delta = reconcilable.length
       ? r2(reconcilable.reduce((a, r) => a + r.delta, 0)) : null;
     const recExpected = reconcilable.reduce((a, r) => a + r.expected_covered, 0);

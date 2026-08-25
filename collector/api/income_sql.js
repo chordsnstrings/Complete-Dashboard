@@ -149,6 +149,23 @@ export function chooseBasis(r, windowDays) {
     r.best = r.fares;
     r.basis_note = `fares on only ${r.priced_bookings} of ${r.bookings} bookings `
       + `(${r.fare_coverage_pct}%) — the rest of this channel’s money is not collected`;
+  } else if (!r.bookings) {
+    /* Nothing arrived at all — which is a different fact from "money is dark",
+       and the difference is what makes it fixable. A channel with bookings and
+       no fares has a money problem; a channel with no bookings has a
+       CREDENTIAL problem, and the collection run already knows which. Bolt's
+       last run in production says "code=503 NOT_AUTHORIZED
+       hint=COMPANIES_NOT_ALLOWED"; printing "this channel's money is dark"
+       over that sends a reader looking for a missing fare column. */
+    r.basis = 'none';
+    r.best = null;
+    r.basis_note = r.collection_error
+      ? 'no booking has been collected on this channel — the last collection run reported: '
+        + r.collection_error
+      : r.collection_status
+        ? `no booking collected on this channel in this window; the last collection run `
+          + `finished ${r.collection_status}, so the channel is configured and simply quiet`
+        : 'no booking collected on this channel, and no collection run has ever reported on it';
   } else {
     r.basis = 'none';
     r.best = null;

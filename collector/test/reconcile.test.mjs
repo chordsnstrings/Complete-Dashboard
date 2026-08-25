@@ -308,6 +308,92 @@ console.log('\nthe page cannot offer a control the endpoint does not honour');
     'the surface serves the current period, not six months');
 }
 
+/* ── days that have not happened, and a percentage over nearly nothing ────
+   Two ways this page published arithmetic as fact.
+
+   Uber's payout periods are weekly and driver_payout_day spreads a period
+   evenly over ITS days, so on the 25th the table already holds rows for the
+   26th through the 30th. Production served all five as reconciled days —
+   byte-identical to the 25th except trips:null — and summed them into the
+   month tiles.
+
+   And on 2026-08-17 and 08-18, expected_covered was −9.91 against a
+   bank_covered of 5,820.67, so delta_pct came back 58,835.3% in a column of
+   single digits. */
+console.log('\ndays that have not happened yet');
+
+{
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const [y, m] = today.split('-');
+  const month = `${y}-${m}`;
+  const dayIn = (offset) => {
+    const d = new Date(`${today}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + offset);
+    return d.toISOString().slice(0, 10);
+  };
+  /* Only run where the accrual can actually land inside the current month —
+     on the 30th, "three days from now" is next month and there is nothing to
+     assert here. */
+  const ahead = dayIn(3);
+  if (ahead.slice(0, 7) === month) {
+    await stmt(today, 400, 0, 0, 0, 'uber_rest');
+    await pay(today, 380);
+    // The forward projection of the same payout period.
+    await pay(ahead, 380);
+    await db.query(
+      `INSERT INTO driver_statement_day (platform, fleet_id, driver_name, driver_ext_id, day,
+         net, tips, salik, cash, source, pseudo)
+       VALUES ('uber','ecosine','Amina Rashid','u-amina',$1,400,0,0,0,'uber_rest',false)`,
+      [ahead]);
+
+    const d = (await get(`/api/reconcile?month=${month}`)).body;
+    const future = d.rows.find((r) => r.d === ahead);
+    const now = d.rows.find((r) => r.d === today);
+    check('a row for a day that has not happened is marked as an accrual',
+      future?.accrual === true, JSON.stringify(future));
+    check('and today is not', now?.accrual === false, JSON.stringify(now && now.accrual));
+    check('an accrued day carries no delta — both sides of it are the same projection',
+      future?.delta === null && future?.delta_pct === null, JSON.stringify(future));
+    check('the money is still shown rather than deleted, because it was reported',
+      Number(future?.bank_payout) === 380, String(future?.bank_payout));
+    check('but the month tiles exclude it, where they used to be inflated by it',
+      Number(d.totals.bank_payout) === Number(
+        d.rows.filter((r) => !r.accrual).reduce((a, r) => a + (Number(r.bank_payout) || 0), 0)),
+      JSON.stringify({ tile: d.totals.bank_payout, accrued: future?.bank_payout }));
+    check('and the count of excluded rows is stated rather than left to be noticed',
+      d.totals.accrual_rows >= 1, String(d.totals.accrual_rows));
+  } else {
+    check('accrual check skipped — today is too near the month end to place a future day',
+      true, ahead);
+  }
+}
+
+console.log('\na percentage needs a base worth dividing by');
+
+{
+  /* The exact production shape: a tiny NEGATIVE expectation under a real bank
+     payout. 5830.58 / 9.91 is 58,835%, and it was printed. */
+  await stmt('2026-06-17', -9.91, 0, 0, 0, 'uber_rest');
+  await pay('2026-06-17', 5820.67);
+  await stmt('2026-06-18', 400, 10, 0, 20, 'uber_rest');
+  await pay('2026-06-18', 420);
+  const d = (await get('/api/reconcile?month=2026-06')).body;
+  const bad = d.rows.find((r) => r.d === '2026-06-17');
+  const good = d.rows.find((r) => r.d === '2026-06-18');
+  check('a delta over a negative expectation reports no percentage',
+    bad && bad.delta != null && bad.delta_pct === null,
+    JSON.stringify({ delta: bad?.delta, pct: bad?.delta_pct, base: bad?.expected_covered }));
+  check('the delta itself survives — the money is real, the ratio is not',
+    Number(bad?.delta) > 5000, String(bad?.delta));
+  check('a healthy day still reports its percentage',
+    good && good.delta_pct != null, JSON.stringify({ pct: good?.delta_pct }));
+  check('and no row in the month carries a percentage above 1000',
+    d.rows.every((r) => r.delta_pct == null || Math.abs(r.delta_pct) <= 1000),
+    JSON.stringify(d.rows.filter((r) => r.delta_pct != null).map((r) => [r.d, r.delta_pct])));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

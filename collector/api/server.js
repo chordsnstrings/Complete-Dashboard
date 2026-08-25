@@ -26,6 +26,7 @@ import { capacityRoutes } from './capacity_routes.js';
 import { revenueRoutes } from './revenue_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
 import { probeRoutes } from './probe.js';
+import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
 
@@ -106,20 +107,10 @@ const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   res.status(500).json({ error: 'internal', ref });
 });
 
-// Writes (credential changes) require ADMIN_TOKEN via x-admin-token header.
-// When ADMIN_TOKEN is set, writes require it. When it is unset the API runs OPEN —
-// convenient during setup, but it means anyone who reaches this URL can read and
-// change stored credentials. Set ADMIN_TOKEN before treating this as production.
-let warnedOpen = false;
-const requireAdmin = (req, res, next) => {
-  const want = process.env.ADMIN_TOKEN;
-  if (!want) {
-    if (!warnedOpen) { log.warn('api', 'ADMIN_TOKEN unset — write endpoints are UNAUTHENTICATED'); warnedOpen = true; }
-    return next();
-  }
-  if (req.get('x-admin-token') !== want) return res.status(401).json({ error: 'unauthorized' });
-  next();
-};
+// Writes (credential changes) require ADMIN_TOKEN via the x-admin-token header,
+// and an API with no ADMIN_TOKEN refuses every write rather than running open.
+// See api/admin_gate.js for why, and for the deploy ordering that fix demands.
+const requireAdmin = adminGate({ warn: (m) => log.warn('api', m) });
 
 /* filters: ?from=&to=&platform=&fleet=
    Bounds are Dubai-local calendar dates, matched against trip_norm.local_day.
@@ -1641,7 +1632,18 @@ app.get('/api/coverage', wrap(async (_, res) => {
 }));
 
 /* ───────────────────────── settings ───────────────────────── */
-app.get('/api/settings', wrap(async (_, res) => res.json(await describeSettings())));
+/* Readable by anyone; legible only to an administrator.
+   ─────────────────────────────────────────────────────────────────────────
+   This route was wide open and returned every non-secret credential in clear.
+   It is not gated outright because the Settings page is also the only place
+   that says which credential is missing, which component holds it and how many
+   days a session cookie has left — a diagnostic an operator needs when they
+   have, by definition, just lost their token. So the shape stays and the
+   values go: see redactSettings in api/admin_gate.js. */
+app.get('/api/settings', wrap(async (req, res) => {
+  const rows = await describeSettings();
+  res.json(isAdmin(req) ? rows : redactSettings(rows));
+}));
 
 app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
   const updates = req.body && typeof req.body === 'object' ? req.body : {};
@@ -1753,7 +1755,12 @@ app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
   const [job] = await q(
     `INSERT INTO collector_job (mode, fleet, requested_by) VALUES ($1, $2, $3)
      RETURNING id, mode, fleet, status, requested_at`,
-    [mode, fleet, (req.get('x-admin-token') ? 'admin' : 'unauthenticated')]);
+    /* Always 'admin' now, and that is the point: requireAdmin is the only way
+       into this handler and it no longer lets an unauthenticated caller past,
+       so the ternary this replaced could only ever have written the truthful
+       'unauthenticated' — which is what all ten stored jobs in production say.
+       A queue whose every row reads "unauthenticated" is not an audit trail. */
+    [mode, fleet, 'admin']);
   res.json({ ok: true, queued: mode, fleet, job_id: job.id, job });
 }));
 
@@ -2273,26 +2280,76 @@ app.get('/api/recommendations', wrap(async (_, res) => {
 }));
 
 // earnings components — tips are the interesting one; they never appear in the trip feed
+/* Both of these read winDays(req), which is from/to and nothing else, so the
+   platform and fleet chips the Finance page displays did nothing to either.
+   #finance?platform=bolt rendered a tips tile and a components tree over a
+   channel with no data at all, and &fleet=egari was byte-identical to
+   &fleet=ecosine on a two-fleet operator. driver_earnings_component carries
+   both columns (sql/schema_v5.sql:65,74); range(req) supplies both binds.
+
+   The containment window (period_start >= $1 AND period_end <= $2) and the
+   LIMIT are deliberately untouched here — both belong to the money-model
+   work, and changing a predicate and a window in the same commit makes the
+   money it moves impossible to attribute to either. */
 app.get('/api/earnings/components', wrap(async (req, res) => res.json(await q(
   `SELECT driver_ext_id, driver_name, category, parent,
           round(sum(amount)::numeric,2) amount, currency
    FROM driver_earnings_component
    WHERE period_start >= $1 AND period_end <= $2
+     AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
    GROUP BY 1,2,3,4,6 ORDER BY abs(sum(amount)) DESC LIMIT 400`,
-  winDays(req)))));
+  range(req)))));
 
 // per-driver tip rate — service quality expressed in money
-app.get('/api/earnings/tips', wrap(async (req, res) => res.json(await q(
-  `SELECT driver_ext_id, max(driver_name) driver_name,
-          round(sum(amount) FILTER (WHERE category='tip')::numeric,2) tips,
-          round(sum(amount) FILTER (WHERE category='net_fare')::numeric,2) fare,
-          round((sum(amount) FILTER (WHERE category='tip')
-                 / nullif(sum(amount) FILTER (WHERE category='net_fare'),0) * 100)::numeric,2) tip_pct
-   FROM driver_earnings_component
-   WHERE period_start >= $1 AND period_end <= $2
-   GROUP BY driver_ext_id HAVING sum(amount) FILTER (WHERE category='net_fare') > 0
-   ORDER BY tip_pct DESC NULLS LAST LIMIT 200`,
-  winDays(req)))));
+/* Ranked by RATE, which needs a base worth dividing by.
+   ─────────────────────────────────────────────────────────────────────────
+   The floor was `> 0`, so the top of this table was whoever had the smallest
+   fare. Production's rank 1 was {tips: 10.00, fare: 63.49, tip_pct: 15.75},
+   above {tips: 30.00, fare: 506.41, 5.92} — under a caption claiming the
+   metric "compares a high-volume driver with a low-volume one fairly". One
+   generous rider on one AED 63 week is not a service-quality finding.
+
+   AED 300 of net fare is roughly a driver's day, and it is the smallest base
+   at which a single tip cannot dominate the ratio: at 300, one AED 10 tip
+   moves the rate 3.3 points rather than 15.8. Everybody below it is COUNTED
+   and reported as excluded rather than silently dropped — an unranked driver
+   is a fact about the window, not an absence. */
+app.get('/api/earnings/tips', wrap(async (req, res) => {
+  const FARE_FLOOR = 300;
+  const p = range(req);
+  const rows = await q(
+    `SELECT driver_ext_id, max(driver_name) driver_name,
+            round(sum(amount) FILTER (WHERE category='tip')::numeric,2) tips,
+            round(sum(amount) FILTER (WHERE category='net_fare')::numeric,2) fare,
+            round((sum(amount) FILTER (WHERE category='tip')
+                   / nullif(sum(amount) FILTER (WHERE category='net_fare'),0) * 100)::numeric,2) tip_pct
+     FROM driver_earnings_component
+     WHERE period_start >= $1 AND period_end <= $2
+       AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
+     GROUP BY driver_ext_id
+     HAVING sum(amount) FILTER (WHERE category='net_fare') >= $5
+     ORDER BY tip_pct DESC NULLS LAST LIMIT 200`, [...p, FARE_FLOOR]);
+  const [t] = await q(
+    `SELECT count(*)::int ranked,
+            count(*) FILTER (WHERE fare < $5)::int excluded
+     FROM (SELECT driver_ext_id, sum(amount) FILTER (WHERE category='net_fare') fare
+             FROM driver_earnings_component
+            WHERE period_start >= $1 AND period_end <= $2
+              AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
+            GROUP BY 1 HAVING sum(amount) FILTER (WHERE category='net_fare') > 0) d`,
+    [...p, FARE_FLOOR]);
+  res.json({
+    rows,
+    fare_floor: FARE_FLOOR,
+    /* Named so the page can say "11 drivers had less than AED 300 of fare in
+       this window and are not ranked" rather than showing a short list with no
+       explanation for its shortness. */
+    excluded_n: t?.excluded ?? 0,
+    total: (t?.ranked ?? 0) - (t?.excluded ?? 0),
+    shown: rows.length,
+    truncated: ((t?.ranked ?? 0) - (t?.excluded ?? 0)) > rows.length,
+  });
+}));
 
 // product-tier economics: which assets serve which tier
 /* Custody resolved once per plate, not once per row.

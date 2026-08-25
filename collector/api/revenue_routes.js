@@ -31,6 +31,7 @@
    because it is the one somebody can fix. */
 import { chooseBasis, fleetIncome, platformStatements } from './income_sql.js';
 import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
+import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
 
 export function revenueRoutes(app, { q, wrap, range }) {
   app.get('/api/revenue', wrap(async (req, res) => {
@@ -39,7 +40,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
     const windowDays = Math.max(1,
       Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1);
 
-    const [fares, payouts, components, tips, stmts] = await Promise.all([
+    const [fares, payouts, components, tips, stmts, health] = await Promise.all([
       /* Per platform, over BOOKINGS only — a telematics journey is the same
          physical trip seen by the tracker and has no fare by definition. */
       q(`SELECT n.platform,
@@ -69,9 +70,20 @@ export function revenueRoutes(app, { q, wrap, range }) {
               every platform total was inflated. It also required periods
               WHOLLY inside the window, which dropped the two straddling its
               edges. See sql/schema_v23.sql. */
+           /* The fleet predicate was missing here, on the components query and
+              on tips, while the fares query above has always carried it. So
+              #revenue with a fleet chip selected counted ONE fleet's bookings
+              against BOTH fleets' money. Measured on production at days=30:
+              /api/kpis&fleet=egari reported accounted 105,038.19 and
+              /api/revenue&fleet=egari reported 327,552.58 for the same window
+              — 3.1×, because Egari's 3,501 bookings were being paid by
+              Ecosine's payout rows as well as their own. driver_payout_day
+              records fleet_id (sql/schema_v23.sql:112); it was simply never
+              read. */
            SELECT * FROM driver_payout_day
             WHERE day BETWEEN $1::date AND $2::date
               AND ($3::text IS NULL OR platform=$3)
+              AND ($4::text IS NULL OR fleet_id=$4)
          ),
          /* Which DAYS of the window the payout periods actually cover.
             Without this, three days of payout on a thirty-day window made a
@@ -94,7 +106,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
                 min(pay.period_start) first_period, max(pay.period_end) last_period,
                 max(covered.days) AS payout_days
            FROM pay LEFT JOIN covered ON covered.platform = pay.platform
-          GROUP BY 1`, [from, to, p[2]]),
+          GROUP BY 1`, p),
 
       /* The payout tree. `parent IS NULL` are the top-level categories; summing
          every row would count a category and its children twice. */
@@ -104,16 +116,28 @@ export function revenueRoutes(app, { q, wrap, range }) {
          FROM driver_earnings_component
          WHERE period_start >= $1::date AND period_end <= $2::date
            AND ($3::text IS NULL OR platform=$3)
-         GROUP BY 1,2,3 ORDER BY abs(sum(amount)) DESC`, [from, to, p[2]]),
+           AND ($4::text IS NULL OR fleet_id=$4)
+         GROUP BY 1,2,3 ORDER BY abs(sum(amount)) DESC`, p),
 
+      /* Tips carried NEITHER filter — not platform, not fleet — so every
+         filtered Revenue page showed the whole fleet's tips. On production,
+         /api/revenue?days=30&platform=bolt returned a platform row for `uber`
+         with 0 bookings and tips 528: Bolt has no data at all, and the only
+         thing that materialised the row was a tip total nothing had narrowed.
+         driver_earnings_component carries both columns (sql/schema_v5.sql:65,74). */
       q(`SELECT platform, round(sum(amount)::numeric,2) tips
          FROM driver_earnings_component
          WHERE period_start >= $1::date AND period_end <= $2::date AND category ILIKE '%tip%'
-         GROUP BY 1`, [from, to]),
+           AND ($3::text IS NULL OR platform=$3)
+           AND ($4::text IS NULL OR fleet_id=$4)
+         GROUP BY 1`, p),
       /* The statement view — the operator's daily ledger and any provider
          statement surface that still answers. See api/income_sql.js on why it
          never merges into fares or payouts. */
       q(platformStatements(), p),
+      /* What the collector last managed on each source, so a channel with no
+         row can say why rather than not appear. See api/channels_sql.js. */
+      q(channelHealthSql()),
     ]);
 
     const num = (v) => (v == null ? null : Number(v));
@@ -142,6 +166,18 @@ export function revenueRoutes(app, { q, wrap, range }) {
       if (c.parent == null) r.components = (r.components || 0) + num(c.amount);
     }
     for (const t of tips) row(t.platform).tips = num(t.tips);
+    /* Every configured booking channel gets a row, whether or not it delivered
+       anything. This page's own docstring calls the empty row the most useful
+       one on it, and there was no empty row: /api/revenue returned exactly
+       three platforms at 7, 30 and 365 days and Bolt appeared on none of them.
+       Narrowed to the selected platform when one is chosen, so asking for Uber
+       does not conjure three channels nobody asked about. */
+    const wanted = BOOKING_CHANNELS.filter((c) => !p[2] || c === p[2]);
+    for (const pl of wanted) row(pl);
+    const byHealth = channelHealth(health);
+    for (const r of byPlatform.values()) Object.assign(r, byHealth.get(r.platform) || {
+      collection_status: null, collection_error: null, collection_at: null,
+    });
     for (const t of stmts) Object.assign(row(t.platform), {
       statement_net: num(t.statement_net), statement_gross: num(t.statement_gross),
       statement_fees: num(t.statement_fees), statement_tips: num(t.statement_tips),
@@ -165,8 +201,13 @@ export function revenueRoutes(app, { q, wrap, range }) {
 
     const rows = [...byPlatform.values()].sort((a, b) => (b.bookings || 0) - (a.bookings || 0));
     const measured = rows.filter((r) => r.basis === 'fares' || r.basis === 'payout');
-    const dark = rows.filter((r) => r.basis === 'none' || r.basis === 'partial_fares'
-      || r.basis === 'partial_payout');
+    /* A channel that delivered no booking at all is not "dark money" — it is a
+       channel that did not run, and naming it in a sentence about how many
+       bookings report no fare would read as "bolt accounts for 0 of 3,328
+       bookings", which is true and useless. It gets its own list. */
+    const dark = rows.filter((r) => (r.basis === 'none' || r.basis === 'partial_fares'
+      || r.basis === 'partial_payout') && r.bookings);
+    const silent = rows.filter((r) => !r.bookings);
     const totalBookings = rows.reduce((a, r) => a + (r.bookings || 0), 0);
     const darkBookings = dark.reduce((a, r) => a + (r.bookings || 0), 0);
 
@@ -205,6 +246,15 @@ export function revenueRoutes(app, { q, wrap, range }) {
           + 'them understate what the fleet took.'
         : null,
       measured_platforms: measured.map((r) => r.platform),
+      /* The configured channels that delivered nothing in this window, each
+         carrying the collector's last verdict. This is the work item the page
+         was missing entirely. */
+      silent_platforms: silent.map((r) => ({
+        platform: r.platform,
+        collection_status: r.collection_status,
+        collection_error: r.collection_error,
+        collection_at: r.collection_at,
+      })),
     });
   }));
 }

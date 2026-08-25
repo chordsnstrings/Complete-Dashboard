@@ -119,6 +119,19 @@ const EXEMPT_LIST = new Set([
      would repeat the subject three times per row. The rule this exists for —
      a plate the reader cannot trace to a human — is satisfied one level up. */
   '/api/economics/drivers.rows[].plates',
+  /* The playbook's idle-vehicle evidence: cars that took no booking in the
+     window. Until the CTE alias collision was fixed (the CTE and
+     custodyOverWindow's own alias were both `v`, so the injected predicate
+     was `v.plate = v.plate`), every one of these rows came back carrying the
+     whole window's custodians — production showed the same three names and
+     driver_n 123 on all twelve rows, including cars with journeys 0. This
+     list passed the check by naming people who had never held the car.
+
+     Now a car nobody held returns nobody, and `held_by` — the last holder at
+     any time, which is who a redeployment call goes to — is NULL for a car
+     that has never been held by anyone. That is the row's whole content, and
+     there is no honest driver to name in it. */
+  '/api/playbook.actions[].detail',
 ]);
 
 const plateNoDriver = [], driverNoVehicle = [], nameNoId = [], broke = [];

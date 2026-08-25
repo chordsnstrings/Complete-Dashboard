@@ -191,18 +191,38 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
   /* What is owed, and by whom. */
   app.get('/api/settlement/receivables', wrap(async (req, res) => {
     const p = range(req);
+    /* One counterparty, one row.
+       ─────────────────────────────────────────────────────────────────────
+       The group key included driver_ext_id, so a hotel's debt was split by
+       whichever driver happened to run each booking. Le Meridien appeared
+       EIGHT times in production — 3,155 / 2,245 / 1,215 / 830 / 720 / 285 /
+       95 / 70 — and so did Aloft, in a 29-row table over about 13 real
+       counterparties, above a tile reading "Counterparties 29 — every one of
+       them listed below". Nobody chasing that debt rings a driver about a
+       hotel's room charges.
+
+       The driver ids are kept, as an array, because they are the drill-down: a
+       salary deduction IS a person, and a property's row can still say which
+       drivers ran the work. */
+    const KEY = `settlement_class,
+              CASE WHEN settlement_class = 'salary' THEN coalesce(driver_name, '(unnamed driver)')
+                   ELSE coalesce(partner_name, partner_id, '(unnamed property)') END`;
     const rows = await q(
       `SELECT settlement_class,
               CASE WHEN settlement_class = 'salary' THEN coalesce(driver_name, '(unnamed driver)')
                    ELSE coalesce(partner_name, partner_id, '(unnamed property)') END AS counterparty,
-              partner_id, driver_ext_id,
+              max(partner_id) AS partner_id,
+              (array_agg(driver_ext_id ORDER BY driver_ext_id)
+                 FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
+              array_remove(array_agg(DISTINCT driver_ext_id), NULL) AS driver_ids,
+              count(DISTINCT driver_ext_id)::int drivers,
               count(*)::int trips,
               count(*) FILTER (WHERE price IS NOT NULL)::int priced_trips,
               sum(price) AS amount,
               min(requested_at) oldest, max(requested_at) newest
        FROM trip_ext
        WHERE ${FB} AND is_receivable
-       GROUP BY 1, 2, 3, 4 ORDER BY amount DESC NULLS LAST LIMIT 200`, p);
+       GROUP BY 1, 2 ORDER BY amount DESC NULLS LAST LIMIT 200`, p);
     // Same rule: the outstanding total is a sum over the table, not over the
     // page. A receivables figure that quietly excludes its own tail is worse
     // than no figure, because somebody will reconcile against it.
@@ -214,13 +234,42 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               sum(price) AS amount,
               (SELECT count(*)::int FROM (
                  SELECT 1 FROM trip_ext WHERE ${FB} AND is_receivable
-                 GROUP BY settlement_class,
-                          CASE WHEN settlement_class = 'salary'
-                               THEN coalesce(driver_name, '(unnamed driver)')
-                               ELSE coalesce(partner_name, partner_id, '(unnamed property)') END,
-                          partner_id, driver_ext_id) g) AS counterparties,
-              min(requested_at) AS oldest
+                 GROUP BY ${KEY}) g) AS counterparties
        FROM trip_ext WHERE ${FB} AND is_receivable`, p);
+
+    /* ── how old the debt is, over the DEBT rather than over the window ────
+       oldest_days was min(requested_at) inside the same window as everything
+       else, so at days=7 the oldest receivable could not exceed seven days and
+       at days=30 it could not exceed thirty. The tone that warns on debt over
+       sixty days was therefore unreachable at any range a reader would pick,
+       on the page whose entire subject is money that has been owed too long.
+
+       Ageing is a property of the receivable, not of the range chip, so this
+       drops the lower bound and keeps the upper one — "as at the end of the
+       selected window". Nothing here records settlement, so every receivable
+       booking is treated as outstanding, which the response says in words.
+
+       sql/schema_v30.sql carries a partial index matching is_receivable's own
+       expression so this does not become a full scan of 253,000 trips. */
+    /* Bound with [to, platform, fleet] rather than the usual four: there is no
+       lower bound to bind, and a $1 nothing references is a parameter Postgres
+       cannot infer a type for. */
+    const RECV_TO_DATE = `local_day <= $1::date AND is_booking AND is_receivable
+       AND ($2::text IS NULL OR platform=$2) AND ($3::text IS NULL OR fleet_id=$3)`;
+    const AGE = (lo, hi) => `($1::date - local_day) >= ${lo}`
+      + (hi == null ? '' : ` AND ($1::date - local_day) <= ${hi}`);
+    const [age] = await q(
+      `SELECT min(requested_at) AS oldest,
+              count(*)::int trips,
+              count(*) FILTER (WHERE ${AGE(0, 30)})::int n_0_30,
+              count(*) FILTER (WHERE ${AGE(31, 60)})::int n_31_60,
+              count(*) FILTER (WHERE ${AGE(61, 90)})::int n_61_90,
+              count(*) FILTER (WHERE ${AGE(91, null)})::int n_90_plus,
+              sum(price) FILTER (WHERE ${AGE(0, 30)}) AS a_0_30,
+              sum(price) FILTER (WHERE ${AGE(31, 60)}) AS a_31_60,
+              sum(price) FILTER (WHERE ${AGE(61, 90)}) AS a_61_90,
+              sum(price) FILTER (WHERE ${AGE(91, null)}) AS a_90_plus
+       FROM trip_ext WHERE ${RECV_TO_DATE}`, [p[1], p[2], p[3]]);
     res.json({
       rows: rows.map((r) => ({
         ...r, amount: r.priced_trips ? round(r.amount, 0) : null,
@@ -231,7 +280,22 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       total_trips: t?.trips || 0,
       counterparties: t?.counterparties || 0,
       priced_trips: t?.priced_trips || 0,
-      oldest_days: t?.oldest ? Math.floor((Date.now() - Date.parse(t.oldest)) / 864e5) : null,
+      /* Measured over every receivable up to the end of the window, not over
+         the window — see RECV_TO_DATE above. */
+      oldest_days: age?.oldest ? Math.floor((Date.now() - Date.parse(age.oldest)) / 864e5) : null,
+      ageing: {
+        as_at: p[1],
+        note: 'Nothing in this data records a receivable being settled, so every '
+          + 'receivable booking up to the end of the selected window is counted as '
+          + 'outstanding. Ageing is measured from the booking date.',
+        total_trips: age?.trips || 0,
+        buckets: [
+          { label: '0-30 days', trips: age?.n_0_30 || 0, amount: round(NUM(age?.a_0_30) || 0, 0) },
+          { label: '31-60 days', trips: age?.n_31_60 || 0, amount: round(NUM(age?.a_31_60) || 0, 0) },
+          { label: '61-90 days', trips: age?.n_61_90 || 0, amount: round(NUM(age?.a_61_90) || 0, 0) },
+          { label: 'over 90 days', trips: age?.n_90_plus || 0, amount: round(NUM(age?.a_90_plus) || 0, 0) },
+        ],
+      },
       shown: rows.length,
       truncated: (t?.counterparties || 0) > rows.length,
     });
@@ -391,6 +455,21 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      finding about the business. */
   app.get('/api/corporate/guests', wrap(async (req, res) => {
     const p = range(req);
+    /* What counts as a room number.
+       ─────────────────────────────────────────────────────────────────────
+       The hotel channel writes an EMPTY STRING into roomNumber far more often
+       than it writes a room, and an empty string is not null — so
+       `room_no IS NOT NULL` counted every one of them. Production reported
+       bookings_with_room 875 of 875, a flat 100%, while 226 of the 300 guest
+       rows returned carried room_no "". Worse, the repeat query grouped on it:
+       one pseudo-room made of every blank passed `HAVING count(*) > 1` and the
+       tiles read repeat_rooms 13 / repeat_bookings 791 above a list of 11
+       rooms totalling 24 bookings.
+
+       The room list below already filtered on this expression; the three
+       figures printed ABOVE the list did not, which is exactly how a KPI comes
+       to contradict the table under it. One definition, used by all four. */
+    const ROOM = `room_no IS NOT NULL AND room_no ~ '^[0-9]{2,5}$'`;
     const rows = await q(
       `SELECT guest_id, count(*)::int bookings,
               sum(price) FILTER (WHERE NOT is_complimentary) AS revenue,
@@ -409,8 +488,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        GROUP BY 1 ORDER BY bookings DESC, revenue DESC NULLS LAST LIMIT 300`, p);
     const [all] = await q(
       `SELECT count(DISTINCT guest_id)::int guests, count(*)::int bookings,
-              count(*) FILTER (WHERE room_no IS NOT NULL)::int with_room,
-              count(DISTINCT room_no)::int rooms
+              count(*) FILTER (WHERE ${ROOM})::int with_room,
+              count(DISTINCT room_no) FILTER (WHERE ${ROOM})::int rooms
        FROM trip_ext WHERE ${F} AND platform = 'hotel' AND guest_id IS NOT NULL`, p);
     const repeat = rows.filter((r) => r.bookings > 1);
 
@@ -428,7 +507,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               sum(price) FILTER (WHERE NOT is_complimentary) AS revenue,
               min(requested_at) first_at, max(requested_at) last_at
        FROM trip_ext
-       WHERE ${F} AND platform = 'hotel' AND room_no IS NOT NULL AND room_no ~ '^[0-9]{2,5}$'
+       WHERE ${F} AND platform = 'hotel' AND ${ROOM}
        GROUP BY 1 HAVING count(*) > 1 ORDER BY bookings DESC LIMIT 80`, p);
 
     // The page's "Rooms seen more than once" tile was this list's length, and
@@ -437,7 +516,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     const [roomTot] = await q(
       `SELECT count(*)::int repeat_rooms, sum(n)::int repeat_bookings FROM (
          SELECT count(*)::int n FROM trip_ext
-         WHERE ${F} AND platform = 'hotel' AND room_no IS NOT NULL
+         WHERE ${F} AND platform = 'hotel' AND ${ROOM}
          GROUP BY room_no HAVING count(*) > 1) g`, p);
 
     res.json({
@@ -1125,11 +1204,29 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      Yango and Bolt report the counts a trip table cannot: how many requests
      were offered, accepted, and who cancelled. This is the only place in the
      data where lost demand is visible at all. */
+  /* One covering period per driver, not every report window that touches this one.
+     ─────────────────────────────────────────────────────────────────────────
+     This summed overlapping Yango report periods. Measured on production at
+     days=30, Aliyan Khalil came back as NINE rows totalling 145 offers:
+     2026-07-24→08-23 (53), 2026-07-23→08-22 (51) — two 31-day windows offset
+     by a day, describing the same work — plus a 7-day and five short windows
+     nested inside them. The four KPI tiles above the table were therefore
+     about 3× the truth; deduplicated to one covering period per driver the
+     same window reads roughly a third of what it did, while the accept and
+     complete RATES barely move, because both numerator and denominator were
+     inflated by the same duplication.
+
+     The longest period wins: it is the one that covers the window rather than
+     a slice of it, and periods_seen says how many were folded away so a reader
+     can tell a clean weekly report from a pile of overlapping catch-ups.
+
+     State comes from driver_platform_state, not from `raw ->> 'state'`. The
+     two never coexisted in one row: at days=30 production returned 57 rows
+     with metrics and 143 with a state, and ZERO with both, so the State column
+     on this page was structurally `—` on every visible row for ever. */
   app.get('/api/funnel/drivers', wrap(async (req, res) => {
     const [from, to] = range(req);
-    res.json((await q(
-      `SELECT platform, driver_name, driver_ext_id, period_start, period_end,
-              ${J('count_orders_all')}              offered,
+    const metrics = `${J('count_orders_all')}              offered,
               ${J('count_orders_accepted')}         accepted,
               ${J('count_orders_completed')}        completed,
               ${J('count_orders_cancelled_by_driver')} cancelled_driver,
@@ -1138,11 +1235,38 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               ${J('price_cash')}                    price_cash,
               ${J('price_cashless')}                price_cashless,
               ${J('price_platform_commission')}     commission,
-              ${J('driver_score')}                  driver_score,
-              raw ->> 'state'                                    state
-       FROM driver_performance
-       WHERE period_start <= $2::date AND period_end >= $1::date AND raw IS NOT NULL
-       ORDER BY offered DESC NULLS LAST LIMIT 200`, [from, to])).map((r) => ({
+              ${J('driver_score')}                  driver_score`;
+    /* The dedup key falls back to the name because the hotel channel names
+       drivers it never numbers, and grouping every one of those under a NULL
+       id would fold separate people into one row. */
+    const CAND = `SELECT platform, coalesce(driver_ext_id, driver_name) person_key,
+                         driver_name, driver_ext_id, period_start, period_end,
+                         (period_end - period_start + 1)::int period_days, ${metrics}
+                    FROM driver_performance
+                   WHERE period_start <= $2::date AND period_end >= $1::date
+                     AND raw IS NOT NULL
+                     AND raw ->> 'count_orders_all' IS NOT NULL`;
+    const [rows, [t]] = await Promise.all([
+      q(`WITH cand AS (${CAND}),
+              counted AS (SELECT platform, person_key, count(*)::int periods_seen
+                            FROM cand GROUP BY 1,2),
+              best AS (SELECT DISTINCT ON (platform, person_key) * FROM cand
+                        ORDER BY platform, person_key, period_days DESC, period_start DESC)
+         SELECT b.*, c.periods_seen, s.state, s.state_raw, s.can_earn
+           FROM best b
+           JOIN counted c ON c.platform = b.platform AND c.person_key = b.person_key
+           LEFT JOIN driver_platform_state s
+             ON s.platform = b.platform AND s.driver_ext_id = b.driver_ext_id
+          WHERE b.offered IS NOT NULL
+          ORDER BY b.offered DESC NULLS LAST LIMIT 200`, [from, to]),
+      /* The list was LIMIT 200 and returned exactly 200 — a cap that has
+         already bitten, reported as a complete funnel. */
+      q(`WITH cand AS (${CAND}),
+              best AS (SELECT DISTINCT ON (platform, person_key) * FROM cand
+                        ORDER BY platform, person_key, period_days DESC, period_start DESC)
+         SELECT count(*)::int drivers FROM best WHERE offered IS NOT NULL`, [from, to]),
+    ]);
+    res.json({ rows: rows.map((r) => ({
       ...r,
       accept_pct: r.offered > 0 ? round((r.accepted / r.offered) * 100, 1) : null,
       complete_pct: r.accepted > 0 ? round((r.completed / r.accepted) * 100, 1) : null,
@@ -1156,7 +1280,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       cash_pct: (NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0) > 0
         ? round(((NUM(r.price_cash) || 0) / ((NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0))) * 100, 1)
         : null,
-    })));
+    })),
+    total: t?.drivers ?? rows.length,
+    shown: rows.length,
+    truncated: (t?.drivers ?? 0) > rows.length });
   }));
 }
 
