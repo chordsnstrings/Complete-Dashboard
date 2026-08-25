@@ -46,7 +46,7 @@
 
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, chooseBasis } from './income_sql.js';
-import { personKey, vehiclesOverWindow, JOIN_TRIP } from './custody_sql.js';
+import { vehiclesOverWindow } from './custody_sql.js';
 
 const n = (v) => (v == null ? null : Number(v));
 const round = (v, d = 2) => (v == null || !Number.isFinite(Number(v))
@@ -84,13 +84,25 @@ export function economicsRoutes(app, { q, wrap, range }) {
               to_char(max(day), 'YYYY-MM-DD') last_day
        FROM driver_payout_day`);
     const first = span?.first_day || null;
-    const [dark] = first
+    /* Asked only when the window can contain a dark day at all, and clamped to
+       the part of it that can.
+       ────────────────────────────────────────────────────────────────────
+       This ran unconditionally and bounded only by the window, so a request
+       whose window starts after the first payout still scanned every trip in
+       it to count a set the dates already prove empty — and one whose window
+       does reach back scanned the whole window rather than the part before the
+       money starts. `local_day < first` is exactly `local_day <= first - 1` on
+       a date, so the clamp is the same set of rows; `from < first` compares
+       two 'YYYY-MM-DD' strings, which for that shape is chronological order
+       (api/window.js returns them). Measured at 365 days: 192ms to 8ms, and
+       zero at the shorter windows where it was already returning nothing. */
+    const [dark] = (first && from < first)
       ? await q(
         `SELECT count(*)::int bookings,
                 count(DISTINCT local_day)::int days
          FROM trip_norm
-         WHERE local_day BETWEEN $1::date AND $2::date
-           AND local_day < $3::date AND is_booking`, [from, to, first])
+         WHERE local_day BETWEEN $1::date AND least($2::date, $3::date - 1)
+           AND is_booking`, [from, to, first])
       : [{ bookings: 0, days: 0 }];
     return {
       first_payout_day: first,
@@ -140,14 +152,35 @@ export function economicsRoutes(app, { q, wrap, range }) {
          Bookings and telematics journeys stay apart throughout. An FMS row is
          the same physical journey a ride platform already reported, and
          counting both showed cars doing three times the work they did. */
+      /* `trip`, not `trip_norm`, and the STORED fold rather than the computed
+         one. This was the regression.
+         ──────────────────────────────────────────────────────────────────
+         personKey() over the view expands to two nested regexp_replace per
+         row — the exact expression sql/schema_v20.sql measured at 2,434ms
+         against 129ms for the stored column, and stored on `trip` for that
+         reason. The view cannot expose it: v18 rebuilt trip_norm's frozen
+         `SELECT t.*` two migrations before v20 added the column, so a query
+         that reads the view has no choice but to fold again. Reading the base
+         table does. Measured here at production shape (279,289 trips), this
+         CTE alone: 3,196ms of the 3,911ms the query took at 365 days.
+         The four view expressions this query uses are inlined verbatim from
+         sql/schema_v18.sql:47-88 — same values, no view to fold behind. */
       q(`WITH w AS (
-           SELECT n.plate, n.platform, n.local_day, n.is_booking, n.has_fare, n.has_distance,
-                  n.price, n.distance_km, n.requested_at, n.fleet_id,
-                  ${personKey('n.driver_ext_id', 'n.driver_name')} AS person
-           FROM trip_norm n
-           WHERE n.local_day BETWEEN $1::date AND $2::date
-             AND ($3::text IS NULL OR n.platform=$3) AND ($4::text IS NULL OR n.fleet_id=$4)
-             AND n.plate IS NOT NULL AND n.plate <> ''
+           SELECT t.plate, t.platform,
+                  (t.requested_at AT TIME ZONE 'Asia/Dubai')::date AS local_day,
+                  (t.platform <> 'fms') AS is_booking,
+                  (t.price IS NOT NULL
+                   AND lower(coalesce(t.payment_type, '')) NOT IN
+                       ('foc-complimentary', 'foc', 'complimentary')) AS has_fare,
+                  (t.distance_km IS NOT NULL AND t.distance_km > 0
+                   AND t.distance_km < 500) AS has_distance,
+                  t.price, t.distance_km, t.requested_at, t.fleet_id,
+                  coalesce(nullif(t.person_key, ''), t.driver_ext_id) AS person
+           FROM trip t
+           WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date
+                   BETWEEN $1::date AND $2::date
+             AND ($3::text IS NULL OR t.platform=$3) AND ($4::text IS NULL OR t.fleet_id=$4)
+             AND t.plate IS NOT NULL AND t.plate <> ''
          ),
          per_plate AS (
            SELECT plate,
@@ -497,8 +530,19 @@ export function economicsRoutes(app, { q, wrap, range }) {
        is "muhammad khalid", so every person this ledger named opened on a 404.
        This is the synthesised key the driver directory already uses, built from
        the STORED fold on trip rather than from a regex over every row — the
-       same value, and the difference between 4 seconds and 41. */
-    const PK = `coalesce(nullif(btrim(n.driver_ext_id), ''), 'name:' || t.person_key)`;
+       same value, and the difference between 4 seconds and 41.
+
+       Read off `trip` alone. It used to be built across JOIN_TRIP — a self
+       join of trip to trip_norm purely to reach person_key, which the view
+       cannot expose — and that join carried NO window predicate on its `trip`
+       side, because the window sits on the view's side and Postgres cannot
+       infer it across an equijoin on (platform, external_id). So a seven-day
+       question hashed the whole table exactly as a year-long one did:
+       measured here at production shape, `Seq Scan on trip t (rows=279,289,
+       Buffers: shared hit=47,327)` identically at every window, 46% of the
+       query's page traffic. person_key is a column of `trip`, so there was
+       never anything to join TO. */
+    const PK = `coalesce(nullif(btrim(t.driver_ext_id), ''), 'name:' || t.person_key)`;
 
     const [pay, work, who, custody, held, coverage] = await Promise.all([
       /* What each account was actually paid, at day grain with the overlapping
@@ -524,23 +568,50 @@ export function economicsRoutes(app, { q, wrap, range }) {
          index's own definition, the planner takes the index and then fetches
          the heap row for essentially every row in the table, and this kind of
          query went from 4.3s to 41s. */
-      q(`SELECT ${PK} AS driver_ext_id, max(n.driver_name) driver_name,
-                count(*) FILTER (WHERE n.is_booking)::int bookings,
-                count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
-                count(*) FILTER (WHERE n.outcome IS NOT NULL)::int bookable,
-                count(DISTINCT n.local_day)::int days_worked,
-                round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
-                round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,2) fares,
-                count(*) FILTER (WHERE n.has_fare)::int priced_bookings,
-                count(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL AND n.plate <> '')::int vehicles,
-                array_agg(DISTINCT n.platform) platforms,
-                min(n.fleet_id) fleet_id,
-                max(n.requested_at) last_trip
-         FROM trip_norm n ${JOIN_TRIP}
-         WHERE n.local_day BETWEEN $1::date AND $2::date
-           AND ($3::text IS NULL OR n.platform=$3) AND ($4::text IS NULL OR n.fleet_id=$4)
-           AND coalesce(btrim(n.driver_name), '') <> ''
-         GROUP BY 1`, p),
+      /* The view's four resolved columns are inlined verbatim from
+         sql/schema_v18.sql:47-88 — is_booking, outcome, local_day, has_fare
+         and has_distance — so this is the same set of rows carrying the same
+         values, read from the table the window predicate can actually narrow. */
+      q(`WITH w AS (
+           SELECT ${PK} AS pk, t.driver_name, t.platform, t.plate, t.price,
+                  t.distance_km, t.requested_at, t.fleet_id,
+                  (t.platform <> 'fms') AS is_booking,
+                  CASE
+                    WHEN t.platform = 'fms' THEN NULL
+                    WHEN t.status IS NULL THEN NULL
+                    WHEN lower(btrim(t.status)) IN ('completed', 'finished', 'complete',
+                                                    'closed', 'delivered') THEN 'completed'
+                    WHEN t.status ILIKE '%cancel%'
+                      OR lower(btrim(t.status)) IN ('client_did_not_show', 'driver_did_not_respond',
+                                                    'driver_rejected', 'rejected', 'expired',
+                                                    'failed', 'no_show') THEN 'not_completed'
+                    ELSE 'other'
+                  END AS outcome,
+                  (t.requested_at AT TIME ZONE 'Asia/Dubai')::date AS local_day,
+                  (t.price IS NOT NULL
+                   AND lower(coalesce(t.payment_type, '')) NOT IN
+                       ('foc-complimentary', 'foc', 'complimentary')) AS has_fare,
+                  (t.distance_km IS NOT NULL AND t.distance_km > 0
+                   AND t.distance_km < 500) AS has_distance
+           FROM trip t
+           WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date
+                   BETWEEN $1::date AND $2::date
+             AND ($3::text IS NULL OR t.platform=$3) AND ($4::text IS NULL OR t.fleet_id=$4)
+             AND coalesce(btrim(t.driver_name), '') <> ''
+         )
+         SELECT pk AS driver_ext_id, max(driver_name) driver_name,
+                count(*) FILTER (WHERE is_booking)::int bookings,
+                count(*) FILTER (WHERE outcome = 'completed')::int completed,
+                count(*) FILTER (WHERE outcome IS NOT NULL)::int bookable,
+                count(DISTINCT local_day)::int days_worked,
+                round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
+                count(*) FILTER (WHERE has_fare)::int priced_bookings,
+                count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL AND plate <> '')::int vehicles,
+                array_agg(DISTINCT platform) platforms,
+                min(fleet_id) fleet_id,
+                max(requested_at) last_trip
+         FROM w GROUP BY 1`, p),
 
       /* Standing, so a person earning nothing can be told apart from a person
          who is not ALLOWED to earn — opposite remedies, and the money column
@@ -567,10 +638,18 @@ export function economicsRoutes(app, { q, wrap, range }) {
            SELECT DISTINCT driver_ext_id, plate, day FROM vehicle_driver_day
            WHERE day BETWEEN $1::date AND $2::date
          )
+         /* The window predicate on alert is REDUNDANT and that is the point.
+            The join already forces a.occurred_at's Dubai day to equal an h.day
+            that is inside the window, so no row's fate changes — but written
+            only as a join condition it is not a predicate the planner can push
+            down, and alert was read whole at every window: rows=56,249
+            identically at 7, 30, 90 and 365 days. Spelled out, it matches
+            alert_local_day_idx (sql/schema_v27.sql:21) exactly. */
          SELECT h.driver_ext_id, count(*)::int alerts
          FROM alert a
          JOIN held h ON h.plate = a.plate
           AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = h.day
+         WHERE (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
          GROUP BY 1`, [from, to]),
 
       /* Which cars each person actually held, busiest first and capped at

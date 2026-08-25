@@ -1,0 +1,75 @@
+-- v30 — the unit-economics window, answered without touching the trip heap.
+--
+-- Two endpoints power #unit, which is the landing page: /api/economics/assets
+-- and /api/economics/drivers. Both ask the same question of `trip` — give me
+-- every row in this range of Dubai days — and then aggregate it two ways. At a
+-- 365-day window that is a quarter of a million rows, and a trip row is wide:
+-- the collectors store the provider's whole record in `raw` (src/sources/
+-- uber.js:93 keeps the entire Uber CSV line), so the heap runs about 1.3 kB per
+-- row and 371 MB in total at production's 279,000 trips.
+--
+-- trip_local_day_idx (schema_v7.sql:60) already matches the predicate exactly,
+-- and that was never the problem: the planner took it and then had to fetch the
+-- heap row for every match, because the nine columns the query reads are not in
+-- the index. Measured at production shape, the assets scan:
+--
+--   Index Scan using trip_local_day_idx ... rows=274,747  Buffers: shared hit=55,562
+--
+-- Fifty-five thousand page reads, of which the index is a few hundred. Every
+-- one of those pages is fetched to read nine narrow columns out of a row that
+-- is mostly a JSON blob nothing on this page looks at.
+--
+-- INCLUDE is what fixes that: the same key, the same matching expression, plus
+-- the payload columns carried in the leaf so the scan never leaves the index.
+--
+--   Index Only Scan using trip_econ_day_idx ... rows=274,747  Heap Fetches: 0
+--                                                Buffers: shared hit=14 read=4,428
+--
+-- 55,562 buffers to 4,442 — twelve and a half times less page traffic, and the
+-- scan node itself falls from 3,196 ms to 96 ms. End to end, cold (page cache
+-- dropped, Postgres restarted, two cores), at a 365-day window:
+--
+--   /api/economics/assets    5,522 ms -> 1,077 ms
+--   /api/economics/drivers   1,895 ms ->   988 ms
+--
+-- with the response byte-for-byte identical at every window. Half of that is
+-- the query rewrites in api/economics_routes.js, which stopped folding the
+-- driver name per row and stopped self-joining trip to itself; this index is
+-- the other half, and it is the half that survives a cold cache.
+--
+-- ── why this and not a rollup table ──────────────────────────────────────
+-- The obvious alternative is a plate x day x platform rollup, filled by
+-- src/rollup.js the way rollup_day is. It was built and measured, and it is no
+-- faster: at production shape it holds 145,000 rows against 279,000 trips, so
+-- it saves under a factor of two on the row count and wins only on row WIDTH —
+-- which is exactly what INCLUDE already wins, without a second copy of the
+-- endpoint's arithmetic to drift from the first, without a refresh path,
+-- without a staleness window, and without a cold-table fallback branch that
+-- has to be written and tested. A rollup is the right instrument when the
+-- answer is smaller than the question. Here it is the same size.
+--
+-- ── what it costs ────────────────────────────────────────────────────────
+-- 35 MB against trip's 371 MB heap, and it is trip's twentieth index. Built in
+-- 733 ms at production shape, once, on the first boot after this ships; the IF
+-- NOT EXISTS makes every later boot a catalogue lookup, so migrate() is not
+-- measurably longer. The write cost was measured rather than assumed: the
+-- incremental collector's re-upsert of a three-day window (1,964 rows) takes
+-- 83/106/106 ms without this index and 107/103/111 ms with it — inside the
+-- noise, because the index is narrow and the rows it touches are recent.
+--
+-- Under churn it degrades gracefully rather than off a cliff: re-upserting a
+-- window clears those pages' visibility bits, so the scan starts fetching the
+-- heap again for exactly those rows — Heap Fetches: 1,967 after three passes —
+-- and the 7-day read went from 5 ms to 8 ms. Autovacuum returns it.
+--
+-- trip_local_day_idx is deliberately left in place. This index is a superset of
+-- it and would serve everything it serves, but schema_v7.sql recreates it on
+-- every boot, so dropping it here would mean building a 7 MB index and throwing
+-- it away once per deploy, on both processes, in front of the readiness probe.
+CREATE INDEX IF NOT EXISTS trip_econ_day_idx
+  ON trip (((requested_at AT TIME ZONE 'Asia/Dubai')::date))
+  INCLUDE (plate, platform, fleet_id, person_key, driver_ext_id, driver_name,
+           status, payment_type, price, distance_km, requested_at);
+
+COMMENT ON INDEX trip_econ_day_idx IS
+  'Covering index for the unit-economics window scan: keyed on the Dubai day, carrying every column /api/economics/assets and /api/economics/drivers read, so a 365-day aggregate is an index-only scan with no heap fetches. See sql/schema_v30.sql.';
