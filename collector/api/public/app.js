@@ -3383,7 +3383,14 @@ V.settings = async (root) => {
         { label: 'Restarts', key: 'attempts', num: true,
           render: (r) => (r.attempts > 1
             ? `<span class="pill ${r.attempts >= 3 ? 'bad' : 'warn'}">${r.attempts}</span>` : '') },
-        { label: 'Detail', key: 'error', render: (r) => (r.error
+        /* Empty for every run that worked, which is most of them — and a
+           column of nine blanks under the heading "Detail" reads as a page
+           that failed to load something rather than as nine runs with nothing
+           to report. */
+        { label: 'Detail', key: 'error',
+          absent: 'these runs finished without an error, so there is nothing to detail — this '
+            + 'column fills in when one fails',
+          render: (r) => (r.error
           ? `<span class="note err" title="${esc(String(r.error))}">${esc(String(r.error).slice(0, 110))}${
             String(r.error).length > 110 ? '…' : ''}</span>` : '') },
       ], { sortable: true, sortId: 'jobs', defaultSort: { key: 'id', dir: 'desc' } }));

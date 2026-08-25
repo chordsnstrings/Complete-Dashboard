@@ -272,6 +272,24 @@ for (const width of WIDTHS) {
     try {
       await page.goto(`${BASE}/#${route}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
       await page.waitForTimeout(SETTLE);
+      /* A skeleton is a page that has not answered YET, and one settle is not
+         evidence that it never will. #sources asks /api/coverage, which its own
+         warmer comment calls a twenty-second query, and it reported
+         "stuck-loading" on a panel that fills at about eleven — a finding about
+         this harness's patience rather than about the page.
+
+         So a page still showing a skeleton gets the settle again, once. What
+         survives that is a panel whose endpoint did not answer, which is the
+         thing the check exists to catch. A slow page is still worth knowing
+         about, so the extra wait is reported rather than hidden. */
+      if (await page.$('.skel')) {
+        await page.waitForTimeout(SETTLE * 2);
+        if (!(await page.$('.skel'))) {
+          findings.push({ route, width, sev: 'w', code: 'slow-panel',
+            detail: `a panel needed more than ${SETTLE}ms to fill — it renders, but a reader `
+              + 'waits on a skeleton first' });
+        }
+      }
       probe = await page.evaluate(PROBE);
     } catch (e) {
       findings.push({ route, width, sev: 'e', code: 'crashed', detail: String(e.message).slice(0, 160) });

@@ -907,3 +907,38 @@ The first version of the regression test demanded the guard at all thirty call
 sites. That is the rule `trip_norm`'s own comment argues against — "a rule
 applied in fifty places is applied in forty-nine" — so it tests the two things
 that make the guards unnecessary instead.
+
+## 2026-08-26 — one caption dragged the whole page sideways
+
+`bin/render-audit.mjs` reported `page-overflow` on `#drivers`: **body 625px
+inside a 412px window**. One rule:
+
+```css
+.toolbar .cap{margin:0;white-space:nowrap}
+```
+
+The summary beside the search box is short on a laptop. On this fleet it is
+*"361 of 361 drivers · 117 drove in this window · 184 did not · 60 never have ·
+77 with no real licence date on file"* — 607px of unbreakable text, clipped by
+nothing. So the drivers view scrolled 213px sideways on every phone, on the page
+the user reported fares missing from. Kept above 761px, dropped below, with
+`min-width:0` for the other half of the mechanism — a flex item defaults to
+`min-width:auto`, "never narrower than my content".
+
+Measured after: body 625 → **412**, zero overflowing elements.
+
+### Two harness findings that were about the harness
+
+**`stuck-loading` on `#sources`.** A skeleton after one settle is a page that
+has not answered *yet*. `/api/coverage` is the twenty-second query its own
+warmer comment describes, and the panel fills at about eleven seconds — the
+audit waited 4.5. It now gives a page one more settle and reports `slow-panel`
+if the second wait fills it, which is worth knowing without being a failure.
+
+**51 `js-error` lines, every one `ERR_CONNECTION_RESET`.** `bin/live-ui.mjs`
+now retries a *thrown* upstream fetch (a non-2xx still passes straight through —
+that is the answer). A page cannot retry; it has already rendered its error box.
+
+Findings at 412px after both: `sparse-column` 51 → **1**, and that one — the
+`Detail` column on `#settings`, blank for every run that succeeded — now says
+so.

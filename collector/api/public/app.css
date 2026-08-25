@@ -682,7 +682,24 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
   transition:border-color .18s var(--ease),box-shadow .18s var(--ease);
 }
 .toolbar input[type=search]:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
-.toolbar .cap{margin:0;white-space:nowrap}
+/* The summary beside a search box, and the one rule on this page that could
+   drag the whole document sideways.
+   ─────────────────────────────────────────────────────────────────────────
+   `white-space:nowrap` keeps "361 of 361 drivers" on one line next to the
+   input, which is right on a laptop. On a phone that sentence is its full
+   form — "361 of 361 drivers · 117 drove in this window · 184 did not · 60
+   never have · 77 with no real licence date on file" — and nowrap makes it
+   607px of unbreakable text inside a 412px viewport. Nothing clips it, so
+   <body> measured 625px against a 412px window and EVERY page on the drivers
+   view scrolled 213px sideways. The render audit calls this page-overflow and
+   it was the only route reporting one.
+
+   So the nowrap is kept where there is room for it and dropped where there is
+   not. min-width:0 as well, because a flex item defaults to min-width:auto —
+   "never narrower than my content" — which is the other half of the same
+   mechanism. */
+.toolbar .cap{margin:0;min-width:0}
+@media(min-width:761px){ .toolbar .cap{white-space:nowrap} }
 
 /* A map inside a detail page. Leaflet needs a concrete height to size against,
    and the height is chosen so the panel stays near 3:2 — close to the shape of
