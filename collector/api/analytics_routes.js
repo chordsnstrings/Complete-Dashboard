@@ -39,7 +39,7 @@ const share = (n, total) => (total ? round((n / total) * 100, 1) : null);
    Dubai - UAE"), so it is the coarsest key that still means something. Where
    the format does not hold, the whole string is kept rather than guessed at. */
 const AREA = `nullif(btrim(split_part(%s, ' - ', 2)), '')`;
-const areaOf = (col) => AREA.replace('%s', col);
+export const areaOf = (col) => AREA.replace('%s', col);
 
 export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
   /* ───────────────────────── settlement ─────────────────────────
@@ -191,18 +191,38 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
   /* What is owed, and by whom. */
   app.get('/api/settlement/receivables', wrap(async (req, res) => {
     const p = range(req);
+    /* One counterparty, one row.
+       ─────────────────────────────────────────────────────────────────────
+       The group key included driver_ext_id, so a hotel's debt was split by
+       whichever driver happened to run each booking. Le Meridien appeared
+       EIGHT times in production — 3,155 / 2,245 / 1,215 / 830 / 720 / 285 /
+       95 / 70 — and so did Aloft, in a 29-row table over about 13 real
+       counterparties, above a tile reading "Counterparties 29 — every one of
+       them listed below". Nobody chasing that debt rings a driver about a
+       hotel's room charges.
+
+       The driver ids are kept, as an array, because they are the drill-down: a
+       salary deduction IS a person, and a property's row can still say which
+       drivers ran the work. */
+    const KEY = `settlement_class,
+              CASE WHEN settlement_class = 'salary' THEN coalesce(driver_name, '(unnamed driver)')
+                   ELSE coalesce(partner_name, partner_id, '(unnamed property)') END`;
     const rows = await q(
       `SELECT settlement_class,
               CASE WHEN settlement_class = 'salary' THEN coalesce(driver_name, '(unnamed driver)')
                    ELSE coalesce(partner_name, partner_id, '(unnamed property)') END AS counterparty,
-              partner_id, driver_ext_id,
+              max(partner_id) AS partner_id,
+              (array_agg(driver_ext_id ORDER BY driver_ext_id)
+                 FILTER (WHERE driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
+              array_remove(array_agg(DISTINCT driver_ext_id), NULL) AS driver_ids,
+              count(DISTINCT driver_ext_id)::int drivers,
               count(*)::int trips,
               count(*) FILTER (WHERE price IS NOT NULL)::int priced_trips,
               sum(price) AS amount,
               min(requested_at) oldest, max(requested_at) newest
        FROM trip_ext
        WHERE ${FB} AND is_receivable
-       GROUP BY 1, 2, 3, 4 ORDER BY amount DESC NULLS LAST LIMIT 200`, p);
+       GROUP BY 1, 2 ORDER BY amount DESC NULLS LAST LIMIT 200`, p);
     // Same rule: the outstanding total is a sum over the table, not over the
     // page. A receivables figure that quietly excludes its own tail is worse
     // than no figure, because somebody will reconcile against it.
@@ -214,13 +234,42 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               sum(price) AS amount,
               (SELECT count(*)::int FROM (
                  SELECT 1 FROM trip_ext WHERE ${FB} AND is_receivable
-                 GROUP BY settlement_class,
-                          CASE WHEN settlement_class = 'salary'
-                               THEN coalesce(driver_name, '(unnamed driver)')
-                               ELSE coalesce(partner_name, partner_id, '(unnamed property)') END,
-                          partner_id, driver_ext_id) g) AS counterparties,
-              min(requested_at) AS oldest
+                 GROUP BY ${KEY}) g) AS counterparties
        FROM trip_ext WHERE ${FB} AND is_receivable`, p);
+
+    /* ── how old the debt is, over the DEBT rather than over the window ────
+       oldest_days was min(requested_at) inside the same window as everything
+       else, so at days=7 the oldest receivable could not exceed seven days and
+       at days=30 it could not exceed thirty. The tone that warns on debt over
+       sixty days was therefore unreachable at any range a reader would pick,
+       on the page whose entire subject is money that has been owed too long.
+
+       Ageing is a property of the receivable, not of the range chip, so this
+       drops the lower bound and keeps the upper one — "as at the end of the
+       selected window". Nothing here records settlement, so every receivable
+       booking is treated as outstanding, which the response says in words.
+
+       sql/schema_v30.sql carries a partial index matching is_receivable's own
+       expression so this does not become a full scan of 253,000 trips. */
+    /* Bound with [to, platform, fleet] rather than the usual four: there is no
+       lower bound to bind, and a $1 nothing references is a parameter Postgres
+       cannot infer a type for. */
+    const RECV_TO_DATE = `local_day <= $1::date AND is_booking AND is_receivable
+       AND ($2::text IS NULL OR platform=$2) AND ($3::text IS NULL OR fleet_id=$3)`;
+    const AGE = (lo, hi) => `($1::date - local_day) >= ${lo}`
+      + (hi == null ? '' : ` AND ($1::date - local_day) <= ${hi}`);
+    const [age] = await q(
+      `SELECT min(requested_at) AS oldest,
+              count(*)::int trips,
+              count(*) FILTER (WHERE ${AGE(0, 30)})::int n_0_30,
+              count(*) FILTER (WHERE ${AGE(31, 60)})::int n_31_60,
+              count(*) FILTER (WHERE ${AGE(61, 90)})::int n_61_90,
+              count(*) FILTER (WHERE ${AGE(91, null)})::int n_90_plus,
+              sum(price) FILTER (WHERE ${AGE(0, 30)}) AS a_0_30,
+              sum(price) FILTER (WHERE ${AGE(31, 60)}) AS a_31_60,
+              sum(price) FILTER (WHERE ${AGE(61, 90)}) AS a_61_90,
+              sum(price) FILTER (WHERE ${AGE(91, null)}) AS a_90_plus
+       FROM trip_ext WHERE ${RECV_TO_DATE}`, [p[1], p[2], p[3]]);
     res.json({
       rows: rows.map((r) => ({
         ...r, amount: r.priced_trips ? round(r.amount, 0) : null,
@@ -231,7 +280,22 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       total_trips: t?.trips || 0,
       counterparties: t?.counterparties || 0,
       priced_trips: t?.priced_trips || 0,
-      oldest_days: t?.oldest ? Math.floor((Date.now() - Date.parse(t.oldest)) / 864e5) : null,
+      /* Measured over every receivable up to the end of the window, not over
+         the window — see RECV_TO_DATE above. */
+      oldest_days: age?.oldest ? Math.floor((Date.now() - Date.parse(age.oldest)) / 864e5) : null,
+      ageing: {
+        as_at: p[1],
+        note: 'Nothing in this data records a receivable being settled, so every '
+          + 'receivable booking up to the end of the selected window is counted as '
+          + 'outstanding. Ageing is measured from the booking date.',
+        total_trips: age?.trips || 0,
+        buckets: [
+          { label: '0-30 days', trips: age?.n_0_30 || 0, amount: round(NUM(age?.a_0_30) || 0, 0) },
+          { label: '31-60 days', trips: age?.n_31_60 || 0, amount: round(NUM(age?.a_31_60) || 0, 0) },
+          { label: '61-90 days', trips: age?.n_61_90 || 0, amount: round(NUM(age?.a_61_90) || 0, 0) },
+          { label: 'over 90 days', trips: age?.n_90_plus || 0, amount: round(NUM(age?.a_90_plus) || 0, 0) },
+        ],
+      },
       shown: rows.length,
       truncated: (t?.counterparties || 0) > rows.length,
     });
@@ -378,7 +442,14 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       types: types.map((t) => ({ ...t, revenue: round(t.revenue, 0), avg_km: round(t.avg_km, 1) })),
       payments: payments.map((x) => ({ ...x, revenue: round(x.revenue, 0), label_class: LABEL[x.settlement_class] || null })),
       guests: guests.map((g) => ({ ...g, revenue: round(g.revenue, 0) })),
+      /* 40 of a property's 478 passengers were listed with nothing saying so.
+         profile.guests is the count over the whole window, so the cap is
+         checkable against it rather than against the list's own length. */
+      guests_shown: guests.length,
+      guests_truncated: (profile?.guests ?? 0) > guests.length,
       drivers: drivers.map((d) => ({ ...d, revenue: round(d.revenue, 0), avg_deadhead_km: round(d.avg_deadhead_km, 2) })),
+      drivers_shown: drivers.length,
+      drivers_truncated: (profile?.drivers ?? 0) > drivers.length,
       dayparts,
     });
   }));
@@ -391,6 +462,21 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      finding about the business. */
   app.get('/api/corporate/guests', wrap(async (req, res) => {
     const p = range(req);
+    /* What counts as a room number.
+       ─────────────────────────────────────────────────────────────────────
+       The hotel channel writes an EMPTY STRING into roomNumber far more often
+       than it writes a room, and an empty string is not null — so
+       `room_no IS NOT NULL` counted every one of them. Production reported
+       bookings_with_room 875 of 875, a flat 100%, while 226 of the 300 guest
+       rows returned carried room_no "". Worse, the repeat query grouped on it:
+       one pseudo-room made of every blank passed `HAVING count(*) > 1` and the
+       tiles read repeat_rooms 13 / repeat_bookings 791 above a list of 11
+       rooms totalling 24 bookings.
+
+       The room list below already filtered on this expression; the three
+       figures printed ABOVE the list did not, which is exactly how a KPI comes
+       to contradict the table under it. One definition, used by all four. */
+    const ROOM = `room_no IS NOT NULL AND room_no ~ '^[0-9]{2,5}$'`;
     const rows = await q(
       `SELECT guest_id, count(*)::int bookings,
               sum(price) FILTER (WHERE NOT is_complimentary) AS revenue,
@@ -409,8 +495,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        GROUP BY 1 ORDER BY bookings DESC, revenue DESC NULLS LAST LIMIT 300`, p);
     const [all] = await q(
       `SELECT count(DISTINCT guest_id)::int guests, count(*)::int bookings,
-              count(*) FILTER (WHERE room_no IS NOT NULL)::int with_room,
-              count(DISTINCT room_no)::int rooms
+              count(*) FILTER (WHERE ${ROOM})::int with_room,
+              count(DISTINCT room_no) FILTER (WHERE ${ROOM})::int rooms
        FROM trip_ext WHERE ${F} AND platform = 'hotel' AND guest_id IS NOT NULL`, p);
     const repeat = rows.filter((r) => r.bookings > 1);
 
@@ -428,7 +514,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               sum(price) FILTER (WHERE NOT is_complimentary) AS revenue,
               min(requested_at) first_at, max(requested_at) last_at
        FROM trip_ext
-       WHERE ${F} AND platform = 'hotel' AND room_no IS NOT NULL AND room_no ~ '^[0-9]{2,5}$'
+       WHERE ${F} AND platform = 'hotel' AND ${ROOM}
        GROUP BY 1 HAVING count(*) > 1 ORDER BY bookings DESC LIMIT 80`, p);
 
     // The page's "Rooms seen more than once" tile was this list's length, and
@@ -437,7 +523,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     const [roomTot] = await q(
       `SELECT count(*)::int repeat_rooms, sum(n)::int repeat_bookings FROM (
          SELECT count(*)::int n FROM trip_ext
-         WHERE ${F} AND platform = 'hotel' AND room_no IS NOT NULL
+         WHERE ${F} AND platform = 'hotel' AND ${ROOM}
          GROUP BY room_no HAVING count(*) > 1) g`, p);
 
     res.json({
@@ -446,6 +532,11 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         span_days: r.first_at && r.last_at
           ? Math.round((Date.parse(r.last_at) - Date.parse(r.first_at)) / 864e5) : null,
       })),
+      /* 300 of 875 guest rows reached the page. total_guests is the count over
+         the window, so a reader can see the cap bite instead of taking 300 for
+         the channel's whole passenger list. */
+      guests_shown: rows.length,
+      guests_truncated: (all?.guests ?? 0) > rows.length,
       total_guests: all?.guests ?? 0,
       total_bookings: all?.bookings ?? 0,
       bookings_with_room: all?.with_room ?? 0,
@@ -649,7 +740,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
   app.get('/api/tiers/by-vehicle', wrap(async (req, res) => {
     const p = range(req);
     const rows = await q(
-      `SELECT t.plate,
+      `WITH agg AS (
+       SELECT t.plate,
               count(*)::int trips,
               count(*) FILTER (WHERE t.uber_tier = 'Black')::int black,
               count(*) FILTER (WHERE t.uber_tier = 'Comfort')::int comfort,
@@ -659,20 +751,48 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               round(sum(t.distance_km) FILTER (WHERE t.has_distance)::numeric, 0) km,
               round(avg(t.distance_km) FILTER (WHERE t.has_distance)::numeric, 1) avg_km,
               max(vp.make) AS make, max(vp.model) AS model, max(vp.year)::int AS year,
-              max(vp.colour) AS colour,
-              /* Who ran this car over the window. "L45240 does 4% premium work
-                 against a fleet median of 31%" is a finding about a person as
-                 much as an asset, and the row used to name only the asset —
-                 leaving the reader to open the vehicle page and work backwards
-                 to who had it before they could act on anything. */
-              ${custodyOverWindow('t.plate')} AS driver_refs,
-              ${custodyCountOverWindow('t.plate')} AS driver_n
+              max(vp.colour) AS colour
        -- The window filter is applied inside a subquery rather than beside the
        -- join: vehicle_profile also has platform and fleet_id columns, and the
        -- shared filter names them bare, which makes the reference ambiguous.
        FROM (SELECT * FROM trip_ext WHERE ${F} AND platform = 'uber' AND plate IS NOT NULL) t
        LEFT JOIN vehicle_profile vp ON upper(replace(vp.plate, ' ', '')) = upper(replace(t.plate, ' ', ''))
-       GROUP BY t.plate ORDER BY trips DESC LIMIT 250`, p);
+       GROUP BY t.plate ORDER BY trips DESC LIMIT 250),
+       held AS (
+         SELECT v.plate, v.driver_name, v.driver_ext_id, count(DISTINCT v.day)::int days
+           FROM vehicle_driver_day v
+          WHERE v.plate IN (SELECT plate FROM agg)
+            AND v.day BETWEEN $1::date AND $2::date
+            AND v.driver_name IS NOT NULL
+          GROUP BY v.plate, v.driver_name, v.driver_ext_id),
+       ranked AS (
+         SELECT h.*, row_number() OVER (PARTITION BY h.plate
+                                        ORDER BY h.days DESC, h.driver_name) rn
+           FROM held h),
+       per_plate AS (
+         SELECT r.plate,
+                jsonb_agg(jsonb_build_object('name', r.driver_name, 'id', r.driver_ext_id,
+                                             'days', r.days)
+                          ORDER BY r.days DESC, r.driver_name)
+                  FILTER (WHERE r.rn <= 3) AS driver_refs,
+                count(DISTINCT r.driver_ext_id)::int AS driver_n
+           FROM ranked r GROUP BY r.plate)
+       /* Who ran this car over the window. "L45240 does 4% premium work against
+          a fleet median of 31%" is a finding about a person as much as an
+          asset, and the row used to name only the asset — leaving the reader
+          to open the vehicle page and work backwards to who had it before
+          they could act on anything.
+
+          Custody resolved ONCE for the 250 plates, not once per output row.
+          custodyOverWindow and custodyCountOverWindow are correlated
+          subqueries in the SELECT list, so each of them re-grouped
+          vehicle_driver_day for every plate on the page — 500 groupings to
+          decorate 250 rows. This tab measured 4,794ms cold at a 12-month
+          window. /api/product/by-vehicle already makes exactly this trade and
+          says why; this is the same shape. */
+       SELECT a.*, p2.driver_refs, coalesce(p2.driver_n, 0) AS driver_n
+         FROM agg a LEFT JOIN per_plate p2 ON p2.plate = a.plate
+        ORDER BY a.trips DESC`, p);
     const fleetPremium = rows.reduce((a, r) => a + r.premium, 0);
     const fleetTrips = rows.reduce((a, r) => a + r.trips, 0);
     const fleetPct = share(fleetPremium, fleetTrips);
@@ -688,8 +808,16 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       cur.best = Math.max(cur.best, r.trips >= 20 ? (r.premium / r.trips) * 100 : 0);
       byModel.set(k, cur);
     }
+    /* How many Uber-carrying vehicles there ARE, so the 250 the list stops at
+       cannot be read as the fleet. */
+    const [vt] = await q(
+      `SELECT count(DISTINCT plate)::int vehicles FROM trip_ext
+        WHERE ${F} AND platform = 'uber' AND plate IS NOT NULL`, p);
     res.json({
       fleet_premium_pct: fleetPct,
+      total: vt?.vehicles ?? rows.length,
+      shown: rows.length,
+      truncated: (vt?.vehicles ?? 0) > rows.length,
       vehicles: rows.map((r) => {
         const k = [r.make, r.model].filter(Boolean).join(' ') || '(unknown)';
         const m = byModel.get(k);
@@ -760,7 +888,15 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      a real one: 2026-07-16 to 2026-08-02 holds zero trips between two months
      that hold thousands. */
   app.get('/api/coverage/calendar', wrap(async (req, res) => {
-    const [from, to] = range(req);
+    /* The platform and fleet chips reached this route and were dropped:
+       /api/coverage/calendar?platform=uber returned all four sources
+       unchanged. Both dimensions are real here — a source IS a platform and
+       rollup_day carries a row per fleet — so both are honoured, with one
+       caveat kept from the comment below: asking for one PLATFORM narrows the
+       calendar to that source's own row, which is what a reader selecting it
+       means, while the fleet '*' row remains the default because the question
+       is usually whether a source collected at all. */
+    const [from, to, platform, fleet] = range(req);
     /* The day grain, precomputed.
        ─────────────────────────────────────────────────────────────────────
        source_day_coverage is an aggregate over the entire trip table. It
@@ -797,10 +933,12 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        rollup_day counts distinct PEOPLE, folded across a person's several
        platform accounts, which is what every other page in this product counts
        and what this calendar's tooltip has always claimed to say. */
+    const P = [from, to, platform, fleet];
     const rollupReady = (await q(
       `SELECT 1 FROM rollup_day
         WHERE day BETWEEN $1::date AND $2::date
-          AND platform <> '*' AND fleet_id = '*' LIMIT 1`, [from, to])).length > 0;
+          AND platform <> '*' AND fleet_id = coalesce($4, '*')
+          AND ($3::text IS NULL OR platform = $3) LIMIT 1`, P)).length > 0;
     /* to_char on either path, not the raw date: the driver hands a DATE back
        as a JS Date whose string form is "Tue Aug 01 2026 …", and slicing ten
        characters off that yields "Tue Aug 01" — which then parses as the year
@@ -811,12 +949,16 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 r.trips AS rows, r.vehicles AS plates, r.drivers
          FROM rollup_day r
          WHERE r.day BETWEEN $1::date AND $2::date
-           AND r.platform <> '*' AND r.fleet_id = '*'
+           AND r.platform <> '*' AND r.fleet_id = coalesce($4, '*')
+           AND ($3::text IS NULL OR r.platform = $3)
          ORDER BY 1, 2`
       : `SELECT source, to_char(day, 'YYYY-MM-DD') AS day, rows, plates, drivers
        FROM source_day_coverage
-       WHERE day BETWEEN $1::date AND $2::date ORDER BY source, day`;
-    const rows = await q(coverageSql, [from, to]);
+       WHERE day BETWEEN $1::date AND $2::date
+         AND ($3::text IS NULL OR source = $3)
+         AND ($4::text IS NULL OR true)
+       ORDER BY source, day`;
+    const rows = await q(coverageSql, P);
     const bySource = new Map();
     for (const r of rows) {
       const s = bySource.get(r.source) || { source: r.source, days: [], total: 0 };
@@ -1040,6 +1182,18 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      cost a second scan. */
   app.get('/api/geo/corridors', wrap(async (req, res) => {
     const p = range(req);
+    /* Which half of the page is being asked for.
+       ─────────────────────────────────────────────────────────────────────
+       Cold at a 12-month window this endpoint measured 8.45s and the page 7.9
+       to 14.4s, all of it one skeleton. The KPI row and the origins panel are
+       a roll-up of the same aggregate the corridor list needs, so they can be
+       painted the moment it lands rather than after 120 corridor rows have
+       been ordered and cut. `part=summary` returns the totals and origins,
+       `part=corridors` the list; no `part` returns everything, which is what
+       every existing caller gets. */
+    const part = ['summary', 'corridors'].includes(req.query.part) ? req.query.part : null;
+    const wantCorridors = part !== 'summary';
+    const wantSummary = part !== 'corridors';
     const rows = await q(
       `WITH base AS (
          SELECT coalesce(${areaOf('pickup_addr')}, '(unrecorded)') AS from_area,
@@ -1047,8 +1201,23 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 count(*)::int AS trips,
                 round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) AS avg_km,
                 round(avg(duration_s)::numeric / 60, 1) AS avg_min,
-                count(*) FILTER (WHERE price IS NOT NULL)::int AS priced,
+                /* The denominator the average actually used. "priced" counted
+                   price IS NOT NULL while avg_fare additionally excluded
+                   complimentary rides, so the printed "N priced" was not the N
+                   the AED beside it was divided by. A complimentary ride has a
+                   price of zero that is not a price; counted separately rather
+                   than folded into either. */
+                count(*) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::int AS priced,
+                count(*) FILTER (WHERE is_complimentary)::int AS complimentary,
                 round(avg(price) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::numeric, 2) AS avg_fare,
+                /* How many rows carried a duration at all. avg_min is NULL on
+                   every corridor in every window because duration_s is never
+                   written by any collector, though sql/schema.sql:64 declares
+                   it and src/probe.js maps Uber's "Trip Duration" to it. A
+                   column of dashes with no denominator reads as "these trips
+                   took no time"; with the count beside it the page can say the
+                   field is not collected. */
+                count(duration_s)::int AS min_n,
                 array_agg(DISTINCT platform) AS platforms,
                 -- The pickup-only measures, carried at corridor grain so the
                 -- origins panel is a roll-up rather than another scan. The
@@ -1060,25 +1229,36 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 sum(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km,
                 count(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km_n
            FROM trip_ext
-          WHERE ${F} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
+          /* FB, not F. Every other demand endpoint in this product counts
+             bookings; this one counted raw trips, so FMS telematics twins —
+             the tracker's own record of journeys the ride platforms already
+             reported — were charted as demand. Measured at days=7: unfiltered
+             gave corridors_3plus 302 / corridors_all 3,303 / origins_all 703,
+             and &platform=fms ALONE gave 187 / 1,217 / 193, so FMS supplied
+             62% of "corridors seen 3+ times". The list carried rows like
+             "Dubai | United Arab Emirates, | 93 | fms", and the top origin
+             "Dubai" was 985 trips of which 805 were twins. */
+          WHERE ${FB} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
           GROUP BY 1, 2),
        corridor AS (
          SELECT row_number() OVER () AS seq, c.*
-           FROM (SELECT * FROM base WHERE trips >= 3 ORDER BY trips DESC LIMIT 120) c),
+           FROM (SELECT * FROM base WHERE ${wantCorridors ? 'trips >= 3' : 'false'}
+                  ORDER BY trips DESC LIMIT 120) c),
        origin AS (
          SELECT row_number() OVER () AS seq, o.*
            FROM (SELECT from_area AS area, sum(from_trips)::int AS trips,
                         sum(from_morning)::int AS morning, sum(from_evening)::int AS evening,
                         round((sum(from_km) / nullif(sum(from_km_n), 0))::numeric, 1) AS avg_km
-                   FROM base GROUP BY 1 HAVING sum(from_trips) > 0
+                   FROM base WHERE ${wantSummary ? 'true' : 'false'} GROUP BY 1
+                  HAVING sum(from_trips) > 0
                   ORDER BY trips DESC LIMIT 60) o)
-       SELECT 'corridor' AS kind, seq, from_area, to_area, trips, avg_km, avg_min, priced,
-              avg_fare, platforms, NULL::int AS morning, NULL::int AS evening,
+       SELECT 'corridor' AS kind, seq, from_area, to_area, trips, avg_km, avg_min, min_n, priced,
+              complimentary, avg_fare, platforms, NULL::int AS morning, NULL::int AS evening,
               NULL::int AS corridors_3plus, NULL::int AS corridors_all, NULL::int AS origins_all
          FROM corridor
        UNION ALL
-       SELECT 'origin', seq, area, NULL, trips, avg_km, NULL, NULL,
-              NULL, NULL, morning, evening,
+       SELECT 'origin', seq, area, NULL, trips, avg_km, NULL, NULL, NULL,
+              NULL, NULL, NULL, morning, evening,
               NULL, NULL, NULL
          FROM origin
        UNION ALL
@@ -1087,8 +1267,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           lists capped at 60 and 120 rows — right until the fleet works more
           than 120 distinct corridors, at which point both tiles quietly become
           the cap. One row, always, so an empty window still states its zeroes. */
-       SELECT 'total', 0, NULL, NULL, NULL, NULL, NULL, NULL,
-              NULL, NULL, NULL, NULL,
+       SELECT 'total', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+              NULL, NULL, NULL, NULL, NULL,
               count(*) FILTER (WHERE from_trips >= 3)::int,
               count(*) FILTER (WHERE from_trips > 0)::int,
               count(DISTINCT from_area) FILTER (WHERE from_trips > 0 AND from_area <> '(unrecorded)')::int
@@ -1103,14 +1283,18 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     };
     const corridors = rows.filter((r) => r.kind === 'corridor').map((r) => ({
       from_area: r.from_area, to_area: r.to_area, trips: r.trips, avg_km: r.avg_km,
-      avg_min: r.avg_min, priced: r.priced, avg_fare: r.avg_fare, platforms: r.platforms,
+      avg_min: r.avg_min, min_n: r.min_n, priced: r.priced, complimentary: r.complimentary,
+      avg_fare: r.avg_fare, platforms: r.platforms,
     }));
     const origins = rows.filter((r) => r.kind === 'origin').map((r) => ({
       area: r.from_area, trips: r.trips, morning: r.morning, evening: r.evening, avg_km: r.avg_km,
     }));
     const shown = corridors.filter((r) => r.from_area !== '(unrecorded)' || r.to_area !== '(unrecorded)');
     res.json({
-      note: 'Areas are parsed from the address text each provider returns, not from a place id.',
+      note: 'Areas are parsed from the address text each provider returns, not from a place id. '
+        + 'Bookings only — an FMS row is the tracker\'s own record of a journey a ride platform '
+        + 'already reported, and counting it would chart the same trip twice.',
+      part: part || 'all',
       corridors: shown,
       origins,
       totals: t,
@@ -1118,6 +1302,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       truncated: t.corridors_all > shown.length,
       origins_shown: origins.length,
       origins_truncated: t.origins_all > origins.length,
+      /* Duration is declared on the trip table and written by nothing, so
+         avg_min is NULL on every corridor in every window. Said once, here,
+         rather than left as a column of dashes. */
+      duration_measured: corridors.reduce((a, r) => a + (r.min_n || 0), 0),
     });
   }));
 
@@ -1125,11 +1313,29 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      Yango and Bolt report the counts a trip table cannot: how many requests
      were offered, accepted, and who cancelled. This is the only place in the
      data where lost demand is visible at all. */
+  /* One covering period per driver, not every report window that touches this one.
+     ─────────────────────────────────────────────────────────────────────────
+     This summed overlapping Yango report periods. Measured on production at
+     days=30, Aliyan Khalil came back as NINE rows totalling 145 offers:
+     2026-07-24→08-23 (53), 2026-07-23→08-22 (51) — two 31-day windows offset
+     by a day, describing the same work — plus a 7-day and five short windows
+     nested inside them. The four KPI tiles above the table were therefore
+     about 3× the truth; deduplicated to one covering period per driver the
+     same window reads roughly a third of what it did, while the accept and
+     complete RATES barely move, because both numerator and denominator were
+     inflated by the same duplication.
+
+     The longest period wins: it is the one that covers the window rather than
+     a slice of it, and periods_seen says how many were folded away so a reader
+     can tell a clean weekly report from a pile of overlapping catch-ups.
+
+     State comes from driver_platform_state, not from `raw ->> 'state'`. The
+     two never coexisted in one row: at days=30 production returned 57 rows
+     with metrics and 143 with a state, and ZERO with both, so the State column
+     on this page was structurally `—` on every visible row for ever. */
   app.get('/api/funnel/drivers', wrap(async (req, res) => {
     const [from, to] = range(req);
-    res.json((await q(
-      `SELECT platform, driver_name, driver_ext_id, period_start, period_end,
-              ${J('count_orders_all')}              offered,
+    const metrics = `${J('count_orders_all')}              offered,
               ${J('count_orders_accepted')}         accepted,
               ${J('count_orders_completed')}        completed,
               ${J('count_orders_cancelled_by_driver')} cancelled_driver,
@@ -1138,11 +1344,38 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               ${J('price_cash')}                    price_cash,
               ${J('price_cashless')}                price_cashless,
               ${J('price_platform_commission')}     commission,
-              ${J('driver_score')}                  driver_score,
-              raw ->> 'state'                                    state
-       FROM driver_performance
-       WHERE period_start <= $2::date AND period_end >= $1::date AND raw IS NOT NULL
-       ORDER BY offered DESC NULLS LAST LIMIT 200`, [from, to])).map((r) => ({
+              ${J('driver_score')}                  driver_score`;
+    /* The dedup key falls back to the name because the hotel channel names
+       drivers it never numbers, and grouping every one of those under a NULL
+       id would fold separate people into one row. */
+    const CAND = `SELECT platform, coalesce(driver_ext_id, driver_name) person_key,
+                         driver_name, driver_ext_id, period_start, period_end,
+                         (period_end - period_start + 1)::int period_days, ${metrics}
+                    FROM driver_performance
+                   WHERE period_start <= $2::date AND period_end >= $1::date
+                     AND raw IS NOT NULL
+                     AND raw ->> 'count_orders_all' IS NOT NULL`;
+    const [rows, [t]] = await Promise.all([
+      q(`WITH cand AS (${CAND}),
+              counted AS (SELECT platform, person_key, count(*)::int periods_seen
+                            FROM cand GROUP BY 1,2),
+              best AS (SELECT DISTINCT ON (platform, person_key) * FROM cand
+                        ORDER BY platform, person_key, period_days DESC, period_start DESC)
+         SELECT b.*, c.periods_seen, s.state, s.state_raw, s.can_earn
+           FROM best b
+           JOIN counted c ON c.platform = b.platform AND c.person_key = b.person_key
+           LEFT JOIN driver_platform_state s
+             ON s.platform = b.platform AND s.driver_ext_id = b.driver_ext_id
+          WHERE b.offered IS NOT NULL
+          ORDER BY b.offered DESC NULLS LAST LIMIT 200`, [from, to]),
+      /* The list was LIMIT 200 and returned exactly 200 — a cap that has
+         already bitten, reported as a complete funnel. */
+      q(`WITH cand AS (${CAND}),
+              best AS (SELECT DISTINCT ON (platform, person_key) * FROM cand
+                        ORDER BY platform, person_key, period_days DESC, period_start DESC)
+         SELECT count(*)::int drivers FROM best WHERE offered IS NOT NULL`, [from, to]),
+    ]);
+    res.json({ rows: rows.map((r) => ({
       ...r,
       accept_pct: r.offered > 0 ? round((r.accepted / r.offered) * 100, 1) : null,
       complete_pct: r.accepted > 0 ? round((r.completed / r.accepted) * 100, 1) : null,
@@ -1156,7 +1389,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       cash_pct: (NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0) > 0
         ? round(((NUM(r.price_cash) || 0) / ((NUM(r.price_cash) || 0) + (NUM(r.price_cashless) || 0))) * 100, 1)
         : null,
-    })));
+    })),
+    total: t?.drivers ?? rows.length,
+    shown: rows.length,
+    truncated: (t?.drivers ?? 0) > rows.length });
   }));
 }
 
@@ -1190,15 +1426,21 @@ export function analystRoutes(app, { q, wrap, range }) {
     const [from, to] = range(req);
     const verdicts = String(req.query.verdict || 'confirmed').split(',')
       .filter((v) => ['confirmed', 'refuted', 'immaterial', 'unsupported'].includes(v));
+    /* analyst_finding records the fleet it was generated for and the chip on
+       #analyst reached this route and was dropped. Platform is deliberately
+       not applied: a finding is a claim about a metric and a segment, and the
+       segment may itself BE a platform — narrowing the list by one would hide
+       every finding about the others rather than narrowing anything. */
     const rows = await q(
       `SELECT * FROM analyst_finding
        WHERE window_start >= $1::date AND window_end <= $2::date
          AND ($3::text[] IS NULL OR verdict = ANY($3))
+         AND ($4::text IS NULL OR fleet_id = $4)
        ORDER BY created_at DESC,
                 CASE verdict WHEN 'confirmed' THEN 0 WHEN 'refuted' THEN 1
                              WHEN 'immaterial' THEN 2 ELSE 3 END,
                 abs(coalesce(effect_pct, 0)) DESC
-       LIMIT 300`, [from, to, verdicts.length ? verdicts : null]);
+       LIMIT 300`, [from, to, verdicts.length ? verdicts : null, req.query.fleet || null]);
     // The unit belongs to the metric, not to a guess at the front end: a page
     // deriving "%" from a column name printed a distance difference as a bare
     // number and a fare difference as a percentage.
@@ -1214,8 +1456,18 @@ export function analystRoutes(app, { q, wrap, range }) {
               count(*) FILTER (WHERE verdict = 'unsupported')::int unsupported,
               count(DISTINCT run_id)::int runs, max(created_at) last_run, max(model) model
        FROM analyst_finding
-       WHERE window_start >= $1::date AND window_end <= $2::date`, [from, to]);
-    res.json({ ...counts, findings: rows });
+       WHERE window_start >= $1::date AND window_end <= $2::date
+         AND ($3::text IS NULL OR fleet_id = $3)`, [from, to, req.query.fleet || null]);
+    res.json({
+      ...counts, findings: rows,
+      fleet: req.query.fleet || null,
+      /* Whether the model that writes these is configured at all. An empty
+         list means "no finding" only when the generator can run; with
+         ARK_API_KEY unset it means the pass has never happened, and the page
+         described that as a scheduling delay. */
+      configured: !!process.env.ARK_API_KEY,
+      platform_applies: false,
+    });
   }));
 
   /* What the checker is allowed to check, published so the rules are readable

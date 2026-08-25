@@ -33,7 +33,14 @@ const trip = (platform, ext, drv, name, plate, dayISO, hour, opts = {}) => q(
    `${dayISO}T${String(hour).padStart(2, '0')}:24:00+04:00`,
    opts.km ?? 9, opts.dur ?? 1440, opts.status ?? 'completed',
    opts.product ?? 'UberX', opts.pay ?? 'card', opts.price ?? 38,
-   opts.lat ?? 25.204, opts.lng ?? 55.271, opts.addr ?? 'Dubai Marina - Marina Walk',
+   opts.lat ?? 25.204, opts.lng ?? 55.271, /* The real shape a provider returns: "<building or street> - <community> -
+      <city> - <country>". The community is the SECOND segment, which is why
+      every page in this product keys an area on it. This fixture used to carry
+      a two-part string with the area first, which is the one shape that made
+      split_part(addr, ' - ', 1) look right — on the live fleet it produced one
+      row per building: "12 Cluster E", "9 Marasi Dr", trailing " &" fragments
+      and all. */
+   opts.addr ?? 'Marina Walk - Dubai Marina - Dubai - UAE',
    opts.dlat ?? 25.118, opts.dlng ?? 55.200]);
 
 // Amina, Uber: 8 trips/day across 2026-08-10..14, starting at 07:00
@@ -45,7 +52,7 @@ for (const day of ['2026-08-10', '2026-08-11', '2026-08-12', '2026-08-13', '2026
 // …one cancelled, and one long airport run so the distance buckets have spread
 await trip('uber', 'u-cx', UBER, 'Amina Rashid', 'L46174', '2026-08-12', 16, { status: 'rider_cancelled', km: 0, price: 0 });
 await trip('uber', 'u-air', UBER, 'Amina Rashid', 'L46174', '2026-08-13', 17,
-  { km: 42, price: 160, addr: 'Dubai International Airport - Terminal 3', lat: 25.253, lng: 55.365 });
+  { km: 42, price: 160, addr: 'Terminal 3 - Dubai International Airport - Dubai - UAE', lat: 25.253, lng: 55.365 });
 // Amina, Yango: same person, doubled surname, different vehicle
 for (let i = 0; i < 5; i++)
   await trip('yango', `y${i}`, YANGO, 'Amina Rashid Rashid', 'L36397', '2026-08-15', 18 + (i % 5),
@@ -148,7 +155,17 @@ check('cancellation is inverted (lower is better)', cancel.percentile < 100, Str
 const terr = (await get(`/api/driver/territory?id=${UBER}&${W}`)).body;
 check('pickup clusters returned', terr.pickups.length >= 2, String(terr.pickups.length));
 check('busiest pickup first', terr.pickups[0].n >= terr.pickups[terr.pickups.length - 1].n);
-check('named areas extracted from the address', terr.areas.some((a) => a.area === 'Dubai Marina'), JSON.stringify(terr.areas.slice(0, 2)));
+check('named areas are the community, not the building number',
+  terr.areas.some((a) => a.area === 'Dubai Marina')
+  && terr.areas.some((a) => a.area === 'Dubai International Airport'),
+  JSON.stringify(terr.areas.slice(0, 3)));
+/* One cluster on a map beside a table of pickups across 25 areas is not a
+   contradiction — most channels report no coordinate at all — but the page
+   could not say so, and its "no positioned trips" note fired only at zero. */
+check('the map says how much of the work it could place',
+  terr.coverage.bookings > 0 && terr.coverage.positioned <= terr.coverage.bookings
+  && terr.coverage.positioned_pct != null,
+  JSON.stringify(terr.coverage));
 check('waiting spots come from stationary fixes', terr.idle.length === 1, String(terr.idle.length));
 // Three fixes at that spot, and two custody rows for the day — still three.
 check('a stationary fix is counted once per custody day', terr.idle[0]?.fixes === 3, String(terr.idle[0]?.fixes));
@@ -180,9 +197,12 @@ check('trip list honours the limit', tr.length === 10, String(tr.length));
 check('trips come back newest first', new Date(tr[0].requested_at) >= new Date(tr[1].requested_at));
 const cust = (await get(`/api/driver/custody?id=${UBER}&${W}`)).body;
 // Three rows for two vehicles: L46174 twice on the 13th (uber + yango), L36397 once.
-check('custody lists every platform row', cust.length === 3, String(cust.length));
-check('custody covers both vehicles', new Set(cust.map((c) => c.plate)).size === 2,
-  [...new Set(cust.map((c) => c.plate))].join(','));
+check('custody lists every platform row', cust.rows.length === 3, String(cust.rows.length));
+check('custody covers both vehicles', new Set(cust.rows.map((c) => c.plate)).size === 2,
+  [...new Set(cust.rows.map((c) => c.plate))].join(','));
+// 60 of 256 rows reached the Activity tab with nothing saying so.
+check('and says how many there are, so a 400-row cap cannot read as the record',
+  cust.total === 3 && cust.truncated === false, JSON.stringify([cust.total, cust.truncated]));
 
 /* ── directory ──────────────────────────────────────────────────────────── */
 const dir = (await get(`/api/drivers/directory?${W}`)).body;

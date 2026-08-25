@@ -24,6 +24,14 @@ import { rollupGrainSql } from '../src/rollup.js';
 
 export function capacityRoutes(app, { q, wrap }) {
   app.get('/api/capacity', wrap(async (req, res) => {
+    /* The platform and fleet chips were displayed, written into the address,
+       sent with every request — and pinned to '*' in every query, so
+       /api/capacity returned identical bodies for five filter variants. Worse,
+       the response cache keys on the URL, so every combination anybody ever
+       selected minted a fresh 2.38s computation of the same answer. Honouring
+       them makes the cache key mean something as well as making the page true. */
+    const pl = req.query.platform || null;
+    const fl = req.query.fleet || null;
     /* ── how much work is coming ──────────────────────────────────────── */
     /* From rollup_month, like /api/forecast — the same full-history grouping,
        with nothing in the request that could narrow it. Falls back to computing
@@ -33,12 +41,14 @@ export function capacityRoutes(app, { q, wrap }) {
     const monthShape = `to_char(month,'YYYY-MM') AS m, bookings AS trips`;
     let months = await q(
       `SELECT ${monthShape}, first_day, last_day FROM rollup_month
-       WHERE platform = '*' AND fleet_id = '*' ORDER BY month`);
+       WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*') ORDER BY month`,
+      [pl, fl]);
     if (!months.length) {
       months = await q(
         `SELECT ${monthShape}, NULL::date AS first_day, NULL::date AS last_day
          FROM (${rollupGrainSql('month')}) g
-         WHERE platform = '*' AND fleet_id = '*' ORDER BY month`);
+         WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*') ORDER BY month`,
+        [pl, fl]);
     }
     if (!months.length) return res.json({ ok: false, reason: 'No booking has been collected.' });
 
@@ -47,11 +57,13 @@ export function capacityRoutes(app, { q, wrap }) {
        index on local_day cannot serve the original and it scanned. */
     let [{ a: spanFrom, b: spanTo } = {}] = await q(
       `SELECT to_char(min(day),'YYYY-MM-DD') a, to_char(max(day),'YYYY-MM-DD') b
-       FROM rollup_day WHERE platform = '*' AND fleet_id = '*' AND bookings > 0`);
+       FROM rollup_day WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*')
+         AND bookings > 0`, [pl, fl]);
     if (!spanFrom) {
       [{ a: spanFrom, b: spanTo } = {}] = await q(
         `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
-         FROM trip_norm WHERE is_booking`);
+         FROM trip_norm WHERE is_booking AND ($1::text IS NULL OR platform = $1)
+           AND ($2::text IS NULL OR fleet_id = $2)`, [pl, fl]);
     }
     const lastOf = (ym) => {
       const [y, mo] = ym.split('-').map(Number);
@@ -64,7 +76,13 @@ export function capacityRoutes(app, { q, wrap }) {
     const fc = forecastMonths(months, { horizon: 3 });
     if (!fc.ok) return res.json({ ok: false, reason: fc.reason, break: fc.break });
 
-    const target = fc.forecast[0];
+    /* NEXT month, under a subtitle promising next month. forecast[0] used to be
+       the month already in progress — on 2026-08-25 /api/capacity reported
+       target_month "2026-08" and built a rota starting 2026-08-01, naming its
+       busiest expected day eighteen days in the past. The horizon now begins
+       at the first unstarted month, and this guard stays because a caller
+       reading forecast[0] must not have to know that. */
+    const target = fc.forecast.find((r) => r.m > (fc.horizon_from || '')) || fc.forecast[0];
 
     /* ── how the work is distributed, and who covers it ────────────────── */
     /* Measured over a trailing window rather than the whole record: the fleet
@@ -79,6 +97,7 @@ export function capacityRoutes(app, { q, wrap }) {
          FROM trip_norm
          WHERE is_booking
            AND local_day > (SELECT max(local_day) FROM trip_norm WHERE is_booking) - $1::int
+           AND ($2::text IS NULL OR platform = $2) AND ($3::text IS NULL OR fleet_id = $3)
          GROUP BY 1,2,3)
        SELECT dow, slot_hour AS hour,
               sum(bookings)::int bookings,
@@ -87,7 +106,7 @@ export function capacityRoutes(app, { q, wrap }) {
               round(avg(drivers)::numeric, 2) AS drivers_per_occurrence,
               max(drivers)::int AS most_drivers_seen,
               round(avg(bookings::numeric / nullif(drivers, 0)), 2) AS bookings_per_driver
-        FROM c GROUP BY 1,2 ORDER BY 1,2`, [WINDOW_DAYS]);
+        FROM c GROUP BY 1,2 ORDER BY 1,2`, [WINDOW_DAYS, pl, fl]);
 
     if (!cells.length) return res.json({ ok: false, reason: 'No booking in the trailing window.' });
 
@@ -146,7 +165,11 @@ export function capacityRoutes(app, { q, wrap }) {
 
     res.json({
       ok: true,
+      /* Stated rather than implied. The page's subtitle promises next month and
+         the endpoint used to answer about this one. */
       target_month: target.m,
+      target_is_next_month: target.m > (fc.horizon_from || ''),
+      platform: pl, fleet: fl,
       target_bookings: target.point,
       target_low: target.low,
       target_high: target.high,
@@ -155,7 +178,14 @@ export function capacityRoutes(app, { q, wrap }) {
       observed_bookings: totalBookings,
       cells: rows,
       shortfall: short.slice(0, 20),
+      /* 93 hours were short and 20 were listed, with nothing saying so. */
+      shortfall_total: short.length,
+      shortfall_shown: Math.min(20, short.length),
+      shortfall_truncated: short.length > 20,
       surplus: spare.slice(0, 20),
+      surplus_total: spare.length,
+      surplus_shown: Math.min(20, spare.length),
+      surplus_truncated: spare.length > 20,
       /* The whole-month arithmetic, so the cell-level numbers can be checked
          against something. */
       totals: {

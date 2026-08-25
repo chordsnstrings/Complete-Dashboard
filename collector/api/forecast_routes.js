@@ -24,6 +24,13 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
   /* ── the forecast ─────────────────────────────────────────────────────── */
   app.get('/api/forecast', wrap(async (req, res) => {
     const horizon = Math.min(24, Math.max(1, Number(req.query.horizon) || 12));
+    /* The fleet chip was written into the address and honoured by nothing:
+       every query below pinned fleet_id = '*', so /api/forecast&fleet=egari
+       was byte-identical to unfiltered on a two-fleet operator. The rollup
+       carries a row per fleet at each grain (src/rollup.js GROUPING SETS), so
+       narrowing is a bind rather than a new aggregation. */
+    const pl = req.query.platform || null;
+    const fl = req.query.fleet || null;
 
     /* Whole Dubai-local months of BOOKINGS. Telematics journeys are the same
        physical trips seen by the tracker; forecasting the sum of both predicts
@@ -41,18 +48,31 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
               earning_vehicles AS vehicles, round(revenue,0) AS revenue, priced_trips`;
     let months = await q(
       `SELECT ${monthShape}, first_day, last_day FROM rollup_month
-       WHERE platform = coalesce($1,'*') AND fleet_id = '*' ORDER BY month`,
-      [req.query.platform || null]);
+       WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*') ORDER BY month`,
+      [pl, fl]);
     if (!months.length) {
       months = await q(
         `SELECT ${monthShape}, NULL::date AS first_day, NULL::date AS last_day
          FROM (${rollupGrainSql('month')}) g
-         WHERE platform = coalesce($1,'*') AND fleet_id = '*' ORDER BY month`,
-        [req.query.platform || null]);
+         WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*') ORDER BY month`,
+        [pl, fl]);
     }
 
     if (!months.length) {
-      return res.json({ ok: false, reason: 'No booking has ever been collected.', months: [] });
+      /* Name the filter that caused the refusal. #forecast?platform=bolt
+         rendered "No booking has ever been collected." over the whole product,
+         about a channel Ecosine is refused on (COMPANIES_NOT_ALLOWED) and
+         whose Egari token expired — a sentence that reads as "this business
+         has no data" when it means "this one channel does not". */
+      const who = [pl && `${pl} `, fl && `${fl}'s `].filter(Boolean).join('');
+      return res.json({
+        ok: false,
+        reason: pl || fl
+          ? `No ${who}booking has ever been collected. See Data sources for what each `
+            + 'channel last reported.'
+          : 'No booking has ever been collected.',
+        filtered: !!(pl || fl), platform: pl, fleet: fl, months: [],
+      });
     }
 
     /* Mark the months the record only partly covers. They are short by
@@ -63,13 +83,13 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
        cannot serve the original and it scanned the table. */
     let [{ a: spanFrom, b: spanTo } = {}] = await q(
       `SELECT to_char(min(day),'YYYY-MM-DD') a, to_char(max(day),'YYYY-MM-DD') b
-       FROM rollup_day WHERE platform = coalesce($1,'*') AND fleet_id = '*' AND bookings > 0`,
-      [req.query.platform || null]);
+       FROM rollup_day WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*')
+         AND bookings > 0`, [pl, fl]);
     if (!spanFrom) {
       [{ a: spanFrom, b: spanTo } = {}] = await q(
         `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
-         FROM trip_norm WHERE is_booking AND ($1::text IS NULL OR platform = $1)`,
-        [req.query.platform || null]);
+         FROM trip_norm WHERE is_booking AND ($1::text IS NULL OR platform = $1)
+           AND ($2::text IS NULL OR fleet_id = $2)`, [pl, fl]);
     }
     const lastOf = (ym) => {
       const [y, mo] = ym.split('-').map(Number);
@@ -95,7 +115,11 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
       const daysTotal = Number(lastOf(current.m).slice(8, 10));
       const runRate = current.trips / daysSoFar;
       const projected = Math.round(runRate * daysTotal);
-      const fcRow = (fc.forecast || []).find((r) => r.m === current.m);
+      /* The month in progress is no longer in the horizon — the horizon starts
+         at the first month that has NOT started — so its prediction comes from
+         the field that exists for exactly this check. */
+      const fcRow = (fc.current_month?.m === current.m ? fc.current_month : null)
+        || (fc.forecast || []).find((r) => r.m === current.m);
       inProgress = {
         m: current.m, days_so_far: daysSoFar, days_total: daysTotal,
         trips_so_far: current.trips,
@@ -115,15 +139,15 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
     const dayShape = `to_char(day,'YYYY-MM-DD') AS day, bookings AS trips`;
     let days = await q(
       `SELECT ${dayShape} FROM rollup_day
-       WHERE platform = coalesce($1,'*') AND fleet_id = '*'
+       WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*')
          AND day > (SELECT max(day) FROM rollup_day WHERE platform = '*' AND fleet_id = '*') - 70
-       ORDER BY day`, [req.query.platform || null]);
+       ORDER BY day`, [pl, fl]);
     if (!days.length) {
       days = await q(
         `SELECT ${dayShape} FROM (${rollupGrainSql('day')}) g
-         WHERE platform = coalesce($1,'*') AND fleet_id = '*'
+         WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*')
            AND day > (SELECT max(local_day) FROM trip_norm WHERE is_booking) - 70
-         ORDER BY day`, [req.query.platform || null]);
+         ORDER BY day`, [pl, fl]);
     }
     /* Drop the trailing partial week: the record stops mid-week, so the last
        few days are complete days but an incomplete cycle, and averaging them

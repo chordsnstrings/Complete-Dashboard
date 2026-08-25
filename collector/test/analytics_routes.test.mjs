@@ -119,15 +119,36 @@ await q(`INSERT INTO partner (platform, partner_id, name, approval_required, pur
    between, and nothing at all before day 1. Only the first is a gap. */
 for (const d of [1, 10]) await trip({ platform: 'yango', id: `y${d}`, plate: 'L104', day: d, price: 30, pay: 'cash' });
 
+/* Two overlapping report windows for the SAME Yango driver, plus a short one
+   nested inside them — the shape production is actually in. Aliyan Khalil came
+   back as nine rows totalling 145 offers for a driver offered 53, because
+   every window that touched the range was summed. The nested window is only
+   half the offers of the covering one, so a sum and a pick are distinguishable
+   here rather than accidentally equal.
+
+   The Bolt row carries a metric AND a non-numeric score: without a metric it
+   is a state-only row and correctly no longer appears in the funnel at all,
+   which would have made the "a non-numeric value is null, not a crash" check
+   below pass by finding nothing. */
 await q(`INSERT INTO driver_performance
   (platform,fleet_id,driver_ext_id,driver_name,period_start,period_end,raw)
   VALUES ('yango','ecosine','yd1','Yango Driver','2026-08-01','2026-08-31',$1),
+         ('yango','ecosine','yd1','Yango Driver','2026-08-02','2026-09-01',$1),
+         ('yango','ecosine','yd1','Yango Driver','2026-08-10','2026-08-16',$3),
          ('bolt','ecosine','bd1','Bolt Driver','2026-08-01','2026-08-31',$2)`,
   [JSON.stringify({ count_orders_all: 200, count_orders_accepted: 150, count_orders_completed: 120,
     count_orders_cancelled_by_driver: 12, count_orders_cancelled_by_client: 18,
     work_time_seconds: 360000, price_cash: 3000, price_cashless: 1000,
     price_platform_commission: -800, state: 'active' }),
-   JSON.stringify({ driver_score: 'n/a', state: 'suspended' })]);
+   JSON.stringify({ count_orders_all: 40, driver_score: 'n/a', state: 'suspended' }),
+   JSON.stringify({ count_orders_all: 100, count_orders_accepted: 75, count_orders_completed: 60 })]);
+/* The standing each platform reports lives here, never in driver_performance's
+   raw — which is why the funnel's State column was empty on every row that had
+   any metric to show. */
+await q(`INSERT INTO driver_platform_state
+  (platform, driver_ext_id, fleet_id, full_name, state, state_raw, can_earn)
+  VALUES ('yango','yd1','ecosine','Yango Driver','active','ACTIVE',true),
+         ('bolt','bd1','ecosine','Bolt Driver','suspended','BLOCKED',false)`);
 await refreshPayouts(db); // the payout table is collector-filled; this test plays the collector
 
 /* ── mount the real module ───────────────────────────────────────────────── */
@@ -245,6 +266,25 @@ const W = 'from=2026-08-01&to=2026-08-31';
     `${r.priced_trips} of ${r.total_trips}`);
   check('the outstanding total covers every receivable booking, not the page',
     r.total_trips === r.rows.reduce((a, x) => a + x.trips, 0), String(r.total_trips));
+
+  /* The split: the group key carried driver_ext_id, so one hotel's debt became
+     one row per driver who happened to run a booking. Le Meridien appeared
+     eight times in production, in a 29-row table over ~13 counterparties, under
+     a tile reading "Counterparties 29 — every one of them listed below". */
+  const palm = r.rows.filter((x) => x.counterparty === 'Palm Grand');
+  check('a property owing money is one row, not one row per driver who drove for it',
+    palm.length === 1, JSON.stringify(palm.map((x) => [x.trips, x.amount])));
+  check('and the drivers behind it are kept, so the row is still a drill-down',
+    palm[0].drivers > 1 && Array.isArray(palm[0].driver_ids) && palm[0].driver_ids.length > 1,
+    JSON.stringify(palm[0].driver_ids));
+  check('the counterparty count equals the number of distinct counterparties',
+    r.counterparties === new Set(r.rows.map((x) => `${x.settlement_class}|${x.counterparty}`)).size,
+    `${r.counterparties} vs ${r.rows.length} rows`);
+
+  /* Ageing over the debt rather than over the window, and the blank-room
+     pseudo-room, are exercised in test/receivables_ageing.test.mjs — both need
+     rows outside this fixture's August, and this fixture's counts are asserted
+     to the unit above. */
 }
 
 /* ── the corporate channel ───────────────────────────────────────────────── */
@@ -405,12 +445,62 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('the response says the area was parsed, not looked up', /parsed from the address/.test(c.note));
   check('origins carry the morning and evening split',
     c.origins.every((o) => o.morning != null && o.evening != null));
+
+  /* Demand, not journeys. This counted raw trips, so the 40 FMS telematics
+     rows in this fixture — the tracker's own record of trips the ride
+     platforms already reported — were charted as corridors. On production at
+     days=7, FMS alone accounted for 187 of the 302 "corridors seen 3+ times"
+     and 805 of the top origin's 985 trips. */
+  check('a telematics twin is not a corridor',
+    !c.corridors.some((x) => (x.platforms || []).includes('fms'))
+    && !c.origins.some((o) => o.area === 'United Arab Emirates'),
+    JSON.stringify(c.corridors.filter((x) => (x.platforms || []).includes('fms'))));
+  const fmsOnly = await get(`/api/geo/corridors?${W}&platform=fms`);
+  check('and asking for the telematics feed alone returns no demand at all',
+    fmsOnly.corridors.length === 0 && fmsOnly.totals.corridors_all === 0,
+    JSON.stringify(fmsOnly.totals));
+  check('the note says so, since a reader cannot see the predicate',
+    /already reported/.test(c.note), c.note);
+
+  /* The printed denominator has to be the one the average used: `priced`
+     counted price IS NOT NULL while avg_fare also excluded complimentary
+     rides. */
+  check('complimentary rides are counted apart from priced ones',
+    c.corridors.every((x) => 'complimentary' in x && x.priced + x.complimentary <= x.trips),
+    JSON.stringify(c.corridors.map((x) => [x.trips, x.priced, x.complimentary])));
+  /* On the live fleet duration_measured is 0 on every corridor in every
+     window — duration_s is declared on the trip table and written by no
+     collector — so avg_min is a column of dashes with no denominator beside
+     it. Here the Uber rows carry a duration, so the count is the honest one
+     and the identity that matters is the pairing: an average with no rows
+     behind it must be null rather than zero. */
+  check('every corridor says how many rows carried a duration at all',
+    c.corridors.every((x) => typeof x.min_n === 'number')
+    && c.duration_measured === c.corridors.reduce((a, x) => a + x.min_n, 0),
+    String(c.duration_measured));
+  check('and a corridor with no measured duration reports no average minutes',
+    c.corridors.every((x) => x.min_n > 0 || x.avg_min == null),
+    JSON.stringify(c.corridors.filter((x) => !x.min_n).map((x) => x.avg_min)));
+
+  /* The KPI row and the origins panel are a roll-up of the same aggregate the
+     corridor list needs, so they can be asked for on their own and painted
+     while the list is still being ordered — cold at 365 days this endpoint
+     measured 8.45s and the page 7.9-14.4s, all of it one skeleton. */
+  const sum = await get(`/api/geo/corridors?${W}&part=summary`);
+  check('the summary half returns the tiles and the origins with no corridor list',
+    sum.corridors.length === 0 && sum.origins.length > 0
+    && sum.totals.corridors_all === c.totals.corridors_all,
+    JSON.stringify([sum.corridors.length, sum.origins.length]));
+  const list = await get(`/api/geo/corridors?${W}&part=corridors`);
+  check('and the corridor half returns the same list the whole answer does',
+    JSON.stringify(list.corridors) === JSON.stringify(c.corridors),
+    `${list.corridors.length} vs ${c.corridors.length}`);
 }
 
 /* ── the acceptance funnel ───────────────────────────────────────────────── */
 {
   const f = await get(`/api/funnel/drivers?${W}`);
-  const y = f.find((r) => r.platform === 'yango');
+  const y = f.rows.find((r) => r.platform === 'yango');
   check('offers, acceptances and completions are separate numbers',
     y.offered === '200' || +y.offered === 200, String(y.offered));
   check('acceptance is over offers and completion is over acceptances',
@@ -418,7 +508,32 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('platform commission is reported as a positive cost', y.commission_cost === 800, String(y.commission_cost));
   check('the cash share of gross is stated', y.cash_pct === 75, String(y.cash_pct));
   check('a non-numeric value in the payload is null, not a crash',
-    f.find((r) => r.platform === 'bolt')?.driver_score == null);
+    f.rows.find((r) => r.platform === 'bolt')?.driver_score == null);
+
+  /* The bug: three overlapping report windows for one driver were three rows,
+     and the page's four KPI tiles summed them. 200 + 200 + 100 = 500 offers
+     for a driver offered 200. */
+  check('one driver is one row, however many overlapping report periods touch the window',
+    f.rows.filter((r) => r.driver_ext_id === 'yd1').length === 1,
+    String(f.rows.filter((r) => r.driver_ext_id === 'yd1').length));
+  check('and the period kept is the one that COVERS the window, not a slice of it',
+    +y.offered === 200 && y.period_days === 31, `${y.offered} over ${y.period_days} days`);
+  check('the offers total is the driver\'s, not the sum of every window that overlapped',
+    f.rows.reduce((a, r) => a + (+r.offered || 0), 0) === 240,
+    String(f.rows.reduce((a, r) => a + (+r.offered || 0), 0)));
+  check('how many periods were folded away is stated, so a pile of catch-ups is visible',
+    y.periods_seen === 3, String(y.periods_seen));
+
+  /* Structurally empty before this: production returned 57 rows with metrics
+     and 143 with a state and none with both, so the column could never fill. */
+  check('every funnel row carries the standing the platform reports',
+    f.rows.every((r) => r.state != null), JSON.stringify(f.rows.map((r) => [r.platform, r.state])));
+  check('and it is the normalised state, from driver_platform_state',
+    y.state === 'active' && f.rows.find((r) => r.platform === 'bolt').state === 'suspended');
+  check('a row with a state and no metric at all is not a funnel row',
+    f.rows.every((r) => r.offered != null));
+  check('the list says how many drivers there are, so a 200-row cap cannot read as the funnel',
+    f.total === 2 && f.shown === 2 && f.truncated === false, JSON.stringify({ t: f.total, s: f.shown }));
 }
 
 
@@ -741,7 +856,11 @@ const W = 'from=2026-08-01&to=2026-08-31';
     /FROM rollup_day/.test(rollupSql) && /FROM source_day_coverage/.test(liveSql),
     `${rollupSql.slice(0, 48)} | ${liveSql.slice(0, 48)}`);
 
-  const P = ['2026-09-01', '2026-09-05'];
+  /* Four binds now, not two: both statements narrow by the platform and fleet
+     chips the page displays. /api/coverage/calendar?platform=uber used to
+     return all four sources unchanged. NULLs here mean "every source, the
+     all-fleets row", which is what this comparison is about. */
+  const P = ['2026-09-01', '2026-09-05', null, null];
   const live = await q(liveSql, P);
   await refreshRollups({ db });
   const rolled = await q(rollupSql, P);

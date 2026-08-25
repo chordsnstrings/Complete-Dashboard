@@ -3,43 +3,43 @@
 // falling back to environment variables. Call `loadSettings()` before reading `config` in a loop —
 // the collector refreshes it each tick so Settings changes apply without a redeploy.
 import 'dotenv/config';
-import { get, getInt } from './settings.js';
+import { get, getInt, SETTING_DEFAULTS as D } from './settings.js';
 
 export { loadSettings } from './settings.js';
 
 // `config` is a getter-based view so every read reflects the latest loaded settings.
 export const config = {
-  get backfillMonths() { return getInt('BACKFILL_MONTHS', 12); },
-  get incrementalDays() { return getInt('INCREMENTAL_DAYS', 3); },
+  get backfillMonths() { return getInt('BACKFILL_MONTHS', Number(D.BACKFILL_MONTHS)); },
+  get incrementalDays() { return getInt('INCREMENTAL_DAYS', Number(D.INCREMENTAL_DAYS)); },
   // CABMAN realtime GPS: fixed 5-minute refresh saved to telemetry_snapshot.
-  get cabmanCron() { return get('CABMAN_CRON', '*/5 * * * *'); },
+  get cabmanCron() { return get('CABMAN_CRON', D.CABMAN_CRON); },
   // Other live pollers (Uber online/on-trip status, FMS live) — lighter cadence.
   get liveStatusSeconds() { return getInt('LIVE_STATUS_SECONDS', 120); },
 
   // LLM used to judge whether a news headline can plausibly move a Dubai fleet.
   get modelark() {
     return {
-      baseUrl: get('ARK_BASE_URL', 'https://ark.ap-southeast.bytepluses.com/api/v3'),
+      baseUrl: get('ARK_BASE_URL', D.ARK_BASE_URL),
       apiKey: get('ARK_API_KEY'),
-      model: get('ARK_MODEL', 'glm-5-2-260617'),
+      model: get('ARK_MODEL', D.ARK_MODEL),
     };
   },
 
   get fms() {
     return {
-      base: get('FMS_BASE', 'http://103.185.74.197/currentinfotest/ItlService.svc'),
+      base: get('FMS_BASE', D.FMS_BASE),
       fleets: [
-        { fleet: 'ecosine', username: get('FMS_ECOSINE_USER', 'ecosinetranspor'), password: get('FMS_ECOSINE_PASS') },
-        { fleet: 'egari', username: get('FMS_EGARI_USER', 'egariluxury'), password: get('FMS_EGARI_PASS') },
+        { fleet: 'ecosine', username: get('FMS_ECOSINE_USER', D.FMS_ECOSINE_USER), password: get('FMS_ECOSINE_PASS') },
+        { fleet: 'egari', username: get('FMS_EGARI_USER', D.FMS_EGARI_USER), password: get('FMS_EGARI_PASS') },
       ],
     };
   },
 
   get cabman() {
     return {
-      url: get('CABMAN_URL', 'https://app.cabman.ae/dtcabmanrestservice/api/trackingServices/GetIVDData'),
+      url: get('CABMAN_URL', D.CABMAN_URL),
       fleets: [
-        { fleet: 'ecosine', interfaceId: get('CABMAN_ECOSINE_ID', '81'), user: get('CABMAN_ECOSINE_USER', 'admin_ecosine'), pass: get('CABMAN_ECOSINE_PASS') },
+        { fleet: 'ecosine', interfaceId: get('CABMAN_ECOSINE_ID', D.CABMAN_ECOSINE_ID), user: get('CABMAN_ECOSINE_USER', D.CABMAN_ECOSINE_USER), pass: get('CABMAN_ECOSINE_PASS') },
         // Egari DT credentials can be added here once provided
       ],
     };
@@ -79,7 +79,7 @@ export const config = {
 
   get yango() {
     return {
-      base: get('YANGO_BASE', 'https://fleet.yango.com'),
+      base: get('YANGO_BASE', D.YANGO_BASE),
       parkId: get('YANGO_PARK_ID'),
       apiKey: get('YANGO_API_KEY'),
       cookie: get('YANGO_COOKIE'),
@@ -90,8 +90,8 @@ export const config = {
 
   get hotel() {
     return {
-      base: get('HOTEL_BASE', 'https://whale-app-iofbt.ondigitalocean.app'),
-      domain: get('HOTEL_DOMAIN', 'hotel.ecosine.ae'),
+      base: get('HOTEL_BASE', D.HOTEL_BASE),
+      domain: get('HOTEL_DOMAIN', D.HOTEL_DOMAIN),
       token: get('HOTEL_TOKEN'),
       fleet: 'ecosine',
     };

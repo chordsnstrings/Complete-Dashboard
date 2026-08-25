@@ -17,6 +17,17 @@ import express from 'express';
 import { readFileSync, readdirSync } from 'node:fs';
 import { win, winDays } from '../api/window.js';
 import { rollupGrainSql } from '../src/rollup.js';
+/* The real redaction, not a stub: GET /api/settings now answers a
+   non-administrator a shape with every credential value blanked, and a stub
+   here would let a regression that leaks them again pass. requireAdmin stays
+   stubbed open below so the write routes are still reachable from a test. */
+import { isAdmin, redactSettings } from '../api/admin_gate.js';
+/* The provider alias tables, shared with src/probe.js. /api/schema/raw-fields
+   matched raw field names against information_schema alone, so thirteen of
+   Uber's fifteen fields read "not promoted to a column" while the collector
+   maps every one of them. Injected rather than stubbed because the whole point
+   is that both readers use the same table. */
+import { RAW_ALIASES } from '../src/probe.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -65,6 +76,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
+    isAdmin, redactSettings, RAW_ALIASES,
     FIX_FRESH: "interval '30 minutes'",
     rollupGrainSql, rollupState: async () => [],
     /* The response cache object server.js closes over. The harness mounts a

@@ -226,14 +226,28 @@ async function unsafeDriving(from, to) {
     await put({
       code: 'unsafe_driving', severity: 'warning', category: 'safety',
       entity_type: 'vehicle', entity_id: r.plate,
+      /* "the fleet median" is not one number.
+         ─────────────────────────────────────────────────────────────────────
+         This rule runs on whatever window the collection pass used, and the
+         table keeps every run: one computed_at in production carried
+         window_start/window_end spans of 3, 30 and 365 days, so SEVEN
+         different values — 106.9, 29.5, 8.8, 196.2 among them — were all
+         called "the fleet median", over four different denominators (45
+         vehicles, 42, 54, 69). L72481 read 6.5x and L26356 3.8x although
+         L26356 has seven times the raw rate: two multiples against two
+         different medians, printed in one list as though they ranked.
+
+         Naming the window makes each row true on its own terms, and
+         /api/insights can now filter to one window so a list is comparable. */
       title: `${r.plate}: ${r.per100.toFixed(1)} harsh events per 100km — `
-        + `${(r.per100 / (med || 1)).toFixed(1)}x the fleet median of ${med.toFixed(1)}`,
+        + `${(r.per100 / (med || 1)).toFixed(1)}x the median of ${med.toFixed(1)} `
+        + `over ${from} → ${to}`,
       detail: `${r.events} events over ${Math.round(r.km)}km of tracked movement `
         + `(${r.overspeed} overspeed, ${r.harsh_brake} harsh braking, `
         + `${Math.max(0, r.events - r.overspeed - r.harsh_brake)} other). `
-        + `The median across all ${r.population} vehicles with enough distance to judge is `
-        + `${med.toFixed(1)} per 100km. Sustained harsh driving predicts both collisions and `
-        + `tyre and brake spend.`,
+        + `The median across all ${r.population} vehicles with enough distance to judge over `
+        + `${from} → ${to} is ${med.toFixed(1)} per 100km. Sustained harsh driving predicts `
+        + `both collisions and tyre and brake spend.`,
       action: `Pull the dashcam clips for the worst events and run a coaching conversation with whoever drove this plate.`,
       impact_aed: null, metric: r.per100, window_start: from, window_end: to,
     });
@@ -533,6 +547,14 @@ async function platformFlags() {
         detail: `Uber flagged ${idle.length} driver(s) logged in for about ${hours.toFixed(1)} hours in total with zero completed trips (${day(r.period_start)}). Paid-for supply that produced nothing.`,
         action: `Check whether they were genuinely available, sitting in a dead zone, or logged in without intending to work.`,
         impact_aed: null, metric: idle.length,
+        /* WHO. This is the most severe finding on the list and it rendered with
+           no anchors: seven people named in a sentence and identified nowhere,
+           under an action ("check whether they were genuinely available") that
+           cannot be taken without their ids. Uber's own payload carries them —
+           they were being counted and thrown away one line above. */
+        refs: JSON.stringify(idle.map((f) => ({
+          driver_ext_id: f.driver_ext_id, hours_online: f.online_hours ?? null,
+        }))),
         window_start: r.period_start, window_end: r.period_end,
       });
       n++; continue;
@@ -615,6 +637,29 @@ export async function computeInsights({ from, to } = {}) {
     try { out[name] = await fn(); }
     catch (e) { out[name] = `err: ${String(e).slice(0, 80)}`; log.error('insights', name, { err: String(e) }); }
   }
+  /* Prune the copies this run has just made obsolete.
+     ─────────────────────────────────────────────────────────────────────────
+     The windowed rules key on (code, entity_type, entity_id, window_start,
+     window_end), and the window slides: a 30-day lookback recomputed every
+     thirty minutes means the same finding about the same vehicle keys
+     differently every time and INSERTS instead of replacing. Production held
+     29,634 rows describing 204 findings — 99.3% duplicates — and both readers
+     de-duplicated at query time with a DISTINCT ON over all of them, four
+     times per summary.
+
+     Deleting here keeps exactly the row those readers already serve
+     (DISTINCT ON ... ORDER BY computed_at DESC), so no number on any page
+     moves; only the sort behind it shrinks. sql/schema_v30.sql does the same
+     delete once for the copies that had already accumulated, and explains why
+     the surviving set is provably the current answer. */
+  const pruned = await pool.query(
+    `DELETE FROM insight a USING insight b
+      WHERE a.code = b.code
+        AND a.entity_type IS NOT DISTINCT FROM b.entity_type
+        AND a.entity_id   IS NOT DISTINCT FROM b.entity_id
+        AND (a.computed_at < b.computed_at
+             OR (a.computed_at = b.computed_at AND a.id < b.id))`);
+  out._pruned = pruned.rowCount || 0;
   log.info('insights', 'computed', out);
   return out;
 }

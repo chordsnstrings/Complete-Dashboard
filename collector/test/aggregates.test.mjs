@@ -379,7 +379,14 @@ console.log('\ncash exposure aggregates the window once');
    corridors than the page is allowed to show. */
 {
   const AREA = (c) => `nullif(btrim(split_part(${c}, ' - ', 2)), '')`;
-  const FW = 'local_day BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR platform=$3)'
+  /* is_booking, because the endpoint counts DEMAND. It used to count raw
+     trips, so FMS telematics rows — the tracker's own record of journeys the
+     ride platforms already reported — were charted as corridors: at days=7 on
+     the live fleet, FMS alone supplied 187 of the 302 "corridors seen 3+
+     times". The snapshot carries the predicate so this stays a check on the
+     rewrite rather than on the predicate. */
+  const FW = 'local_day BETWEEN $1::date AND $2::date AND is_booking'
+    + ' AND ($3::text IS NULL OR platform=$3)'
     + ' AND ($4::text IS NULL OR fleet_id=$4)';
   const P = ['2026-08-01', '2026-08-31', null, null];
   const W = 'from=2026-08-01&to=2026-08-31';
@@ -435,7 +442,15 @@ console.log('\ncash exposure aggregates the window once');
      same size, and never did — so the lists are compared as sets, and the
      order they came back in is checked separately as the sequence the sort key
      actually determines. */
-  const sorted = (a) => JSON.stringify([...a].sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));
+  /* Fields the endpoint gained after this snapshot was frozen, projected out
+     so the comparison stays about the rewrite. `complimentary` is the count
+     the average fare excludes and `priced` did not, so the printed denominator
+     was not the one the AED was divided by; `min_n` says how many rows carried
+     a duration at all, which on the live fleet is zero on every corridor. */
+  const ADDED = ['complimentary', 'min_n'];
+  const trim = (r) => { const c = { ...r }; for (const k of ADDED) delete c[k]; return c; };
+  const sorted = (a) => JSON.stringify([...a].map(trim)
+    .sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));
   const bykey = (a, k) => JSON.stringify(a.map((r) => k.map((f) => r[f])));
 
   /* Addresses the seeded fleets do not carry. */

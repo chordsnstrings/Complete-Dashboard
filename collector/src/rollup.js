@@ -156,7 +156,15 @@ async function refreshPersonMonth(db, since) {
   // rebuilt from five days of August is a person who worked five days.
   const from = since ? snapToBucket(since, 'month') : null;
   const { rowCount } = await db.query(
-    `INSERT INTO rollup_person_month (person_key, month, name, driver_ext_id, bookings, revenue, km, platforms, computed_at)
+    /* fleets, beside the platforms already stored.
+       ─────────────────────────────────────────────────────────────────────
+       #retention could not be narrowed to a fleet, because this rollup carried
+       no fleet at all — the page described both businesses under either
+       heading on a two-fleet operator. An ARRAY rather than a key column: the
+       primary key is (person_key, month) and a person who drove for both
+       fleets in a month is ONE person, so splitting the row would fold them
+       into two humans on the one page whose subject is whether people stay. */
+    `INSERT INTO rollup_person_month (person_key, month, name, driver_ext_id, bookings, revenue, km, platforms, fleets, computed_at)
      SELECT t.person_key,
             date_trunc('month', n.local_day)::date AS month,
             max(n.driver_name),
@@ -165,6 +173,7 @@ async function refreshPersonMonth(db, since) {
             round(sum(n.price) FILTER (WHERE n.has_fare)::numeric, 2),
             round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric, 1),
             array_agg(DISTINCT n.platform),
+            array_remove(array_agg(DISTINCT n.fleet_id), NULL),
             now()
      ${FROM_TRIPS}
      /* Not a person_key IS NOT NULL predicate here: that matches the partial
@@ -178,7 +187,8 @@ async function refreshPersonMonth(db, since) {
      ON CONFLICT (person_key, month) DO UPDATE
        SET name = EXCLUDED.name, driver_ext_id = EXCLUDED.driver_ext_id,
            bookings = EXCLUDED.bookings, revenue = EXCLUDED.revenue, km = EXCLUDED.km,
-           platforms = EXCLUDED.platforms, computed_at = now()`, from ? [from] : []);
+           platforms = EXCLUDED.platforms, fleets = EXCLUDED.fleets, computed_at = now()`,
+    from ? [from] : []);
   return rowCount || 0;
 }
 

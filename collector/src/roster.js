@@ -14,6 +14,12 @@ export const STATES = {
   active: { label: 'Active', can_earn: true, tone: 'good' },
   waitlist: { label: 'On the waitlist', can_earn: false, tone: 'warn' },
   onboarding: { label: 'Onboarding', can_earn: false, tone: 'warn' },
+  /* An application the provider turned down. Not "onboarding" — nothing is in
+     progress — and not "deactivated", which is somebody who was working and
+     was stopped. Uber sends ONBOARDING_STATUS_REJECTED for five people and
+     they were being filed as `unknown`, which reports a gap in our knowledge
+     where the provider gave a clear answer. */
+  rejected: { label: 'Application rejected', can_earn: false, tone: 'critical' },
   suspended: { label: 'Suspended', can_earn: false, tone: 'critical' },
   deactivated: { label: 'Deactivated', can_earn: false, tone: 'critical' },
   inactive: { label: 'Inactive', can_earn: false, tone: 'serious' },
@@ -28,8 +34,19 @@ export function normaliseState(raw) {
     .replace(/^onboarding_status_/, '').replace(/^driver_status_/, '').replace(/[\s-]+/g, '_');
   if (!s) return 'unknown';
   if (['active', 'online', 'available', 'approved', 'enabled', 'on_trip', 'offline'].includes(s)) return 'active';
-  if (['waitlist', 'waiting', 'waitlisted', 'queued'].includes(s)) return 'waitlist';
-  if (['onboarding', 'pending', 'in_progress', 'incomplete', 'document_pending', 'review'].includes(s)) return 'onboarding';
+  /* Prefix, not equality. Uber qualifies the word:
+     ONBOARDING_STATUS_WAITLISTED_AUTO_REACTIVATION normalises to
+     "waitlisted_auto_reactivation", which is not in any list, so eighteen
+     people on the live roster were filed as `unknown` — reported by
+     /api/roster/states as an unrecognised word, and by the roster itself as
+     "standing not reported" for somebody the provider had described plainly. */
+  if (/^waitlist/.test(s) || ['waiting', 'queued'].includes(s)) return 'waitlist';
+  /* applied and accepted are both "has not started yet": the application is
+     in, the provider has not turned them loose. One person each on the live
+     roster, both unclassified. */
+  if (['onboarding', 'pending', 'in_progress', 'incomplete', 'document_pending', 'review',
+    'applied', 'accepted'].includes(s)) return 'onboarding';
+  if (/^rejected/.test(s) || ['declined', 'denied'].includes(s)) return 'rejected';
   if (['suspended', 'blocked', 'banned', 'restricted'].includes(s)) return 'suspended';
   if (['deactivated', 'deleted', 'removed', 'terminated', 'churned'].includes(s)) return 'deactivated';
   if (['inactive', 'disabled', 'dormant', 'paused'].includes(s)) return 'inactive';

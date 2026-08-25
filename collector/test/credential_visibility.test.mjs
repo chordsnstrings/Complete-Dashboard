@@ -74,7 +74,7 @@ check('the api records its own, so the page can name the difference',
 
 console.log('\ncredential visibility: it round-trips');
 
-const { recordCredentialVisibility } = await import('../src/settings.js');
+const { recordCredentialVisibility, SETTING_DEFS, SETTING_DEFAULTS } = await import('../src/settings.js');
 /* Against this database, not the module's own pool. The first version of this
    test called it bare, the pool could not resolve its host, and the assertion
    fell through to a branch that passed while testing nothing — which is worse
@@ -85,9 +85,27 @@ check('a row is written for every credential in the catalogue',
   stored.length > 10, String(stored.length));
 check('all attributed to the component that recorded them',
   stored.every((r) => r.component === 'collector'), JSON.stringify(stored.slice(0, 2)));
-check('and every row names a source of environment, settings or unset',
-  stored.every((r) => ['environment', 'settings', 'unset'].includes(r.source)),
+/* Four sources, not three. A key with a code default — src/config.js resolves
+   get('FMS_ECOSINE_USER', 'ecosinetranspor') and FMS has collected 41,809 trip
+   rows with it — was being recorded as "unset", which the Settings page paints
+   amber. Two of the three warnings on that page were credentials in daily use. */
+check('every row names a source of environment, settings, default or unset',
+  stored.every((r) => ['environment', 'settings', 'default', 'unset'].includes(r.source)),
   JSON.stringify([...new Set(stored.map((r) => r.source))]));
+check('a credential the code supplies is recorded as configured, not as missing',
+  stored.find((r) => r.key === 'FMS_ECOSINE_USER')?.source === 'default'
+  && stored.find((r) => r.key === 'FMS_ECOSINE_USER')?.configured === true,
+  JSON.stringify(stored.find((r) => r.key === 'FMS_ECOSINE_USER')));
+check('and one nothing supplies is still unset',
+  stored.find((r) => r.key === 'FMS_ECOSINE_PASS')?.source === 'unset',
+  JSON.stringify(stored.find((r) => r.key === 'FMS_ECOSINE_PASS')));
+/* describeSettings itself needs the module's own pool, which this test does not
+   have — so the rule is asserted where it is decided: no secret may carry a
+   code default at all, which is what makes publishing default_value safe. */
+check('a default is never declared for a secret',
+  SETTING_DEFS.filter((d) => d.secret).every((d) => SETTING_DEFAULTS[d.key] == null),
+  JSON.stringify(SETTING_DEFS.filter((d) => d.secret && SETTING_DEFAULTS[d.key] != null)
+    .map((d) => d.key)));
 
 /* Re-recording must update in place. Appending would grow a row per hour per
    credential for ever, and the page would then show a credential as held by

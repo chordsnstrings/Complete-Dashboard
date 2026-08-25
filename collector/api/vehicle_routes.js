@@ -192,11 +192,23 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        FROM (SELECT $1::text AS plate) k
        LEFT JOIN vehicle v ON v.plate = k.plate
        LEFT JOIN vehicle_profile vp ON vp.plate = k.plate`, [plate]);
+    /* Bookings and telematics twins, counted apart.
+       ─────────────────────────────────────────────────────────────────────
+       This read raw "trip", so span.trips was bookings PLUS the FMS journeys
+       that are the same physical trips seen by the tracker: L36397 reported
+       547 where the car took 325 bookings and the tracker logged 222 twins of
+       them. sql/schema_v7.sql sets is_booking = (platform <> 'fms') for
+       exactly this, and lines 314, 439 and 461 below already respect it.
+       Both figures are returned, because "it moved 222 times without a
+       booking" is its own fact and deleting it would be the opposite error. */
     const [span] = await q(
-      `SELECT min(requested_at) first_trip, max(requested_at) last_trip, count(*)::int trips,
-              count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days_worked,
+      `SELECT min(requested_at) first_trip, max(requested_at) last_trip,
+              count(*) FILTER (WHERE is_booking)::int trips,
+              count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
+              count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)
+                FILTER (WHERE is_booking)::int days_worked,
               ${peopleCount()}::int drivers
-       FROM trip WHERE ${TW}`, p);
+       FROM trip_norm WHERE ${TW}`, p);
     const [tel] = await q(
       `SELECT captured_at last_fix, polled_at, lat, lng, speed, status, seat_occupied,
               odometer, fuel_level, ignition, source,
@@ -278,9 +290,14 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
       `WITH seen AS (
          SELECT DISTINCT (captured_at AT TIME ZONE 'Asia/Dubai')::date AS day
          FROM telemetry_snapshot WHERE plate = $3 AND captured_at BETWEEN $1 AND $2),
+       /* A day the tracker twinned a booking is not a day the car earned
+          nothing. This read raw "trip", so an FMS twin counted as earning and
+          the tile disagreed with the caption printed directly beneath it:
+          L26356 showed "Idle days 2" over "5 day(s) with a tracker fix and no
+          trip". is_booking is the same predicate the rest of this file uses. */
        earned AS (
          SELECT DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day
-         FROM trip WHERE ${TW})
+         FROM trip_norm WHERE ${TW} AND is_booking)
        SELECT count(*)::int idle_days FROM seen WHERE day NOT IN (SELECT day FROM earned)`, p);
     /* The money this asset actually made. `revenue` above is the sum of the
        FARES on its trips, and on this fleet that is ten hotel bookings out of
@@ -506,8 +523,14 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
 
   app.get('/api/vehicle/movement', withVehicle(async (req, res, plate, p) => {
     const segments = await q(
+      /* verdict_reason and unavailable_sources are the two fields that make a
+         verdict readable — /api/segments returns both and this per-vehicle
+         table did not, so the same rows were strictly poorer here than on
+         #segments. "Assessed blind" means nothing without naming which channel
+         could not be checked. */
       `SELECT started_at, ended_at, duration_min, distance_km, top_speed, fixes,
-              verdict, matched_platform, low_confidence,
+              verdict, verdict_reason, unavailable_sources, matched_platform,
+              low_confidence, max_gap_min, ignition_ratio,
               start_lat, start_lng, end_lat, end_lng
        FROM occupancy_segment WHERE plate = $3 AND started_at BETWEEN $1 AND $2
        ORDER BY started_at DESC LIMIT 200`, p);
@@ -516,9 +539,15 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               round(sum(distance_km)::numeric,0) km, round(sum(duration_min)::numeric,0) AS minutes
        FROM occupancy_segment WHERE plate = $3 AND started_at BETWEEN $1 AND $2
        GROUP BY 1 ORDER BY n DESC`, p);
+    /* Only fixes that can be drawn. The replay picker offered "Aug 25 · 119
+       fixes" and /api/map/journey then returned 108 for the same day, because
+       that endpoint requires lat IS NOT NULL and this count did not. A fix
+       with no coordinate is a poll that came back without a satellite lock;
+       counting it here promised a route it could not draw. */
     const days = await q(
       `SELECT (captured_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int fixes
-       FROM telemetry_snapshot WHERE plate = $3 AND captured_at BETWEEN $1 AND $2
+       FROM telemetry_snapshot
+       WHERE plate = $3 AND captured_at BETWEEN $1 AND $2 AND lat IS NOT NULL
        GROUP BY 1 HAVING count(*) >= 3 ORDER BY 1 DESC LIMIT 90`, p);
     // Where it spends its stationary time — depot, driver's home, or a rank.
     const parked = await q(
@@ -545,6 +574,16 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     // driver's name, and the km column summed a day's distance once per alert.
     // Collapse custody to one row per day first, then count each day's alerts
     // once against it.
+    /* The rate needs the driver's km on this plate over the WHOLE window, not
+       over the days they happened to trigger an alert.
+       ─────────────────────────────────────────────────────────────────────
+       sum(c.km) ran over per_day, which only holds days with at least one
+       alert, so the denominator was the distance driven on bad days. Aliyan
+       khalil came back with km "459" here while /api/vehicle/drivers-detail
+       reported 2,459 for the same person on the same plate — and 322 events
+       over 459 km is 215.3 per 100 km, printed beside a vehicle rate of 34.
+       Custody is aggregated separately over every day held, which is the same
+       figure drivers-detail computes. */
     const byDriver = await q(
       `WITH custody AS (
          SELECT DISTINCT ON (day) day, driver_ext_id, driver_name, km
@@ -555,12 +594,34 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        per_day AS (
          SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int n
          FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2 GROUP BY 1
+       ),
+       ev AS (
+         SELECT coalesce(c.driver_name,'unattributed') driver_name,
+                max(c.driver_ext_id) driver_ext_id, sum(pd.n)::int n
+         FROM per_day pd LEFT JOIN custody c ON c.day = pd.day
+         GROUP BY 1
+       ),
+       held AS (
+         SELECT driver_name, round(sum(km)::numeric,0) booked_km,
+                count(*)::int days_held
+         FROM custody WHERE driver_name IS NOT NULL GROUP BY 1
        )
-       SELECT coalesce(c.driver_name,'unattributed') driver_name,
-              max(c.driver_ext_id) driver_ext_id,
-              sum(pd.n)::int n, round(sum(c.km)::numeric,0) km
-       FROM per_day pd LEFT JOIN custody c ON c.day = pd.day
-       GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);
+       /* by_type summed 1,436 and by_driver 1,381 on the same vehicle in
+          production. The 55 missing events are not unattributed — they are the
+          tail this LIMIT cut, and nothing said so. The two figures the panel
+          needs ride down on the rows, the way /api/alerts/by-driver carries
+          its own population: a second query here would replay the alert scan
+          and the custody fold to arrive at two numbers. */
+       SELECT ev.driver_name, ev.driver_ext_id, ev.n,
+              held.booked_km AS km, held.booked_km, held.days_held,
+              round((ev.n * 100.0 / nullif(held.booked_km, 0))::numeric, 2) AS per_100km,
+              count(*) OVER ()::int AS _drivers,
+              sum(ev.n) OVER ()::int AS _alerts
+       FROM ev LEFT JOIN held ON held.driver_name = ev.driver_name
+       ORDER BY ev.n DESC LIMIT 20`, p);
+    const drvTot = byDriver.length
+      ? { drivers: byDriver[0]._drivers, alerts: byDriver[0]._alerts } : { drivers: 0, alerts: 0 };
+    for (const r of byDriver) { delete r._drivers; delete r._alerts; }
     const daily = await q(
       `SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int alerts
        FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 1`, p);
@@ -568,7 +629,23 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
       `SELECT alert_type, occurred_at, location, lat, lng, video_url
        FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2
        ORDER BY occurred_at DESC LIMIT 100`, p);
-    res.json({ by_type: byType, by_driver: byDriver, daily, recent });
+    const [recentTot] = await q(
+      `SELECT count(*)::int alerts FROM alert
+       WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2`, p);
+    res.json({
+      by_type: byType, by_driver: byDriver, daily, recent,
+      /* Sibling counts rather than a {rows,...} wrapper: this response is
+         already an object with four lists in it, and three of them are capped.
+         A reader has to be able to tell "this driver had no more events" from
+         "the list stopped at twenty". */
+      by_driver_total: drvTot.drivers,
+      by_driver_shown: byDriver.length,
+      by_driver_truncated: drvTot.drivers > byDriver.length,
+      by_driver_alerts: drvTot.alerts,
+      recent_total: recentTot?.alerts ?? recent.length,
+      recent_shown: recent.length,
+      recent_truncated: (recentTot?.alerts ?? 0) > recent.length,
+    });
   }));
 
   /* ── how the asset is used: product tier, payment, platform ───────────── */

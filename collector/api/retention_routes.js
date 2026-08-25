@@ -25,6 +25,12 @@
 export function retentionRoutes(app, { q, wrap }) {
   app.get('/api/retention', wrap(async (req, res) => {
     const maxAge = Math.min(24, Math.max(3, Number(req.query.months) || 13));
+    /* The two chips this page displayed and ignored. rollup_person_month now
+       stores the fleets and already stored the platforms a person worked in a
+       month, both as arrays — a person who worked both is one human, so the
+       filter is containment rather than a narrower key. */
+    const pl = req.query.platform || null;
+    const fl = req.query.fleet || null;
 
     /* One row per person per month they booked. Folded by canonical name,
        because the same human holds a separate id on every platform and
@@ -42,7 +48,10 @@ export function retentionRoutes(app, { q, wrap }) {
        pages do. */
     let activity = await q(
       `SELECT person_key AS person, name, to_char(month,'YYYY-MM') AS m, bookings, driver_ext_id
-       FROM rollup_person_month ORDER BY person_key, month`);
+       FROM rollup_person_month
+       WHERE ($1::text IS NULL OR platforms @> ARRAY[$1]::text[])
+         AND ($2::text IS NULL OR fleets @> ARRAY[$2]::text[])
+       ORDER BY person_key, month`, [pl, fl]);
     if (!activity.length) {
       activity = await q(
         `SELECT t.person_key AS person, max(n.driver_name) AS name,
@@ -51,7 +60,8 @@ export function retentionRoutes(app, { q, wrap }) {
                 (array_agg(DISTINCT n.driver_ext_id) FILTER (WHERE n.driver_ext_id IS NOT NULL))[1] AS driver_ext_id
          FROM trip_norm n JOIN trip t ON t.platform = n.platform AND t.external_id = n.external_id
          WHERE n.is_booking AND t.person_key IS NOT NULL AND t.person_key <> ''
-         GROUP BY 1, 3`);
+           AND ($1::text IS NULL OR n.platform = $1) AND ($2::text IS NULL OR n.fleet_id = $2)
+         GROUP BY 1, 3`, [pl, fl]);
     }
 
     if (!activity.length) {
@@ -97,6 +107,13 @@ export function retentionRoutes(app, { q, wrap }) {
        hiding the largest group on the page raises more questions than it
        settles. */
     const byCohort = new Map();
+    /* Every month gets a cohort, including the ones nobody joined in.
+       ─────────────────────────────────────────────────────────────────────
+       Cohorts were built only from months somebody actually joined, so June
+       2026 — a month this fleet recruited nobody in — was simply absent from
+       the table. A missing row and a row reading zero are different claims,
+       and on a recruitment page the second is the finding. */
+    for (const m of months) byCohort.set(m, { cohort: m, size: 0, people: [] });
     for (const p of people.values()) {
       const joined = p.months[0];
       const c = byCohort.get(joined) || { cohort: joined, size: 0, people: [] };
@@ -114,15 +131,17 @@ export function retentionRoutes(app, { q, wrap }) {
         for (let k = 0; k < Math.min(horizon, maxAge); k++) {
           const target = months[start + k];
           const n = c.people.filter((p) => p.months.includes(target)).length;
-          retained.push({ offset: k, m: target, n, pct: Math.round((n / c.size) * 100) });
+          retained.push({ offset: k, m: target, n, pct: c.size ? Math.round((n / c.size) * 100) : null });
         }
         const stillActive = c.people.filter((p) => p.months.includes(last)).length;
         return {
           cohort: c.cohort, size: c.size, retained,
           still_active: stillActive,
-          still_active_pct: Math.round((stillActive / c.size) * 100),
+          // A month nobody joined has no percentage — 0/0 is not 0%.
+          still_active_pct: c.size ? Math.round((stillActive / c.size) * 100) : null,
           months_observed: Math.min(horizon, maxAge),
           is_left_censored: c.cohort === months[0],
+          no_intake: c.size === 0,
         };
       });
 
@@ -177,7 +196,14 @@ export function retentionRoutes(app, { q, wrap }) {
     res.json({
       ok: true,
       months,
+      platform: pl, fleet: fl,
       current_month_excluded: currentIsPartial ? currentMonth : null,
+      /* The month in progress, named and measured rather than only excluded.
+         "Excluded" tells a reader a month is missing; this tells them which,
+         how far into it the record reaches, and that nobody in it has left. */
+      current_month_partial: currentIsPartial
+        ? { m: currentMonth, observed_to: spanTo, last_day: lastOf(currentMonth) }
+        : null,
       cohorts,
       flow,
       last_complete_month: last,
