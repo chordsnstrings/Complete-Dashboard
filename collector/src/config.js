@@ -114,4 +114,23 @@ export const config = {
 };
 
 // Normalize a license plate for cross-platform joins: uppercase, strip spaces/dashes.
-export const normPlate = (p) => (p || '').toUpperCase().replace(/[\s-]+/g, '');
+/* A plate, or null — never the empty string.
+   ─────────────────────────────────────────────────────────────────────────
+   This returned `''` for anything that normalised away: a missing "Number
+   plate" column in an Uber export, a booking with no vehicle attached, a value
+   that was only spaces or a dash. So `trip.plate` recorded "no vehicle" two
+   different ways, and every guard downstream had been written for one of them.
+
+   Measured over a year on /api/drivers/cross-platform: 47 of 150 people
+   carried '' in their plate list. array_agg(DISTINCT …) sorts ascending, so ''
+   sorted FIRST and always took one of the three slots the query keeps — "the
+   three cars they drove" was two cars and a blank — count(DISTINCT plate)
+   counted it as a vehicle, and mode() WITHIN GROUP could return it as the car
+   somebody mostly drives. /api/kpis guarded with `AND n.plate <> ''` and the
+   rest did not, so two endpoints answering the same question about the same
+   day could disagree by one, each looking right on its own page.
+
+   Fixed here, at the one function all seven collectors pass a plate through,
+   rather than at the thirty aggregates that consume it. sql/schema_v32.sql
+   cleans the rows already written. */
+export const normPlate = (p) => (p || '').toUpperCase().replace(/[\s-]+/g, '') || null;

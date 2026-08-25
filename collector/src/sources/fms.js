@@ -97,7 +97,11 @@ async function pullTrips(fleet, from, to, onStep) {
       const plate = normPlate(t['Plate No']);
       const start = parseFmsTime(t['Start Time']);
       return {
-        platform: SRC, external_id: `${plate}|${start}`, fleet_id: fleet.fleet, plate,
+        /* `plate ?? ''` and not `plate`: normPlate returns null now, and this
+           key identifies rows already in the table. Interpolating null would
+           rewrite it as "null|…" where it used to be "|…" and re-insert every
+           such journey as a new row on the next collection. */
+        platform: SRC, external_id: `${plate ?? ''}|${start}`, fleet_id: fleet.fleet, plate,
         requested_at: start, ended_at: parseFmsTime(t['End Time']),
         pickup_addr: t['Start Location'], pickup_lat: t.StartLat, pickup_lng: t.StartLon,
         dropoff_addr: t['End Location'], dropoff_lat: t.EndLat, dropoff_lng: t.EndLon,
@@ -153,7 +157,8 @@ async function pullAlerts(fleet, from, to) {
       const plate = normPlate(a['Plate No']);
       const at = parseFmsTime(a['Alert Date Time']);
       return {
-        platform: SRC, external_id: `${plate}|${a['Alert Name']}|${at}`, fleet_id: fleet.fleet,
+        // Same reason as the journey key above: these bytes are already in the table.
+        platform: SRC, external_id: `${plate ?? ''}|${a['Alert Name']}|${at}`, fleet_id: fleet.fleet,
         plate, alert_type: a['Alert Name'], occurred_at: at, location: a['Start Location'], raw: a,
       };
     }).filter((r) => r.occurred_at);

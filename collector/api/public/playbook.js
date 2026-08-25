@@ -82,6 +82,21 @@ export async function renderPlaybook(root) {
         : `bookings at the fleet median, over ${d.window_days ? countOf(d.window_days, 'day') : 'this window'}`
           + ' — not per month; it scales with the range above',
       tone: t.bookings_ceiling ? 'warn' : null },
+    /* The other half of the split, which was computed and never drawn.
+       ─────────────────────────────────────────────────────────────────────
+       api/playbook_routes.js separates the ceilings into GAIN and PROTECT
+       precisely so the two are not added together — its comment says an
+       avoided loss on the same cars had been printing as upside. Only the gain
+       half reached this page, so a reader saw what the fleet could win and not
+       what it stands to lose by doing nothing. A protect action is a document
+       about to expire or a driver about to be blocked: the volume behind it is
+       not upside, it is the floor falling out. */
+    ...(t.bookings_at_risk
+      ? [{ label: 'At risk if nothing is done', value: fmt(t.bookings_at_risk),
+        sub: `${t.ceiling_unit || 'bookings over this window'} — volume the fleet ALREADY has and `
+          + 'would lose, counted apart from the idle capacity beside it so the two are never added',
+        tone: 'critical' }]
+      : []),
     { label: 'Vehicles earning', value: `${fmt(fleet.earning)} of ${fmt(fleet.vehicles_seen)}`,
       sub: fleet.median_bookings ? `median ${fmt(fleet.median_bookings)} bookings each` : null,
       tone: fleet.earning < fleet.vehicles_seen * 0.6 ? 'critical' : 'warn' },

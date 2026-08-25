@@ -30,9 +30,39 @@ const UP = process.env.UPSTREAM || 'https://fleet-dashboard-wpeqb.ondigitalocean
    reads as a broken build rather than a broken path. */
 const pub = join(dirname(fileURLToPath(import.meta.url)), '..', 'api', 'public');
 const app = express();
+
+/* Upstream fetches retry; a browser page load does not.
+   ─────────────────────────────────────────────────────────────────────────
+   A full render audit is 104 routes at three widths and something over a
+   thousand upstream requests through the egress proxy, and a handful of them
+   come back ECONNRESET. Each one reached the browser as a failed fetch, and
+   the audit reported it as a js-error on the page — 282 of them in one run,
+   every single one saying ERR_CONNECTION_RESET, burying the 51 findings that
+   were about the product.
+
+   The page cannot retry: it has already rendered its error state by the time
+   anybody sees it. The bridge can, and this is the layer that knows the
+   difference between "the API said no" and "the connection dropped on the way
+   to Amsterdam". A non-2xx is passed straight through — that IS the answer —
+   and only a thrown fetch is retried. */
+const RETRIES = 3;
+const upstream = async (url) => {
+  let last;
+  for (let i = 0; i <= RETRIES; i += 1) {
+    try {
+      return await fetch(url, { headers: { accept: 'application/json' } });
+    } catch (e) {
+      last = e;
+      if (i === RETRIES) break;
+      await new Promise((r) => setTimeout(r, 150 * 2 ** i));
+    }
+  }
+  throw last;
+};
+
 app.get('/api/*', async (req, res) => {
   try {
-    const r = await fetch(`${UP}${req.originalUrl}`, { headers: { accept: 'application/json' } });
+    const r = await upstream(`${UP}${req.originalUrl}`);
     const body = await r.text();
     /* An endpoint this working tree declares and the deployed build does not
        comes back as the API's own 404 JSON, and the page renders its error box
@@ -43,7 +73,13 @@ app.get('/api/*', async (req, res) => {
       console.log(`  ↯ ${req.path} is not on ${UP} yet — the page will show its error state`);
     }
     res.status(r.status).type(r.headers.get('content-type') || 'application/json').send(body);
-  } catch (e) { res.status(502).json({ error: String(e).slice(0, 200) }); }
+  } catch (e) {
+    /* Named in the terminal, because a 502 here is the BRIDGE failing and not
+       the API — and the page will render an error box that looks identical to
+       a real one. */
+    console.log(`  ✗ ${req.path} — upstream unreachable after ${RETRIES} retries: ${String(e).slice(0, 90)}`);
+    res.status(502).json({ error: String(e).slice(0, 200) });
+  }
 });
 app.use(express.static(pub));
 app.get('*', (_, r) => r.sendFile(join(pub, 'index.html')));

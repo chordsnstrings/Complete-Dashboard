@@ -155,11 +155,25 @@ await db.query(
      requested_at, status, distance_km)
    VALUES ('uber','older-2','ecosine','ZZ9999','u-old','Older Driver',
            '2025-02-12T09:00:00+04:00','completed',9)`);
-// A plate nobody typed, and a plate that is a blank string: neither is a vehicle.
+/* A plate nobody typed. It used to be inserted two ways here — NULL and the
+   empty string — because the collector wrote both: normPlate returned '' for
+   anything that normalised away, so "no vehicle" was recorded two different
+   ways and every guard downstream had been written for one of them.
+
+   sql/schema_v32.sql fixes that at the source (normPlate returns null) and adds
+   `CHECK (plate <> '')`, so the blank row this test used to insert is now
+   rejected by the database. The check below proves the constraint holds rather
+   than proving the directory survives the row: an insert that cannot happen is
+   a better guarantee than a filter that catches it. */
 await db.query(
   `INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, status)
-   VALUES ('fms','blank-1','ecosine','','2026-08-04T09:00:00+04:00','completed'),
-          ('fms','null-1','ecosine',NULL,'2026-08-04T09:00:00+04:00','completed')`);
+   VALUES ('fms','null-1','ecosine',NULL,'2026-08-04T09:00:00+04:00','completed')`);
+let blankRejected = false;
+try {
+  await db.query(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, status)
+     VALUES ('fms','blank-1','ecosine','','2026-08-04T09:00:00+04:00','completed')`);
+} catch (e) { blankRejected = /plate_not_blank/.test(String(e.message || e)); }
 
 const edges = await compare('with plates outside the window', db);
 const plates = edges.map((r) => r.plate);
@@ -171,6 +185,8 @@ check('a vehicle with no work in the window reports absence, not zero distance',
   edges.find((r) => r.plate === 'A00001')?.km == null,
   JSON.stringify(edges.find((r) => r.plate === 'A00001')));
 check('a blank plate is not a vehicle', !plates.includes(''), JSON.stringify(plates));
+check('and the database refuses to store one at all', blankRejected,
+  'CHECK (plate <> \'\') is missing — a blank plate can be written again');
 
 console.log('\nthe wide fleet: 240 plates, where folding and truncation show');
 

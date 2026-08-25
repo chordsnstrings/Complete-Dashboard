@@ -307,7 +307,7 @@ async function volumeTrend() {
      agg AS (
        SELECT local_month AS m, count(*) FILTER (WHERE is_booking)::int trips,
               count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id IS NOT NULL)::int drivers,
-              count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL)::int vehicles
+              count(DISTINCT plate) FILTER (WHERE nullif(btrim(plate), '') IS NOT NULL)::int vehicles
        FROM trip_norm WHERE requested_at > now() - interval '18 months' GROUP BY 1
      ),
      -- Days in each month on which ANY source collected anything.

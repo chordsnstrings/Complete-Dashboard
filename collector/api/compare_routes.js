@@ -106,7 +106,7 @@ export function compareRoutes(app, { q, wrap }) {
                 sum(n.price) FILTER (WHERE n.has_fare) fares,
                 count(*) FILTER (WHERE n.has_fare)::int priced,
                 count(DISTINCT n.driver_ext_id) FILTER (WHERE n.is_booking AND n.driver_ext_id IS NOT NULL)::int drivers,
-                count(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL)::int vehicles,
+                count(DISTINCT n.plate) FILTER (WHERE nullif(btrim(n.plate), '') IS NOT NULL)::int vehicles,
                 min(n.requested_at) FILTER (WHERE n.is_booking) first_at,
                 max(n.requested_at) FILTER (WHERE n.is_booking) last_at,
                 round((sum(extract(epoch FROM (n.ended_at - n.requested_at)))

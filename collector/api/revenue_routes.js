@@ -53,7 +53,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
                 round(sum(n.distance_km) FILTER (WHERE n.has_fare AND n.has_distance)::numeric,0) priced_km,
                 round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric,0) km,
                 ${peopleCountStored()}::int drivers,
-                count(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL)::int vehicles,
+                count(DISTINCT n.plate) FILTER (WHERE nullif(btrim(n.plate), '') IS NOT NULL)::int vehicles,
                 min(n.requested_at) first_at, max(n.requested_at) last_at
          FROM trip_norm n ${JOIN_TRIP}
          WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking

@@ -50,7 +50,7 @@ export function dayRoutes(app, { q, wrap }) {
                 sum(distance_km) FILTER (WHERE has_distance AND is_booking) booked_km,
                 sum(distance_km) FILTER (WHERE has_distance AND NOT is_booking) telematics_km,
                 count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int drivers,
-                count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL)::int vehicles,
+                count(DISTINCT plate) FILTER (WHERE nullif(btrim(plate), '') IS NOT NULL)::int vehicles,
                 min(requested_at) first_at, max(requested_at) last_at
          FROM trip_ext WHERE ${D}`, p),
       q(`SELECT local_hour AS hour, count(*) FILTER (WHERE is_booking)::int bookings,

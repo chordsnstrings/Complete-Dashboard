@@ -878,6 +878,21 @@ V.drivers = async (root) => {
           : (r.telematics_journeys === 0 ? '<span class="dim">0</span>' : '—')) },
       { label: 'Bookings', key: 'booking_trips', num: true },
       { label: 'Accounts', key: 'accounts', num: true },
+      /* The car. The endpoint's own comment says why it computes this — "a
+         person working three platforms is usually working them from ONE car,
+         and that was the fact this table could not show" — and then the table
+         still did not show it. main_plate is the one they drove most in the
+         window; plate_n is how many they touched. */
+      { label: 'Mainly drives', key: 'main_plate',
+        absent: 'no trip on these people carries a plate',
+        render: (r) => (r.main_plate
+          ? entity('vehicle', r.main_plate, r.main_plate)
+            + (r.plate_n > 1 ? `<span class="dim" title="${esc((r.plates || []).join(', '))}${
+              r.plate_n > (r.plates || []).length ? ' and others' : ''}"> +${fmt(r.plate_n - 1)} more</span>` : '')
+          : '<span class="ent-off" title="no trip of theirs in this window records a plate">—</span>') },
+      { label: 'Km', key: 'km', num: true,
+        absent: 'no trip on these people carries a usable distance',
+        render: (r) => (r.km == null ? '<span class="ent-off">—</span>' : fmt(r.km)) },
     ], { sortable: true, sortId: 'cross', defaultSort: { key: 'booking_trips', dir: 'desc' } }));
     xp.body.append(el('p', 'cap',
       `${fmt(multiN)} of ${fmt(popN)} people in this window work more than one channel`
