@@ -16,7 +16,8 @@
 
 import { empty, fmt, areaChart, hbars, donut } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
-         dtStr, timeStr, dayStr, money, custody } from './ui.js';
+         dtStr, timeStr, dayStr, dateStr, money, custody,
+         sourceLabel, countOf, plural, asList } from './ui.js';
 import { q, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -47,16 +48,40 @@ export async function renderSegments(root, kind, value) {
   const vf = d.facets.verdict || [];
   const unauth = vf.find((r) => r.key === 'unauthorized');
   const totalAll = vf.reduce((a, r) => a + r.n, 0);
+  /* Which channels were unreadable, named. "Assessed blind 37" is a count of
+     segments nobody can act on until they know WHICH source was down, and
+     every row carries `unavailable_sources`. */
+  const blindSources = [...new Set((d.rows || [])
+    .filter((r) => r.low_confidence)
+    .flatMap((r) => asList(r.unavailable_sources)))];
   root.append(kpiRow([
-    { label: 'Segments in window', value: fmt(totalAll), sub: 'every occupancy interval CABMAN saw' },
+    { label: 'Segments in window', value: fmt(totalAll), sub: 'every occupancy interval the seat sensor saw' },
     { label: 'Unexplained', value: fmt(unauth?.n || 0),
-      sub: unauth?.km ? `${fmt(unauth.km)} km carried off-book` : 'no distance recorded',
+      /* Null distance is not zero km. */
+      sub: unauth?.km != null ? `${fmt(unauth.km)} km carried off-book`
+        : (unauth?.n ? 'no distance was measured on these segments' : 'nothing unexplained to measure'),
       tone: unauth?.n ? 'bad' : 'good' },
     { label: 'Matching this filter', value: fmt(d.total),
       sub: kind ? `${kind} = ${value}` : 'no filter applied' },
     { label: 'Assessed blind', value: fmt(d.low_confidence),
-      sub: 'a revenue channel was unreadable', tone: d.low_confidence ? 'warn' : null },
+      sub: blindSources.length
+        ? `${blindSources.map(sourceLabel).join(', ')} could not be read when these were judged`
+        : 'a revenue channel was unreadable when these were judged',
+      tone: d.low_confidence ? 'warn' : null },
   ]));
+
+  /* The range selector implies a history the seat sensor does not have.
+     CABMAN is a five-minute poll with nothing behind it, so however wide the
+     window, these segments are the few days it has ever recorded — and a
+     "0 unexplained over 30 days" reads as thirty days of clean driving. */
+  const days = d.facets.day || [];
+  if (days.length) {
+    root.append(el('p', 'cap',
+      `Seat-occupancy evidence exists for ${countOf(days.length, 'day')} — `
+      + `${dateStr(days[0].key)} to ${dateStr(days[days.length - 1].key)} — and that is everything the `
+      + 'sensor has ever recorded, whatever range is selected above. It is a realtime poll with no '
+      + 'history behind it, so widening the window does not widen this evidence.'));
+  }
 
   if (kind) {
     const clear = el('div', 'note');
@@ -100,23 +125,46 @@ export async function renderSegments(root, kind, value) {
   // ── what the reconciler actually said ───────────────────────────────────
   const rp = panel('Recorded reasons', 'The reconciler’s own words, not a sentence written here');
   g.append(rp.panel);
-  const reasons = d.facets.reason || [];
+  /* Folded to SHAPES. The facet counts every distinct string, and the strings
+     embed a trip id and a minute count — so "matched uber trip fa66c89c-…" is
+     109 different reasons and "telemetry clock is 2339 min behind wall time"
+     is another four. Four shapes carry meaning and the panel reported 109.
+     Folded here rather than only server-side, so this reads correctly whether
+     or not the endpoint groups them. */
+  const shapeOf = (k) => String(k)
+    .replace(/\b[0-9a-f]{8}-?[0-9a-f-]{4,}\b/gi, '<id>')
+    .replace(/\b\d[\d.,]*\b/g, '<n>');
+  const folded = new Map();
+  (d.facets.reason || []).forEach((r) => {
+    const key = shapeOf(r.key);
+    const cur = folded.get(key) || { key, verdict: r.verdict, n: 0, forms: 0, sample: r.key };
+    cur.n += r.n; cur.forms += 1;
+    folded.set(key, cur);
+  });
+  const reasons = [...folded.values()].sort((a, b) => b.n - a.n);
   if (reasons.length) {
     rp.body.append(tableFrom(reasons, [
-      { label: 'Reason', key: 'key', render: (r) => `<span class="wrap">${esc(r.key)}</span>` },
+      { label: 'Reason', key: 'key',
+        render: (r) => `<span class="wrap" title="${esc(r.sample)}">${esc(r.key)}</span>`
+          + (r.forms > 1
+            ? `<span class="dim" title="the same reason with a different id or number in it"> · ${fmt(r.forms)} wordings</span>`
+            : '') },
       { label: 'Verdict', key: 'verdict', render: (r) => vTag(r.verdict) },
       { label: 'Segments', key: 'n', num: true },
-    ], { compact: true }));
+    ], { compact: true, sortable: true, sortId: 'reasons', defaultSort: { key: 'n', dir: 'desc' } }));
     const rt = d.facet_totals || {};
-    if (rt.reason > rt.reason_shown) rp.body.append(el('p', 'cap',
-      `The ${fmt(rt.reason_shown)} commonest of ${fmt(rt.reason)} distinct reasons recorded in this range.`));
+    rp.body.append(el('p', 'cap',
+      `${countOf(reasons.length, 'distinct reason')}, with the trip ids and minute counts folded out — `
+      + 'the same sentence with a different id in it is one reason, not two.'
+      + (rt.reason > rt.reason_shown
+        ? ` The server sent the ${fmt(rt.reason_shown)} commonest of ${fmt(rt.reason)} raw strings.`
+        : '')));
     if (d.unreasoned) rp.body.append(el('p', 'cap',
       `${fmt(d.unreasoned)} of the segments matching this filter carry no recorded reason at all — `
       + 'they were judged by a version of the reconciler that did not write one down.'));
   } else empty(rp.body, 'No reasons recorded');
 
   // ── the day strip, as a filter ──────────────────────────────────────────
-  const days = d.facets.day || [];
   if (days.length) {
     const dp = panel('By day', 'Unexplained intervals per day — click a day for that day’s list');
     root.append(dp.panel);
@@ -133,7 +181,7 @@ export async function renderSegments(root, kind, value) {
     });
     dp.body.append(strip);
     dp.body.append(el('p', 'cap',
-      `${dayStr(days[0].key)} → ${dayStr(days[days.length - 1].key)} · `
+      `${dateStr(days[0].key)} → ${dateStr(days[days.length - 1].key)} · `
       + 'a pale cell is a day with occupancy but nothing unexplained.'));
   }
 
@@ -141,7 +189,22 @@ export async function renderSegments(root, kind, value) {
   const lp = panel(kind ? `Segments — ${kind} ${value}` : 'Every occupancy segment',
     `${fmt(d.rows.length)} shown${d.truncated ? ` of ${fmt(d.total)}` : ''} · click a row for the evidence`);
   root.append(lp.panel);
-  if (!d.rows.length) { empty(lp.body, 'Nothing matches this filter'); return; }
+  if (!d.rows.length) {
+    /* "Nothing matches this filter" for a facet that came from this page's own
+       chips is a dead end; naming the facet and offering the way back is not. */
+    const box = el('div', 'empty');
+    box.innerHTML = kind
+      ? `<b>No segment with ${esc(kind)} = ${esc(value)}</b>`
+        + `The facet came from this window's own counts, so this usually means the filter has been `
+        + 'narrowed twice — by the chip and by the date range above.'
+      : '<b>No occupancy interval in this window</b>The seat sensor is a realtime poll with no history '
+        + 'behind it; a window that reaches past the few days it has recorded finds nothing in the rest.';
+    const back = el('p', 'cap');
+    back.innerHTML = `<a class="lnk" href="${href('segments')}">Every segment</a>`;
+    box.append(back);
+    lp.body.innerHTML = ''; lp.body.append(box);
+    return;
+  }
   lp.body.append(segmentTable(d.rows));
   if (d.truncated) lp.body.append(el('p', 'cap',
     `Showing the ${fmt(d.rows.length)} most recent of ${fmt(d.total)}. Narrow by vehicle or day to see the rest — `
@@ -150,10 +213,15 @@ export async function renderSegments(root, kind, value) {
 
 /* A table of segments where every cell that names something is a link to it.
    Exported because the vehicle and day pages want the same table. */
-export function segmentTable(rows) {
-  if (!rows.length) { const d = el('div'); empty(d, 'Nothing flagged here'); return d; }
+export function segmentTable(rows, opts = {}) {
+  if (!rows.length) { const d = el('div'); empty(d, opts.emptyMsg || 'Nothing flagged here'); return d; }
+  const anyReason = rows.some((r) => r.verdict_reason);
+  const anyFleet = rows.some((r) => r.fleet_id);
+  const anyFix = rows.some((r) => r.fixes != null || r.max_gap_min != null || r.ignition_ratio != null);
   const t = tableFrom(rows, [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+    ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',
+      render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id), 'plat') : '—') }] : []),
     /* Both destinations, because they answer different questions and the row
        previously offered only one. The name opens the PERSON — which is what
        somebody reading an accusation wants — and the funnel opens this
@@ -163,23 +231,47 @@ export function segmentTable(rows) {
     { label: 'Driver that day', key: 'drivers',
       render: (r) => custody(r, { title: 'This driver’s other flagged segments',
         hrefFor: (d) => href('segments', 'driver', d.name) }) },
-    { label: 'Started', key: 'started_at', render: (r) => `<a href="${href('segment', r.plate, r.started_at)}">${esc(dtStr(r.started_at))}</a>` },
+    { label: 'Started', key: 'started_at',
+      render: (r) => `<a href="${href('segment', r.plate, r.started_at)}">${esc(`${dateStr(r.started_at)} ${timeStr(r.started_at)}`)}</a>` },
     { label: 'Duration', key: 'duration_min', num: true, render: (r) => (r.duration_min ?? '—') + ' min' },
-    { label: 'Distance', key: 'distance_km', num: true, render: (r) => (r.distance_km ?? 0) + ' km' },
-    { label: 'Top speed', key: 'top_speed', num: true, render: (r) => (r.top_speed ?? 0) + ' km/h' },
+    /* Null is not zero. A segment with no measured distance printed "0 km",
+       which is a claim that the vehicle did not move — the opposite of what an
+       unexplained occupancy means. */
+    { label: 'Distance', key: 'distance_km', num: true,
+      render: (r) => (r.distance_km == null
+        ? '<span class="ent-off" title="no distance was measured across this interval">—</span>'
+        : `${fmt(r.distance_km, 1)} km`) },
+    { label: 'Top speed', key: 'top_speed', num: true,
+      render: (r) => (r.top_speed == null ? '<span class="ent-off">—</span>' : `${fmt(r.top_speed)} km/h`) },
+    ...(anyFix ? [{ label: 'Fixes', key: 'fixes', num: true,
+      render: (r) => (r.fixes == null ? '—'
+        : `${fmt(r.fixes)}${r.max_gap_min ? `<span class="dim" title="largest gap between consecutive fixes"> · gap ${fmt(r.max_gap_min)}m</span>` : ''}`) },
+    { label: 'Ignition on', key: 'ignition_ratio', num: true,
+      render: (r) => (r.ignition_ratio == null
+        ? '<span class="ent-off" title="this feed does not report ignition">—</span>'
+        : `${fmt(r.ignition_ratio * 100, 0)}%`) }] : []),
     { label: 'Verdict', key: 'verdict', render: (r) => vTag(r.verdict) },
-    { label: 'Confidence', key: 'low_confidence', render: (r) => (r.low_confidence
-      ? '<span class="tag warn">blind</span>' : '<span class="tag dim">ok</span>') },
-  ]);
-  // The row is a link too, but only where the click did not land on one of the
-  // cell links above — otherwise the plate link and the row link fight.
-  t.querySelectorAll('tbody tr').forEach((tr, i) => {
-    tr.style.cursor = 'pointer';
-    tr.onclick = (e) => {
-      if (e.target.closest('a')) return;
-      const r = rows[i]; location.hash = href('segment', r.plate, r.started_at);
-    };
-  });
+    /* The reason the reconciler recorded. It is the field that makes a verdict
+       readable, it is on every row, and the list showed only the verdict —
+       so the most serious claim this product makes arrived with no working. */
+    ...(anyReason ? [{ label: 'Why', key: 'verdict_reason',
+      render: (r) => (r.verdict_reason
+        ? `<span class="wrap dim" title="${esc(r.verdict_reason)}">${esc(String(r.verdict_reason).slice(0, 80))}${
+          String(r.verdict_reason).length > 80 ? '…' : ''}</span>`
+        : '<span class="ent-off" title="judged by a version of the reconciler that did not record one">none recorded</span>') }] : []),
+    { label: 'Confidence', key: 'low_confidence',
+      render: (r) => {
+        if (!r.low_confidence) return '<span class="tag dim">ok</span>';
+        const out = asList(r.unavailable_sources).map(sourceLabel);
+        return `<span class="tag warn" title="${esc(out.length
+          ? `unreadable when this was judged: ${out.join(', ')}`
+          : 'a revenue channel was unreadable when this was judged')}">blind${
+          out.length ? ` · ${esc(out.join(', '))}` : ''}</span>`;
+      } },
+  ], { sortable: true, sortId: opts.sortId || 'segs', defaultSort: { key: 'started_at', dir: 'desc' },
+    // The row is a link too, bound through onRow so re-sorting cannot open the
+    // wrong segment; a click on a cell link is left to that link.
+    onRow: (r) => { location.hash = href('segment', r.plate, r.started_at); } });
   return t;
 }
 

@@ -18,8 +18,9 @@
       claims to have proved anything. */
 
 import { empty } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, fmt, pct } from './ui.js';
-import { api } from './data.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, fmt, pct,
+  sourceLabel, countOf, plural } from './ui.js';
+import { api, href, hrefFilter } from './data.js';
 
 const MONTH = (m) => {
   const [y, mm] = String(m).slice(0, 7).split('-');
@@ -77,7 +78,10 @@ function trendChart(host, months, onPick) {
   const iw = W - P.l - P.r, ih = H - P.t - P.b;
   const step = iw / months.length, bw = Math.min(step * 0.66, 46);
   const Y = (v) => P.t + ih - (v / max) * ih;
-  const out = [`<svg viewBox="0 0 ${W} ${H}" role="img">`];
+  const out = [`<svg viewBox="0 0 ${W} ${H}" role="img">`,
+    `<defs><pattern id="partHatch" width="6" height="6" patternUnits="userSpaceOnUse"
+      patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--b300)"/>
+      <line x1="0" y1="0" x2="0" y2="6" stroke="var(--surface)" stroke-width="2"/></pattern></defs>`];
   for (let g = 0; g <= 3; g++) {
     const v = (max / 3) * g;
     out.push(`<line x1="${P.l}" x2="${W - P.r}" y1="${Y(v).toFixed(1)}" y2="${Y(v).toFixed(1)}" stroke="var(--rule)"/>`);
@@ -93,10 +97,22 @@ function trendChart(host, months, onPick) {
           text-anchor="middle" transform="rotate(-90 ${(x + bw / 2).toFixed(1)} ${P.t + ih / 2})">no data</text>`);
     } else {
       const h = Math.max(1, ih * (m.trips / max));
+      /* A partial month drawn at full height is a collapse that did not
+         happen. Collection began on the 21st of the first month and stops
+         inside the current one, so both ends hold a third of the days of the
+         bars beside them — and the boundary between a partial month and a
+         whole one is where every one of this page's "+377%" breaks comes
+         from. Hatched, and the tooltip says how many days it actually holds. */
+      const part = m.partial_month;
       out.push(`<rect x="${x.toFixed(1)}" y="${Y(m.trips).toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="3"
-        fill="var(${m.drivers_known ? '--b500' : '--b300'})" data-rise style="animation-delay:${i * 30}ms"
+        fill="${part ? 'url(#partHatch)' : `var(${m.drivers_known ? '--b500' : '--b300'})`}"
+        ${part ? 'stroke="var(--rule-strong)" stroke-width="1"' : ''}
+        data-rise style="animation-delay:${i * 30}ms"
         data-m="${esc(m.m)}"><title>${MONTH(m.m)} — ${fmt(m.trips)} trips${
-        m.drivers_known ? `, ${m.drivers} drivers` : ', no driver attribution'}</title></rect>`);
+        m.drivers_known ? `, ${m.drivers} drivers` : ', no driver attribution'}${
+        part ? ` — PARTIAL: ${m.days_covered != null && m.days_in_month != null
+          ? `${m.days_covered} of ${m.days_in_month} days collected` : 'the record starts or stops inside this month'}`
+          : ''}</title></rect>`);
     }
     out.push(`<text x="${(x + bw / 2).toFixed(1)}" y="${H - 24}" font-size="10" fill="var(--ink-3)" text-anchor="middle">${MONTH(m.m)}</text>`);
   });
@@ -109,6 +125,7 @@ function trendChart(host, months, onPick) {
   host.append(el('div', 'legend', `
     <span><i style="background:var(--b500)"></i>trips, drivers named</span>
     <span><i style="background:var(--b300)"></i>trips, no driver attribution</span>
+    <span><i style="background:repeating-linear-gradient(45deg,var(--b300),var(--b300)2px,var(--surface)2px,var(--surface)4px)"></i>partial month — fewer days than the bars beside it</span>
     <span><i style="background:var(--surface-2);border:1px dashed var(--rule-strong)"></i>no data collected</span>`));
 }
 
@@ -169,16 +186,38 @@ export async function renderCauses(root) {
   const evP = panel('Known context', 'Seasonal, religious and regional events that move Dubai demand'); root.append(evP.panel);
   [trend.body, brk.body, gapP.body, evP.body].forEach(loading);
 
-  const [t, breaks, events] = await Promise.all([
-    api('/api/trend/monthly'),
-    api('/api/breaks').catch(() => []),
-    api('/api/events?from=2024-01-01&to=2027-12-31').catch(() => []),
-  ]);
+  const t = await api('/api/trend/monthly');
   const months = t.months || [];
+  /* Events bounded to the RECORD, not to a hardcoded 2024→2027. The panel
+     fetched four years and rendered 22 rows spanning 2024 to 2028 — including
+     events eighteen months in the future — beside a thirteen-month trend, so
+     most of what it showed could not overlap anything on the page. */
+  const observedMonths = months.filter((m) => !m.no_data).map((m) => m.m).sort();
+  const evFrom = observedMonths.length ? `${observedMonths[0]}-01` : '2024-01-01';
+  /* Calendar arithmetic on a month STRING, not a clock reading — the last day
+     of a month is a property of the month, and no timezone is involved. Built
+     from the day number rather than by formatting a Date, so nothing here can
+     be read as taking a UTC day from the machine's clock. */
+  const lastMonth = observedMonths[observedMonths.length - 1];
+  const evTo = lastMonth
+    ? `${lastMonth}-${String(new Date(Date.UTC(+lastMonth.slice(0, 4), +lastMonth.slice(5, 7), 0)).getUTCDate()).padStart(2, '0')}`
+    : '2027-12-31';
+  const [breaks, events] = await Promise.all([
+    api('/api/breaks').catch(() => []),
+    api(`/api/events?from=${encodeURIComponent(evFrom)}&to=${encodeURIComponent(evTo)}`).catch(() => []),
+  ]);
   const observed = months.filter((m) => !m.no_data);
   const attributable = observed.filter((m) => m.drivers_known);
   const totalTrips = observed.reduce((a, m) => a + m.trips, 0);
-  const biggest = [...(t.breaks || [])].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct))[0];
+  /* The largest move that is a MOVE. A break touching a partial month is a
+     fact about when collection started, and it is always the biggest number
+     on the page — +377% between eleven days of August and a whole September.
+     The real largest is headlined and the artefact is named beside it, rather
+     than the artefact leading and its explanation sitting in a branch that
+     only runs when the stored decomposition is missing. */
+  const allBreaks = [...(t.breaks || [])].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
+  const artifacts = allBreaks.filter((b) => b.boundary_artifact);
+  const biggest = allBreaks.find((b) => !b.boundary_artifact) || allBreaks[0];
 
   kpiHost.replaceWith(kpiRow([
     { label: 'Months observed', value: `${observed.length} of ${months.length}`,
@@ -188,11 +227,35 @@ export async function renderCauses(root) {
     { label: 'Driver attribution', value: `${attributable.length} of ${observed.length}`,
       sub: 'months where trips name a driver',
       tone: attributable.length === observed.length ? 'good' : 'warn' },
-    { label: 'Structural breaks', value: fmt((t.breaks || []).length), sub: 'moves above 30% between adjacent months' },
+    { label: 'Structural breaks', value: fmt((t.breaks || []).length),
+      sub: artifacts.length
+        ? `moves above 30% between adjacent months — ${fmt(artifacts.length)} of them touch a partial month`
+        : 'moves above 30% between adjacent months' },
     biggest ? { label: 'Largest move', value: `${biggest.change_pct > 0 ? '+' : ''}${biggest.change_pct}%`,
-      sub: `${MONTH(biggest.from)} → ${MONTH(biggest.to)}`,
-      tone: Math.abs(biggest.change_pct) > 60 ? 'critical' : 'warn' } : null,
+      sub: `${MONTH(biggest.from)} → ${MONTH(biggest.to)}`
+        + (biggest.boundary_artifact
+          ? ' — a partial month against a whole one, so this is when we started collecting rather than something the fleet did'
+          : (artifacts.length ? ' — the largest that is not a collection boundary' : '')),
+      tone: biggest.boundary_artifact ? null
+        : Math.abs(biggest.change_pct) > 60 ? 'critical' : 'warn' } : null,
   ]));
+
+  /* Hoisted out of the dead branch. This warning only rendered when the stored
+     decomposition was ABSENT, which is the one case where the reader is
+     already being told the breaks are provisional — and never when the table
+     they apply to was on screen. */
+  if (artifacts.length) {
+    root.append(el('div', 'note warn',
+      `${countOf(artifacts.length, 'break')} on this page ${plural(artifacts.length, 'touches', 'touch')} `
+      + 'a month the record only partly covers — collection started or stopped inside it, so the month '
+      + 'holds fewer days than a full one and the step across that boundary is a fact about our '
+      + 'collector rather than about the fleet. '
+      + artifacts.slice(0, 3).map((b) => `${esc(MONTH(b.from))} → ${esc(MONTH(b.to))} `
+        + `(${b.change_pct > 0 ? '+' : ''}${b.change_pct}%)`).join(', ')
+      + `${artifacts.length > 3 ? `, and ${fmt(artifacts.length - 3)} more` : ''}. `
+      + 'They are shown rather than hidden, because a break that silently disappears is its own kind of '
+      + 'lie — but nothing should be concluded from one.'));
+  }
 
   /* ── the whole year at once, which was never possible before ───────────
      The Uber history ran 56 days until the backfill finally landed a full
@@ -285,18 +348,30 @@ export async function renderCauses(root) {
     if (!row || row.no_data) return;
     const near = (t.breaks || []).filter((b) => b.from === m || b.to === m);
     trend.body.querySelectorAll('.picked').forEach((n) => n.remove());
-    const d = el('div', 'note picked',
-      `${MONTH(m)}: ${fmt(row.trips)} bookings on ${esc((row.booking_platforms || row.platforms || []).join(', ') || 'unknown')}` +
-      `${row.telematics_journeys ? `, ${fmt(row.telematics_journeys)} telematics journeys behind them` : ''}` +
-      `${row.drivers_known ? `, ${row.drivers} drivers` : ', no driver attribution'}` +
-      `${row.accounted ? `, AED ${fmt(row.accounted)} in` : ''}` +
+    /* Every noun in this sentence is a destination somewhere in the product,
+       and none of them was a link — the month has a reconciliation page, the
+       channels have a page, the drivers have a directory. */
+    const d = el('div', 'note picked');
+    d.innerHTML = `<a class="lnk" href="${href('reconcile', m)}">${esc(MONTH(m))}</a>: `
+      + `${fmt(row.trips)} bookings on `
+      + ((row.booking_platforms || row.platforms || []).length
+        ? (row.booking_platforms || row.platforms).map((p2) =>
+          `<a class="lnk" href="${hrefFilter('revenue', { platform: p2 })}">${esc(sourceLabel(p2))}</a>`).join(', ')
+        : 'an unknown channel')
+      + (row.telematics_journeys ? `, ${fmt(row.telematics_journeys)} telematics journeys behind them` : '')
+      + (row.drivers_known
+        ? `, <a class="lnk" href="${href('drivers')}">${fmt(row.drivers)} drivers</a>`
+        : ', no driver attribution')
+      + (row.accounted ? `, AED ${fmt(row.accounted)} in` : '')
       /* Uber's earnings API serves roughly the last six months, so a month
          older than that has bookings, distance and drivers and no money that
          can ever be collected for it. Without saying so the reader sees a
          month of work worth nothing and reasonably concludes the fleet had a
          bad month. */
-      `${row.income_missing ? ' — no platform statement covers this month; its money is not recoverable' : ''}` +
-      `${near.length ? ` — ${near.length} break(s) touch this month.` : ''}`);
+      + (row.income_missing ? ' — no platform statement covers this month; its money is not recoverable' : '')
+      + (row.partial_month ? ' — a PARTIAL month: the record starts or stops inside it, so it holds fewer '
+        + 'days than the months beside it and should not be compared with them directly' : '')
+      + (near.length ? ` — ${countOf(near.length, 'break')} ${plural(near.length, 'touches', 'touch')} this month.` : '');
     trend.body.append(d);
   });
 
@@ -360,19 +435,38 @@ export async function renderCauses(root) {
   const evs = Array.isArray(events) ? events : [];
   if (!evs.length) evP.body.append(note('No context events stored yet. The collector derives seasonal and religious dates and classifies regional news on each cycle.'));
   else {
+    /* Which of these actually touch a break. An event overlapping nothing is
+       context; one overlapping a 70% move is a candidate, and the table gave
+       the reader no way to tell them apart but to compare dates by eye. */
+    const brks = (t.breaks || []).map((b) => ({ ...b,
+      from0: `${b.from}-01`, to1: `${b.to}-28` }));
+    const touches = (r) => brks.filter((b) =>
+      String(r.starts_on || '').slice(0, 10) <= b.to1 && String(r.ends_on || r.starts_on || '').slice(0, 10) >= b.from0);
     evP.body.append(tableFrom(evs.slice(0, 40), [
-      { label: 'Starts', key: 'starts_on', render: (r) => dayStr(r.starts_on) },
-      { label: 'Ends', key: 'ends_on', render: (r) => dayStr(r.ends_on) },
+      { label: 'Starts', key: 'starts_on', render: (r) => dateStr(r.starts_on) },
+      { label: 'Ends', key: 'ends_on', render: (r) => dateStr(r.ends_on) },
       { label: 'Event', key: 'title' },
+      { label: 'Overlaps', key: '_o',
+        sortValue: (r) => touches(r).length,
+        render: (r) => {
+          const hit = touches(r);
+          return hit.length
+            ? hit.slice(0, 2).map((b) => `<span class="pill warn" title="trips moved ${b.change_pct}% here">`
+              + `${esc(MONTH(b.from))} → ${esc(MONTH(b.to))}</span>`).join(' ')
+            : '<span class="ent-off" title="no structural break in the record overlaps this event">no break</span>';
+        } },
       { label: 'Category', key: 'category', render: (r) => pill(r.category || '—') },
       { label: 'Expected effect', key: 'expected_effect', render: (r) => pill(
         String(r.expected_effect || 'unknown').replace(/_/g, ' '),
         r.expected_effect === 'demand_up' ? 'ok' : r.expected_effect === 'demand_down' ? 'warn' : null) },
       { label: 'Confidence', key: 'confidence', num: true, render: (r) => (r.confidence != null ? pct(r.confidence * 100) : '—') },
       { label: 'Why it matters', key: 'summary' },
-    ]));
+    ], { sortable: true, sortId: 'events', defaultSort: { key: 'starts_on', dir: 'desc' } }));
     evP.body.append(el('p', 'cap',
-      'Seasonal and religious dates are derived; news items are classified by an LLM from regional coverage. ' +
-      'Confidence is how strongly the event is expected to move Dubai ride demand, not how certain we are it occurred.'));
+      `Bounded to the record — ${dateStr(evFrom)} to ${dateStr(evTo)} — because an event eighteen months `
+      + 'after the last trip we hold cannot explain anything on this page. '
+      + (evs.length > 40 ? `Showing 40 of ${countOf(evs.length, 'event')}. ` : '')
+      + 'Seasonal and religious dates are derived; news items are classified by an LLM from regional coverage. '
+      + 'Confidence is how strongly the event is expected to move Dubai ride demand, not how certain we are it occurred.'));
   }
 }

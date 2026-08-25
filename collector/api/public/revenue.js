@@ -15,8 +15,9 @@
    thousands of bookings and no money is not an accounting problem, it is a
    collector that needs a credential, and naming it is the point. */
 import { empty, fmt, hbars } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, pct, dayStr } from './ui.js';
-import { q, href } from './data.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, pct,
+  dayStr, dateStr, sourceLabel, countOf, plural } from './ui.js';
+import { q, href, hrefFilter, state } from './data.js';
 
 const BASIS = {
   fares: { label: 'measured', tone: 'ok',
@@ -39,7 +40,26 @@ export async function renderRevenue(root) {
   const d = await q('/api/revenue');
   host.innerHTML = '';
 
-  if (!d.platforms.length) return empty(host, 'No bookings on any channel in this window.');
+  /* A channel with no booking is not the same as a channel that is not there.
+     The endpoint returns only the channels with rows, so a filter that matches
+     nothing produced a phantom row — `uber`, 0 bookings, tips 528 — because
+     the tips query carries no platform predicate. The population this page
+     describes is the channels that actually carry bookings. */
+  const live = d.platforms.filter((r) => (+r.bookings || 0) > 0);
+  if (!live.length) {
+    const box = el('div', 'empty');
+    box.innerHTML = state.platform
+      ? `<b>No booking on ${esc(sourceLabel(state.platform))} in this window</b>`
+        + 'That is a statement about this channel, not about the range: it either has no collector '
+        + 'running or is being refused at the door.'
+      : '<b>No booking on any channel in this window</b>Widen the range above, or check Data sources.';
+    const links = el('p', 'cap');
+    links.innerHTML = `<a class="lnk" href="${href('sources')}">Which collector is failing and why</a>`
+      + (state.platform ? ` · <a class="lnk" href="${hrefFilter('revenue', { platform: '' })}">every channel</a>` : '');
+    box.append(links);
+    host.append(box);
+    return;
+  }
 
   const t = d.totals;
   host.append(kpiRow([
@@ -54,23 +74,56 @@ export async function renderRevenue(root) {
       sub: t.statement_net != null
         ? 'gross minus commission, from the platform statement reports'
         : 'not yet collected for this window — comes from the platform statement reports' },
-    { label: 'Cash collected', value: t.cash != null ? money(t.cash) : '—',
-      sub: 'already in the driver’s hand, owed back to the fleet' },
+    /* Two sources of cash, added, with both named. This tile was `t.cash`
+       alone — Yango's, because Uber's cash_earnings is null — so it read
+       AED 1,505 on a window whose statements report AED 5,754 more. Three
+       pages of this product carry a "cash" figure and no two of them agreed. */
+    { label: 'Cash the platforms report',
+      value: (t.cash != null || t.statement_cash != null)
+        ? money((+t.cash || 0) + (+t.statement_cash || 0)) : '—',
+      html: (t.cash != null || t.statement_cash != null)
+        ? `<a class="ent" href="${href('settlement', 'cash')}">${esc(money((+t.cash || 0) + (+t.statement_cash || 0)))}</a>`
+        : null,
+      sub: [t.cash != null ? `${money(t.cash)} in the payout tree` : null,
+        t.statement_cash != null ? `${money(t.statement_cash)} in the statements` : null]
+        .filter(Boolean).join(' · ')
+        + ' — already in a driver’s hand. Cash in hand lists who holds it.' },
     { label: 'Tips', value: t.tips != null ? money(t.tips) : '—',
       sub: 'never appears in a trip feed — it comes from the payout tree' },
-    { label: 'Bookings with no money', value: fmt(t.dark_bookings),
-      sub: t.dark_pct != null ? `${pct(t.dark_pct, 1)} of the window` : null,
+    /* The basis, not just the count. This tile reads 0 · 0.0% green at 7 and
+       30 days and 234,790 · 99.4% red at 365, and nothing moved in the fleet:
+       `chooseBasis` puts Uber on a payout basis while a payout covers the
+       window and on nothing once the window reaches past the statements. The
+       flip is the finding, so it is on the tile. */
+    { label: 'Bookings with no money value', value: fmt(t.dark_bookings),
+      sub: (t.dark_pct != null ? `${pct(t.dark_pct, 1)} of the window · ` : '')
+        + `${countOf(live.filter((r) => r.basis === 'none').length, 'channel')} of `
+        + `${fmt(live.length)} report no money at all`,
       tone: t.dark_bookings ? 'critical' : 'good' },
   ]));
+  /* Why the tile above can be 0 one moment and 99% the next. */
+  const flipped = live.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout');
+  if (flipped.length) {
+    host.append(el('p', 'cap',
+      `${flipped.map((r) => sourceLabel(r.platform)).join(', ')} `
+      + `${plural(flipped.length, 'carries', 'carry')} no fare per booking and `
+      + `${plural(flipped.length, 'is', 'are')} accounted for by payout instead. A payout covers DAYS, so `
+      + 'widening the range past the statements we hold flips those bookings from accounted to dark in one '
+      + 'step — the "no money value" tile moves by tens of thousands without anything changing in the '
+      + 'fleet. Compare it across two ranges before reading it as a trend.'));
+  }
 
   if (d.caveat) host.append(el('div', 'note err', esc(d.caveat)));
 
   /* ── per channel ─────────────────────────────────────────────────────── */
   const p = panel('What each channel tells us',
     'Two kinds of money, kept apart. "Basis" is which one this row is, and how far it can be trusted.');
-  p.body.append(tableFrom(d.platforms, [
+  p.body.append(tableFrom(live, [
+    /* The channel name carries which channel it is, and the link discarded it
+       — all three names opened the same unfiltered #platforms, whose own
+       caption then invited the reader to click a slice to filter by platform. */
     { label: 'Channel', key: 'platform',
-      render: (r) => `<a class="ent" href="${href('platforms')}">${esc(r.platform)}</a>` },
+      render: (r) => `<a class="ent" href="${hrefFilter('platforms', { platform: r.platform })}">${esc(sourceLabel(r.platform))}</a>` },
     { label: 'Bookings', key: 'bookings', num: true, render: (r) => fmt(r.bookings) },
     { label: 'Report a fare', key: 'priced_bookings', num: true,
       render: (r) => (r.bookings
@@ -79,16 +132,28 @@ export async function renderRevenue(root) {
     { label: 'Fares (gross)', key: 'fares', num: true,
       render: (r) => (r.fares != null ? money(r.fares) : '<span class="dim">none reported</span>') },
     { label: 'Payout (net)', key: 'payouts', num: true,
-      // With the share of the WINDOW it covers. A payout is over days, not over
-      // bookings, and three days of it on a thirty-day window is not the month.
+      /* With the share of the WINDOW it covers, the population it was paid to,
+         and the period it actually spans. A payout is over DAYS, not over
+         bookings: three days of it on a thirty-day window is not the month,
+         and a weekly period straddling the edge reaches past it — the payout
+         column ran to 2026-08-30 on a window ending 08-25, over 217 paid
+         drivers against 83 who drove. */
       render: (r) => (r.payouts == null ? '<span class="dim">not reported</span>'
-        : `${money(r.payouts)}<span class="dim"> · ${r.payout_days || 0} of ${d.window_days} days</span>`) },
+        : `${money(r.payouts)}<span class="dim"> · ${r.payout_days || 0} of ${d.window_days} days`
+          + `${r.payout_drivers != null ? ` · ${fmt(r.payout_drivers)} drivers paid` : ''}`
+          + `${r.first_period ? `<br>${esc(dateStr(r.first_period))} → ${esc(dateStr(r.last_period))}` : ''}</span>`) },
     { label: 'On-trip (net)', key: 'statement_net', num: true,
       /* The statement view of the money, from the platform's own reports.
          Differs from the bank payout by the cash drivers hold plus tips and
-         tolls; a 13% difference in a heavy-cash month is normal, not a bug. */
+         tolls; a 13% difference in a heavy-cash month is normal, not a bug.
+
+         With the coverage it rests on. This column is identical at 7, 30 and
+         365 days for Uber, because the statements we hold span nine days —
+         so widening the window does not widen this figure and nothing said so. */
       render: (r) => (r.statement_net == null ? '<span class="dim">not collected</span>'
-        : `${money(r.statement_net)}<span class="dim"> · cash ${r.statement_cash != null ? money(r.statement_cash) : '—'}</span>`) },
+        : `${money(r.statement_net)}<span class="dim"> · cash ${r.statement_cash != null ? money(r.statement_cash) : '—'}`
+          + `${r.statement_days != null ? ` · ${r.statement_days} of ${d.window_days} days` : ''}`
+          + `${r.statement_drivers != null ? `, ${fmt(r.statement_drivers)} drivers` : ''}</span>`) },
     { label: 'Per km', key: 'revenue_per_km', num: true,
       render: (r) => (r.revenue_per_km != null
         ? `${money(r.revenue_per_km, 'AED', 2)}<span class="dim"> over ${fmt(r.priced_km)} km</span>`
@@ -96,7 +161,7 @@ export async function renderRevenue(root) {
     { label: 'Basis', key: 'basis',
       render: (r) => pill(BASIS[r.basis]?.label || r.basis, BASIS[r.basis]?.tone) },
     { label: 'Why', key: 'basis_note', render: (r) => `<span class="wrap dim">${esc(r.basis_note)}</span>` },
-  ]));
+  ], { sortable: true, sortId: 'chan', defaultSort: { key: 'bookings', dir: 'desc' } }));
   p.body.append(el('p', 'cap',
     'Three views of the same money, never added together. A fare is what the rider was charged. '
     + 'On-trip revenue is gross minus the platform’s commission — what the fleet EARNED, from the '
@@ -108,7 +173,7 @@ export async function renderRevenue(root) {
   host.append(p.panel);
 
   /* ── what is missing, and what would fix it ──────────────────────────── */
-  const missing = d.platforms.filter((r) => r.basis === 'none' || r.basis === 'partial_fares');
+  const missing = live.filter((r) => r.basis === 'none' || r.basis === 'partial_fares');
   if (missing.length) {
     const mp = panel('Channels whose money is not collected',
       'Each of these is a credential or an endpoint away from being measured, not an accounting problem.');
@@ -135,17 +200,39 @@ export async function renderRevenue(root) {
     const cp = panel('The payout, broken down',
       'What the platform actually paid and took back. Tips and tolls never appear in a trip feed at all.');
     if (top.length) {
-      hbars(cp.body, top.map((c) => ({ label: `${c.platform}: ${c.category}`, n: Number(c.amount) })),
-        { valueFmt: (v) => money(v) });
+      /* Negative amounts are drawn as deductions and not as magnitudes. The
+         AED −10,248 cash clawback rendered an 886px bar beside the AED +33,905
+         earnings bar at 899px, because a negative width is an invalid CSS
+         declaration and the fill then filled its whole track. */
+      hbars(cp.body, top.map((c) => ({ label: `${sourceLabel(c.platform)}: ${String(c.category).replace(/_/g, ' ')}`,
+        n: Number(c.amount) })), {
+        valueFmt: (v) => money(v),
+        legend: [['--b400', 'paid to the fleet'], ['--s2', 'taken back — cash already collected, fees']] });
+      const net = top.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+      cp.body.append(el('p', 'cap',
+        `${countOf(top.length, 'top-level component')} netting to ${money(net)}. `
+        + 'Everything in the table below is INSIDE one of these and is not added again.'));
     }
     if (kids.length) {
-      cp.body.append(tableFrom(kids.slice(0, 30), [
-        { label: 'Channel', key: 'platform' },
-        { label: 'Within', key: 'parent' },
-        { label: 'Component', key: 'category' },
-        { label: 'Amount', key: 'amount', num: true, render: (c) => money(c.amount, 'AED', 2) },
+      const rootAmt = new Map(top.map((c) => [`${c.platform}|${c.category}`, Number(c.amount) || 0]));
+      cp.body.append(tableFrom(kids.slice(0, 30).map((c) => ({ ...c,
+        _share: rootAmt.get(`${c.platform}|${c.parent}`)
+          ? (Number(c.amount) / rootAmt.get(`${c.platform}|${c.parent}`)) * 100 : null })), [
+        { label: 'Channel', key: 'platform', render: (c) => esc(sourceLabel(c.platform)) },
+        { label: 'Within', key: 'parent', render: (c) => esc(String(c.parent).replace(/_/g, ' ')) },
+        { label: 'Component', key: 'category', render: (c) => esc(String(c.category).replace(/_/g, ' ')) },
+        { label: 'Amount', key: 'amount', num: true,
+          render: (c) => `${Number(c.amount) < 0 ? '−' : ''}${money(Math.abs(Number(c.amount)), 'AED', 2)}` },
+        { label: 'Share of its parent', key: '_share', num: true,
+          render: (c) => (c._share == null
+            ? '<span class="ent-off" title="the parent component was not returned for this window">—</span>'
+            : pct(c._share, 1)) },
         { label: 'Drivers', key: 'drivers', num: true },
-      ], { compact: true }));
+      ], { compact: true, sortable: true, sortId: 'payoutkids' }));
+      if (kids.length > 30) {
+        cp.body.append(el('p', 'cap',
+          `Showing 30 of ${countOf(kids.length, 'nested component')}, largest first.`));
+      }
     }
     host.append(cp.panel);
   } else {
@@ -153,6 +240,11 @@ export async function renderRevenue(root) {
       + 'tolls and cash clawbacks appear — the trip feeds carry none of them.'));
   }
 
+  /* With the year. At 365 days this footer read "Window Aug 25 – Aug 25" for a
+     range covering 2025-08-25 to 2026-08-25: two dates a year apart printed
+     identically, on the line whose only job is to say which period the page is
+     about. */
   host.append(el('p', 'cap',
-    `Window ${dayStr(`${d.window[0]}T12:00:00`)} – ${dayStr(`${d.window[1]}T12:00:00`)}, Dubai days.`));
+    `Window ${dateStr(`${d.window[0]}T12:00:00`)} – ${dateStr(`${d.window[1]}T12:00:00`)}, `
+    + `${countOf(d.window_days, 'Dubai day')} inclusive.`));
 }

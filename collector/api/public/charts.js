@@ -50,11 +50,17 @@ function ticks(max, n = 3) {
    the subject — the day page draws the fortnight around a date and the date
    itself was indistinguishable from its neighbours, which is the one thing the
    chart is there to show. */
-export function barChart(host, data, { x, y, label, color = '--b400', colorFor, onClick, valueFmt = (v) => fmt(v) } = {}) {
+/* `lo`/`hi` name per-datum interval keys. A forecast bar drawn solid is a
+   point estimate presented as a fact: #forecast's caption promised hatching
+   and a range, and drew neither, so "223,400 next year" appeared without the
+   126,200–320,500 it actually sits inside. Where a datum carries both, a
+   whisker is drawn through the bar and the tooltip states the range. */
+export function barChart(host, data, { x, y, label, color = '--b400', colorFor, onClick,
+  valueFmt = (v) => fmt(v), lo = null, hi = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
-  const raw = Math.max(...data.map((d) => +d[y] || 0)) || 1;
+  const raw = Math.max(...data.map((d) => Math.max(+d[y] || 0, hi ? +d[hi] || 0 : 0))) || 1;
   const marks = ticks(raw <= 3 ? raw : raw * 1.12);
   const max = marks[marks.length - 1] || 1;
   const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length, bw = Math.min(step * 0.62, 44);
@@ -68,8 +74,19 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
     const h = ih * (+d[y]) / max, bx = pl + step * i + (step - bw) / 2, by = pt + ih - h;
     const fill = (colorFor && colorFor(d, i)) || color;
     const r = mk('rect', { x: bx, y: by, width: bw, height: Math.max(h, 1), rx: 3, fill: `var(${fill})`, 'data-rise': '' });
-    interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}`, onClick && (() => onClick(d)));
+    const hasRange = lo && hi && d[lo] != null && d[hi] != null;
+    interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}`
+      + (hasRange ? `<br>somewhere between ${valueFmt(d[lo])} and ${valueFmt(d[hi])}` : ''),
+      onClick && (() => onClick(d)));
     svg.append(r);
+    if (hasRange) {
+      const yl = pt + ih - ih * (+d[lo]) / max, yh = pt + ih - ih * (+d[hi]) / max;
+      const cxb = bx + bw / 2, cap = Math.min(bw * 0.45, 9);
+      svg.append(
+        mk('line', { x1: cxb, x2: cxb, y1: yh, y2: yl, stroke: 'var(--ink-2)', 'stroke-width': 1.4, opacity: .75 }),
+        mk('line', { x1: cxb - cap, x2: cxb + cap, y1: yh, y2: yh, stroke: 'var(--ink-2)', 'stroke-width': 1.4, opacity: .75 }),
+        mk('line', { x1: cxb - cap, x2: cxb + cap, y1: yl, y2: yl, stroke: 'var(--ink-2)', 'stroke-width': 1.4, opacity: .75 }));
+    }
     // Past ~16 bars the labels used to be dropped entirely, so the default
     // 30-day range showed a chart with no dates at all under a caption inviting
     // you to click a specific day. Thin them instead, the way areaChart does.
@@ -157,9 +174,16 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   const partial = data.filter((d) => !d[gapKey] && d.sources_silent > 0).length;
   if (gaps || partial) {
     const c = document.createElement('p'); c.className = 'cap';
+    /* "N more" only reads as "more" when something came before it. With no
+       uncollected days at all — which is every window on this fleet — the
+       caption opened with a dangling "45 more had at least one source silent",
+       more than what. */
     c.innerHTML = [
       gaps ? `<b>${fmt(gaps)} of ${fmt(data.length)} days: ${esc(gapLabel)}</b> — drawn as a hatched band, not as zero.` : '',
-      partial ? `${fmt(partial)} more had at least one source silent, so their bars are understated.` : '',
+      partial
+        ? `${gaps ? `${fmt(partial)} more` : `${fmt(partial)} of ${fmt(data.length)} days`} had at least `
+          + 'one source silent, so their bars are understated.'
+        : '',
     ].filter(Boolean).join(' ');
     host.append(c);
   }
@@ -175,17 +199,30 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 30;
-  const vals = data.map((d) => +d[y]);
-  const max = fixedMax || Math.max(...vals) * 1.14 || 1;
+  const vals = data.map((d) => +d[y] || 0);
+  const peak = Math.max(...vals);
+  /* The same integer-tick treatment barChart already had. Four evenly-spaced
+     ticks over a maximum of 1 round onto two values — a property with one
+     booking drew a y-axis reading "0 / 0 / 1 / 1", and an all-zero series drew
+     "AED 0 / AED 0 / AED 1 / AED 1" beneath a line that never leaves zero.
+     A fixed max is honoured exactly, because it states what the measure's
+     ceiling IS (a share cannot exceed 100%) and headroom above it would draw a
+     gridline at a value the series cannot take. */
+  const marks = fixedMax ? [0, 1, 2, 3].map((i) => (fixedMax * i) / 3)
+    : peak <= 0 ? [0, 1]
+      : ticks(peak <= 3 ? peak : peak * 1.14);
+  const max = marks[marks.length - 1] || 1;
   const iw = W - pl - pr, ih = H - pt - pb;
   const X = (i) => pl + (data.length === 1 ? iw / 2 : iw * i / (data.length - 1));
   const Y = (v) => pt + ih - ih * v / max;
   const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
-  for (let i = 0; i <= 3; i++) {
-    const gy = pt + ih - ih * i / 3;
+  // An all-zero series gets ONE line at the baseline: repeating "0" four times
+  // up the side asserts a scale that has no values on it.
+  (peak <= 0 && !fixedMax ? [0] : marks).forEach((v) => {
+    const gy = pt + ih - ih * (v / max);
     svg.append(mk('line', { class: 'gl', x1: pl, y1: gy, x2: W - pr, y2: gy }),
-      txt(pl - 7, gy + 3, valueFmt(Math.round(max * i / 3)), 'axis', 'end'));
-  }
+      txt(pl - 7, gy + 3, valueFmt(v >= 10 ? Math.round(v) : +v.toFixed(1)), 'axis', 'end'));
+  });
   const id = 'g' + Math.random().toString(36).slice(2, 7);
   const defs = mk('defs'); const lg = mk('linearGradient', { id, x1: 0, x2: 0, y1: 0, y2: 1 });
   lg.append(mk('stop', { offset: 0, 'stop-color': `var(${color})`, 'stop-opacity': .30 }),
@@ -201,13 +238,24 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
     interactive(c, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>`, onClick && (() => onClick(d)));
     svg.append(c);
   });
-  const ticks = data.length <= 8 ? data.map((_, i) => i) : [0, Math.floor(data.length / 3), Math.floor(2 * data.length / 3), data.length - 1];
-  ticks.forEach((i) => svg.append(txt(X(i), H - 8, shortLabel(data[i][x]), 'axis', 'middle')));
+  // Named `xTicks`, not `ticks` — a local `const ticks` here shadows the
+  // module-level helper of the same name across the WHOLE function scope, so
+  // the axis code above would throw before its first gridline.
+  const xTicks = data.length <= 8 ? data.map((_, i) => i)
+    : [0, Math.floor(data.length / 3), Math.floor(2 * data.length / 3), data.length - 1];
+  xTicks.forEach((i) => svg.append(txt(X(i), H - 8, shortLabel(data[i][x]), 'axis', 'middle')));
   host.append(svg);
 }
 
 /* ── donut (composition, few slices) ── */
-export function donut(host, data, { label = 'label', value = 'n', onClick, max = 8 } = {}) {
+/* `clickable` is a per-slice predicate. Every slice used to take the pointer
+   cursor whenever the caller passed an onClick, including the ones whose
+   handler had no destination for that label — on #roster three of six slices
+   navigated and three, covering 51% of the ring, did nothing while inviting
+   the click. A slice with nowhere to go keeps the hover tooltip and loses the
+   pointer. */
+export function donut(host, data, { label = 'label', value = 'n', onClick, max = 8,
+  clickable = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   /* The tail is FOLDED, never dropped. This used to render the first eight
@@ -232,7 +280,7 @@ export function donut(host, data, { label = 'label', value = 'n', onClick, max =
     const path = mk('path', { d: p, fill: `var(${CAT[i % CAT.length]})`, 'data-fade': '' });
     interactive(path, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(frac * 100).toFixed(1)}%)${
       d._tail ? `<br><span style="opacity:.8">${esc(d._tail.slice(0, 10).join(' · '))}</span>` : ''}`,
-    onClick && !d._tail && (() => onClick(d)));
+    onClick && !d._tail && (!clickable || clickable(d)) && (() => onClick(d)));
     svg.append(path); a0 = a1;
   });
   svg.append(txt(cx, cy - 2, fmt(tot), 'vlab', 'middle', 'font-size:19px;font-weight:600;fill:var(--ink)'),
@@ -245,48 +293,100 @@ export function donut(host, data, { label = 'label', value = 'n', onClick, max =
 }
 
 /* ── horizontal bars (ranking) ── */
-export function hbars(host, data, { label = 'label', value = 'n', color, seq = false, onClick, valueFmt = (v) => fmt(v) } = {}) {
+/* Signed, because these series carry deductions.
+   ─────────────────────────────────────────────────────────────────────────
+   The width was `value / max * 100` with `max` the largest SIGNED value, so a
+   negative amount emitted `width:-88.6%` — CSS discards an invalid declaration
+   and the `.fill` then filled its whole track. On #revenue the AED −10,248
+   cash clawback drew 886px of bar beside the AED +33,905 earnings bar at
+   899px: the biggest deduction in the payout rendered as the second-largest
+   credit. Scaling against max(|value|) and colouring the negatives separately
+   makes the same numbers read as what they are. `signed:false` keeps the old
+   magnitude behaviour for series that genuinely cannot go below zero. */
+export function hbars(host, data, { label = 'label', value = 'n', color, seq = false, onClick,
+  valueFmt = (v) => fmt(v), signed = true, negColor = '--s2', legend = null,
+  // A row may opt out of navigation individually — see `donut`, same reason.
+  clickable = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
-  const max = Math.max(...data.map((d) => +d[value])) || 1;
+  const vals = data.map((d) => +d[value] || 0);
+  const anyNeg = signed && vals.some((v) => v < 0);
+  const max = Math.max(...vals.map((v) => (anyNeg ? Math.abs(v) : v)), 0) || 1;
   const wrap = document.createElement('div'); wrap.className = 'hbars';
   data.forEach((d, i) => {
+    const v = +d[value] || 0;
+    const neg = anyNeg && v < 0;
     const row = document.createElement('div'); row.className = 'hb';
-    const c = color ? `var(${color})` : seq ? `var(${SEQ[Math.max(6 - i, 2)]})` : `var(${CAT[i % CAT.length]})`;
+    const c = neg ? `var(${negColor})`
+      : color ? `var(${color})` : seq ? `var(${SEQ[Math.max(6 - i, 2)]})` : `var(${CAT[i % CAT.length]})`;
+    const w = Math.min(100, Math.abs(v) / max * 100);
     row.innerHTML = `<div class="k" title="${esc(d[label])}">${esc(d[label])}</div>
-      <div class="track"><div class="fill" style="width:${(+d[value] / max * 100).toFixed(1)}%;background:${c}"></div></div>
-      <div class="v num">${valueFmt(d[value])}</div>`;
-    interactive(row, `${esc(d[label])} — <b>${valueFmt(d[value])}</b>`, onClick && (() => onClick(d)));
+      <div class="track"><div class="fill" style="width:${w.toFixed(1)}%;background:${c}"></div></div>
+      <div class="v num">${neg ? '−' : ''}${valueFmt(Math.abs(v))}</div>`;
+    const go = onClick && (!clickable || clickable(d)) ? () => onClick(d) : null;
+    interactive(row, `${esc(d[label])} — <b>${neg ? '−' : ''}${valueFmt(Math.abs(v))}</b>`, go);
     wrap.append(row);
   });
   host.append(wrap);
+  if (anyNeg || legend) {
+    const leg = document.createElement('div'); leg.className = 'legend';
+    leg.innerHTML = (legend || [['--b400', 'added'], [negColor, 'deducted']])
+      .map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${esc(t)}</span>`).join('');
+    host.append(leg);
+  }
 }
 
 /* ── heatmap (day-of-week × hour) ── */
-export function heatmap(host, rows, { onClick } = {}) {
+/* `unit` and `valueFmt`, because this grid is drawn twice with two different
+   measures. #capacity plots DRIVERS NEEDED and every tooltip still read
+   "— 28.6 trips", contradicting the caption directly beneath it. And the scale
+   is stated: the shading is normalised to each window's own maximum, so the
+   same cell darkens when the range narrows, and without a legend the reader
+   has no way to know the colours are relative rather than absolute. Zero and
+   never-seen were shaded identically; they are now a distinct empty cell and
+   a legend entry of their own. */
+export function heatmap(host, rows, { onClick, unit = 'trips',
+  valueFmt = (v) => fmt(v), legend = true } = {}) {
   host.innerHTML = '';
   if (!rows.length) return empty(host);
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const grid = {}; let max = 0;
-  rows.forEach((r) => { grid[`${r.dow}-${r.h}`] = r.trips; max = Math.max(max, r.trips); });
+  rows.forEach((r) => { grid[`${r.dow}-${r.h}`] = r.trips; max = Math.max(max, +r.trips || 0); });
   const W = 760, cell = 26, lw = 40, H = 7 * cell + 26;
   const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
   for (let d = 0; d < 7; d++) {
     svg.append(txt(lw - 8, d * cell + 17, DOW[d], 'axis', 'end'));
     for (let h = 0; h < 24; h++) {
-      const v = grid[`${d}-${h}`] || 0, w = (W - lw - 8) / 24;
-      const idx = v === 0 ? -1 : Math.min(6, Math.floor(v / max * 6.99));
+      const raw = grid[`${d}-${h}`];
+      const seen = raw != null;
+      const v = +raw || 0, w = (W - lw - 8) / 24;
+      const idx = v === 0 ? -1 : Math.min(6, Math.floor(v / (max || 1) * 6.99));
       const rect = mk('rect', {
         x: lw + h * w, y: d * cell + 3, width: w - 2, height: cell - 4, rx: 2,
         fill: idx < 0 ? 'var(--surface-2)' : `var(${SEQ[idx]})`,
+        ...(idx < 0 ? { stroke: 'var(--rule)', 'stroke-width': 1 } : {}),
       });
-      interactive(rect, `${DOW[d]} ${String(h).padStart(2, '0')}:00 — <b>${fmt(v)}</b> trips`,
+      interactive(rect, `${DOW[d]} ${String(h).padStart(2, '0')}:00 — `
+        + (seen ? `<b>${valueFmt(v)}</b> ${esc(unit)}` : `<b>nothing recorded</b> in this hour`),
         onClick && (() => onClick({ dow: d, h, trips: v })));
       svg.append(rect);
     }
   }
   [0, 4, 8, 12, 16, 20, 23].forEach((h) => svg.append(txt(lw + h * ((W - lw - 8) / 24) + 6, H - 6, String(h).padStart(2, '0'), 'axis', 'middle')));
   host.append(svg);
+  if (legend) {
+    const buckets = [0, 1, 2, 3, 4, 5, 6].map((i) => {
+      const lo = (max * i) / 7, hi = (max * (i + 1)) / 7;
+      return `<span title="${valueFmt(lo)} – ${valueFmt(hi)} ${esc(unit)}">`
+        + `<i class="sw" style="background:var(${SEQ[i]})"></i>${i === 6 ? valueFmt(max) : ''}</span>`;
+    }).join('');
+    const leg = document.createElement('div'); leg.className = 'legend';
+    leg.innerHTML = `<span><i class="sw" style="background:var(--surface-2);border:1px solid var(--rule)"></i>none</span>`
+      + `<span class="dim">0</span>${buckets}`
+      + `<span class="dim">${esc(unit)} — shaded against this window's own busiest hour `
+      + `(${valueFmt(max)}), so the colours are relative and not comparable between ranges.</span>`;
+    host.append(leg);
+  }
 }
 
 /* ── scatter (two measures per entity) ── */
@@ -356,16 +456,29 @@ function shortLabel(v) {
   // rendered in a western zone is the previous day on the axis.
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
     const d = new Date(s);
-    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: TZ });
+    if (Number.isNaN(d.getTime())) return s;
+    const day = d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: TZ });
+    /* An axis label carries its year when it is not this year. Over a
+       twelve-month window the axis read "Aug 25 … Aug 25" — the first and last
+       tick identical, a year apart — which makes a trend chart unreadable in
+       the one range where the trend is the point. Apostrophised rather than
+       spelled out, because a 12-tick axis has about ten characters per label. */
+    const y = d.toLocaleDateString('en-CA', { year: 'numeric', timeZone: TZ });
+    const now = new Date().toLocaleDateString('en-CA', { year: 'numeric', timeZone: TZ });
+    return y === now ? day : `${day} ’${y.slice(2)}`;
   }
   return s.length > 11 ? s.slice(0, 10) + '…' : s;
 }
-export function empty(host, msg = 'No data for this range yet') {
+/* `msg` is TEXT. It was interpolated into innerHTML, so #slot/9/99 printed its
+   own syntax help with the syntax removed — "A slot address is #slot//." —
+   because `<weekday 0-6>` and `<hour 0-23>` parsed as unknown elements. Any
+   caller that genuinely needs markup passes `html: true` and owns the escaping. */
+export function empty(host, msg = 'No data for this range yet', { html = false } = {}) {
   // Callers reach here after loading() has filled the host with a skeleton.
   // Appending without clearing left a forever-shimmering "Loading…" bar sitting
   // on top of the empty state.
   host.innerHTML = '';
   const d = document.createElement('div'); d.className = 'empty';
-  d.innerHTML = `<b>Nothing to show</b>${msg}`;
+  d.innerHTML = `<b>Nothing to show</b>${html ? msg : esc(msg)}`;
   host.append(d); return d;
 }

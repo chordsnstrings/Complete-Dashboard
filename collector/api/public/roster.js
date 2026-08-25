@@ -18,7 +18,7 @@
 
 import { donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
-  dayStr, dtStr, money, pct } from './ui.js';
+  dayStr, dateStr, dtStr, money, pct, sourceLabel, countOf, plural } from './ui.js';
 import { q, href, state } from './data.js';
 
 export const ROSTER_TABS = [
@@ -72,9 +72,16 @@ export async function renderRoster(root) {
       ? { label: 'Output not observed', value: fmt(t.activity_unknown),
           sub: 'we hold no trips for their platform', tone: 'warn' }
       : null,
-    { label: 'Holding a car while stopped', value: fmt(t.holding_vehicle_while_blocked),
+    /* The denominator for the tile beside it. "Holding a car while stopped 31"
+       is a numerator with no base — 31 of how many stopped people? — and
+       `blocked` was in the same totals object and shown nowhere. */
+    { label: 'Stopped everywhere', value: fmt(t.blocked),
+      tone: t.blocked ? 'critical' : 'good',
+      sub: 'not permitted to work on any platform they hold' },
+    { label: 'Holding a car while stopped',
+      value: t.blocked ? `${fmt(t.holding_vehicle_while_blocked)} of ${fmt(t.blocked)}` : fmt(t.holding_vehicle_while_blocked),
       tone: t.holding_vehicle_while_blocked ? 'critical' : null,
-      sub: 'earns nothing, still costs' },
+      sub: 'earns nothing, still depreciates, insures and parks' },
   ]));
 
   if (!d.people.length) {
@@ -96,11 +103,21 @@ export async function renderRoster(root) {
     const { panel: p1, body: b1 } = panel('Everyone, by what they are doing', null);
     const counts = Object.keys(CAT).map((k) => ({ label: CAT[k].label, n: d.people.filter((x) => x.category === k).length }))
       .filter((x) => x.n);
-    donut(b1, counts, { onClick: (x) => {
-      const k = Object.keys(CAT).find((c) => CAT[c].label === x.label);
-      const to = { in_pipeline: 'pipeline', never_started: 'pipeline', idle_this_window: 'idle', blocked: 'blocked' }[k];
-      if (to) location.hash = href('roster', to);
-    } });
+    /* Every slice has a destination now. Three of six navigated and three —
+       Working, Output not observed and Standing not reported, 51% of the ring —
+       took the pointer cursor and did nothing. `unclassified` and
+       `activity_unknown` are already in the pipeline tab's filter; `working`
+       goes to the directory filtered to the people who drove. */
+    const SLICE_TO = { in_pipeline: ['roster', 'pipeline'], never_started: ['roster', 'pipeline'],
+      unclassified: ['roster', 'pipeline'], activity_unknown: ['roster', 'pipeline'],
+      idle_this_window: ['roster', 'idle'], blocked: ['roster', 'blocked'],
+      working: ['drivers'] };
+    const keyOf = (label) => Object.keys(CAT).find((c) => CAT[c].label === label);
+    donut(b1, counts, {
+      clickable: (x) => !!SLICE_TO[keyOf(x.label)],
+      onClick: (x) => { const to = SLICE_TO[keyOf(x.label)]; if (to) location.hash = href(...to); },
+    });
+    b1.append(el('p', 'cap', 'Every slice opens the people behind it.'));
     g.append(p1);
     const { panel: p2, body: b2 } = panel('How many platforms each person works',
       'One person with three platform accounts is one person. The fold is by name, which is the only key that spans providers.');
@@ -118,6 +135,9 @@ export async function renderRoster(root) {
     return;
   }
 
+  const anyKm = shown.some((r) => r.km != null);
+  const anyScore = shown.some((r) => r.score != null);
+  const anyObs = shown.some((r) => r.observed_at);
   host.append(tableFrom(shown, [
     /* The roster exists to find the people who are not earning. A row you
        cannot open is a person you cannot look into. */
@@ -126,35 +146,81 @@ export async function renderRoster(root) {
     { label: 'Standing', key: 'category',
       render: (r) => pill(CAT[r.category]?.label || r.category, CAT[r.category]?.tone) },
     { label: 'Platforms', key: 'platforms',
-      render: (r) => `${(r.platforms || []).join(', ')}${r.accounts > (r.platforms || []).length
+      render: (r) => `${(r.platforms || []).map(sourceLabel).join(', ')}${r.accounts > (r.platforms || []).length
         ? ` <small class="dim">${r.accounts} accounts</small>` : ''}` },
     { label: 'Reported as', key: 'states', render: (r) => esc((r.states || []).join(', ')) },
     { label: 'Vehicle', key: 'plates',
       render: (r) => ((r.plates || []).length
         ? (r.plates || []).slice(0, 2).map((p2) => entity('vehicle', p2, p2)).join(' ')
-        : '<span class="ent-off">none attached</span>') },
+        : '<span class="ent-off" title="no custody record attaches a vehicle to this person">none attached</span>') },
     { label: 'Trips this window', key: 'trips', num: true },
-    { label: 'Fares', key: 'revenue', num: true, render: (r) => money(r.revenue) },
-    // Zero and unobserved are different numbers and must not share a cell.
+    { label: 'Completed', key: 'completed', num: true,
+      render: (r) => (r.completed == null
+        ? '<span class="ent-off" title="no platform of theirs reports an outcome">—</span>'
+        : fmt(r.completed)) },
+    ...(anyKm ? [{ label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) }] : []),
+    { label: 'Fares', key: 'revenue', num: true,
+      render: (r) => (r.revenue ? money(r.revenue)
+        : '<span class="ent-off" title="no booking of theirs reports a fare — Uber’s export has no fare column">—</span>') },
+    /* "not observed" is reserved for a genuinely absent value. This printed it
+       whenever `activity_known` was false — and sixteen people here have a
+       lifetime count in the same payload, so the cell read "TRIPS EVER: not
+       observed" beside "LAST DROVE: Mar 17" with 2,098 in the row. The Last
+       drove column already did this correctly. */
     { label: 'Trips ever', key: 'lifetime_trips', num: true,
-      render: (r) => (r.activity_known ? fmt(r.lifetime_trips || 0)
-        : '<span class="ent-off">not observed</span>') },
+      render: (r) => (r.lifetime_trips != null ? fmt(r.lifetime_trips)
+        : '<span class="ent-off" title="we hold no trip history for any platform this person is on">not observed</span>') },
+    { label: 'First drove', key: 'first_trip',
+      render: (r) => (r.first_trip ? dateStr(r.first_trip)
+        : (r.lifetime_trips ? '<span class="ent-off">not recorded</span>' : '<span class="ent-off">never</span>')) },
     { label: 'Last drove', key: 'last_ever',
+      sortValue: (r) => (r.last_ever ? Date.parse(r.last_ever) : null),
       render: (r) => (r.last_ever
-        ? `${dayStr(r.last_ever)} <small class="dim">${fmt(r.days_since_last_trip)}d</small>`
-        : r.activity_known ? '<span class="ent-off">never</span>'
-          : '<span class="ent-off">not observed</span>') },
-    { label: 'Score', key: 'score', num: true, render: (r) => (r.score == null ? '—' : fmt(r.score)) },
+        ? `${dateStr(r.last_ever)} <small class="dim">${fmt(r.days_since_last_trip)}d</small>`
+        : r.lifetime_trips ? '<span class="ent-off">not recorded</span>'
+          : '<span class="ent-off">never</span>') },
+    /* Named for what it is. A bare "Score" column that is Bolt's rating and
+       null for 211 of 278 people reads as a fleet score nobody has. */
+    ...(anyScore ? [{ label: 'Bolt score', key: 'score', num: true,
+      render: (r) => (r.score == null
+        ? '<span class="ent-off" title="only Bolt publishes a driver score, and only for its own roster">—</span>'
+        : fmt(r.score)) }] : []),
+    ...(anyObs ? [{ label: 'Roster seen', key: 'observed_at',
+      sortValue: (r) => (r.observed_at ? Date.parse(r.observed_at) : null),
+      render: (r) => (r.observed_at
+        ? `${dateStr(r.observed_at)}<span class="dim" title="a roster nobody has refreshed describes the past"> ${
+          fmt(Math.floor((Date.now() - Date.parse(r.observed_at)) / 864e5))}d ago</span>`
+        : '<span class="ent-off">not recorded</span>') }] : []),
     { label: 'Reason given', key: 'reason',
-      render: (r) => (r.reason ? esc(String(r.reason).slice(0, 90)) : '—') },
-  ]));
+      render: (r) => (r.reason
+        ? `<span class="wrap" title="${esc(r.reason)}">${esc(String(r.reason).slice(0, 90))}${
+          String(r.reason).length > 90 ? '…' : ''}</span>`
+        : '—') },
+  ], { sortable: true, sortId: 'roster', defaultSort: { key: 'trips', dir: 'desc' } }));
 
   if (tab === 'blocked') {
     const holding = shown.filter((x) => x.holding_vehicle_while_blocked);
     if (holding.length) {
-      host.append(note(`${fmt(holding.length)} of these still have a vehicle attached: `
-        + `${holding.flatMap((x) => x.plates || []).slice(0, 8).join(', ')}. A car assigned to somebody `
-        + 'who is not allowed to drive it earns nothing and still depreciates, insures and parks.'));
+      /* One row per CAR, with how many stopped people hold it. The note listed
+         plates as plain text and printed duplicates — L59841 appeared twice,
+         which is two deactivated drivers on one vehicle and reads as a typo —
+         then truncated at eight of thirty-one with no count. And every plate
+         above this note is a link while these were not. */
+      const perPlate = new Map();
+      holding.forEach((x) => (x.plates || []).forEach((p2) => {
+        perPlate.set(p2, (perPlate.get(p2) || 0) + 1);
+      }));
+      const plates = [...perPlate.entries()].sort((a, b) => b[1] - a[1]);
+      const n = el('div', 'note');
+      n.innerHTML = `${countOf(holding.length, 'stopped driver')} still `
+        + `${plural(holding.length, 'has', 'have')} a vehicle attached, across `
+        + `${countOf(plates.length, 'car')}: `
+        + plates.slice(0, 12).map(([p2, k]) => entity('vehicle', p2, p2)
+          + (k > 1 ? `<span class="dim" title="${k} stopped drivers hold this car"> ×${k}</span>` : '')).join(', ')
+        + (plates.length > 12 ? ` <span class="dim">and ${fmt(plates.length - 12)} more</span>` : '')
+        + '. A car assigned to somebody who is not allowed to drive it earns nothing and still '
+        + 'depreciates, insures and parks. A ×2 is two stopped drivers on one vehicle, not a duplicate.';
+      host.append(n);
     }
   }
   if (tab === 'idle') {

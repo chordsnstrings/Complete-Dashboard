@@ -21,7 +21,10 @@
     <nav id="nav"></nav>
     <div class="side-foot">
       <button id="themeBtn" title="Toggle theme">◐ theme</button>
-      <div id="freshness" class="fresh">—</div>
+      <!-- An address, not a paragraph. This block is where a reader learns a
+           collector is behind, and the page that says which one and why was one
+           click away with no way to take it. -->
+      <a id="freshness" class="fresh" href="#sources" title="Collector health, coverage and history depth">—</a>
     </div>
   </aside>
 
@@ -33,10 +36,15 @@
         <p id="viewSub" class="sub">What every vehicle and every driver earned per day worked, per km and per booking</p>
       </div>
       <div class="filters" id="filters">
+        <!-- 180 is here because the router accepts it (api/public/data.js) and
+             the repo's own smoke list links to it. Without the option a
+             ?days=180 address left the control with selectedIndex -1 — blank —
+             while the page genuinely used six months. -->
         <select id="fRange" title="Date range">
           <option value="7">Last 7 days</option>
           <option value="30" selected>Last 30 days</option>
           <option value="90">Last 90 days</option>
+          <option value="180">Last 6 months</option>
           <option value="365">Last 12 months</option>
         </select>
         <select id="fPlatform" title="Platform">

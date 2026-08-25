@@ -24,13 +24,144 @@ export function panel(title, cap) {
 }
 export const loading = (host) => { host.innerHTML = '<div class="skel">Loading…</div>'; };
 
-export function tableFrom(rows, cols, { compact = false } = {}) {
+/* ── ranked tables you can actually rank ──────────────────────────────────
+   Every table in this product is ordered by whatever the SQL chose, and the
+   column somebody wants to rank by is usually a different one: the largest
+   known cash holder sat 38th on #settlement/cash behind thirty-seven rows
+   reading "—", and the licence table opened on 77 placeholder dates with no
+   way to get past them.
+
+   `sortable: true` makes each header a button. Three things make it correct
+   rather than merely clickable:
+
+     - Postgres sends `numeric` over JSON as a STRING, so a `num` column is
+       coerced with Number() before comparing. Sorting "9" against "10" as text
+       puts 9 last.
+     - Nulls go last in BOTH directions. A dash is an absence, not a small
+       value, and floating them to the top of a descending sort buries the
+       answer under rows that have none.
+     - The sort is part of the ADDRESS. This product replaced its modals with
+       pages so a finding could be sent to somebody; a table sorted into a
+       finding and not linkable would reintroduce the same problem one layer
+       down. Written with replaceState, so re-sorting does not re-fetch. */
+const sortVal = (r, c) => {
+  if (c.sortValue) return c.sortValue(r);
+  const v = r[c.key];
+  if (v == null || v === '') return null;
+  if (c.num) { const n = Number(v); return Number.isFinite(n) ? n : null; }
+  return String(v).toLowerCase();
+};
+
+function readSorts() {
+  const h = location.hash.slice(1);
+  const qi = h.indexOf('?');
+  if (qi < 0) return new Map();
+  const out = new Map();
+  for (const raw of new URLSearchParams(h.slice(qi + 1)).getAll('sort')) {
+    const [id, key, dir] = String(raw).split('.');
+    if (id && key) out.set(id, { key, dir: dir === 'asc' ? 'asc' : 'desc' });
+  }
+  return out;
+}
+
+function writeSort(id, key, dir) {
+  const h = location.hash.slice(1);
+  const qi = h.indexOf('?');
+  const path = qi >= 0 ? h.slice(0, qi) : h;
+  const p = new URLSearchParams(qi >= 0 ? h.slice(qi + 1) : '');
+  const keep = p.getAll('sort').filter((s) => String(s).split('.')[0] !== id);
+  p.delete('sort');
+  keep.forEach((s) => p.append('sort', s));
+  if (key) p.append('sort', `${id}.${key}.${dir}`);
+  const qs = p.toString();
+  // replaceState, not assignment: a hashchange would re-render the whole view
+  // and re-issue every request on the page to re-order rows already in the DOM.
+  try { history.replaceState(null, '', `#${path}${qs ? '?' + qs : ''}`); }
+  catch { /* a sandboxed frame refuses; the sort still applies on screen */ }
+}
+
+export function tableFrom(rows, cols, { compact = false, sortable = false,
+  sortId = 't', defaultSort = null, capped = null, onRow = null } = {}) {
   if (!rows.length) { const d = el('div'); empty(d); return d; }
   const wrap = el('div', 'tscroll');
   const t = el('table', compact ? 'compact' : null);
-  t.innerHTML = `<thead><tr>${cols.map((c) => `<th class="${c.num ? 'num' : ''}">${esc(c.label)}</th>`).join('')}</tr></thead>
-    <tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(r) : esc(r[c.key] ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody>`;
-  wrap.append(t); return wrap;
+  const byKey = (k) => cols.find((c) => c.key === k);
+
+  let active = sortable ? (readSorts().get(sortId) || defaultSort) : null;
+  if (active && !byKey(active.key)) active = defaultSort && byKey(defaultSort.key) ? defaultSort : null;
+
+  const order = (list) => {
+    if (!active) return list;
+    const c = byKey(active.key);
+    if (!c) return list;
+    const sign = active.dir === 'asc' ? 1 : -1;
+    return [...list].sort((a, b) => {
+      const x = sortVal(a, c), y = sortVal(b, c);
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;                 // absences last, both directions
+      if (y == null) return -1;
+      if (x === y) return 0;
+      return x > y ? sign : -sign;
+    });
+  };
+
+  const head = () => `<thead><tr>${cols.map((c) => {
+    const on = active && active.key === c.key;
+    const aria = on ? (active.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+    const cls = `${c.num ? 'num' : ''}${sortable && c.key ? ' sortable' : ''}${on ? ' sorted' : ''}`.trim();
+    const mark = on ? `<i class="sarr">${active.dir === 'asc' ? '↑' : '↓'}</i>` : '';
+    return sortable && c.key
+      ? `<th class="${cls}" aria-sort="${aria}"><button type="button" data-sk="${esc(c.key)}">`
+        + `${esc(c.label)}${mark}</button></th>`
+      : `<th class="${cls}" aria-sort="none">${esc(c.label)}</th>`;
+  }).join('')}</tr></thead>`;
+
+  const body = (list) => `<tbody>${list.map((r) => `<tr>${cols.map((c) =>
+    `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(r) : esc(r[c.key] ?? '—')}</td>`)
+    .join('')}</tr>`).join('')}</tbody>`;
+
+  /* The caller's row-level handlers index into the array it passed, so the
+     re-ordered array is written back onto the same reference rather than
+     replaced — otherwise clicking row 1 of a re-sorted table opens row 1 of
+     the original order. */
+  const paint = () => {
+    const list = order(rows.slice());
+    rows.length = 0; rows.push(...list);
+    t.innerHTML = head() + body(rows);
+    /* Row handlers are re-bound on every paint and take the ROW, not an index
+       into an array that has since been re-ordered. A table that opened the
+       wrong driver after a sort would be worse than one that could not sort. */
+    if (onRow) {
+      t.querySelectorAll('tbody tr').forEach((tr, i) => {
+        tr.style.cursor = 'pointer';
+        tr.setAttribute('data-click', '');
+        tr.onclick = (ev) => { if (!ev.target.closest('a')) onRow(rows[i], ev); };
+      });
+    }
+    if (!sortable) return;
+    t.querySelectorAll('thead button[data-sk]').forEach((b) => {
+      b.onclick = () => {
+        const k = b.dataset.sk;
+        const c = byKey(k);
+        active = active && active.key === k
+          ? (active.dir === 'desc' ? { key: k, dir: 'asc' } : null)
+          // A first click ranks the way the reader means: biggest first for a
+          // number, A-Z for a name.
+          : { key: k, dir: c && c.num ? 'desc' : 'asc' };
+        writeSort(sortId, active?.key, active?.dir);
+        paint();
+        wrap.dispatchEvent(new CustomEvent('table:sorted', { bubbles: true, detail: { rows } }));
+      };
+    });
+  };
+  paint();
+  wrap.append(t);
+  if (sortable && capped) {
+    wrap.append(el('p', 'cap tsort-note',
+      `Sorting re-orders the ${rows.length} rows on screen, not ${esc(capped)} — the rows that reach `
+      + 'this page were chosen by the server before you got to choose the column.'));
+  }
+  return wrap;
 }
 
 /* There is no `drill()` any more.
@@ -105,10 +236,15 @@ export const custody = (r, { title = null, hrefFor = null } = {}) => {
    something different if it is drawn from yesterday or from eleven weeks ago,
    and hiding that invites somebody to ring the wrong person. */
 export const custodyAsOf = (ref) => (ref && ref.name
-  // Anchored at midday: a bare YYYY-MM-DD parses as UTC midnight, which renders
-  // as the previous day for any viewer west of Greenwich.
+  /* Anchored at midday: a bare YYYY-MM-DD parses as UTC midnight, which renders
+     as the previous day for any viewer west of Greenwich.
+
+     The day is sliced to ten characters first, because callers hand this
+     whatever the endpoint gave them and half of them send a full ISO timestamp
+     — appending "T12:00:00" to "2026-04-03T00:00:00.000Z" produced an
+     unparseable string, so a real custody date rendered as "as of —". */
   ? `${entity('driver', ref.id, ref.name)}<span class="dim"> as of `
-    + `${ref.day ? dayStr(`${ref.day}T12:00:00`) : 'an unrecorded day'}</span>`
+    + `${ref.day ? dayStr(`${String(ref.day).slice(0, 10)}T12:00:00`) : 'an unrecorded day'}</span>`
   : '<span class="dim">nobody on record</span>');
 
 export const pill = (text, tone) => `<span class="pill${tone ? ' ' + tone : ''}">${esc(text)}</span>`;
@@ -128,13 +264,68 @@ export const pill = (text, tone) => `<span class="pill${tone ? ' ' + tone : ''}"
    person reading this happens to be. */
 export { TZ, TZ_LABEL, dubaiDay };
 
-export const dateStr = (v) => (v ? new Date(v).toLocaleDateString(undefined,
-  { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : '—');
-export const dayStr = (v) => (v ? new Date(v).toLocaleDateString(undefined,
-  { day: 'numeric', month: 'short', timeZone: TZ }) : '—');
-export const timeStr = (v) => (v ? new Date(v).toLocaleTimeString(undefined,
-  { hour: '2-digit', minute: '2-digit', timeZone: TZ }) : '—');
-export const dtStr = (v) => (v ? `${dayStr(v)} ${timeStr(v)}` : '—');
+const asDate = (v) => {
+  if (v == null || v === '') return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+// The Dubai calendar year of an instant, and of right now.
+const yearOf = (d) => d.toLocaleDateString('en-CA', { year: 'numeric', timeZone: TZ });
+const thisYear = () => yearOf(new Date());
+
+export const dateStr = (v) => {
+  const d = asDate(v);
+  return d ? d.toLocaleDateString(undefined,
+    { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ }) : '—';
+};
+/* Year-aware, because this product offers a twelve-month window.
+   ─────────────────────────────────────────────────────────────────────────
+   "21 Oct" and "21 Aug" sat side by side with nothing to say which year, so a
+   driver who last drove ten months ago read as current, a 2027 registration
+   expiry read as June just gone, and the Revenue footer printed
+   "Window Aug 25 – Aug 25" for a range covering an entire year. The year is
+   added only when the date falls outside the current Dubai year, so the
+   common case — a date inside the window you are looking at — stays short. */
+export const dayStr = (v) => {
+  const d = asDate(v);
+  if (!d) return '—';
+  // Both branches state the zone, rather than mutating one options object:
+  // every formatter in this file names timeZone inside its own call, which is
+  // what test/timezone.test.mjs reads to prove none is left on the viewer's
+  // clock. A zone set a line earlier is invisible to that check and to a
+  // reader skimming for it.
+  return yearOf(d) === thisYear()
+    ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: TZ })
+    : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: TZ });
+};
+export const timeStr = (v) => {
+  const d = asDate(v);
+  return d ? d.toLocaleTimeString(undefined,
+    { hour: '2-digit', minute: '2-digit', timeZone: TZ }) : '—';
+};
+export const dtStr = (v) => (asDate(v) ? `${dayStr(v)} ${timeStr(v)}` : '—');
+
+/* A source's name as a person writes it. These are database keys — `fms`,
+   `cabman` — and they were rendered raw as panel HEADINGS on the two pages an
+   operator opens to ask which collector is broken. */
+export const SOURCE_LABEL = {
+  uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel', fms: 'FMS telematics',
+  cabman: 'CABMAN', ecosine: 'Ecosine', egari: 'Egari',
+};
+export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()] || String(s || '—');
+
+/* "yango is missing 1 days" and "1 have no record of ever being requested".
+   Takes the count so the caller cannot forget to look at it. */
+export const plural = (n, one, many) => (Math.abs(Number(n)) === 1 ? one : (many ?? `${one}s`));
+export const countOf = (n, one, many) => `${fmt(n)} ${plural(n, one, many)}`;
+
+/* A list column that may arrive either way.
+   Several endpoints return a set of names as a comma-joined STRING —
+   `unavailable_sources: "bolt, yango"`, `channels_checked: "uber,yango,hotel"` —
+   and others return a real array for the same idea. Calling .join on the
+   string form throws and takes the whole view with it. */
+export const asList = (v) => (Array.isArray(v) ? v.filter(Boolean)
+  : (v == null || v === '' ? [] : String(v).split(',').map((s) => s.trim()).filter(Boolean)));
 
 /* A trip's timestamp, as a door into the telemetry behind it: the link opens
    the vehicle's movement replay preselected to that trip's Dubai day. Every
@@ -142,10 +333,16 @@ export const dtStr = (v) => (v ? `${dayStr(v)} ${timeStr(v)}` : '—');
    happened on that ride" is one click from any number that mentions it. No
    plate — a hotel booking before dispatch, an unmatched statement line — and
    it degrades to the plain timestamp rather than a link to nowhere. */
+/* The day rides in href()'s own query string rather than being concatenated
+   after it. Appended, an address already carrying a window came out as
+   `…/movement?days=365?day=2026-08-25`: URLSearchParams reads one key `days`
+   whose value is "365?day=2026-08-25", so the window silently fell back to 30
+   and the `day` was never parsed at all — every trip clicked from a non-default
+   window opened the newest replayable day instead of the trip's own. */
 export const tripTime = (plate, at) => {
   const day = plate && at ? dubaiDay(at) : null;
   return day
-    ? `<a class="lnk" href="${href('vehicle', plate, 'movement')}?day=${day}" `
+    ? `<a class="lnk" href="${href('vehicle', plate, 'movement', { day })}" `
       + `title="Replay ${esc(plate)} on this day">${esc(dtStr(at))}</a>`
     : esc(dtStr(at));
 };

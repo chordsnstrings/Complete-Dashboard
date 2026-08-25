@@ -24,6 +24,25 @@ export const state = {
   admin: store.get('adminToken'),
 };
 
+/* Which render is the current one.
+   ─────────────────────────────────────────────────────────────────────────
+   A view is a sequence of awaits, and the reader can navigate through the
+   middle of one. The shell empties #view and starts again; the abandoned
+   render is still holding a reference to panels that are no longer on the page
+   and carries on writing to them. On #unauthorized that means
+   `root.insertBefore(w, g)` throwing "not a child of this node" — whose catch
+   then replaces the WHOLE page with an error box, recoverable only by
+   reloading. On #sources it means the abandoned render's panels appended
+   beside the new ones, five panels becoming seven with two drawn twice.
+
+   A view captures `currentGen()` before its first await and checks `alive()`
+   after each one. Kept here rather than in the shell so a page module can
+   import it without importing the shell back. */
+let renderGen = 0;
+export const newRender = () => ++renderGen;
+export const currentGen = () => renderGen;
+export const alive = (g) => g === renderGen;
+
 /* Fetch, but answer from what we last knew if we have it.
    ─────────────────────────────────────────────────────────────────────────
    A page issues between five and fifteen of these and shows skeletons until
@@ -112,9 +131,18 @@ export const api = async (path, opts) => {
    happening now. West of Greenwich it went the other way and asked for a day
    that has not started in Dubai. The fleet's calendar is Dubai's; the browser's
    location is not part of the question. */
+/* INCLUSIVE of both ends, so "last 7 days" is seven days and not eight.
+   `dubaiDay(now - days * 864e5)` counts back `days` whole days from today and
+   then includes today as well — an eight-day range under a label saying seven.
+   api/window.js returns exactly `n` days for the same `?days=n`, so the UI and
+   a hand-typed URL disagreed about the same window: at days=7 the UI asked for
+   2026-08-18 → 2026-08-25 and /api/revenue answered `window_days 8`, rendering
+   "8 of 8 days"; /api/kpis?days=7 fetched directly returned 2,876 trips where
+   the UI's own "Last 7 days" returned 3,325. Every rate in the product was
+   over one more day than it said. */
 export function windowDates() {
   const now = Date.now();
-  return [dubaiDay(new Date(now - state.days * 864e5)), dubaiDay(new Date(now))];
+  return [dubaiDay(new Date(now - (state.days - 1) * 864e5)), dubaiDay(new Date(now))];
 }
 export function params(extra = {}) {
   const [from, to] = windowDates();
@@ -144,17 +172,58 @@ export const qAll = (path, extra) => api(`${path}?${unfiltered(extra)}`);
    page's address. */
 const DEFAULTS = { days: 30, platform: '', fleet: '' };
 
-export function filterQuery() {
+/* Which controls a view actually offers. Declared here rather than in the
+   shell, because href() has to agree with it: an address that carries a filter
+   the destination page hides is a filter nobody can see, change or undo, and
+   `#capacity?fleet=egari` was exactly that — a page whose numbers are supposed
+   to be filtered by a control that is not on screen.
+
+   NO_FILTER hides all three. NO_RANGE hides only the window (reconciliation is
+   whole months by construction, but a fleet's money is still its own).
+   NO_PLATFORM_FLEET hides the two channel controls: every detail page answers
+   "everything about this person / car / property" through qAll(), so a chip
+   reading "egari" above a card reading ECOSINE described nothing. `coverage`
+   is here because /api/coverage and /api/coverage/calendar ignore both — it
+   comes off this list the day they stop ignoring them. */
+export const NO_RANGE = ['reconcile'];
+export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage'];
+export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
+  'compliance', 'forecast', 'retention', 'capacity'];
+
+export const hidesRange = (v) => NO_FILTER.includes(v) || NO_RANGE.includes(v);
+export const hidesChannel = (v) => NO_FILTER.includes(v) || NO_PLATFORM_FLEET.includes(v);
+
+/* `extra` is merged into the SAME query string rather than concatenated after
+   it. Appending "?day=…" to an href that already carried "?days=365" produced
+   `#vehicle/L27045/movement?days=365?day=2026-08-25` — URLSearchParams reads
+   one key `days` whose value is "365?day=2026-08-25", so the window silently
+   reset to 30 and the day was never seen at all. */
+export function filterQuery(view = state.view, extra = null, over = null) {
+  const s = { days: state.days, platform: state.platform, fleet: state.fleet, ...(over || {}) };
   const p = new URLSearchParams();
-  if (state.days !== DEFAULTS.days) p.set('days', String(state.days));
-  if (state.platform) p.set('platform', state.platform);
-  if (state.fleet) p.set('fleet', state.fleet);
-  const s = p.toString();
-  return s ? '?' + s : '';
+  if (!hidesRange(view) && s.days !== DEFAULTS.days) p.set('days', String(s.days));
+  if (!hidesChannel(view)) {
+    if (s.platform) p.set('platform', s.platform);
+    if (s.fleet) p.set('fleet', s.fleet);
+  }
+  for (const [k, v] of Object.entries(extra || {})) {
+    if (v != null && v !== '') p.set(k, String(v));
+  }
+  const qs = p.toString();
+  return qs ? '?' + qs : '';
 }
 
-export const href = (view, param, sub) =>
-  '#' + [view, param, sub].filter(Boolean).map(encodeURIComponent).join('/') + filterQuery();
+export const href = (view, param, sub, extra) =>
+  '#' + [view, param, sub].filter(Boolean).map(encodeURIComponent).join('/') + filterQuery(view, extra);
+
+/* An address that carries a DIFFERENT filter from the one currently set.
+   A donut slice knows which platform it is; the click threw that away and
+   opened the unfiltered page, so every slice of the ring led to the same
+   place. This builds the link the slice deserves without a handler, so it can
+   be middle-clicked, opened in a tab and hovered for its destination. */
+export const hrefFilter = (view, patch = {}, param = null, sub = null) =>
+  '#' + [view, param, sub].filter(Boolean).map(encodeURIComponent).join('/')
+  + filterQuery(view, null, patch);
 
 export function parseHash(h = location.hash.slice(1)) {
   const qi = h.indexOf('?');

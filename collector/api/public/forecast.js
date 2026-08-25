@@ -18,8 +18,9 @@
    decoration. */
 
 import { empty, fmt, barChart } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dayStr } from './ui.js';
-import { q, href } from './data.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dayStr, dateStr,
+  countOf, sourceLabel } from './ui.js';
+import { q, href, hrefFilter, state } from './data.js';
 
 const MONTH = (m) => {
   const [y, mm] = String(m).slice(0, 7).split('-');
@@ -34,9 +35,25 @@ export async function renderForecast(root) {
   root.innerHTML = '';
 
   if (!d.ok) {
-    root.append(el('div', 'empty', `<b>Not enough to forecast from</b>${esc(d.reason || '')}`));
+    /* Name the filter that produced the refusal. `#forecast?platform=bolt`
+       rendered "No booking has ever been collected." — a claim about the whole
+       fleet, on a page describing one channel. The address is hidden on this
+       view, so the reader has no way to see that a filter is even set. */
+    const box = el('div', 'empty');
+    box.innerHTML = `<b>Not enough to forecast from</b>${
+      state.platform
+        ? `${esc(sourceLabel(state.platform))}: ${esc(d.reason || 'nothing to fit a line through.')} `
+          + 'That is a statement about this channel, not about the fleet.'
+        : esc(d.reason || '')}`;
+    root.append(box);
+    if (state.platform) {
+      const links = el('p', 'cap');
+      links.innerHTML = `<a class="lnk" href="${hrefFilter('forecast', { platform: '' })}">Forecast the whole fleet</a>`
+        + ` · <a class="lnk" href="${href('sources')}">why this channel has no bookings</a>`;
+      root.append(links);
+    }
     if (d.months_used?.length) {
-      root.append(note(`Months that would have been used: ${d.months_used.join(', ')}.`));
+      root.append(note(`Months that would have been used: ${d.months_used.map(MONTH).join(', ')}.`));
     }
     return;
   }
@@ -57,8 +74,14 @@ export async function renderForecast(root) {
     { label: 'Flat baseline', value: fmt(d.flat_baseline),
       sub: d.beats_flat ? 'the trend explains more than this does' : 'the trend does NOT beat this',
       tone: d.beats_flat ? null : 'warn' },
+    /* The range, on the tile. A point estimate shown alone is the failure mode
+       this page's own header names, and the twelve-month figure was the one
+       number on it printed without its interval — 223,400 with nothing to say
+       it sits in 126,200 to 320,500. */
     d.year_ahead ? { label: 'Next twelve months', value: fmt(d.year_ahead.total),
-      sub: `${d.year_ahead.forecast_months} forecast, ${12 - d.year_ahead.forecast_months} extrapolated`,
+      sub: (d.year_ahead.low != null
+        ? `somewhere between ${fmt(d.year_ahead.low)} and ${fmt(d.year_ahead.high)} · ` : '')
+        + `${d.year_ahead.forecast_months} forecast, ${12 - d.year_ahead.forecast_months} extrapolated`,
       tone: 'warn' } : null,
   ]));
 
@@ -102,9 +125,13 @@ export async function renderForecast(root) {
   const series = [
     ...hist.map((m) => ({ label: MONTH(m.m), n: m.trips,
       kind: m.partial_month ? 'partial' : used.has(m.m) ? 'fitted' : 'excluded' })),
-    ...d.forecast.map((f) => ({ label: MONTH(f.m), n: f.point, kind: f.kind })),
+    /* Every forecast bar carries its interval. The caption promised hatching
+       and a range and the chart drew a solid bar — a point estimate presented
+       as a measurement, which is the exact failure this page's own header
+       says it exists to avoid. */
+    ...d.forecast.map((f) => ({ label: MONTH(f.m), n: f.point, kind: f.kind, lo: f.low, hi: f.high })),
   ];
-  barChart(tb, series, { x: 'label', y: 'n', label: 'bookings',
+  barChart(tb, series, { x: 'label', y: 'n', label: 'bookings', lo: 'lo', hi: 'hi',
     colorFor: (r) => ({ fitted: '--b500', excluded: '--ink-3', partial: '--ink-3',
       forecast: '--s3', extrapolation: '--s5' }[r.kind] || '--b400') });
   tb.append(el('div', 'legend', [
@@ -112,7 +139,47 @@ export async function renderForecast(root) {
     ['--ink-3', 'not used — before the break, or a partial month'],
     ['--s3', 'forecast (3 months)'],
     ['--s5', 'extrapolation — a line, not a forecast'],
-  ].map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')));
+  ].map(([c, t]) => `<span><i class="sw" style="background:var(${c})"></i>${t}</span>`).join('')
+    + '<span class="dim">The whisker on a forecast bar is its 95% interval. A month with no whisker is '
+    + 'observed, not predicted.</span>'));
+
+  /* What the fitted line is actually made of.
+     ───────────────────────────────────────────────────────────────────────
+     `drivers` and `vehicles` come back on every observed month and were drawn
+     nowhere, so a rising booking count read as growth. Bookings per driver on
+     the fitted months ran 60.7 → 72.9 → 118.4 → 135.8 → 96.3: the trend is
+     mostly each driver doing more, not more drivers — and the month whose
+     driver count rose 45% for a 2.6% rise in bookings is the one that decides
+     whether next month is reachable. */
+  if (hist.some((m) => m.drivers != null)) {
+    const withD = hist.filter((m) => m.drivers != null && m.drivers > 0);
+    tb.append(tableFrom(withD, [
+      { label: 'Month', key: 'm', render: (m) => MONTH(m.m)
+        + (used.has(m.m) ? '' : ' <span class="tag dim" title="excluded from the fit">not fitted</span>') },
+      { label: 'Bookings', key: 'trips', num: true, render: (m) => fmt(m.trips) },
+      { label: 'Drivers earning', key: 'drivers', num: true, render: (m) => fmt(m.drivers) },
+      { label: 'Vehicles earning', key: 'vehicles', num: true,
+        render: (m) => (m.vehicles == null
+          ? '<span class="ent-off" title="not reported for this month">—</span>'
+          : fmt(m.vehicles)) },
+      { label: 'Bookings per driver', key: '_pd', num: true,
+        sortValue: (m) => (m.drivers ? m.trips / m.drivers : null),
+        render: (m) => (m.drivers ? fmt(m.trips / m.drivers, 1) : '—') },
+    ], { compact: true, sortable: true, sortId: 'fcmonths', defaultSort: { key: 'm', dir: 'asc' } }));
+    const fitted = withD.filter((m) => used.has(m.m));
+    if (fitted.length >= 2) {
+      const per = (m) => m.trips / m.drivers;
+      const dMove = Math.round(((fitted[fitted.length - 1].drivers / fitted[0].drivers) - 1) * 100);
+      const pMove = Math.round(((per(fitted[fitted.length - 1]) / per(fitted[0])) - 1) * 100);
+      tb.append(el('p', 'cap',
+        `Across the fitted months the driver count moved ${dMove > 0 ? '+' : ''}${dMove}% and each `
+        + `driver's own output moved ${pMove > 0 ? '+' : ''}${pMove}%. `
+        + (Math.abs(pMove) > Math.abs(dMove)
+          ? 'The trend this page fits is mostly per-driver intensity, not headcount — which is a ceiling, '
+            + 'because a driver cannot keep doubling. Read the forecast against that before rostering to it.'
+          : 'The trend this page fits is mostly headcount, which stops when hiring stops.')));
+    }
+  }
 
   if (d.break) {
     tb.append(el('p', 'note',

@@ -13,7 +13,7 @@
    performance judgement about people. */
 
 import { empty, fmt, heatmap } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, pill } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, countOf, plural } from './ui.js';
 import { q, href } from './data.js';
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -46,8 +46,18 @@ export async function renderCapacity(root) {
       tone: t.cells_short ? 'warn' : 'good' },
     { label: 'Hours with people to spare', value: fmt(t.cells_spare),
       sub: 'covered beyond what the projection needs' },
-    { label: 'Busiest single hour', value: t.drivers_needed_peak ? `${t.drivers_needed_peak} drivers` : '—',
-      sub: 'the most any one weekday-hour would need' },
+    /* The HOUR, on a tile labelled "Busiest single hour" that printed a
+       headcount — and led nowhere, on a page where every other row naming an
+       hour opens it. */
+    (() => {
+      const peak = [...(d.cells || [])].sort((a, b) => (b.drivers_needed ?? -1) - (a.drivers_needed ?? -1))[0];
+      if (!peak || peak.drivers_needed == null) {
+        return { label: 'Busiest single hour', value: '—', sub: 'no hour has enough history to size' };
+      }
+      return { label: 'Busiest single hour',
+        html: `<a class="ent" href="${slotLink(peak)}">${DOW[peak.dow]} ${hhmm(peak.hour)}</a>`,
+        sub: `${fmt(peak.drivers_needed, 1)} drivers needed at the rate its own drivers currently work it` };
+    })(),
     { label: 'Hours with too little history', value: fmt(t.cells_thin),
       sub: 'seen fewer than four times — shown, not planned on', tone: t.cells_thin ? 'warn' : null },
   ]));
@@ -67,7 +77,12 @@ export async function renderCapacity(root) {
   g.append(sp);
   if (!d.shortfall.length) empty(sb, 'No hour is projected to need more than it currently gets.');
   else {
-    sb.append(gapTable(d.shortfall));
+    sb.append(gapTable(d.shortfall, 'short'));
+    if (t.cells_short > d.shortfall.length) {
+      sb.append(el('p', 'cap',
+        `The ${fmt(d.shortfall.length)} largest gaps of ${countOf(t.cells_short, 'hour')} that read short. `
+        + 'Every one of them is in the full table below.'));
+    }
     const worst = d.shortfall[0];
     sb.append(el('p', 'note',
       `The largest gap is ${DOW[worst.dow]} at ${hhmm(worst.hour)}: ${fmt(worst.expected_per_occurrence, 1)} `
@@ -82,25 +97,38 @@ export async function renderCapacity(root) {
     + 'moving somebody is cheaper than recruiting.');
   g.append(pp);
   if (!d.surplus.length) empty(pb, 'No hour is covered beyond its projection.');
-  else pb.append(gapTable(d.surplus));
+  else {
+    pb.append(gapTable(d.surplus, 'spare'));
+    if (t.cells_spare > d.surplus.length) {
+      pb.append(el('p', 'cap',
+        `The ${fmt(d.surplus.length)} largest of ${countOf(t.cells_spare, 'hour')} with cover to spare.`));
+    }
+  }
 
   /* ── the whole week ───────────────────────────────────────────────────── */
   const { panel: hp, body: hb } = panel('Every hour of the week',
     'Darker means more people needed at the current rate. Click an hour to open it.');
   root.append(hp);
   const grid = d.cells.map((c) => ({ dow: c.dow, h: c.hour, trips: c.drivers_needed ?? 0 }));
-  heatmap(hb, grid, { onClick: (c) => { location.hash = href('slot', String(c.dow), String(c.h)); } });
+  /* The unit, in the tooltip. Every cell said "— 28.6 trips" where the value
+     is DRIVERS NEEDED, contradicting the caption directly beneath it. */
+  heatmap(hb, grid, { unit: 'drivers needed', valueFmt: (v) => fmt(v, 1),
+    onClick: (c) => { location.hash = href('slot', String(c.dow), String(c.h)); } });
   hb.append(el('p', 'cap',
     'The scale is drivers needed, not bookings — an hour with modest demand and nobody on it matters more '
-    + 'to a rota than a busy hour that is already staffed.'));
+    + 'to a rota than a busy hour that is already staffed. Shading is against this grid\'s own busiest '
+    + 'cell, so it is a ranking within the week rather than an absolute level.'));
 
   /* ── the arithmetic, in full ──────────────────────────────────────────── */
   const { panel: ap, body: ab } = panel('Every hour, with the arithmetic',
     `Shares measured over the trailing ${d.window_days} days — the fleet that produced last year's hours is `
     + 'not the one rostering next month, and a shape averaged across a 76% collapse describes neither.');
   root.append(ap);
+  /* Every hour of the week, not sixty of them. A panel titled "Every hour"
+     that draws 60 of 168 rows is the one caption on this page nobody would
+     think to check — and the table already lives in a scroll container. */
   ab.append(tableFrom(
-    [...d.cells].sort((a, b) => (b.driver_gap ?? -99) - (a.driver_gap ?? -99)).slice(0, 60), [
+    [...d.cells].sort((a, b) => (b.driver_gap ?? -99) - (a.driver_gap ?? -99)), [
       { label: 'Hour', key: '_s', render: (r) => `<a href="${slotLink(r)}">${SHORT[r.dow]} ${hhmm(r.hour)}</a>`
         + (r.thin ? ' <span class="tag warn">thin history</span>' : '') },
       { label: 'Share of the month', key: 'share_pct', num: true, render: (r) => `${r.share_pct}%` },
@@ -114,7 +142,40 @@ export async function renderCapacity(root) {
       { label: 'Gap', key: 'driver_gap', num: true, render: (r) => (r.driver_gap == null ? '—'
         : `<span class="pill ${r.driver_gap >= 0.5 ? 'bad' : r.driver_gap <= -0.5 ? 'ok' : ''}">`
           + `${r.driver_gap > 0 ? '+' : ''}${fmt(r.driver_gap, 1)}</span>`) },
-    ]));
+    ], { sortable: true, sortId: 'cells', defaultSort: { key: 'driver_gap', dir: 'desc' } }));
+  ab.append(el('p', 'cap',
+    `All ${countOf(d.cells.length, 'hour')} of the week, largest gap first. The table scrolls; nothing is cut.`));
+
+  /* Why nearly every hour reads short. The month's projection is above the
+     rate the hourly shares were measured at, so the arithmetic produces a
+     shortfall in almost every cell before anything about the rota is
+     considered — 93 hours short and exactly one spare is a property of the
+     comparison, not a finding about the week. */
+  const trailingRate = d.trailing_bookings != null && d.window_days
+    ? (d.trailing_bookings / d.window_days) * 30 : null;
+  if (trailingRate && d.target_bookings) {
+    const lift = Math.round(((d.target_bookings / trailingRate) - 1) * 100);
+    if (Math.abs(lift) >= 5) {
+      // Built with el(), not note(): note() escapes its text, and this sentence
+      // carries the link to the page the comparison comes from.
+      root.append(el('div', 'note warn',
+        `${esc(MONTH(d.target_month))}'s projection is ${lift > 0 ? `${lift}% above` : `${Math.abs(lift)}% below`} `
+        + `the rate the hourly shares were measured at (${fmt(Math.round(trailingRate))} bookings a month `
+        + `over the trailing ${fmt(d.window_days)} days). Every cell inherits that, so `
+        + `${lift > 0 ? 'most hours read short' : 'most hours read covered'} before anything about the rota `
+        + 'is considered. '
+        + (d.target_low != null
+          ? `The low end of the forecast interval — ${fmt(d.target_low)} — is the conservative rota. `
+            + `<a class="lnk" href="${href('forecast')}">Where the interval comes from</a>.`
+          : '')));
+    }
+  } else if (t.cells_short > 100) {
+    root.append(el('div', 'note warn',
+      `${fmt(t.cells_short)} of ${fmt(d.cells.length)} hours read short and ${fmt(t.cells_spare)} read `
+      + 'spare. A split that lopsided is usually the monthly projection sitting above the rate the '
+      + 'hourly shares were measured at rather than a week that is uniformly understaffed — check the '
+      + `total against <a class="lnk" href="${href('forecast')}">the forecast</a> before rostering to it.`));
+  }
 
   root.append(note(esc(d.caveat)));
   root.append(el('p', 'cap',
@@ -123,14 +184,28 @@ export async function renderCapacity(root) {
     + `<a href="${href('retention')}">Whether the people to fill these hours are still here</a>`));
 }
 
-function gapTable(rows) {
+function gapTable(rows, id) {
   return tableFrom(rows, [
-    { label: 'Hour', key: '_s', render: (r) => `<a href="${slotLink(r)}">${DOW[r.dow]} ${hhmm(r.hour)}</a>` },
+    { label: 'Hour', key: '_s',
+      sortValue: (r) => r.dow * 24 + r.hour,
+      render: (r) => `<a class="ent" href="${slotLink(r)}">${DOW[r.dow]} ${hhmm(r.hour)}</a>` },
     { label: 'Expected each time', key: 'expected_per_occurrence', num: true,
       render: (r) => fmt(r.expected_per_occurrence, 1) },
     { label: 'Drivers now', key: 'drivers_per_occurrence', num: true, render: (r) => fmt(r.drivers_per_occurrence, 1) },
+    /* The ceiling this hour has ever actually reached, where the endpoint
+       reports it — asking for 28.6 drivers on a Friday at 19:00 means
+       something different when the most ever seen in that hour is 29. */
+    { label: 'Most ever seen', key: 'most_drivers_seen', num: true,
+      render: (r) => (r.most_drivers_seen == null
+        ? '<span class="ent-off" title="not reported for this hour">—</span>'
+        : fmt(r.most_drivers_seen)) },
     { label: 'Needed', key: 'drivers_needed', num: true, render: (r) => fmt(r.drivers_needed, 1) },
+    { label: 'Times next month', key: 'occurrences_next', num: true,
+      render: (r) => (r.occurrences_next == null
+        ? '<span class="ent-off" title="not reported for this hour">—</span>'
+        : fmt(r.occurrences_next)) },
     { label: 'Gap', key: 'driver_gap', num: true,
       render: (r) => `<span class="pill ${r.driver_gap > 0 ? 'bad' : 'ok'}">${r.driver_gap > 0 ? '+' : ''}${fmt(r.driver_gap, 1)}</span>` },
-  ], { compact: true });
+  ], { compact: true, sortable: true, sortId: `gap-${id}`,
+    defaultSort: { key: 'driver_gap', dir: id === 'short' ? 'desc' : 'asc' } });
 }
