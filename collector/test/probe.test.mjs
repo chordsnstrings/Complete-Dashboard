@@ -18,7 +18,7 @@
 
    3. A SHAPE REPORT THAT IS ACTUALLY A DATA EXPORT. The whole justification for
       running this on a schedule is that it records shape, never records. */
-import { describe, firstList, unmappedAgainst, surfaces, norm } from '../src/probe.js';
+import { describe, firstList, unmappedAgainst, surfaces, norm, payloadError } from '../src/probe.js';
 import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
@@ -143,6 +143,59 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
   check('no credential is interpolated into a note or a surface name',
     !/note:.*(token|password|cookie|secret|apiKey)/i.test(src)
     && !/surface: `[^`]*\$\{[^}]*(token|pass|cookie|secret)/i.test(src));
+}
+
+/* ── a refusal is not a success ────────────────────────────────────────────
+   Yango's orders/list, summary/drivers/list and transactions/park/list all came
+   back from production as {http_status: 403, ok: true}; Uber's transactions as
+   {404, ok: true}. The page counted every one of them under "ANSWERING 18 /
+   NOT ANSWERING 0" with failing: []. And FMS's GetVehicleCurrentDetails
+   returned {ok: true, record_count: 0, top_keys: ["error"]} with the value
+   "Authentication failed" — then offered "error" as an unmapped field we could
+   be keeping. */
+{
+  const src = readFileSync('src/probe.js', 'utf8');
+  check('ok is decided by the status code, not by the call returning',
+    /const good = status == null \|\| \(status >= 200 && status < 300\)/.test(src));
+  check('and a non-2xx surface records the status as its error',
+    /error: refusal \|\| \(good \? null : `HTTP \$\{status\}`\)/.test(src));
+
+  check('a payload whose only key is an error is a refusal, whatever the status said',
+    payloadError({ error: 'Authentication failed' }) === 'Authentication failed');
+  check('and the provider\'s own words survive into it',
+    payloadError({ message: 'token expired' }) === 'token expired');
+  check('a real payload is not mistaken for one',
+    payloadError({ error: null, rows: [] }) === null
+    && payloadError([{ a: 1 }]) === null && payloadError(null) === null);
+  check('an empty object is not a refusal either — it is an empty answer',
+    payloadError({}) === null);
+
+  /* distinct_seen saturated at exactly 14 for every wide field in the corpus:
+     the cap on the sample set was also the counter, so a trip uuid, a plate, a
+     driver name and a timestamp all reported "14 distinct". */
+  const wide = describe(Array.from({ length: 40 }, (_, i) => ({ id: `u-${i}`, tier: i % 3 })));
+  check('a wide field reports how many distinct values it really had',
+    wide.find((f) => f.key === 'id').distinct_seen === 40,
+    String(wide.find((f) => f.key === 'id').distinct_seen));
+  check('and says the count is a floor when every sampled row differed',
+    wide.find((f) => f.key === 'id').distinct_capped === true);
+  check('while a narrow field is unaffected and still carries its values',
+    wide.find((f) => f.key === 'tier').distinct_seen === 3
+    && wide.find((f) => f.key === 'tier').values.length === 3);
+  check('a wide field still exports no values at all',
+    wide.find((f) => f.key === 'id').values === null);
+
+  check('every configured FMS fleet is probed, not the first one with a credential',
+    !/const fmsFleet = \(config\.fms/.test(src) && /for \(const fleet of fmsFleets\.filter/.test(src));
+  check('and a fleet that cannot be probed gets a visible row rather than silence',
+    /surface: `\$\{f\.fleet\}:\(not probed\)`/.test(src));
+  check('CABMAN surfaces name their fleet',
+    /`\$\{cab\.fleet\}:GetIVDData`/.test(src));
+  check('both Bolt companies are probed, and the trip and earnings surfaces with them',
+    /for \(const company of \(config\.bolt\.companies/.test(src)
+    && /getFleetOrders/.test(src) && /getCompanyEarnings/.test(src));
+  check('the described row count is stored beside the record count',
+    /described_n: Math\.min\(Array\.isArray\(arr\) \? arr\.length : 0, 300\)/.test(src));
 }
 
 /* ── a helper referenced but never imported ────────────────────────────────

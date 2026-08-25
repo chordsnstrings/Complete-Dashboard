@@ -18,15 +18,39 @@
    every booking on every channel within an hour either side, not just the
    nearest; the driver who actually held the car that day; and the raw fixes. */
 import { custodyNames, custodyRefs, peopleCount } from './custody_sql.js';
+import { areaOf } from './analytics_routes.js';
 
 export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
   const VERDICTS = ['unauthorized', 'authorized', 'sensor_suspect', 'partial', 'stationary', 'unverifiable', 'pending'];
+
+  /* A reason is a SHAPE, not a string.
+     ─────────────────────────────────────────────────────────────────────────
+     The reason facet grouped on the raw text, so every matched segment was its
+     own "reason": production reported facet_totals {reason: 109, reason_shown:
+     20} over a menu whose rows were "matched uber trip fa66c89c-…", "matched
+     hotel trip 6a8aa7d1…" and four separate "telemetry clock is {2339, 2903,
+     2439, 2438} min behind wall time". Four shapes carried meaning and 109
+     filters were offered, of which 89 could not even be selected because the
+     list stops at 20.
+
+     The trip id and the minute count are what vary; the sentence is what
+     means something. Both are replaced before grouping, and the skew comes
+     back as a NUMBER on each segment so a page can name the affected plates
+     instead of leaving 37 unverifiable segments discoverable only by reading
+     four table rows. */
+  const REASON_SHAPE = (col) => `regexp_replace(
+    regexp_replace(coalesce(${col}, '(no reason recorded)'),
+                   '[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}',
+                   '<trip id>', 'gi'),
+    '[0-9]+', 'N', 'g')`;
+  const SKEW = (col) => `(regexp_match(${col}, '([0-9]+) min behind'))[1]::int`;
 
   const SEG_COLS = `o.plate, o.fleet_id, o.started_at, o.ended_at, o.duration_min, o.distance_km,
      o.top_speed, o.fixes, o.max_gap_min, o.ignition_ratio, o.verdict,
      o.matched_platform, o.matched_trip_id, o.low_confidence, o.unavailable_sources,
      o.verdict_reason, o.nearest_platform, o.nearest_trip_id, o.nearest_gap_min,
      o.channels_checked, o.boundary_gap_min,
+     ${SKEW('o.verdict_reason')} AS clock_skew_min,
      o.start_lat, o.start_lng, o.end_lat, o.end_lng,
      to_char((o.started_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS local_day`;
 
@@ -81,8 +105,10 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
           GROUP BY 1 ORDER BY 1`, [from, to]),
       // What the reconciler actually said. This is the honest version of the
       // hardcoded sentence: a reason with no rows is a reason we never give.
-      q(`SELECT coalesce(o.verdict_reason,'(no reason recorded)') AS key, count(*)::int n,
-                min(o.verdict) AS verdict
+      q(`SELECT ${REASON_SHAPE('o.verdict_reason')} AS key, count(*)::int n,
+                min(o.verdict) AS verdict,
+                max(${SKEW('o.verdict_reason')})::int AS max_skew_min,
+                count(*) FILTER (WHERE ${SKEW('o.verdict_reason')} IS NOT NULL)::int skewed
           FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}
           GROUP BY 1 ORDER BY n DESC LIMIT 20`, [from, to]),
       q(`SELECT count(*)::int n,
@@ -91,7 +117,7 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
           FROM occupancy_segment o WHERE ${WHERE}`, p),
       // How many facet values exist, against how many the lists above show.
       q(`SELECT count(DISTINCT o.plate)::int plates,
-                count(DISTINCT coalesce(o.verdict_reason,'(no reason recorded)'))::int reasons
+                count(DISTINCT ${REASON_SHAPE('o.verdict_reason')})::int reasons
           FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')}`, [from, to]),
     ]);
 
@@ -117,6 +143,15 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
         reason_shown: (byReason || []).length,
       },
       known_verdicts: VERDICTS,
+      /* A tracker whose clock is two days out cannot be compared against a
+         booking at all, and 37 unverifiable segments in production were
+         exactly that. Named here so the page can say which cars, rather than
+         leaving it to be inferred from four rows of a facet list. */
+      clock_skew: {
+        segments: rows.filter((r) => r.clock_skew_min != null).length,
+        plates: [...new Set(rows.filter((r) => r.clock_skew_min != null).map((r) => r.plate))],
+        max_min: rows.reduce((a, r) => Math.max(a, r.clock_skew_min || 0), 0) || null,
+      },
     });
   }));
 
@@ -284,9 +319,19 @@ export function slotRoutes(app, { q, wrap, range }) {
                 count(*) FILTER (WHERE has_fare)::int priced_n
           FROM trip_norm WHERE ${SLOT} GROUP BY 1 ORDER BY trips DESC`, p),
 
-      // Where the work in this hour actually starts — the rostering question is
-      // "put a car where", not just "put a car on".
-      q(`SELECT coalesce(nullif(btrim(split_part(pickup_addr, ',', 1)), ''), '(no address)') AS place,
+      /* Where the work in this hour actually starts — the rostering question is
+         "put a car where", not just "put a car on".
+
+         Split on the DASH, not on a comma. Every channel returns a formatted
+         address of the form "01 Cluster E - Al Thanyah Fifth - Dubai - UAE",
+         which contains no comma at all, so split_part(addr, ',', 1) returned
+         the whole string: twelve bars covering 29 of a slot's 118 trips, the
+         largest of them "(no address)", and the rest whole raw addresses that
+         could never group with each other. The expression that does this
+         correctly already existed in api/analytics_routes.js and is imported
+         rather than copied, so #slot and #corridors cannot drift into two
+         different taxonomies for the same place. */
+      q(`SELECT coalesce(${areaOf('pickup_addr')}, '(no address)') AS place,
                 count(*)::int trips
           FROM trip_norm WHERE ${SLOT} AND pickup_addr IS NOT NULL
           GROUP BY 1 ORDER BY trips DESC LIMIT 12`, p),
@@ -332,6 +377,10 @@ export function slotRoutes(app, { q, wrap, range }) {
       `SELECT count(*)::int n FROM trip_norm
        WHERE is_booking AND local_day BETWEEN $1::date AND $2::date`, [from, to]);
 
+    const [drvTot] = await q(
+      `SELECT count(DISTINCT driver_ext_id)::int n FROM trip_norm
+       WHERE ${SLOT} AND driver_ext_id IS NOT NULL`, p);
+
     res.json({
       slot: { dow, hour },
       headline: {
@@ -345,7 +394,13 @@ export function slotRoutes(app, { q, wrap, range }) {
         revenue_per_priced_trip: head?.priced_n
           ? +(Number(head.revenue) / head.priced_n).toFixed(2) : null,
       },
-      drivers, platforms, corridors, occurrences, peers, settlement: settle, outcome,
+      drivers,
+      /* 40 of a slot's 62 drivers were listed with nothing saying so, on a page
+         whose whole subject is how few people cover an hour. */
+      drivers_total: drvTot?.n ?? drivers.length,
+      drivers_shown: drivers.length,
+      drivers_truncated: (drvTot?.n ?? 0) > drivers.length,
+      platforms, corridors, occurrences, peers, settlement: settle, outcome,
     });
   }));
 }

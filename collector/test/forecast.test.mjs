@@ -149,8 +149,26 @@ const M = (m, trips, extra = {}) => ({ m, trips, no_data: false, partial_month: 
   const fc = forecastMonths(withPartial);
   check('a partial month is never fitted, however recent it is',
     !fc.months_used.includes('2026-08'), JSON.stringify(fc.months_used));
-  check('so the forecast starts from the last WHOLE month',
-    fc.forecast[0].m === '2026-08', fc.forecast[0].m);
+  /* The horizon counts from the newest OBSERVED month, not the newest fitted
+     one. Anchored on the last whole month, forecast[0] was August — the month
+     already three weeks spent — and production published
+     {m:"2026-08", point:12100, low:8100, high:16100} beside in_progress
+     {days_so_far:25, trips_so_far:9801}: an interval whose floor sat below
+     what was already banked, presented as a prediction, with the daily rota
+     planning from the 1st and naming its busiest expected day eighteen days in
+     the past. */
+  check('the horizon starts at the first month that has not started',
+    fc.forecast[0].m === '2026-09', fc.forecast[0].m);
+  check('and the month in progress is predicted separately, for the self-check',
+    fc.current_month?.m === '2026-08' && fc.current_month.kind === 'in_progress',
+    JSON.stringify(fc.current_month));
+  check('the two anchors are both stated, since they differ only mid-month',
+    fc.fitted_to === '2026-07' && fc.horizon_from === '2026-08',
+    JSON.stringify([fc.fitted_to, fc.horizon_from]));
+  check('a record ending on a whole month has no month in progress at all',
+    forecastMonths(withPartial.slice(0, 5)).current_month === null
+    && forecastMonths(withPartial.slice(0, 5)).forecast[0].m === '2026-08',
+    JSON.stringify(forecastMonths(withPartial.slice(0, 5)).forecast[0]));
   /* And it must not register as a break either — a short month looks like a
      collapse and would truncate the very series being fitted. */
   check('a partial month is not mistaken for a structural break',

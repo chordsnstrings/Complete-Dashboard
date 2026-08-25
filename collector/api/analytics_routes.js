@@ -39,7 +39,7 @@ const share = (n, total) => (total ? round((n / total) * 100, 1) : null);
    Dubai - UAE"), so it is the coarsest key that still means something. Where
    the format does not hold, the whole string is kept rather than guessed at. */
 const AREA = `nullif(btrim(split_part(%s, ' - ', 2)), '')`;
-const areaOf = (col) => AREA.replace('%s', col);
+export const areaOf = (col) => AREA.replace('%s', col);
 
 export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
   /* ───────────────────────── settlement ─────────────────────────
@@ -876,7 +876,15 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      a real one: 2026-07-16 to 2026-08-02 holds zero trips between two months
      that hold thousands. */
   app.get('/api/coverage/calendar', wrap(async (req, res) => {
-    const [from, to] = range(req);
+    /* The platform and fleet chips reached this route and were dropped:
+       /api/coverage/calendar?platform=uber returned all four sources
+       unchanged. Both dimensions are real here — a source IS a platform and
+       rollup_day carries a row per fleet — so both are honoured, with one
+       caveat kept from the comment below: asking for one PLATFORM narrows the
+       calendar to that source's own row, which is what a reader selecting it
+       means, while the fleet '*' row remains the default because the question
+       is usually whether a source collected at all. */
+    const [from, to, platform, fleet] = range(req);
     /* The day grain, precomputed.
        ─────────────────────────────────────────────────────────────────────
        source_day_coverage is an aggregate over the entire trip table. It
@@ -913,10 +921,12 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        rollup_day counts distinct PEOPLE, folded across a person's several
        platform accounts, which is what every other page in this product counts
        and what this calendar's tooltip has always claimed to say. */
+    const P = [from, to, platform, fleet];
     const rollupReady = (await q(
       `SELECT 1 FROM rollup_day
         WHERE day BETWEEN $1::date AND $2::date
-          AND platform <> '*' AND fleet_id = '*' LIMIT 1`, [from, to])).length > 0;
+          AND platform <> '*' AND fleet_id = coalesce($4, '*')
+          AND ($3::text IS NULL OR platform = $3) LIMIT 1`, P)).length > 0;
     /* to_char on either path, not the raw date: the driver hands a DATE back
        as a JS Date whose string form is "Tue Aug 01 2026 …", and slicing ten
        characters off that yields "Tue Aug 01" — which then parses as the year
@@ -927,12 +937,16 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 r.trips AS rows, r.vehicles AS plates, r.drivers
          FROM rollup_day r
          WHERE r.day BETWEEN $1::date AND $2::date
-           AND r.platform <> '*' AND r.fleet_id = '*'
+           AND r.platform <> '*' AND r.fleet_id = coalesce($4, '*')
+           AND ($3::text IS NULL OR r.platform = $3)
          ORDER BY 1, 2`
       : `SELECT source, to_char(day, 'YYYY-MM-DD') AS day, rows, plates, drivers
        FROM source_day_coverage
-       WHERE day BETWEEN $1::date AND $2::date ORDER BY source, day`;
-    const rows = await q(coverageSql, [from, to]);
+       WHERE day BETWEEN $1::date AND $2::date
+         AND ($3::text IS NULL OR source = $3)
+         AND ($4::text IS NULL OR true)
+       ORDER BY source, day`;
+    const rows = await q(coverageSql, P);
     const bySource = new Map();
     for (const r of rows) {
       const s = bySource.get(r.source) || { source: r.source, days: [], total: 0 };

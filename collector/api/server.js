@@ -1362,12 +1362,23 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
 
 /* ───────────────────────── unauthorized trips ───────────────────────── */
 // Seat-sensor occupancy that no booking explains. See docs/unauthorized-trips.md.
+/* The fleet chip narrows these; the platform chip does not, and cannot.
+   ──────────────────────────────────────────────────────────────────────────
+   An occupancy segment is a seat sensor and a GPS trace. It belongs to a car,
+   and a car belongs to a fleet — occupancy_segment.fleet_id, which none of
+   these queries read, so #unauthorized answered identically for both
+   businesses. It does NOT belong to a booking channel: the whole point of the
+   verdict is that no channel explains it. Filtering by platform here would
+   return an empty page and call it a clean one, so the predicate is left out
+   deliberately and the front end says why. */
+const SEG_FLEET = "AND ($3::text IS NULL OR fleet_id = $3)";
 app.get('/api/unauthorized/summary', wrap(async (req, res) => {
-  const [from, to] = range(req);
+  const [from, to, , fleet] = range(req);
   const rows = await q(
     `SELECT verdict, count(*)::int n, round(sum(distance_km)::numeric,0) km,
             round(sum(duration_min)::numeric,0) minutes
-     FROM occupancy_segment WHERE ${DAYWIN('started_at')} GROUP BY verdict ORDER BY n DESC`, [from, to]);
+     FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET}
+     GROUP BY verdict ORDER BY n DESC`, [from, to, fleet]);
   /* Built FROM the same rows as the donut, not from a second query with its
      own hand-written verdict list. That list named four of the seven verdicts
      schema_v8 documents, so `unverifiable` and `stationary` were counted
@@ -1391,7 +1402,7 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
                presented as an answer about thirty. Those are different claims
                and only one of them is true. */
             count(DISTINCT (started_at AT TIME ZONE 'Asia/Dubai')::date)::int days_with_data
-     FROM occupancy_segment WHERE ${DAYWIN('started_at')}`, [from, to]);
+     FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET}`, [from, to, fleet]);
   const daysInWindow = Math.max(1, Math.round(
     (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1);
   const byVerdict = Object.fromEntries(rows.map((r) => [r.verdict, r.n]));
@@ -1464,7 +1475,7 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
 // Names the drivers who actually held the car on the days the flags occurred —
 // "L44305 had two unexplained trips" is a fact about a person, not a plate.
 app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
-  const [from, to] = range(req);
+  const [from, to, , fleet] = range(req);
   const rows = await q(
     `WITH seg AS (
        SELECT plate,
@@ -1472,7 +1483,7 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
               count(*) FILTER (WHERE verdict='authorized')::int authorized,
               count(*) FILTER (WHERE verdict='sensor_suspect')::int sensor_suspect,
               round(sum(distance_km) FILTER (WHERE verdict='unauthorized')::numeric,1) unauth_km
-       FROM occupancy_segment WHERE ${DAYWIN('started_at')}
+       FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET}
        GROUP BY plate HAVING count(*) FILTER (WHERE verdict='unauthorized') > 0),
      who AS (
        SELECT o.plate, string_agg(DISTINCT v.driver_name, ', ') AS drivers
@@ -1485,7 +1496,7 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
        GROUP BY o.plate)
      SELECT seg.*, who.drivers
      FROM seg LEFT JOIN who USING (plate)
-     ORDER BY seg.unauthorized DESC LIMIT 100`, [from, to]);
+     ORDER BY seg.unauthorized DESC LIMIT 100`, [from, to, fleet]);
   /* How many vehicles are flagged in total. The page's "Vehicles involved" tile
      already prefers a measured figure; this is where it comes from, and without
      it the tile falls back to counting the hundred rows it received. */
@@ -1493,14 +1504,14 @@ app.get('/api/unauthorized/by-vehicle', wrap(async (req, res) => {
     `SELECT count(DISTINCT plate)::int vehicles,
             count(*) FILTER (WHERE verdict='unauthorized')::int segments
      FROM occupancy_segment
-     WHERE ${DAYWIN('started_at')} AND verdict='unauthorized'`, [from, to]);
+     WHERE ${DAYWIN('started_at')} AND verdict='unauthorized' ${SEG_FLEET}`, [from, to, fleet]);
   res.json({ rows, total: t?.vehicles ?? rows.length, segments: t?.segments ?? null,
     shown: rows.length, truncated: (t?.vehicles ?? 0) > rows.length });
 }));
 
 // daily trend of unauthorized vs authorized occupancy
 app.get('/api/unauthorized/daily', wrap(async (req, res) => {
-  const [from, to] = range(req);
+  const [from, to, , fleet] = range(req);
   res.json(await q(
     /* Dubai-local, like every other daily grouping in this product. Bucketing
        by UTC day put segments between midnight and 04:00 on the previous day,
@@ -1535,7 +1546,7 @@ app.get('/api/unauthorized/daily', wrap(async (req, res) => {
               count(*) FILTER (WHERE verdict='partial')::int partial,
               count(*) FILTER (WHERE verdict='stationary')::int stationary,
               count(*)::int segments
-       FROM occupancy_segment WHERE ${DAYWIN('started_at')} GROUP BY 1
+       FROM occupancy_segment WHERE ${DAYWIN('started_at')} ${SEG_FLEET} GROUP BY 1
      )
      SELECT to_char(cal.d, 'YYYY-MM-DD') AS d,
             coalesce(agg.unauthorized, 0) unauthorized,
@@ -1548,7 +1559,7 @@ app.get('/api/unauthorized/daily', wrap(async (req, res) => {
             -- reconciler had nothing to judge, and must not be drawn as zero.
             (agg.d IS NULL) AS uncollected
      FROM cal LEFT JOIN agg ON agg.d = cal.d
-     ORDER BY cal.d`, [from, to]));
+     ORDER BY cal.d`, [from, to, fleet]));
 }));
 
 // sensor health per vehicle — dead/stuck pads make leakage numbers unreliable
@@ -1564,7 +1575,7 @@ app.get('/api/unauthorized/daily', wrap(async (req, res) => {
    page's window, and was 0 or NULL for every plate — so the client-side
    "suspect" verdict keyed on it could never fire. */
 app.get('/api/sensor-health', wrap(async (req, res) => {
-  const [from, to] = range(req);
+  const [from, to, , fleet] = range(req);
   res.json(await q(
     `SELECT t.plate,
             count(*) FILTER (WHERE t.seat_occupied)::int occupied_fixes,
@@ -1579,15 +1590,16 @@ app.get('/api/sensor-health', wrap(async (req, res) => {
      FROM telemetry_snapshot t
      LEFT JOIN (SELECT plate, count(*) FILTER (WHERE verdict='sensor_suspect') suspect
                 FROM occupancy_segment
-                WHERE ${DAYWIN('started_at')} GROUP BY plate) o ON o.plate = t.plate
+                WHERE ${DAYWIN('started_at')} ${SEG_FLEET} GROUP BY plate) o ON o.plate = t.plate
      WHERE t.source='cabman' AND ${DAYWIN('t.captured_at')}
+       AND ($3::text IS NULL OR t.fleet_id = $3)
      GROUP BY t.plate
      -- Distance from a plausible occupancy band, so BOTH tails surface: a pad
      -- that never triggers and a pad that never releases are equally broken.
      ORDER BY abs(coalesce(count(*) FILTER (WHERE t.seat_occupied)::float
                            / nullif(count(*) FILTER (WHERE t.seat_occupied IS NOT NULL), 0), 0.35) - 0.35) DESC,
               total_fixes DESC
-     LIMIT 100`, [from, to]));
+     LIMIT 100`, [from, to, fleet]));
 }));
 
 /* ───────────────────────── ops / meta ───────────────────────── */
@@ -1667,11 +1679,29 @@ app.get('/api/status', wrap(async (_, res) => res.json((await q(
   };
 }))));
 
-app.get('/api/coverage', wrap(async (_, res) => {
+/* This route ignored the request object entirely — `(_, res)` — so both filter
+   chips above it did nothing, and #coverage?platform=bolt rendered a full page
+   of Uber. Every table it reads carries a fleet, and three of the five carry a
+   platform or a source; the two that do not (alert, ledger_entry) are narrowed
+   by fleet alone and say so.
+
+   No date window: this page is about the whole record by construction — "where
+   does each source start and stop" — and the range chip is already hidden for
+   it. See F21 for the front-end half. */
+app.get('/api/coverage', wrap(async (req, res) => {
+  const pl = req.query.platform || null;
+  const fl = req.query.fleet || null;
+  const P = [pl, fl];
   const [trips, telemetry, alerts, ledger, earnings] = await Promise.all([
-    q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts FROM trip GROUP BY 1`),
-    q(`SELECT source, count(*)::int n, max(polled_at) last_poll FROM telemetry_snapshot GROUP BY 1`),
-    q(`SELECT count(*)::int n, max(occurred_at) latest FROM alert`),
+    q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts
+       FROM trip WHERE ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
+       GROUP BY 1`, P),
+    /* telemetry_snapshot.source is 'cabman' or 'fms' — a tracker, not a booking
+       channel — so a platform filter would empty it rather than narrow it. */
+    q(`SELECT source, count(*)::int n, max(polled_at) last_poll FROM telemetry_snapshot
+       WHERE ($1::text IS NULL OR fleet_id=$1) GROUP BY 1`, [fl]),
+    q(`SELECT count(*)::int n, max(occurred_at) latest FROM alert
+       WHERE ($1::text IS NULL OR fleet_id=$1)`, [fl]),
     q(`SELECT count(*)::int n, max(event_at) latest FROM ledger_entry`),
     /* Money coverage, beside trip coverage, because they are not the same span
        and the difference is the single largest hole in this product.
@@ -1687,7 +1717,10 @@ app.get('/api/coverage', wrap(async (_, res) => {
               min(day) from_day, max(day) to_day,
               count(DISTINCT day)::int days,
               round(sum(earnings)::numeric, 0) earnings
-       FROM driver_payout_day WHERE earnings IS NOT NULL GROUP BY 1`),
+       FROM driver_payout_day
+       WHERE earnings IS NOT NULL
+         AND ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
+       GROUP BY 1`, P),
   ]);
   /* Per platform: where the trip feed starts, where the money starts, and how
      much work sits before it. A page can then say "6,231 bookings we hold no
@@ -1926,21 +1959,62 @@ const INSIGHT_LIMIT = 200;
 app.get('/api/insights', wrap(async (req, res) => {
   const sev = req.query.severity || null;
   const cat = req.query.category || null;
+  /* A finding page could not find its own finding.
+     ─────────────────────────────────────────────────────────────────────────
+     #action/<code>/<id> fetched the WHOLE list and searched it in the browser.
+     The list is capped at 200 and production holds 204 findings, so the four
+     rows the cap cut rendered in the category chips on #insights and then
+     answered "That finding is no longer open." on their own page:
+     unsafe_driving on L45255, L95161 and L40959, and stale_tracker on L40547 —
+     all four open, all four unreachable. Asking for a code returns every row
+     under it (29 for unsafe_driving) instead of a slice of everything. */
+  const code = req.query.code || null;
+  const entity = req.query.entity_id || null;
+  /* The fleet a finding is about. 171 of the 200 rows carry one and no page
+     could narrow by it, so a two-fleet operator read one list for both. */
+  const fleet = req.query.fleet || null;
+  /* The window a finding is ABOUT, where the caller states one.
+     ─────────────────────────────────────────────────────────────────────────
+     The generator runs on whatever window a collection pass used and the table
+     keeps every run, so one list held unsafe_driving rows measured over 3, 30
+     and 365 days, each carrying its own "fleet median" — seven different
+     medians over four different denominators, ranked against each other.
+     Filtering to one window makes the list comparable. A NULL-window row
+     (idle_vehicle, stale_tracker, the document rules) always passes: it is not
+     about a window at all, and dropping it would silently shorten the list. */
+  const from = /^\d{4}-\d{2}-\d{2}$/.test(req.query.from || '') ? req.query.from : null;
+  const to = /^\d{4}-\d{2}-\d{2}$/.test(req.query.to || '') ? req.query.to : null;
   const rows = await q(
     `WITH latest AS (
        SELECT DISTINCT ON (code, entity_type, entity_id)
               code, severity, category, entity_type, entity_id, title, detail, action,
-              impact_aed, metric, fleet_id, window_start, window_end, computed_at
+              impact_aed, metric, fleet_id, refs, window_start, window_end, computed_at
        FROM insight
        WHERE ($1::text IS NULL OR severity=$1) AND ($2::text IS NULL OR category=$2)
+         AND ($3::text IS NULL OR code=$3) AND ($4::text IS NULL OR entity_id=$4)
+         AND ($5::text IS NULL OR fleet_id=$5)
+         AND (window_start IS NULL
+              OR (($6::date IS NULL OR window_start >= $6::date)
+                  AND ($7::date IS NULL OR window_end <= $7::date)))
        ORDER BY code, entity_type, entity_id, computed_at DESC
      )
-     SELECT * FROM latest
+     SELECT *,
+            /* Whether the AED beside a finding was MEASURED or assumed. 75 of
+               the 204 live findings are idle_vehicle, whose impact is a
+               hardcoded holding-cost constant, and nothing on the row said so
+               — so a modelled number sorted and totalled beside measured
+               ones. */
+            CASE WHEN impact_aed IS NULL THEN NULL
+                 WHEN code = 'idle_vehicle' THEN 'modelled' ELSE 'measured' END AS impact_kind
+       FROM latest
      ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 WHEN 'info' THEN 2 ELSE 3 END,
               computed_at DESC, impact_aed DESC NULLS LAST
-     LIMIT ${INSIGHT_LIMIT + 1}`, [sev, cat]);
+     LIMIT ${INSIGHT_LIMIT + 1}`, [sev, cat, code, entity, fleet, from, to]);
   const truncated = rows.length > INSIGHT_LIMIT;
-  res.json({ insights: rows.slice(0, INSIGHT_LIMIT), truncated, limit: INSIGHT_LIMIT });
+  res.json({
+    insights: rows.slice(0, INSIGHT_LIMIT), truncated, limit: INSIGHT_LIMIT,
+    filter: { severity: sev, category: cat, code, entity_id: entity, fleet, from, to },
+  });
 }));
 
 /* Counts over the DEDUPLICATED set, and the money kept apart from it.
@@ -1952,20 +2026,34 @@ app.get('/api/insights', wrap(async (req, res) => {
    A modelled figure and a measured one do not belong in the same total, so the
    assumption is returned with it and the tile can say so. */
 const IDLE_DAY_COST = Number(process.env.VEHICLE_DAY_COST_AED || 120);
-app.get('/api/insights/summary', wrap(async (_, res) => {
-  const base = `WITH latest AS (
+app.get('/api/insights/summary', wrap(async (req, res) => {
+  /* One pass over the table, not five.
+     ─────────────────────────────────────────────────────────────────────────
+     This ran the same DISTINCT ON over ~30,000 rows four separate times — once
+     per severity group, once per category group, once for the totals — plus a
+     fifth count(*). The rows are 99.3% duplicates (stored_rows 29,634 against
+     total.n 204), so each pass sorted thirty thousand rows to reach two
+     hundred. Materialised once and read three times; sql/schema_v30.sql adds
+     the index whose key and order are exactly what the DISTINCT ON needs. */
+  const fleet = req.query.fleet || null;
+  const pl = req.query.platform || null;
+  const base = `WITH latest AS MATERIALIZED (
       SELECT DISTINCT ON (code, entity_type, entity_id) *
-      FROM insight ORDER BY code, entity_type, entity_id, computed_at DESC)`;
-  const bySev = await q(`${base} SELECT severity, count(*)::int n FROM latest GROUP BY 1`);
-  const byCat = await q(`${base} SELECT category, count(*)::int n FROM latest GROUP BY 1 ORDER BY 2 DESC`);
-  const [tot] = await q(
-    `${base}
+      FROM insight
+      WHERE ($1::text IS NULL OR fleet_id = $1)
+      ORDER BY code, entity_type, entity_id, computed_at DESC)`;
+  const P = [fleet];
+  const [bySev, byCat, [tot], [raw]] = await Promise.all([
+    q(`${base} SELECT severity, count(*)::int n FROM latest GROUP BY 1`, P),
+    q(`${base} SELECT category, count(*)::int n FROM latest GROUP BY 1 ORDER BY 2 DESC`, P),
+    q(`${base}
      SELECT count(*)::int n,
             round(sum(impact_aed) FILTER (WHERE code <> 'idle_vehicle')::numeric, 0) AS measured_impact,
             round(sum(impact_aed) FILTER (WHERE code = 'idle_vehicle')::numeric, 0) AS modelled_impact,
             count(*) FILTER (WHERE code = 'idle_vehicle')::int AS idle_vehicles
-     FROM latest`);
-  const [raw] = await q(`SELECT count(*)::int n FROM insight`);
+     FROM latest`, P),
+    q(`SELECT count(*)::int n FROM insight WHERE ($1::text IS NULL OR fleet_id = $1)`, P),
+  ]);
   res.json({
     total: tot, by_severity: bySev, by_category: byCat,
     modelled: {
@@ -1976,11 +2064,23 @@ app.get('/api/insights/summary', wrap(async (_, res) => {
     // Visible so a duplicate explosion cannot be silent again.
     stored_rows: raw?.n ?? 0,
     duplicates_suppressed: Math.max(0, (raw?.n ?? 0) - (tot?.n ?? 0)),
+    /* Platform is accepted and NOT applied, and says so rather than pretending.
+       An insight is about a vehicle, a driver or the fleet; the generator does
+       not record which booking channel it came from, so narrowing by one would
+       return an empty list rather than a narrower one. */
+    filter: { fleet, platform: pl },
+    platform_applies: false,
   });
 }));
 
 // monthly trend + automatic structural-break detection (what changed, and when)
 app.get('/api/trend/monthly', wrap(async (req, res) => {
+  /* The fleet chip was carried in the address and honoured by nothing: every
+     query below pinned fleet_id = '*'. On a two-fleet operator that made
+     #causes — the page whose subject is why the numbers moved — describe both
+     businesses under one fleet's heading. The rollup already carries a row per
+     fleet at every grain, so this is a bind rather than an aggregation. */
+  const trendFleet = req.query.fleet || null;
   /* Every trap trip_norm exists to resolve, all three of them live in this one
      query, on the page whose entire job is explaining why the numbers moved.
      With a full year of Uber finally collected they became visible at once:
@@ -2023,8 +2123,8 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
   let observed = await q(
     `SELECT ${SHAPE}, platforms, booking_platforms
      FROM rollup_month
-     WHERE platform = coalesce($1, '*') AND fleet_id = '*'
-     ORDER BY month`, [req.query.platform || null]);
+     WHERE platform = coalesce($1, '*') AND fleet_id = coalesce($2, '*')
+     ORDER BY month`, [req.query.platform || null, trendFleet]);
 
   /* Before the first rollup has run — a fresh database, a deploy that lands
      ahead of a collection, a rollup that failed — the table is empty and this
@@ -2037,8 +2137,8 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
     observed = await q(
       `SELECT ${SHAPE}, NULL::text[] AS platforms, NULL::text[] AS booking_platforms
        FROM (${rollupGrainSql('month')}) g
-       WHERE platform = coalesce($1, '*') AND fleet_id = '*'
-       ORDER BY month`, [req.query.platform || null]);
+       WHERE platform = coalesce($1, '*') AND fleet_id = coalesce($2, '*')
+       ORDER BY month`, [req.query.platform || null, trendFleet]);
   }
   // Said in the response rather than only in a log: a reader deserves to know
   // whether the figures were precomputed or derived on the spot.
@@ -2048,8 +2148,9 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
      built from trips alone. The statement months extend it. */
   const stmtSpan = await q(
     `SELECT to_char(min(day), 'YYYY-MM') a, to_char(max(day), 'YYYY-MM') b
-     FROM driver_statement_day WHERE source <> 'ledger' AND ($1::text IS NULL OR platform = $1)`,
-    [req.query.platform || null]);
+     FROM driver_statement_day WHERE source <> 'ledger' AND ($1::text IS NULL OR platform = $1)
+       AND ($2::text IS NULL OR fleet_id = $2)`,
+    [req.query.platform || null, trendFleet]);
   if (!observed.length && !stmtSpan[0]?.a) {
     return res.json({ months: [], breaks: [], gaps: [], source: trendSource });
   }
@@ -2075,7 +2176,8 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
      the thing worth seeing. */
   const [span = {}] = await q(
     `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
-     FROM trip_norm WHERE ($1::text IS NULL OR platform=$1)`, [req.query.platform || null]);
+     FROM trip_norm WHERE ($1::text IS NULL OR platform=$1)
+       AND ($2::text IS NULL OR fleet_id=$2)`, [req.query.platform || null, trendFleet]);
   const spanFrom = span.a || null, spanTo = span.b || null;
   const lastOf = (ym) => {
     const [y, mo] = ym.split('-').map(Number);
@@ -2102,20 +2204,20 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
   const platMonthSql = fromRollup
     ? `SELECT to_char(month, 'YYYY-MM') AS m, platform, bookings, priced_trips, revenue
        FROM rollup_month
-       WHERE fleet_id = '*' AND platform <> '*'
+       WHERE fleet_id = coalesce($2, '*') AND platform <> '*'
          AND ($1::text IS NULL OR platform = $1)`
     : `SELECT to_char(month, 'YYYY-MM') AS m, platform, bookings, priced_trips, revenue
        FROM (${rollupGrainSql('month')}) g
-       WHERE fleet_id = '*' AND platform <> '*'
+       WHERE fleet_id = coalesce($2, '*') AND platform <> '*'
          AND ($1::text IS NULL OR platform = $1)`;
   const [platMonths, payMonths, stmtMonths] = await Promise.all([
-    q(platMonthSql, [req.query.platform || null]),
+    q(platMonthSql, [req.query.platform || null, trendFleet]),
     q(`SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS m, platform,
               round(sum(earnings)::numeric, 2) AS payouts,
               count(DISTINCT day)::int AS payout_days
        FROM driver_payout_day
-       WHERE ($1::text IS NULL OR platform = $1)
-       GROUP BY 1, 2`, [req.query.platform || null]),
+       WHERE ($1::text IS NULL OR platform = $1) AND ($2::text IS NULL OR fleet_id = $2)
+       GROUP BY 1, 2`, [req.query.platform || null, trendFleet]),
     /* The statement view per month — the operator's ledger. Rides beside the
        payout, never inside it; see api/income_sql.js. */
     q(`SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS m, platform,
@@ -2124,7 +2226,8 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
               round(sum(bank)::numeric, 2) AS statement_bank
        FROM driver_statement_day
        WHERE source <> 'ledger' AND ($1::text IS NULL OR platform = $1)
-       GROUP BY 1, 2`, [req.query.platform || null]),
+         AND ($2::text IS NULL OR fleet_id = $2)
+       GROUP BY 1, 2`, [req.query.platform || null, trendFleet]),
   ]);
   const incomeByMonth = new Map();
   {
@@ -2510,13 +2613,15 @@ app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
 /* ───────────────── world events + causal attribution ───────────────── */
 // "What was happening when the numbers moved" — candidates, not proof.
 app.get('/api/breaks', wrap(async (req, res) => {
+  // metric_break records the fleet it was detected for; the fleet chip on
+  // #causes was reaching this route and being ignored.
   res.json(await q(
     `SELECT metric, grain, platform, fleet_id, period_from, period_to,
             value_from, value_to, change_pct, drivers_from, drivers_to,
             driver_change_pct, productivity_change_pct, attribution, candidate_events, detected_at
      FROM metric_break
-     WHERE ($1::text IS NULL OR platform=$1)
-     ORDER BY period_to DESC`, [req.query.platform || null]));
+     WHERE ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
+     ORDER BY period_to DESC`, [req.query.platform || null, req.query.fleet || null]));
 }));
 
 app.get('/api/events', wrap(async (req, res) => {

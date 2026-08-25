@@ -47,3 +47,69 @@ CREATE INDEX IF NOT EXISTS trip_receivable_local_day_idx
 -- the index states NULLS LAST explicitly to match the queries.
 CREATE INDEX IF NOT EXISTS insight_latest_idx
   ON insight (code, entity_type, entity_id, computed_at DESC);
+
+-- A finding that names seven people and identifies none of them.
+--
+-- drivers_online_no_trips is the most severe row on the live list: "Uber
+-- flagged 7 driver(s) logged in for about 12.6 hours with zero completed
+-- trips". Uber's own payload names them — platform_recommendation.flagged
+-- carries {driver_ext_id, value, online_hours} per person — and the finding
+-- rendered with no anchors at all, so the one action it proposes ("check
+-- whether they were genuinely available") cannot be taken from the page.
+--
+-- `refs` is the entities a finding is ABOUT when that is more than one thing.
+-- entity_id already carries the single subject (a plate, a driver id); this is
+-- the list, in the shape the front end's link map already reads:
+-- [{driver_ext_id, name, hours_online}] or [{plate, ...}].
+ALTER TABLE insight ADD COLUMN IF NOT EXISTS refs JSONB;
+COMMENT ON COLUMN insight.refs IS
+  'The entities a finding names, when it names more than one: [{driver_ext_id|plate, ...}]. entity_id is the single subject; this is the list, so a fleet-wide finding about seven people can be opened.';
+
+-- And the copies themselves, which no index can make cheap.
+--
+-- schema_v15 deduplicated the NULL-window and fleet-level rules and gave them
+-- unique indexes. It could not touch the WINDOWED ones, because their conflict
+-- key includes window_start and window_end and those move on every run: a
+-- sliding 30-day window means the same finding about the same vehicle keys
+-- differently every thirty minutes, so it INSERTS rather than replacing. That
+-- is where the remaining 29,430 duplicates came from, and they are still
+-- arriving.
+--
+-- This keeps exactly the row the read path already serves. Every reader is
+--
+--   DISTINCT ON (code, entity_type, entity_id) ... ORDER BY computed_at DESC
+--
+-- so the surviving set is BY CONSTRUCTION the set /api/insights returns today:
+-- the delete cannot change a single number on any page, only how many rows
+-- have to be sorted to produce them. The tiebreak on equal computed_at is
+-- a.id < b.id, matching schema_v15's, so the two purges cannot disagree about
+-- which copy is the survivor.
+--
+-- Idempotent, so it needs no run-once guard: on a deduplicated table it
+-- deletes nothing. It runs unconditionally and before the index above for the
+-- reason schema_v15 records at length — a migration file is one implicit
+-- transaction, and guarding a purge behind an index creation means the index
+-- failure rolls the purge back with it.
+--
+-- src/insights.js prunes after every run as well, so this is a one-off
+-- catch-up rather than the mechanism.
+DELETE FROM insight a USING insight b
+WHERE a.code = b.code
+  AND a.entity_type IS NOT DISTINCT FROM b.entity_type
+  AND a.entity_id   IS NOT DISTINCT FROM b.entity_id
+  AND (a.computed_at < b.computed_at
+       OR (a.computed_at = b.computed_at AND a.id < b.id));
+
+-- The probe described 300 rows and reported a record count of 10,423.
+--
+-- describe() reads rows.slice(0, 300) — deliberately, because the question is
+-- the SHAPE, not the numbers — while record_count was the full array length.
+-- The Providers page printed the two beside each other as though the fill
+-- rates and distinct counts covered every record, and on a surface returning
+-- ten thousand rows they cover 2.9% of them.
+--
+-- Nullable: rows written before this column existed carry NULL, which reads as
+-- "not recorded" rather than as zero described.
+ALTER TABLE provider_probe ADD COLUMN IF NOT EXISTS described_n INT;
+COMMENT ON COLUMN provider_probe.described_n IS
+  'How many of record_count rows the field description was actually read from. describe() samples the first 300; a fill rate or a distinct count is over this many rows, never over record_count.';

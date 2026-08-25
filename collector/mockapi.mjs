@@ -124,7 +124,8 @@ app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
   by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }],
   // Modelled vs stored: the page must not present a projection as a record.
-  modelled: false, stored_rows: 93, duplicates_suppressed: 4 }));
+  modelled: false, stored_rows: 93, duplicates_suppressed: 4,
+  filter: { fleet: null, platform: null }, platform_applies: false }));
 
 const insights = [
   { code:'vehicle_doc_expiring', severity:'critical', category:'compliance', entity_type:'vehicle', entity_id:'L20048',
@@ -164,7 +165,14 @@ const insights = [
 ];
 app.get('/api/insights', (req, r) => {
   const rows = req.query.category ? insights.filter((i) => i.category === req.query.category) : insights;
-  r.json({ insights: rows, truncated: false, limit: 200 });
+  /* The filter the answer was narrowed by. #action/<code>/<id> used to fetch
+     the whole 200-row list and search it in the browser, so the four findings
+     the cap cut answered "no longer open" on their own pages while appearing
+     in the category chips. */
+  r.json({ insights: rows, truncated: false, limit: 200,
+    filter: { severity: req.query.severity || null, category: req.query.category || null,
+      code: req.query.code || null, entity_id: req.query.entity_id || null,
+      fleet: req.query.fleet || null, from: null, to: null } });
 });
 app.get('/api/insights/summary', (_, r) => r.json({
   // Measured and modelled are separate numbers: the modelled one is a constant
@@ -177,6 +185,11 @@ app.get('/api/insights/summary', (_, r) => r.json({
   by_severity: [{ severity: 'critical', n: 4 }, { severity: 'warning', n: 2 }, { severity: 'info', n: 1 }],
   by_category: [{ category: 'utilisation', n: 2 }, { category: 'compliance', n: 1 },
     { category: 'demand', n: 2 }, { category: 'safety', n: 1 }, { category: 'data', n: 1 }],
+  /* Platform is accepted and NOT applied, and says so: an insight is about a
+     vehicle, a driver or the fleet, and the generator never records which
+     booking channel it came from. */
+  filter: { fleet: null, platform: null },
+  platform_applies: false,
 }));
 let _doc = 0;
 const mkDoc = (plate, make, model, days, drv) => ({
@@ -1893,6 +1906,7 @@ const mkSeg = (i) => ({
   top_speed: 40 + (i % 60), fixes: 4 + (i % 12), max_gap_min: i % 5 === 0 ? 25 : 5,
   ignition_ratio: +(0.4 + (i % 6) / 10).toFixed(2),
   verdict: SEG_VERDICTS[i % SEG_VERDICTS.length],
+  clock_skew_min: null,
   matched_platform: i % SEG_VERDICTS.length === 1 ? 'uber' : null,
   matched_trip_id: i % SEG_VERDICTS.length === 1 ? `t-${i}` : null,
   low_confidence: i % 7 === 0, unavailable_sources: i % 7 === 0 ? 'bolt, yango' : null,
@@ -1939,17 +1953,30 @@ app.get('/api/segments', (req, r) => {
       verdict: by('verdict').sort((a, b) => b.n - a.n),
       plate: by('plate').sort((a, b) => b.unauthorized - a.unauthorized),
       day: by('local_day').sort((a, b) => String(a.key).localeCompare(String(b.key))),
+      /* Grouped on the SHAPE of a reason, not on its text. Keyed on the raw
+         string, every matched segment was its own "reason": production offered
+         109 filters of which 20 could be shown, and the rows were
+         "matched uber trip fa66c89c-…" and four separate
+         "telemetry clock is {2339,2903,2439,2438} min behind wall time". */
       reason: [
-        { key: 'no booking within 15 min on any of 5 channels', n: 21, verdict: 'unauthorized' },
-        { key: 'matched a uber booking 2 min away', n: 14, verdict: 'authorized' },
-        { key: '(no reason recorded)', n: 7, verdict: 'partial' },
+        { key: 'no booking within N min on any of N channels', n: 21, verdict: 'unauthorized',
+          max_skew_min: null, skewed: 0 },
+        { key: 'matched a uber booking N min away', n: 14, verdict: 'authorized',
+          max_skew_min: null, skewed: 0 },
+        { key: 'telemetry clock is N min behind wall time', n: 4, verdict: 'unverifiable',
+          max_skew_min: 2903, skewed: 4 },
+        { key: '(no reason recorded)', n: 7, verdict: 'partial', max_skew_min: null, skewed: 0 },
       ],
     },
     /* Facet lists are capped at 40 plates and 20 reasons. A truncated facet is
        not a shorter menu — the vehicle you want is simply absent from it — so
        the page needs to know how many there really are. */
-    facet_totals: { plate: 23, plate_shown: by('plate').length, reason: 9, reason_shown: 3 },
+    facet_totals: { plate: 23, plate_shown: by('plate').length, reason: 4, reason_shown: 4 },
     known_verdicts: SEG_VERDICTS,
+    /* A tracker two days out cannot be compared against a booking at all, and
+       37 live segments were exactly that — discoverable only by reading four
+       rows of a facet list. */
+    clock_skew: { segments: 0, plates: [], max_min: null },
   });
 });
 
@@ -2025,6 +2052,9 @@ app.get('/api/slot', (req, r) => {
     occurrences: Array.from({ length: daysSeen }, (_, i) => ({
       day: `2026-08-${String(3 + i * 7).padStart(2, '0')}`, trips: 8 + i * 9, revenue: 300 + i * 90,
     })),
+    /* 40 of a slot's 62 drivers were listed with nothing saying so, on a page
+       whose subject is how few people cover an hour. */
+    drivers_total: 6, drivers_shown: 6, drivers_truncated: false,
     peers: Array.from({ length: 7 }, (_, d) => ({ dow: d, trips: 20 + ((d * 11 + hour) % 40), days: 4 })),
     settlement: [
       { settlement_class: 'cash', trips: Math.round(trips * 0.5), revenue: 700 },

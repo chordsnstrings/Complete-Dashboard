@@ -191,10 +191,44 @@ export function forecastMonths(months, { horizon = 12, metric = 'trips' } = {}) 
   const recent = usable.slice(-3);
   const flat = recent.reduce((a, m) => a + Number(m[metric]), 0) / recent.length;
 
-  const lastMonth = usable[usable.length - 1].m;
+  /* The horizon starts after the newest month the record has ANY row for, not
+     after the newest COMPLETE one.
+     ─────────────────────────────────────────────────────────────────────────
+     `usable` holds complete months only, so on 2026-08-25 the last fitted
+     month was July and forecast[0] was AUGUST — the month already in progress.
+     Production published {m:"2026-08", point:12100, low:8100, high:16100}
+     beside in_progress {days_so_far:25, trips_so_far:9801}: an interval whose
+     floor sat below what was already banked, presented as a prediction. The
+     daily rota inherited it and planned from 2026-08-01, naming "the busiest
+     expected day" eighteen days in the past.
+
+     The month in progress is still predicted — it is the only out-of-sample
+     evidence this fit has — but it is returned separately, as
+     `current_month`, so a horizon means the months that have not started. */
+  const lastFitted = usable[usable.length - 1].m;
+  const lastObserved = months.length ? months[months.length - 1].m : lastFitted;
+  const anchor = lastObserved > lastFitted ? lastObserved : lastFitted;
+  const rowFor = (ym, kind) => {
+    const x2 = idx(ym);
+    const point2 = Math.max(0, f.predict(x2));
+    const pm2 = interval(f, x2);
+    return {
+      m: ym,
+      point: Math.round(point2 / 100) * 100,
+      low: pm2 == null ? null : Math.max(0, Math.round((point2 - pm2) / 100) * 100),
+      high: pm2 == null ? null : Math.round((point2 + pm2) / 100) * 100,
+      flat: Math.round(flat / 100) * 100,
+      days: daysInMonth(ym),
+      kind,
+    };
+  };
+  /* The prediction for the month already under way, for the in-progress
+     self-check and for nothing else. NULL when the newest observed month is
+     itself complete, because then there is no month in progress. */
+  const currentMonth = anchor > lastFitted ? rowFor(anchor, 'in_progress') : null;
   const out = [];
   for (let k = 1; k <= horizon; k++) {
-    const ym = addMonths(lastMonth, k);
+    const ym = addMonths(anchor, k);
     const x = idx(ym);
     const point = Math.max(0, f.predict(x));
     const pm = interval(f, x);
@@ -232,6 +266,13 @@ export function forecastMonths(months, { horizon = 12, metric = 'trips' } = {}) 
        short series it frequently does not, and saying so is the difference
        between a forecast and a decoration. */
     beats_flat: f.s != null && f.r2 != null && f.r2 >= 0.5,
+    /* The last month the line was fitted through, and the month the horizon
+       counts from. They differ exactly when a month is in progress, and saying
+       so is what stops a reader taking forecast[0] for a prediction about a
+       month that is already two thirds spent. */
+    fitted_to: lastFitted,
+    horizon_from: anchor,
+    current_month: currentMonth,
     forecast: out,
   };
 }

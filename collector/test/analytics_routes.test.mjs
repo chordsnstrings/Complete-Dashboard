@@ -856,7 +856,11 @@ const W = 'from=2026-08-01&to=2026-08-31';
     /FROM rollup_day/.test(rollupSql) && /FROM source_day_coverage/.test(liveSql),
     `${rollupSql.slice(0, 48)} | ${liveSql.slice(0, 48)}`);
 
-  const P = ['2026-09-01', '2026-09-05'];
+  /* Four binds now, not two: both statements narrow by the platform and fleet
+     chips the page displays. /api/coverage/calendar?platform=uber used to
+     return all four sources unchanged. NULLs here mean "every source, the
+     all-fleets row", which is what this comparison is about. */
+  const P = ['2026-09-01', '2026-09-05', null, null];
   const live = await q(liveSql, P);
   await refreshRollups({ db });
   const rolled = await q(rollupSql, P);
