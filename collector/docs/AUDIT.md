@@ -88,3 +88,46 @@ the unique indexes it exists to make possible are creatable afterwards; and the
 ledger is keyed on content, writes only after success, and degrades to full
 replay if the ledger table cannot be created.
 
+### Pass 2 — 25 Aug 2026, two pages that had been 500ing in production
+
+Probing every list endpoint against the live database for fields that are null
+in **every** row turned up something worse than a null: two endpoints returning
+`{"error":"internal"}`.
+
+```
+/api/insights   → 500      the Action list
+/api/retention  → 500      Joiners & leavers
+```
+
+Both are the same root cause as Pass 1, and neither would have been found by a
+harness that only checks whether a page renders — the page renders, it renders
+its error box.
+
+`sql/schema_v31.sql` adds three columns:
+
+- `rollup_person_month.fleets` — which `/api/retention` filters on
+- `insight.refs` — which `/api/insights` selects
+- `provider_probe.described_n`
+
+and it contains, between them, the quadratic `DELETE` from Pass 1. **A
+migration file is one implicit transaction.** The `DELETE` hit the statement
+timeout, the transaction aborted, and every `ALTER` in the file rolled back with
+it. So the columns never existed, the two routes that read them 500ed on every
+request, and `src/rollup.js` — which writes `fleets` — was failing the same way.
+
+The two pages were not broken by anything on the pages. They were broken by a
+`DELETE` seventy lines above the `ALTER` they depend on, in a file that reported
+its own failure to a log nobody reads and carried on booting.
+
+| # | finding | fix |
+|---|---|---|
+| 7 | `/api/insights` 500s — `insight.refs` does not exist | Pass 1's rewrite lets `schema_v31` commit |
+| 8 | `/api/retention` 500s — `rollup_person_month.fleets` does not exist | same |
+| 9 | `src/rollup.js` writes `fleets` into a column that is not there | same |
+
+**The general lesson, worth stating because it will happen again:** a data
+statement and a structural statement in the same migration file are coupled by
+the transaction. A slow `DELETE` does not merely fail — it takes every `ALTER`
+in the file down with it, silently, and the damage shows up somewhere else
+entirely as a 500 on an unrelated page.
+
