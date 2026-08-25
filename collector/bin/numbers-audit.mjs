@@ -51,7 +51,27 @@ const rd = first(drv), rv = first(veh), rp = first(prop);
 const SUB = { 'drv-0': rd?.ids?.[0] || rd?.driver_ext_id, 'drv-9': rd?.ids?.[0] || rd?.driver_ext_id,
   L45235: rv?.plate, 'h-palm': rp?.partner_id, '2026-08-25': TODAY,
   '2026-08-24': dubai(new Date(Date.now() - 864e5)), '2026-08-14': dubai(new Date(Date.now() - 864e5)) };
-const sub = (r) => Object.entries(SUB).reduce((a, [k, v]) => (v ? a.split(k).join(v) : a), r);
+const sub1 = (r) => Object.entries(SUB).reduce((a, [k, v]) => (v ? a.split(k).join(v) : a), r);
+
+/* A segment is addressed by (plate, started_at) and BOTH halves have to come
+   from the SAME row, or the page 404s and this harness audits an error box
+   while reporting the route as clean. There was no substitution here at all,
+   so #segment has never actually been checked by the numbers pass.
+
+   Applied AFTER the token pass, not before. The token table maps '2026-08-25'
+   to today, and it will happily rewrite that date INSIDE a timestamp this
+   function just wrote — which is exactly the bug that had render-audit asking
+   for a segment one day after the one it had looked up. subSegment replaces
+   the whole route, so running it last makes it immune. */
+const seg1 = await (async () => {
+  const d = await api(`/api/segments?${WIN}`);
+  const rows = Array.isArray(d) ? d : (d?.rows || []);
+  return rows[0] || null;
+})();
+const subSegment = (r) => (seg1?.plate && seg1?.started_at
+  ? r.replace(/^segment\/[^/]+\/.+$/, `segment/${seg1.plate}/${seg1.started_at}`)
+  : r);
+const sub = (r) => subSegment(sub1(r));
 
 /* Numbers worth checking: money and counts big enough that a reader would
    notice them missing. Small integers — a page index, a rating, a day count —
