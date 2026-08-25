@@ -228,3 +228,50 @@ first page, not "no offset".
 | 14 | no test could catch a third occurrence | `test/query_params.test.mjs` bans `x \|\| undefined` inside any `q()`/`qAll()` argument |
 | 15 | `/api/driver/trips` and `/api/vehicle/trips` returned a bare array capped at `limit` with no total — "the server sent the 500 newest" is unusable when the reader cannot know 500 of how many | both return `{rows, total, shown, offset, limit, truncated}`; both tabs say "500 of 1,247 loaded" and offer **Load the next 500** |
 
+### Pass 5 — 25 Aug 2026, the page that could never find anything
+
+`#unauthorized` and all seven `#segments/*` routes rendered the panel **"Vehicles
+with unexplained occupancy"** empty. The empty state was honest — "No vehicle
+carries an unexplained segment in this range" — and the reason it was empty was
+not.
+
+Live, over thirty days:
+
+```
+authorized   149      partial      232
+stationary    61      unverifiable  41
+unauthorized   0
+```
+
+Zero, on the page whose entire subject is unauthorized trips. That zero reads as
+"no leakage". It was **the verdict being unreachable**, twice over.
+
+**The channel guard.** A journey may only be called unauthorized once every
+booking channel has been consulted, so channels that reported nothing in the
+window block the verdict. It was computed against a hardcoded
+`['uber','yango','bolt','hotel']` — and this fleet has **never had a single bolt
+booking**: 0 bookings, 0 rows, ever. So `bolt` was permanently unavailable, the
+guard fired on every segment, and the branch below it never ran.
+
+**The clock guard.** Telemetry whose clock disagrees with wall time cannot be
+matched against bookings, so a skewed feed refuses to judge. It measured
+`now - captured_at` — which is how **old** a fix is, and every fix in a
+thirty-day window is days old by construction. The median came out around a
+fortnight, sailed past the sixty-minute threshold, and the second half of the
+test ("the window ends near now") is true of every window ending today. So every
+recent window declared the fleet's clock suspect.
+
+Both are plausible expressions measuring the wrong thing, and both fail the same
+way: an empty page rather than an error.
+
+| # | finding | fix |
+|---|---|---|
+| 16 | `unavailable` computed from a hardcoded channel list; bolt has never produced a booking, so the unauthorized verdict was unreachable | `blockingChannels(everSeen, inWindow)` — a channel the fleet has never used is not a channel; one it has used but that is silent this window still blocks |
+| 17 | clock skew measured as data age, condemning every window that ends today | `clockSkewMin(fixes)` — `polled_at − captured_at`, the device's clock against ours at the moment we asked |
+| 18 | `channels_checked` reported bolt as consulted on a fleet with no bolt | reports the set the verdict was actually reached against |
+| 19 | neither guard was testable — `reconcile()` needs a database, so "can this branch be reached" could only be read | both are pure exported functions; `test/verdict_guards.test.mjs` (17 assertions) |
+
+The clock guard keeps the failure it was written for: a tracker running four
+hours behind still reads as 240 minutes of skew and still refuses verdicts, and
+it is a **median**, so one broken tracker cannot stop the fleet being judged.
+

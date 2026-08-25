@@ -194,9 +194,51 @@ const NON_CANDIDATE_REASON = {
   partial: 'the journey is cut off by the edge of available telemetry',
 };
 
+/* The two guards that decide whether a verdict may be issued at all.
+   ─────────────────────────────────────────────────────────────────────────
+   Pure and exported, because both were wrong in production for months and
+   neither was testable in place: reconcile() needs a database, so the only
+   way to check "can this branch ever be reached" was to read it. Both bugs
+   were of the same kind — a plausible expression measuring the wrong thing —
+   and both produced an empty page rather than an error.
+
+   test/verdict_guards.test.mjs pins them. */
+
+/* Channels a verdict may be reached WITHOUT.
+   `everSeen` is every platform that has produced a booking on this fleet at
+   any time; `inWindow` is those that produced one in the range being judged. A
+   channel in the first set and not the second genuinely might hold the booking
+   that explains a journey, so no unauthorized verdict is safe. A channel in
+   NEITHER is not part of this fleet's booking surface and must not block one —
+   bolt has produced zero bookings here, ever, and blocking on it made the
+   unauthorized verdict unreachable. `fms` is telematics, not a channel. */
+export function blockingChannels(everSeen, inWindow) {
+  const seen = inWindow instanceof Set ? inWindow : new Set(inWindow || []);
+  return (everSeen || []).filter((c) => c && c !== 'fms' && !seen.has(c));
+}
+
+/* How far the trackers' clocks are from ours, in minutes.
+   The gap between what the device says the time was (captured_at) and when we
+   asked for it (polled_at). NOT `now - captured_at`, which is how OLD a fix
+   is: every fix in a thirty-day window is days old by construction, so that
+   measurement declared the fleet's clock suspect on every window ending today
+   and refused to judge anything it had not already matched. A row with no
+   polled_at cannot be judged either way and is left out of the median. */
+export function clockSkewMin(fixes) {
+  const lags = (fixes || []).map((f) => (f && f.polled_at && f.captured_at
+    ? (new Date(f.polled_at).getTime() - new Date(f.captured_at).getTime()) / 60000 : null))
+    .filter((v) => v != null && Number.isFinite(v) && v > -60)
+    .sort((a, b) => a - b);
+  return lags.length ? lags[Math.floor(lags.length / 2)] : 0;
+}
+
 export async function reconcile({ from, to }) {
   const { rows: fixes } = await pool.query(
-    `SELECT plate, fleet_id, captured_at, seat_occupied, speed, ignition, lat, lng, odometer
+    /* polled_at as well as captured_at. The clock check below needs the gap
+       BETWEEN THEM — the device's clock against ours at the moment we fetched
+       — and was measuring `now - captured_at` instead, which is the age of the
+       data and grows without bound as the window recedes. See there. */
+    `SELECT plate, fleet_id, captured_at, polled_at, seat_occupied, speed, ignition, lat, lng, odometer
      FROM telemetry_snapshot WHERE source='cabman' AND captured_at BETWEEN $1 AND $2
      ORDER BY plate, captured_at`, [from, to]);
   if (!fixes.length) { log.info('reconcile', 'no cabman telemetry in window'); return { segments: 0 }; }
@@ -228,21 +270,20 @@ export async function reconcile({ from, to }) {
     `SELECT platform, count(*)::int n FROM trip_norm WHERE is_booking GROUP BY platform`);
   const inWindow = new Set(seen.map((r) => r.platform));
   const configured = ever.filter((r) => r.n > 0).map((r) => r.platform);
-  const CHANNELS = ['uber', 'yango', 'bolt', 'hotel'];
   // A channel we have never seen at all is not configured; one we have seen but
   // that produced nothing here is unavailable for this window.
-  const unavailable = CHANNELS.filter((c) => !inWindow.has(c));
+  // See blockingChannels() above for why this is not a hardcoded list.
+  const unavailable = blockingChannels(configured, inWindow);
 
   /* Telemetry whose clock disagrees with wall time cannot be compared against
      bookings at all. A 4-hour skew in the CABMAN feed once made every segment
      miss its own booking by 240 minutes against a 15-minute tolerance, and the
      dashboard named nine drivers for trips they had genuinely run. Refuse to
      judge rather than accuse. */
-  const now = Date.now();
-  const lags = fixes.map((f) => (now - new Date(f.captured_at).getTime()) / 60000)
-    .filter((v) => Number.isFinite(v) && v > -60).sort((a, b) => a - b);
-  const medianLag = lags.length ? lags[Math.floor(lags.length / 2)] : 0;
-  const clockSuspect = medianLag > 60 && new Date(to).getTime() > now - 6 * 3600e3;
+  // See clockSkewMin() above: the gap between the device's clock and ours,
+  // not the age of the data.
+  const medianLag = clockSkewMin(fixes);
+  const clockSuspect = medianLag > 60;
   if (clockSuspect) {
     log.error('reconcile', 'telemetry clock looks skewed — refusing to issue verdicts', {
       median_lag_min: Math.round(medianLag),
@@ -309,7 +350,10 @@ export async function reconcile({ from, to }) {
         nearest_trip_id: found.nearest?.external_id || null,
         nearest_gap_min: found.nearest_gap_min,
         verdict_reason: reason,
-        channels_checked: CHANNELS.filter((c) => inWindow.has(c)).join(',') || null,
+        /* What was actually checked, which is the same set the verdict was
+           reached against. Reading a hardcoded list here claimed bolt had been
+           consulted on a fleet that has never had a bolt booking. */
+        channels_checked: configured.filter((c) => c !== 'fms' && inWindow.has(c)).join(',') || null,
         low_confidence: verdict === 'unverifiable' || verdict === 'pending',
         unavailable_sources: unavailable.length ? unavailable.join(',') : null,
       });
