@@ -301,8 +301,21 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
    the tile means the reader does not even get an ellipsis to warn them.
    Measured against the values that overflowed — "12:00 AM – 11:57 PM" (19)
    and "+AED 37,286 · 150.9%" (20) — and against the ones the nowrap rule
-   exists to protect, of which the longest is "AED 257,122" (11). */
-const KPI_ONE_LINE = 14;
+   exists to protect, of which the longest is "AED 257,122" (11).
+
+   It was 14, and the render audit found the value that sits exactly on the
+   boundary: #compare's Distance tile reading "44 vs 6,454 km" — fourteen
+   characters, so `> 14` was false, so no wrap, so clipped by five pixels at
+   1500px with no ellipsis to say so. A threshold tuned to the character is a
+   threshold that fails on the next character, and it fails INVISIBLY: the tile
+   looks like a tile and the number in it is wrong.
+
+   Twelve, because the class is not a punishment. `.long` lets a value wrap and
+   drops the font a step; a value that fits still occupies one line, because
+   `white-space:normal` breaks only where it must. Everything the nowrap rule
+   was written for — "AED 257,122" at eleven — is still under it, and the two
+   characters of margin are what stops the next boundary case from clipping. */
+const KPI_ONE_LINE = 12;
 
 export function kpiRow(items) {
   const host = el('div', 'kpis');

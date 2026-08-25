@@ -1214,7 +1214,7 @@ export async function renderDriverDirectory(root) {
       <div class="rank">${i + 1}</div>
       <div class="av sm">${esc(initials)}</div>
       <div class="dc-meta">
-        <b>${esc(r.driver_name)}</b>
+        <b title="${esc(r.driver_name)}">${esc(r.driver_name)}</b>
         <div class="cap">${(r.platforms || []).join(' · ')}${r.plate ? ' · ' + esc(r.plate) : ''}</div>
       </div>
       <div class="dc-n"><span class="num">${fmt(r.trips)}</span><small>trips</small></div>`;
