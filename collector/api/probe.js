@@ -268,5 +268,60 @@ export function probeRoutes(app, { wrap }) {
     });
   }));
 
+  /* Is the FMS history actually gone, or did we ask for it wrongly?
+     ─────────────────────────────────────────────────────────────────────────
+     The record says six consecutive monthly windows covering August 2025 to
+     February 2026 were asked and answered ok with zero rows, while every
+     window after them returned thousands. That is the provider's answer as far
+     as our collector can tell — but "returned an empty list" and "returned an
+     empty list because the request was subtly wrong" are indistinguishable in
+     a row count, and the difference decides whether five months of telematics
+     are recoverable or gone.
+
+     So this asks FMS the same question the collector asks, for a window the
+     caller names, and reports the SHAPE of what comes back: the HTTP status,
+     the top-level keys, how many records, and the field names of the first one.
+     Same operation, same parameters, same credentials as the collector — a
+     different answer here would mean the collector is at fault, and an
+     identical empty one means the data is not there.
+
+     Read-only: GetTripPassenger is a report endpoint, the operation name is
+     fixed here rather than taken from the caller, and only the shape is
+     returned. */
+  app.get('/api/probe/fms/window', wrap(async (req, res) => {
+    await loadSettings();
+    const from = String(req.query.from || '').slice(0, 10);
+    const to = String(req.query.to || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return res.status(400).json({ error: 'from and to are required as YYYY-MM-DD' });
+    }
+    const dot = (d) => d.replace(/-/g, '.');
+    const out = [];
+    for (const f of (config.fms.fleets || [])) {
+      if (!f.username || !f.password) { out.push({ fleet: f.fleet, skipped: 'no credential' }); continue; }
+      try {
+        const url = `${config.fms.base}/GetTripPassenger?${qs({
+          username: f.username, Password: f.password, vehicleno: 'ALL',
+          fromdate: dot(from), todate: dot(to),
+        })}`;
+        const { status, data } = await http(url, { timeoutMs: 120000, retries: 0 });
+        const arr = Array.isArray(data?.Data) ? data.Data : null;
+        out.push({
+          fleet: f.fleet,
+          http: status,
+          top_level_keys: data && typeof data === 'object' ? Object.keys(data).slice(0, 20) : [],
+          message: data?.Message || data?.message || data?.error || null,
+          records: arr ? arr.length : null,
+          /* Field NAMES only. A telematics row carries positions and a plate,
+             which is the fleet's own data and does not need to leave here to
+             answer whether the window is empty. */
+          fields: arr && arr.length ? Object.keys(arr[0]).slice(0, 40) : [],
+          first_start: arr && arr.length ? String(arr[0]['Start Time'] || '').slice(0, 19) : null,
+        });
+      } catch (e) { out.push({ fleet: f.fleet, error: String(e).slice(0, 220) }); }
+    }
+    res.json({ window: [from, to], operation: 'GetTripPassenger', fleets: out });
+  }));
+
   log.info('api', 'probe routes mounted (read-only, allowlisted)');
 }

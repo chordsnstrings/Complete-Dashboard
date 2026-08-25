@@ -48,6 +48,9 @@ const EXEMPT = {
   '/api/probe/uber/rest': 'operator tool: reports the shape of the provider REST surfaces',
   '/api/probe/uber/window': 'operator tool: asks the provider what it still holds for one window, '
     + 'to settle whether a gap in our history is recoverable or gone',
+  '/api/probe/fms/window': 'operator tool: the same question of FMS, whose history has a 152-day hole. '
+    + 'Our records say those windows were asked and answered empty, and an empty list is '
+    + 'indistinguishable from a malformed request in a row count — this asks again and reports the shape',
   '/api/driver/vehicles': 'the per-vehicle rollup of /api/driver/custody, which is what the page draws; '
     + 'kept because it is an address somebody may have bookmarked, and it now resolves the whole person '
     + 'and honours the window rather than answering about one account and all of history',
