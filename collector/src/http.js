@@ -23,6 +23,25 @@ export async function http(url, { method = 'GET', headers = {}, body, timeoutMs 
       const text = await res.text();
       let data = text;
       if (expect === 'json') { try { data = JSON.parse(text); } catch { /* leave as text */ } }
+      /* A refusal that nobody checks is a silent hole.
+         ─────────────────────────────────────────────────────────────────────
+         This resolves for any status — which is right, because some callers
+         need to read a 4xx body — but no collector was checking. A provider
+         answering 400 therefore arrived with no records under the key the
+         mapper reads, fell through `data?.X || []`, and was recorded as a
+         window that was asked and answered with nothing. FMS did exactly that
+         for six months of 2025 while still serving those months on request,
+         and the Collection gaps page reported the hole as the provider's.
+
+         The control flow is deliberately unchanged: making this throw would
+         alter the error semantics of nine collectors at once, and each of them
+         needs exercising against its own provider before that is safe. What
+         changes is that a refusal can no longer pass without saying so, in any
+         of them, which is what let this one hide. */
+      if (!res.ok) {
+        log.warn('http', `${res.status} ${String(url).split('?')[0]}`,
+          { status: res.status, body: String(text).slice(0, 160) });
+      }
       return { status: res.status, ok: res.ok, data, headers: res.headers };
     } catch (err) {
       clearTimeout(t);

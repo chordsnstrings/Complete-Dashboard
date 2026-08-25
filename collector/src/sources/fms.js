@@ -44,10 +44,37 @@ async function pullTrips(fleet, from, to, onStep) {
     chunks.push(chunk);
     let data;
     try {
-      ({ data } = await call('GetTripPassenger', {
+      /* A refusal is not an empty month.
+         ─────────────────────────────────────────────────────────────────
+         http() resolves for any status — it returns { status, ok, data } and
+         only throws on a transport failure — so a 400 arrived here with no
+         Data key, fell through `data?.Data || []`, and was recorded as a
+         window that was asked and answered with nothing. Six consecutive
+         months of 2025 read that way, and the Collection gaps page dutifully
+         reported five months of telematics as the provider having none.
+
+         FMS is still serving those months. Asked again today it returns 4,500
+         trips for Egari in December 2025 and 4,351 in February 2026 — the same
+         windows our own record calls empty — while refusing Ecosine's with a
+         400, deterministically, on every retry. So the two fleets have
+         different reach into the history, which is a fact worth having, and
+         none of it is what was recorded.
+
+         Status is checked before the body is read now, and a refusal is a
+         chunk error: the page can then say "asked and refused" rather than
+         "asked and answered empty", which are opposite instructions to whoever
+         reads it. */
+      const r = await call('GetTripPassenger', {
         username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
         fromdate: dotDate(s), todate: dotDate(e),
-      }));
+      });
+      if (!r.ok) {
+        chunk.error = `HTTP ${r.status}${r.data?.Message ? `: ${String(r.data.Message).slice(0, 120)}` : ''}`;
+        log.warn(SRC, `trip window ${dotDate(s)}..${dotDate(e)} refused`,
+          { fleet: fleet.fleet, status: r.status });
+        continue;
+      }
+      data = r.data;
     } catch (err) {
       chunk.error = String(err).slice(0, 300);
       log.error(SRC, `trip window ${dotDate(s)}..${dotDate(e)} FAILED`,

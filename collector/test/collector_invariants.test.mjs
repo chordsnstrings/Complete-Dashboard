@@ -666,5 +666,39 @@ console.log('\na silent vehicle is not a broken clock');
     'two endpoints disagreeing about which vehicles are live is its own bug');
 }
 
+console.log('\na provider that refuses is not a provider with nothing');
+
+/* The FMS collector recorded six consecutive months of 2025 as asked and
+   answered empty. FMS was refusing them with HTTP 400 — and http() resolves
+   for any status, so the refusal arrived with no Data key, fell through
+   `data?.Data || []`, and became a successful empty window. The Collection
+   gaps page then reported five months of missing telematics as the provider
+   having none, which is the opposite instruction to whoever reads it.
+
+   Asked again today FMS serves those months: 4,500 trips for Egari in
+   December 2025, 4,351 in February 2026 — the very windows our record calls
+   empty — while refusing Ecosine's deterministically. The data was there the
+   whole time. */
+{
+  const fms = src('fms.js');
+  check('the trip pull checks the status before reading the body',
+    /if \(!r\.ok\)/.test(fms) && /chunk\.error = `HTTP \$\{r\.status\}/.test(fms),
+    'a 400 still falls through as an empty window');
+  check('and a refusal is recorded as an error, not as an empty window',
+    /trip window .* refused/.test(fms) && !/\({ data } = await call\('GetTripPassenger'/.test(fms),
+    'the chunk must carry the refusal so the page can tell the two apart');
+
+  /* And the silence ends everywhere, because no collector checked. Changing
+     http() to throw would alter nine collectors' error semantics at once and
+     each needs exercising against its own provider first; what it must not do
+     is let a refusal pass without a word. */
+  const httpSrc = readFileSync('src/http.js', 'utf8');
+  check('http() says something when a provider refuses',
+    /if \(!res\.ok\)/.test(httpSrc) && /log\.warn\('http'/.test(httpSrc),
+    'an unchecked refusal is how five months of telematics went missing quietly');
+  check('and still resolves rather than throwing, so callers that read a 4xx body keep working',
+    /return \{ status: res\.status, ok: res\.ok, data, headers: res\.headers \}/.test(httpSrc));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
