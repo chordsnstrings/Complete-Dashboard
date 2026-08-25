@@ -144,9 +144,26 @@ export function windowDates() {
   const now = Date.now();
   return [dubaiDay(new Date(now - (state.days - 1) * 864e5)), dubaiDay(new Date(now))];
 }
+/* An absent value must be ABSENT, not the four-letter word "undefined".
+   ─────────────────────────────────────────────────────────────────────────
+   URLSearchParams stringifies everything it is handed, so `{ fleet: undefined }`
+   went over the wire as `fleet=undefined` — and a route that reads
+   `req.query.fleet || null` sees a non-empty string and filters on a fleet by
+   that name. Nothing matches, and the page renders a perfectly healthy-looking
+   empty state.
+
+   #compare shipped with exactly this: `fleet: state.fleet || undefined`, three
+   panels reading "No booking on either day" over a database holding 293
+   bookings that day. It is the worst class of front-end bug — no error, no
+   warning, a page that looks like an answer.
+
+   Dropped here, once, rather than at each of the two hundred call sites. */
+const clean = (o = {}) => Object.fromEntries(
+  Object.entries(o).filter(([, v]) => v != null && v !== ''));
+
 export function params(extra = {}) {
   const [from, to] = windowDates();
-  const p = new URLSearchParams({ from, to, ...extra });
+  const p = new URLSearchParams({ from, to, ...clean(extra) });
   if (state.platform) p.set('platform', state.platform);
   if (state.fleet) p.set('fleet', state.fleet);
   return p.toString();
@@ -158,7 +175,7 @@ export const q = (path, extra) => api(`${path}?${params(extra)}`);
 // a platform filter is set elsewhere would be a lie.
 export function unfiltered(extra = {}) {
   const [from, to] = windowDates();
-  return new URLSearchParams({ from, to, ...extra }).toString();
+  return new URLSearchParams({ from, to, ...clean(extra) }).toString();
 }
 export const qAll = (path, extra) => api(`${path}?${unfiltered(extra)}`);
 

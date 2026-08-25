@@ -712,9 +712,16 @@ app.get('/api/driver/quality', (req, r) => {
   });
 });
 
+/* Paged, like the real one. 640 trips behind a 500-row page, so the "load the
+   next N" control and the "500 of 640 loaded" caption are both reachable from
+   the fixture — a mock that always returns everything cannot exercise the one
+   branch this endpoint exists to have. */
 app.get('/api/driver/trips', (req, r) => {
   const seed = idIndex(req.query.id);
-  r.json(Array.from({ length: 120 }, (_, n) => ({
+  const TOTAL = 640;
+  const limit = Math.min(+req.query.limit || 200, 1000);
+  const offset = Math.max(0, +req.query.offset || 0);
+  const all = Array.from({ length: TOTAL }, (_, n) => ({
     platform: n % 9 === 0 ? 'yango' : 'uber', external_id: `t-${seed}-${n}`,
     requested_at: new Date(Date.now() - n * 27e5).toISOString(),
     ended_at: new Date(Date.now() - n * 27e5 + 12e5).toISOString(),
@@ -730,7 +737,10 @@ app.get('/api/driver/trips', (req, r) => {
     is_booking: true, has_fare: n % 5 !== 1,
     product: ['UberX', 'Comfort', 'Uber Black'][n % 3], payment_type: n % 5 === 0 ? 'cash' : 'card',
     price: n % 5 === 1 ? null : +rnd(18, 140).toFixed(2), currency: 'AED',
-  })));
+  }));
+  const rows = all.slice(offset, offset + limit);
+  r.json({ rows, total: TOTAL, shown: rows.length, offset, limit,
+    truncated: offset + rows.length < TOTAL });
 });
 
 app.get('/api/driver/custody', (req, r) => {
@@ -1002,7 +1012,10 @@ app.get('/api/vehicle/mix', (req, r) => r.json({
 
 app.get('/api/vehicle/trips', (req, r) => {
   const i = pIndex(req.query.plate);
-  r.json(Array.from({ length: 140 }, (_, n) => ({
+  const TOTAL = 720;
+  const limit = Math.min(+req.query.limit || 200, 1000);
+  const offset = Math.max(0, +req.query.offset || 0);
+  const all = Array.from({ length: TOTAL }, (_, n) => ({
     platform: n % 11 === 0 ? 'yango' : 'uber', external_id: `vt-${i}-${n}`,
     requested_at: new Date(Date.now() - n * 24e5).toISOString(),
     ended_at: new Date(Date.now() - n * 24e5 + 11e5).toISOString(),
@@ -1014,7 +1027,10 @@ app.get('/api/vehicle/trips', (req, r) => {
     status: n % 19 === 0 ? 'rider_cancelled' : 'completed',
     product: ['UberX', 'Comfort', 'Uber Black'][n % 3], payment_type: n % 5 === 0 ? 'cash' : 'card',
     price: +rnd(18, 140).toFixed(2), currency: 'AED',
-  })));
+  }));
+  const rows = all.slice(offset, offset + limit);
+  r.json({ rows, total: TOTAL, shown: rows.length, offset, limit,
+    truncated: offset + rows.length < TOTAL });
 });
 
 

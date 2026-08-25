@@ -669,10 +669,22 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
   }));
 
   /* ── the raw trip record ──────────────────────────────────────────────── */
-  app.get('/api/vehicle/trips', withVehicle(async (req, res, plate, p) => res.json(await q(
-    `SELECT platform, external_id, requested_at, ended_at, driver_name, driver_ext_id,
-            pickup_addr, dropoff_addr, distance_km, duration_s, status, product,
-            payment_type, price, currency
-     FROM trip WHERE ${TW}
-     ORDER BY requested_at DESC LIMIT ${Math.min(+req.query.limit || 200, 1000)}`, p))));
+  /* Paged, and honest about it — see the twin in api/driver_routes.js. A bare
+     capped array cannot tell a reader whether they are looking at all of the
+     evidence or two fifths of it. */
+  app.get('/api/vehicle/trips', withVehicle(async (req, res, plate, p) => {
+    const limit = Math.min(+req.query.limit || 200, 1000);
+    const offset = Math.max(0, +req.query.offset || 0);
+    const [rows, [t]] = await Promise.all([
+      q(`SELECT platform, external_id, requested_at, ended_at, driver_name, driver_ext_id,
+                pickup_addr, dropoff_addr, distance_km, duration_s, status, product,
+                payment_type, price, currency
+         FROM trip WHERE ${TW}
+         ORDER BY requested_at DESC LIMIT ${limit} OFFSET ${offset}`, p),
+      q(`SELECT count(*)::int n FROM trip WHERE ${TW}`, p),
+    ]);
+    const total = t?.n ?? rows.length;
+    res.json({ rows, total, shown: rows.length, offset, limit,
+      truncated: offset + rows.length < total });
+  }));
 }

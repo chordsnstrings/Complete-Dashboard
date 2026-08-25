@@ -192,9 +192,27 @@ check('only alerts for vehicles they held that day', qy.alerts.reduce((a, r) => 
 check('harsh events normalised per 100km', qy.alerts_per_100km > 0, String(qy.alerts_per_100km));
 
 /* ── raw records ────────────────────────────────────────────────────────── */
-const tr = (await get(`/api/driver/trips?id=${UBER}&${W}&limit=10`)).body;
+/* Paged, not capped. A bare array could not say whether ten rows were all of
+   them or the first ten of two hundred, and the Trips tab printed "the server
+   sent the 500 newest" — true, and unusable, because 500 of how many? */
+const page = (await get(`/api/driver/trips?id=${UBER}&${W}&limit=10`)).body;
+const tr = page.rows;
 check('trip list honours the limit', tr.length === 10, String(tr.length));
+check('and reports how many there actually are, so the page can say "10 of N"',
+  page.total > tr.length, JSON.stringify({ total: page.total, shown: page.shown }));
+check('and says so as a flag, not only by arithmetic a renderer could invert',
+  page.truncated === true);
 check('trips come back newest first', new Date(tr[0].requested_at) >= new Date(tr[1].requested_at));
+/* The offset is what turns the cap into a page. Without it the reader is told
+   what they cannot see and given no way to see it. */
+const p2 = (await get(`/api/driver/trips?id=${UBER}&${W}&limit=10&offset=10`)).body;
+check('an offset returns the NEXT page rather than the same one',
+  p2.rows.length && p2.rows[0].external_id !== tr[0].external_id,
+  JSON.stringify([tr[0]?.external_id, p2.rows[0]?.external_id]));
+check('and the total does not move between pages',
+  p2.total === page.total, JSON.stringify([page.total, p2.total]));
+check('the last page reports itself as the last one',
+  ((await get(`/api/driver/trips?id=${UBER}&${W}&limit=1000`)).body).truncated === false);
 const cust = (await get(`/api/driver/custody?id=${UBER}&${W}`)).body;
 // Three rows for two vehicles: L46174 twice on the 13th (uber + yango), L36397 once.
 check('custody lists every platform row', cust.rows.length === 3, String(cust.rows.length));

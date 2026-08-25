@@ -267,8 +267,14 @@ check('product mix includes the Comfort trip', mix.product.some((r) => r.label =
 check('hourly profile returned', mix.hours.length > 3);
 
 /* ── trips ──────────────────────────────────────────────────────────────── */
-const tr = (await get(`/api/vehicle/trips?plate=${PLATE}&${W}&limit=5`)).body;
+/* Paged, not capped — the twin of the driver trip ledger. */
+const page = (await get(`/api/vehicle/trips?plate=${PLATE}&${W}&limit=5`)).body;
+const tr = page.rows;
 check('trip list honours the limit', tr.length === 5, String(tr.length));
+check('and reports the window\'s real total beside it',
+  page.total >= tr.length, JSON.stringify({ total: page.total, shown: page.shown }));
+check('an offset returns the next page',
+  ((await get(`/api/vehicle/trips?plate=${PLATE}&${W}&limit=5&offset=5`)).body).offset === 5);
 check('every trip belongs to this plate', tr.every((t) => t.plate === undefined || t.plate === PLATE));
 /* Every BOOKING carries a driver. A telematics journey does not: it is the
    tracker's own record of a trip, with a plate and no person. */

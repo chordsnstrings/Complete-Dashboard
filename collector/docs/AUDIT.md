@@ -174,3 +174,57 @@ against endpoints we have not proven exist. `REPORT_TYPE_PAYMENTS_ORDER` and
 `analytics-data/query` are the two candidates already identified for fares and
 hours. Until one is proven, the honest thing is the sentence, not a dash.
 
+### Pass 4 — 25 Aug 2026, the full render sweep
+
+`bin/render-audit.mjs` against production: **104 routes × 3 widths = 312
+page-renders**, 471 findings.
+
+```
+page-overflow 105 · dead-column 85 · silent-cap 75 · sparse-column 53
+bad-value 48 · empty-panel 44 · blank-page 18 · mostly-empty 15
+clipped-text 8 · overflow 7 · js-error 6 · api-error 6 · stuck-loading 1
+```
+
+#### 12 — every page scrolled sideways on a phone
+
+At an 820px viewport the document was **3,836px wider than the window** on 105
+of the 312 renders — effectively the whole product. One cause: below 820px the
+sidebar becomes a horizontal strip and `#nav` lays twenty-nine destinations out
+in a `nowrap` row, 4,641px of it.
+
+A grid item and a flex item both default to `min-width:auto` — "never narrower
+than my content" — so that measurement propagated straight up: `.side` took
+4,658px, the grid column took 4,658px, the body took 4,658px. The `overflow-x:auto`
+already on `#nav` could not help, because `#nav` itself was never asked to be
+narrow.
+
+Fixed with `min-width:0` on `#app > *`, `.side` and `#nav`. Verified: `overview`,
+`drivers`, `unit`, `day`, `reconcile` and `providers` all measure exactly 820 now.
+
+#### 13 — `fleet=undefined`, and three panels of a healthy-looking lie
+
+`#compare` reported **"No booking on either day"** across three panels, over a
+database holding 293 bookings that day.
+
+`URLSearchParams` stringifies whatever it is handed, so
+`{ fleet: state.fleet || undefined }` went over the wire as `fleet=undefined`.
+A route reading `req.query.fleet || null` sees a non-empty string and filters on
+a fleet by that name. Nothing matches. Every layer below behaved correctly — the
+request was well-formed, the query ran, the answer was an honest zero for the
+filter it was given — and the page rendered a perfectly healthy empty state with
+no error and no warning.
+
+The worst class of front-end bug: no stack trace, no red, a page that looks like
+an answer. Only a DOM-level audit finds it.
+
+`params()` and `unfiltered()` now drop empty values once, rather than two hundred
+call sites each remembering to. A legitimate zero survives — `offset=0` is the
+first page, not "no offset".
+
+| # | finding | fix |
+|---|---|---|
+| 12 | body 3,836px wider than an 820px window on 105 renders | `min-width:0` on the shell's grid and flex items |
+| 13 | `fleet=undefined` emptied `#compare` | `params()`/`unfiltered()` drop null and empty; `#compare` stopped passing it |
+| 14 | no test could catch a third occurrence | `test/query_params.test.mjs` bans `x \|\| undefined` inside any `q()`/`qAll()` argument |
+| 15 | `/api/driver/trips` and `/api/vehicle/trips` returned a bare array capped at `limit` with no total — "the server sent the 500 newest" is unusable when the reader cannot know 500 of how many | both return `{rows, total, shown, offset, limit, truncated}`; both tabs say "500 of 1,247 loaded" and offer **Load the next 500** |
+

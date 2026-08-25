@@ -930,8 +930,13 @@ async function tabQuality(root, id) {
 async function tabTrips(root, id) {
   const p = panel('Trip records', 'The underlying rows, newest first — every platform this driver appears on');
   root.append(p.panel); loading(p.body);
-  const LIMIT = 500;
-  const rows = await qAll('/api/driver/trips', { id, limit: LIMIT });
+  /* A page, not a ceiling. The endpoint returns {rows, total, offset,
+     truncated}, so "500 newest" can become "500 of 1,247" and the reader can
+     ask for the next 500 instead of being told the rest is unreachable. */
+  const PAGE = 500;
+  const res0 = await qAll('/api/driver/trips', { id, limit: PAGE });
+  const rows = res0.rows || [];
+  let total = res0.total ?? rows.length;
   p.body.innerHTML = '';
   if (!rows.length) {
     return empty(p.body, 'No trip on any channel for this driver in this window. Widen the range above '
@@ -976,16 +981,43 @@ async function tabTrips(root, id) {
     if (!list.length) {
       host.innerHTML = '';
       host.append(note(`No trip here matches “${term}”. That is a filter over the `
-        + `${fmt(rows.length)} trips on this page, not a statement about the window.`));
+        + `${fmt(rows.length)} trips loaded on this page`
+        + (rows.length < total ? `, not over all ${fmt(total)} in the window.` : '.')));
       return;
     }
     const caps = [];
-    if (list.length > DRAW) caps.push(`showing the ${fmt(DRAW)} newest of ${fmt(list.length)} matching`);
-    if (rows.length >= LIMIT) caps.push(`the server sent the ${fmt(LIMIT)} newest trips in this window, `
-      + 'so older ones are not on this page at all');
+    if (list.length > DRAW) caps.push(`drawing the ${fmt(DRAW)} newest of ${fmt(list.length)} matching`);
+    /* Both numbers, always: how many are loaded, and how many exist. "The
+       server sent the 500 newest" is true and unusable — 500 of how many? */
+    if (rows.length < total) {
+      caps.push(`${fmt(rows.length)} of ${fmt(total)} trips in this window are loaded`);
+    }
     if (caps.length) host.append(el('p', 'cap', `${caps.join('; ')}.`));
+
+    if (rows.length < total) {
+      const more = el('button', 'btn', `Load the next ${fmt(Math.min(PAGE, total - rows.length))}`);
+      more.onclick = async () => {
+        more.disabled = true; more.textContent = 'Loading…';
+        try {
+          const next = await qAll('/api/driver/trips', { id, limit: PAGE, offset: rows.length });
+          rows.push(...(next.rows || []));
+          total = next.total ?? total;
+          const t = bar.querySelector('#tq').value.trim().toLowerCase();
+          const l = t ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(t)) : rows;
+          count(l.length); draw(l, t);
+        } catch (e) {
+          more.disabled = false;
+          more.textContent = 'Could not load more — try again';
+        }
+      };
+      host.append(more);
+    }
   };
-  const count = (n) => { bar.querySelector('#tn').textContent = `${fmt(n)} of ${fmt(rows.length)} trips`; };
+  const count = (n) => {
+    bar.querySelector('#tn').textContent = rows.length < total
+      ? `${fmt(n)} of ${fmt(rows.length)} loaded · ${fmt(total)} in this window`
+      : `${fmt(n)} of ${fmt(rows.length)} trips`;
+  };
   count(rows.length);
   draw(rows, '');
   bar.querySelector('#tq').oninput = (e) => {

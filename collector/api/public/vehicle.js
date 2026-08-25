@@ -718,12 +718,19 @@ async function tabCompliance(root, plate, prof) {
 /* ── tab: trips ──────────────────────────────────────────────────────────── */
 async function tabTrips(root, plate) {
   const p = panel('Trip records', 'Every platform, newest first'); root.append(p.panel); loading(p.body);
-  const rows = await qAll('/api/vehicle/trips', { plate, limit: 500 });
+  /* A page, not a ceiling — the twin of the driver trip ledger. The endpoint
+     returns {rows, total, offset, truncated}, so the table can say how many of
+     the window's trips are actually on screen and the reader can ask for the
+     rest instead of silently seeing four hundred of twelve hundred. */
+  const PAGE = 500;
+  const res0 = await qAll('/api/vehicle/trips', { plate, limit: PAGE });
+  const rows = res0.rows || [];
+  let total = res0.total ?? rows.length;
   p.body.innerHTML = '';
   if (!rows.length) return empty(p.body);
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="vq" type="search" placeholder="Filter by driver, address, product or status…">
-    <span class="cap" id="vn">${rows.length} trips</span>`;
+    <span class="cap" id="vn"></span>`;
   p.body.append(bar);
   const host = el('div'); p.body.append(host);
   const cols = [
@@ -739,12 +746,43 @@ async function tabTrips(root, plate) {
     { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', /cancel/i.test(r.status || '') ? 'warn' : 'ok') },
     { label: 'Fare', key: 'price', num: true, render: (r) => (r.price ? money(r.price, r.currency) : '—') },
   ];
-  const draw = (list) => { host.innerHTML = ''; host.append(tableFrom(list.slice(0, 400), cols)); };
+  const DRAW = 400;
+  const count = (n) => {
+    bar.querySelector('#vn').textContent = rows.length < total
+      ? `${fmt(n)} of ${fmt(rows.length)} loaded · ${fmt(total)} in this window`
+      : `${fmt(n)} of ${fmt(rows.length)} trips`;
+  };
+  const draw = (list) => {
+    host.innerHTML = '';
+    host.append(tableFrom(list.slice(0, DRAW), cols));
+    const caps = [];
+    if (list.length > DRAW) caps.push(`drawing the ${fmt(DRAW)} newest of ${fmt(list.length)} matching`);
+    if (rows.length < total) caps.push(`${fmt(rows.length)} of ${fmt(total)} trips in this window are loaded`);
+    if (caps.length) host.append(el('p', 'cap', `${caps.join('; ')}.`));
+    if (rows.length < total) {
+      const more = el('button', 'btn', `Load the next ${fmt(Math.min(PAGE, total - rows.length))}`);
+      more.onclick = async () => {
+        more.disabled = true; more.textContent = 'Loading…';
+        try {
+          const next = await qAll('/api/vehicle/trips', { plate, limit: PAGE, offset: rows.length });
+          rows.push(...(next.rows || []));
+          total = next.total ?? total;
+          const t = bar.querySelector('#vq').value.trim().toLowerCase();
+          const l = t ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(t)) : rows;
+          count(l.length); draw(l);
+        } catch {
+          more.disabled = false; more.textContent = 'Could not load more — try again';
+        }
+      };
+      host.append(more);
+    }
+  };
+  count(rows.length);
   draw(rows);
   bar.querySelector('#vq').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
     const list = t ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(t)) : rows;
-    bar.querySelector('#vn').textContent = `${list.length} trips`;
+    count(list.length);
     draw(list);
   };
 }

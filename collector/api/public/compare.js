@@ -124,8 +124,12 @@ export async function renderCompare(root, aParam, bParam) {
   yday.href = href('compare', dubaiToday(), before(dubaiToday()));
   bar.append(yday);
 
-  const p = await q('/api/compare', { a, b, cut, fleet: state.fleet || undefined,
-    platform: state.platform || undefined });
+  /* `q()` already carries the fleet and platform chips, and drops empty values
+     — passing `state.fleet || undefined` here sent `fleet=undefined` over the
+     wire, which a route reading `req.query.fleet || null` accepts as a fleet
+     name. Three panels then reported "No booking on either day" over a
+     database holding 293 of them. */
+  const p = await q('/api/compare', { a, b, cut });
 
   const A = p.totals.a, B = p.totals.b;
   const partial = p.cut_minutes < 1440;

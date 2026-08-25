@@ -1068,15 +1068,39 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   }));
 
   /* ── the raw record, because eventually someone needs the trips ────── */
-  app.get('/api/driver/trips', withDriver(async (req, res, d, p) => res.json(await q(
-    `SELECT platform, external_id, requested_at, ended_at, plate, pickup_addr, dropoff_addr,
-            distance_km, duration_s, status, product, payment_type, price, currency,
-            -- The provider's own word stays in the status column; outcome is
-            -- what the UI may colour by, because the four platforms disagree
-            -- about which strings mean success.
-            outcome, is_booking, has_fare
-     FROM trip_norm WHERE ${TW}
-     ORDER BY requested_at DESC LIMIT ${Math.min(+req.query.limit || 200, 1000)}`, p))));
+  /* ── the trip ledger, paged, and honest about being paged ─────────────
+     This returned a bare array capped at whatever `limit` asked for, and said
+     nothing about how many trips the window actually holds. The page then
+     printed "the server sent the 500 newest trips in this window, so older
+     ones are not on this page at all" — true, and unusable: 500 of how many?
+     Of six hundred, that sentence is a footnote. Of twelve hundred, the reader
+     is looking at two fifths of the evidence and has no way to reach the rest.
+
+     So the count comes back with the rows, and so does an offset, which is
+     what turns a dead end into a page. The count is a second query rather than
+     a window function over the same one — a COUNT(*) OVER () is evaluated for
+     every row returned, and on a 1,000-row page that is a thousand copies of
+     the same integer travelling over the wire. */
+  app.get('/api/driver/trips', withDriver(async (req, res, d, p) => {
+    const limit = Math.min(+req.query.limit || 200, 1000);
+    const offset = Math.max(0, +req.query.offset || 0);
+    const [rows, [t]] = await Promise.all([
+      q(`SELECT platform, external_id, requested_at, ended_at, plate, pickup_addr, dropoff_addr,
+                distance_km, duration_s, status, product, payment_type, price, currency,
+                -- The provider's own word stays in the status column; outcome is
+                -- what the UI may colour by, because the four platforms disagree
+                -- about which strings mean success.
+                outcome, is_booking, has_fare
+         FROM trip_norm WHERE ${TW}
+         ORDER BY requested_at DESC LIMIT ${limit} OFFSET ${offset}`, p),
+      q(`SELECT count(*)::int n FROM trip_norm WHERE ${TW}`, p),
+    ]);
+    const total = t?.n ?? rows.length;
+    res.json({ rows, total, shown: rows.length, offset, limit,
+      /* Stated as a flag as well as derivable, so a renderer cannot get the
+         comparison the wrong way round and claim a complete list. */
+      truncated: offset + rows.length < total });
+  }));
 
   /* ── which vehicles, day by day (handovers visible) ────────────────── */
   app.get('/api/driver/custody', withDriver(async (req, res, d, p) => {
