@@ -1226,7 +1226,20 @@ async function platformShare(root) {
   const fleetMix = panel('Trips by fleet', 'Ecosine vs Egari'); g.append(fleetMix.panel);
   const cov = panel('Coverage & history depth', 'What each source has actually delivered'); root.append(cov.panel);
   [share.body, fleetMix.body, cov.body].forEach(loading);
-  const [byPlat, byFleet, plats] = await Promise.all([q('/api/mix', { by: 'platform' }), q('/api/mix', { by: 'fleet' }), api('/api/platforms')]);
+  /* qAll, not api and not q.
+     ─────────────────────────────────────────────────────────────────────────
+     Bare api() sent no range, and /api/platforms is explicit about what that
+     means: `windowed` comes back false and window_bookings is the OPEN window,
+     identical to the all-time figure — "a page that drew it as this month would
+     be wrong". So the range selector above this table governed nothing a reader
+     could see, and the per-window count the endpoint has always returned could
+     not be drawn.
+
+     q() would send the window AND the platform/fleet chips, which would cut
+     this table down to the one channel selected — on the page whose subject is
+     which channels exist and what each carries. qAll sends the window and not
+     the chips, which is exactly the shape this table needs. */
+  const [byPlat, byFleet, plats] = await Promise.all([q('/api/mix', { by: 'platform' }), q('/api/mix', { by: 'fleet' }), qAll('/api/platforms')]);
   /* Clicking a slice used to open a modal listing that platform's drivers. It
      now sets the platform filter and goes to the driver directory — the same
      answer, on a page with the search box, the compliance columns and an
@@ -1252,11 +1265,33 @@ async function platformShare(root) {
           : fmt(r.bookings)) },
       { label: 'Rows stored', key: 'rows_seen', num: true, render: (r) => fmt(r.rows_seen ?? r.trips) }]
       : [{ label: 'Rows stored, all time', key: 'trips', num: true, render: (r) => fmt(r.trips) }]),
+    /* …and what the channel did in the window the reader chose.
+       ─────────────────────────────────────────────────────────────────────
+       Every column here is all-time and says so, which is honest — and it left
+       the range selector above governing nothing a reader could see. Narrow to
+       seven days and Uber/Ecosine still read 166,814. /api/platforms has
+       returned window_bookings all along (7,571 against those 166,814 over
+       thirty days); this is the column that makes the control mean something,
+       and the one that lets the table be compared with the donut beside it,
+       which has always been the window. */
+    /* Only when a range was actually supplied. `windowed` false means the
+       endpoint answered over the open window and this column would be the
+       all-time figure under a heading claiming otherwise — the server says so
+       in its own comment, and it was right. */
+    ...(plats.some((r) => r.windowed && r.window_bookings != null)
+      ? [{ label: 'Bookings in this window', key: 'window_bookings', num: true,
+        absent: 'this endpoint reports no per-window count',
+        render: (r) => (r.window_bookings == null
+          ? '<span class="ent-off" title="this source reports no bookings in any window — it is a telematics feed">—</span>'
+          : `${fmt(r.window_bookings)}${r.bookings
+            ? `<span class="dim"> · ${pct((r.window_bookings / r.bookings) * 100, 1)} of all time</span>` : ''}`) }]
+      : []),
     { label: 'Earliest', key: 'earliest', render: (r) => (r.earliest ? String(r.earliest).slice(0, 10) : '—') },
     { label: 'Latest', key: 'latest', render: (r) => (r.latest ? String(r.latest).slice(0, 10) : '—') },
   ], { sortable: true, sortId: 'cov', defaultSort: { key: hasSplit ? 'bookings' : 'trips', dir: 'desc' } }));
   cov.body.append(note((hasSplit
-    ? 'Counts are over the whole record, not this window, so they do not match the donut above. '
+    ? 'The all-time columns are over the whole record and do not match the donut above, which is this '
+      + 'window; the window column beside them does. '
     : 'Counts are over the whole record, not this window, and they count stored ROWS — an FMS row is '
       + 'the telematics twin of a booking another channel already reported, so adding this column up '
       + 'double-counts every tracked journey. That is why it does not match the donut above. ')

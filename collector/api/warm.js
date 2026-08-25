@@ -54,6 +54,13 @@ const PATHS = [
      whole record and Collection gaps asks about a window, so the endpoint has
      two live cache keys and warming either alone leaves a page cold. */
   '/api/coverage',
+  /* Moved out of BARE_PATHS with the fix that made #platforms honour its own
+     range selector. The page used to ask bare, so `windowed` came back false
+     and window_bookings was the open window — identical to the all-time
+     figure, which is why the per-window count could not be drawn. It now asks
+     through qAll (the window, without the channel chips, so the table stays an
+     inventory of every channel), and this is the key that has to be warm. */
+  '/api/platforms',
 ];
 
 /* Warmed WITHOUT a window, because that is how the pages ask for them.
@@ -70,7 +77,7 @@ const PATHS = [
    page during a backfill waited on the live query until the platform's gateway
    gave up. Warm what is asked for, not what is convenient to loop over. */
 const BARE_PATHS = [
-  '/api/platforms', '/api/trend/monthly', '/api/insights',
+  '/api/trend/monthly', '/api/insights',
   '/api/compliance/drivers', '/api/coverage',
 ];
 

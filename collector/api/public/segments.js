@@ -70,6 +70,29 @@ export async function renderSegments(root, kind, value) {
       tone: d.low_confidence ? 'warn' : null },
   ]));
 
+  /* The clock guard, said out loud.
+     ─────────────────────────────────────────────────────────────────────────
+     A telematics feed whose clock disagrees with wall time cannot be matched
+     against bookings, so the reconciler refuses to judge those segments. It is
+     right to refuse — and the refusal was invisible: /api/segments has returned
+     `clock_skew` since the guard was written, and this page rendered none of
+     it, so a run of unjudged segments would have read as a clean fleet.
+
+     This is the same shape as the bug that made the Unauthorized page report
+     zero for the life of the project: a guard that fires correctly, suppresses
+     a verdict, and says nothing. It reads zero on this fleet today, which is
+     exactly when to wire it up — the day a tracker's clock drifts, the page
+     will say so instead of going quiet. */
+  const skew = d.clock_skew || {};
+  if (skew.segments) {
+    root.append(note(`${countOf(skew.segments, 'segment')} could not be judged at all: the tracker on `
+      + `${skew.plates?.length ? skew.plates.join(', ') : 'at least one vehicle'} reported times `
+      + `${skew.max_min != null ? `up to ${fmt(Math.abs(skew.max_min))} minutes ` : ''}out of step with `
+      + 'the clock the bookings are stamped in, and a segment that cannot be lined up against a booking '
+      + 'cannot be called authorised or unauthorised. They are excluded from every verdict above rather '
+      + 'than counted as clean.', 'warn'));
+  }
+
   /* The range selector implies a history the seat sensor does not have.
      CABMAN is a five-minute poll with nothing behind it, so however wide the
      window, these segments are the few days it has ever recorded — and a

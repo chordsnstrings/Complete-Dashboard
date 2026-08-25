@@ -145,8 +145,25 @@ export async function renderCompare(root, aParam, bParam) {
       sub: `${dayStr(a)} against ${dayStr(b)}` },
     { label: 'Change', html: delta(A.bookings, B.bookings),
       sub: partial ? `both days to ${p.cut_label} Dubai` : 'both days in full' },
+    /* "started" is a VERB here, and countOf pluralises its noun — the tile read
+       "6 starteds · 6 stopped". Both halves are counts of people who did a
+       thing, so both are written the same way. */
     { label: 'Drivers out', html: `${fmt(A.drivers)} <span class="dim">vs ${fmt(B.drivers)}</span>`,
-      sub: `${countOf(p.started.length, 'started')} · ${fmt(p.stopped.length)} stopped` },
+      sub: `${fmt(p.started.length)} started · ${fmt(p.stopped.length)} stopped` },
+    /* The completion split, which was in the per-driver and per-channel tables
+       and on no tile — and on this page it is usually the biggest relative move
+       there is. Measured on the two days this was written: bookings moved by
+       1% and cancellations by 23%, and only the 1% was above the fold.
+       `worse: true` because a rise here is a fall. */
+    { label: 'Completed', html: `${fmt(A.completed)} <span class="dim">vs ${fmt(B.completed)}</span>`,
+      sub: A.bookings ? `${Math.round((A.completed / A.bookings) * 100)}% of bookings, `
+        + `against ${B.bookings ? Math.round((B.completed / B.bookings) * 100) : 0}%` : null },
+    { label: 'Cancelled', html: `${fmt(A.cancelled)} <span class="dim">vs ${fmt(B.cancelled)}</span>`
+      + ` ${delta(A.cancelled, B.cancelled, { worse: true })}`,
+      sub: A.bookings ? `${Math.round((A.cancelled / A.bookings) * 100)}% of bookings on `
+        + `${dayStr(a)}` : null,
+      tone: A.bookings && B.bookings
+        && (A.cancelled / A.bookings) > (B.cancelled / B.bookings) * 1.2 ? 'warn' : null },
     { label: 'Distance', html: `${fmt(A.km)} <span class="dim">vs ${fmt(B.km)}</span> km`,
       sub: 'booked kilometres, where a channel reports one' },
     { label: 'Carrying someone', html: `${hrs(A.on_trip_min)} <span class="dim">vs ${hrs(B.on_trip_min)}</span>`,

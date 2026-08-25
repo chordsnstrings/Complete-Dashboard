@@ -803,3 +803,57 @@ up exactly.
 `test/warm.test.mjs` learned about `qChan`: with no chip set it produces the
 bare path with no query string, so it counts as a bare call and
 `/api/trend/monthly` keeps its warm key.
+
+## 2026-08-25 — fields the API sent and no page drew
+
+A probe over every endpoint the UI calls, comparing the field names in each
+live payload against the names anywhere in `api/public`. Most hits were derived
+values under another name; these were real.
+
+**`/api/revenue` → `silent_platforms`.** The "Channels whose money is not
+collected" panel is built from `d.platforms` filtered to `bookings > 0`, and the
+endpoint returns a row only for a channel that *has* rows. So bolt — configured
+on both fleets, `503 NOT_AUTHORIZED` on the ecosine roster and an invalid egari
+token — was absent from the money page entirely. A reader saw three channels and
+concluded the fleet has three. New panel, with the collector's own error text
+and a link to Data sources.
+
+**`/api/live` → `poll_age_min`, and the silent count.** Fix age and poll age
+answer different questions and only one was on screen. A fix two weeks old under
+a poll one minute old means the provider is still listing the vehicle and
+handing back the same ancient reading — the exact failure `api/server.js`'s
+freshness query was rewritten to expose, because `polled_at` satisfies a dormant
+vehicle forever. Both old means we stopped asking. One is the fleet's problem
+and one is ours. New **Last polled** column, and a **Silent over a day** tile:
+**23 of 130, the quietest dark for 860 days** — matching the `silent_vehicles`
+count the API has returned since that query was written, which the server's own
+comment says exists "so a page can say which vehicles have gone quiet instead of
+quietly dropping them". No page ever read it.
+
+**`/api/platforms` → `window_bookings`.** The page called it through bare
+`api()`. The endpoint is explicit about what that means: `windowed` comes back
+false and `window_bookings` is the *open* window, identical to all-time — "a
+page that drew it as this month would be wrong". So the range selector above the
+table governed nothing visible, and the donut beside it (always the window)
+could not be reconciled with the table (always all-time). Now fetched with
+`qAll` — the window, without the channel chips, so the table stays an inventory
+of every channel — and the new column is guarded on `windowed`. Uber/Ecosine:
+166,814 all time, 7,571 in thirty days, 2,080 in seven. `/api/platforms` moved
+from the warmer's bare list to its windowed one; `test/warm.test.mjs` caught
+that in the same run.
+
+**`/api/compare` → the completion split**, and a pluralisation bug. The tile row
+read *"6 starteds"* — `countOf` pluralises a noun and "started" is a verb. And
+the biggest relative move on the page was not on it: over the two days this was
+written bookings moved 1% and cancellations 23%, and only the 1% was above the
+fold. Completed and Cancelled are now tiles.
+
+**`/api/segments` → `clock_skew`.** A tracker whose clock disagrees with wall
+time cannot be matched against bookings, so the reconciler refuses to judge
+those segments — correctly, and invisibly. This is the same shape as the bug
+that made the Unauthorized page report zero for the life of the project: a guard
+that fires, suppresses a verdict, and says nothing. It reads zero on this fleet
+today, which is exactly when to wire it up.
+
+**`/api/retention` → the other half of tenure**, and **`/api/corporate/guests` →
+`distinct_rooms`** as the denominator for "21 rooms seen more than once".
