@@ -1021,3 +1021,26 @@ is not overwritten by its own loading state. `test/slow_skeleton.test.mjs`
 holds all three in a real browser.
 
 Findings at 412px across all 104 routes: **0**.
+
+## 2026-08-26 — a photograph we do not host
+
+The last js-error in the sweep was a vehicle photograph:
+`tb-static.uber.com/prod/vehicles-importer/…/han-ev/….png`. Same shape as the
+map tiles — an external host this sandbox cannot reach and a reader's browser
+can — so it joins them in the noise filter.
+
+The product bug underneath it is real, though. That `<img>` had no error
+handler, and `tb-static.uber.com` is a host ad blockers block as a matter of
+course. A failed image renders as a broken-image icon with the plate beside it,
+which reads as a broken page rather than as a picture we do not have. It now
+replaces itself: *"The photograph for this vehicle is served by Uber and could
+not be loaded. Nothing else on this page depends on it."*
+
+Two details decided whether that worked at all. The handler has to be attached
+**before** `src` — a cached failure can dispatch `error` before the next
+statement runs — and `loading="lazy"` had to go, because it defers the request
+until the image scrolls into view and this panel is below the fold. Either one
+leaves the broken-image icon in place.
+
+Findings across all 104 routes at 412px: **1 js-error (this), 2 slow-panel** —
+and slow-panel is the honest report the harness gained this pass, not a fault.

@@ -757,8 +757,26 @@ async function tabCompliance(root, plate, prof) {
   spec.body.append(el('div', 'kv', rows.map(([k, v]) =>
     `<div class="kv-k">${esc(k)}</div><div class="kv-v">${esc(v)}</div>`).join('')));
   if (s.image_url) {
-    const img = el('img'); img.src = s.image_url; img.alt = `${prof.plate}`;
+    /* The picture is hosted by the PLATFORM, not by us — tb-static.uber.com —
+       so it is the one thing on this page that can fail for reasons nothing
+       here controls. Ad blockers block that host as a matter of course, and a
+       failed <img> renders as a broken-image icon with the plate beside it,
+       which reads as a broken page rather than as a picture we do not have.
+       On failure the image removes itself and says where it came from. */
+    const img = el('img');
+    img.alt = `${prof.plate}`;
     img.style.cssText = 'max-width:320px;border-radius:var(--r-sm);margin-top:14px';
+    /* Handler BEFORE src, and no lazy loading. A cached failure can dispatch
+       error before the next statement runs, and `loading="lazy"` defers the
+       request until the image scrolls into view — which on a panel below the
+       fold means the fallback appears late or not at all. Both would leave the
+       broken-image icon this exists to replace. */
+    img.onerror = () => {
+      img.replaceWith(el('p', 'cap',
+        `The photograph for this vehicle is served by ${esc(sourceLabel(s.platform) || 'the platform')} `
+        + 'and could not be loaded. Nothing else on this page depends on it.'));
+    };
+    img.src = s.image_url;
     spec.body.append(img);
   }
 }

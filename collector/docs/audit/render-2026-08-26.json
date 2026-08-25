@@ -1,11 +1,179 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-08-25T21:08:42.503Z",
+  "at": "2026-08-25T21:16:58.879Z",
   "widths": [
     412
   ],
-  "routes": 7,
+  "routes": 104,
   "findings": [
+    {
+      "route": "unit",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":75,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":8,\"tables\":6,\"charts\":3}"
+    },
+    {
+      "route": "unit/assets",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":140,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "unit/drivers",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":247,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":6,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "unit/nonsense",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":75,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":8,\"tables\":6,\"charts\":3}"
+    },
+    {
+      "route": "top-performers",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":72,\"explained\":true,\"title\":\"Top performers\",\"kpis\":4,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "low-performers",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":72,\"explained\":true,\"title\":\"Low performers\",\"kpis\":4,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":1,\"rows\":7,\"explained\":true,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":5,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "performer/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":1,\"rows\":7,\"explained\":true,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":5,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "overview",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":12,\"explained\":false,\"title\":\"Fleet activity\",\"kpis\":6,\"tables\":1,\"charts\":4}"
+    },
+    {
+      "route": "demand",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":30,\"explained\":true,\"title\":\"Demand\",\"kpis\":4,\"tables\":1,\"charts\":3}"
+    },
+    {
+      "route": "day/2026-08-25",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":12,\"empty_panels\":0,\"rows\":266,\"explained\":true,\"title\":\"Tuesday, August 25, 2026\",\"kpis\":8,\"tables\":5,\"charts\":4}"
+    },
+    {
+      "route": "day/not-a-date",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"Day\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "drivers",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":390,\"explained\":true,\"title\":\"Drivers\",\"kpis\":0,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "compare",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":27,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "compare/2026-08-26",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":28,\"explained\":true,\"title\":\"August 26 vs the day before\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "compare/2026-08-26/2026-08-25",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":28,\"explained\":true,\"title\":\"August 26 vs August 25\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "compare/2026-08-26/2026-08-25?cut=full",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":97,\"explained\":true,\"title\":\"August 26 vs August 25\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "compare/not-a-date",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":28,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":8,\"tables\":1,\"charts\":3}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/activity",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":58,\"explained\":true,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/territory",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":12,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":1,\"charts\":2}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/earnings",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":5,\"explained\":true,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/quality",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":3,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "driver/0a6eb545-aa3b-4441-882c-34204df3d451/trips",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":264,\"explained\":false,\"title\":\"Mohammed Selim Shafiqur Rahman\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
     {
       "route": "roster",
       "width": 412,
@@ -14,18 +182,95 @@
       "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":280,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":1}"
     },
     {
-      "route": "compliance",
+      "route": "roster/pipeline",
       "width": 412,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":212,\"explained\":true,\"title\":\"Compliance\",\"kpis\":7,\"tables\":2,\"charts\":0}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":113,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":0}"
     },
     {
-      "route": "map",
+      "route": "roster/idle",
       "width": 412,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":false,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":2}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":46,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster/blocked",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":32,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster/states",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":10,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "vehicles",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":170,\"explained\":true,\"title\":\"Vehicles\",\"kpis\":6,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "vehicle/L36397",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"explained\":false,\"title\":\"L36397\",\"kpis\":10,\"tables\":0,\"charts\":5}"
+    },
+    {
+      "route": "vehicle/L36397/drivers",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":65,\"explained\":false,\"title\":\"L36397\",\"kpis\":0,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "vehicle/L36397/movement",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":52,\"explained\":true,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "vehicle/L36397/earnings",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":3,\"explained\":true,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "vehicle/L36397/safety",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":60,\"explained\":false,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "vehicle/L36397/compliance",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"explained\":false,\"title\":\"L36397\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "vehicle/L36397/trips",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":400,\"explained\":false,\"title\":\"L36397\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "platforms",
+      "width": 412,
+      "sev": "e",
+      "code": "js-error",
+      "detail": "net::ERR_CONNECTION_RESET https://tb-static.uber.com/prod/vehicles-importer/2025/byd/han-ev/1843041054933.png"
     },
     {
       "route": "platforms",
@@ -35,11 +280,382 @@
       "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":7,\"explained\":true,\"title\":\"Platforms\",\"kpis\":0,\"tables\":1,\"charts\":2}"
     },
     {
-      "route": "drivers",
+      "route": "platforms/tiers",
       "width": 412,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":390,\"explained\":true,\"title\":\"Drivers\",\"kpis\":0,\"tables\":3,\"charts\":1}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":94,\"explained\":true,\"title\":\"Platforms\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "platforms/funnel",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":10,\"explained\":true,\"title\":\"Platforms\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corridors",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":119,\"explained\":true,\"title\":\"Corridors\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "finance",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":46,\"explained\":true,\"title\":\"Finance\",\"kpis\":8,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "settlement",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"explained\":true,\"title\":\"Settlement\",\"kpis\":4,\"tables\":0,\"charts\":1}"
+    },
+    {
+      "route": "settlement/cash",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":117,\"explained\":true,\"title\":\"Settlement\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "settlement/receivables",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":11,\"explained\":true,\"title\":\"Settlement\",\"kpis\":3,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corporate",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":10,\"tables\":0,\"charts\":3}"
+    },
+    {
+      "route": "corporate/properties",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":6,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corporate/guests",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":311,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "corporate/leakage",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "corporate/leakage/complimentary",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":10,\"explained\":false,\"title\":\"Corporate & hotels\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "corporate/approach",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":29,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "corporate/approach/daypart",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":28,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":3,\"explained\":false,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":8,\"tables\":1,\"charts\":4}"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/guests",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":40,\"explained\":true,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "property/673dc94395448356a777f1ec/drivers",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":18,\"explained\":true,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "causes",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":12,\"explained\":true,\"title\":\"Why it moved\",\"kpis\":5,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "forecast",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":32,\"explained\":true,\"title\":\"Forecast\",\"kpis\":10,\"tables\":3,\"charts\":2}"
+    },
+    {
+      "route": "retention",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":56,\"explained\":true,\"title\":\"Joiners & leavers\",\"kpis\":5,\"tables\":4,\"charts\":1}"
+    },
+    {
+      "route": "playbook",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":65,\"explained\":true,\"title\":\"To-do list\",\"kpis\":6,\"tables\":7,\"charts\":0}"
+    },
+    {
+      "route": "capacity",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":188,\"explained\":true,\"title\":\"Rota gaps\",\"kpis\":5,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "revenue",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":15,\"explained\":true,\"title\":\"Revenue by channel\",\"kpis\":7,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "reconcile",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":13,\"explained\":true,\"title\":\"Reconciliation\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "reconcile/2026-08",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"Reconciliation\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "insights",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":3,\"explained\":true,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "action/idle_vehicle/L36397",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"Finding\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "action/nope/-",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"Finding\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/refuted",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/immaterial",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/unsupported",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"Analyst\",\"kpis\":5,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "analyst/rules",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":13,\"explained\":true,\"title\":\"Analyst\",\"kpis\":3,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "compliance",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":212,\"explained\":true,\"title\":\"Compliance\",\"kpis\":7,\"tables\":2,\"charts\":0}"
+    },
+    {
+      "route": "unauthorized",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":49,\"explained\":true,\"title\":\"Unauthorized trips\",\"kpis\":8,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "segments",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":320,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segments/verdict/unauthorized",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segments/verdict/authorized",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":185,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segments/plate/L36397",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":20,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "segments/day/2026-08-25",
+      "width": 412,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "segments/day/2026-08-25",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":111,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segments/driver/Ahmed",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":20,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "segments/nonsense/x",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":320,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "segment/L46706/2026-08-25T19:58:57.077Z",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":26,\"explained\":true,\"title\":\"L46706\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+    },
+    {
+      "route": "segment/L46706/2026-08-25T19:58:57.077Z",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":26,\"explained\":true,\"title\":\"L46706\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+    },
+    {
+      "route": "slot/2/19",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":40,\"explained\":true,\"title\":\"Tuesday 19:00\",\"kpis\":7,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "slot/0/3",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":16,\"explained\":false,\"title\":\"Sunday 03:00\",\"kpis\":7,\"tables\":3,\"charts\":3}"
+    },
+    {
+      "route": "slot/9/99",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":true,\"title\":\"One hour of the week\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "safety",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":61,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "safety/vehicles",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":63,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "safety/events",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":0,\"charts\":2}"
+    },
+    {
+      "route": "live",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":130,\"explained\":false,\"title\":\"Live fleet\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "map",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":false,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":2}"
+    },
+    {
+      "route": "sources",
+      "width": 412,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
     },
     {
       "route": "sources",
@@ -54,6 +670,90 @@
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":5,\"empty_panels\":0,\"explained\":true,\"title\":\"Collection gaps\",\"kpis\":5,\"tables\":3,\"charts\":0}"
+    },
+    {
+      "route": "providers",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":29,\"empty_panels\":0,\"rows\":244,\"explained\":true,\"title\":\"What each API offers\",\"kpis\":6,\"tables\":18,\"charts\":0}"
+    },
+    {
+      "route": "settings",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":11,\"explained\":true,\"title\":\"Settings\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "insights/severity/critical",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":3,\"explained\":true,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "insights/safety",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":3,\"explained\":true,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "insights/nosuchcategory",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":1,\"rows\":3,\"explained\":true,\"title\":\"Action list\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "providers/uber/trips/Surge%20multiplier",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"explained\":true,\"title\":\"What each API offers\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    },
+    {
+      "route": "map/replay/L36397",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":false,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":2}"
+    },
+    {
+      "route": "overview?days=90&platform=uber",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":12,\"explained\":false,\"title\":\"Fleet activity\",\"kpis\":6,\"tables\":1,\"charts\":4}"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":386,\"explained\":true,\"title\":\"Drivers\",\"kpis\":0,\"tables\":2,\"charts\":1}"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":69,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":7,\"tables\":6,\"charts\":3}"
+    },
+    {
+      "route": "unit/assets?days=7&platform=uber",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":140,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":6,\"tables\":1,\"charts\":1}"
+    },
+    {
+      "route": "segments/verdict/unauthorized?days=180",
+      "width": 412,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":31,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     }
   ]
 }

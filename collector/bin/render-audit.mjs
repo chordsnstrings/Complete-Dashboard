@@ -270,6 +270,11 @@ for (const width of WIDTHS) {
     'ERR_CERT_', 'ERR_PROXY', 'ERR_TUNNEL', 'ERR_NAME_NOT_RESOLVED',
     'fonts\\.(googleapis|gstatic)',
     'tile\\.openstreetmap\\.org', '\\.tile\\.', 'basemaps\\.',
+    /* Vehicle photographs, served by the platform that owns the record. Same
+       shape as the tiles: an external host this sandbox cannot reach and a
+       reader's browser can. The page no longer shows a broken-image icon when
+       it fails, which is the part that WAS a product bug. */
+    'tb-static\\.uber\\.com',
   ].join('|'));
   const keep = (t) => t && !NOISE.test(t);
   page.on('pageerror', (e) => { const t = String(e.message).slice(0, 160); if (keep(t)) live.js.push(t); });
