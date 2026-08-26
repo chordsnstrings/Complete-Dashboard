@@ -3263,8 +3263,14 @@ V.sources = async (root) => {
        reader sees. They were the same string once and it matched two rows of
        nine — sourceLabel() renders 'cabman' as 'CABMAN', so every telemetry
        row failed to join and kept reporting itself as undated. */
+    /* `collected_from` — min(polled_at), when WE started asking — not the
+       oldest fix we hold. A dormant tracker's last fix is from April 2024 on
+       this fleet, so `from_ts` printed 2024 in the From column beside "6 of 6
+       days collected" in the next one: two clocks under one heading, saying
+       different things about the same feed. */
     ...(coverage.telemetry || []).map((r) => ({ what: `telemetry · ${sourceLabel(r.source)}`,
-      key: `telemetry:${r.source}`, src: null, n: r.n, from: r.from_ts, to: r.last_poll })),
+      key: `telemetry:${r.source}`, src: null, n: r.n,
+      from: r.collected_from || r.from_ts, to: r.last_poll })),
     ...(coverage.alerts || []).map((r) => ({ what: 'safety alerts', key: 'alerts',
       src: null, n: r.n, from: r.from_ts, to: r.latest })),
     ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', key: 'ledger',
