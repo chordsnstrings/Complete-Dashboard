@@ -1498,8 +1498,19 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
   });
 }));
 
+/* The fleet filter, which this endpoint alone was missing.
+   ─────────────────────────────────────────────────────────────────────────
+   Its three siblings — summary, daily and by-vehicle — all bind SEG_FLEET, so
+   an Egari-filtered occupancy page showed every tile at zero and a note saying
+   no sensor data covers this fleet, above a table of twenty-six flagged
+   segments on ECOSINE plates, each labelled Ecosine in its own Fleet column.
+   The page named one fleet and accused another's cars.
+
+   CABMAN DT is configured for Ecosine only (src/config.js says so: Egari's
+   credentials have never been supplied), so the honest Egari answer here is an
+   empty table under that note, not somebody else's vehicles. */
 app.get('/api/unauthorized/list', wrap(async (req, res) => {
-  const [from, to] = range(req);
+  const [from, to, , fleet] = range(req);
   const verdict = req.query.verdict || 'unauthorized';
   res.json(await q(
     /* schema_v8 added verdict_reason, nearest_platform, nearest_trip_id,
@@ -1533,7 +1544,8 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
                 AND v.day = (o.started_at AT TIME ZONE 'Asia/Dubai')::date
                 AND v.driver_name IS NOT NULL) AS drivers
      FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')} AND ($3='all' OR o.verdict=$3)
-     ORDER BY o.started_at DESC LIMIT 300`, [from, to, verdict]));
+       AND ($4::text IS NULL OR o.fleet_id = $4)
+     ORDER BY o.started_at DESC LIMIT 300`, [from, to, verdict, fleet]));
 }));
 
 // Names the drivers who actually held the car on the days the flags occurred —

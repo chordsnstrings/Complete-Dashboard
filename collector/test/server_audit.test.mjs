@@ -141,12 +141,17 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
              distance_km, verdict, verdict_reason, low_confidence)
            VALUES ('L100','ecosine',$1,$2,26,18,'unauthorized','no completed booking overlaps',false),
                   ('L100','ecosine',$3,$4,10,4,'unverifiable','a channel was missing',true),
-                  ('L101','ecosine',$5,$6,5,0.2,'stationary','did not travel far enough',false)`,
+                  ('L101','ecosine',$5,$6,5,0.2,'stationary','did not travel far enough',false),
+                  ('L900','egari',$7,$8,9,6,'unauthorized','no completed booking overlaps',false)`,
     [`${DAY}T22:30:00+04:00`, `${DAY}T22:56:00+04:00`,
      `${DAY}T23:30:00+04:00`, `${DAY}T23:40:00+04:00`,
-     `${DAY}T12:00:00+04:00`, `${DAY}T12:05:00+04:00`]);
-  // A window ENDING on the day itself must include its evening.
-  const s = await get(`/api/unauthorized/summary?from=${DAY}&to=${DAY}`);
+     `${DAY}T12:00:00+04:00`, `${DAY}T12:05:00+04:00`,
+     `${DAY}T14:00:00+04:00`, `${DAY}T14:09:00+04:00`]);
+  /* A window ENDING on the day itself must include its evening. Scoped to one
+     fleet, because these checks are about the Dubai day boundary and not about
+     how many rows the fixture holds — the Egari segment below exists to prove
+     the fleet filter, and counting it here would couple one test to the other. */
+  const s = await get(`/api/unauthorized/summary?from=${DAY}&to=${DAY}&fleet=ecosine`);
   check('a 22:30 Dubai segment is inside a window ending that day',
     s.totals.unauthorized === 1, JSON.stringify(s.totals));
   check('a 23:30 Dubai segment is too', s.totals.unverifiable === 1, JSON.stringify(s.totals));
@@ -169,8 +174,28 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
     list.every((r) => 'nearest_gap_min' in r && 'nearest_platform' in r && 'channels_checked' in r),
     Object.keys(list[0] || {}).join(','));
 
+  /* ── and the evidence table ignored the fleet its siblings honour ──── */
+  /* summary, daily and by-vehicle all bind the fleet; this one did not. On
+     production an Egari-filtered page showed every tile at zero above a table
+     of twenty-six Ecosine segments, each labelled Ecosine in its own column. */
+  const eg = await get(`/api/unauthorized/list?from=${DAY}&to=${DAY}&verdict=all&fleet=egari`);
+  check('the segment list is filtered to the fleet asked for',
+    eg.length === 1 && eg.every((r) => r.fleet_id === 'egari'),
+    JSON.stringify(eg.map((r) => `${r.plate}/${r.fleet_id}`)));
+  const ec = await get(`/api/unauthorized/list?from=${DAY}&to=${DAY}&verdict=all&fleet=ecosine`);
+  check('and the other fleet sees only its own',
+    ec.length === 3 && ec.every((r) => r.fleet_id === 'ecosine'),
+    JSON.stringify(ec.map((r) => `${r.plate}/${r.fleet_id}`)));
+  check('no fleet asked for still means every fleet',
+    list.length === 4, String(list.length));
+  /* The table and the tiles above it must describe the same rows — the bug was
+     precisely that they did not. */
+  const egS = await get(`/api/unauthorized/summary?from=${DAY}&to=${DAY}&fleet=egari`);
+  check('the tiles and the table agree about the fleet',
+    egS.totals.segments === eg.length, `${egS.totals.segments} vs ${eg.length}`);
+
   /* ── the daily chart bucketed in UTC while the drill filtered in Dubai ── */
-  const daily = await get(`/api/unauthorized/daily?from=${DAY}&to=${DAY}`);
+  const daily = await get(`/api/unauthorized/daily?from=${DAY}&to=${DAY}&fleet=ecosine`);
   check('a 23:30 Dubai segment is on the Dubai day, not the next one',
     daily.length === 1 && String(daily[0].d).slice(0, 10) === DAY,
     JSON.stringify(daily.map((r) => String(r.d).slice(0, 10))));
