@@ -370,11 +370,55 @@ export async function refreshPayouts(db = pool) {
   }
 }
 
-/* Derive the ON-TRIP statement days from the earner-payments components.
+/* Two surfaces, two vocabularies for the same money.
+   ─────────────────────────────────────────────────────────────────
+   The OAuth REST payments surface roots its tree at earnings and
+   names the fare-net-of-commission net_fare. The supplier GraphQL
+   surface — the only one that answers for Egari at all, and the only
+   one with history for either fleet — roots at your_earnings and
+   names its children fare and service_fee instead. Same money,
+   different words, and this query knew only the first set. Egari's
+   components arrived, none of them said net_fare, the HAVING
+   dropped every one, and the reconciliation showed a fleet that had
+   been paid AED 107,233 in August against a null expectation.
+
+   Measured on production, both trees hold the same identity:
+
+     REST     earnings      = net_fare            + tip + taxes
+     GraphQL  your_earnings = fare + service_fee  + tip + taxes
+
+   so your_earnings − tip − taxes IS net_fare. Checked on driver
+   64686123: 3386.90 − 846.78 − 42.38 + 35.00 = 2532.74, the root
+   Uber itself reports, to the fils.
+
+   Subtracting from Uber's own root rather than adding fare and
+   service_fee is deliberate: the root already contains every child,
+   including ones this mapping has never seen. Egari's fleet-wide
+   residual against fare+service_fee is exactly its AED 3.00
+   promotion — a category an additive reading would have silently
+   dropped, and the next new one would go the same way.
+
+   taxes_earnings and tip hang under BOTH roots, so the GraphQL
+   subtraction names its parent. The other three read without one:
+   the table's key is (platform, driver, period_start, period_end,
+   category), so one period holds one row per category whichever
+   surface wrote it, and there is nothing to double count. */
+export const NET_FARE_SQL = `coalesce(
+    sum(amount) FILTER (WHERE category = 'net_fare'),
+    sum(amount) FILTER (WHERE category = 'your_earnings')
+      - coalesce(sum(amount) FILTER (WHERE category = 'tip'
+                                       AND parent = 'your_earnings'), 0)
+      - coalesce(sum(amount) FILTER (WHERE category = 'taxes_earnings'
+                                       AND parent = 'your_earnings'), 0))`;
+
+/* Derive the ON-TRIP statement days from the earnings components.
    ─────────────────────────────────────────────────────────────────────────
-   The REST payments surface is the one API that carries Uber's statement view
-   — net fares, tips, tolls, cash collected — and it lands in
-   driver_earnings_component per driver-week. This turns those periods into
+   Two Uber surfaces carry the statement view — net fares, tips, tolls, cash
+   collected. The OAuth REST payments surface answers for Ecosine and only for
+   the current payment period; the supplier GraphQL breakdown answers for both
+   fleets and for as far back as Uber retains. Both land in
+   driver_earnings_component per driver-period, in different vocabularies the
+   query below reconciles. This turns those periods into
    driver_statement_day rows (source='uber_rest'), the table every on-trip
    figure reads, spreading each week evenly over its days the same way the
    payout resolution spreads its periods.
@@ -406,14 +450,15 @@ export async function refreshStatements(db = pool) {
         SELECT platform, coalesce(fleet_id, 'ecosine') AS fleet_id, driver_ext_id,
                max(driver_name) AS driver_name, period_start, period_end,
                (period_end - period_start + 1)::numeric AS days,
-               sum(amount) FILTER (WHERE category = 'net_fare')        AS net,
+               ${NET_FARE_SQL}                                        AS net,
                sum(amount) FILTER (WHERE category = 'tip')             AS tips,
                sum(amount) FILTER (WHERE category = 'toll')            AS salik,
                -sum(amount) FILTER (WHERE category = 'cash_collected') AS cash
         FROM driver_earnings_component
-        WHERE category IN ('net_fare', 'tip', 'toll', 'cash_collected')
+        WHERE category IN ('net_fare', 'your_earnings', 'taxes_earnings',
+                           'tip', 'toll', 'cash_collected')
         GROUP BY platform, fleet_id, driver_ext_id, period_start, period_end
-        HAVING sum(amount) FILTER (WHERE category = 'net_fare') IS NOT NULL
+        HAVING ${NET_FARE_SQL} IS NOT NULL
       ),
       resolved AS (
         SELECT DISTINCT ON (p.platform, p.fleet_id, p.driver_ext_id, d.day)

@@ -8,7 +8,7 @@ import { applySchema } from './schema.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { driverRoutes } from '../api/driver_routes.js';
-import { refreshPayouts } from '../src/rollup.js';
+import { refreshPayouts, refreshStatements } from '../src/rollup.js';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -70,8 +70,13 @@ await q(`INSERT INTO driver_performance (platform,fleet_id,driver_ext_id,driver_
 await q(`INSERT INTO driver_earnings_component (platform,driver_ext_id,period_start,period_end,category,parent,amount,driver_name)
          VALUES ('uber',$1,'2026-08-10','2026-08-16','net_fare','earnings',1200,'Amina Rashid'),
                 ('uber',$1,'2026-08-10','2026-08-16','tip','earnings',96,'Amina Rashid')`, [UBER]);
-// The payout table is collector-filled (src/rollup.js); the fixture plays the collector.
+/* The payout and statement tables are collector-filled (src/rollup.js); the
+   fixture plays the collector. /api/driver/earnings reads the derived
+   statement days rather than the raw components, because Uber answers this
+   fleet on two surfaces whose report windows overlap and summing them counts
+   the same day twice. */
 await refreshPayouts(db);
+await refreshStatements(db);
 
 // custody + alerts so the quality tab has vehicle-linked events to attribute
 // Two custody rows for L46174 on the 13th — one per platform. Alert and

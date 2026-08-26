@@ -2656,26 +2656,34 @@ app.get('/api/earnings/components', wrap(async (req, res) => res.json(await q(
 app.get('/api/earnings/tips', wrap(async (req, res) => {
   const FARE_FLOOR = 300;
   const p = range(req);
+  /* Read from the resolved statement days, not the raw component tree.
+     ───────────────────────────────────────────────────────────────────────
+     Uber answers on two surfaces with two vocabularies, and both can describe
+     the same days — the REST payments feed on short periods, the supplier
+     GraphQL breakdown on weeks. Summing components adds the two readings
+     together, which inflates the numerator and the denominator of this ratio
+     by different amounts. driver_statement_day holds one row per driver-day
+     with that collision already resolved (src/rollup.js), so the rate here is
+     over days rather than over overlapping report windows, and the window
+     predicate is finally the days the reader asked for. */
+  const STMT = `FROM driver_statement_day
+     WHERE source <> 'ledger' AND NOT pseudo
+       AND day BETWEEN $1::date AND $2::date
+       AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`;
   const rows = await q(
-    `SELECT driver_ext_id, max(driver_name) driver_name,
-            round(sum(amount) FILTER (WHERE category='tip')::numeric,2) tips,
-            round(sum(amount) FILTER (WHERE category='net_fare')::numeric,2) fare,
-            round((sum(amount) FILTER (WHERE category='tip')
-                   / nullif(sum(amount) FILTER (WHERE category='net_fare'),0) * 100)::numeric,2) tip_pct
-     FROM driver_earnings_component
-     WHERE period_start >= $1 AND period_end <= $2
-       AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
-     GROUP BY driver_ext_id
-     HAVING sum(amount) FILTER (WHERE category='net_fare') >= $5
+    `SELECT max(driver_ext_id) driver_ext_id, max(driver_name) driver_name,
+            round(sum(tips)::numeric,2) tips,
+            round(sum(net)::numeric,2) fare,
+            round((sum(tips) / nullif(sum(net),0) * 100)::numeric,2) tip_pct
+     ${STMT}
+     GROUP BY name_key
+     HAVING sum(net) >= $5
      ORDER BY tip_pct DESC NULLS LAST LIMIT 200`, [...p, FARE_FLOOR]);
   const [t] = await q(
     `SELECT count(*)::int ranked,
             count(*) FILTER (WHERE fare < $5)::int excluded
-     FROM (SELECT driver_ext_id, sum(amount) FILTER (WHERE category='net_fare') fare
-             FROM driver_earnings_component
-            WHERE period_start >= $1 AND period_end <= $2
-              AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
-            GROUP BY 1 HAVING sum(amount) FILTER (WHERE category='net_fare') > 0) d`,
+     FROM (SELECT sum(net) fare ${STMT}
+            GROUP BY name_key HAVING sum(net) > 0) d`,
     [...p, FARE_FLOOR]);
   res.json({
     rows,

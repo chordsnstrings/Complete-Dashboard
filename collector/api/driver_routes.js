@@ -1000,11 +1000,27 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       r.cancellation_rate = m?.cancellation_rate ?? null;
       r.rating = m?.rating ?? null;
     }
+    /* The resolved DAY table, not the raw components.
+       ─────────────────────────────────────────────────────────────────────
+       Uber now answers this driver on two surfaces at once — the REST payments
+       feed on short periods and the supplier GraphQL breakdown on weeks — and
+       a raw sum over components adds both readings of the same days together.
+       Production shows it plainly: driver 64686123 carries a tip row of 35.00
+       under your_earnings and another of 30.00 under earnings, for one week of
+       work. Summed, the page reported AED 65.
+
+       driver_statement_day is the same components with that collision already
+       settled: one row per driver-day, taken from the FINEST period covering
+       it (src/rollup.js). It is also what the reconciliation reads, so the
+       driver page and the money pages now answer from one table. The window
+       predicate is a day range rather than a period range, which is the other
+       half of the fix: a week whose Monday fell outside the window used to
+       drag all seven of its days in. */
     const [tips] = await q(
-      `SELECT round(sum(amount) FILTER (WHERE category='tip')::numeric,2) tips,
-              round(sum(amount) FILTER (WHERE category='net_fare')::numeric,2) fare
-       FROM driver_earnings_component
-       WHERE driver_ext_id = ANY($3) AND period_start >= $1::date AND period_end <= $2::date`, p);
+      `SELECT round(sum(tips)::numeric,2) tips, round(sum(net)::numeric,2) fare
+       FROM driver_statement_day
+       WHERE source <> 'ledger' AND driver_ext_id = ANY($3)
+         AND day BETWEEN $1::date AND $2::date`, p);
     res.json({ components, periods,
       /* The sum the caption prints, computed here rather than left to the page
          to add up — the two disagreed by AED 1,538 in production. */

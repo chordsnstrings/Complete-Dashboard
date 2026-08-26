@@ -603,12 +603,21 @@ async function platformFlags() {
 /* ─────────────────── 13. Tips: service quality that shows up in cash ─────────────────── */
 async function tipSignal() {
   const rows = await q(
+    /* Weeks of resolved statement days, not raw component periods.
+       Uber now answers on two surfaces whose report windows overlap, so a sum
+       over driver_earnings_component counts some days twice; and the periods
+       themselves are no longer one grid — short REST windows beside GraphQL
+       weeks — so grouping by them mixed grains inside one ranking.
+       driver_statement_day is per driver-day with that already resolved, and
+       date_trunc keeps the Monday-anchored week this threshold was set for. */
     `WITH t AS (
-       SELECT driver_ext_id, driver_name, period_start, period_end,
-              sum(amount) FILTER (WHERE category='tip')      AS tips,
-              sum(amount) FILTER (WHERE category='net_fare') AS fare
-       FROM driver_earnings_component
-       GROUP BY 1,2,3,4)
+       SELECT max(driver_ext_id) AS driver_ext_id, max(driver_name) AS driver_name,
+              date_trunc('week', day)::date AS period_start,
+              (date_trunc('week', day) + interval '6 days')::date AS period_end,
+              sum(tips) AS tips, sum(net) AS fare
+       FROM driver_statement_day
+       WHERE source <> 'ledger' AND NOT pseudo
+       GROUP BY name_key, 3, 4)
      SELECT * FROM t WHERE fare > 200 ORDER BY (coalesce(tips,0)/nullif(fare,0)) ASC LIMIT 40`);
   if (rows.length < 4) return 0;
   const rates = rows.map((r) => Number(r.tips || 0) / Number(r.fare || 1));

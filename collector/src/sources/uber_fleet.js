@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { normPlate } from '../config.js';
+import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
 import { iso, weekChunks } from '../util.js';
@@ -198,14 +198,36 @@ async function pullEarningsComponents(from, to, o) {
     totalRows += r.rows; earners += r.earners; weeks += 1;
     if (r.earners) served += 1;
   }
+  /* The probe describes ONE org, so the inference only holds for one fleet.
+     ───────────────────────────────────────────────────────────────────────
+     provider_probe is keyed (provider, surface) with no fleet column, and
+     src/probe.js calls this surface with config.uber.org — Ecosine's. So
+     "the probe saw earners, you saw none, therefore your request is wrong"
+     is a valid deduction about Ecosine and a non sequitur about anybody else.
+
+     Egari is the anybody else, and it paid for the confusion: this OAuth
+     surface serves it nothing at all, every run of it threw against Ecosine's
+     probe count, and /api/status reported Egari's uber_fleet as a partial
+     failure with a reason that was not true. Its earnings components come
+     from the supplier GraphQL breakdown instead (src/sources/uber.js), which
+     does answer for both fleets, so an empty answer here is a fact about
+     which org this credential covers rather than a fault to raise.
+
+     Recorded rather than thrown for those fleets — a surface that serves one
+     org of two is worth knowing about, and worth not being told twice. */
+  const probed = o.fleet === config.uber.fleet;
   if (weeks && !earners) {
     const { rows: [probe] = [] } = await pool.query(
       `SELECT record_count, probed_at FROM provider_probe
         WHERE provider = 'uber' AND surface = 'earner-payments' AND ok`).catch(() => ({ rows: [] }));
-    if (probe?.record_count > 0) {
+    if (probed && probe?.record_count > 0) {
       throw new Error(`earner payments returned no earners in any of ${weeks} week(s), but the `
         + `probe of the same surface saw ${probe.record_count} at ${probe.probed_at}. `
         + 'The request, not the window, is wrong.');
+    }
+    if (!probed) {
+      log.info(SRC, 'earner payments serves no earners for this org', {
+        fleet: o.fleet, weeks, note: 'components come from the supplier GraphQL breakdown' });
     }
   }
   /* Weeks served beside weeks asked, because "3 of 53" is the shape of a
