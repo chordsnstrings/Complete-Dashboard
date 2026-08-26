@@ -596,6 +596,12 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .pill.ok{background:var(--good-bg);color:var(--good)}
 .pill.warn{background:var(--warn-bg);color:var(--warn)}
 .pill.bad{background:var(--critical-bg);color:var(--critical)}
+/* A fact this window did not measure. The driver directory lists everyone the
+   fleet has ever known, and answers their fleet, channels and vehicle over the
+   whole history when the range on screen holds no work for them — otherwise
+   244 of 361 rows carried a name and three blanks. Drawn quieter than a
+   measured one so the two are never mistaken for each other. */
+.pill.dim{background:var(--surface-2);color:var(--ink-2);opacity:.72}
 
 .lnk{color:var(--accent-ink);text-decoration:none;border-bottom:1px solid var(--accent-line)}
 .lnk:hover{border-bottom-color:var(--accent)}

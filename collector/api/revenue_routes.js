@@ -203,9 +203,38 @@ export function revenueRoutes(app, { q, wrap, range }) {
        that double-counts any platform reporting both, so the Overview and this
        page printed different totals for the same month. */
     for (const r of byPlatform.values()) {
-      r.revenue_per_km = r.fares != null && r.priced_km
-        ? Math.round((r.fares / r.priced_km) * 100) / 100 : null;
       chooseBasis(r, windowDays);
+      /* Per km follows the BASIS, like every other figure on this row.
+         ───────────────────────────────────────────────────────────────────
+         It was fares over priced km and nothing else, so the fleet's largest
+         channel printed a dash: Uber prices no booking, so it has no fares
+         and no priced km. On production that was 2,890 of 3,109 bookings —
+         93% of the work — with AED 99,430 of payout and 2,890 measured
+         distances sitting unused beside an empty cell.
+
+         A payout-basis row divides the payout by the distance of every
+         booking with one, which is the same question the fares rows answer
+         and the same one the Per-km column is headed with. The denominator
+         differs between the two, so it is reported rather than assumed:
+         `per_km_basis` says which money, `per_km_km` says over what.
+
+         Both denominators exclude bookings with no distance, so neither
+         reads as smaller than it is because a channel forgot to send one. */
+      const paid = r.basis === 'payout' || r.basis === 'partial_payout';
+      const r2 = (v) => Math.round(v * 100) / 100;
+      if (paid && r.payouts != null && r.km) {
+        r.revenue_per_km = r2(r.payouts / r.km);
+        r.per_km_basis = 'payout';
+        r.per_km_km = r.km;
+      } else if (r.fares != null && r.priced_km) {
+        r.revenue_per_km = r2(r.fares / r.priced_km);
+        r.per_km_basis = 'fares';
+        r.per_km_km = r.priced_km;
+      } else {
+        r.revenue_per_km = null;
+        r.per_km_basis = null;
+        r.per_km_km = null;
+      }
     }
 
     const rows = [...byPlatform.values()].sort((a, b) => (b.bookings || 0) - (a.bookings || 0));

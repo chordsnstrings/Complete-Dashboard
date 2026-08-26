@@ -179,13 +179,28 @@ function componentTree(components) {
       if (!byParent.has(c.parent)) byParent.set(c.parent, []);
       byParent.get(c.parent).push(c);
     });
+    /* The parent may be a child itself.
+       ───────────────────────────────────────────────────────────────────────
+       This looked the parent up in `roots` alone, so a GRANDCHILD never found
+       one and its share came out null. Uber's supplier tree is three deep —
+       `little_fare` inside `fare` inside `your_earnings` — and `fare` is not a
+       root, so on production 17 of the 31 rows on this table were blank,
+       including the largest component the fleet has. Looked up across every
+       component instead, at whatever depth it sits. */
+    const byLabel = new Map();
+    for (const c of [...roots, ...kids]) {
+      /* Summed: one category can hang under two parents — Uber reports
+         `taxes_earnings` inside both `earnings` and `your_earnings` — and
+         last-write-wins would measure a share against half its denominator. */
+      byLabel.set(c.label, (byLabel.get(c.label) || 0) + (c.amount || 0));
+    }
     const rows = [];
     for (const [p, list] of byParent) {
-      const root = roots.find((r) => r.label === String(p).replace(/_/g, ' '));
+      const parentAmt = byLabel.get(String(p).replace(/_/g, ' ')) ?? byLabel.get(p);
       list.sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)).forEach((c) => {
         rows.push({ within: String(p).replace(/_/g, ' '), label: c.label, amount: c.amount,
           drivers: c.drivers,
-          share: root && root.amount ? (c.amount / root.amount) * 100 : null });
+          share: parentAmt ? (c.amount / parentAmt) * 100 : null });
       });
     }
     host.append(tableFrom(rows, [

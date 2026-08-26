@@ -1472,6 +1472,22 @@ export function analystRoutes(app, { q, wrap, range }) {
        FROM analyst_finding
        WHERE window_start >= $1::date AND window_end <= $2::date
          AND ($3::text IS NULL OR fleet_id = $3)`, [from, to, req.query.fleet || null]);
+    /* What the last pass actually did.
+       ─────────────────────────────────────────────────────────────────────
+       `configured` was the only thing this endpoint knew, and it reads the
+       API process's environment while the analyst runs in the COLLECTOR — so
+       it could say "configured" about a component it cannot see. Worse, an
+       empty list has three causes and it could distinguish none of them.
+
+       Production, 2026-08-26: confirmed 0, runs 0, last_run null, configured
+       true, and the page reporting the analyst as quiet. The collector log
+       had it — a 429 from the model endpoint, then a 120-second abort on the
+       retry — and nothing wrote it anywhere a page could read. analyst_run
+       (sql/schema_v35.sql) is that record, and this is where it surfaces. */
+    const [lastRun] = await q(
+      `SELECT run_id, outcome, proposed, dropped, confirmed, model, error,
+              duration_ms, finished_at
+         FROM analyst_run ORDER BY finished_at DESC LIMIT 1`).catch(() => []);
     res.json({
       ...counts, findings: rows,
       fleet: req.query.fleet || null,
@@ -1480,6 +1496,18 @@ export function analystRoutes(app, { q, wrap, range }) {
          ARK_API_KEY unset it means the pass has never happened, and the page
          described that as a scheduling delay. */
       configured: !!process.env.ARK_API_KEY,
+      last_pass: lastRun || null,
+      /* The sentence the page prints above an empty list, composed here so
+         every surface that shows it says the same thing. */
+      empty_reason: rows.length ? null
+        : !lastRun ? 'the analyst has not run yet — no pass has been recorded'
+          : lastRun.outcome === 'failed'
+            ? `the last pass could not reach the model: ${lastRun.error || 'the call failed'}`
+            : lastRun.outcome === 'no_model'
+              ? 'no model is configured for the collector, so the analyst can measure but not propose'
+              : lastRun.outcome === 'empty'
+                ? 'the last pass ran and the model proposed nothing worth checking'
+                : 'the last pass ran and nothing it proposed survived measurement',
       platform_applies: false,
     });
   }));

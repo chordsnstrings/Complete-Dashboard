@@ -16,7 +16,7 @@ import { rebuildCustody } from './custody.js';
 import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
 import { monthsAgo, daysAgo } from './util.js';
-import { setState } from './db.js';
+import { setState, pool } from './db.js';
 import { log } from './log.js';
 
 /* Order matters, and it took a live diagnosis to see why.
@@ -138,7 +138,23 @@ export async function analystPass({ days = 30 } = {}) {
       immaterial: r.findings.filter((f) => f.verdict === 'immaterial').length,
     });
     return r;
-  } catch (e) { log.error('analyst', 'pass failed', { err: String(e) }); return null; }
+  } catch (e) {
+    /* Recorded, not just logged. This caught, logged and returned null, so a
+       pass that could not reach the model left no trace any page could read —
+       and production spent its nights in exactly that state while the Action
+       list reported the analyst as quiet. The row is best-effort: a pass that
+       failed because the database is unreachable cannot write it, and that is
+       the one case where the log is all there is. */
+    const err = String(e?.message || e).slice(0, 400);
+    log.error('analyst', 'pass failed', { err });
+    await pool.query(
+      `INSERT INTO analyst_run (run_id, window_start, window_end, outcome, error, finished_at)
+       VALUES ($1,$2,$3,'failed',$4, now()) ON CONFLICT (run_id) DO UPDATE
+         SET outcome='failed', error=EXCLUDED.error, finished_at=now()`,
+      [`an-${Date.now()}`, iso(from), iso(to), err])
+      .catch(() => {});
+    return null;
+  }
 }
 
 /* Describe every provider surface the collectors call, so "what else could we

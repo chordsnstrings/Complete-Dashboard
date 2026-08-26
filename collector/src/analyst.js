@@ -356,31 +356,61 @@ Return ONLY a JSON array, at most 12 items:
 export async function propose(brief) {
   if (!config.modelark?.apiKey) {
     log.warn(SRC, 'no ARK_API_KEY — the analyst cannot propose, only measure');
-    return { proposals: [], rejected: [{ reason: 'no model configured' }], model: null };
+    return { proposals: [], rejected: [{ reason: 'no model configured' }],
+      model: null, outcome: 'no_model', error: 'no ARK_API_KEY is set for the component that runs the analyst' };
   }
   const prompt = SYSTEM
     .replace('{METRICS}', Object.keys(METRICS).join(', '))
     .replace('{DIMENSIONS}', Object.keys(DIMENSIONS).join(', '));
-  const { data } = await http(`${config.modelark.baseUrl}/chat/completions`, {
-    method: 'POST', timeoutMs: 120000, retries: 1,
-    headers: { authorization: `Bearer ${config.modelark.apiKey}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      model: config.modelark.model,
-      messages: [{ role: 'system', content: prompt },
-        { role: 'user', content: JSON.stringify(brief) }],
-      max_tokens: 3000, temperature: 0.4,
-    }),
-  });
+  /* The call is allowed to fail, and saying so is the whole point.
+     ─────────────────────────────────────────────────────────────────────────
+     This threw, analystPass caught it, logged it and returned null, and the
+     Action list then reported the analyst as quiet. Production spent an
+     unknown number of nights in that state: the collector log for
+     2026-08-26 shows a 429 from the model endpoint followed by a 120-second
+     abort on the retry, while every page said the analyst simply had nothing
+     to add. A generator that cannot run is a different fact from a generator
+     with no findings, and only one of them is somebody's job to fix. */
+  let data;
+  try {
+    ({ data } = await http(`${config.modelark.baseUrl}/chat/completions`, {
+      method: 'POST', timeoutMs: 120000, retries: 1,
+      headers: { authorization: `Bearer ${config.modelark.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: config.modelark.model,
+        messages: [{ role: 'system', content: prompt },
+          { role: 'user', content: JSON.stringify(brief) }],
+        max_tokens: 3000, temperature: 0.4,
+      }),
+    }));
+  } catch (e) {
+    const err = String(e?.message || e).slice(0, 200);
+    log.error(SRC, 'model call failed', { err, model: config.modelark.model });
+    return { proposals: [], rejected: [{ reason: err }],
+      model: config.modelark.model, outcome: 'failed', error: err };
+  }
+  /* A body that is not the shape asked for is a failure too. A 429 answers
+     with an error object and no choices, and reading that as "no proposals"
+     is how a rate limit became a quiet night. */
+  if (!data?.choices?.length) {
+    const err = String(data?.error?.message || data?.message
+      || (typeof data === 'string' ? data.slice(0, 160) : JSON.stringify(data || {}).slice(0, 160)))
+      || 'the model returned no choices';
+    log.error(SRC, 'model returned nothing usable', { err, model: config.modelark.model });
+    return { proposals: [], rejected: [{ reason: err }],
+      model: config.modelark.model, outcome: 'failed', error: err };
+  }
   const txt = data?.choices?.[0]?.message?.content || '';
-  return { ...parseProposals(txt), model: config.modelark.model };
+  return { ...parseProposals(txt), model: config.modelark.model, outcome: null, error: null };
 }
 
 /* One full pass: brief → propose → measure → adjudicate → store. */
 export async function runAnalyst({ from, to, fleet = null } = {}) {
   const runId = `an-${new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)}`;
+  const startedAt = new Date();
   const win = [from, to, fleet];
   const brief = await buildBrief(win);
-  const { proposals, rejected, model } = await propose(brief);
+  const { proposals, rejected, model, outcome, error } = await propose(brief);
   log.info(SRC, 'proposals', { n: proposals.length, dropped: rejected.length });
 
   const out = [];
@@ -414,6 +444,25 @@ export async function runAnalyst({ from, to, fleet = null } = {}) {
     out.push(row);
   }
   const kept = out.filter((r) => r.verdict === 'confirmed').length;
+  /* The pass itself is recorded, whether or not it produced a finding — see
+     sql/schema_v35.sql. Without this row an empty Action list cannot say
+     whether the analyst is quiet, unconfigured or broken, and production sat
+     in the third state reporting the first. */
+  await pool.query(
+    `INSERT INTO analyst_run (run_id, window_start, window_end, fleet_id, outcome,
+       proposed, dropped, confirmed, model, error, duration_ms, started_at, finished_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+     ON CONFLICT (run_id) DO UPDATE SET outcome = EXCLUDED.outcome,
+       proposed = EXCLUDED.proposed, dropped = EXCLUDED.dropped,
+       confirmed = EXCLUDED.confirmed, model = EXCLUDED.model, error = EXCLUDED.error,
+       duration_ms = EXCLUDED.duration_ms, finished_at = now()`,
+    [runId, from, to, fleet,
+      outcome || (proposals.length ? 'ok' : 'empty'),
+      proposals.length, rejected.length, kept, model,
+      error ? String(error).slice(0, 400) : null,
+      Date.now() - startedAt.getTime(), startedAt])
+    .catch((e) => log.warn(SRC, 'could not record the run', { err: String(e).slice(0, 120) }));
   log.info(SRC, 'run complete', { run: runId, proposed: proposals.length, confirmed: kept });
-  return { run_id: runId, brief, proposed: proposals.length, dropped: rejected, findings: out };
+  return { run_id: runId, brief, proposed: proposals.length, dropped: rejected,
+    findings: out, outcome: outcome || (proposals.length ? 'ok' : 'empty'), error: error || null };
 }

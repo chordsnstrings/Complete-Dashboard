@@ -154,9 +154,18 @@ export async function renderRevenue(root) {
         : `${money(r.statement_net)}<span class="dim"> · cash ${r.statement_cash != null ? money(r.statement_cash) : '—'}`
           + `${r.statement_days != null ? ` · ${r.statement_days} of ${d.window_days} days` : ''}`
           + `${r.statement_drivers != null ? `, ${fmt(r.statement_drivers)} drivers` : ''}</span>`) },
+    /* The denominator is named, because it is not the same one on every row.
+       A fares row divides gross fares by the distance of the bookings that
+       carried a fare; a payout row divides the net payout by every booking
+       with a distance. Both answer "what did a kilometre earn", and printing
+       them under one heading without saying which money it was would invite
+       a reader to compare AED 4.12 of gross hotel fare against AED 2.71 of
+       net Uber payout as though they were the same thing. */
     { label: 'Per km', key: 'revenue_per_km', num: true,
       render: (r) => (r.revenue_per_km != null
-        ? `${money(r.revenue_per_km, 'AED', 2)}<span class="dim"> over ${fmt(r.priced_km)} km</span>`
+        ? `${money(r.revenue_per_km, 'AED', 2)}<span class="dim"> ${
+          r.per_km_basis === 'payout' ? 'net payout' : 'gross fare'} over ${
+          fmt(r.per_km_km ?? r.priced_km)} km</span>`
         : '—') },
     { label: 'Basis', key: 'basis',
       render: (r) => pill(BASIS[r.basis]?.label || r.basis, BASIS[r.basis]?.tone) },
@@ -257,10 +266,34 @@ export async function renderRevenue(root) {
         + 'Everything in the table below is INSIDE one of these and is not added again.'));
     }
     if (kids.length) {
-      const rootAmt = new Map(top.map((c) => [`${c.platform}|${c.category}`, Number(c.amount) || 0]));
+      /* Every component, not just the roots.
+         ─────────────────────────────────────────────────────────────────────
+         This map was built from `top` — the rows whose parent IS NULL — so a
+         GRANDCHILD could never find its parent and its share came out null.
+         Uber's supplier tree is three deep: `little_fare` sits inside `fare`
+         which sits inside `your_earnings`, and `fare` is not a root. On
+         production that left 16 of 30 rows on this table blank, and 17 of 31
+         on the same table on #finance — including `little_fare`, which is the
+         single largest component the fleet has.
+
+         Keyed on the whole list instead, so a share is against the row's OWN
+         parent at whatever depth it sits. A parent that is genuinely absent
+         from the window still yields null, which is the case the dash was
+         written for. */
+      /* Summed, not last-write-wins. One category can hang under two parents
+         — Uber reports `taxes_earnings` inside both `earnings` (the REST tree)
+         and `your_earnings` (the GraphQL one) — and a plain Map would keep
+         whichever came last, so a share could be measured against half its
+         denominator. Summing is the only reading that is never wildly wrong
+         when the same name means the same money on two surfaces. */
+      const byCat = new Map();
+      for (const c of [...top, ...kids]) {
+        const k = `${c.platform}|${c.category}`;
+        byCat.set(k, (byCat.get(k) || 0) + (Number(c.amount) || 0));
+      }
       cp.body.append(tableFrom(kids.slice(0, 30).map((c) => ({ ...c,
-        _share: rootAmt.get(`${c.platform}|${c.parent}`)
-          ? (Number(c.amount) / rootAmt.get(`${c.platform}|${c.parent}`)) * 100 : null })), [
+        _share: byCat.get(`${c.platform}|${c.parent}`)
+          ? (Number(c.amount) / byCat.get(`${c.platform}|${c.parent}`)) * 100 : null })), [
         { label: 'Channel', key: 'platform', render: (c) => esc(sourceLabel(c.platform)) },
         { label: 'Within', key: 'parent', render: (c) => esc(String(c.parent).replace(/_/g, ' ')) },
         { label: 'Component', key: 'category', render: (c) => esc(String(c.category).replace(/_/g, ' ')) },
@@ -296,7 +329,7 @@ export async function renderRevenue(root) {
          product had lost it. */
       const parents = [...new Set(kids.map((c) => `${c.platform}|${c.parent}`))];
       const gaps = parents.map((key) => {
-        const total = rootAmt.get(key);
+        const total = byCat.get(key);
         if (!total) return null;
         const sum = kids.filter((c) => `${c.platform}|${c.parent}` === key)
           .reduce((a, c) => a + (Number(c.amount) || 0), 0);
@@ -306,7 +339,7 @@ export async function renderRevenue(root) {
       }).filter(Boolean);
 
       const anyOver = kids.some((c) => {
-        const t = rootAmt.get(`${c.platform}|${c.parent}`);
+        const t = byCat.get(`${c.platform}|${c.parent}`);
         return t && Math.abs(Number(c.amount)) > Math.abs(t);
       });
       if (anyOver || gaps.length) {

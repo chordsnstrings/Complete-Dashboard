@@ -17,7 +17,7 @@
    the model's word. */
 
 import { empty, fmt } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, pct } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, pct, dtStr } from './ui.js';
 import { q, api, href, state } from './data.js';
 
 export const ANALYST_TABS = [
@@ -56,8 +56,28 @@ export async function renderAnalyst(root) {
        zero because ARK_API_KEY is unset on the API. Read from a `configured`
        flag where the endpoint supplies one, and inferred from "no pass has
        ever run" where it does not. */
+    /* The endpoint records what the last pass actually did now, so the page
+       no longer has to infer three states from two counts. A pass that
+       reached the model and failed is the case this never had a word for —
+       production ran nightly into a 429 and a timeout while this page said
+       "the analyst has not run yet", which reads as something you wait out. */
+    if (d.last_pass && d.last_pass.outcome === 'failed') {
+      host.append(note(`The analyst ran and could not reach the model. It last tried ${
+        dtStr(d.last_pass.finished_at)} and the call failed: ${d.last_pass.error
+        || 'no reason was recorded'}. This page stays empty until that is fixed — `
+        + 'it is not a scheduling delay.', 'warn'));
+      const link = el('p', 'cap');
+      link.innerHTML = `The model is called from the COLLECTOR, not from this page. `
+        + `<a class="lnk" href="${href('sources')}">Data sources</a> shows what that process `
+        + `can reach, and <a class="lnk" href="${href('insights')}">the action list</a> is the `
+        + 'rule-based findings, which need no model at all and are running.';
+      host.append(link);
+      return;
+    }
     const unconfigured = d.configured === false
-      || (!d.runs && !d.model && !(d.confirmed || d.refuted || d.immaterial || d.unsupported));
+      || d.last_pass?.outcome === 'no_model'
+      || (!d.runs && !d.last_pass && !d.model
+        && !(d.confirmed || d.refuted || d.immaterial || d.unsupported));
     if (unconfigured) {
       host.append(note('The analyst is not configured on this deployment. It needs a model credential — '
         + 'the pass is a model call, so with no key nothing can run, and this page will stay empty '
@@ -70,11 +90,19 @@ export async function renderAnalyst(root) {
       host.append(link);
       return;
     }
-    host.append(note(d.runs
-      ? 'No finding in this category for this window. Widen the range above, or look at the other tabs — '
-        + 'a pass that produced nothing here still produced something.'
-      : 'The analyst has not run over this window yet. It runs from the collector schedule rather than '
-        + 'from a page load, because each pass costs a model call.'));
+    /* The endpoint composes this sentence, so every surface that shows it
+       says the same thing rather than each inferring its own. */
+    host.append(note(d.empty_reason
+      || (d.runs
+        ? 'No finding in this category for this window. Widen the range above, or look at the other '
+          + 'tabs — a pass that produced nothing here still produced something.'
+        : 'The analyst has not run over this window yet. It runs from the collector schedule rather '
+          + 'than from a page load, because each pass costs a model call.')));
+    if (d.last_pass) {
+      host.append(el('p', 'cap', `Last pass ${dtStr(d.last_pass.finished_at)}`
+        + `${d.last_pass.model ? ` · ${d.last_pass.model}` : ''}`
+        + ` · ${d.last_pass.proposed} proposed, ${d.last_pass.confirmed} confirmed`));
+    }
     return;
   }
 

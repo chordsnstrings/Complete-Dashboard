@@ -470,6 +470,8 @@ app.get('/api/drivers/directory', (_, r) => r.json([
     plate: plates[i % plates.length], state: i === 3 ? 'suspended' : 'active',
     licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9, rating: 4.9 - i * 0.06,
     active_in_window: true, ever_driven: true,
+    // The window measured these, so they are not history-derived.
+    identity_from_history: false,
   })),
   /* The two rows the directory used to omit entirely: somebody who did not
      drive in this window, and somebody who has never driven. One of them has an
@@ -477,15 +479,22 @@ app.get('/api/drivers/directory', (_, r) => r.json([
   { driver_ext_id: 'drv-idle', ids: ['drv-idle'], driver_name: 'Saeed Al Mansoori',
     fleet_id: 'ecosine', trips: 0, completed: 0, bookable: 0, days: 0, km: null, revenue: null,
     priced_trips: 0, last_trip: null, last_ever: dayISO(96), lifetime_trips: 311,
-    first_trip: null, completion_pct: null, platforms: [], plate: null, state: 'active',
+    /* Fleet, channels and vehicle from the WHOLE HISTORY, because this window
+       holds no work for them — the case that used to print a name and three
+       blanks for 244 of 361 people on production. The flag is what lets the
+       page draw them quieter than a measured value. */
+    first_trip: null, completion_pct: null, platforms: ['uber', 'yango'],
+    plate: plates[2], state: 'active', identity_from_history: true,
     licence_expires: '2026-06-01', licence_days_left: -81, rating: null,
     active_in_window: false, ever_driven: true },
   { driver_ext_id: 'drv-new', ids: ['drv-new'], driver_name: 'Faisal Rahman',
     fleet_id: 'ecosine', trips: 0, completed: 0, bookable: 0, days: 0, km: null, revenue: null,
     priced_trips: 0, last_trip: null, last_ever: null, lifetime_trips: 0,
+    /* Never driven, so there is no history to fall back on either — the row
+       that must stay blank, and the reason the flag is not just "is it empty". */
     first_trip: null, completion_pct: null, platforms: [], plate: null, state: 'active',
     licence_expires: null, licence_days_left: null, rating: null,
-    active_in_window: false, ever_driven: false },
+    identity_from_history: false, active_in_window: false, ever_driven: false },
 ]));
 
 app.get('/api/driver/profile', (req, r) => {
@@ -1314,6 +1323,7 @@ app.get('/api/revenue', (_, r) => {
     { platform: 'uber', bookings: 6142, priced_bookings: 0, fares: null, priced_km: null,
       km: 78400, drivers: 61, vehicles: 74, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 0, revenue_per_km: null,
+      per_km_basis: null, per_km_km: null,
       first_at: dayISO(30), last_at: dayISO(0), best: null, payout_drivers: 0,
       first_period: null, last_period: null, payout_days: 0, payout_coverage_pct: null,
       booking_days: 31, payout_coverage_days: null, payout_coverage_base: null,
@@ -1324,6 +1334,7 @@ app.get('/api/revenue', (_, r) => {
     { platform: 'hotel', bookings: 1267, priced_bookings: 1267, fares: 61400, priced_km: 15600,
       km: 15600, drivers: 22, vehicles: 31, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 100, revenue_per_km: 3.94,
+      per_km_basis: 'fares', per_km_km: 15600,
       first_at: dayISO(30), last_at: dayISO(0), best: 61400, payout_drivers: 0,
       first_period: null, last_period: null, payout_days: 0, payout_coverage_pct: null,
       booking_days: 31, payout_coverage_days: null, payout_coverage_base: null,
@@ -1333,7 +1344,8 @@ app.get('/api/revenue', (_, r) => {
       statement_drivers: 21 },
     { platform: 'yango', bookings: 214, priced_bookings: 96, fares: 4180, priced_km: 1180,
       km: 2640, drivers: 9, vehicles: 11, payouts: 3210, cash: 640, payout_periods: 12,
-      components: null, tips: null, fare_coverage_pct: 44.9, revenue_per_km: 3.54,
+      components: null, tips: null, fare_coverage_pct: 44.9, revenue_per_km: 1.22,
+      per_km_basis: 'payout', per_km_km: 2640,
       first_at: dayISO(30), last_at: dayISO(0), best: 3210, payout_drivers: 9,
       first_period: dayISO(28).slice(0, 10), last_period: dayISO(0).slice(0, 10),
       payout_days: 29, payout_coverage_pct: 93.5,
@@ -1861,6 +1873,13 @@ app.get('/api/analyst/findings', (req, r) => {
        unset it means the pass has never happened, and the page described that
        as a scheduling delay. */
     configured: true,
+    /* What the last pass actually did, so an empty list can say which of the
+       three nothings it is. See sql/schema_v35.sql — production ran nightly
+       into a 429 and a timeout while every page reported the analyst quiet. */
+    last_pass: { run_id: 'an-20260821', outcome: 'ok', proposed: 5, dropped: 2,
+      confirmed: 2, model: 'glm-5-2-260617', error: null, duration_ms: 41200,
+      finished_at: new Date().toISOString() },
+    empty_reason: null,
     platform_applies: false });
 });
 app.get('/api/analyst/rules', (_, r) => r.json({

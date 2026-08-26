@@ -1286,11 +1286,25 @@ export async function renderDriverDirectory(root) {
           : '<span class="ent-off" title="no platform published a standing for this person">not reported</span>')) }] : []),
     // On a two-fleet operator, which fleet. It is on every row and was drawn
     // nowhere.
+    /* These three are IDENTITY, and the endpoint now answers them over the
+       whole history when the window has nothing to say — 244 of 361 rows on
+       production carried a name and three blanks, one of them belonging to a
+       driver with 2,393 trips on record. `identity_from_history` marks those,
+       so the page can show the fact and still be honest that it is not a
+       measurement of the range on screen. */
     ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',
-      render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id), 'plat')
+      render: (r) => (r.fleet_id
+        ? pill(sourceLabel(r.fleet_id), r.identity_from_history ? 'dim' : 'plat')
         : '<span class="ent-off" title="no trip of theirs names a fleet">—</span>') }] : []),
-    { label: 'Platforms', key: '_p', render: (r) => (r.platforms || []).map((p) => pill(sourceLabel(p), 'plat')).join('') },
-    { label: 'Usual vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+    { label: 'Platforms', key: '_p',
+      render: (r) => (r.platforms || []).map((p) => pill(sourceLabel(p),
+        r.identity_from_history ? 'dim' : 'plat')).join('') },
+    { label: 'Usual vehicle', key: 'plate',
+      render: (r) => (r.plate == null ? ''
+        : r.identity_from_history
+          ? `<span class="dim" title="their last vehicle — they took no booking in this window">${
+            entity('vehicle', r.plate, r.plate)}</span>`
+          : entity('vehicle', r.plate, r.plate)) },
     { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },
     ...(anyLifetime ? [{ label: 'Trips ever', key: 'lifetime_trips', num: true,
       render: (r) => (r.lifetime_trips == null

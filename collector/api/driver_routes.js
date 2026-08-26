@@ -245,11 +245,29 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        GROUP BY licence_expires ORDER BY n DESC LIMIT 1`);
     const placeholderDate = phRow && phRow.with_date && phRow.n >= 5
       && phRow.n / phRow.with_date >= 0.5 ? phRow.d : null;
+    /* The lifetime CTE carries identity now, not just counts.
+       ─────────────────────────────────────────────────────────────────────
+       Measured on production over thirty days: 361 rows, 244 of them with no
+       fleet, no channel list and no vehicle — one of those people has 2,393
+       trips on record. Every one of those columns was read from the WINDOW's
+       trips, and a person who last drove in June has none. A driver's fleet is
+       not a fact about a date range, so it is answered over the whole history
+       and used only where the window has nothing to say. The fallback below
+       computes the same three columns, so a fresh database behaves
+       identically. */
     const everSql = lifetimeReady
-      ? 'SELECT driver_ext_id, driver_name, last_ever, lifetime FROM driver_lifetime'
+      ? `SELECT driver_ext_id, driver_name, last_ever, lifetime,
+                last_fleet, platforms AS ever_platforms, last_plate
+           FROM driver_lifetime`
       : `SELECT coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key) AS driver_ext_id,
                 max(driver_name) AS driver_name,
-                max(requested_at) last_ever, count(*)::int lifetime
+                max(requested_at) last_ever, count(*)::int lifetime,
+                (array_agg(fleet_id ORDER BY requested_at DESC NULLS LAST)
+                   FILTER (WHERE fleet_id IS NOT NULL))[1] AS last_fleet,
+                array_agg(DISTINCT platform)
+                  FILTER (WHERE platform IS NOT NULL AND platform <> '') AS ever_platforms,
+                (array_agg(plate ORDER BY requested_at DESC NULLS LAST)
+                   FILTER (WHERE plate IS NOT NULL AND btrim(plate) <> ''))[1] AS last_plate
            FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1`;
     const rows = await q(
       `WITH ever AS (${everSql}),
@@ -355,8 +373,18 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               coalesce(w.bookable, 0) AS bookable, coalesce(w.days, 0) AS days,
               w.km, w.revenue, coalesce(w.priced_trips, 0) AS priced_trips,
               pay.payout, coalesce(pay.payout_days, 0) AS payout_days,
-              w.last_trip, w.first_trip, w.plate, w.fleet_id,
-              coalesce(w.platforms, ARRAY[]::text[]) AS platforms,
+              w.last_trip, w.first_trip,
+              /* Window first, whole history second. The window answer is the
+                 one that describes THIS range; the lifetime answer exists so
+                 that a person the range does not cover is still identified
+                 rather than shown as four blanks under their own name.
+                 ever_* is never used to overwrite a window value. */
+              coalesce(w.plate, ev.last_plate) AS plate,
+              coalesce(w.fleet_id, ev.last_fleet) AS fleet_id,
+              coalesce(w.platforms, ev.ever_platforms, ARRAY[]::text[]) AS platforms,
+              /* So a reader can tell a measurement from an identity: true
+                 where these three describe work outside the window. */
+              (w.trips IS NULL OR w.trips = 0) AND ev.lifetime > 0 AS identity_from_history,
               ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
               dc.state, dc.licence_expires, dc.rating,
               (dc.licence_expires - now()::date) AS licence_days_left,

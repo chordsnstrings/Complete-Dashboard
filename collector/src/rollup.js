@@ -517,13 +517,40 @@ export async function refreshLifetime(db = pool) {
   try {
     await db.query("SET LOCAL statement_timeout = '600000'").catch(() => {});
     await db.query('DELETE FROM driver_lifetime');
+    /* Identity as well as counts — see sql/schema_v34.sql. The directory lists
+       everyone the fleet has ever known, and for the 244 of 361 people with no
+       work inside a thirty-day window it was printing a name and four blanks,
+       including for a driver with 2,393 trips on record. Fleet, channels and
+       vehicle are not window facts and are answered here, once, over the whole
+       history.
+
+       DISTINCT ON for the two "last" columns rather than max(): max(plate)
+       is the alphabetically largest plate this person ever held, which is not
+       a fact about anything. The subquery orders by requested_at DESC so both
+       come from the SAME booking — the most recent one. */
     const r = await db.query(`
-      INSERT INTO driver_lifetime (driver_ext_id, driver_name, last_ever, lifetime)
-      SELECT coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key),
-             max(driver_name), max(requested_at), count(*)::int
-        FROM trip
-       WHERE driver_name IS NOT NULL AND btrim(driver_name) <> ''
-       GROUP BY 1`);
+      WITH keyed AS (
+        SELECT coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || person_key) AS k,
+               driver_name, requested_at, fleet_id, platform, plate
+          FROM trip
+         WHERE driver_name IS NOT NULL AND btrim(driver_name) <> ''
+      ),
+      last_trip AS (
+        SELECT DISTINCT ON (k) k, fleet_id AS last_fleet, plate AS last_plate
+          FROM keyed ORDER BY k, requested_at DESC NULLS LAST
+      )
+      INSERT INTO driver_lifetime
+        (driver_ext_id, driver_name, last_ever, lifetime, last_fleet, platforms, last_plate)
+      SELECT g.k, g.driver_name, g.last_ever, g.lifetime,
+             l.last_fleet, g.platforms, nullif(btrim(coalesce(l.last_plate, '')), '')
+        FROM (
+          SELECT k, max(driver_name) AS driver_name, max(requested_at) AS last_ever,
+                 count(*)::int AS lifetime,
+                 array_agg(DISTINCT platform) FILTER (
+                   WHERE platform IS NOT NULL AND platform <> '') AS platforms
+            FROM keyed GROUP BY k
+        ) g
+        LEFT JOIN last_trip l ON l.k = g.k`);
     await db.query('COMMIT');
     return r.rowCount ?? 0;
   } catch (e) {
