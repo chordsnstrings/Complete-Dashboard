@@ -1347,7 +1347,9 @@ async function platformShare(root) {
      now sets the platform filter and goes to the driver directory — the same
      answer, on a page with the search box, the compliance columns and an
      address that carries the filter with it. */
-  donut(share.body, byPlat, { onClick: (d) => setFilter({ platform: d.label, view: 'drivers', param: null, sub: null }) });
+  /* Same raw-label donut as the one on the fleet's front page. */
+  donut(share.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
+    { onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'drivers', param: null, sub: null }) });
   share.body.append(el('p', 'cap', 'Click a slice to filter the whole dashboard to that platform and open its drivers.'));
   donut(fleetMix.body, byFleet);
   cov.body.innerHTML = '';
@@ -3166,7 +3168,8 @@ V.sources = async (root) => {
     hp.body.append(tableFrom(holes, [
       { label: 'Source', key: 'source', render: (r) => sourceLabel(r.source) },
       { label: 'Mode', key: 'mode' },
-      { label: 'From', key: 'from' }, { label: 'To', key: 'to' },
+      { label: 'From', key: 'from', render: (r) => dateStr(r.from) },
+      { label: 'To', key: 'to', render: (r) => dateStr(r.to) },
       { label: 'What came back', key: 'error',
         render: (h) => `<span class="wrap" title="${esc(String(h.error))}">${esc(String(h.error).slice(0, 140))}${
           String(h.error).length > 140 ? '…' : ''}</span>` },
@@ -3435,7 +3438,10 @@ V.settings = async (root) => {
     }
     const box = el('div', 'note warn');
     box.innerHTML = `${countOf(holes.length, 'window')} did not land and ${plural(holes.length, 'is', 'are')} `
-      + `still outstanding: ${holes.slice(0, 6).map((h) => `${esc(sourceLabel(h.source))} ${esc(h.from)}→${esc(h.to)}`).join(', ')}`
+      /* The window bounds arrive as ISO days and were written into the
+         sentence unchanged: "FMS telematics 2026-01-27→2026-02-26". */
+      + `still outstanding: ${holes.slice(0, 6).map((h) => `${esc(sourceLabel(h.source))} `
+        + `${esc(dateStr(h.from))} → ${esc(dateStr(h.to))}`).join(', ')}`
       + `${holes.length > 6 ? `, and ${fmt(holes.length - 6)} more` : ''}. `
       + `<a class="lnk" href="${href('sources')}">What each one came back with</a>.`;
     holesHost.append(box);

@@ -316,7 +316,7 @@ async function moneyTab(root) {
   if (!yields.length) {
     empty(chan.body, 'No channel reports both money and distance in this range');
   } else {
-    hbars(chan.body, yields.map((p) => ({ label: p.platform, n: p.aed_per_km })),
+    hbars(chan.body, yields.map((p) => ({ label: sourceLabel(p.platform), n: p.aed_per_km })),
       { color: '--b500', valueFmt: (v) => money(v, 'AED', 2),
         onClick: () => { location.hash = href('revenue'); } });
     /* The basis rides in the channel's own cell rather than in a fifth column.

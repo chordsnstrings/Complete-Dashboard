@@ -24,6 +24,11 @@ const daysAgoFrom = (v) => (v == null ? null : Math.floor((Date.now() - new Date
    days", "1 drivers were online but completed no trips" and "1 driver(s)
    logged in". */
 const s_ = (n, one, many = `${one}s`) => (Math.abs(Number(n)) === 1 ? one : many);
+
+/* Channel names as the dashboard writes them. A finding is a sentence, and it
+   was reading "11% of uber jobs cancel". */
+const CHANNEL = { uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel', fms: 'FMS telematics' };
+const LABEL = (v) => CHANNEL[String(v || '').toLowerCase()] || String(v || '');
 const n_ = (n, one, many) => `${n} ${s_(n, one, many)}`;
 
 // Assumed daily holding cost per vehicle (depreciation + insurance + permit + finance).
@@ -434,7 +439,7 @@ async function cancellations(from, to) {
     await put({
       code: 'cancellation_rate', severity: r.rate > 0.15 ? 'critical' : 'warning', category: 'revenue',
       entity_type: 'platform', entity_id: r.platform, fleet_id: r.fleet_id,
-      title: `${Math.round(r.rate * 100)}% of ${r.platform} jobs cancel (${r.cancels} of ${r.total})`,
+      title: `${Math.round(r.rate * 100)}% of ${LABEL(r.platform)} jobs cancel (${r.cancels} of ${r.total})`,
       detail: `Each cancellation still costs the approach drive and the driver's time. At an average fare of AED ${Number(r.avg_price || 0).toFixed(0)}, this is real money leaving before the meter starts.`,
       action: `Split rider- vs driver-initiated cancels. Driver-side is a coaching problem; rider-side is usually ETA or vehicle-match.`,
       impact_aed: money((r.cancels || 0) * Number(r.avg_price || 0) * 0.3),
