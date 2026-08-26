@@ -6,7 +6,7 @@ const tt = () => document.getElementById('tt');
    CSS background to TRANSPARENT — so the seventh slice of a donut went black
    and a bar coloured `--s8` disappeared entirely. Both are now defined; this
    list and the palette must stay in step. */
-import { TZ } from './tz.js';
+import { TZ, dubaiDay } from './tz.js';
 export const CAT = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
 export const SEQ = ['--b100', '--b200', '--b300', '--b400', '--b500', '--b600', '--b700'];
 
@@ -125,6 +125,15 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
    `gapKey` marks a datum as uncollected. Those days are drawn as a hatched
    void across the full height of the plot — an absence, not a low value — and
    the caption states how many there were. */
+/* Is this bucket label the Dubai day it is now? The chart is handed day
+   strings ("2026-08-26") and Postgres timestamps ("2026-08-26T00:00:00.000Z")
+   by different callers, so both are reduced to ten characters before
+   comparing. Dubai's day, never the viewer's: this fleet's calendar is
+   Dubai's and a reader in London opening it at 21:00 is looking at tomorrow. */
+const isToday = (v) => String(v ?? '').slice(0, 10) === dubaiDay();
+const nowHHMM = () => new Intl.DateTimeFormat('en-GB', {
+  timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
+
 export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'uncollected',
   onClick, valueFmt = (v) => fmt(v), secondary,
   // What the background bar IS. It was hardcoded as "telematics journeys" in the
@@ -133,7 +142,24 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   secondaryLabel = 'telematics journeys',
   // What a hatched day MEANS. "nothing was collected" is right for a trip
   // series and wrong for a seat sensor, where the honest statement is narrower.
-  gapLabel = 'nothing was collected' } = {}) {
+  gapLabel = 'nothing was collected',
+  /* A day that has not finished yet.
+     ─────────────────────────────────────────────────────────────────────
+     TODAY is six hours old when somebody opens this at breakfast, and it was
+     drawn at full weight beside thirty complete days: 37 bookings against 475
+     and 487 the two days before. Nothing on the chart said the bar was still
+     filling, so the first thing the dashboard showed every morning was a
+     cliff that does not exist.
+
+     The product already knows how to say this everywhere else — #compare cuts
+     both days to the same Dubai minute, #causes hatches a partial month and
+     names how many of its days are in the record — and the one chart on the
+     landing page did not. Drawn hollow, with the hour in the tooltip and a
+     sentence under the chart.
+
+     Opt-out rather than opt-in: `inProgress: false` for a series where the
+     last bucket is not a day in progress. */
+  inProgress = true } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
@@ -173,9 +199,16 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
         height: Math.max(sh, 1), rx: 3, fill: 'var(--surface-3)' }));
     }
     const h = ih * (+d[y]) / max, cx = bx + (step - bw) / 2, by = pt + ih - h;
+    /* Hollow, not hatched: hatching already means "nobody collected this day",
+       and a day in progress is the opposite — it is being collected right now. */
+    const live = inProgress && i === data.length - 1 && isToday(d[x]);
     const r = mk('rect', { x: cx, y: by, width: bw, height: Math.max(h, 1), rx: 3,
-      fill: `var(${color})`, 'data-rise': '' });
+      fill: live ? 'var(--surface-2)' : `var(${color})`,
+      ...(live ? { stroke: `var(${color})`, 'stroke-width': 1.5, 'stroke-dasharray': '3 2' } : {}),
+      'data-rise': '' });
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}${
+      live ? ` <b>so far</b>, at ${esc(nowHHMM())} Dubai — this day is still being collected`
+        : ''}${
       secondary && +d[secondary] ? `<br>${fmt(d[secondary])} ${esc(secondaryLabel)}` : ''}`,
     onClick && (() => onClick(d)));
     svg.append(r);
@@ -185,6 +218,17 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     }
   });
   host.append(svg);
+
+  /* The sentence for the hollow bar, first, because it is about the bar a
+     reader is looking at right now rather than about the window as a whole. */
+  const last = data[data.length - 1];
+  if (inProgress && last && !last[gapKey] && isToday(last[x])) {
+    const c = document.createElement('p'); c.className = 'cap';
+    c.innerHTML = `The last bar is <b>today, still being collected</b> — ${esc(valueFmt(last[y]))}`
+      + `${label ? ` ${esc(label)}` : ''} as of ${esc(nowHHMM())} Dubai, against whole days beside `
+      + 'it. It is drawn hollow rather than filled so it is not read as a fall.';
+    host.append(c);
+  }
 
   const gaps = data.filter((d) => d[gapKey]).length;
   const partial = data.filter((d) => !d[gapKey] && d.sources_silent > 0).length;
