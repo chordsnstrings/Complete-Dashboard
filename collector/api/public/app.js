@@ -3757,7 +3757,7 @@ async function render() {
     root.innerHTML = '';
     root.append(failureBox(e, () => render()));
   }
-  if (alive(gen)) freshness();
+  if (alive(gen)) { freshness(); authBanner(); }
 }
 
 /* A dead end with a way out. The generic catch printed the message and left
@@ -3839,6 +3839,68 @@ window.addEventListener('data:refreshed', (ev) => {
     render().then(() => window.scrollTo({ top: y }));
   }, 250);
 });
+
+/* The credential banner, on every page.
+   ─────────────────────────────────────────────────────────────────────────
+   The failure this exists for was invisible. An expired Uber web session
+   redirects to auth.uber.com and answers 404, which the collector parsed as
+   neither JSON nor an error and recorded as a week in which nobody drove —
+   run status 'ok', sidebar green, every earnings figure quietly frozen. The
+   detection is in src/auth_state.js and the classification in
+   api/auth_routes.js; this is the part a person sees.
+
+   Above the title rather than inside the view, because a stopped credential
+   makes every number below it stale and a view render would replace it.
+   Rendered on every route change, so there is no page on which this is
+   missing — which was the whole request.
+
+   Silent unless something is true. No banner is the normal state, an amber
+   banner is a surface that has stalled while its credential still works, and
+   a red one is a credential that was refused and has to be replaced. Nothing
+   here is driven by a predicted expiry: the one dated token in the Uber cookie
+   jar was measured NOT to be the session (api/auth_routes.js records the
+   experiment), and a banner that goes amber on a working fleet is one nobody
+   reads twice. */
+async function authBanner() {
+  const host = $('#authBanner');
+  if (!host) return;
+  let d;
+  try { d = await api('/api/auth'); } catch { host.innerHTML = ''; return; }
+  const stopped = (d?.rows || []).filter((r) => r.severity === 'stopped');
+  const risk = (d?.rows || []).filter((r) => r.severity === 'at-risk');
+  const show = stopped.length ? stopped : risk;
+  if (!show.length) { host.innerHTML = ''; return; }
+
+  const tone = stopped.length ? 'stopped' : 'at-risk';
+  const fleetOf = (r) => (r.fleet_id && r.fleet_id !== '*'
+    ? ` · ${sourceLabel(r.fleet_id)}` : '');
+  /* "last worked 2h ago" is the half that makes the other half actionable:
+     it separates "this broke this morning" from "this has been dead a week". */
+  const since = (r) => {
+    const h = r.last_ok_age_h;
+    if (h == null) return 'never authenticated';
+    return h < 1 ? `last worked ${Math.round(h * 60)} min ago`
+      : h < 48 ? `last worked ${Math.round(h)}h ago`
+        : `last worked ${Math.round(h / 24)} days ago`;
+  };
+  const head = stopped.length
+    ? `${countOf(stopped.length, 'credential')} stopped working — `
+      + 'the surfaces behind ' + (stopped.length === 1 ? 'it are' : 'them are')
+      + ' collecting nothing until ' + (stopped.length === 1 ? 'it is' : 'they are') + ' replaced'
+    : `${countOf(risk.length, 'source')} ${risk.length === 1 ? 'has' : 'have'} not collected recently`;
+
+  host.className = `authbanner ${tone}`;
+  host.innerHTML = `<span class="ab-dot"></span><div class="ab-body">`
+    + `<div class="ab-head">${esc(head)}</div>`
+    + `<ul class="ab-list ab-detail">`
+    + show.map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
+      + `<code>${esc(r.credential)}</code> — `
+      + esc(r.severity === 'stopped'
+        ? (r.detail || 'the credential was refused')
+        : `no completed run in ${r.run_age_h}h, against a ${r.stall_limit_h}h expectation`)
+      + ` <span class="ab-when">· ${esc(since(r))}</span></li>`).join('')
+    + `</ul></div>`;
+}
 
 /* The sidebar freshness block.
    ─────────────────────────────────────────────────────────────────────────

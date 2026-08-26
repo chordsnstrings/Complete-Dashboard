@@ -1129,3 +1129,47 @@ a.insight-row:hover{border-color:var(--accent)}
   font-family:"IBM Plex Mono",monospace;font-size:.72rem;color:var(--ink-3);
   font-variant-numeric:tabular-nums;
 }
+
+/* The credential banner.
+   ─────────────────────────────────────────────────────────────────────────
+   Above the page title on every view, because a credential that has stopped
+   makes every figure underneath it stale — and the failure it exists for was
+   invisible: an expired Uber web session used to answer 404 through a redirect
+   and be recorded as a week in which nobody drove.
+
+   Two tones, and the difference is what the reader has to do. `.stopped` is a
+   credential that was refused and needs replacing. `.at-risk` is one that
+   still authenticates while the surface behind it has stalled. Nothing here
+   is driven by a predicted expiry — see api/auth_routes.js for why the one
+   dated token in the Uber cookie jar turned out not to be the session. */
+.authbanner{
+  display:flex; gap:.7rem; align-items:flex-start;
+  margin:0 0 1rem; padding:.7rem .95rem;
+  border-radius:var(--r,10px); border:1px solid transparent;
+  font-size:.86rem; line-height:1.45;
+  animation:fadeUp .35s var(--ease-out);
+}
+.authbanner .ab-dot{
+  flex:0 0 auto; width:.6rem; height:.6rem; border-radius:50%; margin-top:.42rem;
+}
+.authbanner .ab-body{min-width:0}
+.authbanner .ab-head{font-weight:650; letter-spacing:.01em}
+.authbanner .ab-list{margin:.3rem 0 0; padding:0; list-style:none}
+.authbanner .ab-list li{margin-top:.22rem}
+.authbanner code{font-size:.82em; padding:.05rem .3rem; border-radius:4px;
+  background:color-mix(in srgb, currentColor 12%, transparent)}
+.authbanner .ab-when{opacity:.75}
+.authbanner.stopped{
+  background:var(--critical-bg); border-color:color-mix(in srgb, var(--critical) 45%, transparent);
+  color:var(--critical);
+}
+.authbanner.stopped .ab-dot{background:var(--critical)}
+.authbanner.at-risk{
+  background:var(--warn-bg); border-color:color-mix(in srgb, var(--warn) 45%, transparent);
+  color:var(--warn);
+}
+.authbanner.at-risk .ab-dot{background:var(--warn)}
+/* The body text sits on the page's own ink, not the tone colour: a paragraph
+   of amber is harder to read than a paragraph of text with an amber rule. */
+.authbanner .ab-detail{color:var(--fg); opacity:.85}
+@media (prefers-reduced-motion:reduce){ .authbanner{animation:none} }

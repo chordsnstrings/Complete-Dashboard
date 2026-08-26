@@ -2265,6 +2265,27 @@ app.get('/api/segments', (req, r) => {
    The awkward shape here is the money: Uber prices no trip and its money is a
    figure for the whole DAY, so the fixture carries both a priced channel and
    an unpriced one — the page is mostly about telling them apart. */
+/* Credential health, for the banner every page carries.
+   Two rows that are fine and one that is not, because a fixture in which
+   nothing is wrong exercises exactly the branch that renders nothing. */
+app.get('/api/auth', (_, r) => {
+  const rows = [
+    { provider: 'uber', fleet_id: 'ecosine', credential: 'UBER_WEB_COOKIE', state: 'ok',
+      detail: null, surface: 'supplier graphql', last_ok_at: dayISO(0), checked_at: dayISO(0),
+      last_ok_age_h: 0.2, run_age_h: 0.4, stall_limit_h: 6, severity: 'ok' },
+    { provider: 'uber', fleet_id: 'egari', credential: 'UBER_WEB_COOKIE_EGARI', state: 'expired',
+      detail: 'redirected to auth.uber.com — the session is no longer signed in',
+      surface: 'supplier graphql', last_ok_at: dayISO(1), checked_at: dayISO(0),
+      last_ok_age_h: 19.5, run_age_h: 19.5, stall_limit_h: 6, severity: 'stopped' },
+    { provider: 'yango', fleet_id: 'ecosine', credential: 'YANGO_API_KEY', state: 'ok',
+      detail: null, surface: 'fleet api', last_ok_at: dayISO(2), checked_at: dayISO(0),
+      last_ok_age_h: 41, run_age_h: 41, stall_limit_h: 12, severity: 'at-risk' },
+  ];
+  r.json({ rows, stopped: 1, at_risk: 1, missing: 0, observed: true,
+    headline: 'A credential has stopped working: uber · Egari (UBER_WEB_COOKIE_EGARI) '
+      + '— redirected to auth.uber.com — the session is no longer signed in' });
+});
+
 app.get('/api/trip', (req, r) => {
   const platform = String(req.query.platform || 'uber');
   const id = String(req.query.id || 'u-mock-1');

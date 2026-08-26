@@ -11,6 +11,7 @@ import { iso, weekChunks } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
 import { log } from '../log.js';
+import { authFailure, saysAuth, noteCredential } from '../auth_state.js';
 
 const SRC = 'uber_fleet';
 // The real queries, captured verbatim from the portal. Hand-writing them against a
@@ -29,11 +30,32 @@ const GQL = 'https://supplier.uber.com/graphql';
    `expected` is built from comes from here. collect() now iterates the orgs
    and each surface takes the one it is collecting. */
 async function gql(operationName, query, variables, o) {
-  const { data } = await http(GQL, {
+  const res = await http(GQL, {
     method: 'POST', timeoutMs: 45000, retries: 2,
     headers: uberWebHeaders(o), body: JSON.stringify({ operationName, query, variables }),
   });
-  if (data?.errors) throw new Error(`${operationName}: ${data.errors[0]?.extensions?.code || data.errors[0]?.message}`);
+  const { data } = res;
+  const cred = o.fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI';
+  /* The same silent hole the sibling collector had: an expired cookie
+     redirects to auth.uber.com and answers 404, which parses as neither JSON
+     nor an error, so `data?.errors` was false and `data?.data` undefined and
+     every caller read it as a surface with nothing to say. */
+  const bad = authFailure(GQL, res);
+  if (bad) {
+    await noteCredential(pool, { provider: SRC, fleet: o.fleet, credential: cred,
+      state: 'expired', detail: bad.reason, surface: `supplier graphql ${operationName}` });
+    throw new Error(`${operationName}: web session — ${bad.reason}`);
+  }
+  if (data?.errors) {
+    const msg = String(data.errors[0]?.extensions?.code || data.errors[0]?.message);
+    if (saysAuth(msg)) {
+      await noteCredential(pool, { provider: SRC, fleet: o.fleet, credential: cred,
+        state: 'expired', detail: msg, surface: `supplier graphql ${operationName}` });
+    }
+    throw new Error(`${operationName}: ${msg}`);
+  }
+  await noteCredential(pool, { provider: SRC, fleet: o.fleet, credential: cred,
+    state: 'ok', detail: null, surface: `supplier graphql ${operationName}` });
   return data?.data;
 }
 

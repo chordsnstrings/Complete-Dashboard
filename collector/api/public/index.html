@@ -29,6 +29,12 @@
   </aside>
 
   <main class="main">
+    <!-- Above the title, not inside a panel. A credential that has stopped
+         makes every number below it stale, so it cannot sit in the page's
+         content where a view can replace it or a reader can scroll past it.
+         Filled by authBanner() in app.js on every render; empty and unstyled
+         until there is something true to say. -->
+    <div id="authBanner" role="status" aria-live="polite"></div>
     <header class="topbar">
       <div>
         <nav id="crumb" class="crumb" style="display:none"></nav>

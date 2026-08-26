@@ -42,7 +42,13 @@ export async function http(url, { method = 'GET', headers = {}, body, timeoutMs 
         log.warn('http', `${res.status} ${String(url).split('?')[0]}`,
           { status: res.status, body: String(text).slice(0, 160) });
       }
-      return { status: res.status, ok: res.ok, data, headers: res.headers };
+      /* finalUrl and redirected, because fetch follows redirects silently and
+         by the time a caller sees the response the 302 is gone. A provider
+         that answers a data request by bouncing you to a login page is the
+         only evidence there is that a session has expired — see
+         src/auth_state.js for what that cost before anyone looked. */
+      return { status: res.status, ok: res.ok, data, headers: res.headers,
+        finalUrl: res.url, redirected: res.redirected };
     } catch (err) {
       clearTimeout(t);
       if (attempt <= retries) {

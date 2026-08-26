@@ -11,6 +11,7 @@ import { dateChunks, weekChunks, dubaiDayChunks, iso, unixMs } from '../util.js'
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
 import { log } from '../log.js';
+import { authFailure, saysAuth, noteCredential } from '../auth_state.js';
 
 const SRC = 'uber';
 
@@ -202,13 +203,37 @@ async function earnerCall(s, e, variables) {
     },
     query: EARNER_QUERY,
   });
-  const { data } = await http('https://supplier.uber.com/graphql',
-    { method: 'POST', headers: uberWebHeaders(org()), body });
-  // An expired web cookie answers with `errors` and no data, which is
-  // indistinguishable from "this fleet had no drivers" unless we say so.
-  if (data?.errors?.length) {
-    return { err: String(data.errors[0]?.message || data.errors[0]).slice(0, 250), rows: [] };
+  const URL_ = 'https://supplier.uber.com/graphql';
+  const res = await http(URL_, { method: 'POST', headers: uberWebHeaders(org()), body });
+  const { data } = res;
+  /* An expired web cookie says NOTHING. Measured live: with `sid` dropped this
+     request follows a redirect to auth.uber.com and answers 404 "Not Found",
+     so the JSON parse fails, `data.errors` is undefined, the row list is
+     undefined, and this function used to return no error and no rows — the
+     exact shape of a week in which nobody drove, recorded as a successful run.
+     src/auth_state.js carries the whole measurement. */
+  const bad = authFailure(URL_, res);
+  if (bad) {
+    await noteCredential(pool, { provider: SRC, fleet: org().fleet,
+      credential: org().fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI',
+      state: 'expired', detail: bad.reason, surface: 'supplier graphql' });
+    return { err: `web session: ${bad.reason}`, rows: [], auth: true };
   }
+  if (data?.errors?.length) {
+    const msg = String(data.errors[0]?.message || data.errors[0]).slice(0, 250);
+    if (saysAuth(msg)) {
+      await noteCredential(pool, { provider: SRC, fleet: org().fleet,
+        credential: org().fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI',
+        state: 'expired', detail: msg, surface: 'supplier graphql' });
+      return { err: `web session: ${msg}`, rows: [], auth: true };
+    }
+    return { err: msg, rows: [] };
+  }
+  /* A well-formed answer IS the proof the credential works, so it is recorded
+     on every call rather than inferred from the absence of a failure. */
+  await noteCredential(pool, { provider: SRC, fleet: org().fleet,
+    credential: org().fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI',
+    state: 'ok', detail: null, surface: 'supplier graphql' });
   const g = data?.data?.getEarnerBreakdownsV2;
   return { err: null, rows: g?.earnerEarningsBreakdowns || [], next: g?.pageInfo?.nextPageToken || '' };
 }

@@ -23,6 +23,7 @@ import { forecastRoutes } from './forecast_routes.js';
 import { playbookRoutes } from './playbook_routes.js';
 import { retentionRoutes } from './retention_routes.js';
 import { tripRoutes } from './trip_routes.js';
+import { authRoutes } from './auth_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
 import { revenueRoutes } from './revenue_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
@@ -2974,6 +2975,7 @@ rosterRoutes(app, { q, wrap, range });
 dayRoutes(app, { q, wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
+authRoutes(app, { q, wrap });
 
 /* Occupancy segments as pages rather than a modal: the list with its own
    facets, and one interval with every booking that stood near it. */

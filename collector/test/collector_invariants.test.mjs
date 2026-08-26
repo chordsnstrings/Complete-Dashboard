@@ -717,7 +717,17 @@ console.log('\na provider that refuses is not a provider with nothing');
     /if \(!res\.ok\)/.test(httpSrc) && /log\.warn\('http'/.test(httpSrc),
     'an unchecked refusal is how five months of telematics went missing quietly');
   check('and still resolves rather than throwing, so callers that read a 4xx body keep working',
-    /return \{ status: res\.status, ok: res\.ok, data, headers: res\.headers \}/.test(httpSrc));
+    /return \{ status: res\.status, ok: res\.ok, data, headers: res\.headers,/.test(httpSrc)
+    && !/throw new Error\(`HTTP/.test(httpSrc));
+  /* finalUrl, because fetch follows redirects silently and by the time a
+     caller sees the response the 302 is gone. That is the ONLY evidence an
+     expired Uber web session leaves: measured live, dropping `sid` sends the
+     request to auth.uber.com and returns 404 "Not Found", which parsed as
+     neither JSON nor an error and was recorded as a week in which nobody
+     drove. src/auth_state.js reads this field and nothing else can. */
+  check('and hands back where the request actually landed',
+    /finalUrl: res\.url/.test(httpSrc) && /redirected: res\.redirected/.test(httpSrc),
+    'without it a redirect to a login page is indistinguishable from a quiet week');
 
   /* ── the check must be able to see what it checks ────────────────────────
      The refusal guard above shipped reading `r.ok` off the object FMS's own
