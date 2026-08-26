@@ -373,7 +373,24 @@ async function pullEarnerBreakdowns(from, to, onStep) {
      of tips, because Uber attributes an item to the period it settles in —
      measured on both fleets. Trips and net outstanding are exactly additive
      and are what the daily grid collects; these are not, and are collected on
-     the grid they are true on. */
+     the grid they are true on.
+
+     INCOMPLETE, and deliberately left so. This surface returns exactly two
+     trees, and each equals its own children to the fils — but their sum is
+     BELOW netOutstanding. Ecosine, week of 6 July, measured live: 52,793.48
+     outstanding against 49,185.37 itemised. There is no third field to ask
+     for; fifteen plausible names were probed and the server rejected every
+     one, and introspection is disabled. The week of 17 August identifies the
+     residual: 4,553.91 here, against 1,295.96 of reimbursements and expenses
+     reported by the OAuth REST feed over 29% of the same drivers — about
+     4,434 scaled. So the missing money is the reimbursement bucket, Salik
+     above all.
+
+     The residual is exactly computable, and is NOT written. Doing so would
+     make #reconcile's expected payout a rearrangement of netOutstanding,
+     which is what its bank side already is — the check would then prove
+     nothing. api/reconcile_routes.js states the resulting floor under the
+     gap instead. */
   const writeComponents = async (bd, ps, pe) => {
     const out = [];
     const seen = new Set();

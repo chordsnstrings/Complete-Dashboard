@@ -59,11 +59,44 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
   const num = (v) => (v == null ? null : Number(v));
   const r2 = (v) => Math.round(v * 100) / 100;
 
+  /* Why the gap on Uber sits near 12-14% and is not a fault.
+     ───────────────────────────────────────────────────────────────────────
+     The two sides come from two different Uber answers, on purpose. The bank
+     side is netOutstanding — what Uber says it owes. The expected side is
+     rebuilt from the ITEMISED statement, so that it can disagree; an expected
+     figure derived from netOutstanding would be netOutstanding, and the check
+     would prove nothing.
+
+     Measured live on 2026-08-26, Ecosine, the week of 6 July: netOutstanding
+     52,793.48 against an itemised tree of 49,185.37. The residual, 3,608.11,
+     is real money and it is not broken out — the supplier GraphQL breakdown
+     returns exactly two trees, `your_earnings` and `payouts`, each of which
+     equals its own children to the fils, and no third field exists (fifteen
+     plausible names were probed; the server rejected every one, and
+     introspection is disabled).
+
+     What the residual IS was settled on the other surface. For the week of
+     17 August the residual was 4,553.91, while the OAuth REST feed — which
+     does itemise, and covered 29% of the same drivers that week — reported
+     1,295.96 of reimbursements and expenses, which scales to about 4,434.
+     So the residual is the reimbursement bucket: Salik, Sharjah surcharge,
+     airport fees, less expenses.
+
+     The consequence is a floor under the gap, not a bug: on months served
+     only by GraphQL, `salik` is null and the reimbursements are invisible to
+     the itemised side while the bank side already contains them. That is
+     stated here rather than corrected, because correcting it would mean
+     deriving the expected figure from the number it is meant to test. */
   const NOTE = 'Bank payout ≈ on-trip net + tips + salik − cash collected: what the '
     + 'platform wires is what the fleet earned on-trip, plus tips and toll reimbursements, '
     + 'minus the cash its drivers already hold — proven to 0.7% on July 2026. The gap is '
     + 'measured over the driver-days BOTH sides describe, never over a whole month against '
-    + 'a fraction of one.';
+    + 'a fraction of one. On Uber it also has a floor: the expected side is rebuilt from the '
+    + 'itemised statement so that it can disagree with the payout, and Uber’s supplier '
+    + 'breakdown does not itemise the reimbursements — Salik, surcharges, airport fees — that '
+    + 'the payout already contains. Measured against the surface that does itemise them, that '
+    + 'accounts for most of the 12–14% Uber gap; a month whose salik column is empty is a month '
+    + 'where none of it could be seen.';
 
   app.get('/api/reconcile', wrap(async (req, res) => {
     const platform = req.query.platform || null;
