@@ -624,7 +624,7 @@ async function pullLiveOrg(o) {
        these twice a minute — "bad key" against one of the two orgs — while
        every page reported the source healthy, because the OAuth token grant
        that precedes it succeeds. See src/auth_state.js. */
-    const bad = await noteUberRest(pool, url, res, o, 'drivers/actions');
+    const bad = await noteUberRest(pool, url, res, o, 'drivers/actions', token);
     if (bad) throw new Error(`driver roster for ${o.fleet}: ${bad.reason}`);
     const { data } = res;
     const page = data?.driverStatusOverviews || [];

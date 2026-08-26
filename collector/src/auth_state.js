@@ -29,6 +29,8 @@
    host it was sent to, a 401 or 403, or a body that is not the JSON the caller
    asked for, is an authentication failure and not an empty window. */
 
+import { http } from './http.js';
+
 /** Hosts a provider redirects to when it wants a human to log in again. */
 const LOGIN_HOST = /(^|\.)(auth|login|accounts|signin|sso)\./i;
 
@@ -143,15 +145,53 @@ export function uberOrgCredential(fleet) {
   return fleet === 'egari' ? 'UBER_ORG_ENCRYPTED_EGARI' : 'UBER_ORG_ENCRYPTED';
 }
 
-export async function noteUberRest(db, url, res, o, surface) {
+/* Which organisations this OAuth client can reach at all.
+   ─────────────────────────────────────────────────────────────────────────
+   /v1/vehicle-suppliers/orgs is the one REST surface that takes no org_id, so
+   it is the only one that can say what a valid org_id is — and it answers with
+   exactly the string UBER_ORG_ENCRYPTED wants. (`orgs`, not `organizations`:
+   five other spellings answer 404. Measured 2026-08-26.)
+
+   Asked once and cached, and only when something has already been refused:
+   the point is to turn "bad key" into a sentence somebody can act on. On this
+   deployment it answers with one organisation, ECOSINE TRANSPORTS, which means
+   no value of UBER_ORG_ENCRYPTED_EGARI can ever work — the fleet is not on
+   this API client, and the fix is an Uber account change rather than a string
+   somebody has not found yet. That is a different errand, and a banner that
+   sends an operator on the wrong one costs more than saying nothing. */
+let orgList = null;
+async function knownOrgs(token) {
+  if (orgList) return orgList;
+  try {
+    const { data } = await http('https://api.uber.com/v1/vehicle-suppliers/orgs',
+      { headers: { authorization: `Bearer ${token}` }, timeoutMs: 20000, retries: 0 });
+    const rows = data?.organizations || data?.orgs || [];
+    if (Array.isArray(rows) && rows.length) {
+      orgList = rows.map((r) => r.name || r.id).filter(Boolean);
+    }
+  } catch { /* a diagnosis is not worth failing a run for */ }
+  return orgList;
+}
+
+export async function noteUberRest(db, url, res, o, surface, token = null) {
   const bad = authFailure(url, res);
   const fleet = o?.fleet || '*';
   const cred = bad?.blames === 'token' ? 'UBER_CLIENT_SECRET' : uberOrgCredential(fleet);
+  let detail = bad ? bad.reason : null;
+  /* A 403 means the org_id was refused. Naming what this client CAN see turns
+     "find the right string" into "this fleet is not on this credential". */
+  if (bad && bad.blames === 'resource' && token) {
+    const orgs = await knownOrgs(token);
+    if (orgs?.length) {
+      detail += ` — this API client covers only ${orgs.join(', ')}, so no org id `
+        + 'will work for this fleet until Uber grants the client access to it';
+    }
+  }
   await noteCredential(db, {
     provider: 'uber', fleet: bad?.blames === 'token' ? '*' : fleet,
     credential: cred,
     state: bad ? 'expired' : 'ok',
-    detail: bad ? bad.reason : null,
+    detail,
     surface: `oauth rest ${surface}`,
   });
   return bad;

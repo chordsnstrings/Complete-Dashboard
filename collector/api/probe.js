@@ -168,16 +168,11 @@ export function probeRoutes(app, { wrap }) {
        an org. Confirmed by setting it and watching the 403 persist. An org
        list has two rows, so describe() reports the ids rather than suppressing
        them as free text, which is exactly what makes this answerable. */
-    /* Several candidates, because the path is not documented here and each
-       wrong guess costs a deploy. The scope the OAuth client already asks for
-       is vehicle_suppliers.organizations.read, so the resource exists; only
-       its spelling is in question. Whichever answers is the one to keep. */
-    organizations: () => 'https://api.uber.com/v1/vehicle-suppliers/organizations',
+    /* `orgs`, not `organizations` — five other spellings answer 404. Measured
+       2026-08-26. This is the only surface here that takes no org_id, so it is
+       the only one that can say what a valid org_id IS, and it answers with
+       exactly the string UBER_ORG_ENCRYPTED wants. */
     orgs: () => 'https://api.uber.com/v1/vehicle-suppliers/orgs',
-    organization: () => 'https://api.uber.com/v1/vehicle-suppliers/organization',
-    'organizations-v1': () => 'https://api.uber.com/v1/organizations',
-    suppliers: () => 'https://api.uber.com/v1/vehicle-suppliers/suppliers',
-    'supplier-me': () => 'https://api.uber.com/v1/vehicle-suppliers/me',
     'driver-actions': (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?org_id=${encodeURIComponent(org)}`,
     transactions: (org) => `https://api.uber.com/v1/vehicle-suppliers/transactions?org_id=${encodeURIComponent(org)}&limit=50`,
     'earner-payments': (org) => `https://api.uber.com/v1/vehicle-suppliers/earners/payments?org_id=${encodeURIComponent(org)}&limit=50`,

@@ -269,7 +269,7 @@ async function pullEarningsWeek(token, from, to, until, o) {
     /* The refusal this surface has been answering with for one of the two
        fleets — 403 "bad key" — which nothing read, so an org key that selects
        nothing looked exactly like a provider with nothing to give. */
-    const bad = await noteUberRest(pool, url, res, o, 'earners/payments');
+    const bad = await noteUberRest(pool, url, res, o, 'earners/payments', token);
     if (bad) throw new Error(`earner payments for ${o.fleet}: ${bad.reason}`);
     return res.data;
   };
