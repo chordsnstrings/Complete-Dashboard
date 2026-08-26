@@ -116,12 +116,23 @@ async function compare(label, db) {
   const after = await q(NEW, WIN);
   check(`${label}: the rewrite returns the same number of rows`,
     before.length === after.length && before.length > 0, `${before.length} vs ${after.length}`);
+  /* fix_age_min is minutes since now(), and the two queries are two calls, so
+     it cannot be identical by construction — it differs by one whenever the
+     pair straddles a minute boundary. Comparing it made this test fail roughly
+     once in every few runs and say nothing true when it did. It is compared as
+     a bound instead, which is the only claim there is to make about it. */
+  const CLOCK = 'fix_age_min';
+  const fixed = (r) => JSON.stringify(Object.fromEntries(
+    Object.entries(r).filter(([k]) => k !== CLOCK)));
   const diffs = [];
   for (let i = 0; i < Math.min(before.length, after.length); i++) {
-    if (JSON.stringify(before[i]) !== JSON.stringify(after[i])) {
+    if (fixed(before[i]) !== fixed(after[i])) {
       diffs.push(`row ${i}: ${JSON.stringify(before[i])} vs ${JSON.stringify(after[i])}`);
     }
   }
+  const drift = before.map((b, i) => Math.abs((b[CLOCK] ?? 0) - (after[i]?.[CLOCK] ?? 0)));
+  check(`${label}: and the clock-derived age agrees to the minute`,
+    drift.every((d) => d <= 1), `max drift ${Math.max(0, ...drift)}`);
   check(`${label}: and every row identical, in the same order`, diffs.length === 0,
     diffs.slice(0, 2).join(' | '));
   return after;

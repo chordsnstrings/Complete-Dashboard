@@ -124,10 +124,19 @@ export function revenueRoutes(app, { q, wrap, range }) {
          /api/revenue?days=30&platform=bolt returned a platform row for `uber`
          with 0 bookings and tips 528: Bolt has no data at all, and the only
          thing that materialised the row was a tip total nothing had narrowed.
-         driver_earnings_component carries both columns (sql/schema_v5.sql:65,74). */
-      q(`SELECT platform, round(sum(amount)::numeric,2) tips
-         FROM driver_earnings_component
-         WHERE period_start >= $1::date AND period_end <= $2::date AND category ILIKE '%tip%'
+
+         Read from the RESOLVED statement days rather than the raw component
+         tree. Uber now answers this fleet on two surfaces whose report windows
+         overlap — the REST payments feed on short periods, the supplier
+         GraphQL breakdown on weeks — and each carries its own `tip` row for
+         the same day, so summing components adds one week's tips twice.
+         driver_statement_day is those components with the overlap already
+         settled to one row per driver-day (src/rollup.js), which also makes
+         the window a range of DAYS rather than of report periods: a week whose
+         Monday fell outside the window used to drag all seven days in. */
+      q(`SELECT platform, round(sum(tips)::numeric,2) tips
+         FROM driver_statement_day
+         WHERE source <> 'ledger' AND day BETWEEN $1::date AND $2::date
            AND ($3::text IS NULL OR platform=$3)
            AND ($4::text IS NULL OR fleet_id=$4)
          GROUP BY 1`, p),

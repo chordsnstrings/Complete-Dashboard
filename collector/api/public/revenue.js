@@ -89,7 +89,7 @@ export async function renderRevenue(root) {
         .filter(Boolean).join(' · ')
         + ' — already in a driver’s hand. Cash in hand lists who holds it.' },
     { label: 'Tips', value: t.tips != null ? money(t.tips) : '—',
-      sub: 'never appears in a trip feed — it comes from the payout tree' },
+      sub: 'never appears in a trip feed — it comes from the channel’s own statement' },
     /* The basis, not just the count. This tile reads 0 · 0.0% green at 7 and
        30 days and 234,790 · 99.4% red at 365, and nothing moved in the fleet:
        `chooseBasis` puts Uber on a payout basis while a payout covers the
