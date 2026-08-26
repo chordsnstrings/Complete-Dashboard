@@ -73,6 +73,21 @@ await seg({ plate: 'L100', at: '2026-08-11T09:00:00+04:00', end: '2026-08-11T09:
 // Another of Bob's on the 11th — same day, so the evidence page shows context.
 await seg({ plate: 'L100', at: '2026-08-11T14:00:00+04:00', verdict: 'sensor_suspect',
   ign: 0.02, reason: 'occupied with ignition off for 3h' });
+/* Two matched hotel segments whose ids differ. A hotel trip id is a 24-hex
+   Mongo ObjectId with no dashes, not the 32-hex UUID the other channels issue,
+   and it used to escape the id-shaping rule and get mangled digit-by-digit
+   into "matched hotel trip NaNdbNbNbaNdbfNccN" — a different string per id,
+   so one reason became one facet row each. Both must collapse to one. */
+await seg({ plate: 'L200', at: '2026-08-11T08:00:00+04:00', verdict: 'authorized',
+  mp: 'hotel', mt: '6a8db4b47ba7dbf44436cc83',
+  reason: 'matched hotel trip 6a8db4b47ba7dbf44436cc83' });
+await seg({ plate: 'L200', at: '2026-08-11T10:00:00+04:00', verdict: 'authorized',
+  mp: 'hotel', mt: '675d566697467adfe29a32c7',
+  reason: 'matched hotel trip 675d566697467adfe29a32c7' });
+// And one carrying a dashed UUID, so the older shape stays covered.
+await seg({ plate: 'L200', at: '2026-08-11T12:00:00+04:00', verdict: 'authorized',
+  mp: 'uber', mt: 'fa66c89c-1111-2222-3333-444455556666',
+  reason: 'matched uber trip fa66c89c-1111-2222-3333-444455556666' });
 // A blind one, and one with no reason at all.
 await seg({ plate: 'L200', at: '2026-08-10T11:00:00+04:00', verdict: 'unverifiable',
   blind: true, unavail: 'bolt, yango' });
@@ -100,7 +115,7 @@ const get = async (p) => { const r = await fetch(`http://127.0.0.1:${port}${p}`)
 
 /* ── the list ─────────────────────────────────────────────────────────────── */
 const all = (await get('/api/segments')).body;
-check('every segment in the window is listed', all.rows.length === 5, String(all.rows.length));
+check('every segment in the window is listed', all.rows.length === 8, String(all.rows.length));
 check('rows carry the recorded reason, not a sentence written in the UI',
   all.rows.some((r) => /no booking within 15 min/.test(r.verdict_reason || '')));
 check('every segment with no recorded reason is counted, not hidden',
@@ -120,7 +135,9 @@ check('a late-evening Dubai segment keeps its Dubai date',
 /* ── who is named ─────────────────────────────────────────────────────────── */
 check('the segment is attributed to whoever held the car THAT day',
   aliceRow?.drivers === 'Alice Ahmed', String(aliceRow?.drivers));
-const bobRow = all.rows.find((r) => r.verdict === 'authorized');
+// By plate as well as verdict: L200 also carries authorized rows now, and
+// "the first authorized row" was only Bob's by accident of the fixture.
+const bobRow = all.rows.find((r) => r.verdict === 'authorized' && r.plate === 'L100');
 check('the next day names the driver who took over, not the previous one',
   bobRow?.drivers === 'Bob Bakr', String(bobRow?.drivers));
 const orphan = all.rows.find((r) => r.plate === 'L200' && r.local_day === '2026-08-12');
@@ -136,9 +153,9 @@ check('the filter is echoed back so the page can say what it is showing',
   unauth.filter.verdict === 'unauthorized');
 
 const byPlate = (await get('/api/segments?plate=L200')).body;
-check('the plate filter narrows the rows', byPlate.rows.length === 2, String(byPlate.rows.length));
+check('the plate filter narrows the rows', byPlate.rows.length === 5, String(byPlate.rows.length));
 const byDay = (await get('/api/segments?day=2026-08-11')).body;
-check('the day filter is a Dubai calendar day', byDay.rows.length === 2, String(byDay.rows.length));
+check('the day filter is a Dubai calendar day', byDay.rows.length === 5, String(byDay.rows.length));
 const byDrv = (await get('/api/segments?driver=Alice')).body;
 check('the driver filter matches on the name custody recorded',
   byDrv.rows.length === 1 && byDrv.rows[0].plate === 'L100', String(byDrv.rows.length));
@@ -155,6 +172,16 @@ check('the day facet is ordered so a strip reads left to right',
   all.facets.day.map((r) => r.key).join());
 check('a segment with no reason is folded under a visible label, not dropped',
   all.facets.reason.some((r) => r.key === '(no reason recorded)'),
+  JSON.stringify(all.facets.reason.map((r) => r.key)));
+const hotelReason = all.facets.reason.filter((r) => /matched hotel trip/.test(r.key));
+check('two hotel matches with different ObjectIds are ONE reason, not two',
+  hotelReason.length === 1 && hotelReason[0].n === 2,
+  JSON.stringify(all.facets.reason.map((r) => [r.key, r.n])));
+check('and the id is replaced rather than mangled into N-and-letters',
+  hotelReason.length === 1 && hotelReason[0].key === 'matched hotel trip <trip id>',
+  JSON.stringify(hotelReason.map((r) => r.key)));
+check('a dashed UUID is still replaced the same way',
+  all.facets.reason.some((r) => r.key === 'matched uber trip <trip id>'),
   JSON.stringify(all.facets.reason.map((r) => r.key)));
 
 /* ── the evidence page ────────────────────────────────────────────────────── */

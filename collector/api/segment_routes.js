@@ -38,9 +38,16 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
      back as a NUMBER on each segment so a page can name the affected plates
      instead of leaving 37 unverifiable segments discoverable only by reading
      four table rows. */
+  /* Two id shapes, not one. Uber and Bolt trip ids are 32-hex UUIDs; the hotel
+     channel issues 24-hex Mongo ObjectIds with no dashes, which the UUID
+     pattern cannot match. Those fell through to the digits-to-N rule below and
+     came out as "matched hotel trip NaNdbNbNbaNdbfNccN" — a different mangling
+     per id, so every hotel match became its own reason and the menu this code
+     exists to collapse was fragmented again, twelve of its twenty rows
+     matching a single segment each. */
   const REASON_SHAPE = (col) => `regexp_replace(
     regexp_replace(coalesce(${col}, '(no reason recorded)'),
-                   '[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}',
+                   '[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}|[0-9a-f]{24}',
                    '<trip id>', 'gi'),
     '[0-9]+', 'N', 'g')`;
   const SKEW = (col) => `(regexp_match(${col}, '([0-9]+) min behind'))[1]::int`;

@@ -16,7 +16,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
-  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE } from './ui.js';
+  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, noneChosen} from './ui.js';
 import { qAll, href, parseHash, currentGen, alive } from './data.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
@@ -861,6 +861,10 @@ const TABS = { overview: tabOverview, drivers: tabDrivers, movement: tabMovement
 
 /* ── page shell ──────────────────────────────────────────────────────────── */
 export async function renderVehicle(root, plate, tab = 'overview') {
+  /* Addressed with no id — a typed URL, a stale bookmark, a link whose id
+     never got filled in. It went to the endpoint and printed the API's own
+     complaint. #day has always answered this properly; these four did not. */
+  if (!plate) return noneChosen(root, 'vehicle', 'vehicles', 'Every vehicle');
   const head = el('div'); root.append(head); loading(head);
   const body = el('div'); root.append(body);
 

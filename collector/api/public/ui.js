@@ -113,6 +113,27 @@ function writeSort(id, key, dir) {
   catch { /* a sandboxed frame refuses; the sort still applies on screen */ }
 }
 
+/* A detail page addressed with nothing to detail.
+   ─────────────────────────────────────────────────────────────────────────
+   #driver, #vehicle, #performer, #property and #segment each report on ONE
+   thing named in the address. Reached without one — a typed URL, a stale
+   bookmark, a link whose id never got filled in — they called their endpoint
+   anyway and rendered whatever it complained with: "Could not load: 400 id
+   required", or a bare 404. #day has always answered this in English and
+   pointed somewhere useful; this makes the others do the same. */
+export function noneChosen(root, thing, listView, listLabel, listParam) {
+  root.innerHTML = '';
+  const p = panel(`No ${thing} chosen`,
+    `This page reports one ${thing} at a time and the address carries no `
+    + `${thing === 'segment' ? 'plate and instant' : 'id'}.`);
+  root.append(p.panel);
+  p.body.append(el('p', 'cap',
+    `<a class="lnk" href="${href(listView, listParam)}">${esc(listLabel)} \u2192</a>`));
+  p.body.append(note(`Open one from that list, or from any ${thing} name elsewhere in the product — `
+    + 'every one of them is a link that carries what this page needs.'));
+  return null;
+}
+
 /* The default cell.
    ─────────────────────────────────────────────────────────────────────────
    A column declared `num: true` with no render of its own fell straight

@@ -20,7 +20,7 @@
 
 import { donut, hbars, areaChart, stackedBar, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
-  dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural } from './ui.js';
+  dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural, noneChosen} from './ui.js';
 import { q, qAll, href, state } from './data.js';
 
 /* Why a whole column is empty, in the words the page prints under it. Shared
@@ -574,6 +574,12 @@ export const PROPERTY_TABS = [
 
 export async function renderProperty(root, id, tab = 'overview', onDetail) {
   root.innerHTML = '';
+  /* #property with nothing after it is reachable — from a typed URL, a stale
+     bookmark, a link whose id never got filled in — and it went straight to the
+     endpoint and printed "Could not load: 400 id required". A page has to say
+     which property it wants and offer the list, not hand back the API's
+     complaint about a missing query parameter. */
+  if (!id) return noneChosen(root, 'property', 'corporate', 'Every property that books', 'properties');
   root.append(tabBar(PROPERTY_TABS, tab, (t) => href('property', id, t === 'overview' ? null : t)));
   const host = el('div'); root.append(host); loading(host);
   let d;

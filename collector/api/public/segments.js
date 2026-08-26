@@ -17,7 +17,7 @@
 import { empty, fmt, areaChart, hbars, donut } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dtStr, timeStr, dayStr, dateStr, money, custody,
-         sourceLabel, countOf, plural, asList } from './ui.js';
+         sourceLabel, countOf, plural, asList, noneChosen} from './ui.js';
 import { q, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -301,6 +301,10 @@ export function segmentTable(rows, opts = {}) {
 /* ── one interval, with the case for and against ──────────────────────────── */
 export async function renderSegment(root, plate, at) {
   root.innerHTML = '';
+  /* Addressed with no id — a typed URL, a stale bookmark, a link whose id
+     never got filled in. It went to the endpoint and printed the API's own
+     complaint. #day has always answered this properly; these four did not. */
+  if (!plate || !at) return noneChosen(root, 'segment', 'segments', 'Every occupancy segment');
   loading(root);
   let d;
   try {

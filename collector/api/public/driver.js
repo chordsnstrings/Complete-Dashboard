@@ -17,7 +17,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
-  sourceLabel, plural, countOf, UBER_FARE, UBER_HOURS, NO_DURATION } from './ui.js';
+  sourceLabel, plural, countOf, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen} from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 
 /* Why a whole column is empty, in the words the page prints under it.
@@ -1103,6 +1103,10 @@ const TABS = { overview: tabOverview, activity: tabActivity, territory: tabTerri
 
 /* ── page shell ──────────────────────────────────────────────────────────── */
 export async function renderDriver(root, id, tab = 'overview') {
+  /* Addressed with no id — a typed URL, a stale bookmark, a link whose id
+     never got filled in. It went to the endpoint and printed the API's own
+     complaint. #day has always answered this properly; these four did not. */
+  if (!id) return noneChosen(root, 'driver', 'drivers', 'Every driver');
   const head = el('div'); root.append(head); loading(head);
   const body = el('div'); root.append(body);
 

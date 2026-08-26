@@ -36,7 +36,7 @@
       carrying someone, measured from the trips, and it is labelled that. */
 import { hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
-  fmt, empty } from './ui.js';
+  fmt, empty, noneChosen} from './ui.js';
 import { q, href, state } from './data.js';
 
 /* Enough of a week to rank on. Two thirds of a working week: below it a
@@ -221,6 +221,10 @@ export { weekEnd, MIN_DAYS, MIN_BOOKINGS };
    is never called one. ONLINE is what Uber does not report, and where a
    platform status happens to exist it is shown as observations, not hours. */
 export async function renderPerformer(root, id) {
+  /* Addressed with no id — a typed URL, a stale bookmark, a link whose id
+     never got filled in. It went to the endpoint and printed the API's own
+     complaint. #day has always answered this properly; these four did not. */
+  if (!id) return noneChosen(root, 'person', 'drivers', 'Every driver');
   const kh = el('div', 'kpis'); root.append(kh);
   /* Full width. Ten columns of a day — including the two waiting columns —
      do not fit in 2fr of a 2:1 split, and the ones pushed off the edge were
