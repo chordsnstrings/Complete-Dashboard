@@ -525,9 +525,25 @@ console.log('\ncash exposure aggregates the window once');
       `${before.origins.length} vs ${after.origins.length}`);
     check('in the same order by size',
       bykey(before.origins, ['trips']) === bykey(after.origins, ['trips']));
+    /* The tiles the SPLIT was about, compared key by key rather than as a
+       whole object. This was JSON.stringify equality, and it failed the moment
+       the endpoint gained pickups_all / pickups_named — two fields the split
+       does not touch and the page needed so its four shares could stop using
+       three different denominators. A test that pins the exact SHAPE of a
+       response forbids adding a field to it, which is not what this check is
+       about: it is about the three counts being computed over every corridor
+       rather than over the truncated list. */
+    const tileKeys = ['corridors_3plus', 'corridors_all', 'origins_all'];
+    const tiles = (o) => JSON.stringify(Object.fromEntries(tileKeys.map((k) => [k, o[k]])));
     check('the same tiles, counted over every corridor rather than the list',
-      JSON.stringify(before.totals) === JSON.stringify(after.totals),
-      `${JSON.stringify(before.totals)} vs ${JSON.stringify(after.totals)}`);
+      tiles(before.totals) === tiles(after.totals),
+      `${tiles(before.totals)} vs ${tiles(after.totals)}`);
+    /* And the new pair is present and sane wherever it is measured: every
+       pickup is at least the pickups that carry an area. */
+    check('the pickup denominators are returned and consistent',
+      Number.isInteger(after.totals.pickups_all) && Number.isInteger(after.totals.pickups_named)
+      && after.totals.pickups_all >= after.totals.pickups_named,
+      JSON.stringify(after.totals));
     check('and the same answer about whether either list was cut',
       before.shown === after.shown && before.truncated === after.truncated
       && before.origins_shown === after.origins_shown

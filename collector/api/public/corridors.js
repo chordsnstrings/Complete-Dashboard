@@ -118,16 +118,35 @@ export async function renderCorridors(root) {
         : `all ${fmt(named.length)} drawn below` },
     { label: 'Corridors seen 3+ times', value: fmt(t.corridors_3plus ?? c.corridors.length),
       sub: t.corridors_all ? `of ${fmt(t.corridors_all)} distinct origin–destination pairs` : null },
+    /* One denominator for every share on this page.
+       ─────────────────────────────────────────────────────────────────────
+       There used to be three, in four adjacent tiles. "Busiest pickup area —
+       25.9% of every addressed pickup" divided by the trips in the 59 areas
+       the server RETURNED; "Top 5 areas — 52.4%" divided by the same 59; and
+       "Pickups with no area — 22.2% of every pickup" divided by everything.
+       The origins list is the top 60 of 1,237 areas, so the first two were
+       shares of a truncated base and the third was not, and the tiles sat side
+       by side with no way to tell.
+
+       The endpoint now counts pickups over the WHOLE window rather than over
+       the rows it returns — totals.pickups_all and pickups_named — so every
+       figure here divides by the same thing and says which. */
     { label: 'Busiest pickup area', value: named[0]?.area || '—',
-      sub: named[0] ? `${pct((named[0].trips / totalOrigin) * 100, 1)} of every addressed pickup` : null },
-    { label: 'Top 5 areas', value: pct((named.slice(0, 5).reduce((a, o) => a + o.trips, 0) / totalOrigin) * 100, 1),
-      sub: `share of all ${fmt(named.length)} areas the server returned, not of the ${fmt(SHOWN)} drawn` },
+      sub: named[0]
+        ? `${pct((named[0].trips / (t.pickups_named || totalOrigin)) * 100, 1)} of the `
+          + `${fmt(t.pickups_named || totalOrigin)} pickups that carry a recognisable area`
+        : null },
+    { label: 'Top 5 areas', value: pct((named.slice(0, 5).reduce((a, o) => a + o.trips, 0)
+      / (t.pickups_named || totalOrigin)) * 100, 1),
+      sub: `of the same ${fmt(t.pickups_named || totalOrigin)} — and the five are the busiest of `
+        + `${fmt(t.origins_all ?? named.length)} areas, not of the ${fmt(named.length)} this page `
+        + 'was sent' },
     /* The largest single bucket on the page, and the one every percentage
        above it silently excludes. */
     unrecorded && unrecorded.trips
       ? { label: 'Pickups with no area', value: fmt(unrecorded.trips),
         tone: unrecorded.trips > (named[0]?.trips || 0) ? 'warn' : null,
-        sub: `${pct((unrecorded.trips / (totalOrigin + unrecorded.trips)) * 100, 1)} of every pickup — `
+        sub: `${pct((unrecorded.trips / (t.pickups_all || (totalOrigin + unrecorded.trips))) * 100, 1)} of every pickup — `
           + 'the address text carried no community, so these are in none of the figures beside this one' }
       : null,
   ]));

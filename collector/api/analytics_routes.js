@@ -1254,12 +1254,13 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                   ORDER BY trips DESC LIMIT 60) o)
        SELECT 'corridor' AS kind, seq, from_area, to_area, trips, avg_km, avg_min, min_n, priced,
               complimentary, avg_fare, platforms, NULL::int AS morning, NULL::int AS evening,
-              NULL::int AS corridors_3plus, NULL::int AS corridors_all, NULL::int AS origins_all
+              NULL::int AS corridors_3plus, NULL::int AS corridors_all, NULL::int AS origins_all,
+              NULL::int AS pickups_all, NULL::int AS pickups_named
          FROM corridor
        UNION ALL
        SELECT 'origin', seq, area, NULL, trips, avg_km, NULL, NULL, NULL,
               NULL, NULL, NULL, morning, evening,
-              NULL, NULL, NULL
+              NULL, NULL, NULL, NULL, NULL
          FROM origin
        UNION ALL
        /* Counted over every corridor, not over the lists. The page's "Distinct
@@ -1271,7 +1272,15 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               NULL, NULL, NULL, NULL, NULL,
               count(*) FILTER (WHERE from_trips >= 3)::int,
               count(*) FILTER (WHERE from_trips > 0)::int,
-              count(DISTINCT from_area) FILTER (WHERE from_trips > 0 AND from_area <> '(unrecorded)')::int
+              count(DISTINCT from_area) FILTER (WHERE from_trips > 0 AND from_area <> '(unrecorded)')::int,
+              /* The two denominators the page needs and could not compute.
+                 The origins list is the top 60 areas of 1,237, so a share
+                 taken over the rows it received is a share of a truncated
+                 base -- "the top five areas are 52.4%" was 52.4% OF THE
+                 SIXTY, not of the window. These count every corridor in the
+                 base CTE, which is the whole window. */
+              sum(from_trips)::int,
+              sum(from_trips) FILTER (WHERE from_area <> '(unrecorded)')::int
          FROM base
        ORDER BY 1, 2`, p);
 
@@ -1280,6 +1289,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       corridors_3plus: totalRow?.corridors_3plus ?? 0,
       corridors_all: totalRow?.corridors_all ?? 0,
       origins_all: totalRow?.origins_all ?? 0,
+      /* Every pickup in the window, and the part of it that carries a
+         parseable area. One denominator for every share on the page. */
+      pickups_all: totalRow?.pickups_all ?? 0,
+      pickups_named: totalRow?.pickups_named ?? 0,
     };
     const corridors = rows.filter((r) => r.kind === 'corridor').map((r) => ({
       from_area: r.from_area, to_area: r.to_area, trips: r.trips, avg_km: r.avg_km,
