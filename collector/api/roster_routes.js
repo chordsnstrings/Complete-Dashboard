@@ -1,4 +1,9 @@
 import { personFold, JOIN_TRIP } from './custody_sql.js';
+
+/* One spelling for a channel, matching the dashboard's own label map. */
+const CHANNEL_NAMES = { uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel',
+  fms: 'FMS telematics', cabman: 'CABMAN' };
+const CHANNEL_LABEL = (v) => CHANNEL_NAMES[String(v || '').toLowerCase()] || String(v || '');
 /* The roster: who is on the books, and who is actually earning.
    ──────────────────────────────────────────────────────────────────────────
    Four providers each report a driver's standing and none of them knows what
@@ -268,7 +273,10 @@ export function rosterRoutes(app, { q, wrap, range }) {
         + 'id with another. The accounts column shows how many were folded, so the join can be '
         + 'checked rather than trusted.'
         + (withTrips.size
-          ? ` Trip history exists for ${[...withTrips].sort().join(', ')} only; a driver on any other `
+          /* Channel names as the dashboard writes them; this sentence is read
+             beside a Platforms column that has always said Uber, not uber. */
+          ? ` Trip history exists for ${[...withTrips].sort().map(CHANNEL_LABEL).join(', ')} only; `
+            + 'a driver on any other '
             + 'platform has their output reported as unobserved rather than as zero.'
           : ' No platform has any trip history, so no output can be observed at all.'),
     });
