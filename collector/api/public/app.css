@@ -1095,7 +1095,30 @@ a.insight-row:hover{border-color:var(--accent)}
 /* The table and the sentences that explain it. The scroller is inside; the
    notes are not, so they stay at panel width while the columns scroll. */
 .tblock{min-width:0}
-.tblock > .tscroll{margin-bottom:0}
+.tblock > .tsbox{position:relative;min-width:0}
+.tblock > .tsbox > .tscroll{margin-bottom:0}
+
+/* The edge fade for a table that continues past its panel.
+   ─────────────────────────────────────────────────────────────────────────
+   On the wrapper, not on the scroller: a pseudo-element inside an
+   overflow:auto box scrolls away with the content, which is precisely when the
+   reader needs it. Pinned to the block instead, so it sits over the last
+   column and stays there.
+
+   pointer-events:none, or the fade would eat clicks on the cells beneath it —
+   and the right-hand columns of these tables carry the links.
+
+   The gradient goes to the SURFACE colour rather than to a shadow, so it reads
+   as "the table continues" rather than as a border. ui.js toggles cue-l/cue-r
+   on scroll and on resize; neither is present when the table fits. */
+.tsbox::before,.tsbox::after{
+  content:"";position:absolute;top:1px;bottom:1px;width:38px;pointer-events:none;
+  opacity:0;transition:opacity .18s var(--ease);z-index:3;border-radius:var(--r);
+}
+.tsbox::after{right:1px;background:linear-gradient(to left,var(--surface) 12%,transparent)}
+.tsbox::before{left:1px;background:linear-gradient(to right,var(--surface) 12%,transparent)}
+.tsbox.cue-r::after,.tsbox.cue-l::before{opacity:1}
+.tcue{color:var(--ink-3)}
 
 /* A row's rank, inside the cell that names the row. Its own column would cost
    the width of the one column that stays pinned when a wide table scrolls —

@@ -277,10 +277,77 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
 
      Returned as one element either way, because two hundred call sites do
      `body.append(tableFrom(...))` and a fragment would break every one. */
-  if (!notes.length) return wrap;
+  /* The scroller gets its own positioned box so the edge fades can be pinned
+     over the TABLE and not over the notes underneath it. A pseudo-element on
+     the scroller itself would scroll away with the content, which is exactly
+     when it is needed. */
+  const box = el('div', 'tsbox');
+  box.append(wrap);
   const block = el('div', 'tblock');
-  block.append(wrap, ...notes);
+  block.append(box, ...notes);
+  scrollCue(box, wrap);
   return block;
+}
+
+/* A table that scrolls sideways has to say so.
+   ─────────────────────────────────────────────────────────────────────────
+   Measured on production, #reconcile at 1440px — a wide desktop, not a phone:
+   the scroller is 1,088px and its table is 1,278, so 190px sits outside the
+   panel and the last figure a reader can see is "+AED 41", cut mid-number. At
+   1180px it is 449px, which is two whole columns. There was no fade, no
+   shadow, no caption — nothing on screen said the table continued.
+
+   This is the user's own report about Reconciliation ("doesn't have all data
+   filled") in its second form. Pinning the identity column fixed WHICH ROW a
+   figure belongs to; nothing had ever addressed whether the reader knows there
+   are more figures to the right.
+
+   Two cues, because they answer different questions. The fade says "there is
+   more this way" and follows the scroll — it appears at whichever end has
+   content beyond it and goes when you reach it. The caption NAMES the columns
+   that start off screen, which is the part a fade cannot do: "Δ bank −
+   expected" is a number somebody came to this page for, and a gradient does
+   not tell them it exists.
+
+   Both are recomputed on scroll and on resize, and both are silent when the
+   table fits — which is most tables on most screens. */
+function scrollCue(box, wrap) {
+  const sync = () => {
+    const over = wrap.scrollWidth - wrap.clientWidth;
+    box.classList.toggle('cue-r', over > 2 && wrap.scrollLeft < over - 2);
+    box.classList.toggle('cue-l', over > 2 && wrap.scrollLeft > 2);
+  };
+  wrap.addEventListener('scroll', sync, { passive: true });
+  /* ResizeObserver rather than a window resize listener: a table can start
+     overflowing because a SIBLING changed — a panel gaining a chart, a filter
+     narrowing the grid — with the window untouched. */
+  if (typeof ResizeObserver === 'function') new ResizeObserver(sync).observe(wrap);
+
+  /* Named after layout, and only once. requestAnimationFrame because the
+     element is not in the document yet at this point, so scrollWidth is 0 and
+     every table would look like it fits. */
+  requestAnimationFrame(() => {
+    sync();
+    const over = wrap.scrollWidth - wrap.clientWidth;
+    if (over <= 2 || !wrap.isConnected) return;
+    /* Which columns are CUT, not which start off screen.
+       ─────────────────────────────────────────────────────────────────────
+       The first version tested the header's left edge, and on #reconcile at
+       1440px that reported one hidden column when the screenshot plainly shows
+       two: "Δ bank − expected" starts inside the panel and ends outside it, so
+       the figure a reader sees is "+AED 41" — cut mid-number. A column whose
+       value is clipped is a column you have to scroll for, whether or not its
+       heading happens to fit. */
+    const edge = wrap.getBoundingClientRect().right;
+    const hidden = [...wrap.querySelectorAll('thead th')]
+      .filter((th) => th.getBoundingClientRect().right > edge + 4)
+      .map((th) => th.textContent.replace(/[↑↓▾▴]/g, '').trim())
+      .filter(Boolean);
+    if (!hidden.length) return;
+    const p = el('p', 'cap tcue');
+    p.textContent = `Scroll the table sideways for ${hidden.length === 1 ? 'one more column' : `${hidden.length} more columns`}: ${hidden.join(', ')}.`;
+    box.parentElement.append(p);
+  });
 }
 
 /* There is no `drill()` any more.
