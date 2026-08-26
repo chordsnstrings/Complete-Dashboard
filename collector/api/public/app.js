@@ -374,9 +374,14 @@ function setHeader(detail) {
     const t = detail?.trip;
     $('#viewTitle').textContent = t
       ? `${sourceLabel(t.platform)} booking, ${dayStr(t.local_day)}` : 'One booking';
+    /* Both ends, or a named one — a lone address joined by nothing reads as
+       the pickup when it is usually the drop-off, and this channel reports one
+       end far more often than the other. */
     $('#viewSub').textContent = t
-      ? [t.pickup_addr, t.dropoff_addr].filter(Boolean).join(' → ')
-        || 'Everything the record holds about this booking'
+      ? (t.pickup_addr && t.dropoff_addr ? `${t.pickup_addr} → ${t.dropoff_addr}`
+        : t.dropoff_addr ? `Dropped at ${t.dropoff_addr}`
+          : t.pickup_addr ? `Picked up at ${t.pickup_addr}`
+            : 'Everything the record holds about this booking')
       : 'Everything the record holds about one booking';
     crumb.innerHTML = t?.driver_ext_id
       ? `<a href="${href('driver', t.driver_ext_id, 'trips')}">${esc(t.driver_name || 'Driver')}</a>`

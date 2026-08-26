@@ -105,9 +105,15 @@ export async function renderTrip(root, platform, id) {
           + `, from a ${countOf(Number(pd.period_days) || 1, 'day')} payout period`
           + ` (${dayStr(pd.period_start)} → ${dayStr(pd.period_end)})`
         : 'no payout statement covers this day' },
+    /* The basis has to describe what is in the cell, not what would be there.
+       Written unconditionally it said "part of the figure above" beside an
+       em dash, which describes a number that is not on the page. */
     { what: 'Cash the driver held that day', v: pd && pd.cash_earnings != null
       ? money(pd.cash_earnings, 'AED', 2) : null,
-      basis: pd ? 'part of the figure above, already in their hand' : 'no payout statement covers this day' },
+      basis: !pd ? 'no payout statement covers this day'
+        : (pd.cash_earnings == null
+          ? 'the statement for this day reports no cash collected'
+          : 'part of the figure above, already in their hand') },
   ], [
     { label: 'Figure', key: 'what' },
     { label: 'Amount', key: 'v', num: true, render: (r) => (r.v == null
