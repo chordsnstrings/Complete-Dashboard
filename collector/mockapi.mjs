@@ -2261,6 +2261,56 @@ app.get('/api/segments', (req, r) => {
   });
 });
 
+/* One booking, with the context the trip tables cannot hold.
+   The awkward shape here is the money: Uber prices no trip and its money is a
+   figure for the whole DAY, so the fixture carries both a priced channel and
+   an unpriced one — the page is mostly about telling them apart. */
+app.get('/api/trip', (req, r) => {
+  const platform = String(req.query.platform || 'uber');
+  const id = String(req.query.id || 'u-mock-1');
+  const priced = platform !== 'uber' && platform !== 'fms';
+  const day = '2026-08-20';
+  const at = (t) => `${day}T${t}:00+04:00`;
+  const trip = {
+    platform, external_id: id, fleet_id: 'ecosine', plate: plates[0],
+    driver_ext_id: 'drv-1', driver_name: drivers[0],
+    requested_at: at('06:50'), ended_at: at('07:31'),
+    pickup_addr: 'Al Garhoud - Dubai', pickup_lat: 25.2419, pickup_lng: 55.3521,
+    dropoff_addr: "Terminal 3 - Dubai Int'l Airport", dropoff_lat: 25.2532, dropoff_lng: 55.3657,
+    distance_km: 17.5, duration_s: null, status: 'completed', product: priced ? 'pick_and_drop' : 'Comfort',
+    payment_type: priced ? 'on_account' : 'offline', seat_count: priced ? null : 4,
+    price: priced ? 88.5 : null, currency: 'AED',
+    ingested_at: at('08:02'), raw: { tripUUID: id, productName: 'Comfort', surge: 1 },
+    is_booking: true, outcome: 'completed', has_fare: priced, has_distance: true, local_day: day,
+  };
+  r.json({
+    trip,
+    vehicle: { plate: plates[0], make: 'BYD', model: 'Han EV', year: 2025, colour: 'White', fleet_id: 'ecosine' },
+    custody: [{ driver_ext_id: 'drv-1', driver_name: drivers[0], platform: 'uber', trips: 5,
+      km: 124, is_primary: true, first_trip_at: at('01:00'), last_trip_at: at('10:44') }],
+    telemetry: [
+      { captured_at: at('06:52'), lat: 25.24, lng: 55.35, speed: 44, status: 'moving',
+        seat_occupied: true, ignition: true, source: 'fms' },
+      { captured_at: at('07:20'), lat: 25.25, lng: 55.36, speed: 31, status: 'moving',
+        seat_occupied: true, ignition: true, source: 'fms' },
+    ],
+    segments: [{ plate: plates[0], started_at: at('06:51'), ended_at: at('07:30'), duration_min: 39,
+      distance_km: 17.2, verdict: 'authorized', verdict_reason: 'matched uber trip <trip id>',
+      matched_platform: 'uber', matched_trip_id: id }],
+    payout_day: { day, platform: 'uber', earnings: 389.4, cash_earnings: 42, trips: 5,
+      period_start: day, period_end: day, period_days: 1, period_earnings: 389.4 },
+    same_day: [
+      { platform, external_id: id, requested_at: at('06:50'), ended_at: at('07:31'),
+        plate: plates[0], distance_km: 17.5, status: 'completed', outcome: 'completed',
+        price: priced ? 88.5 : null, currency: 'AED', product: 'Comfort' },
+      { platform: 'hotel', external_id: 'h-mock-2', requested_at: at('10:15'), ended_at: at('10:44'),
+        plate: plates[0], distance_km: 9.4, status: 'completed', outcome: 'completed',
+        price: 88.5, currency: 'AED', product: 'pick_and_drop' },
+    ],
+    notes: { fare_reported: priced, platform_prices_trips: priced, is_telematics_journey: false },
+  });
+});
+
 app.get('/api/segment', (req, r) => {
   const seg = ALL_SEGS.find((x) => x.plate === req.query.plate && x.started_at === req.query.at) || ALL_SEGS[0];
   const t0 = Date.parse(seg.started_at);

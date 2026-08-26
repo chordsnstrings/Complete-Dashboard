@@ -14,6 +14,7 @@ import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCauses } from './causes.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
+import { renderTrip } from './trip.js';
 import { renderSettlement, SETTLE_TABS } from './settlement.js';
 import { renderCoverage } from './coverage.js';
 import { renderCorridors } from './corridors.js';
@@ -365,6 +366,22 @@ function setHeader(detail) {
     $('#viewTitle').textContent = label;
     $('#viewSub').textContent = 'Every source that saw this day — including whether each one was collecting';
     crumb.innerHTML = `<a href="${href('demand')}">Demand</a><span>/</span><b>${esc(state.param || '')}</b>`;
+    crumb.style.display = 'flex';
+  } else if (state.view === 'trip') {
+    /* Named, because the fall-through at the bottom of this chain takes the
+       first entry of VIEWS — which is how one person's week came to be titled
+       "Unit economics" and would have retitled every booking the same way. */
+    const t = detail?.trip;
+    $('#viewTitle').textContent = t
+      ? `${sourceLabel(t.platform)} booking, ${dayStr(t.local_day)}` : 'One booking';
+    $('#viewSub').textContent = t
+      ? [t.pickup_addr, t.dropoff_addr].filter(Boolean).join(' → ')
+        || 'Everything the record holds about this booking'
+      : 'Everything the record holds about one booking';
+    crumb.innerHTML = t?.driver_ext_id
+      ? `<a href="${href('driver', t.driver_ext_id, 'trips')}">${esc(t.driver_name || 'Driver')}</a>`
+        + `<span>/</span><b>booking</b>`
+      : `<a href="${href('drivers')}">Drivers</a><span>/</span><b>booking</b>`;
     crumb.style.display = 'flex';
   } else if (state.view === 'performer') {
     /* Without this the drill-down fell through to the final else, VIEWS has no
@@ -1158,6 +1175,10 @@ V.segments = async (root) => {
   await renderSegments(root, kind, kind ? state.sub : null);
 };
 V.segment = async (root) => renderSegment(root, state.param, state.sub);
+/* A booking as an address: #trip/<channel>/<the provider's own id>. Every
+   trip table in the product opens into this, and the id is the provider's
+   so a link survives a re-collection. */
+V.trip = async (root) => renderTrip(root, state.param, state.sub);
 
 /* The two pages an operations lead opens on the first of the month: what is
    coming, and what to do about it. */

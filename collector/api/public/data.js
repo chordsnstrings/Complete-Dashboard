@@ -249,7 +249,11 @@ export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage'];
    and a timestamp — so all three controls above these two pages governed
    nothing on them. */
 export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
-  'compliance', 'forecast', 'retention', 'capacity', 'map', 'segment'];
+  /* #trip is ONE booking addressed by the provider's own id. /api/trip takes a
+     platform and an id and nothing else — a range, a channel or a fleet
+     control above it would govern nothing, and would ride along into every
+     link leaving the page. */
+  'compliance', 'forecast', 'retention', 'capacity', 'map', 'segment', 'trip'];
 
 export const hidesRange = (v) => NO_FILTER.includes(v) || NO_RANGE.includes(v);
 export const hidesChannel = (v) => NO_FILTER.includes(v) || NO_PLATFORM_FLEET.includes(v);

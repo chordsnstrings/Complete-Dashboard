@@ -1061,8 +1061,13 @@ async function tabTrips(root, id) {
      sentence names both ceilings. */
   const draw = (list, term) => {
     host.innerHTML = '';
+    /* A row opens the booking. The endpoint has always returned external_id
+       and the table never used it, so the one artefact somebody wants to look
+       into — "which trip was that, exactly" — was the one thing here that led
+       nowhere. Clicks on the plate link still go to the vehicle. */
     host.append(tableFrom(list.slice(0, DRAW), cols,
-      { sortable: true, sortId: 'dtrips', defaultSort: { key: 'requested_at', dir: 'desc' } }));
+      { sortable: true, sortId: 'dtrips', defaultSort: { key: 'requested_at', dir: 'desc' },
+        onRow: (r) => { location.hash = href('trip', r.platform, r.external_id); } }));
     if (!list.length) {
       host.innerHTML = '';
       host.append(note(`No trip here matches “${term}”. That is a filter over the `

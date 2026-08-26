@@ -830,7 +830,9 @@ async function tabTrips(root, plate) {
   };
   const draw = (list) => {
     host.innerHTML = '';
-    host.append(tableFrom(list.slice(0, DRAW), cols));
+    // A row opens the booking; the driver link inside it still opens the driver.
+    host.append(tableFrom(list.slice(0, DRAW), cols,
+      { onRow: (r) => { location.hash = href('trip', r.platform, r.external_id); } }));
     const caps = [];
     if (list.length > DRAW) caps.push(`drawing the ${fmt(DRAW)} newest of ${fmt(list.length)} matching`);
     if (rows.length < total) caps.push(`${fmt(rows.length)} of ${fmt(total)} trips in this window are loaded`);

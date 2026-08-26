@@ -1,0 +1,127 @@
+/* One booking, and everything the record knows about it.
+   ──────────────────────────────────────────────────────────────────────────
+   The driver and vehicle pages both end in a table of trip records, and every
+   row was a dead end: nine columns of a row that has twenty-odd, no way to
+   reach the coordinates, the seat count, the fleet it was booked under, or the
+   provider's own record of it. "Which trip was that, exactly" had no answer
+   short of the database.
+
+   A trip is an address now. It carries the row in full, and — the part a row
+   cannot — the things that only make sense in context: who held the car that
+   day, what the trackers saw while it was running, whether the occupancy
+   analysis matched it, what the driver was paid for the day it falls in, and
+   the rest of that driver's day around it.
+
+   Both fleets, and both kinds of channel. Uber's export carries no fare at all
+   and its money arrives weekly under a payout; the hotel channel prices every
+   booking. A page that showed only `price` would be blank for 90% of the work
+   this fleet does, so the payout day is here beside the fare and the page says
+   which one is a measurement of THIS trip and which is not. */
+export function tripRoutes(app, { q, wrap }) {
+  /* The key is (platform, external_id) — the provider's own id, which is the
+     only thing about a trip that is stable across a re-collection. */
+  app.get('/api/trip', wrap(async (req, res) => {
+    const platform = String(req.query.platform || '').trim().toLowerCase();
+    const id = String(req.query.id || '').trim();
+    if (!platform || !id) {
+      return res.status(400).json({ error: 'platform and id are both required' });
+    }
+
+    const [t] = await q(
+      `SELECT platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+              requested_at, ended_at, pickup_addr, pickup_lat, pickup_lng,
+              dropoff_addr, dropoff_lat, dropoff_lng, distance_km, duration_s,
+              status, product, payment_type, seat_count, price, currency,
+              ingested_at, raw,
+              is_booking, outcome, has_fare, has_distance,
+              to_char(local_day, 'YYYY-MM-DD') AS local_day
+       FROM trip_norm WHERE platform = $1 AND external_id = $2`, [platform, id]);
+    if (!t) {
+      return res.status(404).json({ error: 'no trip with that platform and id',
+        platform, external_id: id });
+    }
+
+    /* Everything below is context and every one of them may be empty. A trip
+       on a plate nobody held, on a day no tracker reported, is a real trip —
+       so each block is fetched independently and an empty one is reported as
+       empty rather than turning the page into an error. */
+    const day = t.local_day;
+    const [custody, telemetry, segment, payout, sameDay, vehicle] = await Promise.all([
+      /* Who held the car that day, from the shared definition — the same one
+         the day page and the playbook use, so the person a trip names is the
+         person the to-do list chases. */
+      t.plate && day ? q(
+        `SELECT driver_ext_id, driver_name, platform, trips, km, is_primary,
+                first_trip_at, last_trip_at
+         FROM vehicle_driver_day WHERE plate = $1 AND day = $2::date
+         ORDER BY is_primary DESC, trips DESC NULLS LAST`, [t.plate, day]) : [],
+
+      /* What the trackers saw while it was running. Bounded by the trip's own
+         span, widened a little at each end because a fix lands when it lands. */
+      t.plate && t.requested_at ? q(
+        `SELECT captured_at, lat, lng, speed, status, seat_occupied, ignition, source
+         FROM telemetry_snapshot
+         WHERE plate = $1
+           AND captured_at BETWEEN $2::timestamptz - interval '10 minutes'
+                               AND coalesce($3::timestamptz, $2::timestamptz + interval '2 hours')
+                                   + interval '10 minutes'
+         ORDER BY captured_at LIMIT 300`, [t.plate, t.requested_at, t.ended_at]) : [],
+
+      /* Did the occupancy analysis see this trip? A booking the seat sensor
+         never noticed and a journey with no booking are the two halves of the
+         same question, and #segments answers it from the other side. */
+      t.plate ? q(
+        `SELECT plate, started_at, ended_at, duration_min, distance_km, verdict,
+                verdict_reason, matched_platform, matched_trip_id
+         FROM occupancy_segment
+         WHERE plate = $1
+           AND (matched_trip_id = $2
+                OR (started_at, coalesce(ended_at, started_at))
+                    OVERLAPS ($3::timestamptz - interval '15 minutes',
+                              coalesce($4::timestamptz, $3::timestamptz) + interval '15 minutes'))
+         ORDER BY started_at LIMIT 10`,
+        [t.plate, t.external_id, t.requested_at, t.ended_at]) : [],
+
+      /* The money. For Uber this is the ONLY money that exists for this trip —
+         its export has no fare column — and it is a figure for the whole DAY,
+         not for this booking. The page must not let those be confused. */
+      t.driver_ext_id && day ? q(
+        `SELECT day::text AS day, platform, earnings, cash_earnings, trips,
+                period_start::text AS period_start, period_end::text AS period_end,
+                period_days, period_earnings
+         FROM driver_payout_day
+         WHERE driver_ext_id = $1 AND day = $2::date`, [t.driver_ext_id, day]) : [],
+
+      /* The rest of that driver's day, so a trip sits in the shift it belongs
+         to rather than alone. */
+      t.driver_ext_id && day ? q(
+        `SELECT platform, external_id, requested_at, ended_at, plate, distance_km,
+                status, outcome, price, currency, product
+         FROM trip_norm
+         WHERE driver_ext_id = $1 AND local_day = $2::date AND is_booking
+         ORDER BY requested_at LIMIT 200`, [t.driver_ext_id, day]) : [],
+
+      t.plate ? q(
+        `SELECT plate, make, model, year, color AS colour, fleet_id
+         FROM vehicle WHERE plate = $1`, [t.plate]) : [],
+    ]);
+
+    res.json({
+      trip: t,
+      vehicle: vehicle[0] || null,
+      custody,
+      telemetry,
+      segments: segment,
+      payout_day: payout[0] || null,
+      same_day: sameDay,
+      /* Named rather than inferred from an empty array: "no tracker reported
+         this plate that day" and "this plate has no tracker" are different
+         facts and only one of them is a problem. */
+      notes: {
+        fare_reported: Boolean(t.has_fare),
+        platform_prices_trips: platform !== 'uber' && platform !== 'fms',
+        is_telematics_journey: !t.is_booking,
+      },
+    });
+  }));
+}
