@@ -36,6 +36,19 @@ for (const route of process.argv.slice(2)) {
   await page.waitForTimeout(SETTLE);
   const file = `${OUT}/${WIDTH}-${slug(route)}.png`;
   await page.screenshot({ path: file, fullPage: true });
+  /* PANEL="Trips per day" shoots that panel alone. A full page is the record;
+     one panel is what you look at when checking a specific fix, and cropping a
+     PNG afterwards is a worse way to get there than asking the browser. */
+  if (process.env.PANEL) {
+    const el = await page.evaluateHandle((want) => [...document.querySelectorAll('.panel')]
+      .find((n) => (n.querySelector('h3')?.textContent || '').includes(want)) || null, process.env.PANEL);
+    const node = el.asElement();
+    if (node) {
+      const one = `${OUT}/${WIDTH}-${slug(route)}--${slug(process.env.PANEL)}.png`;
+      await node.screenshot({ path: one });
+      console.log(`   panel → ${one}`);
+    } else console.log(`   panel "${process.env.PANEL}" not found`);
+  }
 
   const seen = await page.evaluate(() => {
     const t = (n) => (n?.textContent || '').replace(/\s+/g, ' ').trim();

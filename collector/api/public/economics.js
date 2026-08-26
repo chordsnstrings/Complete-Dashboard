@@ -218,9 +218,33 @@ async function moneyTab(root) {
   coverageNote(covHost, A.coverage, A.window_days);
 
   kpiHost.replaceWith(kpiRow([
-    { label: 'Money in', value: money(t.money),
-      sub: `${money(t.fares || 0)} in fares · ${money(t.payouts || 0)} attributed from platform `
-        + `payouts · over ${fmt(A.window_days)} days` },
+    /* Named for how it was PLACED, because #revenue answers the same question
+       differently and the two must not both be "money in".
+       ─────────────────────────────────────────────────────────────────────
+       Measured on the live fleet, same window, same fleet:
+
+         30 days   this page 399,627   the fleet total 382,763   +4%
+          7 days   this page 104,824   the fleet total  68,682  +53%
+        365 days   this page 2,203,726 the fleet total 2,186,367 +0.8%
+
+       Neither is wrong and neither is a bug. A weekly payout has to be spread
+       over days before it can sit on a car, and there are two honest ways to
+       do it. driver_payout_day spreads it over the seven CALENDAR days of the
+       period, which is what the fleet-wide figure sums. This page spreads it
+       over the days the driver actually DROVE, because a week's pay earned
+       across three days of custody belongs to those three days — dividing by
+       seven and then dropping the four days with no custody record would
+       delete more than half of it.
+
+       The two agree over a long window and diverge at a short one, because
+       the difference is entirely at the edges: a window that clips a payout
+       period counts more of it here than there. That is why the gap is 0.8%
+       over a year and 53% over a week.
+
+       So the tile says which one this is, and names the other. */
+    { label: 'Money placed on assets', value: money(t.money),
+      sub: `${money(t.fares || 0)} in fares · ${money(t.payouts || 0)} of platform payouts placed `
+        + `on the days each driver actually drove · over ${fmt(A.window_days)} days` },
     { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day, 'AED', 0),
       sub: `${fmt(t.earning_vehicle_days)} vehicle-days actually earned` },
     { label: 'Per km', value: money(t.aed_per_km, 'AED', 2),
@@ -246,6 +270,19 @@ async function moneyTab(root) {
             + 'in that period, so it belongs to no car here' }
       : null,
   ]));
+
+  /* Why this total is not the one on #revenue.
+     ─────────────────────────────────────────────────────────────────────────
+     Both pages answer "what did this fleet take in", both are right, and they
+     differ — by 0.8% over a year and by 53% over a week. A reader who notices
+     that and finds nothing explaining it has to assume one of the two pages is
+     broken, which is a worse outcome than either number. Stated where the
+     larger figure is, with the mechanism rather than a hedge. */
+  root.append(note('This page places money on ASSETS, so a weekly payout is spread over the days '
+    + 'its driver actually drove. Revenue by channel spreads the same payout over the seven '
+    + 'calendar days of its period. Both are honest and they agree over a long window; a window '
+    + 'that cuts through a payout period counts more of it here than there, which is why the two '
+    + 'totals separate as the range gets shorter. Neither figure is the other one rounded.'));
 
   /* Concentration: one series, so no legend — the title names it. Cumulative
      share against rank, which is a curve and therefore an area rather than
