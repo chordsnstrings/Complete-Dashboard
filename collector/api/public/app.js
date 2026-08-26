@@ -202,6 +202,36 @@ function componentTree(components) {
         absent: 'this window predates the per-component driver count',
         render: (r) => (r.drivers == null ? '—' : fmt(r.drivers)) },
     ], { compact: true, sortable: true, sortId: 'comp' }));
+
+    /* The same explanation #revenue carries, because this is the same table.
+       ─────────────────────────────────────────────────────────────────────
+       Two pages render the payout breakdown and both print "net fare — 100.9%
+       of its parent". Explaining it on one of them and not the other is how a
+       reader concludes the OTHER page is the broken one. Measured here:
+       earnings is AED 33,905.19 against children summing to 34,126.23, so a
+       positive child exceeds a net parent and AED 221.04 is not itemised at
+       all. */
+    const gaps = [...byParent.entries()].map(([p, list]) => {
+      const root = roots.find((r) => r.label === String(p).replace(/_/g, ' '));
+      if (!root || !root.amount) return null;
+      const diff = root.amount - list.reduce((a, c) => a + (Number(c.amount) || 0), 0);
+      return Math.abs(diff) < 1 ? null : { name: String(p).replace(/_/g, ' '), diff };
+    }).filter(Boolean);
+    const anyOver = rows.some((r) => r.share != null && Math.abs(r.share) > 100);
+    if (anyOver || gaps.length) {
+      host.append(el('p', 'cap',
+        (anyOver
+          ? 'A share above 100% is not an error: a parent here is a NET of its children, so a '
+            + 'positive component can exceed it once a negative sibling — a tax, a clawback — is '
+            + 'taken off. '
+          : '')
+        + (gaps.length
+          ? `${gaps.map((g) => `<b>${esc(g.name)}</b> is ${money(Math.abs(g.diff))} `
+            + `${g.diff > 0 ? 'more' : 'less'} than the components listed under it`).join('; ')}. `
+            + 'The platform reports the parent and the parts separately and does not itemise the '
+            + 'difference, so the column will not add up to the row above it.'
+          : '')));
+    }
   }
   return host;
 }

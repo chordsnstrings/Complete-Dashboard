@@ -54,6 +54,26 @@ async function settleMix(host) {
       sub: cash ? `${fmt(cash.trips)} bookings` : null, tone: 'warn' },
     { label: 'Settled after the ride', value: pct((owed.reduce((a, c) => a + c.trips, 0) / total) * 100, 1),
       sub: 'on account or against salary', tone: owed.length ? 'warn' : null },
+    /* The largest route the summary row was leaving out.
+       ─────────────────────────────────────────────────────────────────────
+       The three tiles above cover card+wallet, cash, and on-account+salary —
+       54.6%, 22.1% and 2.7% on this fleet, which is 79.4% of the bookings. The
+       missing fifth was almost all ONE route: settled off-platform, 18.8%,
+       2,206 bookings. It has a card further down like every other route, and a
+       reader who stops at the tiles — which is what a tile row is for — was
+       left with a fifth of the fleet's settlements unaccounted and no hint
+       that the remainder was anything in particular.
+
+       It belongs in the summary on its own merits, too: money settled outside
+       the app is the route an operator most wants counted, and the one this
+       page can say least about. */
+    (() => {
+      const off = s.classes.find((c) => c.settlement_class === 'off_platform');
+      if (!off) return null;
+      return { label: 'Settled off-platform', value: pct((off.trips / total) * 100, 1),
+        sub: `${fmt(off.trips)} bookings — the platform records the fare as settled outside the `
+          + 'app and gives no further detail', tone: 'warn' };
+    })(),
   ]));
 
   const { panel: p0, body: b0 } = panel('Every booking, by settlement route', null);
