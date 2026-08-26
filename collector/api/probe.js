@@ -153,6 +153,22 @@ export function probeRoutes(app, { wrap }) {
 
   /* Shape of the OAuth REST surfaces the trip report does not cover. */
   const REST = {
+    /* Which organisations this credential can actually reach, and what Uber
+       calls each of them.
+       ─────────────────────────────────────────────────────────────────────
+       Every other surface here needs an org_id and answers 403 "bad key" for a
+       wrong one, which is a question you cannot answer with the thing you are
+       trying to find. This one takes no org at all — the OAuth scope list
+       already asks for vehicle_suppliers.organizations.read — so it is the one
+       endpoint that can say what the right value IS.
+       
+       Egari's REST org id has been refused on every call for as long as there
+       are logs, while its GraphQL surface works: the two want different
+       identifiers, and the uuid that satisfies GraphQL is not what REST calls
+       an org. Confirmed by setting it and watching the 403 persist. An org
+       list has two rows, so describe() reports the ids rather than suppressing
+       them as free text, which is exactly what makes this answerable. */
+    organizations: () => 'https://api.uber.com/v1/vehicle-suppliers/organizations',
     'driver-actions': (org) => `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?org_id=${encodeURIComponent(org)}`,
     transactions: (org) => `https://api.uber.com/v1/vehicle-suppliers/transactions?org_id=${encodeURIComponent(org)}&limit=50`,
     'earner-payments': (org) => `https://api.uber.com/v1/vehicle-suppliers/earners/payments?org_id=${encodeURIComponent(org)}&limit=50`,
