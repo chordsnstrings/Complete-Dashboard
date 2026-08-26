@@ -276,6 +276,49 @@ export async function renderRevenue(root) {
         cp.body.append(el('p', 'cap',
           `Showing 30 of ${countOf(kids.length, 'nested component')}, largest first.`));
       }
+
+      /* Why a share can read 100.9%, and what the children do not add up to.
+         ─────────────────────────────────────────────────────────────────────
+         Measured on this fleet: `earnings` is AED 33,905.19 and its children
+         are net fare AED 34,198.82, taxes −AED 600.59 and tips AED 528.00. So
+         the largest child is 100.9% of its parent, which reads as arithmetic
+         that has gone wrong, and it has not — the parent is a NET, and a
+         positive child can exceed it once a negative sibling is taken off.
+
+         The children also sum to AED 34,126.23 against a parent of 33,905.19:
+         a remainder of AED 221.04 that the platform does not itemise. That is
+         a real fact about the statement and it was on no page. A reader adding
+         the column up and landing 221 short had no way to tell whether the
+         product had lost it. */
+      const parents = [...new Set(kids.map((c) => `${c.platform}|${c.parent}`))];
+      const gaps = parents.map((key) => {
+        const total = rootAmt.get(key);
+        if (!total) return null;
+        const sum = kids.filter((c) => `${c.platform}|${c.parent}` === key)
+          .reduce((a, c) => a + (Number(c.amount) || 0), 0);
+        const diff = total - sum;
+        /* A dirham of rounding is not a finding. */
+        return Math.abs(diff) < 1 ? null : { name: String(key.split('|')[1]).replace(/_/g, ' '), diff };
+      }).filter(Boolean);
+
+      const anyOver = kids.some((c) => {
+        const t = rootAmt.get(`${c.platform}|${c.parent}`);
+        return t && Math.abs(Number(c.amount)) > Math.abs(t);
+      });
+      if (anyOver || gaps.length) {
+        cp.body.append(el('p', 'cap',
+          (anyOver
+            ? 'A share above 100% is not an error: a parent here is a NET of its children, so a '
+              + 'positive component can exceed it once a negative sibling — a tax, a clawback — is '
+              + 'taken off. '
+            : '')
+          + (gaps.length
+            ? `${gaps.map((g) => `<b>${esc(g.name)}</b> is ${money(Math.abs(g.diff))} `
+              + `${g.diff > 0 ? 'more' : 'less'} than the components listed under it`).join('; ')}. `
+              + 'The platform reports the parent and the parts separately and does not itemise the '
+              + 'difference, so the column will not add up to the row above it.'
+            : '')));
+      }
     }
     host.append(cp.panel);
   } else {
