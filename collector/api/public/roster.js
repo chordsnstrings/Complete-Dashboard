@@ -202,6 +202,20 @@ export async function renderRoster(root) {
         + 'carries no fare column, and on the pipeline and idle lists Uber is all of the work',
       render: (r) => (r.revenue ? money(r.revenue)
         : '<span class="ent-off" title="no booking of theirs reports a fare — Uber’s export has no fare column">—</span>') },
+    /* The money this page was missing. Fares alone left 251 of 280 people
+       blank on production — on the page an operator reads to decide who to
+       keep supplying with cars. driver_payout_day is what their accounts were
+       actually paid, summed across the accounts one person holds.
+
+       Its own column beside the fares, never merged: a fare is what a rider
+       was charged and a payout is what reached the fleet after commission. */
+    { label: 'Paid', key: 'payout', num: true,
+      absent: 'no payout period in this window reaches anybody in this group — which is what '
+        + 'being on this list means',
+      render: (r) => (r.payout == null
+        ? '<span class="ent-off" title="no platform payout in this window covers any of their accounts">—</span>'
+        : `${money(r.payout)}${r.payout_days
+          ? `<span class="dim" title="days of this window with a payout behind them"> · ${fmt(r.payout_days)}d</span>` : ''}`) },
     /* "not observed" is reserved for a genuinely absent value. This printed it
        whenever `activity_known` was false — and sixteen people here have a
        lifetime count in the same payload, so the cell read "TRIPS EVER: not

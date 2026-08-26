@@ -1961,7 +1961,11 @@ app.get('/api/roster', (_, r) => {
       reason: blocked ? 'You can no longer take trips because your document expired.' : null,
       trips: category === 'working' ? 120 - i * 9 : 0,
       completed: category === 'working' ? 110 - i * 9 : 0,
-      revenue: category === 'working' ? (120 - i * 9) * 74 : null,
+      /* Most people have a payout and no fare — the production shape, where
+         Uber is most of the work and publishes no fare per trip. */
+      revenue: category === 'working' && i % 3 === 0 ? (120 - i * 9) * 74 : null,
+      payout: category === 'working' ? (120 - i * 9) * 61 : null,
+      payout_days: category === 'working' ? Math.max(1, 26 - i) : 0,
       km: category === 'working' ? (120 - i * 9) * 12 : null,
       last_trip: category === 'working' ? dayISO(i % 5) : null,
       lifetime_trips: category === 'never_started' ? 0 : 900 - i * 60,

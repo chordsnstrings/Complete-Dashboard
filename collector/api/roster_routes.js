@@ -120,6 +120,37 @@ export function rosterRoutes(app, { q, wrap, range }) {
                 min(requested_at) AS first_trip, max(requested_at) AS last_ever,
                 count(*)::int lifetime_trips
          FROM trip WHERE driver_name IS NOT NULL AND btrim(driver_name) <> '' GROUP BY 1
+       ),
+       /* What these people were PAID, not only what their riders were charged.
+          ─────────────────────────────────────────────────────────────────────
+          The money column here was sum(trip.price), and Uber's trip export has
+          no fare column at all. Measured on production over thirty days: 251
+          of 280 people showed no money, on the page an operator reads to
+          decide who to keep supplying with cars.
+
+          driver_payout_day is what each ACCOUNT was paid, resolved so
+          overlapping report periods cannot double count (sql/schema_v23.sql).
+          Folded to the person the same way everything else on this page is,
+          because one human can hold two platform accounts and this page is
+          about the human. Summed across their accounts — that is what "this
+          person earned" means when they drive for two channels. */
+       paid AS (
+         /* Folded through s, which IS this page's population, rather than
+            through another pass over the trip table — ever above already
+            reads all of it once and this needs no second scan. A person
+            holding two platform accounts appears twice in s, so the id list is
+            deduped first and their accounts are then SUMMED, which is what
+            "this person earned" means when they drive for two channels. */
+         SELECT a.person,
+                round(sum(d.earnings)::numeric, 2) AS payout,
+                count(DISTINCT d.day)::int AS payout_days
+         FROM driver_payout_day d
+         JOIN (SELECT DISTINCT person, driver_ext_id FROM s
+                WHERE coalesce(btrim(driver_ext_id), '') <> '') a
+           ON a.driver_ext_id = d.driver_ext_id
+         WHERE d.day BETWEEN $1::date AND $2::date
+           AND ($4::text IS NULL OR d.fleet_id = $4)
+         GROUP BY 1
        )
        SELECT s.person,
               max(s.full_name) AS name,
@@ -157,6 +188,7 @@ export function rosterRoutes(app, { q, wrap, range }) {
               coalesce(max(w.trips), 0)::int AS trips,
               coalesce(max(w.completed), 0)::int AS completed,
               max(w.revenue) AS revenue,
+              max(paid.payout) AS payout, max(paid.payout_days) AS payout_days,
               max(w.km) AS km,
               max(w.last_trip) AS last_trip,
               max(e.lifetime_trips) AS lifetime_trips,
@@ -164,6 +196,7 @@ export function rosterRoutes(app, { q, wrap, range }) {
               max(e.last_ever) AS last_ever
        FROM s
        LEFT JOIN w    ON w.person = s.person
+       LEFT JOIN paid ON paid.person = s.person
        LEFT JOIN ever e ON e.person = s.person
        LEFT JOIN fleets f ON f.person = s.person
        GROUP BY s.person
@@ -228,6 +261,8 @@ export function rosterRoutes(app, { q, wrap, range }) {
       return {
         ...r,
         revenue: r.revenue == null ? null : round(r.revenue, 0),
+        payout: r.payout == null ? null : Number(r.payout),
+        payout_days: r.payout_days ?? 0,
         km: r.km == null ? null : round(r.km, 0),
         category,
         // A car attached to somebody who cannot drive it.
