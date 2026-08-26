@@ -77,7 +77,7 @@ export async function renderCoverage(root) {
     const { panel: mp, body: mb } = panel('Work we hold no money for',
       'Where a platform\u2019s trip feed reaches further back than its earnings API will serve');
     mb.append(tableFrom(moneyGaps, [
-      { label: 'Platform', key: 'platform' },
+      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
       /* With the year. These two dates are the whole point of the row and they
          are usually in different years — "Aug 21" beside "Feb 9" reads as five
          months forward when it is six months back. dayStr omits the year

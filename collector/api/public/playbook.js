@@ -12,7 +12,7 @@
    two numbers must never be added together, and a page that sorts by size puts
    the ceiling on top, which is exactly backwards. */
 
-import { empty, fmt } from './charts.js';
+import { dec, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money,
          entity, custody, custodyAsOf, dateStr, countOf, plural } from './ui.js';
 import { q, href, store } from './data.js';
@@ -210,16 +210,51 @@ function actionCard(a, d) {
        keys that name an entity render as links. Keys that exist only to carry
        an id or a count for another column are folded into it rather than shown
        as their own column of noise. */
-    const HIDDEN = new Set(['driver_ext_id', 'driver_n']);
+    /* `partner_id` is a Mongo id no page navigates by; it was a column of
+       twenty-four hex characters sitting where the reader looks for a name. */
+    const HIDDEN = new Set(['driver_ext_id', 'driver_n', 'partner_id']);
     const RENDER = {
       plate: (r) => entity('vehicle', r.plate, r.plate),
+      plates: (r) => (Array.isArray(r.plates) && r.plates.length
+        ? r.plates.map((pl) => entity('vehicle', pl, pl)).join(' ') : '\u2014'),
       driver: (r) => entity('driver', r.driver_ext_id, r.driver),
       driver_name: (r) => entity('driver', r.driver_ext_id, r.driver_name),
+      counterparty: (r) => (r.driver_ext_id
+        ? entity('driver', r.driver_ext_id, r.counterparty) : esc(String(r.counterparty ?? '\u2014'))),
       held_by: (r) => custodyAsOf(r.held_by),
       driver_refs: (r) => custody(r) + (r.driver_n > (r.driver_refs || []).length
         ? ` <span class="dim">+${fmt(r.driver_n - (r.driver_refs || []).length)} more</span>` : ''),
+      amount: (r) => money(r.amount, 'AED', 0),
+      pct: (r) => (r.pct == null ? '\u2014' : `${dec(r.pct, 1)}%`),
+      avg_return_km: (r) => (r.avg_return_km == null ? '\u2014' : `${dec(r.avg_return_km, 1)} km`),
+      expires_at: (r) => dateStr(r.expires_at),
+      last_booking: (r) => dateStr(r.last_booking),
+      days_left: (r) => (r.days_left == null ? '\u2014'
+        : (Number(r.days_left) <= 0 ? pill('today', 'critical')
+          : `${fmt(r.days_left)}${Number(r.days_left) <= 7 ? ' ' + pill('soon', 'warn') : ''}`)),
+      state: (r) => pill(String(r.state ?? ''), 'warn'),
+      settlement_class: (r) => pill(String(r.settlement_class ?? '').replace(/_/g, ' ')),
+      platform: (r) => pill(String(r.platform ?? '')),
+      /* `unpriced_channel: false` printed the word "false" under a heading that
+         read "unpriced channel", which asks the reader to negate a negative to
+         learn that the fare IS recorded. Stated the plain way round instead. */
+      unpriced_channel: (r) => (r.unpriced_channel ? pill('no', 'warn') : 'yes'),
     };
-    const LABEL = { driver_refs: 'driven by', held_by: 'held by' };
+    /* Every other table in this product uses sentence case; these were raw
+       column names with the underscores swapped for spaces. */
+    const LABEL = {
+      driver_refs: 'Driven by', held_by: 'Held by', plate: 'Plate', plates: 'Plates',
+      driver: 'Driver', driver_name: 'Driver', counterparty: 'Counterparty',
+      settlement_class: 'Settlement class', trips: 'Bookings', amount: 'Amount owed',
+      oldest_days: 'Oldest, days', priced: 'With a fare', unpriced_channel: 'Fares recorded',
+      expires_at: 'Expires', days_left: 'Days left', state: 'Why blocked',
+      place: 'Drop-off area', drops: 'Drop-offs', avg_return_km: 'Average return',
+      platform: 'Platform', lost: 'Lost', judged: 'Requests judged', pct: 'Lost share',
+      journeys: 'Journeys', last_booking: 'Last booking',
+    };
+    /* Counts arrived through String(v): "45970" where the rest of the product
+       writes 45,970. */
+    const NUM = new Set(['trips', 'priced', 'drops', 'lost', 'judged', 'journeys', 'oldest_days']);
     /* Columns are built from whatever keys the finding's evidence carries, so a
        field the generator emits but never fills becomes a column of dashes —
        "last booking" was empty in all twelve rows of one action. The reason
@@ -229,14 +264,35 @@ function actionCard(a, d) {
        page failed to show one". */
     const cols = Object.keys(a.detail[0]).filter((k) => !HIDDEN.has(k)).map((k) => ({
       label: LABEL[k] || k.replace(/_/g, ' '), key: k,
-      absent: `the evidence behind this finding carries no ${LABEL[k] || k.replace(/_/g, ' ')} `
-        + 'for any of its rows',
-      render: RENDER[k] || ((r) => (r[k] == null ? '—' : esc(String(r[k])))),
+      num: NUM.has(k) || k === 'amount' || k === 'pct' || k === 'days_left',
+      absent: 'the evidence behind this finding carries no '
+        + `${(LABEL[k] || k.replace(/_/g, ' ')).toLowerCase()} for any of its rows`,
+      render: RENDER[k]
+        || (NUM.has(k) ? (r) => (r[k] == null ? '\u2014' : fmt(r[k]))
+          : (r) => (r[k] == null ? '\u2014' : esc(String(r[k])))),
     }));
     const tbl = tableFrom(a.detail, cols, { compact: true });
     basis.append(tbl);
-    if (a.size > a.detail.length) {
+    if (a.detail_of) {
+      /* Not every finding's evidence is a sample of what the finding counts.
+         The cancellations rule counts lost BOOKINGS and hands back one row per
+         PLATFORM, which the generic caption rendered as "Showing 3 of 1,288" —
+         three of a thousand two hundred and eighty-eight what? */
+      basis.append(el('p', 'cap',
+        `${countOf(a.detail.length, a.detail_of)}, covering all `
+        + `${fmt(a.size)} ${a.size_unit || 'rows'}.`));
+    } else if (a.size > a.detail.length) {
       basis.append(el('p', 'cap', `Showing ${a.detail.length} of ${fmt(a.size)}.`));
+    } else if (a.detail.length > a.size) {
+      /* The renewals finding counts documents expiring inside SEVEN days and
+         hands back the whole forty-five day query as its evidence, so a
+         headline reading "8" sat above a table of twelve. The extra rows are
+         worth seeing — they are what comes next — but the table has to say
+         that rather than leave the reader to think one of the two is wrong. */
+      basis.append(el('p', 'cap',
+        `The headline counts ${fmt(a.size)} ${a.size_unit || 'rows'} — the ones this finding is about. `
+        + `The table carries ${fmt(a.detail.length - a.size)} more from the same query for context, `
+        + 'which the columns distinguish.'));
     }
   }
   card.append(basis);

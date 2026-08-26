@@ -958,7 +958,7 @@ V.drivers = async (root) => {
   const pfRows = Array.isArray(pf) ? pf : (pf.rows || []);
   const pfTot = (Array.isArray(pf) ? null : pf.totals) || {};
   perf.body.append(tableFrom(pfRows.slice(0, 25), [
-    { label: 'Platform', key: 'platform' },
+    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Period', key: 'period_start', render: (r) => dayStr(r.period_start) },
     { label: 'Trips', key: 'trips', num: true },
@@ -1996,7 +1996,14 @@ V.safety = async (root) => {
       : 'No driver in this window has both events and a known distance');
   }
   host.append(dp.panel);
-  host.append(tableFrom(byDrv, [
+  /* The longest table on the page carried no heading — sixty-two rows of names
+     and event counts that began immediately under a chart about something
+     else, with nothing saying what the rows were or how many there were. */
+  const dtab = panel(`Every driver with an event — ${countOf(byDrv.length, 'row')}`,
+    'One row per person, plus a row for the events no custody record could attribute. '
+    + 'The four named categories and Other add up to Events.');
+  host.append(dtab.panel);
+  dtab.body.append(tableFrom(byDrv, [
     { label: 'Driver', key: 'driver_name',
       render: (r) => (r.driver_ext_id ? entity('driver', r.driver_ext_id, r.driver_name)
         : `<span class="ent-off">${esc(r.driver_name)}</span>`) },
@@ -2035,7 +2042,7 @@ V.safety = async (root) => {
           ? '<span class="dim" title="under 200 booked km — too small a base to compare on"> ·  thin</span>' : ''}`) },
   ], { sortable: true, sortId: 'safetydrv', defaultSort: { key: 'alerts', dir: 'desc' } }));
   if (byDrv.some((r) => r.driver_name === '(unattributed)')) {
-    host.append(note('"(unattributed)" is not a person. It is every event on a plate-day with no '
+    dtab.body.append(note('"(unattributed)" is not a person. It is every event on a plate-day with no '
       + 'custody record — shown rather than folded into somebody else\'s total.'));
   }
 };
@@ -2741,12 +2748,22 @@ V.insights = async (root) => {
     rec.body.append(note('No platform recommendations collected. Uber publishes these per org; they appear once the fleet-portal collector has run against an account that can see them.'));
   } else {
     rec.body.append(tableFrom(recs, [
-      { label: 'Platform', key: 'platform' },
-      { label: 'Target', key: 'rec_type', render: (r) => esc(String(r.rec_type || '').replace(/_/g, ' ')) },
+      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
+      /* Two columns were both headed "Target": the name of the measure and the
+         number to beat. And the name arrived as Uber's own enum, so the cell
+         read RECOMMENDATION TYPE ORG ACCEPTANCE RATE — the protobuf constant
+         with its underscores swapped for spaces, which is not English. */
+      { label: 'Measure', key: 'rec_type', render: (r) => {
+        const raw = String(r.rec_type || '');
+        if (!raw) return '—';
+        const t = raw.replace(/^RECOMMENDATION_TYPE_/, '').replace(/^ORG_/, '')
+          .toLowerCase().replace(/_/g, ' ');
+        return esc(t.charAt(0).toUpperCase() + t.slice(1));
+      } },
       { label: 'Period', key: '_p', render: (r) => (r.period_start
         ? `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` : 'current') },
       { label: 'Fleet is at', key: 'org_value', num: true, render: (r) => pctOf(r.org_value) },
-      { label: 'Target', key: 'target_value', num: true, render: (r) => pctOf(r.target_value) },
+      { label: 'Uber wants', key: 'target_value', num: true, render: (r) => pctOf(r.target_value) },
       /* `flagged` is a JSON ARRAY of the drivers Uber named. `r.flagged ? …`
          is therefore true for every row, including an empty array — so every
          target was marked "below target", including the ones being met. The

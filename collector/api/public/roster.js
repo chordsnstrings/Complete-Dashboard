@@ -297,7 +297,7 @@ async function rosterStates(host) {
       + 'guessed into a bucket — guessing wrong here describes somebody’s employment incorrectly — and '
       + 'each one is a mapping that could be added.');
     body.append(tableFrom(d.unrecognised_words, [
-      { label: 'Platform', key: 'platform' },
+      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
       { label: 'The provider’s word', key: 'word', render: (r) => `<code>${esc(r.word)}</code>` },
       { label: 'People', key: 'n', num: true },
     ]));
@@ -311,7 +311,7 @@ async function rosterStates(host) {
   }
   if (!d.by_state.length) return empty(host, 'No provider has reported a roster yet');
   host.append(tableFrom(d.by_state, [
-    { label: 'Platform', key: 'platform' },
+    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
     { label: 'Normalised', key: 'state' },
     { label: 'As the provider says it', key: 'state_raw', render: (r) => `<code>${esc(r.state_raw || '—')}</code>` },
     { label: 'People', key: 'n', num: true },

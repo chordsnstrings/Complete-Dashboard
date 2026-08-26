@@ -272,7 +272,7 @@ async function tabDrivers(root, plate) {
     { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
     { label: 'Driver', key: 'driver_name',
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name || r.driver_ext_id) },
-    { label: 'Platform', key: 'platform' },
+    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'First', key: '_a', render: (r) => timeStr(r.first_trip_at) },
@@ -736,7 +736,7 @@ async function tabCompliance(root, plate, prof) {
   } else {
     p.body.append(tableFrom(docs, [
       { label: 'Document', key: 'doc_type' },
-      { label: 'Platform', key: 'platform' },
+      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
       { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', r.status === 'ACTIVE' ? 'ok' : 'warn') },
       { label: 'Expires', key: 'expires_at', render: (r) => dayStr(r.expires_at) },
       { label: 'Days left', key: 'days_left', num: true, render: (r) => (r.days_left == null ? '—'
@@ -804,7 +804,7 @@ async function tabTrips(root, plate) {
     { label: 'Driver', key: 'driver_name', render: (r) => (r.driver_ext_id
       ? `<a class="lnk" href="${href('driver', r.driver_ext_id)}">${esc(r.driver_name || r.driver_ext_id)}</a>`
       : esc(r.driver_name || '—')) },
-    { label: 'Platform', key: 'platform' },
+    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
     { label: 'From', key: 'pickup_addr' },
     { label: 'To', key: 'dropoff_addr' },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },

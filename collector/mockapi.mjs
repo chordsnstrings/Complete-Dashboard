@@ -2687,7 +2687,7 @@ app.get('/api/playbook', (req, r) => {
      kept and money won are different quantities, and the old reduce matched
      /bookings/ against ceiling_unit — which 'bookings/month protected' also
      matches, so avoided loss was summed into "Modelled upside". */
-  const mk = (a) => ({ direction: 'gain', ...a,
+  const mk = (a) => ({ direction: 'gain', detail_of: null, ...a,
     aed_modelled: rate && a.ceiling && /bookings/.test(a.ceiling_unit || '')
       ? Math.round(a.ceiling * rate) : null });
   const actions = [
@@ -2757,7 +2757,7 @@ app.get('/api/playbook', (req, r) => {
         + 'Every one is demand the fleet already had.',
       basis: 'trip_norm.outcome, which normalises across platforms: Bolt reports a completed trip as '
         + '"finished" and three of its four failure modes never contain the word "cancel".',
-      size: 412, size_unit: 'lost bookings', ceiling: 103,
+      size: 412, size_unit: 'lost bookings', detail_of: 'platform', ceiling: 103,
       ceiling_unit: 'bookings/month if a quarter are recoverable',
       aed_measured: null, certainty: 'ceiling', effort: 'medium', link: '#platforms/funnel' }),
     mk({ id: 'cut_return_deadhead', group: 'Improve', horizon: 'this month',

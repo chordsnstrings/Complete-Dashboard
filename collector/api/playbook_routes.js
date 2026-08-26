@@ -348,6 +348,9 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       const modelable = ceiling != null && /bookings/.test(a.ceiling_unit || '');
       raw.push({
         direction: 'gain',
+        /* Uniform on every action, so the mock and the real API answer in the
+           same shape and the page never has to ask whether a key exists. */
+        detail_of: null,
         ...a,
         ceiling,
         aed_measured: a.aed_measured == null ? null : Math.round(a.aed_measured),
@@ -487,6 +490,10 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
           + '"finished" and three of its four failure modes never contain the word "cancel". Measured over the '
           + `${cancel.judged} bookings whose platform reports an outcome at all.`,
         size: cancel.lost, size_unit: `lost ${s(cancel.lost, 'booking')}`,
+        /* The evidence here is one row per platform, not a sample of the lost
+           bookings themselves, so the page must not offer to show "3 of 1,288".
+           Every other action's detail IS a slice of the thing it counts. */
+        detail_of: 'platform',
         /* Scaled to the month like every other ceiling on this page: cancel.lost
            is a count over the requested window, so at 365 days the unscaled
            quarter was a year's worth of recovery labelled per month. */

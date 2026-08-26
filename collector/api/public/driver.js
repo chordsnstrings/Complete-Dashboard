@@ -1018,7 +1018,7 @@ async function tabTrips(root, id) {
   const host = el('div'); p.body.append(host);
   const cols = [
     { label: 'Requested', key: 'requested_at', render: (r) => tripTime(r.plate, r.requested_at) },
-    { label: 'Platform', key: 'platform' },
+    { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'From', key: 'pickup_addr' },
     { label: 'To', key: 'dropoff_addr' },

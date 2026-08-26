@@ -25,6 +25,14 @@ const esc = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>':
 export const fmt = (n, d = 0) => (n == null || n === '' || !Number.isFinite(Number(n))
   ? '—' : Number(n).toLocaleString(undefined, { maximumFractionDigits: d }));
 
+/* fmt() drops trailing zeros, which is right for a headline and wrong for a
+   column: 11.8 and 20 sat under one heading, one of them with a decimal place
+   and one without, and the eye reads that as two different kinds of number.
+   dec() pins the decimals so a column lines up. */
+export const dec = (n, d = 1) => (n == null || n === '' || !Number.isFinite(Number(n))
+  ? '—' : Number(n).toLocaleString(undefined,
+    { minimumFractionDigits: d, maximumFractionDigits: d }));
+
 function interactive(el, label, onClick) {
   el.style.cursor = onClick ? 'pointer' : 'crosshair';
   el.addEventListener('mousemove', (e) => showTip(label, e));

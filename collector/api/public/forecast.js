@@ -227,12 +227,35 @@ export async function renderForecast(root) {
       + 'above — a day is not more certain than the month it sits in.'));
 
     if (d.weekday_shares) {
+      /* The chart above is next month; the shares below were measured on past weeks. Those are
+         two different numbers for the same weekday, so carry next month's back into the table
+         rather than leaving the reader to wonder which one the panel title refers to. */
+      const byDow = new Map();
+      for (const x of d.daily) {
+        const a = byDow.get(x.dow) || { sum: 0, n: 0 };
+        a.sum += x.expected; a.n += 1;
+        byDow.set(x.dow, a);
+      }
+      const expFor = (dow) => {
+        const a = byDow.get(dow);
+        return a && a.n ? a.sum / a.n : null;
+      };
       db.append(tableFrom(d.weekday_shares, [
         { label: 'Weekday', key: 'dow', render: (r) => DOW[r.dow] },
-        { label: 'Average bookings', key: 'mean', num: true, render: (r) => fmt(r.mean, 1) },
+        { label: 'Measured average', key: 'mean', num: true, render: (r) => fmt(r.mean, 1) },
         { label: 'Share of a week', key: 'share', num: true, render: (r) => `${(r.share * 100).toFixed(1)}%` },
         { label: 'Weeks measured', key: 'n', num: true },
+        { label: `Expected per ${MONTH(d.next_month)} day`,
+          key: 'exp', num: true,
+          render: (r) => (expFor(r.dow) == null ? '\u2014' : fmt(expFor(r.dow), 0)) },
+        { label: `${MONTH(d.next_month)} days`, key: 'ndays', num: true,
+          render: (r) => fmt(byDow.get(r.dow)?.n ?? 0) },
       ], { compact: true }));
+      db.append(el('p', 'cap',
+        'The measured column is history — the average of that weekday over the complete weeks behind us. '
+        + `The expected column is the same weekday inside ${MONTH(d.next_month)}, which is the measured `
+        + 'share applied to that month\u2019s forecast total. The two differ by exactly as much as the '
+        + 'forecast differs from where the fleet is running now; the chart above plots the expected one.'));
     }
   }
 

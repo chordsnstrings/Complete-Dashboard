@@ -368,7 +368,7 @@ export async function renderSegment(root, plate, at) {
   g2.append(nv.panel);
   if (d.nearby_vehicle_trips.length) {
     nv.body.append(tableFrom(d.nearby_vehicle_trips, [
-      { label: 'Platform', key: 'platform' },
+      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
       { label: 'Requested', key: 'requested_at', render: (r) => timeStr(r.requested_at) },
       { label: 'Offset', key: 'gap_min', num: true, render: (r) => (r.gap_min > 0 ? '+' : '') + r.gap_min + ' min' },
@@ -396,7 +396,7 @@ export async function renderSegment(root, plate, at) {
   g2.append(nd.panel);
   if (d.nearby_driver_trips.length) {
     nd.body.append(tableFrom(d.nearby_driver_trips, [
-      { label: 'Platform', key: 'platform' },
+      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
       { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
       { label: 'Requested', key: 'requested_at', render: (r) => timeStr(r.requested_at) },
       { label: 'Offset', key: 'gap_min', num: true, render: (r) => (r.gap_min > 0 ? '+' : '') + r.gap_min + ' min' },
@@ -447,7 +447,7 @@ export async function renderSegment(root, plate, at) {
     cp.body.append(tableFrom(d.custody, [
       { label: 'Day', key: 'day', render: (r) => dayStr(r.day) },
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
-      { label: 'Platform', key: 'platform' },
+      { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
       { label: 'Trips', key: 'trips', num: true },
     ], { compact: true }));
   }

@@ -113,6 +113,24 @@ function writeSort(id, key, dir) {
   catch { /* a sandboxed frame refuses; the sort still applies on screen */ }
 }
 
+/* The default cell.
+   ─────────────────────────────────────────────────────────────────────────
+   A column declared `num: true` with no render of its own fell straight
+   through to esc(), which meant 105 columns across seventeen views printed
+   2547 where every other number in the product is written 2,547 — the safety
+   table's event counts, the day view's minutes, the corporate room counts.
+
+   Only integers of four digits or more are touched. A rate, a share, a
+   latitude or a per-100km figure arrives fractional and keeps every digit it
+   came with, and anything under a thousand is unchanged by definition, so
+   this cannot alter a number that was already right. */
+function plainCell(c, r) {
+  const v = r[c.key];
+  const n = Number(v);
+  return (c.num && v != null && v !== '' && Number.isInteger(n) && Math.abs(n) >= 1000)
+    ? fmt(n) : esc(v ?? '—');
+}
+
 export function tableFrom(rows, cols, { compact = false, sortable = false,
   sortId = 't', defaultSort = null, capped = null, onRow = null } = {}) {
   if (!rows.length) { const d = el('div'); empty(d); return d; }
@@ -191,7 +209,7 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
   }).join('')}</tr></thead>`;
 
   const body = (list) => `<tbody>${list.map((r) => `<tr>${cols.map((c) =>
-    `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(r) : esc(r[c.key] ?? '—')}</td>`)
+    `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(r) : plainCell(c, r)}</td>`)
     .join('')}</tr>`).join('')}</tbody>`;
 
   /* The caller's row-level handlers index into the array it passed, so the
