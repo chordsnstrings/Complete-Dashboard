@@ -11,7 +11,7 @@ import { dateChunks, weekChunks, dubaiDayChunks, iso, unixMs } from '../util.js'
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
 import { log } from '../log.js';
-import { authFailure, saysAuth, noteCredential } from '../auth_state.js';
+import { authFailure, saysAuth, noteCredential, noteUberRest } from '../auth_state.js';
 
 const SRC = 'uber';
 
@@ -616,10 +616,17 @@ async function pullLiveOrg(o) {
   const overviews = [];
   let pageToken = '', pages = 0, lastKey = null;
   do {
-    const { data } = await http(
-      `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?${qs({
-        org_id: o.org, limit: 50, ...(pageToken ? { page_token: pageToken } : {}),
-      })}`, { headers: { authorization: `Bearer ${token}` } });
+    const url = `https://api.uber.com/v1/vehicle-suppliers/drivers/actions?${qs({
+      org_id: o.org, limit: 50, ...(pageToken ? { page_token: pageToken } : {}),
+    })}`;
+    const res = await http(url, { headers: { authorization: `Bearer ${token}` } });
+    /* A 403 here is a credential, not a quiet fleet. Production logged one of
+       these twice a minute — "bad key" against one of the two orgs — while
+       every page reported the source healthy, because the OAuth token grant
+       that precedes it succeeds. See src/auth_state.js. */
+    const bad = await noteUberRest(pool, url, res, o, 'drivers/actions');
+    if (bad) throw new Error(`driver roster for ${o.fleet}: ${bad.reason}`);
+    const { data } = res;
     const page = data?.driverStatusOverviews || [];
     const key = page.map((d) => d.driverInfo?.driverUuid).join(',');
     if (key && key === lastKey) {

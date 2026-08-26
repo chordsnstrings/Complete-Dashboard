@@ -51,8 +51,20 @@ export function authFailure(url, res, { expectJson = true } = {}) {
       ? `redirected to ${landed} — the session is no longer signed in`
       : `redirected to ${landed}`, kind: 'expired' };
   }
+  /* The provider's own words, where it gave any. "403 from api.uber.com" sends
+     somebody to read a log; "403 — bad key" tells them which credential. */
   if (res.status === 401 || res.status === 403) {
-    return { reason: `${res.status} from ${sent} — the credential was refused`, kind: 'expired' };
+    const said = providerWords(res.data);
+    return {
+      reason: `${res.status} from ${sent} — ${said || 'the credential was refused'}`,
+      kind: 'expired',
+      /* WHICH credential, as far as a status code can say. 401 is "we do not
+         know who you are" — the token or the secret behind it. 403 is "we know
+         you and you may not have this" — and on these surfaces the thing being
+         asked for is selected by the org key in the query string. Uber calls
+         that key a key, and answers a wrong one with exactly "bad key". */
+      blames: res.status === 401 ? 'token' : 'resource',
+    };
   }
   /* A JSON caller that got something else. A provider that means "no data"
      says so in the shape it promised; HTML is a login page or an error page,
@@ -63,6 +75,18 @@ export function authFailure(url, res, { expectJson = true } = {}) {
       kind: 'expired' };
   }
   return null;
+}
+
+/** Whatever the provider said, from the shapes these APIs actually use. */
+function providerWords(data) {
+  if (!data) return null;
+  if (typeof data === 'string') return data.trim().slice(0, 120) || null;
+  const m = data.message || data.error_description || data.error?.message
+    || data.error || data.detail || data.errors?.[0]?.message;
+  const text = typeof m === 'string' ? m : null;
+  const code = typeof data.code === 'string' ? data.code : null;
+  if (text && code && !text.includes(code)) return `${text} (${code})`;
+  return text || code || null;
 }
 
 /* Messages a provider sends INSIDE a well-formed response when the credential
@@ -93,4 +117,42 @@ export async function noteCredential(db, { provider, fleet = '*', credential,
          checked_at = now()`,
       [provider, fleet, credential, state, detail && String(detail).slice(0, 240), surface]);
   } catch { /* the table may not exist yet on a database mid-migration */ }
+}
+
+/* The Uber OAuth REST surfaces, which fail in a way the token grant cannot see.
+   ─────────────────────────────────────────────────────────────────────────
+   uberOAuthToken() succeeds — the client credentials are fine — and then every
+   data call for one of the two orgs answers 403 with {"code":
+   "rtapi.internal_server_error","message":"bad key"}. Measured on production
+   2026-08-26: the collector logs one successful roster of 113 drivers followed
+   by one 403, twice a minute, and the same 403 on earners/payments. collect()
+   walks the orgs in order, Ecosine first, so the refusal belongs to the second
+   — and it is why that fleet's REST earnings surface has never returned a row.
+
+   The credential at fault is the ORG KEY, not the secret. These endpoints
+   select what you are asking for with org_id in the query string, so a 403
+   means "you may not have this one", and Uber names the field a key in its own
+   refusal. A 401 would mean the token itself, which is a different credential
+   and a different fix, so the two are recorded separately rather than both
+   being reported as "Uber is broken".
+
+   Called after every REST call rather than only on failure: a well-formed
+   answer IS the proof the key works, and a banner that can only ever go red
+   never goes green again. */
+export function uberOrgCredential(fleet) {
+  return fleet === 'egari' ? 'UBER_ORG_ENCRYPTED_EGARI' : 'UBER_ORG_ENCRYPTED';
+}
+
+export async function noteUberRest(db, url, res, o, surface) {
+  const bad = authFailure(url, res);
+  const fleet = o?.fleet || '*';
+  const cred = bad?.blames === 'token' ? 'UBER_CLIENT_SECRET' : uberOrgCredential(fleet);
+  await noteCredential(db, {
+    provider: 'uber', fleet: bad?.blames === 'token' ? '*' : fleet,
+    credential: cred,
+    state: bad ? 'expired' : 'ok',
+    detail: bad ? bad.reason : null,
+    surface: `oauth rest ${surface}`,
+  });
+  return bad;
 }

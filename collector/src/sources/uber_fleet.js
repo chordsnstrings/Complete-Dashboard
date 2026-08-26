@@ -11,7 +11,7 @@ import { iso, weekChunks } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
 import { log } from '../log.js';
-import { authFailure, saysAuth, noteCredential } from '../auth_state.js';
+import { authFailure, saysAuth, noteCredential, noteUberRest } from '../auth_state.js';
 
 const SRC = 'uber_fleet';
 // The real queries, captured verbatim from the portal. Hand-writing them against a
@@ -265,8 +265,13 @@ async function pullEarningsWeek(token, from, to, until, o) {
       end_time: new Date(until).getTime(), page_size: EARNER_PAGE,
       ...(pageToken ? { page_token: pageToken } : {}),
     })}`;
-    const { data } = await http(url, { headers: { authorization: `Bearer ${token}` }, timeoutMs: 45000 });
-    return data;
+    const res = await http(url, { headers: { authorization: `Bearer ${token}` }, timeoutMs: 45000 });
+    /* The refusal this surface has been answering with for one of the two
+       fleets — 403 "bad key" — which nothing read, so an org key that selects
+       nothing looked exactly like a provider with nothing to give. */
+    const bad = await noteUberRest(pool, url, res, o, 'earners/payments');
+    if (bad) throw new Error(`earner payments for ${o.fleet}: ${bad.reason}`);
+    return res.data;
   };
 
   const breakdowns = [];

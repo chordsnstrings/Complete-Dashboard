@@ -22,7 +22,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import express from 'express';
-import { authFailure, saysAuth, noteCredential } from '../src/auth_state.js';
+import { authFailure, saysAuth, noteCredential, noteUberRest, uberOrgCredential } from '../src/auth_state.js';
 import { authRoutes } from '../api/auth_routes.js';
 
 const db = new PGlite();
@@ -159,6 +159,68 @@ check('a credential that was never configured is missing, not stopped',
   cb?.severity === 'missing' && d.missing === 1, JSON.stringify(cb));
 check('and missing never turns the banner red, because nothing broke',
   !/CABMAN/.test(d.headline || ''), d.headline);
+
+/* ── the REST refusal the token grant cannot see ────────────────────────── */
+/* uberOAuthToken() succeeds — the client credentials are fine — and then every
+   data call for one of the two orgs answers 403 "bad key". Production logged
+   that twice a minute while /api/auth reported UBER_CLIENT_SECRET ok, because
+   the grant is a different request from the call. */
+const REST = 'https://api.uber.com/v1/vehicle-suppliers/drivers/actions?org_id=x';
+const REFUSED = { status: 403, ok: false, finalUrl: REST,
+  data: { code: 'rtapi.internal_server_error', message: 'bad key' } };
+
+check('a 403 on a data call is an authentication failure',
+  authFailure(REST, REFUSED)?.kind === 'expired');
+check('and it quotes the provider rather than the status alone',
+  /bad key/.test(authFailure(REST, REFUSED)?.reason || ''), authFailure(REST, REFUSED)?.reason);
+/* Which credential, as far as a status code can say. These endpoints select
+   what you are asking for with org_id, so 403 is about that key; 401 would be
+   about the token behind it, which is a different credential and a different
+   fix. */
+check('a 403 blames the resource selector, not the token',
+  authFailure(REST, REFUSED)?.blames === 'resource');
+check('a 401 blames the token',
+  authFailure(REST, { ...REFUSED, status: 401 })?.blames === 'token');
+
+check('the org credential is named per fleet',
+  uberOrgCredential('egari') === 'UBER_ORG_ENCRYPTED_EGARI'
+  && uberOrgCredential('ecosine') === 'UBER_ORG_ENCRYPTED');
+
+await noteUberRest(db, REST, REFUSED, { fleet: 'egari' }, 'drivers/actions');
+d = await get('/api/auth');
+const org = d.rows.find((r) => r.credential === 'UBER_ORG_ENCRYPTED_EGARI');
+check('a refused org key is recorded against the key a person would replace',
+  org?.severity === 'stopped' && org.fleet_id === 'egari', JSON.stringify(org));
+check('and the banner headline names it with the provider\'s words',
+  /UBER_ORG_ENCRYPTED_EGARI/.test(d.headline || '') && /bad key/.test(d.headline || ''),
+  d.headline);
+/* The secret is a different credential and must not be dragged down with it —
+   it is working, and telling somebody to replace it would waste their time. */
+const secret = d.rows.find((r) => r.credential === 'UBER_CLIENT_SECRET');
+check('the client secret is not blamed for the org key being wrong',
+  secret == null || secret.severity !== 'stopped', JSON.stringify(secret));
+
+/* A good answer must clear it again, or the banner can only ever go red. */
+await noteUberRest(db, REST, { status: 200, ok: true, finalUrl: REST,
+  data: { driverStatusOverviews: [] } }, { fleet: 'egari' }, 'drivers/actions');
+d = await get('/api/auth');
+{
+  const back = d.rows.find((r) => r.credential === 'UBER_ORG_ENCRYPTED_EGARI');
+  check('a working call clears the refusal', back?.state === 'ok', JSON.stringify(back));
+  check('and the last-success time is now recorded', back?.last_ok_at != null);
+  /* Not green, and correctly so: this fixture also carries a uber/egari run
+     that finished forty hours ago, and the credential working while its source
+     has stalled is exactly what amber is for. Red would be wrong — nobody has
+     to replace anything — and green would hide a source that has stopped. */
+  check('a working credential over a stalled source is amber, not red or green',
+    back?.severity === 'at-risk', String(back?.severity));
+}
+/* One fleet's key failing says nothing about the other's. */
+await noteUberRest(db, REST, REFUSED, { fleet: 'ecosine' }, 'earners/payments');
+d = await get('/api/auth');
+check('the two fleets carry their own org keys',
+  d.rows.filter((r) => /UBER_ORG_ENCRYPTED/.test(r.credential)).length === 2,
+  JSON.stringify(d.rows.filter((r) => /UBER_ORG/.test(r.credential)).map((r) => `${r.credential}=${r.severity}`)));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();
