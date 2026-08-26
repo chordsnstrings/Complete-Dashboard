@@ -541,9 +541,18 @@ V.overview = async (root) => {
     onClick: (d) => { location.hash = href('day', dayKey(d.d)); } });
   /* The slice carries which platform it is, and the click threw it away —
      every slice opened the same unfiltered #platforms. */
-  donut(mix.body, byPlat, { onClick: (d) => setFilter({ platform: d.label, view: 'platforms', param: null, sub: null }) });
+  /* Both of these charted the endpoint's raw label — a donut legend reading
+     "uber · hotel · yango" and bars reading "uber: Electric", "uber: UberX" —
+     which are the only places on this page a channel is not written the way
+     the product writes it everywhere else. The raw value is kept on the row so
+     the click still filters by it. */
+  donut(mix.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
+    { onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'platforms', param: null, sub: null }) });
   mix.body.append(el('p', 'cap', 'Click a slice to filter the dashboard to that channel and open it.'));
-  hbars(prod.body, byProd.slice(0, 6), { signed: false });
+  hbars(prod.body, byProd.slice(0, 6).map((r) => {
+    const [plat, tier] = String(r.label || '').split(/:\s*/);
+    return { ...r, label: tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label) };
+  }), { signed: false });
   paymentDonut(pay.body, payDetail);
   /* Folded to OUTCOMES before charting. Charted raw, `completed` and
      `complete` were two slices of the same thing and three spellings of

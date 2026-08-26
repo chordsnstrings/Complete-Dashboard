@@ -48,6 +48,11 @@ import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, chooseBasis } from './income_sql.js';
 import { vehiclesOverWindow } from './custody_sql.js';
 
+/* A day as this product writes days everywhere else. */
+const dayLabel = (v) => (v == null ? '—'
+  : new Date(`${String(v).slice(0, 10)}T12:00:00Z`).toLocaleDateString('en-GB',
+    { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'Asia/Dubai' }));
+
 const n = (v) => (v == null ? null : Number(v));
 const round = (v, d = 2) => (v == null || !Number.isFinite(Number(v))
   ? null : Math.round(Number(v) * 10 ** d) / 10 ** d);
@@ -113,7 +118,9 @@ export function economicsRoutes(app, { q, wrap, range }) {
       unpayable_bookings: dark?.bookings ?? 0,
       unpayable_days: dark?.days ?? 0,
       note: first
-        ? `Bank payouts exist from ${first}. Uber's earnings API serves nothing earlier, `
+        /* `first` is an ISO day. Written into a sentence a person reads, it
+           was the only date in the product still rendered as 2026-02-06. */
+        ? `Bank payouts exist from ${dayLabel(first)}. Uber's earnings API serves nothing earlier, `
           + 'so bookings before that date carry no money and never will.'
         : 'No payout has been collected yet, so nothing here has money attached.',
     };

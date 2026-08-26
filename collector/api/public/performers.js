@@ -36,7 +36,7 @@
       carrying someone, measured from the trips, and it is labelled that. */
 import { hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
-  fmt, empty, noneChosen, sourceLabel } from './ui.js';
+  fmt, empty, noneChosen, sourceLabel, dateStr } from './ui.js';
 import { q, href, state } from './data.js';
 
 /* Enough of a week to rank on. Two thirds of a working week: below it a
@@ -77,7 +77,11 @@ export async function renderPerformers(root, band) {
 
   head.innerHTML = '';
   const wkNote = el('div', 'note info');
-  wkNote.innerHTML = `The week of <b>${esc(wk || '—')}</b> to <b>${esc(weekEnd(wk) || '—')}</b>, `
+  /* The only two dates on this page, and they were the raw ISO strings the
+     endpoint returns — "2026-08-17 to 2026-08-23" — in a product that writes
+     "Aug 17, 2026" in every date column on every other page. */
+  wkNote.innerHTML = `The week of <b>${esc(wk ? dateStr(wk) : '—')}</b> to `
+    + `<b>${esc(weekEnd(wk) ? dateStr(weekEnd(wk)) : '—')}</b>, `
     + 'Dubai days, the last one that finished. A part-finished week ranks whoever started earliest.';
   head.append(wkNote);
 

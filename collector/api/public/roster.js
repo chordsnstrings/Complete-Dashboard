@@ -294,7 +294,7 @@ async function rosterStates(host) {
       tone: (d.unrecognised_words || []).length ? 'warn' : 'good',
       sub: 'a mapping we could add' },
     { label: 'Providers reporting no state', value: fmt((d.no_state_reported || []).length),
-      sub: (d.no_state_reported || []).map((r) => r.platform).join(', ') || 'none' },
+      sub: (d.no_state_reported || []).map((r) => sourceLabel(r.platform)).join(', ') || 'none' },
   ]));
   if ((d.unrecognised_words || []).length) {
     const { panel: p, body } = panel('States we did not recognise',
@@ -309,13 +309,20 @@ async function rosterStates(host) {
     host.append(p);
   }
   if ((d.no_state_reported || []).length) {
-    host.append(note(`${d.no_state_reported.map((r) => `${r.platform} (${fmt(r.n)} people)`).join(', ')} `
-      + 'send no state at all on the endpoint we read. That is not a classification failure and there is '
+    host.append(note(`${d.no_state_reported.map((r) => `${sourceLabel(r.platform)} `
+      + `(${countOf(r.n, 'person', 'people')})`).join(', ')} `
+      + `${plural(d.no_state_reported.length, 'sends', 'send')} no state at all on the endpoint we read. `
+      + 'That is not a classification failure and there is '
       + 'nothing to map — the roster row still carries the useful fact that these people are on the books, '
       + 'and nothing is claimed about whether they can work.'));
   }
   if (!d.by_state.length) return empty(host, 'No provider has reported a roster yet');
-  host.append(tableFrom(d.by_state, [
+  const sp = panel(`What each provider says — ${countOf(d.by_state.length, 'distinct standing')}`,
+    'One row per platform and standing, with the provider\u2019s own word beside the bucket we map it '
+    + 'to. The vehicle count is what makes a standing expensive: a car attached to somebody who cannot '
+    + 'work is depreciating, insured and parked.');
+  host.append(sp.panel);
+  sp.body.append(tableFrom(d.by_state, [
     { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
     { label: 'Normalised', key: 'state' },
     { label: 'As the provider says it', key: 'state_raw', render: (r) => `<code>${esc(r.state_raw || '—')}</code>` },

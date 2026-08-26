@@ -207,7 +207,8 @@ export async function renderProviders(root) {
             // The status code, on every panel, whatever the verdict.
             s.http_status != null ? `HTTP ${s.http_status}` : null,
             ok
-              ? `${fmt(s.record_count)} records returned, first ${fmt(s.described_n ?? Math.min(s.record_count ?? 0, 300))} described`
+              ? `${countOf(s.record_count, 'record')} returned, first `
+                + `${fmt(s.described_n ?? Math.min(s.record_count ?? 0, 300))} described`
               : 'did not answer',
             s.probed_at ? dtStr(s.probed_at) : null].filter(Boolean).join(' · '));
         p.setAttribute('data-surface', '');

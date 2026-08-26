@@ -168,7 +168,7 @@ function breakCard(b) {
     <div class="bk-head">
       <div>
         <h4>${MONTH(b.period_from)} → ${MONTH(b.period_to)} · trips ${dir} ${Math.abs(Math.round(b.change_pct * 100))}%</h4>
-        <p class="cap">${fmt(b.value_from)} → ${fmt(b.value_to)} trips on ${esc(b.platform)}</p>
+        <p class="cap">${fmt(b.value_from)} → ${fmt(b.value_to)} trips on ${esc(sourceLabel(b.platform))}</p>
       </div>
       ${pill(a.label, a.tone)}
     </div>
