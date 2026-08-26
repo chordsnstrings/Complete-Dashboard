@@ -252,7 +252,7 @@ export async function renderCompare(root, aParam, bParam) {
       { label: 'Cancelled', key: 'cancelled', num: true,
         render: (r) => `${fmt(r.a.cancelled)} <span class="dim">vs ${fmt(r.b.cancelled)}</span>` },
       { label: 'Channels', key: 'platforms',
-        render: (r) => (r.platforms || []).map((x) => pill(x)).join(' ') || '—' },
+        render: (r) => (r.platforms || []).map((x) => pill(sourceLabel(x))).join(' ') || '—' },
       /* A driver who changed car between the two days is one of the few
          explanations this data can offer for a drop, so the plate is in the
          row rather than one click away. */
@@ -269,7 +269,7 @@ export async function renderCompare(root, aParam, bParam) {
   if (!pls.length) empty(platP.body, 'No booking on either day.');
   else {
     platP.body.append(tableFrom(pls, [
-      { label: 'Channel', key: 'platform', render: (r) => pill(r.platform) },
+      { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
       { label: 'Trips', key: 'd', num: true,
         render: (r) => `${fmt(r.a.n)} <span class="dim">vs ${fmt(r.b.n)}</span> ${delta(r.a.n, r.b.n)}` },
       { label: 'Cancelled', key: 'cancelled', num: true,

@@ -36,7 +36,7 @@
       carrying someone, measured from the trips, and it is labelled that. */
 import { hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
-  fmt, empty, noneChosen} from './ui.js';
+  fmt, empty, noneChosen, sourceLabel } from './ui.js';
 import { q, href, state } from './data.js';
 
 /* Enough of a week to rank on. Two thirds of a working week: below it a
@@ -126,9 +126,9 @@ export async function renderPerformers(root, band) {
       { label: 'Driver', key: 'driver_name',
         render: (r) => `<span class="rk">${r.rank}</span>`
           + entity('driver', r.driver_ext_id, r.driver_name) },
-      { label: 'Fleet', key: 'fleet_id', render: (r) => (r.fleet_id ? pill(r.fleet_id) : '—') },
+      { label: 'Fleet', key: 'fleet_id', render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id)) : '—') },
       { label: 'Platforms', key: 'platforms',
-        render: (r) => (r.platforms || []).map((x) => pill(x)).join(' ') || '—' },
+        render: (r) => (r.platforms || []).map((x) => pill(sourceLabel(x))).join(' ') || '—' },
       { label: 'Per day', key: '_rate', num: true, render: (r) => money(rate(r)) },
       { label: 'Money in', key: 'money', num: true,
         render: (r) => `${money(r.money)}<span class="dim" title="payout where the channel pays one, fare where it prices the trip"> ${
@@ -328,7 +328,7 @@ export async function renderPerformer(root, id) {
       const pay = pays.find((y) => y.platform === x.platform);
       return { ...x, payout: pay ? pay.payout : null, period: pay ? `${String(pay.period_start).slice(0, 10)} → ${String(pay.period_end).slice(0, 10)}` : null };
     }), [
-      { label: 'Channel', key: 'platform', render: (r) => pill(r.platform) },
+      { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
       { label: 'Bookings', key: 'bookings', num: true },
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
       { label: 'Fares', key: 'fares', num: true,

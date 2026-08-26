@@ -325,7 +325,7 @@ async function moneyTab(root) {
        scrolls to is a warning nobody reads. */
     chan.body.append(tableFrom(yields, [
       { label: 'Channel', key: 'platform',
-        render: (r) => `${esc(r.platform)}<br>`
+        render: (r) => `${esc(sourceLabel(r.platform))}<br>`
           + pill(r.basis === 'fares' || r.basis === 'partial_fares' ? 'gross fare' : 'net payout',
             r.basis === 'fares' ? 'ok' : null)
           + (String(r.basis || '').startsWith('partial') ? ' ' + pill('partial', 'warn') : '') },

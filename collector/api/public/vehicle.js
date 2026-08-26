@@ -570,7 +570,7 @@ async function tabEarnings(root, plate) {
   }));
   if (!byChannel.length) chP.body.append(note('No bookings for this vehicle in this window.'));
   else chP.body.append(tableFrom(byChannel, [
-    { label: 'Channel', key: 'platform', render: (r) => pill(r.platform) },
+    { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
     { label: 'Bookings', key: 'bookings', num: true },
     { label: 'Measured fares', key: 'fares', num: true,
       render: (r) => (r.fares != null ? money(r.fares) : '—') },
@@ -588,7 +588,7 @@ async function tabEarnings(root, plate) {
   } else {
     drvP.body.append(tableFrom(e.attributed, [
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
-      { label: 'Channel', key: 'platform', render: (r) => pill(r.platform) },
+      { label: 'Channel', key: 'platform', render: (r) => pill(sourceLabel(r.platform)) },
       { label: 'Attributed', key: 'attributed', num: true, render: (r) => money(r.attributed) },
       /* Named for the period it counts. "Trips here 288" was the trip count of
          the whole PAYOUT PERIOD, not of the window — the Drivers tab said 171

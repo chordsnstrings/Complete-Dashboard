@@ -178,7 +178,7 @@ export async function renderRevenue(root) {
     const mp = panel('Channels whose money is not collected',
       'Each of these is a credential or an endpoint away from being measured, not an accounting problem.');
     mp.body.append(tableFrom(missing, [
-      { label: 'Channel', key: 'platform' },
+      { label: 'Channel', key: 'platform', render: (r) => sourceLabel(r.platform) },
       { label: 'Bookings it carries', key: 'bookings', num: true, render: (r) => fmt(r.bookings) },
       { label: 'Share of the window', key: '_s', num: true,
         render: (r) => pct((r.bookings / (d.totals.bookings || 1)) * 100, 1) },

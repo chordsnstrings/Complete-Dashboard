@@ -739,12 +739,19 @@ async function tabEarnings(root, id, prof) {
       const v = k.cash_earnings ?? cashValue ?? (fromComponents || null);
       return v ? money(v) : (cashTrips ? 'not reported' : money(0));
     })(),
+    /* "73 cash trips across cash" — the label list is usually the single word
+       "cash", and naming it after "across" made the sentence eat itself. */
     sub: cashTrips
-      ? `${countOf(cashTrips, 'cash trip')} across ${cashRows.map((p) => p.label).join(', ')}`
-        + (cashKnown.length < cashRows.length
-          ? ` — ${countOf(cashRows.length - cashKnown.length, 'of those labels reports', 'of those labels report')}`
-            + ' no fare at all'
-          : '')
+      ? (() => {
+        const labels = cashRows.map((p) => p.label);
+        const named = labels.length > 1 ? `, across ${labels.join(', ')}`
+          : (labels.length === 1 && !/^cash$/i.test(labels[0]) ? `, labelled ${labels[0]}` : '');
+        const short = cashKnown.length < cashRows.length
+          ? ` — ${countOf(cashRows.length - cashKnown.length, 'of those labels reports',
+            'of those labels report')} no fare at all`
+          : '';
+        return `${countOf(cashTrips, 'cash trip')}${named}${short}`;
+      })()
       : 'no cash booking in this window',
     tone: cashTrips && cashKnown.length < cashRows.length ? 'warn' : null },
     // Priced fares over the distance of the priced trips. Dividing by the whole

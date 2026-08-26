@@ -590,7 +590,7 @@ V.overview = async (root) => {
       render: (r) => `<span class="rk">${r._rank}</span>`
         + entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Channels', key: 'platforms',
-      render: (r) => esc((r.platforms || (r.platform ? [r.platform] : [])).join(', ')) },
+      render: (r) => esc((r.platforms || (r.platform ? [r.platform] : [])).map(sourceLabel).join(', ')) },
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Trips', key: 'trips', num: true },
     ...(ranksByCompleted
@@ -1375,8 +1375,10 @@ async function platformShare(root) {
           : `${fmt(r.window_bookings)}${r.bookings
             ? `<span class="dim"> · ${pct((r.window_bookings / r.bookings) * 100, 1)} of all time</span>` : ''}`) }]
       : []),
-    { label: 'Earliest', key: 'earliest', render: (r) => (r.earliest ? String(r.earliest).slice(0, 10) : '—') },
-    { label: 'Latest', key: 'latest', render: (r) => (r.latest ? String(r.latest).slice(0, 10) : '—') },
+    /* Raw ISO strings in a product that writes dates as "Aug 21, 2025"
+       everywhere else, including the columns immediately beside these. */
+    { label: 'Earliest', key: 'earliest', render: (r) => dateStr(r.earliest) },
+    { label: 'Latest', key: 'latest', render: (r) => dateStr(r.latest) },
   ], { sortable: true, sortId: 'cov', defaultSort: { key: hasSplit ? 'bookings' : 'trips', dir: 'desc' } }));
   cov.body.append(note((hasSplit
     ? 'The all-time columns are over the whole record and do not match the donut above, which is this '
@@ -3148,7 +3150,8 @@ V.sources = async (root) => {
     const hp = panel('Windows that did not land',
       'Each of these is a range with no data behind it. Every rate computed across one is wrong.');
     hp.body.append(tableFrom(holes, [
-      { label: 'Source', key: 'source' }, { label: 'Mode', key: 'mode' },
+      { label: 'Source', key: 'source', render: (r) => sourceLabel(r.source) },
+      { label: 'Mode', key: 'mode' },
       { label: 'From', key: 'from' }, { label: 'To', key: 'to' },
       { label: 'What came back', key: 'error',
         render: (h) => `<span class="wrap" title="${esc(String(h.error))}">${esc(String(h.error).slice(0, 140))}${
@@ -3194,8 +3197,8 @@ V.sources = async (root) => {
       render: (r) => (r.value == null
         ? '<span class="ent-off" title="this dataset carries no money">—</span>'
         : money(r.value)) }] : []),
-    { label: 'From', key: 'from', render: (r) => (r.from ? String(r.from).slice(0, 10) : '—') },
-    { label: 'Latest', key: 'to', render: (r) => (r.to ? String(r.to).slice(0, 16).replace('T', ' ') : '—') },
+    { label: 'From', key: 'from', render: (r) => dateStr(r.from) },
+    { label: 'Latest', key: 'to', render: (r) => (r.to ? dtStr(r.to) : '—') },
     { label: 'Days collected', key: '_d', render: (r) => (r.cal
       ? `${fmt(r.cal.days_with_data)} of ${fmt(r.cal.days_with_data + r.cal.missing_days)}`
       : '<span class="ent-off" title="this dataset has no per-day calendar behind it">not a dated source</span>') },
