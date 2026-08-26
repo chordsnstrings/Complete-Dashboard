@@ -505,6 +505,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       `SELECT count(*)::int trips,
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days_worked,
               round(sum(distance_km)::numeric,0) km, round(avg(distance_km)::numeric,1) avg_km,
+              -- avg() skips NULLs, so avg_km is over the trips that REPORT a
+              -- distance and km/trips does not reproduce it. Returned so the
+              -- tile can print the denominator it actually used.
+              count(distance_km)::int trips_with_distance,
               round(sum(price)::numeric,2) revenue,
               round(avg(price)::numeric,2) avg_fare,
               -- Normalised, because the four platforms do not share a status

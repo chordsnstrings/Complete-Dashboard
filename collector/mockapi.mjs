@@ -518,7 +518,9 @@ app.get('/api/driver/kpis', (req, r) => {
   const trips = d.reduce((a, x) => a + x.trips, 0);
   r.json({
     trips, days_worked: d.length, km: Math.round(d.reduce((a, x) => a + x.km, 0)),
-    avg_km: 11.4, revenue: Math.round(d.reduce((a, x) => a + x.revenue, 0)), avg_fare: 34.2,
+    // avg() skips NULLs on the real endpoint, so avg_km has its own denominator.
+    avg_km: 11.4, trips_with_distance: trips,
+    revenue: Math.round(d.reduce((a, x) => a + x.revenue, 0)), avg_fare: 34.2,
     completion_pct: 96.4 - i * 0.4, cancel_pct: 3.1 + i * 0.3, avg_minutes: 17.4,
     /* The numerators beside the rates, and the denominators the money and
        distance figures are actually over. A rate with only its base under it is

@@ -141,7 +141,7 @@ async function tabOverview(root, plate, prof) {
     { label: 'Money in', value: k.accounted ? money(k.accounted) : '—',
       sub: k.accounted
         ? `${money(k.accounted_fares || 0)} in fares · ${money(k.accounted_payouts || 0)} attributed from `
-          + `platform payouts · ${(k.accounted_platforms || []).join(', ')}`
+          + `platform payouts · ${(k.accounted_platforms || []).map(sourceLabel).join(', ')}`
         : 'no fare and no payout reaches this vehicle in this range' },
     { label: 'Fares', value: k.priced_trips ? money(k.accounted_fares) : '—',
       sub: !k.priced_trips
@@ -252,7 +252,7 @@ async function tabDrivers(root, plate) {
       { label: 'Accounts', key: 'driver_ids',
         render: (r) => ((r.driver_ids || []).length > 1
           ? `<span title="${esc((r.driver_ids || []).join(', '))}">${fmt(r.driver_ids.length)}`
-            + ` <span class="dim">· ${esc((r.platforms || []).join(', '))}</span></span>`
+            + ` <span class="dim">· ${esc((r.platforms || []).map(sourceLabel).join(', '))}</span></span>`
           : `<span class="dim">${esc((r.platforms || []).join(', ')) || '1'}</span>`) },
       { label: 'Days', key: 'days', num: true },
       { label: 'As primary', key: 'primary_days', num: true },

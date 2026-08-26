@@ -110,7 +110,7 @@ function paymentDonut(host, detail) {
   cap.innerHTML = [
     detail.unlabelled_trips
       ? `${fmt(detail.unlabelled_trips)} of ${fmt(detail.total_trips)} trips record no payment type`
-        + `${detail.unlabelled_platforms?.length ? ` (${esc(detail.unlabelled_platforms.join(', '))})` : ''}`
+        + `${detail.unlabelled_platforms?.length ? ` (${esc(detail.unlabelled_platforms.map(sourceLabel).join(', '))})` : ''}`
         + ' and are left out rather than counted as cash.'
       : '',
     owed.length
@@ -519,7 +519,7 @@ V.overview = async (root) => {
     ['Money in', k.accounted ? 'AED ' + fmt(k.accounted) : '—',
       k.accounted
         ? `AED ${fmt(k.accounted_fares || 0)} in fares · AED ${fmt(k.accounted_payouts || 0)} in `
-          + `platform payouts · ${(k.accounted_platforms || []).join(', ') || 'no platform'}`
+          + `platform payouts · ${(k.accounted_platforms || []).map(sourceLabel).join(', ') || 'no platform'}`
           + (k.statement_net ? ` · on-trip net AED ${fmt(k.statement_net)}` : '')
         : 'no fare and no payout statement in this range'],
     ['Completion', k.completion_pct != null ? k.completion_pct + '%' : '—', `${k.cancel_pct ?? 0}% cancelled`],
@@ -1007,7 +1007,7 @@ V.drivers = async (root) => {
   if (pfTot.total) {
     perf.body.append(el('p', 'cap',
       `Showing 25 of ${fmt(pfTot.total)} records — ${fmt(pfTot.people)} people across `
-      + `${fmt(pfTot.periods)} reporting periods on ${(pfTot.platforms || []).join(', ') || 'no platform'}, `
+      + `${fmt(pfTot.periods)} reporting periods on ${(pfTot.platforms || []).map(sourceLabel).join(', ') || 'no platform'}, `
       + `${money(pfTot.earnings)} over ${countOf(pfTot.payout_days, 'paid day')}. `
       + 'The total counts each day once: report windows overlap where a backfill '
       + 'and a catch-up describe the same week, and adding the statements would '
@@ -1671,7 +1671,7 @@ V.finance = async (root) => {
       tone: k.priced_pct != null && k.priced_pct < 40 ? 'warn' : null },
     { label: 'Platform payouts', value: money(k.accounted_payouts),
       sub: k.payout_days
-        ? `${(k.payout_platforms || []).join(', ')} · ${countOf(k.payout_days, 'day')} of statements, `
+        ? `${(k.payout_platforms || []).map(sourceLabel).join(', ')} · ${countOf(k.payout_days, 'day')} of statements, `
           + `${countOf(k.payout_drivers, 'driver')}`
         : 'no payout statement covers this range' },
     /* The statement view beside the bank view. What the fleet EARNED on trip
@@ -1681,7 +1681,7 @@ V.finance = async (root) => {
        the on-trip figure is drivers holding cash, not missing money. */
     { label: 'On-trip revenue', value: money(k.statement_net),
       sub: k.statement_net != null
-        ? `gross − commission, from platform statements · ${(k.statement_platforms || []).join(', ')}`
+        ? `gross − commission, from platform statements · ${(k.statement_platforms || []).map(sourceLabel).join(', ')}`
         : 'not collected for this range yet' },
     { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
       sub: k.priced_trips ? `over ${fmt(k.priced_trips)} priced trips` : 'no fares in this range' },

@@ -415,7 +415,13 @@ async function tabOverview(root, id, prof) {
     { label: 'Days worked', value: fmt(k.days_worked), sub: `${fmt(k.trips_per_day, 1)} trips per day` },
     { label: 'Hours online', value: k.hours_online != null ? fmt(k.hours_online, 1) : '—', sub: k.hours_on_trip != null ? `${fmt(k.hours_on_trip, 1)}h with a passenger` : 'platform-reported' },
     { label: 'Utilisation', value: k.utilisation_pct != null ? pct(k.utilisation_pct) : '—', sub: 'on-trip ÷ online', tone: k.utilisation_pct == null ? null : k.utilisation_pct >= 55 ? 'good' : k.utilisation_pct >= 35 ? 'warn' : 'critical' },
-    { label: 'Trips', value: fmt(k.trips), sub: `${fmt(k.km)} km · avg ${fmt(k.avg_km, 1)} km` },
+    /* 3,381 km over 269 trips is 12.6, and this said 14.8 — avg_km is over
+       the trips that report a distance, which was not on the tile. */
+    { label: 'Trips', value: fmt(k.trips),
+      sub: k.trips_with_distance && k.trips_with_distance !== k.trips
+        ? `${fmt(k.km)} km · avg ${fmt(k.avg_km, 1)} km over the ${fmt(k.trips_with_distance)} `
+          + 'reporting one'
+        : `${fmt(k.km)} km · avg ${fmt(k.avg_km, 1)} km` },
     /* The numerator as well as the denominator. A rate with only its base under
        it is a figure the reader has to take on trust — and the fleet page six
        inches away on another screen prints both. */
@@ -431,7 +437,7 @@ async function tabOverview(root, id, prof) {
     { label: 'Money in', value: k.accounted ? money(k.accounted) : '—',
       sub: k.accounted
         ? `${money(k.accounted_fares || 0)} in fares · ${money(k.accounted_payouts || 0)} paid out `
-          + `by ${(k.accounted_platforms || []).join(', ')}`
+          + `by ${(k.accounted_platforms || []).map(sourceLabel).join(', ')}`
         : 'no fare and no payout statement covers this window' },
     { label: 'Fares', value: money(k.accounted_fares),
       sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' },
@@ -1221,7 +1227,7 @@ export async function renderDriverDirectory(root) {
       <div class="av sm">${esc(initials)}</div>
       <div class="dc-meta">
         <b title="${esc(r.driver_name)}">${esc(r.driver_name)}</b>
-        <div class="cap">${(r.platforms || []).join(' · ')}${r.plate ? ' · ' + esc(r.plate) : ''}</div>
+        <div class="cap">${(r.platforms || []).map(sourceLabel).join(' · ')}${r.plate ? ' · ' + esc(r.plate) : ''}</div>
       </div>
       <div class="dc-n"><span class="num">${fmt(r.trips)}</span><small>trips</small></div>`;
     grid.append(c);

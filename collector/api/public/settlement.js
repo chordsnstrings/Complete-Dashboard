@@ -136,7 +136,7 @@ async function settleMix(host) {
 
   if (s.unlabelled_trips) {
     host.append(note(`${fmt(s.unlabelled_trips)} bookings carry no payment label at all`
-      + `${s.unlabelled_platforms.length ? ` (${s.unlabelled_platforms.join(', ')})` : ''} and are left out `
+      + `${s.unlabelled_platforms.length ? ` (${s.unlabelled_platforms.map(sourceLabel).join(', ')})` : ''} and are left out `
       + 'of every share above rather than counted as cash.'));
   }
   host.append(note('"Revenue: not reported" is not zero. The Uber trip export carries no fare column, '
