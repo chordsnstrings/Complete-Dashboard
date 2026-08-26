@@ -3140,6 +3140,13 @@ V.sources = async (root) => {
   const TAG = { ok: 'ok', partial: 'warn', error: 'bad' };
   st.body.append(tableFrom(status, [
     { label: 'Source', key: 'source', render: (r) => esc(sourceLabel(r.source)) },
+    /* The two fleets are separate businesses with separate credentials on the
+       same providers, and each writes its own run. Without this column two
+       rows read as a duplicate of one source rather than as one fleet
+       collecting and the other not. */
+    { label: 'Fleet', key: 'fleet_id',
+      absent: 'these runs predate per-fleet collection and cover the whole account',
+      render: (r) => (r.fleet_id ? sourceLabel(r.fleet_id) : '—') },
     { label: 'Mode', key: 'mode' },
     { label: 'Status', key: 'status', render: (r) => `<span class="tag ${TAG[r.status] || 'bad'}">${esc(r.status || '—')}</span>` },
     // With separators, on a screen where the table below it has them.

@@ -1728,10 +1728,19 @@ app.get('/api/platforms', wrap(async (req, res) => {
    for months while the Uber trip history had a 299-day hole in it. `status`
    now distinguishes them, and `failed_windows` names the dates, which is what
    makes a hole fixable rather than merely visible. */
+/* Per FLEET as well as per source and mode.
+   ─────────────────────────────────────────────────────────────────────────
+   Ecosine and Egari are separate businesses with separate credentials on the
+   same providers, and every collector writes its own run row for each. Keyed
+   on (source, mode) alone, one fleet's row won and the other vanished — so a
+   fleet whose session had expired, or whose surface had never run at all,
+   read as whatever the other fleet did. That is the exact shape of the bug
+   this page exists to expose, and it was hiding it: uber_fleet never ran for
+   Egari for the collector's whole life and #sources showed uber_fleet ok. */
 app.get('/api/status', wrap(async (_, res) => res.json((await q(
-  `SELECT DISTINCT ON (source, mode) source, mode, status, rows_written, window_start, window_end,
-          finished_at, error, chunks_total, chunks_failed, detail
-   FROM collection_run ORDER BY source, mode, finished_at DESC`)).map((r) => {
+  `SELECT DISTINCT ON (source, mode, fleet_id) source, mode, fleet_id, status, rows_written,
+          window_start, window_end, finished_at, error, chunks_total, chunks_failed, detail
+   FROM collection_run ORDER BY source, mode, fleet_id, finished_at DESC`)).map((r) => {
   const detail = typeof r.detail === 'string' ? JSON.parse(r.detail) : r.detail;
   return {
     ...r,

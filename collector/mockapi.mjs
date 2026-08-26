@@ -80,11 +80,24 @@ app.get('/api/rollups', (_q, r) => r.json([
 ]));
 
 app.get('/api/status', (_, r) => r.json([
-  { source: 'cabman', mode: 'realtime', status: 'ok', finished_at: new Date().toISOString(),
+  { source: 'cabman', mode: 'realtime', status: 'ok', fleet_id: 'ecosine',
+    finished_at: new Date().toISOString(),
     rows_written: 48, chunks_total: null, chunks_failed: null, failed_windows: [], windows: [],
     window_start: null, window_end: null, error: null },
+  /* Two fleets, same source and mode. Keyed on (source, mode) alone one of
+     these rows won and the other vanished, so a fleet that never collected at
+     all read as whatever the other fleet did. */
+  { source: 'uber_fleet', mode: 'incremental', status: 'ok', fleet_id: 'ecosine',
+    finished_at: new Date().toISOString(), rows_written: 557, chunks_total: null,
+    chunks_failed: null, failed_windows: [], windows: [], window_start: null,
+    window_end: null, error: null },
+  { source: 'uber_fleet', mode: 'incremental', status: 'error', fleet_id: 'egari',
+    finished_at: new Date().toISOString(), rows_written: 0, chunks_total: null,
+    chunks_failed: null, failed_windows: [], windows: [], window_start: null,
+    window_end: null, error: 'earnings components: no earners in any of 2 week(s)' },
   // The shape that hid a 299-day hole: rows written, and most windows missing.
-  { source: 'uber', mode: 'backfill', status: 'partial', finished_at: new Date().toISOString(),
+  { source: 'uber', mode: 'backfill', status: 'partial', fleet_id: 'ecosine',
+    finished_at: new Date().toISOString(),
     rows_written: 1129, chunks_total: 12, chunks_failed: 9,
     failed_windows: [
       { from: '2025-10-23', to: '2025-11-22', error: 'download timed out after 600s for report 9f2c…' },
