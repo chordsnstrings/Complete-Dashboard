@@ -143,7 +143,32 @@ export async function renderRoster(root) {
   const anyKm = shown.some((r) => r.km != null);
   const anyScore = shown.some((r) => r.score != null);
   const anyObs = shown.some((r) => r.observed_at);
-  host.append(tableFrom(shown, [
+
+  /* The largest table on the page had no heading at all.
+     ─────────────────────────────────────────────────────────────────────────
+     280 rows and fifteen columns appended straight to the host, while every
+     other table in the product — including the two small ones further down
+     this same file — sits in a panel that names it. A reader landing on
+     #roster/blocked saw a table and had to work out from its contents which
+     of the four lists they were looking at, and the tab bar above is a filter,
+     not a title.
+
+     Named for the tab, with the count, so the heading also answers "is this
+     everyone or a subset". */
+  const TITLE = {
+    all: ['Everyone on the books', 'Every person any provider has a roster row for, whether or not '
+      + 'they have ever driven.'],
+    pipeline: ['Waiting to start', 'Onboarding, waitlisted, or on the books with nothing recorded '
+      + 'against them yet — the people a recruiter is still waiting on.'],
+    idle: ['Able to earn, earning nothing', 'A licence and a slot on at least one platform, and no '
+      + 'booking in this window.'],
+    blocked: ['Stopped everywhere', 'Not permitted to work on any platform they hold. A car in '
+      + 'their custody is depreciating, insured and parked.'],
+  };
+  const [rTitle, rSub] = TITLE[tab] || TITLE.all;
+  const rp = panel(`${rTitle} — ${countOf(shown.length, 'person', 'people')}`, rSub);
+  host.append(rp.panel);
+  rp.body.append(tableFrom(shown, [
     /* The roster exists to find the people who are not earning. A row you
        cannot open is a person you cannot look into. */
     { label: 'Driver', key: 'name',
