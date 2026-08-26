@@ -2297,8 +2297,13 @@ app.get('/api/trip', (req, r) => {
     segments: [{ plate: plates[0], started_at: at('06:51'), ended_at: at('07:30'), duration_min: 39,
       distance_km: 17.2, verdict: 'authorized', verdict_reason: 'matched uber trip <trip id>',
       matched_platform: 'uber', matched_trip_id: id }],
-    payout_day: { day, platform: 'uber', earnings: 389.4, cash_earnings: 42, trips: 5,
+    /* cash_earnings is null on purpose. driver_payout_day is built from the
+       performance feed and Uber's reports no cash at all, so a mock that
+       invents a figure there hides the very gap the statement block fills. */
+    payout_day: { day, platform: 'uber', earnings: 389.4, cash_earnings: null, trips: 5,
       period_start: day, period_end: day, period_days: 1, period_earnings: 389.4 },
+    // The day as the channel breaks it down — the surface that does carry cash.
+    statement_day: { net: 352.4, tips: 25, salik: 12, cash: 140, source: 'uber_rest' },
     same_day: [
       { platform, external_id: id, requested_at: at('06:50'), ended_at: at('07:31'),
         plate: plates[0], distance_km: 17.5, status: 'completed', outcome: 'completed',

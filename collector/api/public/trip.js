@@ -94,6 +94,16 @@ export async function renderTrip(root, platform, id) {
     + 'is the only money most of this fleet’s work has — Uber’s trip export carries no fare column.');
   root.append(mp.panel);
   const pd = d.payout_day;
+  const sd = d.statement_day;
+  /* Cash comes from the STATEMENT, not the payout.
+     ───────────────────────────────────────────────────────────────────────
+     driver_payout_day is built from the performance feed, and Uber's reports
+     no cash at all — so this row was a dash for a fleet whose drivers collect
+     thousands of dirhams a week. The earnings components carry it, and
+     api/trip_routes.js now reads the resolved day beside the payout. The
+     payout figure is left alone: it is what reached the bank, and that is a
+     different question from what the day was made of. */
+  const cash = sd?.cash != null ? Number(sd.cash) : null;
   mp.body.append(tableFrom([
     { what: 'Fare on this booking', v: t.price != null ? money(t.price, t.currency || 'AED', 2) : null,
       basis: t.price != null ? 'the channel priced this trip'
@@ -105,15 +115,26 @@ export async function renderTrip(root, platform, id) {
           + `, from a ${countOf(Number(pd.period_days) || 1, 'day')} payout period`
           + ` (${dayStr(pd.period_start)} → ${dayStr(pd.period_end)})`
         : 'no payout statement covers this day' },
+    /* The day, as the channel itself breaks it down. Each row is null rather
+       than zero where the statement does not reach the day, because a driver
+       who was not paid and a day nobody reported on look identical at 0. */
+    { what: 'Net fare that day', v: sd?.net != null ? money(sd.net, 'AED', 2) : null,
+      basis: sd ? 'what the channel says the day’s trips earned, after its commission'
+        : 'no statement covers this day' },
+    { what: 'Tips that day', v: sd?.tips != null ? money(sd.tips, 'AED', 2) : null,
+      basis: sd ? (Number(sd.tips) ? 'riders’ tips, on top of the fares'
+        : 'no rider tipped this driver that day') : 'no statement covers this day' },
+    { what: 'Salik reimbursed that day', v: sd?.salik != null ? money(sd.salik, 'AED', 2) : null,
+      basis: sd ? (Number(sd.salik) ? 'tolls the channel paid back'
+        : 'no toll was reimbursed that day') : 'no statement covers this day' },
     /* The basis has to describe what is in the cell, not what would be there.
        Written unconditionally it said "part of the figure above" beside an
        em dash, which describes a number that is not on the page. */
-    { what: 'Cash the driver held that day', v: pd && pd.cash_earnings != null
-      ? money(pd.cash_earnings, 'AED', 2) : null,
-      basis: !pd ? 'no payout statement covers this day'
-        : (pd.cash_earnings == null
-          ? 'the statement for this day reports no cash collected'
-          : 'part of the figure above, already in their hand') },
+    { what: 'Cash the driver held that day', v: cash != null ? money(cash, 'AED', 2) : null,
+      basis: !sd ? 'no statement covers this day'
+        : (cash === null ? 'the statement for this day reports no cash collected'
+          : cash === 0 ? 'every fare that day was paid in the app'
+            : 'already in their hand, so the channel keeps it back from the payout') },
   ], [
     { label: 'Figure', key: 'what' },
     { label: 'Amount', key: 'v', num: true, render: (r) => (r.v == null

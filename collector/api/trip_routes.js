@@ -46,7 +46,7 @@ export function tripRoutes(app, { q, wrap }) {
        so each block is fetched independently and an empty one is reported as
        empty rather than turning the page into an error. */
     const day = t.local_day;
-    const [custody, telemetry, segment, payout, sameDay, vehicle] = await Promise.all([
+    const [custody, telemetry, segment, payout, sameDay, vehicle, statement] = await Promise.all([
       /* Who held the car that day, from the shared definition — the same one
          the day page and the playbook use, so the person a trip names is the
          person the to-do list chases. */
@@ -104,6 +104,27 @@ export function tripRoutes(app, { q, wrap }) {
       t.plate ? q(
         `SELECT plate, make, model, year, color AS colour, fleet_id
          FROM vehicle WHERE plate = $1`, [t.plate]) : [],
+
+      /* What the CHANNEL's statement says about that day, beside what the bank
+         paid for it. driver_payout_day answers "how much money moved"; it is
+         built from driver_performance, and Uber's performance feed reports no
+         cash at all — so the trip page printed a dash next to "Cash the driver
+         held that day" for a fleet whose drivers collect thousands of dirhams
+         in cash a week. The figure exists, on the other surface: the earnings
+         components carry cash_collected, and src/rollup.js resolves them into
+         one row per driver-day here. Reading both means the page can show the
+         day split into what the driver earned, was tipped, was reimbursed for
+         Salik and already holds — which is the whole of Uber's own statement
+         for that day, against the trip that is part of it. */
+      t.driver_ext_id && day ? q(
+        `SELECT round(sum(net)::numeric,2)   AS net,
+                round(sum(tips)::numeric,2)  AS tips,
+                round(sum(salik)::numeric,2) AS salik,
+                round(sum(cash)::numeric,2)  AS cash,
+                min(source) AS source
+         FROM driver_statement_day
+         WHERE source <> 'ledger' AND driver_ext_id = $1 AND day = $2::date`,
+        [t.driver_ext_id, day]) : [],
     ]);
 
     res.json({
@@ -113,6 +134,10 @@ export function tripRoutes(app, { q, wrap }) {
       telemetry,
       segments: segment,
       payout_day: payout[0] || null,
+      /* Null when no component covers the day, rather than a row of zeroes —
+         "the statement does not reach this day" and "the driver earned
+         nothing" are different facts and the page says which. */
+      statement_day: statement[0]?.net == null ? null : statement[0],
       same_day: sameDay,
       /* Named rather than inferred from an empty array: "no tracker reported
          this plate that day" and "this plate has no tracker" are different

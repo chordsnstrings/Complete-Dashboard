@@ -58,8 +58,19 @@ await q(`INSERT INTO occupancy_segment (plate,started_at,ended_at,fleet_id,durat
 await q(`INSERT INTO driver_performance (platform,fleet_id,driver_ext_id,driver_name,
            period_start,period_end,earnings,trips,ingested_at)
          VALUES ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20',412.75,9, now())`);
-const { refreshPayouts } = await import('../src/rollup.js');
+/* The day's statement, which is a DIFFERENT surface from the payout: Uber's
+   performance feed reports no cash, and the components do. The trip page reads
+   both, so the fixture fills both. */
+await q(`INSERT INTO driver_earnings_component (platform,fleet_id,driver_ext_id,driver_name,
+           period_start,period_end,category,parent,amount,currency)
+         VALUES ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20','your_earnings',NULL,300,'AED'),
+                ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20','tip','your_earnings',20,'AED'),
+                ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20','taxes_earnings','your_earnings',-5,'AED'),
+                ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20','toll','refunds',12.5,'AED'),
+                ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20','cash_collected','payouts',-140,'AED')`);
+const { refreshPayouts, refreshStatements } = await import('../src/rollup.js');
 await refreshPayouts(db);
+await refreshStatements(db);
 
 const app = express();
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
@@ -115,6 +126,17 @@ check('the day payout is returned, with the period it was measured over',
   Number(r.payout_day.earnings) === 412.75 && Number(r.payout_day.period_days) === 1,
   JSON.stringify(r.payout_day));
 
+/* The payout is what reached the bank. The statement is what the day was made
+   of — and it is the only surface that reports cash, which is why the page
+   reads both rather than printing a dash where thousands of dirhams sit. */
+check('the day statement comes back beside the payout',
+  r.statement_day != null && Number(r.statement_day.net) === 285
+  && Number(r.statement_day.tips) === 20 && Number(r.statement_day.salik) === 12.5,
+  JSON.stringify(r.statement_day));
+check('cash is reported positive, from the surface that carries it',
+  Number(r.statement_day.cash) === 140 && r.payout_day.cash_earnings === null,
+  JSON.stringify({ s: r.statement_day?.cash, p: r.payout_day?.cash_earnings }));
+
 const h = (await get('/api/trip?platform=hotel&id=h-9')).body;
 check('a channel that prices its trips reports the fare on the trip',
   Number(h.trip.price) === 88.5 && h.notes.fare_reported === true
@@ -126,6 +148,10 @@ check('a trip on the other fleet resolves too, and names its own fleet',
 /* A plate nobody tracked and a day nobody held is a real trip, not an error. */
 check('missing context is empty rather than fatal',
   e.custody.length === 0 && e.telemetry.length === 0 && e.payout_day === null);
+/* Null, not a row of zeroes: a day no statement reaches and a day the driver
+   earned nothing on look identical at 0, and only one of them is a gap. */
+check('a day no statement covers is null rather than zeroed',
+  e.statement_day === null, JSON.stringify(e.statement_day));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();
