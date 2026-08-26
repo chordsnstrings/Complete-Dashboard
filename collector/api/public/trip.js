@@ -141,6 +141,35 @@ export async function renderTrip(root, platform, id) {
       ? '<span class="ent-off">—</span>' : r.v) },
     { label: 'What it measures', key: 'basis' },
   ], { compact: true }));
+  /* The identity, checked on the page rather than asserted in a caption.
+     ───────────────────────────────────────────────────────────────────────
+     #reconcile proves `bank ≈ net + tips + salik − cash` month by month, to
+     0.7% on July 2026. With both sides of it now on this panel a reader can
+     add the four rows up and compare — so the page does the addition and says
+     how close it came, which is the difference between a table of numbers and
+     a table that can be checked.
+
+     Only when every term is present: a sum with a missing term is not a
+     smaller gap, it is a different equation, and printing it would report
+     absent data as a discrepancy. */
+  if (pd && sd && pd.earnings != null
+      && sd.net != null && sd.tips != null && sd.salik != null && sd.cash != null) {
+    const expect = Number(sd.net) + Number(sd.tips) + Number(sd.salik) - Number(sd.cash);
+    const bank = Number(pd.earnings);
+    const gap = bank - expect;
+    const pctOff = expect ? Math.abs(gap / expect) * 100 : null;
+    mp.body.append(note(`The four figures above are the payout's own parts: `
+      + `${money(sd.net, 'AED', 2)} + ${money(sd.tips, 'AED', 2)} tips `
+      + `+ ${money(sd.salik, 'AED', 2)} Salik − ${money(sd.cash, 'AED', 2)} cash `
+      + `= ${money(expect, 'AED', 2)}, against ${money(bank, 'AED', 2)} paid`
+      + (Math.abs(gap) < 0.01 ? ' — they agree exactly.'
+        : `, a gap of ${money(Math.abs(gap), 'AED', 2)}`
+          + (pctOff == null ? '.' : ` (${pctOff.toFixed(1)}%).`)
+          + ' The two come from different Uber surfaces and settle on different'
+          + ' days, so a small gap is the normal state; a large one is worth a look.'),
+    Math.abs(gap) > Math.max(5, Math.abs(expect) * 0.05) ? 'warn' : null));
+  }
+
   if (pd && Number(pd.period_days) > 1) {
     mp.body.append(note(`The payout above covers ${countOf(Number(pd.period_days), 'day')} and has been `
       + 'divided evenly across them. It is the finest measurement Uber served for this period — a day '
