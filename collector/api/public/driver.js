@@ -888,9 +888,13 @@ async function tabEarnings(root, id, prof) {
   ], { sortable: true, sortId: 'periods', defaultSort: { key: 'period_start', dir: 'desc' } }));
   /* How much of this person's work these statements actually describe.
      ─────────────────────────────────────────────────────────────────────────
-     Uber's earner-payments surface answers for the CURRENT payment period and
-     returns an empty list for every older window, so a driver with 3,295 trips
-     on record can have four of them covered by a statement. The Trips column
+     Coverage is bounded by RETENTION now, not by a broken request. Uber's
+     earner-payments REST surface answers only for the current payment period,
+     and while that was the only statement surface a driver with 3,295 trips on
+     record could have four of them covered. The supplier GraphQL breakdown
+     reaches back about 192 days, on a rolling window that moves forward daily,
+     so the fraction below is now "how much of their work Uber still holds"
+     rather than "how much of it we managed to ask for". The Trips column
      below is per period; the lifetime figure is in the profile the page has
      already fetched, and it was the difference between "this is what they
      earned" and "this is what we can see of what they earned". Printed as a

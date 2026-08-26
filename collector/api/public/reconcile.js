@@ -232,12 +232,21 @@ export async function renderReconcile(root, month) {
   host.append(mp.panel);
 
   host.append(el('p', 'cap', esc(d.note)));
+  /* The horizon this note described was the REST feed's, and Uber has two.
+     ─────────────────────────────────────────────────────────────────────────
+     "answers for the CURRENT payment period and returns an empty list for
+     every older window" was true of api.uber.com's earner-payments surface,
+     and it is still true of it. It stopped describing this page the day the
+     supplier GraphQL breakdown started filling the same table: that surface
+     answers for as far back as Uber retains, which is a rolling window of
+     about 192 days, and it is why seven months now carry an on-trip figure on
+     both fleets where six did not before. A note claiming the column "grows a
+     week at a time from here" sat directly beneath thirteen months of it. */
   host.append(note(
     'A gap between bank and expected is usually timing, not theft: cash a driver banked in the '
     + 'neighbouring month, and per-trip surcharges the statement mapping deliberately leaves '
     + 'unguessed. The on-trip side reaches only as far back as the platform statement surfaces '
-    + 'do, and Uber’s is far shorter than it reads: its earner-payments surface answers for the '
-    + 'CURRENT payment period and returns an empty list for every older window, however wide the '
-    + 'request. So the on-trip column begins where collection began and grows a week at a time '
-    + 'from here; earlier months show “—”, which means unknowable, not zero.'));
+    + 'do. Uber’s reaches about 192 days — a rolling retention window that moves forward daily, '
+    + 'so the oldest month on this table loses its statement a little at a time and can never '
+    + 'get it back. Earlier months show “—”, which means unknowable, not zero.'));
 }
