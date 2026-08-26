@@ -2683,6 +2683,18 @@ app.get('/api/coverage', (_, r) => r.json({
     last_poll: new Date().toISOString() }],
   alerts: [{ n: 1904, from_ts: '2025-09-02T06:00:00Z', latest: '2026-08-21T14:20:00Z' }],
   ledger: [{ n: 2399, from_ts: '2026-02-06T00:00:00Z', latest: '2026-08-20T21:00:00Z' }],
+  /* Continuity for the datasets source_day_coverage does not cover, keyed by
+     the label the table prints. Telemetry carries a real gap so the Missing
+     and Largest gap columns have something to render. */
+  dataset_calendar: {
+    'telemetry · cabman': { days_with_data: 360, first_day: '2025-08-19', last_day: '2026-08-21',
+      median_rows_per_day: 1140, missing_days: 8,
+      gaps: [{ from: '2026-03-02', to: '2026-03-07', days: 6 }, { from: '2026-05-11', to: '2026-05-12', days: 2 }] },
+    'safety alerts': { days_with_data: 353, first_day: '2025-09-02', last_day: '2026-08-21',
+      median_rows_per_day: 5, missing_days: 0, gaps: [] },
+    'ledger entries': { days_with_data: 196, first_day: '2026-02-06', last_day: '2026-08-20',
+      median_rows_per_day: 12, missing_days: 0, gaps: [] },
+  },
   /* Money coverage beside trip coverage. Uber's trip feed reaches back a year
      and its earnings API serves about six months, so half the record has work
      on it and no money — permanently, since the provider will not serve those

@@ -28,6 +28,12 @@ import { isAdmin, redactSettings } from '../api/admin_gate.js';
    maps every one of them. Injected rather than stubbed because the whole point
    is that both readers use the same table. */
 import { RAW_ALIASES } from '../src/probe.js';
+/* The shared gap-finder, injected rather than stubbed for the same reason the
+   alias tables are: /api/coverage reports continuity for the datasets
+   source_day_coverage does not cover, and a stub here would let a regression
+   in that computation pass while the page silently went back to saying "not a
+   dated source" about the longest feed the product holds. */
+import { spanGaps } from '../api/coverage_gaps.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -76,7 +82,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
-    isAdmin, redactSettings, RAW_ALIASES,
+    isAdmin, redactSettings, RAW_ALIASES, spanGaps,
     FIX_FRESH: "interval '30 minutes'",
     rollupGrainSql, rollupState: async () => [],
     /* The response cache object server.js closes over. The harness mounts a

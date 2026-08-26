@@ -3259,7 +3259,13 @@ V.sources = async (root) => {
       from: r.from_ts, to: r.latest })),
     ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', src: null, n: r.n,
       from: r.from_ts, to: r.latest })),
-  ].map((r) => ({ ...r, cal: r.src ? byCal[r.src] : null }));
+    /* Trips are keyed by platform in source_day_coverage; everything else has
+       its continuity computed by /api/coverage under the label this table
+       already prints, so the join is on what the reader sees. Nine of the
+       eleven rows here used to say "not a dated source" about feeds that are
+       dated — including telemetry, the longest record the product holds. */
+  ].map((r) => ({ ...r, cal: (r.src ? byCal[r.src] : null)
+    || (coverage.dataset_calendar || {})[r.what] || null }));
   const anyValue = cov.some((r) => r.value != null);
   cv.body.append(tableFrom(cov, [
     { label: 'Dataset', key: 'what' },

@@ -106,6 +106,7 @@ const q = (text, params) => pool.query(text, params).then((r) => r.rows);
    quote. The real fix for this class of bug is test/route_smoke.test.mjs,
    which executes every route rather than grepping for it. */
 import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, JOIN_TRIP, personFold } from './custody_sql.js';
+import { spanGaps } from './coverage_gaps.js';
 let errSeq = 0;
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   const ref = `e${Date.now().toString(36)}-${(++errSeq).toString(36)}`;
@@ -1778,7 +1779,7 @@ app.get('/api/coverage', wrap(async (req, res) => {
   const pl = req.query.platform || null;
   const fl = req.query.fleet || null;
   const P = [pl, fl];
-  const [trips, telemetry, alerts, ledger, earnings] = await Promise.all([
+  const [trips, telemetry, alerts, ledger, earnings, telDays, alertDays, ledgerDays] = await Promise.all([
     q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts
        FROM trip WHERE ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
        GROUP BY 1`, P),
@@ -1796,6 +1797,7 @@ app.get('/api/coverage', wrap(async (req, res) => {
     q(`SELECT count(*)::int n, min(occurred_at) from_ts, max(occurred_at) latest FROM alert
        WHERE ($1::text IS NULL OR fleet_id=$1)`, [fl]),
     q(`SELECT count(*)::int n, min(event_at) from_ts, max(event_at) latest FROM ledger_entry`),
+
     /* Money coverage, beside trip coverage, because they are not the same span
        and the difference is the single largest hole in this product.
 
@@ -1814,6 +1816,32 @@ app.get('/api/coverage', wrap(async (req, res) => {
        WHERE earnings IS NOT NULL
          AND ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
        GROUP BY 1`, P),
+    /* Per-day counts for the datasets source_day_coverage does not cover.
+       ─────────────────────────────────────────────────────────────────────
+       That view reads the trip table alone, and eight other things read it —
+       including the insight engine, which treats every source in it as a
+       booking channel — so widening it would put telemetry into places that
+       would report it as a channel with collection gaps. The Data coverage
+       table needs the same per-day continuity for feeds that are not trips,
+       so it is computed here, for this endpoint, and folded through the same
+       gap-finder the calendar uses (api/coverage_gaps.js).
+
+       Dubai days, like every other calendar key in this product. */
+    q(`SELECT 'telemetry · ' || source AS dataset,
+              to_char((captured_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
+              count(*)::int rows
+         FROM telemetry_snapshot WHERE captured_at IS NOT NULL
+         GROUP BY 1, 2 ORDER BY 1, 2`),
+    q(`SELECT 'safety alerts' AS dataset,
+              to_char((occurred_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
+              count(*)::int rows
+         FROM alert WHERE occurred_at IS NOT NULL
+         GROUP BY 1, 2 ORDER BY 2`),
+    q(`SELECT 'ledger entries' AS dataset,
+              to_char((event_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
+              count(*)::int rows
+         FROM ledger_entry WHERE event_at IS NOT NULL
+         GROUP BY 1, 2 ORDER BY 2`),
   ]);
   /* Per platform: where the trip feed starts, where the money starts, and how
      much work sits before it. A page can then say "6,231 bookings we hold no
@@ -1859,7 +1887,18 @@ app.get('/api/coverage', wrap(async (req, res) => {
       bookings_before: byPl.get(w.platform) ?? 0,
     }));
   }
-  res.json({ trips, telemetry, alerts, ledger, earnings, earnings_gaps: gaps });
+  /* Continuity for the datasets that are not trips, keyed by the label the
+     table already prints, so the page joins on what it displays rather than
+     on a second naming scheme. Nine of eleven rows read "not a dated source"
+     before this, against feeds that are plainly dated. */
+  const calendars = {};
+  for (const rows of [telDays, alertDays, ledgerDays]) {
+    for (const r of rows) (calendars[r.dataset] ||= []).push({ day: r.day, rows: r.rows });
+  }
+  const dataset_calendar = Object.fromEntries(
+    Object.entries(calendars).map(([k, days]) => [k, spanGaps(days)]));
+  res.json({ trips, telemetry, alerts, ledger, earnings, earnings_gaps: gaps,
+    dataset_calendar });
 }));
 
 /* ───────────────────────── settings ───────────────────────── */

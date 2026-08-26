@@ -20,6 +20,7 @@
       else it is unmeasured, and an unmeasured approach leg is never charted as
       a zero-kilometre one. */
 import { custodyOverWindow, custodyCountOverWindow, peopleCount } from './custody_sql.js';
+import { spanGaps } from './coverage_gaps.js';
 
 /* A number that lives in a JSON blob is a number a provider can change into a
    word without telling us. Every numeric read out of `raw` is guarded, because
@@ -968,31 +969,11 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       bySource.set(r.source, s);
     }
     const out = [...bySource.values()].map((s) => {
-      const seen = new Set(s.days.map((d) => d.day));
-      const first = s.days[0]?.day, last = s.days[s.days.length - 1]?.day;
-      // Gaps are only counted INSIDE a source's own observed span. A source that
-      // started collecting in March has no hole in January — it has no history,
-      // which is a different statement and belongs in a different sentence.
-      const gaps = [];
-      if (first && last) {
-        let run = null;
-        for (let t = Date.parse(first); t <= Date.parse(last); t += 864e5) {
-          const d = new Date(t).toISOString().slice(0, 10);
-          if (seen.has(d)) { if (run) { gaps.push(run); run = null; } }
-          else if (run) { run.to = d; run.days++; }
-          else run = { from: d, to: d, days: 1 };
-        }
-        if (run) gaps.push(run);
-      }
-      const daily = s.days.map((d) => d.rows).sort((a, b) => a - b);
-      const median = daily.length ? daily[Math.floor(daily.length / 2)] : 0;
-      return {
-        source: s.source, total_rows: s.total, days_with_data: s.days.length,
-        first_day: first, last_day: last, median_rows_per_day: median,
-        gaps: gaps.sort((a, b) => b.days - a.days).slice(0, 20),
-        missing_days: gaps.reduce((a, g) => a + g.days, 0),
-        days: s.days,
-      };
+      /* One definition of a gap, shared with /api/coverage — see
+         api/coverage_gaps.js. Its rule is the one this had: gaps are counted
+         only INSIDE a source's own observed span, because a feed that started
+         in March has no hole in January. */
+      return { source: s.source, total_rows: s.total, ...spanGaps(s.days), days: s.days };
     }).sort((a, b) => b.total_rows - a.total_rows);
 
     /* ── the question this page could not answer ──────────────────────────
