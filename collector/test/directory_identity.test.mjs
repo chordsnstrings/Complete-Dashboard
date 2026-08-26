@@ -104,6 +104,25 @@ check('a database with no rollup yet answers the same way',
   oldFresh.fleet_id === 'egari' && oldFresh.plate === 'L900'
   && [...(oldFresh.platforms || [])].sort().join() === 'uber,yango', JSON.stringify(oldFresh));
 
+/* ── and the books, for somebody who has never driven ───────────────────── */
+/* 129 people on production carried no fleet even after the history fallback,
+   because they have taken no booking at all — but every one of them holds a
+   standing or a compliance record, and both tables carry fleet_id. */
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, fleet_id, full_name, state)
+         VALUES ('hotel','d-books','egari','Saeed Al Mansoori','offline')`);
+const books = await get('/api/drivers/directory?from=2026-08-20&to=2026-08-26');
+const bk = books.find((r) => r.driver_ext_id === 'd-books');
+check('somebody who has never driven still shows the fleet whose books they are on',
+  bk?.fleet_id === 'egari', JSON.stringify(bk && { f: bk.fleet_id, t: bk.trips, l: bk.lifetime_trips }));
+check('and is not claimed as identified from trip history, because there is none',
+  bk?.identity_from_history === false, String(bk?.identity_from_history));
+check('their work columns stay zero and their channels stay empty',
+  bk.trips === 0 && (bk.platforms || []).length === 0, JSON.stringify(bk.platforms));
+/* The order matters: a trip beats the books. */
+const still = books.find((r) => r.driver_ext_id === 'd-now');
+check('a measured fleet still beats a compliance record',
+  still.fleet_id === 'ecosine', String(still.fleet_id));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();
 process.exit(fail ? 1 : 0);

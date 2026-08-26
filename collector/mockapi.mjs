@@ -2666,9 +2666,12 @@ app.get('/api/coverage', (_, r) => r.json({
     { platform: 'fms', n: 38970, from_ts: '2025-08-21T02:00:00Z', to_ts: '2026-08-21T19:00:00Z' },
     { platform: 'hotel', n: 1256, from_ts: '2026-07-07T05:00:00Z', to_ts: '2026-08-21T16:00:00Z' },
   ],
-  telemetry: [{ source: 'cabman', n: 412880, last_poll: new Date().toISOString() }],
-  alerts: [{ n: 1904, latest: '2026-08-21T14:20:00Z' }],
-  ledger: [{ n: 2399, latest: '2026-08-20T21:00:00Z' }],
+  /* from_ts on all three: the endpoint used to select only a last timestamp,
+     so seven of eleven rows on the coverage table had no start date. */
+  telemetry: [{ source: 'cabman', n: 412880, from_ts: '2025-08-19T00:00:00Z',
+    last_poll: new Date().toISOString() }],
+  alerts: [{ n: 1904, from_ts: '2025-09-02T06:00:00Z', latest: '2026-08-21T14:20:00Z' }],
+  ledger: [{ n: 2399, from_ts: '2026-02-06T00:00:00Z', latest: '2026-08-20T21:00:00Z' }],
   /* Money coverage beside trip coverage. Uber's trip feed reaches back a year
      and its earnings API serves about six months, so half the record has work
      on it and no money — permanently, since the provider will not serve those

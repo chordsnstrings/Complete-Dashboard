@@ -1784,11 +1784,18 @@ app.get('/api/coverage', wrap(async (req, res) => {
        GROUP BY 1`, P),
     /* telemetry_snapshot.source is 'cabman' or 'fms' — a tracker, not a booking
        channel — so a platform filter would empty it rather than narrow it. */
-    q(`SELECT source, count(*)::int n, max(polled_at) last_poll FROM telemetry_snapshot
+    /* min() as well as max(). This table is headed "what has actually landed"
+       and its From column was blank on every row but the four trip feeds,
+       because only those selected a first timestamp — while telemetry, alerts
+       and the ledger obviously have one and the query simply never asked. On
+       production that was 7 of 11 rows with no start date on the page whose
+       job is to say how far back the record goes. */
+    q(`SELECT source, count(*)::int n, min(captured_at) from_ts,
+              max(polled_at) last_poll FROM telemetry_snapshot
        WHERE ($1::text IS NULL OR fleet_id=$1) GROUP BY 1`, [fl]),
-    q(`SELECT count(*)::int n, max(occurred_at) latest FROM alert
+    q(`SELECT count(*)::int n, min(occurred_at) from_ts, max(occurred_at) latest FROM alert
        WHERE ($1::text IS NULL OR fleet_id=$1)`, [fl]),
-    q(`SELECT count(*)::int n, max(event_at) latest FROM ledger_entry`),
+    q(`SELECT count(*)::int n, min(event_at) from_ts, max(event_at) latest FROM ledger_entry`),
     /* Money coverage, beside trip coverage, because they are not the same span
        and the difference is the single largest hole in this product.
 

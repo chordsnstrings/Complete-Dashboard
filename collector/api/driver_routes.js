@@ -380,11 +380,19 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                  rather than shown as four blanks under their own name.
                  ever_* is never used to overwrite a window value. */
               coalesce(w.plate, ev.last_plate) AS plate,
-              coalesce(w.fleet_id, ev.last_fleet) AS fleet_id,
+              /* …and the books, third. 129 of the people still blank after
+                 the history fallback have never driven at all, so no trip can
+                 name their fleet — but every one of them holds a standing or a
+                 compliance record, and BOTH of those tables carry fleet_id
+                 (this query already filters on it). A person on the books with
+                 no fleet beside their name is the page failing to read a
+                 column it is already joined to. */
+              coalesce(w.fleet_id, ev.last_fleet, dc.fleet_id, dps.fleet_id) AS fleet_id,
               coalesce(w.platforms, ev.ever_platforms, ARRAY[]::text[]) AS platforms,
               /* So a reader can tell a measurement from an identity: true
                  where these three describe work outside the window. */
-              (w.trips IS NULL OR w.trips = 0) AND ev.lifetime > 0 AS identity_from_history,
+              (w.trips IS NULL OR w.trips = 0) AND coalesce(ev.lifetime, 0) > 0
+                AS identity_from_history,
               ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
               dc.state, dc.licence_expires, dc.rating,
               (dc.licence_expires - now()::date) AS licence_days_left,

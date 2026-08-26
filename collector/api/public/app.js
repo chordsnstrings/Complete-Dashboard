@@ -3249,10 +3249,16 @@ V.sources = async (root) => {
     ...(coverage.earnings || []).map((r) => ({ what: `earnings · ${sourceLabel(r.platform || r.source)}`,
       src: null, n: r.n, from: r.from_ts || r.first_period, to: r.to_ts || r.last_period,
       value: r.amount ?? r.total ?? null })),
-    ...(coverage.telemetry || []).map((r) => ({ what: `telemetry · ${sourceLabel(r.source)}`, src: null,
-      n: r.n, from: null, to: r.last_poll })),
-    ...(coverage.alerts || []).map((r) => ({ what: 'safety alerts', src: null, n: r.n, from: null, to: r.latest })),
-    ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', src: null, n: r.n, from: null, to: r.latest })),
+    /* from_ts on all three now. The endpoint selected only a LAST timestamp
+       for these, so seven of the eleven rows on a table headed "what has
+       actually landed" had no start date at all — including the telemetry
+       feed, which is the longest record the product holds. */
+    ...(coverage.telemetry || []).map((r) => ({ what: `telemetry · ${sourceLabel(r.source)}`,
+      src: null, n: r.n, from: r.from_ts, to: r.last_poll })),
+    ...(coverage.alerts || []).map((r) => ({ what: 'safety alerts', src: null, n: r.n,
+      from: r.from_ts, to: r.latest })),
+    ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', src: null, n: r.n,
+      from: r.from_ts, to: r.latest })),
   ].map((r) => ({ ...r, cal: r.src ? byCal[r.src] : null }));
   const anyValue = cov.some((r) => r.value != null);
   cv.body.append(tableFrom(cov, [
