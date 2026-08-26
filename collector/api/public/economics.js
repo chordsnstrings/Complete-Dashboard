@@ -39,7 +39,7 @@
 
 import { areaChart, hbars, scatter, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
-  dayStr, money, pct } from './ui.js';
+  dayStr, money, pct, sourceLabel, countOf, plural } from './ui.js';
 import { q, href, state } from './data.js';
 import { makeMap, fitTo } from './map.js';
 
@@ -141,8 +141,9 @@ function coverageNote(host, cov, windowDays) {
   if (!cov) return;
   const parts = [cov.note];
   if (cov.unpayable_bookings) {
-    parts.push(`${fmt(cov.unpayable_bookings)} booking(s) in the window you are looking at fall `
-      + `before that date across ${fmt(cov.unpayable_days)} day(s), so they contribute work and `
+    parts.push(`${countOf(cov.unpayable_bookings, 'booking')} in the window you are looking at `
+      + `${plural(cov.unpayable_bookings, 'falls', 'fall')} before that date across `
+      + `${countOf(cov.unpayable_days, 'day')}, so they contribute work and `
       + 'no money. Narrow the range to compare like with like.');
   }
   host.append(note(parts.join(' '), cov.unpayable_bookings ? 'warn' : null));
@@ -537,7 +538,7 @@ async function assetsTab(root) {
   const cols = [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Fleet', key: 'fleet_id',
-      render: (r) => (r.fleet_id ? pill(r.fleet_id, 'plat')
+      render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id), 'plat')
         : absent('no source names a fleet for this plate')) },
     { label: 'Make & model', key: 'model', nosort: true,
       render: (r) => esc([r.year, r.make, r.model].filter(Boolean).join(' ') || '—') },
@@ -623,7 +624,12 @@ async function driversTab(root) {
       sub: `${fmt(t.worked_days)} person-days` },
     { label: 'Per booking', value: money(t.aed_per_booking, 'AED', 2),
       sub: `over ${fmt(t.bookings)} bookings` },
-    { label: 'Earning', value: fmt(t.earning), tone: 'good', sub: `of ${fmt(t.people)} people` },
+    /* 247, where #drivers says 361 and #roster says 280 — three different
+       populations, and this one never said which it was. It is everyone who
+       drove OR was paid inside the window, which is the only population the
+       money on this page can be divided by. */
+    { label: 'Earning', value: fmt(t.earning), tone: 'good',
+      sub: `of ${fmt(t.people)} who drove or were paid in this window` },
     { label: 'Drove, no money', value: fmt(t.drove_unpaid),
       tone: t.drove_unpaid ? 'critical' : 'good',
       sub: 'took bookings, no payout statement reaches them' },
@@ -636,7 +642,7 @@ async function driversTab(root) {
       render: (r) => entity('driver', r.driver_ext_id, r.driver_name)
         + (r.accounts > 1 ? ` <span class="dim">${r.accounts} accounts</span>` : '') },
     { label: 'Channels', key: 'platforms', nosort: true,
-      render: (r) => (r.platforms.length ? r.platforms.map((p) => pill(p, 'plat')).join(' ')
+      render: (r) => (r.platforms.length ? r.platforms.map((p) => pill(sourceLabel(p), 'plat')).join(' ')
         : absent('no platform record for this person in this range')) },
     { label: 'Money in', key: 'money', num: true,
       render: (r) => (r.money == null

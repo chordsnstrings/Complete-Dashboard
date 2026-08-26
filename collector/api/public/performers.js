@@ -94,9 +94,18 @@ export async function renderPerformers(root, band) {
       sub: ranked.length ? esc(ranked[0].driver_name) : 'nobody cleared the threshold' },
     { label: 'Fleet per day worked', value: money(t.aed_per_day_worked),
       sub: 'every person, every day anyone drove' },
-    { label: 'Spread', value: ranked.length > 1
-      ? `${Math.round((rate(ranked[0]) || 0) / (rate(ranked[ranked.length - 1]) || 1) * 10) / 10}×` : '—',
-      sub: 'best to worst among the ranked' },
+    /* Same trap as the two-ends table below: first-over-last is a magnitude on
+       the page sorted highest-first and a fraction on the page sorted
+       lowest-first, where AED 361 against AED 13 was rounded to "0x". */
+    { label: 'Spread', value: (() => {
+      if (ranked.length < 2) return '—';
+      const a = rate(ranked[0]) || 0;
+      const b = rate(ranked[ranked.length - 1]) || 0;
+      const hi = Math.max(a, b);
+      const lo = Math.min(a, b);
+      return lo > 0 ? `${Math.round((hi / lo) * 10) / 10}×` : '—';
+    })(),
+      sub: 'between the best and the worst of the ranked' },
   ]));
 
   listP.body.innerHTML = '';
@@ -146,8 +155,14 @@ export async function renderPerformers(root, band) {
   shapeP.body.innerHTML = '';
   if (ranked.length > 3) {
     const n = Math.min(5, Math.floor(ranked.length / 2));
-    const best = ranked.slice(0, n);
-    const worst = ranked.slice(-n);
+    /* Sorted here rather than sliced off the ends of `ranked`, because
+       `ranked` runs highest-first on #performer and LOWEST-first on
+       #low-performers. Taking slice(0, n) as "best" was right on one page and
+       exactly backwards on the other: the low page headed its worst five
+       "Top 5", its best five "Bottom 5", and printed a ratio of 0.1x. */
+    const byRate = [...ranked].sort((a, b) => (rate(b) || 0) - (rate(a) || 0));
+    const best = byRate.slice(0, n);
+    const worst = byRate.slice(-n);
     const avg = (list, f) => list.reduce((a, x) => a + (f(x) || 0), 0) / list.length;
     const cmp = [
       ['Per day worked', avg(best, rate), avg(worst, rate), money],

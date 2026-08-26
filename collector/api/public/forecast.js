@@ -19,7 +19,7 @@
 
 import { empty, fmt, barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dayStr, dateStr,
-  countOf, sourceLabel, signed } from './ui.js';
+  countOf, plural, sourceLabel, signed } from './ui.js';
 import { q, href, hrefFilter, state } from './data.js';
 
 const MONTH = (m) => {
@@ -185,7 +185,8 @@ export async function renderForecast(root) {
     tb.append(el('p', 'note',
       `The fit starts at ${MONTH(d.break.to)}. Between ${MONTH(d.break.from)} and it, bookings moved `
       + `${signed(d.break.change_pct, { unit: '%' })} and did not come back — a line drawn through that predicts a recovery to the `
-      + `old level that nothing in the data supports. ${d.months_excluded.length} earlier month(s) were `
+      + `old level that nothing in the data supports. ${countOf(d.months_excluded.length, 'earlier month')} `
+      + `${plural(d.months_excluded.length, 'was', 'were')} `
       + `excluded: ${d.months_excluded.map(MONTH).join(', ')}.`));
   }
 

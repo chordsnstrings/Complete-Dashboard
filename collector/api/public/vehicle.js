@@ -428,7 +428,11 @@ async function tabMovement(root, plate) {
   else {
     hbars(verd.body, mv.by_verdict.map((v) => ({ label: v.verdict.replace(/_/g, ' '), n: v.n })), { label: 'label', value: 'n', seq: true });
     const un = mv.by_verdict.find((v) => v.verdict === 'unauthorized');
-    if (un) verd.body.append(el('p', 'cap', `${un.n} period(s) covering ${fmt(un.km)} km had the seat occupied and the vehicle moving with no booking on any channel.`));
+    if (un) {
+      verd.body.append(el('p', 'cap',
+        `${countOf(un.n, 'period')} covering ${fmt(un.km)} km had the seat occupied and the `
+        + 'vehicle moving with no booking on any channel.'));
+    }
   }
 
   park.body.innerHTML = '';
@@ -465,8 +469,9 @@ async function tabMovement(root, plate) {
   if (!mv.segments.length) {
     empty(seg.body, mv.days.length
       ? `No occupancy interval was built for ${plate} in this window. `
-        + `${fmt(mv.days.length)} day(s) of fixes are stored and `
-        + `${fmt(mv.parked.length)} stationary period(s) were found — the tracker was reporting; `
+        + `${countOf(mv.days.length, 'day')} of fixes ${plural(mv.days.length, 'is', 'are')} stored and `
+        + `${countOf(mv.parked.length, 'stationary period')} `
+        + `${plural(mv.parked.length, 'was', 'were')} found — the tracker was reporting; `
         + 'it never saw a run of fixes with the seat occupied.'
       : `No telemetry at all is stored for ${plate} in this window, so nothing could be built `
         + 'from it. Collection gaps says whether CABMAN was running.');

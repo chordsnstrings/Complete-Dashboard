@@ -158,21 +158,34 @@ export async function renderReconcile(root, month) {
   const over = `over ${span}`;
 
   const t = d.totals;
+  /* Each of these two totals covers a different part of the window, and both
+     tiles said "over Aug 2025 -> Aug 2026". Expected payout needs a collected
+     payout BREAKDOWN and exists for one month of thirteen; Bank payout needs
+     only a statement and exists for seven. So AED 24,500 sat beside
+     AED 2,108,697 under identical captions, inviting a comparison of one month
+     against seven. Each tile now states its own coverage. */
+  const periods = d.rows.length;
+  const unit = month ? 'day' : 'month';
+  const withExpected = d.rows.filter((r) => r.expected_payout != null).length;
+  const withBank = d.rows.filter((r) => r.bank_payout != null).length;
+  const coverage = (n) => (periods && n < periods
+    ? `over the ${countOf(n, unit)} of ${fmt(periods)} that ${plural(n, 'carries', 'carry')} one`
+    : over);
   host.append(kpiRow([
     { label: 'Trips', value: t.trips != null ? fmt(t.trips) : '—',
       sub: `bookings ${over}` },
     { label: 'Expected payout', value: t.expected_payout != null ? money(t.expected_payout) : '—',
-      sub: `on-trip net + tips + salik − cash, ${over}, where a statement exists` },
+      sub: `on-trip net + tips + salik − cash, ${coverage(withExpected)}` },
     { label: 'Bank payout', value: t.bank_payout != null ? money(t.bank_payout) : '—',
-      sub: `what the platforms report having paid, ${over}` },
+      sub: `what the platforms report having paid, ${coverage(withBank)}` },
     /* The two figures the gap is the difference of, and how much of the record
        they cover. The Gap tile used to sit beside a bank total spanning every
        month while measuring one — two scopes in one row of tiles, with nothing
        on screen to tell them apart. */
     { label: 'Compared over', value: t.matched_pairs ? fmt(t.matched_pairs) : '—',
       sub: t.matched_pairs
-        ? `driver-day(s) both sides describe, in ${fmt(t.reconciled_rows)} `
-          + `${month ? 'day(s)' : 'month(s)'}`
+        ? `${plural(t.matched_pairs, 'driver-day')} both sides describe, in `
+          + `${countOf(t.reconciled_rows, month ? 'day' : 'month')}`
         : 'no driver-day is described by both sides' },
     { label: 'Gap', html: t.delta == null ? '<span class="dim">—</span>' : deltaPill(t),
       sub: t.delta == null

@@ -42,7 +42,7 @@ const partialDays = (m) => {
   const have = m.days_in_record ?? m.days_covered;
   if (have == null) return '';
   const all = m.days_in_month ?? daysInMonth(m.m);
-  return all ? `${fmt(have)} of ${fmt(all)} days collected` : `${fmt(have)} day(s) collected`;
+  return all ? `${fmt(have)} of ${fmt(all)} days collected` : `${countOf(have, 'day')} collected`;
 };
 
 const MONTH = (m) => {

@@ -119,7 +119,8 @@ export async function renderSlot(root, dow, hour) {
           if (r.completion_pct == null) return '<span class="ent-off" title="no platform of theirs reports an outcome">n/a</span>';
           return r.trips >= MIN_TRIPS_FOR_RATE
             ? `<span class="pill ${r.completion_pct >= 90 ? 'ok' : r.completion_pct >= 75 ? 'warn' : 'bad'}">${r.completion_pct}%</span>`
-            : `<span class="dim" title="over only ${r.trips} trip(s) in this hour — too small a base to judge">${r.completion_pct}%</span>`;
+            : `<span class="dim" title="over only ${countOf(r.trips, 'trip')} in this hour — too small a `
+              + `base to judge">${r.completion_pct}%</span>`;
         } },
       { label: 'Fares', key: 'revenue', num: true,
         absent: 'no booking in this hour carries a fare — Uber\'s export has no fare column, and '

@@ -982,7 +982,7 @@ V.drivers = async (root) => {
     perf.body.append(el('p', 'cap',
       `Showing 25 of ${fmt(pfTot.total)} records — ${fmt(pfTot.people)} people across `
       + `${fmt(pfTot.periods)} reporting periods on ${(pfTot.platforms || []).join(', ') || 'no platform'}, `
-      + `${money(pfTot.earnings)} over ${fmt(pfTot.payout_days)} paid day(s). `
+      + `${money(pfTot.earnings)} over ${countOf(pfTot.payout_days, 'paid day')}. `
       + 'The total counts each day once: report windows overlap where a backfill '
       + 'and a catch-up describe the same week, and adding the statements would '
       + 'count those days twice.'
@@ -1254,7 +1254,7 @@ V.vehicles = async (root) => {
       const total = serving.reduce((a, r) => a + r[premium], 0);
       const topTwo = serving.slice(0, 2).reduce((a, r) => a + r[premium], 0);
       tierP.body.append(el('p', 'cap',
-        `${serving.length} vehicle(s) took ${esc(premium)} work. ` +
+        `${countOf(serving.length, 'vehicle')} took ${esc(premium)} work. ` +
         (serving.length && total
           ? `The top two carried ${Math.round((topTwo / total) * 100)}% of it` +
             (serving.length <= 3 ? ' — losing one of those cars takes most of the tier with it.' : '.')
@@ -1633,8 +1633,8 @@ V.finance = async (root) => {
       tone: k.priced_pct != null && k.priced_pct < 40 ? 'warn' : null },
     { label: 'Platform payouts', value: money(k.accounted_payouts),
       sub: k.payout_days
-        ? `${(k.payout_platforms || []).join(', ')} · ${fmt(k.payout_days)} day(s) of statements, `
-          + `${fmt(k.payout_drivers)} driver(s)`
+        ? `${(k.payout_platforms || []).join(', ')} · ${countOf(k.payout_days, 'day')} of statements, `
+          + `${countOf(k.payout_drivers, 'driver')}`
         : 'no payout statement covers this range' },
     /* The statement view beside the bank view. What the fleet EARNED on trip
        (gross minus commission, from the platform's statement reports) vs what
@@ -1647,8 +1647,16 @@ V.finance = async (root) => {
         : 'not collected for this range yet' },
     { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
       sub: k.priced_trips ? `over ${fmt(k.priced_trips)} priced trips` : 'no fares in this range' },
+    /* The server divides priced_measured_revenue by priced_km — the fares of
+       trips reporting BOTH a fare and a distance — and reports that numerator
+       so the ratio can be checked. This tile printed only the denominator, so
+       the reader divided the Fares tile above (AED 65,708) by 14,895 km, got
+       4.41, and had no way to reach 3.91 from anything on screen. */
     { label: 'Revenue per km', value: money(k.revenue_per_km, 'AED', 2),
-      sub: k.priced_km ? `over ${fmt(k.priced_km)} priced km` : 'no priced distance' },
+      sub: k.priced_km
+        ? `${money(k.priced_measured_revenue)} over ${fmt(k.priced_km)} km — the `
+          + `${fmt(k.priced_measured_trips)} trips reporting both a fare and a distance`
+        : 'no priced distance' },
     /* Named for the part of it that was measured. This tile printed
        "AED 23,964" against "45,734 cash bookings; 509 of them report a fare"
        and was read as the cash the fleet is holding — it is the value of 1.1%
@@ -2554,7 +2562,7 @@ V.map = async (root) => {
        looking for is simply absent. */
     const cut = rows[0]?.truncated ? rows[0] : null;
     dayNote.textContent = rows.length
-      ? `${rows.length} replayable day(s)` + (cur ? ` · held today by ${cur}` : '')
+      ? `${countOf(rows.length, 'replayable day')}` + (cur ? ` · held today by ${cur}` : '')
         + (cut ? ` · the picker holds the ${fmt(cut.shown)} newest days across the fleet of `
           + `${fmt(cut.total)} — narrow the range to reach older ones` : '')
       : (cut

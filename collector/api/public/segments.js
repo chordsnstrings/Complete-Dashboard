@@ -139,7 +139,8 @@ export async function renderSegments(root, kind, value) {
        there are rather than implying the list is all of them. */
     const ft = d.facet_totals || {};
     pp.body.append(el('p', 'cap',
-      `${fmt(plates.length)} vehicle(s) shown carry at least one flag. A bar is a link to that vehicle’s segments.`
+      `${countOf(plates.length, 'vehicle')} shown ${plural(plates.length, 'carries', 'carry')} at least one `
+      + 'flag. A bar is a link to that vehicle’s segments.'
       + (ft.plate > ft.plate_shown
         ? ` ${fmt(ft.plate)} vehicles appear in this range in total — open a vehicle directly if it is not listed.`
         : '')));

@@ -854,7 +854,9 @@ async function tabEarnings(root, id, prof) {
     { label: 'Days', key: 'days_used', num: true,
       render: (r) => (r.days_used == null ? '—'
         : r.days_used === r.period_days ? String(r.period_days)
-        : `<span class="tag warn" title="the other ${r.period_days - r.days_used} day(s) are covered by another statement">${r.days_used} of ${r.period_days}</span>`) },
+        : `<span class="tag warn" title="the other ${countOf(r.period_days - r.days_used, 'day')} `
+          + `${plural(r.period_days - r.days_used, 'is', 'are')} covered by another statement">`
+          + `${r.days_used} of ${r.period_days}</span>`) },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Online', key: 'hours_online', num: true, absent: UBER_HOURS,
       render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
