@@ -20,6 +20,12 @@ const month = (v) => (v == null ? null : new Date(v).toLocaleDateString('en-GB',
   { month: 'long', year: 'numeric', timeZone: 'UTC' }));
 const daysAgoFrom = (v) => (v == null ? null : Math.floor((Date.now() - new Date(v).getTime()) / 864e5));
 
+/* Findings are sentences a person reads, and they were writing "expires in 1
+   days", "1 drivers were online but completed no trips" and "1 driver(s)
+   logged in". */
+const s_ = (n, one, many = `${one}s`) => (Math.abs(Number(n)) === 1 ? one : many);
+const n_ = (n, one, many) => `${n} ${s_(n, one, many)}`;
+
 // Assumed daily holding cost per vehicle (depreciation + insurance + permit + finance).
 // Used only to size the "idle capital" impact; tune in settings later.
 const VEHICLE_DAY_COST_AED = Number(process.env.VEHICLE_DAY_COST_AED || 120);
@@ -66,7 +72,7 @@ async function idleVehicles() {
      ORDER BY s.last_seen DESC`, [String(IDLE_LOOKBACK_DAYS)]);
   for (const r of rows) {
     const lastTrip = r.last_trip
-      ? `Its last recorded trip was ${day(r.last_trip)}, ${daysAgoFrom(r.last_trip)} days ago`
+      ? `Its last recorded trip was ${day(r.last_trip)}, ${n_(daysAgoFrom(r.last_trip), 'day')} ago`
         + ` (${r.lifetime} recorded in total).`
       : `No trip has ever been recorded for this plate in the collected data.`;
     await put({
@@ -96,7 +102,7 @@ async function dormantVehicles() {
     await put({
       code: 'vehicle_dormant', severity: 'warning', category: 'data',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
-      title: `${r.plate} has sent no signal for ${days} days`,
+      title: `${r.plate} has sent no signal for ${n_(days, 'day')}`,
       detail: `Last position ${day(r.last_seen)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is still carried in the vehicle list, so it quietly inflates every per-vehicle average.`,
       action: `Reconcile against the asset register: retire it, or refit the tracker if the car is still ours.`,
       impact_aed: null, metric: days, window_start: null, window_end: null,
@@ -155,7 +161,10 @@ async function licenceRisk() {
       code: 'licence_data_unreliable', severity: 'warning', category: 'data',
       entity_type: 'fleet', entity_id: 'all',
       title: `Licence expiry dates look like a default, not real records`,
-      detail: `${spread.common_n} of ${spread.total} drivers carry the identical expiry ${spread.common_date}. That pattern is a system default rather than ${spread.common_n} genuine expiries, so we are not raising individual compliance alerts against it.`,
+      detail: `${spread.common_n} of ${n_(spread.total, 'driver')} carry the identical expiry `
+        + `${spread.common_date}. That pattern is a system default rather than `
+        + `${n_(spread.common_n, 'genuine expiry', 'genuine expiries')}, so we are not raising `
+        + 'individual compliance alerts against it.',
       action: `Get real licence dates into the source system — until then this fleet has no working licence-expiry check at all, which is the actual risk.`,
       impact_aed: null, metric: spread.common_n / spread.total,
       window_start: null, window_end: null,
@@ -245,7 +254,7 @@ async function unsafeDriving(from, to) {
       detail: `${r.events} events over ${Math.round(r.km)}km of tracked movement `
         + `(${r.overspeed} overspeed, ${r.harsh_brake} harsh braking, `
         + `${Math.max(0, r.events - r.overspeed - r.harsh_brake)} other). `
-        + `The median across all ${r.population} vehicles with enough distance to judge over `
+        + `The median across all ${n_(r.population, 'vehicle')} with enough distance to judge over `
         + `${from} → ${to} is ${med.toFixed(1)} per 100km. Sustained harsh driving predicts `
         + `both collisions and tyre and brake spend.`,
       action: `Pull the dashcam clips for the worst events and run a coaching conversation with whoever drove this plate.`,
@@ -271,7 +280,9 @@ async function deadhead(from, to) {
       code: 'deadhead_waste', severity: 'warning', category: 'cost',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} drives ${Math.round(r.ratio * 100)}km empty for every 100km paid`,
-      detail: `${Math.round(r.dead)}km unpaid approach against ${Math.round(r.paid)}km of fare distance across ${r.trips} trips. Empty kilometres burn energy, tyres and driver hours with no revenue.`,
+      detail: `${Math.round(r.dead)}km unpaid approach against ${Math.round(r.paid)}km of fare `
+        + `distance across ${n_(r.trips, 'trip')}. Empty kilometres burn energy, tyres and `
+        + 'driver hours with no revenue.',
       action: `Look at where this car waits. Staging it closer to its usual pickups cuts the approach leg directly.`,
       impact_aed: null, metric: r.ratio, window_start: from, window_end: to,
     });
@@ -350,14 +361,16 @@ async function volumeTrend() {
   const down = change < 0;
   // A driver count of zero means the platform did not attribute the trips, not
   // that nobody drove them; saying "0 drivers" is a claim about the fleet.
-  const who = (r) => (r.drivers ? `${r.drivers} drivers` : 'an unrecorded number of drivers');
+  const who = (r) => (r.drivers ? n_(r.drivers, 'driver') : 'an unrecorded number of drivers');
   await put({
     code: 'volume_trend', severity: down ? 'critical' : 'good', category: 'demand',
     entity_type: 'fleet', entity_id: 'all',
     title: `Trip volume ${down ? 'down' : 'up'} ${Math.abs(Math.round(change * 100))}% `
       + `from ${month(first.m)} to ${month(last.m)}`,
-    detail: `${month(first.m)}: ${first.trips} bookings with ${who(first)} on ${first.vehicles} vehicles `
-      + `-> ${month(last.m)}: ${last.trips} bookings with ${who(last)} on ${last.vehicles} vehicles. `
+    detail: `${month(first.m)}: ${n_(first.trips, 'booking')} with ${who(first)} on `
+      + `${n_(first.vehicles, 'vehicle')} `
+      + `-> ${month(last.m)}: ${n_(last.trips, 'booking')} with ${who(last)} on `
+      + `${n_(last.vehicles, 'vehicle')}. `
       + `Both months were collected on at least ${Math.round(0.8 * 100)}% of their days, and every month `
       + `between them was too — a comparison across a collection hole is not a trend.`,
     action: down
@@ -506,8 +519,8 @@ async function vehicleDocuments() {
       severity: gone || days <= 7 ? 'critical' : 'warning', category: 'compliance',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: gone
-        ? `${r.plate}: ${r.doc_type} expired ${Math.abs(days)} days ago`
-        : `${r.plate}: ${r.doc_type} expires in ${days} days`,
+        ? `${r.plate}: ${r.doc_type} expired ${n_(Math.abs(days), 'day')} ago`
+        : `${r.plate}: ${r.doc_type} expires in ${n_(days, 'day')}`,
       detail: `${r.make || ''} ${r.model || ''}`.trim()
         + ` — ${r.doc_type} valid until ${day(r.expires_at)}.${who}`
         + (gone ? ' A vehicle working on expired documents is uninsured and un-hireable if stopped.'
@@ -543,8 +556,10 @@ async function platformFlags() {
       await put({
         code: 'drivers_online_no_trips', severity: 'critical', category: 'utilisation',
         entity_type: 'fleet', entity_id: 'all', fleet_id: r.fleet_id,
-        title: `${idle.length} drivers were online but completed no trips`,
-        detail: `Uber flagged ${idle.length} driver(s) logged in for about ${hours.toFixed(1)} hours in total with zero completed trips (${day(r.period_start)}). Paid-for supply that produced nothing.`,
+        title: `${n_(idle.length, 'driver')} ${s_(idle.length, 'was', 'were')} online but completed no trips`,
+        detail: `Uber flagged ${n_(idle.length, 'driver')} logged in for about ${hours.toFixed(1)} `
+          + `hours in total with zero completed trips (${day(r.period_start)}). Paid-for supply `
+          + 'that produced nothing.',
         action: `Check whether they were genuinely available, sitting in a dead zone, or logged in without intending to work.`,
         impact_aed: null, metric: idle.length,
         /* WHO. This is the most severe finding on the list and it rendered with
@@ -566,9 +581,9 @@ async function platformFlags() {
       severity: 'warning', category: 'revenue',
       entity_type: 'fleet', entity_id: 'all', fleet_id: r.fleet_id,
       title: isAcc
-        ? `${flagged.length} drivers below Uber's acceptance target`
-        : `${flagged.length} drivers above Uber's cancellation target`,
-      detail: `Fleet sits at ${pct(r.org_value)} against a target of ${pct(r.target_value)} for ${day(r.period_start)} → ${day(r.period_end)}. Uber names ${flagged.length} driver(s) on the wrong side of it — these are the accounts that drag dispatch priority for everyone.`,
+        ? `${n_(flagged.length, 'driver')} below Uber's acceptance target`
+        : `${n_(flagged.length, 'driver')} above Uber's cancellation target`,
+      detail: `Fleet sits at ${pct(r.org_value)} against a target of ${pct(r.target_value)} for ${day(r.period_start)} → ${day(r.period_end)}. Uber names ${n_(flagged.length, 'driver')} on the wrong side of it — these are the accounts that drag dispatch priority for everyone.`,
       action: isAcc
         ? `Review why they decline: vehicle mismatch, positioning, or app left on while unavailable.`
         : `Cancellations after acceptance hurt rider trust and cost the approach drive. Coach the named drivers.`,

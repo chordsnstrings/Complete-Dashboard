@@ -5,7 +5,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
-  sourceLabel, tierLabel, plural, countOf, UBER_FARE } from './ui.js';
+  sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence} from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
@@ -1077,10 +1077,15 @@ V.action = async (root) => {
   const ENTITY_VIEW = { vehicle: 'vehicle', driver: 'driver', partner: 'property' };
   const view = ENTITY_VIEW[r.entity_type];
   root.append(kpiRow([
-    { label: 'Severity', value: r.severity, tone: { critical: 'critical', warning: 'warn', good: 'good' }[r.severity] },
-    { label: 'Category', value: r.category },
-    { label: 'About', html: view && r.entity_id ? entity(view, r.entity_id, `${r.entity_type} ${r.entity_id}`)
-      : esc(`${r.entity_type || 'fleet'} ${r.entity_id || ''}`) },
+    /* These arrive as the rule engine's own enum values — critical, compliance,
+       vehicle — and were printed as tile VALUES, the largest text on the page,
+       in lowercase. */
+    { label: 'Severity', value: sentence(r.severity),
+      tone: { critical: 'critical', warning: 'warn', good: 'good' }[r.severity] },
+    { label: 'Category', value: sentence(r.category) },
+    { label: 'About', html: view && r.entity_id
+      ? entity(view, r.entity_id, `${sentence(r.entity_type)} ${r.entity_id}`)
+      : esc(`${sentence(r.entity_type || 'fleet')} ${r.entity_id || ''}`) },
     { label: 'Computed', value: r.computed_at ? dtStr(r.computed_at) : '—',
       sub: r.window_start ? `over ${dayStr(r.window_start)} → ${dayStr(r.window_end)}` : 'current state' },
     r.impact_aed

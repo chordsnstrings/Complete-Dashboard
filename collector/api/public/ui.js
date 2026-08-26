@@ -573,6 +573,14 @@ export const SOURCE_LABEL = {
   uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel', fms: 'FMS telematics',
   cabman: 'CABMAN', ecosine: 'Ecosine', egari: 'Egari',
 };
+/* An enum value written for a person. The rule engine stores `critical`,
+   `compliance`, `vehicle`; printed as a tile's value they are the largest text
+   on the page and were lowercase with underscores in them. */
+export const sentence = (v) => {
+  const t = String(v ?? '').trim().replace(/_/g, ' ');
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : '—';
+};
+
 export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()] || String(s || '—');
 
 /* A product tier as a person reads it.

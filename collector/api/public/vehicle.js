@@ -253,7 +253,7 @@ async function tabDrivers(root, plate) {
         render: (r) => ((r.driver_ids || []).length > 1
           ? `<span title="${esc((r.driver_ids || []).join(', '))}">${fmt(r.driver_ids.length)}`
             + ` <span class="dim">· ${esc((r.platforms || []).map(sourceLabel).join(', '))}</span></span>`
-          : `<span class="dim">${esc((r.platforms || []).join(', ')) || '1'}</span>`) },
+          : `<span class="dim">${esc((r.platforms || []).map(sourceLabel).join(', ')) || '1'}</span>`) },
       { label: 'Days', key: 'days', num: true },
       { label: 'As primary', key: 'primary_days', num: true },
       { label: 'Trips', key: 'trips', num: true },
