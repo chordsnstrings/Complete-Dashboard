@@ -184,7 +184,7 @@ export async function renderForecast(root) {
   if (d.break) {
     tb.append(el('p', 'note',
       `The fit starts at ${MONTH(d.break.to)}. Between ${MONTH(d.break.from)} and it, bookings moved `
-      + `${d.break.change_pct}% and did not come back — a line drawn through that predicts a recovery to the `
+      + `${signed(d.break.change_pct, { unit: '%' })} and did not come back — a line drawn through that predicts a recovery to the `
       + `old level that nothing in the data supports. ${d.months_excluded.length} earlier month(s) were `
       + `excluded: ${d.months_excluded.map(MONTH).join(', ')}.`));
   }
