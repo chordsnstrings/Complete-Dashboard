@@ -194,9 +194,34 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
      A quarter is the line. Above it a column reads as populated with gaps,
      which is ordinary; below it the gaps are the story. */
   const SPARSE = 0.25;
+  /* Counted as the reader SEES it, not as the row carries it.
+     ───────────────────────────────────────────────────────────────────────
+     `filled` tests the raw value, and a numeric 0 is a value. But a money
+     column renders 0 as a dash — `r.revenue ? money(r.revenue) : '—'` — so on
+     production this note said "72 of 361 rows carry one" above a table showing
+     31: forty-one drivers have a fare total of exactly zero. The note and the
+     column it describes disagreed about the column.
+     
+     So a column that declares `absent` is counted by running its own renderer
+     and asking whether anything came out. Only those columns pay for it, the
+     renderers here are pure string builders, and the tables are capped — and
+     it makes the sentence agree with the cells by construction rather than by
+     both sides happening to test the same thing.
+     
+     Deliberately NOT used for `dead` above: that one PRUNES a column, and
+     changing what counts as empty there would silently drop columns across
+     every page in the product on a judgement about rendering. */
+  const DASH = /^[—–-]?$/;
+  const shown = (c, r) => {
+    if (typeof c.render !== 'function') return !isBlank(r[c.key]);
+    let out;
+    try { out = c.render(r); } catch { return !isBlank(r[c.key]); }
+    return !DASH.test(String(out ?? '').replace(/<[^>]*>/g, '').trim());
+  };
+  const visible = (c) => rows.reduce((n, r) => n + (shown(c, r) ? 1 : 0), 0);
   const sparse = cols.filter((c) => c.absent && c.key && rows.length >= 8
-    && filled(c) / rows.length < SPARSE)
-    .map((c) => ({ col: c, n: filled(c) }));
+    && visible(c) / rows.length < SPARSE)
+    .map((c) => ({ col: c, n: visible(c) }));
 
   const byKey = (k) => cols.find((c) => c.key === k);
 

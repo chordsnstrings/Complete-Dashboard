@@ -54,9 +54,16 @@ const COLS = [
   { label: 'Fares', key: 'fares', num: true },
 ];
 /* The column definitions cross into the page as JSON, so `render` functions
-   cannot come with them — none of these columns needs one. */
+   cannot come with them. A column that needs one carries it as `renderSrc` —
+   the same source-string trick `run` above uses — and it is rebuilt on the
+   other side. The sparse-column count depends on what a column RENDERS, so a
+   test of that count cannot avoid sending one. */
 const build = (ui, a) => {
-  const t = ui.tableFrom(a.rows, a.cols);
+  const cols = a.cols.map((c) => (c.renderSrc
+    // eslint-disable-next-line no-new-func
+    ? { ...c, render: new Function(`return (${c.renderSrc});`)() }
+    : c));
+  const t = ui.tableFrom(a.rows, cols);
   const html = t.innerHTML;
   const heads = [...t.querySelectorAll('thead th')].map((h) => h.textContent.trim());
   return {
@@ -122,6 +129,29 @@ check('and the table says how many carry a value',
   /1 of 20 rows carry one/.test(mostly.note), mostly.note);
 check('followed by the same reason the empty case would have given',
   /no channel reports a driver rating/.test(mostly.note), mostly.note);
+
+/* ── and it counts what the reader SEES, not what the row carries ─────── */
+/* A money column renders 0 as a dash, and `0` is a value — so on production
+   this sentence said "72 of 361 rows carry one" above a table showing 31:
+   forty-one drivers have a fare total of exactly zero. The note and the column
+   it describes disagreed about the column. */
+const DASHED = [{ label: 'Driver', key: 'name' }, { label: 'Trips', key: 'trips', num: true },
+  { label: 'Fares', key: 'fares', num: true, absent: 'no channel here reports a fare',
+    renderSrc: '(r) => (r.fares ? `AED ${r.fares}` : "\u2014")' }];
+const zeroes = await run(build, { cols: DASHED,
+  rows: [...Array(17)].map((_, i) => ({ name: `d${i}`, trips: 1, fares: 0 }))
+    .concat([...Array(3)].map((_, i) => ({ name: `p${i}`, trips: 1, fares: 40 }))) });
+check('a zero that renders as a dash is not counted as carrying a value',
+  /3 of 20 rows carry one/.test(zeroes.note), zeroes.note);
+/* The other half of the same claim: a zero that a column actually PRINTS is a
+   value, and must still be counted. A count of zero trips is a finding. */
+const printed = [{ label: 'Driver', key: 'name' }, { label: 'Trips', key: 'trips', num: true },
+  { label: 'Alerts', key: 'alerts', num: true, absent: 'no alert reached this fleet',
+    renderSrc: '(r) => String(r.alerts)' }];
+const printedZero = await run(build, { cols: printed,
+  rows: [...Array(20)].map((_, i) => ({ name: `d${i}`, trips: 1, alerts: 0 })) });
+check('a zero the column prints IS counted, so no sparse note fires',
+  !/rows carry one/.test(printedZero.note), printedZero.note);
 
 const half = await run(build, { cols: COLS,
   rows: [...Array(20)].map((_, i) => ({ name: `d${i}`, trips: 1, rating: i % 2 ? 4.9 : null, fares: 1 })) });
