@@ -3292,8 +3292,14 @@ V.sources = async (root) => {
     /* The link carries the range and the anchor. It was a bare `#coverage`,
        which opens on the default thirty days — a page that then reports
        "MISSING DAYS 1" and denies the 152-day gap the link was named after. */
+    /* An event-driven dataset has no missing days. Safety alerts happen when
+       something happens and the ledger arrives when somebody imports one —
+       neither promises a row every day, so counting the quiet ones as gaps
+       describes a calm fortnight as a collection failure. */
     { label: 'Missing', key: '_m', render: (r) => (!r.cal ? '—'
-      : r.cal.missing_days
+      : r.cal.event_driven
+        ? '<span class="ent-off" title="this dataset records events, not a daily feed — a day with nothing on it is a quiet day, not a gap">not a daily feed</span>'
+        : r.cal.missing_days
         /* The anchor rides in the QUERY, not as a second '#'.
            ─────────────────────────────────────────────────────────────────
            This built `#coverage?days=365#src-fms`, and parseHash splits the
@@ -3307,6 +3313,9 @@ V.sources = async (root) => {
           + `${countOf(r.cal.missing_days, 'day')}</a>`
         : pill('none', 'ok')) },
     { label: 'Largest gap', key: '_g', render: (r) => {
+      if (r.cal?.event_driven) {
+        return '<span class="ent-off" title="this dataset records events, not a daily feed">—</span>';
+      }
       const g = r.cal && r.cal.gaps && r.cal.gaps[0];
       return g ? `${dateStr(g.from)} → ${dateStr(g.to)} <small class="dim">${g.days}d</small>`
         : (r.cal ? '<span class="ent-off">none</span>' : '—');

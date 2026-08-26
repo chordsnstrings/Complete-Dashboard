@@ -33,6 +33,11 @@ const DUBAI_DAY = [
   ['trip', 'requested_at'],
   ['alert', 'occurred_at'],
   ['telemetry_snapshot', 'captured_at'],
+  /* The same table's OTHER clock. captured_at is when the tracker saw the
+     vehicle; polled_at is when we asked. /api/coverage groups by the second
+     because a dormant tracker's last fix is not evidence about what we
+     collected — see sql/schema_v36.sql. */
+  ['telemetry_snapshot', 'polled_at'],
   ['occupancy_segment', 'started_at'],
   ['ledger_entry', 'event_at'],
 ];

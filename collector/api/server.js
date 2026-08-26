@@ -1793,6 +1793,7 @@ app.get('/api/coverage', wrap(async (req, res) => {
        production that was 7 of 11 rows with no start date on the page whose
        job is to say how far back the record goes. */
     q(`SELECT source, count(*)::int n, min(captured_at) from_ts,
+              min(polled_at) collected_from,
               max(polled_at) last_poll FROM telemetry_snapshot
        WHERE ($1::text IS NULL OR fleet_id=$1) GROUP BY 1`, [fl]),
     q(`SELECT count(*)::int n, min(occurred_at) from_ts, max(occurred_at) latest FROM alert
@@ -1828,10 +1829,24 @@ app.get('/api/coverage', wrap(async (req, res) => {
        gap-finder the calendar uses (api/coverage_gaps.js).
 
        Dubai days, like every other calendar key in this product. */
+    /* polled_at, not captured_at — OUR clock, not the tracker's.
+       ─────────────────────────────────────────────────────────────────────
+       captured_at is when the device says the fix happened, and this fleet
+       has trackers that stopped years ago: the collector logs "vehicles
+       listed but not reporting, dormant 15 of 48, oldest_days 862". Their
+       last surviving fix drags min(captured_at) back to 2024, so a span
+       computed from it reported CABMAN as 23 days collected of 863 and 840
+       missing — which reads as a catastrophic collection failure and is
+       actually fifteen dead units and one fix from April 2024.
+
+       polled_at advances every time the collector observes a vehicle, so a
+       day with a poll on it is a day we collected. That is the question this
+       column asks. src/reconcile.js draws the same distinction for the same
+       reason. */
     q(`SELECT 'telemetry:' || source AS dataset,
-              to_char((captured_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
+              to_char((polled_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
               count(*)::int rows
-         FROM telemetry_snapshot WHERE captured_at IS NOT NULL
+         FROM telemetry_snapshot WHERE polled_at IS NOT NULL
          GROUP BY 1, 2 ORDER BY 1, 2`),
     q(`SELECT 'alerts' AS dataset,
               to_char((occurred_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
@@ -1909,8 +1924,15 @@ app.get('/api/coverage', wrap(async (req, res) => {
   for (const rows of [telDays, alertDays, ledgerDays, earnDays]) {
     for (const r of rows) (calendars[r.dataset] ||= []).push({ day: r.day, rows: r.rows });
   }
+  /* A quiet day is not a gap on an EVENT-DRIVEN dataset. Safety alerts happen
+     when something happens, and the ledger arrives in batches when the
+     operator imports one — neither promises a row every day, so "78 days
+     missing" about them describes a calm fortnight as a collection failure.
+     They keep their span and their day count and say so instead. */
+  const EVENT_DRIVEN = new Set(['alerts', 'ledger']);
   const dataset_calendar = Object.fromEntries(
-    Object.entries(calendars).map(([k, days]) => [k, spanGaps(days)]));
+    Object.entries(calendars).map(([k, days]) => [k,
+      { ...spanGaps(days), event_driven: EVENT_DRIVEN.has(k) }]));
   res.json({ trips, telemetry, alerts, ledger, earnings, earnings_gaps: gaps,
     dataset_calendar });
 }));
