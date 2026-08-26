@@ -2694,6 +2694,8 @@ app.get('/api/coverage', (_, r) => r.json({
       median_rows_per_day: 5, missing_days: 0, gaps: [] },
     'ledger': { days_with_data: 196, first_day: '2026-02-06', last_day: '2026-08-20',
       median_rows_per_day: 12, missing_days: 0, gaps: [] },
+    'earnings:uber': { days_with_data: 197, first_day: '2026-02-06', last_day: '2026-08-21',
+      median_rows_per_day: 58, missing_days: 0, gaps: [] },
   },
   /* Money coverage beside trip coverage. Uber's trip feed reaches back a year
      and its earnings API serves about six months, so half the record has work

@@ -3246,9 +3246,15 @@ V.sources = async (root) => {
        tables. /api/coverage returns it — uber 42,841 rows worth AED 2,096,301,
        yango 568 worth AED 11,750 — and this table, which inventories what has
        landed, left it out entirely. */
+    /* from_day/to_day are what this query actually returns — it reads
+       driver_payout_day, whose column is `day`. Reading from_ts/first_period
+       left both of these rows with no dates at all, on the two rows about the
+       money. */
     ...(coverage.earnings || []).map((r) => ({ what: `earnings · ${sourceLabel(r.platform || r.source)}`,
-      src: null, n: r.n, from: r.from_ts || r.first_period, to: r.to_ts || r.last_period,
-      value: r.amount ?? r.total ?? null })),
+      key: `earnings:${r.platform || r.source}`, src: null, n: r.n,
+      from: r.from_day || r.from_ts || r.first_period,
+      to: r.to_day || r.to_ts || r.last_period,
+      value: r.earnings ?? r.amount ?? r.total ?? null })),
     /* from_ts on all three now. The endpoint selected only a LAST timestamp
        for these, so seven of the eleven rows on a table headed "what has
        actually landed" had no start date at all — including the telemetry

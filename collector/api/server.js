@@ -1779,7 +1779,8 @@ app.get('/api/coverage', wrap(async (req, res) => {
   const pl = req.query.platform || null;
   const fl = req.query.fleet || null;
   const P = [pl, fl];
-  const [trips, telemetry, alerts, ledger, earnings, telDays, alertDays, ledgerDays] = await Promise.all([
+  const [trips, telemetry, alerts, ledger, earnings, telDays, alertDays, ledgerDays,
+    earnDays] = await Promise.all([
     q(`SELECT platform, count(*)::int n, min(requested_at) from_ts, max(requested_at) to_ts
        FROM trip WHERE ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
        GROUP BY 1`, P),
@@ -1842,6 +1843,15 @@ app.get('/api/coverage', wrap(async (req, res) => {
               count(*)::int rows
          FROM ledger_entry WHERE event_at IS NOT NULL
          GROUP BY 1, 2 ORDER BY 2`),
+    /* Earnings too. driver_payout_day already resolves overlapping report
+       windows to one row per driver-day, so its days ARE the days the money
+       covers — which is the continuity question this table asks. Without it
+       the two earnings rows were the last on the page with nothing to say
+       about their own gaps, on a product where the money reaching back only
+       to February is the single most consequential hole in the record. */
+    q(`SELECT 'earnings:' || platform AS dataset,
+              to_char(day, 'YYYY-MM-DD') AS day, count(*)::int rows
+         FROM driver_payout_day GROUP BY 1, 2 ORDER BY 1, 2`),
   ]);
   /* Per platform: where the trip feed starts, where the money starts, and how
      much work sits before it. A page can then say "6,231 bookings we hold no
@@ -1896,7 +1906,7 @@ app.get('/api/coverage', wrap(async (req, res) => {
      telemetry row silently failed to join and went on saying "not a dated
      source" about the longest feed the product holds. */
   const calendars = {};
-  for (const rows of [telDays, alertDays, ledgerDays]) {
+  for (const rows of [telDays, alertDays, ledgerDays, earnDays]) {
     for (const r of rows) (calendars[r.dataset] ||= []).push({ day: r.day, rows: r.rows });
   }
   const dataset_calendar = Object.fromEntries(
