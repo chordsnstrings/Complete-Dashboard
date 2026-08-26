@@ -190,8 +190,9 @@ function componentTree(components) {
     host.append(tableFrom(rows, [
       { label: 'Within', key: 'within' },
       { label: 'Component', key: 'label' },
+      // money() writes the sign now; this used to do it by hand.
       { label: 'Amount', key: 'amount', num: true,
-        render: (r) => `${r.amount < 0 ? '−' : ''}${money(Math.abs(r.amount), 'AED', 2)}` },
+        render: (r) => money(r.amount, 'AED', 2) },
       { label: 'Share of its parent', key: 'share', num: true,
         render: (r) => (r.share == null
           ? '<span class="ent-off" title="the parent component was not returned for this window">—</span>'

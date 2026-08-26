@@ -8,7 +8,7 @@
 
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
-  countOf, plural, sourceLabel } from './ui.js';
+  countOf, plural, sourceLabel, signed } from './ui.js';
 import { q, href } from './data.js';
 
 /* "Aug 25" is how every other page in this product writes a DATE — the 25th of
@@ -102,7 +102,7 @@ export async function renderRetention(root) {
   root.append(kpiRow([
     { label: `Earning in ${MONTH(d.last_complete_month)}`, value: fmt(flowLast.active),
       sub: flowLast.net == null ? null
-        : `${flowLast.net >= 0 ? '+' : ''}${flowLast.net} on the month`,
+        : `${signed(flowLast.net)} on the month`,
       tone: flowLast.net < 0 ? 'critical' : flowLast.net > 0 ? 'good' : null },
     { label: 'Stopped that month', value: fmt(d.stopped_last_month.length),
       sub: 'worked the month before and not this one',
@@ -191,7 +191,7 @@ export async function renderRetention(root) {
     { label: 'Stopped', key: 'left', num: true,
       render: (r) => (r.left ? `<span class="pill bad">−${r.left}</span>` : '—') },
     { label: 'Net', key: 'net', num: true,
-      render: (r) => (r.net == null ? '—' : `${r.net > 0 ? '+' : ''}${r.net}`) },
+      render: (r) => (r.net == null ? '—' : esc(signed(r.net))) },
   ], { compact: true, sortable: true, sortId: 'flow', defaultSort: { key: 'm', dir: 'asc' } }));
 
   /* ── the cohort table ─────────────────────────────────────────────────── */

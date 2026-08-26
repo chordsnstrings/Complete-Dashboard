@@ -264,8 +264,12 @@ export async function renderRevenue(root) {
         { label: 'Channel', key: 'platform', render: (c) => esc(sourceLabel(c.platform)) },
         { label: 'Within', key: 'parent', render: (c) => esc(String(c.parent).replace(/_/g, ' ')) },
         { label: 'Component', key: 'category', render: (c) => esc(String(c.category).replace(/_/g, ' ')) },
+        /* money() writes the sign now, so the amount goes in as it stands.
+             This used to hand-write the minus and pass Math.abs, which is why
+             this table looked right while every other negative money figure in
+             the product carried an ASCII hyphen. */
         { label: 'Amount', key: 'amount', num: true,
-          render: (c) => `${Number(c.amount) < 0 ? '−' : ''}${money(Math.abs(Number(c.amount)), 'AED', 2)}` },
+          render: (c) => money(Number(c.amount), 'AED', 2) },
         { label: 'Share of its parent', key: '_share', num: true,
           render: (c) => (c._share == null
             ? '<span class="ent-off" title="the parent component was not returned for this window">—</span>'

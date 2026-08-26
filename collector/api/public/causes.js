@@ -19,7 +19,7 @@
 
 import { empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, fmt, pct,
-  sourceLabel, countOf, plural } from './ui.js';
+  sourceLabel, countOf, plural, signed } from './ui.js';
 import { api, qChan, href, hrefFilter } from './data.js';
 
 /* How much of a partial month is actually in the record.
@@ -162,7 +162,7 @@ function breakCard(b) {
     try { return typeof b.candidate_events === 'string' ? JSON.parse(b.candidate_events) : (b.candidate_events || []); }
     catch { return []; }
   })();
-  const asPct = (v) => (v == null ? null : `${v > 0 ? '+' : ''}${Math.round(v * 100)}%`);
+  const asPct = (v) => (v == null ? null : signed(Math.round(v * 100), { unit: '%' }));
 
   card.innerHTML = `
     <div class="bk-head">
@@ -259,7 +259,7 @@ export async function renderCauses(root) {
       sub: artifacts.length
         ? `moves above 30% between adjacent months — ${fmt(artifacts.length)} of them touch a partial month`
         : 'moves above 30% between adjacent months' },
-    biggest ? { label: 'Largest move', value: `${biggest.change_pct > 0 ? '+' : ''}${biggest.change_pct}%`,
+    biggest ? { label: 'Largest move', value: signed(biggest.change_pct, { unit: '%' }),
       sub: `${MONTH(biggest.from)} → ${MONTH(biggest.to)}`
         + (biggest.boundary_artifact
           ? ' — a partial month against a whole one, so this is when we started collecting rather than something the fleet did'
@@ -279,7 +279,7 @@ export async function renderCauses(root) {
       + 'holds fewer days than a full one and the step across that boundary is a fact about our '
       + 'collector rather than about the fleet. '
       + artifacts.slice(0, 3).map((b) => `${esc(MONTH(b.from))} → ${esc(MONTH(b.to))} `
-        + `(${b.change_pct > 0 ? '+' : ''}${b.change_pct}%)`).join(', ')
+        + `(${signed(b.change_pct, { unit: '%' })})`).join(', ')
       + `${artifacts.length > 3 ? `, and ${fmt(artifacts.length - 3)} more` : ''}. `
       + 'They are shown rather than hidden, because a break that silently disappears is its own kind of '
       + 'lie — but nothing should be concluded from one.'));
@@ -330,7 +330,7 @@ export async function renderCauses(root) {
       { label: `${MONTH(lastThird[0].m)}–${MONTH(lastThird[lastThird.length - 1].m)}`,
         key: 'b', num: true, render: (r) => (r.b == null ? '—' : fmt(r.b, r.fmtN)) },
       { label: 'Move', key: 'd', num: true, render: (r) => (r.d == null ? '—'
-        : `<span class="pill ${Math.abs(r.d) < 10 ? '' : r.d < 0 ? 'bad' : 'ok'}">${r.d > 0 ? '+' : ''}${r.d}%</span>`) },
+        : `<span class="pill ${Math.abs(r.d) < 10 ? '' : r.d < 0 ? 'bad' : 'ok'}">${esc(signed(r.d, { unit: '%' }))}</span>`) },
     ]));
 
     /* State the reading, and state what would falsify it. A verdict with no
@@ -344,18 +344,18 @@ export async function renderCauses(root) {
         && Math.abs(pMove) > Math.abs(dMove) * 1.5;
       sb.append(el('p', 'note',
         supplyLed
-          ? `Bookings moved ${tMove}% and the driver count moved ${dMove}%, while each driver's own `
-            + `output moved only ${pMove}%. That is a SUPPLY move: the people changed, the work per `
+          ? `Bookings moved ${signed(tMove, { unit: '%' })} and the driver count moved ${signed(dMove, { unit: '%' })}, while each driver's own `
+            + `output moved only ${signed(pMove, { unit: '%' })}. That is a SUPPLY move: the people changed, the work per `
             + 'person did not. Recruitment and retention, not marketing. It would be wrong if bookings '
             + 'per driver were the thing that had moved — that number is in the table above and can be checked.'
           : demandLed
-            ? `Each driver's output moved ${pMove}% while the driver count moved only ${dMove}%. That is a `
+            ? `Each driver's output moved ${signed(pMove, { unit: '%' })} while the driver count moved only ${signed(dMove, { unit: '%' })}. That is a `
               + 'DEMAND move: the same people are getting less work. Adding drivers would make it worse.'
-            : `Bookings moved ${tMove}%, drivers ${dMove}%, output per driver ${pMove}%. Both sides moved `
+            : `Bookings moved ${signed(tMove, { unit: '%' })}, drivers ${signed(dMove, { unit: '%' })}, output per driver ${signed(pMove, { unit: '%' })}. Both sides moved `
               + 'together, so neither explains the other on this evidence alone.'));
       if (v1 != null && v0 != null && Math.abs(move(v0, v1)) < 15 && dMove != null && dMove < -15) {
         sb.append(el('p', 'note err',
-          `The vehicle count barely moved (${move(v0, v1)}%) while the driver count fell ${dMove}%. `
+          `The vehicle count barely moved (${signed(move(v0, v1), { unit: '%' })}) while the driver count fell ${signed(dMove, { unit: '%' })}. `
           + 'The fleet is still holding the cars it is no longer staffing — that is idle capital with a '
           + 'registration and an insurance policy attached, and it is on the balance sheet either way.'));
       }
@@ -423,7 +423,7 @@ export async function renderCauses(root) {
     brk.body.append(tableFrom(t.breaks || [], [
       { label: 'From', key: 'from', render: (r) => MONTH(r.from) },
       { label: 'To', key: 'to', render: (r) => MONTH(r.to) },
-      { label: 'Change', key: 'change_pct', num: true, render: (r) => `${r.change_pct > 0 ? '+' : ''}${r.change_pct}%`
+      { label: 'Change', key: 'change_pct', num: true, render: (r) => esc(signed(r.change_pct, { unit: '%' }))
         + (r.boundary_artifact ? ' <span class="tag warn">boundary</span>' : '') },
       { label: 'Trips', key: '_t', num: true, render: (r) => `${fmt(r.trips_from)} → ${fmt(r.trips_to)}` },
       { label: 'Drivers', key: '_d', num: true, render: (r) => (r.drivers_from == null ? 'not comparable' : `${r.drivers_from} → ${r.drivers_to}`) },
@@ -480,7 +480,7 @@ export async function renderCauses(root) {
         render: (r) => {
           const hit = touches(r);
           return hit.length
-            ? hit.slice(0, 2).map((b) => `<span class="pill warn" title="trips moved ${b.change_pct}% here">`
+            ? hit.slice(0, 2).map((b) => `<span class="pill warn" title="trips moved ${signed(b.change_pct, { unit: '%' })} here">`
               + `${esc(MONTH(b.from))} → ${esc(MONTH(b.to))}</span>`).join(' ')
             : '<span class="ent-off" title="no structural break in the record overlaps this event">no break</span>';
         } },

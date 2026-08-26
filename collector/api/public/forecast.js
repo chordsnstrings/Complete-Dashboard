@@ -19,7 +19,7 @@
 
 import { empty, fmt, barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dayStr, dateStr,
-  countOf, sourceLabel } from './ui.js';
+  countOf, sourceLabel, signed } from './ui.js';
 import { q, href, hrefFilter, state } from './data.js';
 
 const MONTH = (m) => {
@@ -65,7 +65,7 @@ export async function renderForecast(root) {
     { label: `Bookings in ${MONTH(next.m)}`, value: fmt(next.point),
       sub: next.low != null ? `somewhere between ${fmt(next.low)} and ${fmt(next.high)}` : 'no interval available',
       tone: null },
-    { label: 'Trend', value: `${d.slope_per_month > 0 ? '+' : ''}${fmt(d.slope_per_month)}/month`,
+    { label: 'Trend', value: signed(d.slope_per_month, { unit: '/month' }),
       sub: `over ${d.n} months since the last break`,
       tone: d.slope_per_month > 0 ? 'good' : 'critical' },
     { label: 'How well the line fits', value: d.r2 == null ? '—' : d.r2.toFixed(2),
@@ -172,8 +172,8 @@ export async function renderForecast(root) {
       const dMove = Math.round(((fitted[fitted.length - 1].drivers / fitted[0].drivers) - 1) * 100);
       const pMove = Math.round(((per(fitted[fitted.length - 1]) / per(fitted[0])) - 1) * 100);
       tb.append(el('p', 'cap',
-        `Across the fitted months the driver count moved ${dMove > 0 ? '+' : ''}${dMove}% and each `
-        + `driver's own output moved ${pMove > 0 ? '+' : ''}${pMove}%. `
+        `Across the fitted months the driver count moved ${signed(dMove, { unit: '%' })} and each `
+        + `driver's own output moved ${signed(pMove, { unit: '%' })}. `
         + (Math.abs(pMove) > Math.abs(dMove)
           ? 'The trend this page fits is mostly per-driver intensity, not headcount — which is a ceiling, '
             + 'because a driver cannot keep doubling. Read the forecast against that before rostering to it.'

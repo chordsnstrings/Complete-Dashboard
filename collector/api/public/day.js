@@ -12,7 +12,7 @@ import { TZ } from './tz.js';
 
 import { barChart, donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
-  dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel } from './ui.js';
+  dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel, signed } from './ui.js';
 import { api, href, state } from './data.js';
 
 /* Why a fare column on this page can be almost entirely empty. Shared between
@@ -58,7 +58,7 @@ export async function renderDay(root, day, onDetail) {
   root.append(kpiRow([
     { label: 'Bookings', value: fmt(h.bookings),
       sub: vs.delta_pct == null ? null
-        : `${vs.delta_pct > 0 ? '+' : ''}${pct(vs.delta_pct, 0)} on the fortnight median of ${fmt(vs.median_bookings)}`,
+        : `${signed(vs.delta_pct, { unit: '%' })} on the fortnight median of ${fmt(vs.median_bookings)}`,
       tone: vs.delta_pct == null ? null : vs.delta_pct < -30 ? 'critical' : vs.delta_pct < -10 ? 'warn' : null },
     { label: 'Completed', value: fmt(h.completed),
       sub: h.completion_pct == null ? null : `${pct(h.completion_pct, 1)} of bookable`,

@@ -627,7 +627,17 @@ export const money = (v, cur = 'AED', d = 0) => {
   // A rate needs a FIXED number of decimals: `maximumFractionDigits` alone
   // rendered 2.70 as "AED 2.7", and rounding to whole dirhams rendered it
   // "AED 3" — which is a different number.
-  return `${cur} ${n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}`;
+  /* And the minus goes BEFORE the currency, in U+2212.
+     ─────────────────────────────────────────────────────────────────────
+     toLocaleString put an ASCII hyphen after the currency — "AED -600.59" —
+     and the two payout tables that render negatives look right only because
+     they hand-write "−" and pass Math.abs() to this function. Every other
+     negative money figure in the product carried the hyphen, next to
+     percentages that carry a true minus. A sign belongs to the number, and
+     the number reads left to right: −AED 600.59. */
+  const body = Math.abs(n).toLocaleString(undefined,
+    { minimumFractionDigits: d, maximumFractionDigits: d });
+  return `${n < 0 ? '\u2212' : ''}${cur} ${body}`;
 };
 /* A percentage, with the same minus sign as every other number on the page.
    ─────────────────────────────────────────────────────────────────────────
@@ -638,6 +648,25 @@ export const money = (v, cur = 'AED', d = 0) => {
    where the string is built rather than at ninety call sites. */
 export const pct = (v, d = 0) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—'
   : `${Number(v).toFixed(d).replace(/^-/, '\u2212')}%`);
+
+/* A number that carries its own sign, in the house glyphs.
+   ─────────────────────────────────────────────────────────────────────────
+   Every hand-built "${v > 0 ? '+' : ''}${Math.round(v)}%" in this product
+   emitted an ASCII hyphen for the negative case, because that is what
+   Math.round and toFixed produce — so "−76%" and "-76%" appear on the same
+   page depending on which line drew it. A minus that is narrower and sits
+   higher than the one beside it is a minus a reader can miss, and on a page
+   about which way the numbers MOVED that is the whole content.
+
+   Plus is explicit and minus is U+2212. `unit` is appended rather than
+   interpolated by the caller so a caller cannot put the sign in the wrong
+   place. */
+export const signed = (v, { unit = '', d = 0 } = {}) => {
+  if (v == null || v === '' || !Number.isFinite(Number(v))) return '—';
+  const n = Number(v);
+  const body = Math.abs(n).toFixed(d);
+  return `${n > 0 ? '+' : n < 0 ? '\u2212' : ''}${fmt(Number(body), d)}${unit}`;
+};
 /* An optional tone. Callers were already passing one — a rollup that failed
    and a rollup that is merely stale are different messages and were rendering
    identically, because the second argument was silently dropped. */

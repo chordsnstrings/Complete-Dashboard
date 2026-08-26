@@ -13,7 +13,8 @@
    performance judgement about people. */
 
 import { empty, fmt, heatmap } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, countOf, plural } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, countOf, plural,
+  signed } from './ui.js';
 import { q, href } from './data.js';
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -141,7 +142,7 @@ export async function renderCapacity(root) {
         render: (r) => (r.drivers_needed == null ? '—' : fmt(r.drivers_needed, 1)) },
       { label: 'Gap', key: 'driver_gap', num: true, render: (r) => (r.driver_gap == null ? '—'
         : `<span class="pill ${r.driver_gap >= 0.5 ? 'bad' : r.driver_gap <= -0.5 ? 'ok' : ''}">`
-          + `${r.driver_gap > 0 ? '+' : ''}${fmt(r.driver_gap, 1)}</span>`) },
+          + `${esc(signed(r.driver_gap, { d: 1 }))}</span>`) },
     ], { sortable: true, sortId: 'cells', defaultSort: { key: 'driver_gap', dir: 'desc' } }));
   ab.append(el('p', 'cap',
     `All ${countOf(d.cells.length, 'hour')} of the week, largest gap first. The table scrolls; nothing is cut.`));
@@ -205,7 +206,7 @@ function gapTable(rows, id) {
         ? '<span class="ent-off" title="not reported for this hour">—</span>'
         : fmt(r.occurrences_next)) },
     { label: 'Gap', key: 'driver_gap', num: true,
-      render: (r) => `<span class="pill ${r.driver_gap > 0 ? 'bad' : 'ok'}">${r.driver_gap > 0 ? '+' : ''}${fmt(r.driver_gap, 1)}</span>` },
+      render: (r) => `<span class="pill ${r.driver_gap > 0 ? 'bad' : 'ok'}">${esc(signed(r.driver_gap, { d: 1 }))}</span>` },
   ], { compact: true, sortable: true, sortId: `gap-${id}`,
     defaultSort: { key: 'driver_gap', dir: id === 'short' ? 'desc' : 'asc' } });
 }
