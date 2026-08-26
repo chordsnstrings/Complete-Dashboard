@@ -257,7 +257,8 @@ export async function renderCauses(root) {
       tone: attributable.length === observed.length ? 'good' : 'warn' },
     { label: 'Structural breaks', value: fmt((t.breaks || []).length),
       sub: artifacts.length
-        ? `moves above 30% between adjacent months — ${fmt(artifacts.length)} of them touch a partial month`
+        ? `moves above 30% between adjacent months — ${fmt(artifacts.length)} of them `
+          + `${plural(artifacts.length, 'touches', 'touch')} a partial month`
         : 'moves above 30% between adjacent months' },
     biggest ? { label: 'Largest move', value: signed(biggest.change_pct, { unit: '%' }),
       sub: `${MONTH(biggest.from)} → ${MONTH(biggest.to)}`
@@ -324,7 +325,10 @@ export async function renderCauses(root) {
       { k: 'Vehicles earning', a: v0, b: v1, d: move(v0, v1), fmtN: 0 },
       { k: 'Bookings per driver', a: p0, b: p1, d: move(p0, p1), fmtN: 1 },
     ], [
-      { label: '', key: 'k' },
+      /* The one column with no heading, in a table whose rows are four
+         different measures — so the reader had to infer what "31,890" and
+         "10,021" were being read against from the row label alone. */
+      { label: 'Measure', key: 'k' },
       { label: `${MONTH(firstThird[0].m)}–${MONTH(firstThird[firstThird.length - 1].m)}`,
         key: 'a', num: true, render: (r) => (r.a == null ? '—' : fmt(r.a, r.fmtN)) },
       { label: `${MONTH(lastThird[0].m)}–${MONTH(lastThird[lastThird.length - 1].m)}`,

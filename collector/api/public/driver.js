@@ -357,7 +357,7 @@ function identityCard(p) {
     <div class="idmeta">
       <h2>${esc(p.name || 'Unnamed driver')}</h2>
       <div class="idsub">
-        ${(p.platforms || []).map((x) => pill(x, 'plat')).join('')}
+        ${(p.platforms || []).map((x) => pill(sourceLabel(x), 'plat')).join('')}
         ${p.span?.fleet_id ? pill(p.span.fleet_id, 'plat') : ''}
         ${c.state ? pill(c.state, c.state === 'active' ? 'ok' : 'warn') : ''}
         ${placeholder
@@ -1267,7 +1267,7 @@ export async function renderDriverDirectory(root) {
     ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',
       render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id), 'plat')
         : '<span class="ent-off" title="no trip of theirs names a fleet">—</span>') }] : []),
-    { label: 'Platforms', key: '_p', render: (r) => (r.platforms || []).map((p) => pill(p, 'plat')).join('') },
+    { label: 'Platforms', key: '_p', render: (r) => (r.platforms || []).map((p) => pill(sourceLabel(p), 'plat')).join('') },
     { label: 'Usual vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Trips', key: 'trips', num: true, render: (r) => fmt(r.trips) },
     ...(anyLifetime ? [{ label: 'Trips ever', key: 'lifetime_trips', num: true,

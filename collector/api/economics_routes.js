@@ -284,7 +284,12 @@ export function economicsRoutes(app, { q, wrap, range }) {
                 coalesce(v.year, vp.year) AS year,
                 coalesce(v.fleet_id, vp.fleet_id) fleet_id,
                 tel.last_fix, tel.status, tel.lat, tel.lng,
-                (now() - tel.last_fix > interval '11 minutes') stale,
+                /* Eleven minutes here, thirty in server.js FIX_FRESH, which /api/live
+                 and /api/kpis use. Measured on production the two feeds differ
+                 enough that neither number fits both — FMS reports every ~5 min,
+                 CABMAN sits at a median of 43 — so the pages state which rule
+                 they applied rather than one being quietly imposed on both. */
+              (now() - tel.last_fix > interval '11 minutes') stale,
                 doc.soonest_expiry,
                 (doc.soonest_expiry::date - now()::date) doc_days_left,
                 coalesce(al.alerts,0) alerts,

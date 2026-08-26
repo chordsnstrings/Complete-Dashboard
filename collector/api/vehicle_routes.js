@@ -162,6 +162,11 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               /* Staleness is a property of the FIX, not of our poll. CABMAN
                  re-sends every vehicle's last position on every cycle, so a
                  tracker dead for a year still got a fresh polled_at. */
+              /* Eleven minutes here, thirty in server.js FIX_FRESH, which /api/live
+                 and /api/kpis use. Measured on production the two feeds differ
+                 enough that neither number fits both — FMS reports every ~5 min,
+                 CABMAN sits at a median of 43 — so the pages state which rule
+                 they applied rather than one being quietly imposed on both. */
               (now() - tel.last_fix > interval '11 minutes') stale,
               round(extract(epoch FROM now() - tel.last_fix) / 60)::int fix_age_min,
               doc.soonest_expiry, (doc.soonest_expiry::date - now()::date) doc_days_left,

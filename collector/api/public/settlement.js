@@ -74,6 +74,21 @@ async function settleMix(host) {
         sub: `${fmt(off.trips)} bookings — the platform records the fare as settled outside the `
           + 'app and gives no further detail', tone: 'warn' };
     })(),
+    /* Whatever the four tiles above do not name. They covered card, wallet,
+       cash, on-account, salary and off-platform — 98.2% — under a first tile
+       reading "11,758, all of them", leaving 208 bookings in `adjustment` and
+       `complimentary` with no tile and no mention. Computed as a remainder
+       rather than from a list, so a route a provider invents next month shows
+       up here instead of quietly leaving the tiles short of 100%. */
+    (() => {
+      const NAMED = new Set(['card', 'wallet', 'cash', 'on_account', 'salary', 'off_platform']);
+      const rest = s.classes.filter((c) => !NAMED.has(c.settlement_class));
+      const n = rest.reduce((a, c) => a + c.trips, 0);
+      if (!n) return null;
+      return { label: 'Everything else', value: pct((n / total) * 100, 1),
+        sub: `${countOf(n, 'booking')} — ${rest.map((c) => `${c.label || c.settlement_class} `
+          + `${fmt(c.trips)}`).join(', ')}. The tiles above and this one cover every booking.` };
+    })(),
   ]));
 
   const { panel: p0, body: b0 } = panel('Every booking, by settlement route', null);

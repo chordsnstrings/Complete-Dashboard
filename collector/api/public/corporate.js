@@ -71,7 +71,11 @@ async function corpOverview(host) {
     { label: 'Average fare', value: money(s.avg_fare, 'AED', 2), sub: 'complimentary rides excluded' },
     s.has_cost
       ? { label: 'Cost of delivery', value: money(s.cost), sub: 'reported per booking by this channel' }
-      : { label: 'Revenue per km', value: money(s.revenue_per_km, 'AED', 2), sub: 'over priced bookings only' },
+      /* It divides revenue by EVERY booking's distance — priced_km is not even
+         returned on this endpoint — so "over priced bookings only" described a
+         denominator the figure does not use. 64,900 over 14,725 km is 4.41. */
+      : { label: 'Revenue per km', value: money(s.revenue_per_km, 'AED', 2),
+        sub: s.km ? `${money(s.revenue)} over ${fmt(s.km)} km, priced or not` : 'no distance reported' },
     s.has_cost
       ? { label: 'Gross margin', value: money(grossMargin),
           sub: s.revenue ? `${pct((grossMargin / s.revenue) * 100, 1)} of revenue` : null,
@@ -101,8 +105,15 @@ async function corpOverview(host) {
       ? { label: 'Ended outside Dubai', value: fmt(s.outside_dubai),
         sub: 'a booking the driver has to come back from empty', tone: 'warn' }
       : null,
+    /* A bare "3,632" under a label naming no unit. It is a Herfindahl index —
+       the sum of each property's squared share, out of 10,000 — and without
+       the scale beside it the number says nothing to anyone who has not met
+       one before. */
     { label: 'Client concentration', value: s.concentration_hhi == null ? '—' : fmt(s.concentration_hhi),
-      sub: s.top_property ? `${s.top_property} is ${pct(s.top_property_share_pct, 0)}` : null,
+      sub: s.top_property
+        ? `${s.top_property} is ${pct(s.top_property_share_pct, 0)} · Herfindahl index out of 10,000, `
+          + `where above 2,500 is a concentrated book and ${fmt(10000)} is a single client`
+        : null,
       tone: s.concentration_hhi > 2500 ? 'warn' : null },
   ]));
 

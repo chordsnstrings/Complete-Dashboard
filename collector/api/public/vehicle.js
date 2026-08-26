@@ -925,7 +925,20 @@ export async function renderVehicleDirectory(root) {
       tone: movedOnly ? 'critical' : 'good' },
     { label: 'Did not move', value: fmt(still), sub: 'no booking and no journey',
       tone: still ? 'warn' : 'good' },
-    { label: 'Tracked', value: fmt(tracked), sub: `${fmt(staleN)} with a stale fix`,
+    /* Named, because the product carries two rules for the word "stale" and
+       this page uses the other one. /api/vehicles flags a fix stale after 11
+       minutes; /api/live flags it after 30, which is what #live and #map show.
+       On the same fleet at the same moment that read 65 here and 50 there,
+       with neither tile saying which rule it applied.
+
+       They are not obviously reconcilable: measured on production, an FMS
+       vehicle reports every ~5 minutes (median fix age 7 min across 83
+       vehicles) while a CABMAN one sits at a median of 43. Eleven minutes
+       calls most healthy CABMAN vehicles stale; thirty calls a silent FMS one
+       fresh. Picking one number for both feeds is a decision about what the
+       word should mean, so both tiles now state the rule they used instead. */
+    { label: 'Tracked', value: fmt(tracked),
+      sub: `${fmt(staleN)} with no fix in 11 min`,
       tone: staleN === 0 ? 'good' : 'warn' },
     { label: 'Documents due', value: fmt(expiring), sub: 'expiring within 30 days',
       tone: expiring === 0 ? 'good' : 'critical' },

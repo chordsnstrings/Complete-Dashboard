@@ -498,7 +498,13 @@ V.overview = async (root) => {
   };
   kpiHost.innerHTML = [
     ['Trips', fmt(k.trips), `${fmt(k.drivers)} drivers · ${fmt(k.telematics_journeys || 0)} telematics journeys`],
-    ['Distance', fmt(k.km) + ' km', `avg ${k.avg_km ?? '—'} km/trip`],
+    /* avg_km divides by the trips that REPORT a distance, not by every trip,
+       and that count was nowhere on the tile: 146,249 over 11,758 is 12.44,
+       and the tile said 14.02. Over the 10,434 that carry a distance it is
+       14.02 exactly. */
+    ['Distance', fmt(k.km) + ' km', k.trips_with_distance
+      ? `avg ${k.avg_km ?? '—'} km over the ${fmt(k.trips_with_distance)} trips reporting one`
+      : `avg ${k.avg_km ?? '—'} km/trip`],
     /* Both channels, because one of them alone is not this fleet's money.
        This card showed sum(price) over the trip table, and the Uber export
        carries no fare column — so on a normal month it was 651 of 7,356 trips,
@@ -744,7 +750,14 @@ V.demand = async (root) => {
         sub: `averaging ${fmt(Math.round(avg(ram)))} trips` } : null,
     ]));
 
-    const ctxRows = [...rows].reverse().slice(0, 45);
+    /* Stamped onto the row rather than computed in the column's render:
+       tableFrom prunes a column no row carries a key for, so a value derived
+       purely inside render() vanishes from the table it was added to. */
+    const ctxRows = [...rows].reverse().slice(0, 45).map((r) => ({
+      ...r,
+      open_yet: (r.completed == null && r.cancelled == null) ? null
+        : Math.max(0, (+r.trips || 0) - (+r.completed || 0) - (+r.cancelled || 0)),
+    }));
     ctxP.body.append(tableFrom(ctxRows, [
       /* A day is an address, and this column was the one place on the page it
          was plain text. */
@@ -763,6 +776,16 @@ V.demand = async (root) => {
           : r.cancelled
             ? `<span class="pill ${r.trips && r.cancelled / r.trips > 0.15 ? 'warn' : ''}">${fmt(r.cancelled)}</span>`
             : '0') },
+      /* The residual. Completed and Did-not-complete sat beside Trips and did
+         not add up to it — 85 and 5 against 93 on the day this was found,
+         which is today, so three of them had not finished yet. A column that
+         does not reconcile with the one beside it reads as an error in the
+         data rather than a trip still running. */
+      { label: 'Neither yet', key: 'open_yet', num: true,
+        render: (r) => (r.open_yet == null ? '—'
+          : (r.open_yet > 0
+            ? `<span title="still running, or a status no channel maps to either outcome">${fmt(r.open_yet)}</span>`
+            : '0')) },
       { label: 'Drivers', key: 'drivers', num: true,
         render: (r) => (r.drivers == null
           ? '<span class="ent-off" title="this day’s rows carry no driver id — a telematics-only day">—</span>'
@@ -905,12 +928,15 @@ V.drivers = async (root) => {
   const multiN = cross.multi_platform ?? multi.length;
   if (!multiN) {
     xp.body.append(el('div', 'note', plats.length
-      ? `No driver in this window has trips on more than one of: ${plats.join(', ')}.`
+      ? `No driver in this window has trips on more than one of: ${plats.map(sourceLabel).join(', ')}.`
       : 'No platform has trips in this window, so there is nothing to compare.'));
   } else {
     xp.body.append(tableFrom(multi.slice(0, 15), [
       { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
-      ...plats.map((pl) => ({ label: pl, key: col(pl), num: true })),
+      /* The only place in the product where a raw platform token was a column
+         HEADING: hotel | uber | yango, beside headings reading Bookings and
+         Accounts. */
+      ...plats.map((pl) => ({ label: sourceLabel(pl), key: col(pl), num: true })),
       /* Zero is a number, and here it is the whole finding: this person's work
          is all bookings and no unexplained journeys. Rendered as an em-dash it
          read as "not measured", which on a column beside three trip counts is
@@ -1957,7 +1983,13 @@ V.safety = async (root) => {
     hbars(vp.body, byVeh.slice(0, 12).map((r) => ({ label: r.plate, n: r.alerts })), {
       color: '--s8', onClick: (d) => { location.hash = href('vehicle', d.label, 'safety'); } });
     host.append(vp.panel);
-    host.append(tableFrom(byVeh, [
+    /* Sixty-three rows starting straight under a chart of the worst twelve,
+       with nothing saying what they were or how many. */
+    const vtab = panel(`Every vehicle with an event — ${countOf(byVeh.length, 'vehicle')}`,
+      'The four named categories and Other add up to Total. Drivers that window counts everyone who '
+      + 'held the car on a day one of these happened.');
+    host.append(vtab.panel);
+    vtab.body.append(tableFrom(byVeh, [
       { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
       { label: 'Total', key: 'alerts', num: true },
       { label: 'Harsh brake', key: 'harsh_brake', num: true },
@@ -1973,11 +2005,11 @@ V.safety = async (root) => {
           : '<span class="ent-off" title="no custody record on the days these events happened">unattributed</span>') },
     ], { sortable: true, sortId: 'safetyveh', defaultSort: { key: 'alerts', dir: 'desc' } }));
     if (vehPage.truncated) {
-      host.append(el('p', 'cap',
+      vtab.body.append(el('p', 'cap',
         `Showing ${fmt(byVeh.length)} of ${fmt(vTot.vehicles ?? byVeh.length)} vehicles with an event, `
         + 'the worst first. Sorting re-orders those rows and does not reach the rest.'));
     }
-    host.append(note('Each event is attributed to whoever held the car ON THE DAY it happened, not to '
+    vtab.body.append(note('Each event is attributed to whoever held the car ON THE DAY it happened, not to '
       + 'whoever holds it now — and vehicle_driver_day carries one row per platform, so custody is '
       + 'collapsed to one driver per plate-day before counting. Joining it directly once showed 584 '
       + 'events twice under two spellings of one name.'));
