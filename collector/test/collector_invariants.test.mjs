@@ -36,15 +36,25 @@ check('the run records every window it attempted, not just a total',
    place Uber money exists at all, stayed empty. */
 check('and both of the uber sub-sources contribute their windows to the run',
   /perf\.chunks/.test(uber) && /rows_written: trips\.total \+ perf\.total/.test(uber));
-/* It does not page at all now. The response type has no token this query can
-   select — asking for nextPageToken made the server reject the whole query, and
-   the guess that replaced it (paginationResult.nextPageToken) was never
+/* It pages through `pageInfo`, and only through `pageInfo`.
+   ─────────────────────────────────────────────────────────────────────────
+   Two earlier attempts failed and this rule is the difference between them and
+   the one that works. A BARE `nextPageToken` on the connection is a field the
+   response type does not have, and asking for it made Uber reject the whole
+   query on every window. The guess that replaced it,
+   `paginationResult.nextPageToken`, was a REST shape that GraphQL never
    SELECTED, so it read undefined and one page of ten drivers became the answer
-   for a fleet of eighty-five. Every weekly period in the database held exactly
-   ten drivers: the shape a cap leaves, and not one any real week has.
+   for a fleet of eighty-five — every weekly period in the database held
+   exactly ten, the shape a cap leaves and not one any real week has.
 
-   Drivers are asked for by name instead, ten at a time, from the ids we already
-   hold — so the batches are the fleet and there is no page to run out. */
+   The path the portal itself sends is `pageInfo { nextPageToken }`, and it
+   works: checked against the live endpoint with this file's own query text, a
+   Dubai day comes back in three pages for Egari and five or six for Ecosine,
+   and the seven days sum to exactly the trips and net outstanding the one
+   weekly call reports — 842 / AED 30,280.53 and 1,862 / AED 71,006.78.
+
+   So the rule is not "never ask for a token", which would forbid the thing
+   that works; it is "ask for it where the type actually has it". */
 /* Scoped to the GraphQL document, not to the whole file. Written as
    "nextPageToken appears nowhere in uber.js" it started failing the moment the
    driver roster — a REST response that genuinely carries one — was paged: a
@@ -52,8 +62,13 @@ check('and both of the uber sub-sources contribute their windows to the run',
    which is how a suite stops being believed. */
 const earnerQuery = uber.slice(uber.indexOf('const EARNER_QUERY'),
   uber.indexOf('async function earnerCall'));
-check('the earner breakdown does not ask for a pagination field this response has no room for',
-  !/nextPageToken/.test(earnerQuery), earnerQuery.slice(0, 80));
+check('the earner breakdown asks for its token through pageInfo, where the type has it',
+  /pageInfo \{ nextPageToken \}/.test(earnerQuery), earnerQuery.slice(0, 90));
+check('and never as a bare field on the connection, which the server rejects',
+  !/(^|[^.\w])nextPageToken(?![^{]*\})/.test(earnerQuery.replace(/pageInfo \{ nextPageToken \}/g, '')),
+  earnerQuery.slice(0, 90));
+check('nor as the REST shape that was never selected',
+  !/paginationResult/.test(earnerQuery));
 check('and asks for drivers by name rather than paging past the cap',
   /driverListOrPageOptions: 'Driver_List'/.test(uber) && /driverList: drivers\.slice\(/.test(uber));
 check('taking the driver ids from both places they land, not just the roster',

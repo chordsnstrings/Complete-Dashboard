@@ -92,6 +92,36 @@ check('so the range handed over is a full seven days',
 check('and the next window begins exactly where the last one ended',
   w.every((x, i) => i === 0 || +x.start === +w[i - 1].until));
 
+console.log('\na day is a DUBAI day, not a UTC one');
+
+/* The fleet works Asia/Dubai and every other day figure in this product is
+   `AT TIME ZONE 'Asia/Dubai'`. A UTC-aligned day would begin at 04:00 local
+   and file four hours of each morning under the day before — which would show
+   up immediately as a payout day that disagrees with the trip day beside it. */
+import { dubaiDayChunks } from '../src/util.js';
+const dd = [...dubaiDayChunks(D('2026-08-19T09:00:00Z'), D('2026-08-21T15:00:00Z'))];
+check('one chunk per calendar day in the span, inclusive',
+  dd.length === 3 && dd.map((x) => x.day).join() === '2026-08-19,2026-08-20,2026-08-21',
+  dd.map((x) => x.day).join());
+/* The distinction itself: 23:30Z on the 21st is already the 22nd in Dubai, so
+   the span reaches a day a UTC-aligned chunker would never have asked for. */
+check('an instant late in the UTC day belongs to the NEXT Dubai day',
+  [...dubaiDayChunks(D('2026-08-19T09:00:00Z'), D('2026-08-21T23:30:00Z'))]
+    .map((x) => x.day).join() === '2026-08-19,2026-08-20,2026-08-21,2026-08-22');
+check('each starts at Dubai midnight, which is 20:00Z the day before',
+  dd.every((x) => x.start.getUTCHours() === 20), dd.map((x) => x.start.toISOString()).join(' '));
+check('each spans exactly 24 hours', dd.every((x) => x.until - x.start === 864e5));
+check('and they are contiguous', dd.every((x, i) => i === 0 || +x.start === +dd[i - 1].until));
+/* The stamp is the date the window COVERS in Dubai, not iso(start) — which
+   would name the previous day and put every payout one day early. */
+check('the stamped date is the Dubai date, not the UTC date of its start',
+  dd.every((x) => x.day !== iso(x.start)) && dd[0].day === '2026-08-19',
+  `${dd[0].day} vs iso(start) ${iso(dd[0].start)}`);
+/* A run that starts and ends inside one Dubai day still asks for that day. */
+check('a sub-day span still yields the day it falls in',
+  [...dubaiDayChunks(D('2026-08-20T06:00:00Z'), D('2026-08-20T07:00:00Z'))]
+    .map((x) => x.day).join() === '2026-08-20');
+
 console.log('\nthe collector uses it');
 
 /* A helper nothing calls fixes nothing, and this one replaced a call that
@@ -105,13 +135,52 @@ const body = fn.slice(0, fn.indexOf('\nasync function ') > 0 ? fn.indexOf('\nasy
 check('the earnings pull builds its windows with weekChunks',
   /weekChunks\(from, to\)/.test(body));
 check('and no longer with the run-anchored dateChunks', !/dateChunks\(/.test(body));
+/* Every call site hands over `until`, the exclusive bound — never `e`, the
+   last day covered. There are three now: driver-list mode for a week, page
+   mode for a day, and the page-mode fallback when the server rejects the list. */
+const callSites = body.match(/earner(Call|Pages)\(s, [a-z]+/g) || [];
 check('the provider is handed the exclusive bound, not the last day',
-  (body.match(/earnerCall\(s, until,/g) || []).length === 2,
-  `${(body.match(/earnerCall\(/g) || []).length} calls, ${(body.match(/earnerCall\(s, until,/g) || []).length} exclusive`);
+  callSites.length === 3 && callSites.every((c) => /, until$/.test(c)),
+  callSites.join(' | '));
 /* The row still records the last day COVERED — storing `until` would label a
-   Mon–Sun week as Mon–Mon and overlap the next one by a day. */
+   Mon–Sun week as Mon–Mon and overlap the next one by a day. The stamp moved
+   off `iso(s)`/`iso(e)` when the daily grid arrived, because a Dubai day
+   begins at 20:00Z the day before and iso(start) would name the wrong date;
+   the weekly grid still stamps start..end, which is what this is about. */
 check('but the row stores the last day covered',
-  /period_start: iso\(s\), period_end: iso\(e\)/.test(uber));
+  /ps: iso\(w\.start\), pe: iso\(w\.end\)/.test(body), 'weekly stamp');
+check('and the write uses those stamps rather than the exclusive bound',
+  /period_start: ps, period_end: pe/.test(uber) && !/period_end: iso\(until\)/.test(uber));
+
+/* The daily grid: same question, one Dubai day at a time. Verified against the
+   live endpoint before it was written — seven daily calls and one weekly call
+   over the identical span agreed to the cent on trips and netOutstanding. */
+check('a Dubai-aligned daily grid is asked for as well',
+  /dubaiDayChunks\(dayFrom, to\)/.test(body), 'daily grid');
+check('a day row is stamped with the Dubai date, start and end the same day',
+  /ps: d\.day, pe: d\.day/.test(body));
+check('the daily grid is bounded by the endpoint rolling horizon',
+  /EARNER_DAY_HORIZON/.test(body) && /EARNER_DAY_HORIZON = \d+/.test(uber));
+check('the daily grid never starts before the window the run was given',
+  /Math\.max\(new Date\(from\)\.getTime\(\), dayHorizon\.getTime\(\)\)/.test(body));
+/* Page mode pages now. The old comment said the response carried no token this
+   query could select; it does, and without it a page-mode window returned the
+   first ten drivers and stopped. It is also what makes a 200-day grid
+   affordable: one call per ten drivers who EARNED, against 21 for a
+   driver-list window whatever happened in it. */
+check('the earner query selects a pagination token',
+  /pageInfo \{ nextPageToken \}/.test(uber));
+check('and page mode follows it to the end of the list',
+  /async function earnerPages/.test(uber) && /pageToken: token/.test(uber));
+check('a day is asked for in page mode, not by naming every driver',
+  /if \(isDay\) \{[\s\S]{0,200}earnerPages\(s, until\)/.test(body));
+check('a week still names every driver, so an absent one is a fact about them',
+  /\} else if \(listMode\) \{/.test(body));
+
+/* Two hundred green day rows per fleet would bury the week rows the Sources
+   page is read for; a day that FAILED is the one an operator needs. */
+check('a successful day is not recorded as its own chunk, a failed one is',
+  /if \(!isDay \|\| err\)/.test(body));
 /* total was declared, never added to, and returned as 0, so every run in the
    record says the earnings phase wrote nothing. */
 check('the rows written are counted', /total \+= got;/.test(body));

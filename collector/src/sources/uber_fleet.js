@@ -4,11 +4,12 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { config, normPlate } from '../config.js';
+import { normPlate } from '../config.js';
 import { http, qs } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
 import { iso, weekChunks } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
+import { uberOrgs } from './uber.js';
 import { log } from '../log.js';
 
 const SRC = 'uber_fleet';
@@ -19,12 +20,18 @@ const SRC = 'uber_fleet';
 const __dir = dirname(fileURLToPath(import.meta.url));
 const Q = (f) => readFileSync(join(__dir, '..', 'gql', f), 'utf8');
 const GQL = 'https://supplier.uber.com/graphql';
-const FLEET = 'ecosine';
 
-async function gql(operationName, query, variables) {
+/* Every surface below used to be stamped `fleet_id: 'ecosine'` and addressed
+   with config.uber.orgUuid — the unsuffixed, Ecosine key. Egari is a
+   configured org with its own uuid, encrypted id and web session, and none of
+   this ever ran for it: on production Egari carried a bank payout for 7 of 13
+   months and an expected payout for 0 of 13, because the component tree that
+   `expected` is built from comes from here. collect() now iterates the orgs
+   and each surface takes the one it is collecting. */
+async function gql(operationName, query, variables, o) {
   const { data } = await http(GQL, {
     method: 'POST', timeoutMs: 45000, retries: 2,
-    headers: uberWebHeaders(), body: JSON.stringify({ operationName, query, variables }),
+    headers: uberWebHeaders(o), body: JSON.stringify({ operationName, query, variables }),
   });
   if (data?.errors) throw new Error(`${operationName}: ${data.errors[0]?.extensions?.code || data.errors[0]?.message}`);
   return data?.data;
@@ -32,20 +39,20 @@ async function gql(operationName, query, variables) {
 
 /* ── vehicles + compliance documents (registration/insurance expiry) ────── */
 
-async function pullVehicles() {
+async function pullVehicles(o) {
   let pageToken = null, profiles = [], docs = [], guard = 0;
   do {
     const d = await gql('vehiclesTableVehicles', Q('vehicles.gql'), {
-      orgUUID: config.uber.orgUuid, pageToken: pageToken || '', pageSize: 200,
+      orgUUID: o.orgUuid, pageToken: pageToken || '', pageSize: 200,
       filters: { vehicleComplianceStatus: null, vehicleAssignmentStatus: null,
                  gigUnifiedStatus: null, gigBaseType: null, documentComplianceStatus: null },
       withAssignments: true,
-    });
+    }, o);
     const page = d?.getSupplierVehicles;
     for (const v of (page?.vehicles || [])) {
       const plate = normPlate(v.licensePlate);
       profiles.push({
-        platform: 'uber', vehicle_ext_id: v.uuid, plate, fleet_id: FLEET,
+        platform: 'uber', vehicle_ext_id: v.uuid, plate, fleet_id: o.fleet,
         make: v.make, model: v.model, year: v.year, colour: v.color, colour_hex: v.colorHexCode,
         vin: v.vin || null, image_url: v.imageURL || null, owner_ext_id: v.ownerUUID || null,
         assigned_driver_ext_id: v.assignments?.[0]?.entityUUID || null,
@@ -54,7 +61,7 @@ async function pullVehicles() {
       for (const doc of (v.compliance?.documents || [])) {
         docs.push({
           platform: 'uber', vehicle_ext_id: v.uuid, doc_type: doc.documentTypeName || 'unknown',
-          plate, fleet_id: FLEET, status: doc.status || null,
+          plate, fleet_id: o.fleet, status: doc.status || null,
           expires_at: doc.expiresAt || null, raw: doc,
         });
       }
@@ -69,15 +76,15 @@ async function pullVehicles() {
 
 /* ── Uber's own recommendations: who is below target, per Uber's maths ──── */
 
-async function pullRecommendations() {
+async function pullRecommendations(o) {
   // Recommendations are published for a trailing window; ask for the last 30 days.
   const endsAt = Date.now(), startsAt = endsAt - 30 * 864e5;
   const d = await gql('getRecommendations', Q('recommendations.gql'), {
     recommendationsRequest: {
-      orgUuid: config.uber.orgUuid, userUuid: config.uber.orgUuid,
+      orgUuid: o.orgUuid, userUuid: o.orgUuid,
       timeRange: { startsAt, endsAt }, tenancy: 'uber/production',
     },
-  });
+  }, o);
   const recs = d?.getRecommendations?.recommendations || [];
   const rows = recs.map((r) => {
     const dd = r.data || {};
@@ -99,7 +106,7 @@ async function pullRecommendations() {
     }
     const ms = (v) => (v ? new Date(Number(v)).toISOString().slice(0, 10) : null);
     return {
-      platform: 'uber', rec_type: r.type, rec_uuid: r.uuid, fleet_id: FLEET,
+      platform: 'uber', rec_type: r.type, rec_uuid: r.uuid, fleet_id: o.fleet,
       period_start: ms(r.timeRange?.startsAt), period_end: ms(r.timeRange?.endsAt),
       org_value: orgV, target_value: tgtV,
       flagged_count: flagged.length, flagged: JSON.stringify(flagged), raw: r,
@@ -177,7 +184,7 @@ const EARNER_PAGES_MAX = 40;
    the whole window came back without a single earner while the probe of the
    same surface saw some, the request is wrong. If one week answered, the silent
    ones are simply outside the period Uber serves. */
-async function pullEarningsComponents(from, to) {
+async function pullEarningsComponents(from, to, o) {
   const token = await uberOAuthToken();
   let totalRows = 0, earners = 0, weeks = 0, served = 0;
   for (const wk of weekChunks(from, to)) {
@@ -187,7 +194,7 @@ async function pullEarningsComponents(from, to) {
        earning on record — and this collector was still making the same ask.
        The rows keep the CLOSED week as their key, because that is the grid
        every other Uber figure lives on and what schema_v26 prunes against. */
-    const r = await pullEarningsWeek(token, wk.start, wk.end, wk.until);
+    const r = await pullEarningsWeek(token, wk.start, wk.end, wk.until, o);
     totalRows += r.rows; earners += r.earners; weeks += 1;
     if (r.earners) served += 1;
   }
@@ -207,10 +214,10 @@ async function pullEarningsComponents(from, to) {
   return totalRows;
 }
 
-async function pullEarningsWeek(token, from, to, until = to) {
+async function pullEarningsWeek(token, from, to, until, o) {
   const call = async (pageToken) => {
     const url = `https://api.uber.com/v1/vehicle-suppliers/earners/payments?${qs({
-      org_id: config.uber.org, start_time: new Date(from).getTime(),
+      org_id: o.org, start_time: new Date(from).getTime(),
       end_time: new Date(until).getTime(), page_size: EARNER_PAGE,
       ...(pageToken ? { page_token: pageToken } : {}),
     })}`;
@@ -248,7 +255,7 @@ async function pullEarningsWeek(token, from, to, until = to) {
             platform: 'uber', driver_ext_id: driver, period_start: ps, period_end: pe,
             category, parent: parent || null, amount,
             currency: pick(c, 'amount.currencyCode', 'currency') || 'AED',
-            driver_name: name, fleet_id: FLEET,
+            driver_name: name, fleet_id: o.fleet,
           });
         }
         const kids = c.children || c.breakdowns || c.items || c.subCategories;
@@ -281,7 +288,24 @@ async function pullEarningsWeek(token, from, to, until = to) {
   };
 }
 
+/* One pass per configured org. Each writes its own run row, because
+   /api/status renders a source per fleet and a single row covering both would
+   report Egari's failure as Ecosine's — or hide it entirely behind Ecosine's
+   success, which is how this surface stayed broken for Egari. */
 export async function collect({ from, to, mode }) {
+  let total = 0;
+  const orgs = uberOrgs();
+  for (const o of orgs) {
+    if (!o.orgUuid || !o.webCookie) {
+      log.info(SRC, `skipped ${o.fleet} — no org uuid or web session configured`);
+      continue;
+    }
+    total += await collectOrg({ from, to, mode }, o);
+  }
+  return total;
+}
+
+async function collectOrg({ from, to, mode }, o) {
   let vehicles = 0, documents = 0, recs = 0, earnings = 0;
   /* Each surface is independent — one failing must not cost us the others. But
      "independent" was doing too much work: a surface that threw was written to
@@ -297,17 +321,17 @@ export async function collect({ from, to, mode }) {
     try { return await fn(); }
     catch (e) {
       const err = String(e?.message || e).slice(0, 300);
-      log.warn(SRC, `${name} failed`, { err });
+      log.warn(SRC, `${name} failed`, { fleet: o.fleet, err });
       failed.push({ from: iso(new Date(from)), to: iso(new Date(to)), error: `${name}: ${err}` });
       return null;
     }
   };
-  const veh = await surface('vehicles/compliance', pullVehicles);
+  const veh = await surface('vehicles/compliance', () => pullVehicles(o));
   if (veh) ({ vehicles, documents } = veh);
-  recs = (await surface('recommendations', pullRecommendations)) || 0;
-  earnings = (await surface('earnings components', () => pullEarningsComponents(from, to))) || 0;
+  recs = (await surface('recommendations', () => pullRecommendations(o))) || 0;
+  earnings = (await surface('earnings components', () => pullEarningsComponents(from, to, o))) || 0;
 
-  await logRun({ source: SRC, fleet_id: FLEET, mode,
+  await logRun({ source: SRC, fleet_id: o.fleet, mode,
     window_start: iso(new Date(from)), window_end: iso(new Date(to)),
     // Four surfaces: all four working is ok, some working is partial, none is
     // an error. "ok" used to cover three of the four being broken.
@@ -317,5 +341,6 @@ export async function collect({ from, to, mode }) {
       ? [{ from: iso(new Date(from)), to: iso(new Date(to)), ok: false, rows: 0, error: failed[0].error }]
       : undefined,
     rows_written: vehicles + documents + recs + earnings });
-  log.info(SRC, 'done', { vehicles, documents, recs, earnings, failed: failed.length });
+  log.info(SRC, 'done', { fleet: o.fleet, vehicles, documents, recs, earnings, failed: failed.length });
+  return vehicles + documents + recs + earnings;
 }

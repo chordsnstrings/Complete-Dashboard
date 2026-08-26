@@ -7,7 +7,7 @@ import { parse } from 'csv-parse/sync';
 import { config, normPlate } from '../config.js';
 import { http, qs, sleep } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
-import { dateChunks, weekChunks, iso, unixMs } from '../util.js';
+import { dateChunks, weekChunks, dubaiDayChunks, iso, unixMs } from '../util.js';
 import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
 import { log } from '../log.js';
@@ -176,6 +176,7 @@ async function uberDriverIds() {
 const EARNER_QUERY = `query getEarnerBreakdownsV2($supplierUuid: ID!, $timeRange: OneOfTimeRange__Input, $driverListOrPageOptions: DriverListOrPagination, $driverList: [ID!], $pageOptions: PaginationOption__Input, $excludeAdjustmentItems: Boolean) {
           getEarnerBreakdownsV2(supplierUuid: $supplierUuid, timeRange: $timeRange, driverList: $driverList, pageOptions: $pageOptions, driverListOrPageOptions: $driverListOrPageOptions, excludeAdjustmentItems: $excludeAdjustmentItems) {
             earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode } }
+            pageInfo { nextPageToken }
           } }`;
 
 /* The range is HALF-OPEN: [s, e). Uber takes two instants, not two days, so an
@@ -203,7 +204,40 @@ async function earnerCall(s, e, variables) {
   if (data?.errors?.length) {
     return { err: String(data.errors[0]?.message || data.errors[0]).slice(0, 250), rows: [] };
   }
-  return { err: null, rows: data?.data?.getEarnerBreakdownsV2?.earnerEarningsBreakdowns || [] };
+  const g = data?.data?.getEarnerBreakdownsV2;
+  return { err: null, rows: g?.earnerEarningsBreakdowns || [], next: g?.pageInfo?.nextPageToken || '' };
+}
+
+/* Page mode, all the way to the end of the list.
+   ─────────────────────────────────────────────────────────────────────────
+   The comment on EARNER_BATCH says page mode "returns the first ten drivers
+   and stops" because "the response type carries no pagination token this query
+   can select". The first half was true and the second was not: the query can
+   select `pageInfo { nextPageToken }`, and it pages. Checked against the live
+   endpoint — Egari answers a day in three pages and Ecosine in five or six,
+   and the drivers that come back match the ones the driver-list mode finds for
+   the same span.
+
+   That matters for cost, which is what decides whether a grid can be daily at
+   all. Driver-list mode asks in batches of ten NAMES, so it costs
+   ceil(207/10) = 21 calls for a window whatever happened in it. Page mode
+   costs one call per ten drivers who actually EARNED — five or six on a real
+   day. Over a 200-day backfill that is the difference between about 4,200
+   calls per fleet and about 1,200. */
+async function earnerPages(s, e, cap = 40) {
+  const rows = [];
+  let token = '', pages = 0;
+  for (;;) {
+    const r = await earnerCall(s, e, {
+      driverListOrPageOptions: 'Page_Options',
+      pageOptions: { pageSize: EARNER_BATCH, pageToken: token }, driverList: null,
+    });
+    if (r.err) return { err: r.err, rows };
+    rows.push(...r.rows);
+    token = r.next;
+    if (!token || ++pages >= cap) break;
+  }
+  return { err: null, rows };
 }
 
 /* One earner window, for the operator probe.
@@ -252,6 +286,11 @@ export async function probeEarnerWindow(from, to, limit = 10) {
    before: a wrong guess about an enum should cost the improvement, not the
    data. */
 const EARNER_BATCH = 10;
+/* How far back to ask day by day. The endpoint's own horizon measured 192 days
+   on 2026-08-26 and it rolls forward daily, so this sits a little past it:
+   overshooting costs a few empty calls, undershooting loses days that can
+   never be re-fetched. */
+const EARNER_DAY_HORIZON = 200;
 
 async function pullEarnerBreakdowns(from, to, onStep) {
   let total = 0;
@@ -260,16 +299,44 @@ async function pullEarnerBreakdowns(from, to, onStep) {
   /* Whole calendar weeks, not seven days counted from whenever this run began
      — see weekChunks. The window is the primary key of what gets stored, so a
      grid that moves with the run stores the same week twice. */
-  const windows = [...weekChunks(from, to)];
-  log.info(SRC, 'earner breakdown', { drivers: drivers.length, windows: windows.length });
-  let listMode = drivers.length > 0;
+  const weekly = [...weekChunks(from, to)].map((w) => ({ ...w, ps: iso(w.start), pe: iso(w.end) }));
 
-  const write = async (bd, s, e) => {
+  /* And the same question asked one Dubai day at a time, for as far back as
+     Uber will answer it.
+     ─────────────────────────────────────────────────────────────────────────
+     A week stored as one row is spread across its seven days by
+     driver_payout_day_live, so #reconcile showed the same figure on three
+     consecutive days. Measured against the live endpoint, seven daily calls
+     and one weekly call over the identical span agree to the cent on trips and
+     on netOutstanding — 842 trips and AED 30,280.53 for Egari, 1,862 and AED
+     71,006.78 for Ecosine — so the day is a real measurement here and not a
+     finer-looking guess. The view already prefers the finest window it holds,
+     so these supersede the week covering them and nothing else has to change.
+
+     Bounded, because the endpoint serves a ROLLING window: measured at 192
+     days — Feb 15 answered in full and Feb 14 returned nothing — and it moves
+     every day. Asking past the edge costs calls and returns empty, so the
+     grid stops a little beyond it rather than walking the whole year. */
+  const dayHorizon = new Date(Date.now() - EARNER_DAY_HORIZON * 864e5);
+  const dayFrom = new Date(Math.max(new Date(from).getTime(), dayHorizon.getTime()));
+  const daily = dayFrom > new Date(to) ? []
+    : [...dubaiDayChunks(dayFrom, to)].map((d) => ({ start: d.start, end: d.start, until: d.until,
+      ps: d.day, pe: d.day, daily: true }));
+
+  const windows = [...weekly, ...daily];
+  log.info(SRC, 'earner breakdown', { drivers: drivers.length,
+    weeks: weekly.length, days: daily.length });
+  let listMode = drivers.length > 0;
+  let done = 0;
+
+  /* `ps`/`pe` are the ISO dates to STAMP, which for the daily grid are not
+     iso(start): a Dubai day begins at 20:00Z the day before. */
+  const write = async (bd, ps, pe) => {
     const rows = bd.map((d) => {
       const ti = Object.fromEntries((d.tripInfos || []).map((x) => [x.tripAttributeName, x.value]));
       return {
         platform: SRC, fleet_id: org().fleet, driver_ext_id: d.earnerUuid,
-        driver_name: d.earnerMetadata?.name, period_start: iso(s), period_end: iso(e),
+        driver_name: d.earnerMetadata?.name, period_start: ps, period_end: pe,
         trips: parseInt(ti['TRIP_ATTRIBUTE_NAME_COUNT']) || null,
         distance_km: parseFloat(ti['TRIP_ATTRIBUTE_NAME_DISTRANCE']) || null,
         earnings: d.netOutstanding ? Number(d.netOutstanding.amountE5) / 1e5 : null,
@@ -281,10 +348,28 @@ async function pullEarnerBreakdowns(from, to, onStep) {
       ['platform', 'driver_ext_id', 'period_start', 'period_end']);
   };
 
-  for (const { start: s, end: e, until } of windows) {
+  for (const { start: s, end: e, until, ps, pe, daily: isDay } of windows) {
     let got = 0, err = null, seen = 0;
 
-    if (listMode) {
+    /* A day is asked for in page mode, a week in driver-list mode.
+       ─────────────────────────────────────────────────────────────────────
+       Driver-list mode is the right shape for a week: it names every driver,
+       so a driver absent from the answer is a fact about that driver rather
+       than about where a page ran out. It costs the same 21 calls whether the
+       fleet worked or not, which a 200-day grid cannot afford. Page mode now
+       pages properly and costs one call per ten drivers who actually earned —
+       and on a single day "who earned" is the whole question, so nothing is
+       being traded away. */
+    if (isDay) {
+      const r = await earnerPages(s, until);
+      if (r.err) {
+        err = r.err;
+        log.warn(SRC, `earner breakdown ${ps} rejected`, { err });
+      } else {
+        seen += r.rows.length;
+        got += await write(r.rows, ps, pe);
+      }
+    } else if (listMode) {
       for (let i = 0; i < drivers.length; i += EARNER_BATCH) {
         const r = await earnerCall(s, until, {
           driverListOrPageOptions: 'Driver_List',
@@ -308,28 +393,27 @@ async function pullEarnerBreakdowns(from, to, onStep) {
             .test(r.err);
           log.warn(SRC, modeRejected
             ? 'earner breakdown driver-list mode rejected, falling back to one page'
-            : `earner breakdown ${iso(s)}..${iso(e)} batch failed, keeping driver-list mode`,
+            : `earner breakdown ${ps}..${pe} batch failed, keeping driver-list mode`,
             { err: r.err });
           err = r.err;
           if (modeRejected) listMode = false;
           break;
         }
         seen += r.rows.length;
-        got += await write(r.rows, s, e);
+        got += await write(r.rows, ps, pe);
       }
     }
 
-    if (!listMode) {
-      const r = await earnerCall(s, until, {
-        driverListOrPageOptions: 'Page_Options',
-        pageOptions: { pageSize: EARNER_BATCH, pageToken: '' }, driverList: null,
-      });
+    if (!isDay && !listMode) {
+      // Paginated too: the fallback used to take one page of ten and stop,
+      // which is the cap the driver-list mode was built to work around.
+      const r = await earnerPages(s, until);
       if (r.err) {
         err = r.err;
-        log.warn(SRC, `earner breakdown ${iso(s)}..${iso(e)} rejected`, { err });
+        log.warn(SRC, `earner breakdown ${ps}..${pe} rejected`, { err });
       } else {
         seen += r.rows.length;
-        got += await write(r.rows, s, e);
+        got += await write(r.rows, ps, pe);
       }
     }
 
@@ -343,16 +427,23 @@ async function pullEarnerBreakdowns(from, to, onStep) {
        run in the record says the earnings phase wrote nothing, including the
        ones that wrote 154 rows a week for twenty-eight weeks. */
     total += got;
-    chunks.push({
-      from: iso(s), to: iso(e), rows: got, error: err,
-      detail: `${seen} of ${drivers.length} drivers answered`,
-    });
+    /* Every weekly window is recorded; a daily one only when it FAILED. The
+       Sources page renders these, and two hundred green day rows per fleet
+       would bury the handful of week rows an operator reads it for — while a
+       day that failed is exactly what they need to see. */
+    if (!isDay || err) {
+      chunks.push({
+        from: ps, to: pe, rows: got, error: err,
+        detail: `${seen} of ${drivers.length} drivers answered`,
+      });
+    }
     /* Reported per window, like the trip windows are. Fifty-three windows of
        sixteen batches is around eight hundred calls and a quarter of an hour,
        and it ran with the progress row frozen on the last TRIP window the whole
        time — so a watcher could not tell this phase from a wedged one. That is
        the exact condition onStep was added for. */
-    onStep?.({ window: `${iso(s)}..${iso(e)}`, index: chunks.length - 1, of: windows.length,
+    done += 1;
+    onStep?.({ window: isDay ? ps : `${ps}..${pe}`, index: done - 1, of: windows.length,
       rows_so_far: total, phase: 'earnings' });
   }
   return { total, chunks };

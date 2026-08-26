@@ -54,6 +54,29 @@ export function* weekChunks(from, to) {
   }
 }
 
+/* Dubai days, half-open, for a source that buckets by instant.
+   ─────────────────────────────────────────────────────────────────────────
+   weekChunks above is UTC-aligned, which is right for a report grid keyed on
+   the provider's own week. A DAY is different: the fleet works Asia/Dubai and
+   every other day figure in this product is `AT TIME ZONE 'Asia/Dubai'`, so a
+   UTC-aligned day would start at 04:00 local and file four hours of each
+   morning under the day before — visible immediately on a page that puts a
+   payout day beside its trip day.
+
+   `start`/`until` are the instants to ASK for; `day` is the date to STAMP,
+   which is the Dubai calendar date the window covers. */
+export function* dubaiDayChunks(from, to) {
+  const TZ = 4 * 3600e3;
+  const dayOf = (d) => {
+    const x = new Date(new Date(d).getTime() + TZ);
+    return Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate()) - TZ;
+  };
+  const last = dayOf(to);
+  for (let t = dayOf(from); t <= last; t += 864e5) {
+    yield { start: new Date(t), until: new Date(t + 864e5), day: iso(new Date(t + TZ)) };
+  }
+}
+
 export const monthsAgo = (n) => { const d = new Date(); d.setUTCMonth(d.getUTCMonth() - n); return d; };
 export const daysAgo = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate() - n); return d; };
 
