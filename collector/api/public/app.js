@@ -3253,19 +3253,23 @@ V.sources = async (root) => {
        for these, so seven of the eleven rows on a table headed "what has
        actually landed" had no start date at all — including the telemetry
        feed, which is the longest record the product holds. */
+    /* `key` is the machine name the calendar is keyed on; `what` is what the
+       reader sees. They were the same string once and it matched two rows of
+       nine — sourceLabel() renders 'cabman' as 'CABMAN', so every telemetry
+       row failed to join and kept reporting itself as undated. */
     ...(coverage.telemetry || []).map((r) => ({ what: `telemetry · ${sourceLabel(r.source)}`,
-      src: null, n: r.n, from: r.from_ts, to: r.last_poll })),
-    ...(coverage.alerts || []).map((r) => ({ what: 'safety alerts', src: null, n: r.n,
-      from: r.from_ts, to: r.latest })),
-    ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', src: null, n: r.n,
-      from: r.from_ts, to: r.latest })),
+      key: `telemetry:${r.source}`, src: null, n: r.n, from: r.from_ts, to: r.last_poll })),
+    ...(coverage.alerts || []).map((r) => ({ what: 'safety alerts', key: 'alerts',
+      src: null, n: r.n, from: r.from_ts, to: r.latest })),
+    ...(coverage.ledger || []).map((r) => ({ what: 'ledger entries', key: 'ledger',
+      src: null, n: r.n, from: r.from_ts, to: r.latest })),
     /* Trips are keyed by platform in source_day_coverage; everything else has
        its continuity computed by /api/coverage under the label this table
        already prints, so the join is on what the reader sees. Nine of the
        eleven rows here used to say "not a dated source" about feeds that are
        dated — including telemetry, the longest record the product holds. */
   ].map((r) => ({ ...r, cal: (r.src ? byCal[r.src] : null)
-    || (coverage.dataset_calendar || {})[r.what] || null }));
+    || (coverage.dataset_calendar || {})[r.key] || null }));
   const anyValue = cov.some((r) => r.value != null);
   cv.body.append(tableFrom(cov, [
     { label: 'Dataset', key: 'what' },

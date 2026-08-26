@@ -1827,17 +1827,17 @@ app.get('/api/coverage', wrap(async (req, res) => {
        gap-finder the calendar uses (api/coverage_gaps.js).
 
        Dubai days, like every other calendar key in this product. */
-    q(`SELECT 'telemetry · ' || source AS dataset,
+    q(`SELECT 'telemetry:' || source AS dataset,
               to_char((captured_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
               count(*)::int rows
          FROM telemetry_snapshot WHERE captured_at IS NOT NULL
          GROUP BY 1, 2 ORDER BY 1, 2`),
-    q(`SELECT 'safety alerts' AS dataset,
+    q(`SELECT 'alerts' AS dataset,
               to_char((occurred_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
               count(*)::int rows
          FROM alert WHERE occurred_at IS NOT NULL
          GROUP BY 1, 2 ORDER BY 2`),
-    q(`SELECT 'ledger entries' AS dataset,
+    q(`SELECT 'ledger' AS dataset,
               to_char((event_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day,
               count(*)::int rows
          FROM ledger_entry WHERE event_at IS NOT NULL
@@ -1887,10 +1887,14 @@ app.get('/api/coverage', wrap(async (req, res) => {
       bookings_before: byPl.get(w.platform) ?? 0,
     }));
   }
-  /* Continuity for the datasets that are not trips, keyed by the label the
-     table already prints, so the page joins on what it displays rather than
-     on a second naming scheme. Nine of eleven rows read "not a dated source"
-     before this, against feeds that are plainly dated. */
+  /* Continuity for the datasets that are not trips.
+     ───────────────────────────────────────────────────────────────────────
+     Keyed on a MACHINE value — telemetry:<source>, alerts, ledger — not on
+     the label the page prints. Keying it on the label looked tidier and
+     matched two rows of nine: the page renders 'telemetry · CABMAN' through
+     sourceLabel() while this query knows the source as 'cabman', so every
+     telemetry row silently failed to join and went on saying "not a dated
+     source" about the longest feed the product holds. */
   const calendars = {};
   for (const rows of [telDays, alertDays, ledgerDays]) {
     for (const r of rows) (calendars[r.dataset] ||= []).push({ day: r.day, rows: r.rows });
