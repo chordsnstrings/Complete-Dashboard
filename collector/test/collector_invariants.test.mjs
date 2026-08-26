@@ -26,8 +26,13 @@ check('an unexpected chunk failure logs as an error, not a warning',
 // A run that wrote rows while nine of its twelve windows failed recorded
 // status='ok', which is how a 299-day hole in the trip history stayed hidden.
 check('failed windows are named at the end of the run', /trip backfill left holes/.test(uber));
+/* Both sub-sources return their windows. The earnings one returns
+   `total + comps` rather than a bare `total` — it writes into two tables now,
+   driver_performance for the period and driver_earnings_component for the
+   tree, and a run that wrote 8,000 component rows and reported 0 is the same
+   silence this check exists to break. */
 check('the run records every window it attempted, not just a total',
-  (uber.match(/return \{ total, chunks \}/g) || []).length >= 2
+  (uber.match(/return \{ total(: total \+ comps)?, chunks \}/g) || []).length >= 2
   && /const chunks = \[\.\.\.trips\.chunks, \.\.\.perf\.chunks\]/.test(uber));
 /* BOTH sub-sources, not just the trip report. The earner-breakdown query asked
    for a field the response type does not have, so Uber rejected it on every

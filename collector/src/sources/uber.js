@@ -175,7 +175,12 @@ async function uberDriverIds() {
 
 const EARNER_QUERY = `query getEarnerBreakdownsV2($supplierUuid: ID!, $timeRange: OneOfTimeRange__Input, $driverListOrPageOptions: DriverListOrPagination, $driverList: [ID!], $pageOptions: PaginationOption__Input, $excludeAdjustmentItems: Boolean) {
           getEarnerBreakdownsV2(supplierUuid: $supplierUuid, timeRange: $timeRange, driverList: $driverList, pageOptions: $pageOptions, driverListOrPageOptions: $driverListOrPageOptions, excludeAdjustmentItems: $excludeAdjustmentItems) {
-            earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode } }
+            earnerEarningsBreakdowns { earnerUuid earnerMetadata { name } tripInfos { tripAttributeName value } netOutstanding { amountE5 currencyCode }
+              earnings { localizedCategoryLabel categoryName amount { amountE5 currencyCode }
+                children { localizedCategoryLabel categoryName amount { amountE5 currencyCode }
+                  children { localizedCategoryLabel categoryName amount { amountE5 currencyCode } } } }
+              payouts { localizedCategoryLabel categoryName amount { amountE5 currencyCode }
+                children { localizedCategoryLabel categoryName amount { amountE5 currencyCode } } } }
             pageInfo { nextPageToken }
           } }`;
 
@@ -328,6 +333,7 @@ async function pullEarnerBreakdowns(from, to, onStep) {
     weeks: weekly.length, days: daily.length });
   let listMode = drivers.length > 0;
   let done = 0;
+  let comps = 0;
 
   /* `ps`/`pe` are the ISO dates to STAMP, which for the daily grid are not
      iso(start): a Dubai day begins at 20:00Z the day before. */
@@ -346,6 +352,60 @@ async function pullEarnerBreakdowns(from, to, onStep) {
     if (!rows.length) return 0;
     return upsertMany('driver_performance', rows,
       ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+  };
+
+  /* The earnings tree, from the surface that actually serves both fleets.
+     ─────────────────────────────────────────────────────────────────────────
+     driver_earnings_component is where tips live, and where #reconcile's
+     "expected payout" is built from. It was filled only by uber_fleet.js,
+     which reads a REST surface on api.uber.com — and that surface answers for
+     Ecosine and returns nothing at all for Egari: on production, after a full
+     backfill, "earner payments returned no earners in any of 53 week(s)".
+     Un-hardcoding the fleet there was necessary and not sufficient; the fleet
+     ran and the provider had nothing to give it.
+
+     This GraphQL surface does serve it, for both orgs, with the same session
+     the rest of this file already uses — checked live before writing this, and
+     the components reconcile: fare minus service fee minus taxes plus tip
+     equals your_earnings to the cent on both fleets.
+
+     WEEKLY only. Sliced into days the components lose 2-3% of fare and 9-16%
+     of tips, because Uber attributes an item to the period it settles in —
+     measured on both fleets. Trips and net outstanding are exactly additive
+     and are what the daily grid collects; these are not, and are collected on
+     the grid they are true on. */
+  const writeComponents = async (bd, ps, pe) => {
+    const out = [];
+    const seen = new Set();
+    for (const d of bd) {
+      if (!d.earnerUuid) continue;
+      const walk = (node, parent, depth = 0) => {
+        if (!node || depth > 6) return;
+        for (const c of (Array.isArray(node) ? node : [node])) {
+          if (!c) continue;
+          const category = c.categoryName;
+          const e5 = c.amount?.amountE5;
+          if (category && e5 != null) {
+            const k = `${d.earnerUuid}|${category}`;
+            if (!seen.has(k)) {
+              seen.add(k);
+              out.push({
+                platform: SRC, driver_ext_id: d.earnerUuid, driver_name: d.earnerMetadata?.name,
+                period_start: ps, period_end: pe, category, parent: parent || null,
+                amount: Number(e5) / 1e5, currency: c.amount?.currencyCode || 'AED',
+                fleet_id: org().fleet,
+              });
+            }
+          }
+          if (c.children?.length) walk(c.children, category || parent, depth + 1);
+        }
+      };
+      walk(d.earnings, null);
+      walk(d.payouts, null);
+    }
+    if (!out.length) return 0;
+    return upsertMany('driver_earnings_component', out,
+      ['platform', 'driver_ext_id', 'period_start', 'period_end', 'category']);
   };
 
   for (const { start: s, end: e, until, ps, pe, daily: isDay } of windows) {
@@ -401,6 +461,7 @@ async function pullEarnerBreakdowns(from, to, onStep) {
         }
         seen += r.rows.length;
         got += await write(r.rows, ps, pe);
+        comps += await writeComponents(r.rows, ps, pe);
       }
     }
 
@@ -414,6 +475,7 @@ async function pullEarnerBreakdowns(from, to, onStep) {
       } else {
         seen += r.rows.length;
         got += await write(r.rows, ps, pe);
+        comps += await writeComponents(r.rows, ps, pe);
       }
     }
 
@@ -446,7 +508,11 @@ async function pullEarnerBreakdowns(from, to, onStep) {
     onStep?.({ window: isDay ? ps : `${ps}..${pe}`, index: done - 1, of: windows.length,
       rows_so_far: total, phase: 'earnings' });
   }
-  return { total, chunks };
+  /* Components counted separately in the log and added to the total, because
+     "the earnings phase wrote nothing" was true of this collector for its
+     whole life and only a number in the run row would have said so. */
+  log.info(SRC, 'earner components', { fleet: org().fleet, rows: comps });
+  return { total: total + comps, chunks };
 }
 
 // Live driver status snapshot (OAuth).

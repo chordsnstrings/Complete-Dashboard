@@ -177,6 +177,36 @@ check('a day is asked for in page mode, not by naming every driver',
 check('a week still names every driver, so an absent one is a fact about them',
   /\} else if \(listMode\) \{/.test(body));
 
+/* The earnings TREE, from the surface that serves both fleets.
+   ─────────────────────────────────────────────────────────────────────────
+   driver_earnings_component is where tips live and where #reconcile's
+   "expected payout" is built from, and it was filled only by uber_fleet.js
+   reading a REST surface on api.uber.com. That surface answers for Ecosine
+   and returns nothing for Egari — on production, after a full backfill,
+   "earner payments returned no earners in any of 53 week(s)". This GraphQL
+   surface serves both, with the session this file already holds, and the
+   components reconcile: checked live, fare + tip + promotion - service fee -
+   taxes equals your_earnings to the cent on Egari (34,220.54) and on Ecosine
+   (78,779.03). */
+check('the earner query selects the earnings and payouts trees',
+  /earnings \{ localizedCategoryLabel categoryName amount/.test(uber)
+  && /payouts \{ localizedCategoryLabel categoryName amount/.test(uber));
+check('and walks their children, where wait time and surge live',
+  (uber.match(/children \{ localizedCategoryLabel/g) || []).length >= 3);
+check('components are flattened into the table the reconciliation reads',
+  /upsertMany\('driver_earnings_component'/.test(body));
+check('keyed so a re-collection replaces rather than duplicates',
+  /\['platform', 'driver_ext_id', 'period_start', 'period_end', 'category'\]/.test(body));
+/* WEEKLY only. Sliced into days the components lose 2-3% of fare and 9-16%
+   of tips, because Uber attributes an item to the period it settles in. */
+check('components are written for a week and never for a day',
+  (body.match(/comps \+= await writeComponents\(/g) || []).length === 2
+  && !/isDay[\s\S]{0,400}writeComponents/.test(body.slice(body.indexOf('if (isDay) {'),
+    body.indexOf('} else if (listMode)'))),
+  'a day window must not write components');
+check('and the rows they wrote are counted into the run, not silently dropped',
+  /total: total \+ comps/.test(uber));
+
 /* Two hundred green day rows per fleet would bury the week rows the Sources
    page is read for; a day that FAILED is the one an operator needs. */
 check('a successful day is not recorded as its own chunk, a failed one is',
