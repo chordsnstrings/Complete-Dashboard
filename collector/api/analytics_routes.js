@@ -182,7 +182,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       total_cash_value_known: priced ? round(NUM(totals.value) || 0, 0) : null,
       value_known_pct: share(priced, cashTrips),
       caveat: priced < cashTrips
-        ? `${cashTrips - priced} of ${cashTrips} cash trips come from a channel `
+        ? `${(cashTrips - priced).toLocaleString('en-US')} of ${cashTrips.toLocaleString('en-US')} `
+          + 'cash trips come from a channel '
           + 'that does not report a fare, so the value column is a floor, not the total.'
         : null,
     });

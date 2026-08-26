@@ -259,7 +259,7 @@ export async function renderForecast(root) {
     }
   }
 
-  root.append(note(esc(d.revenue_note)));
+  root.append(note(d.revenue_note));
   root.append(el('p', 'cap',
     `Method: ordinary least squares over ${d.n} whole months since the last regime change, with a 95% `
     + 'prediction interval for a NEW month rather than for the fitted line — operations plans against what '

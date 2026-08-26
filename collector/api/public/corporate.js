@@ -200,10 +200,22 @@ async function corpProperties(host) {
   host.innerHTML = '';
   if (!rows.length) return empty(host, 'No property booked in this window');
   const totalB = rows.reduce((a, r) => a + r.bookings, 0);
-  host.append(tableFrom(rows, [
+  const totalR = rows.reduce((a, r) => a + (+r.revenue || 0), 0);
+  /* The widest table on the page began with no heading of any kind. */
+  const pp = panel(`Every property that books — ${countOf(rows.length, 'property', 'properties')}`,
+    `${fmt(totalB)} bookings worth ${money(totalR)} in this window, ordered by revenue.`);
+  host.append(pp.panel);
+  pp.body.append(tableFrom(rows, [
     { label: 'Property', key: 'name', render: (r) => entity('property', r.partner_id, r.name) },
     { label: 'Bookings', key: 'bookings', num: true, render: (r) => `${fmt(r.bookings)} <small class="dim">${pct((r.bookings / totalB) * 100, 1)}</small>` },
     { label: 'Revenue', key: 'revenue', num: true, render: (r) => money(r.revenue) },
+    /* Revenue divided by Bookings does not give Avg fare, because avg fare is
+       over the bookings that CARRY a fare — 766 booked, 755 priced. Without
+       the divisor on screen the column looked like an arithmetic error. */
+    { label: 'With a fare', key: 'priced', num: true,
+      render: (r) => (r.priced == null ? '—'
+        : `${fmt(r.priced)}${r.priced < r.bookings
+          ? ` <small class="dim">of ${fmt(r.bookings)}</small>` : ''}`) },
     { label: 'Avg fare', key: 'avg_fare', num: true, render: (r) => money(r.avg_fare, 'AED', 2) },
     ...(rows.some((r) => r.cost != null && r.cost !== r.revenue) ? [
       { label: 'Cost', key: 'cost', num: true, absent: COST, render: (r) => money(r.cost) },
@@ -219,6 +231,10 @@ async function corpProperties(host) {
     { label: 'Given away', key: 'foc', num: true },
     { label: 'Last booking', key: 'last_at', render: (r) => dateStr(r.last_at) },
   ], { sortable: true, sortId: 'props', defaultSort: { key: 'revenue', dir: 'desc' } }));
+  pp.body.append(el('p', 'cap',
+    'Avg fare is revenue over the bookings that carry one, not over all of them, so Revenue ÷ Bookings '
+    + 'will read slightly low wherever the two counts differ. AED/km divides the same revenue by the '
+    + 'distance of every booking, priced or not.'));
   host.append(note(rows.some((r) => r.cost != null && r.cost !== r.revenue)
     ? 'Margin is revenue minus the cost this channel reports per booking.'
     : 'There is no margin column because there is no cost: this report returns a single money figure per '
@@ -465,17 +481,29 @@ async function corpApproach(host) {
   if (perBooking.length > 1) {
     const worst = perBooking[0], best = perBooking[perBooking.length - 1];
     if (+worst.avg_deadhead_km > +best.avg_deadhead_km * 2) {
-      body.append(note(`Per booking rather than in total: ${esc(worst.label)} averages `
-        + `${fmt(worst.avg_deadhead_km, 2)} km of approach against ${esc(best.label)}'s `
+      body.append(note(`Per booking rather than in total: ${worst.label} averages `
+        + `${fmt(worst.avg_deadhead_km, 2)} km of approach against ${best.label}'s `
         + `${fmt(best.avg_deadhead_km, 2)} km — `
         + `${fmt((+worst.avg_deadhead_km) / Math.max(0.01, +best.avg_deadhead_km), 0)}x. `
         + 'The bars above rank by total, which puts the busiest group first rather than the most '
         + 'expensive one to serve; sort the "Approach per booking" column below to see it the other way.'));
     }
   }
-  body.append(tableFrom(rows, [
-    { label: APPROACH_BY.find((b) => b.id === by).label.replace('By ', ''), key: 'label',
-      render: (r) => (by === 'property' ? esc(r.label) : esc(r.label)) },
+  /* `'By property'.replace('By ', '')` gave a header reading "property" in a
+     table where every other header is sentence case — and the same for "time
+     of day", "booking type" and "zone". */
+  const byLabel = (() => {
+    const t = APPROACH_BY.find((b) => b.id === by).label.replace('By ', '');
+    return t.charAt(0).toUpperCase() + t.slice(1);
+  })();
+  const ap = panel(`Both legs, ${APPROACH_BY.find((b) => b.id === by).label.toLowerCase()}`
+    + ` — ${countOf(rows.length, 'row')}`,
+    'Approach is the leg before the fare starts; return is the leg after it ends. Both are measured '
+    + 'only where the booking reports that end, so Measured is the honest denominator for every '
+    + 'per-booking figure beside it.');
+  body.append(ap.panel);
+  ap.body.append(tableFrom(rows, [
+    { label: byLabel, key: 'label', render: (r) => esc(r.label) },
     { label: 'Bookings', key: 'bookings', num: true },
     { label: 'Measured', key: 'measured', num: true, render: (r) => `${fmt(r.measured)} <small class="dim">${pct((r.measured / r.bookings) * 100, 0)}</small>` },
     { label: 'Approach km', key: 'deadhead_km', num: true, render: (r) => fmt(r.deadhead_km, 1) },

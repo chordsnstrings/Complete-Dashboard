@@ -1075,7 +1075,7 @@ V.action = async (root) => {
   act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
   root.append(act.panel);
   if (view && r.entity_id) {
-    root.append(note(`Open the ${esc(r.entity_type)} to see everything else known about it — this finding `
+    root.append(note(`Open the ${r.entity_type} to see everything else known about it — this finding `
       + 'is one reading, and the page beside it is the rest of them.'));
   }
   /* Siblings come from the CODE, not from code-and-entity.
@@ -1548,7 +1548,7 @@ async function platformFunnel(root) {
     + 'catch-up describe the same week, so a driver with several rows here has not been offered the sum '
     + 'of them; the rates in each row are sound, the totals across rows are not.'));
   if (state.platform && !['yango', 'bolt'].includes(state.platform)) {
-    root.append(note(`Only Yango and Bolt publish an offer count. The ${esc(sourceLabel(state.platform))} `
+    root.append(note(`Only Yango and Bolt publish an offer count. The ${sourceLabel(state.platform)} `
       + 'filter cannot narrow this page because that channel reports no funnel at all.', 'warn'));
   }
 }

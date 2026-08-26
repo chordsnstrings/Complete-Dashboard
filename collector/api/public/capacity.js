@@ -178,7 +178,7 @@ export async function renderCapacity(root) {
       + `total against <a class="lnk" href="${href('forecast')}">the forecast</a> before rostering to it.`));
   }
 
-  root.append(note(esc(d.caveat)));
+  root.append(note(d.caveat));
   root.append(el('p', 'cap',
     `<a href="${href('forecast')}">Where the monthly total comes from</a> · `
     + `<a href="${href('playbook')}">What else to do about it</a> · `

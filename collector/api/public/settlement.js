@@ -171,7 +171,11 @@ async function settleCash(host) {
      The list arrives ordered by cash bookings, so the driver holding the most
      KNOWN money — AED 1,566 — sat 38th behind thirty-seven rows reading "—",
      and there was no way to reach him but to scroll. */
-  host.append(tableFrom(c.drivers, [
+  const cp = panel(`Who is holding it — ${countOf(c.drivers.length, 'driver')}`,
+    'One row per person, ordered by the money this product can actually see. Coverage is the share of '
+    + 'that driver\u2019s cash bookings that report a fare at all.');
+  host.append(cp.panel);
+  cp.body.append(tableFrom(c.drivers, [
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
     { label: 'Cash bookings', key: 'cash_trips', num: true },
     { label: 'Value known', key: 'cash_value', num: true,
@@ -188,7 +192,8 @@ async function settleCash(host) {
       render: (r) => (r.last_cash_trip ? `${dateStr(r.last_cash_trip)} ${timeStr(r.last_cash_trip)}` : '—') },
   ], { sortable: true, sortId: 'cash', defaultSort: { key: 'cash_value', dir: 'desc' },
     capped: c.truncated ? `all ${fmt(c.driver_count)} drivers holding cash` : null }));
-  if (c.truncated) host.append(note(
+  /* The cap belongs with the table it caps, not adrift below it. */
+  if (c.truncated) cp.body.append(note(
     `Listing the ${fmt(c.drivers.length)} drivers holding the most cash, of ${fmt(c.driver_count)}. `
     + 'The totals above are over all of them.'));
   host.append(note('A fare collected by a supervisor is deliberately excluded: this is the money a '
@@ -232,7 +237,11 @@ async function settleReceivables(host) {
     ], { compact: true }));
   }
   if (!r.rows.length) return empty(host, 'Nothing outstanding in this window');
-  host.append(tableFrom(r.rows, [
+  const rp = panel(`Who owes it — ${countOf(r.rows.length, 'counterparty', 'counterparties')}`,
+    'A ride settled against a salary is owed by the person it comes out of, so it is listed under their '
+    + 'name; a ride charged to an account is listed under the property. Ordered by amount.');
+  host.append(rp.panel);
+  rp.body.append(tableFrom(r.rows, [
     /* Branch on the CLASS, not on which id happens to be present. A salary
        deduction row carries both a `partner_id` (the "Office" partner that
        booked the ride) and a `driver_ext_id` (the person who owes it), and

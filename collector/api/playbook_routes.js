@@ -160,7 +160,13 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       q(`SELECT count(*)::int trips,
                 count(*) FILTER (WHERE price IS NOT NULL)::int priced,
                 round(sum(price)::numeric,0) AS amount,
-                count(DISTINCT coalesce(partner_name, partner_id, driver_name))::int counterparties,
+                /* Attributed the way #settlement/receivables attributes it — the page this
+                   action links to. Coalescing partner-first folded every driver's salary
+                   deduction into their employer, so the card said 6 counterparties and the
+                   evidence page it opens said 11, over the very same AED 37,881. A salary
+                   deduction is owed by the person it comes out of. */
+                count(DISTINCT CASE WHEN settlement_class = 'salary' THEN coalesce(driver_name, '(unnamed driver)')
+                     ELSE coalesce(partner_name, partner_id, '(unnamed property)') END)::int counterparties,
                 max((now()::date - local_day))::int AS oldest_days
          FROM trip_ext WHERE ${DAYWIN('requested_at')} AND is_receivable ${PF()}`, p),
 
@@ -224,7 +230,8 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
          Each row carries the id its entity page is keyed on, so the front
          end's RENDER map can link a counterparty and a driver rather than
          printing a name. */
-      q(`SELECT coalesce(partner_name, partner_id, driver_name, '(unattributed)') AS counterparty,
+      q(`SELECT CASE WHEN settlement_class = 'salary' THEN coalesce(driver_name, '(unnamed driver)')
+                     ELSE coalesce(partner_name, partner_id, '(unnamed property)') END AS counterparty,
                 max(partner_id) AS partner_id, max(driver_ext_id) AS driver_ext_id,
                 max(settlement_class) AS settlement_class,
                 count(*)::int trips,
@@ -327,6 +334,10 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
     /* "Put 1 vehicles back to work" was on the live page at days=365. Counts
        are interpolated into six titles and two of them also carry a they/it. */
     const s = (n, one, many = `${one}s`) => (Number(n) === 1 ? one : many);
+    /* These sentences are read beside tables where every number carries a
+       separator, and they were interpolating raw integers: "2509 bookings",
+       "1288 bookings lost at the door". */
+    const n = (v) => Math.round(Number(v) || 0).toLocaleString('en-US');
     const they = (n) => (Number(n) === 1 ? 'it' : 'they');
 
     /* One place that decides an action's numbers, so no action can quietly
@@ -364,7 +375,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         id: 'collect_receivables', group: 'Collect', horizon: 'this week',
         title: `Chase AED ${Math.round(recv.amount).toLocaleString()} owed across ${recv.counterparties} `
           + s(recv.counterparties, 'counterparty', 'counterparties'),
-        why: `${recv.trips} ${s(recv.trips, 'booking')} in this window settle on account or against salary `
+        why: `${n(recv.trips)} ${s(recv.trips, 'booking')} in this window settle on account or against salary `
           + `rather than at the kerb. The oldest is ${recv.oldest_days} days old.`,
         basis: 'Sum of price over trip_ext rows flagged is_receivable — room charges, company accounts and '
           + 'salary postings. Measured, because these are the channels that report a fare.',
@@ -383,10 +394,10 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       act({
         id: 'reconcile_cash', group: 'Collect', horizon: 'this week',
         title: `Reconcile cash held by ${cash.drivers} ${s(cash.drivers, 'driver')} across `
-          + `${cash.trips} ${s(cash.trips, 'booking')}`,
+          + `${n(cash.trips)} ${s(cash.trips, 'booking')}`,
         why: cash.priced < cash.trips
-          ? `${cash.trips - cash.priced} of those bookings come from a channel that reports no fare, so the `
-            + `AED figure is a floor over the ${cash.priced} that do.`
+          ? `${n(cash.trips - cash.priced)} of those bookings come from a channel that reports no fare, so the `
+            + `AED figure is a floor over the ${n(cash.priced)} that do.`
           : 'Every cash booking in this window reports a fare.',
         basis: 'trip_ext rows where the driver personally holds the money — a supervisor-collected fare is '
           + 'deliberately excluded, because it is not what a cash-handling control is sized on.',
@@ -412,7 +423,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         why: `${fleet.earning} of ${fleet.vehicles_seen} vehicles earned. ${neverMoved} of the idle ones did not `
           + `move either; ${idle.length - neverMoved} drove without a booking behind them, which is a different `
           + 'problem with a different fix.',
-        basis: `The ceiling is ${idle.length} × the fleet's MEDIAN earning vehicle (${Math.round(median)} `
+        basis: `The ceiling is ${idle.length} × the fleet's MEDIAN earning vehicle (${n(median)} `
           + `bookings a month, from ${Math.round(medianWindow)} over the ${windowDays} days requested), not `
           + 'its mean — a handful of very busy cars would otherwise set the target for every '
           + 'idle one. That benchmark assumes an experienced driver takes each car.'
@@ -464,7 +475,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
         title: `Roster ${thinSlots.length} ${s(thinSlots.length, 'hour')} that reliably `
           + `${s(thinSlots.length, 'carries', 'carry')} work and ${s(thinSlots.length, 'has', 'have')} `
           + 'three drivers or fewer',
-        why: `The worst is ${DOW[top.dow]} at ${String(top.hour).padStart(2, '0')}:00 — ${top.trips} bookings `
+        why: `The worst is ${DOW[top.dow]} at ${String(top.hour).padStart(2, '0')}:00 — ${n(top.trips)} bookings `
           + `across ${top.days_seen} occurrences, covered by ${top.drivers}. An hour held up by that few people `
           + 'stops working the day one of them is off.',
         basis: 'Weekday-hour cells with at least 20 bookings over at least 3 occurrences and 3 or fewer distinct '
@@ -483,7 +494,7 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
     if (Number(cancel?.lost) > 0) {
       act({
         id: 'reduce_cancellations', group: 'Improve', horizon: 'this month',
-        title: `Recover some of ${cancel.lost} ${s(cancel.lost, 'booking')} lost at the door (${cancel.pct}%)`,
+        title: `Recover some of ${n(cancel.lost)} ${s(cancel.lost, 'booking')} lost at the door (${cancel.pct}%)`,
         why: 'These were offered and did not complete — a rider no-show, a driver rejection, or a cancellation. '
           + 'Every one is demand the fleet already had.',
         basis: 'trip_norm.outcome, which normalises across platforms: Bolt reports a completed trip as '
