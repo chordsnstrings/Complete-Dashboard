@@ -160,6 +160,28 @@ check('an unclassifiable standing is its own category, not the pipeline',
 check('a stopped driver is categorised as stopped',
   by['Stopped Person'].category === 'blocked', by['Stopped Person']?.category);
 
+/* ── but a trip that HAPPENED outranks a claim about an account ───────────
+   The rung above is right that our trip table may not cover somebody's
+   platform. The reverse also happens, and did: two people carrying a rejected
+   Yango application and a waitlisted Bolt one had 50 and 23 completed trips in
+   the window, and were filed under "not yet able to earn" — which also made
+   the page's "Drove in this window" tile read 89 where 91 people had trips. */
+await put({ platform: 'yango', id: 'y9', name: 'Rejected But Driving', state: 'rejected',
+  plate: 'L109', canEarn: false });
+for (let i = 1; i <= 5; i++) await trip('Rejected But Driving', i, null);
+{
+  const d3 = await get('/api/roster?from=2026-08-01&to=2026-08-31');
+  const b3 = Object.fromEntries(d3.people.map((p) => [p.name, p]));
+  check('somebody a provider rejected who nonetheless drove is working, not pipeline',
+    b3['Rejected But Driving'].category === 'working',
+    `${b3['Rejected But Driving']?.category} with ${b3['Rejected But Driving']?.trips} trips`);
+  check('and the working total equals the number of people with trips in the window',
+    d3.totals.working === d3.people.filter((x) => (x.trips || 0) > 0).length,
+    `${d3.totals.working} working vs ${d3.people.filter((x) => (x.trips || 0) > 0).length} with trips`);
+  check('a waitlisted driver with no trips is still in the pipeline',
+    b3['Waiting Person'].category === 'in_pipeline', b3['Waiting Person']?.category);
+}
+
 /* ── a provider's assertion outranks an inference from our own tables ─────
    Live, this reported `blocked: 0` on the same screen as "31 holding a vehicle
    while blocked": 31 suspended and deactivated Bolt drivers had a lifetime

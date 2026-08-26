@@ -1421,7 +1421,10 @@ async function platformTiers(root) {
       return row;
     }).sort((a, b) => b.total - a.total);
     tp.body.append(tableFrom(rows2, [
-      { label: 'Time of day', key: 'label' },
+      /* The endpoint returns 'evening', 'morning' — lowercase keys, printed raw
+         in a column whose every neighbour is a sentence-cased heading. */
+      { label: 'Time of day', key: 'label',
+        render: (r) => esc(String(r.label || '').replace(/^./, (c) => c.toUpperCase())) },
       ...tiers2.map((t2) => ({ label: t2, key: t2, num: true,
         render: (r) => (r[t2]
           ? `${fmt(r[t2])}<span class="dim"> · ${Math.round((r[t2] / r.total) * 100)}%</span>`
@@ -1451,7 +1454,12 @@ async function platformTiers(root) {
   } else empty(gp.body, 'Every car is carrying as much premium work as its model does elsewhere');
   g.append(gp.panel);
 
-  root.append(tableFrom(t.vehicles, [
+  const tvp = panel(`Every vehicle carrying Uber work — ${countOf(t.vehicles.length, 'vehicle')}`,
+    'Premium is Black plus Comfort as a share of that car\u2019s own Uber trips. The benchmark is the '
+    + 'best-performing car of the same model, so most cars are behind it by construction — the size of '
+    + 'the shortfall is the number worth reading, not its sign.');
+  root.append(tvp.panel);
+  tvp.body.append(tableFrom(t.vehicles, [
     { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     /* Who ran the car over this window. A shortfall against the same model
        elsewhere is a finding about how the car is being dispatched and driven,
@@ -1510,9 +1518,13 @@ async function platformFunnel(root) {
     { label: 'Platform commission', value: money(sum('commission_cost')),
       sub: 'what the channel kept' },
   ]));
-  root.append(tableFrom(live, [
+  const fnp = panel(`Offer and completion, per driver-period — ${countOf(live.length, 'record')}`,
+    'One row per driver per reporting period, as the channel published it. Rates within a row are '
+    + 'sound; the periods overlap, so a column does not add up across rows.');
+  root.append(fnp.panel);
+  fnp.body.append(tableFrom(live, [
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
-    { label: 'Channel', key: 'platform' },
+    { label: 'Channel', key: 'platform', render: (r) => sourceLabel(r.platform) },
     { label: 'Period', key: 'period_start', render: (r) => `${dayStr(r.period_start)} → ${dayStr(r.period_end)}` },
     { label: 'Offered', key: 'offered', num: true, render: (r) => fmt(r.offered) },
     { label: 'Accepted', key: 'accepted', num: true, render: (r) => fmt(r.accepted) },

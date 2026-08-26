@@ -158,8 +158,13 @@ export async function renderRoster(root) {
   const TITLE = {
     all: ['Everyone on the books', 'Every person any provider has a roster row for, whether or not '
       + 'they have ever driven.'],
-    pipeline: ['Waiting to start', 'Onboarding, waitlisted, or on the books with nothing recorded '
-      + 'against them yet — the people a recruiter is still waiting on.'],
+    /* This tab is a union of four categories — not yet able to earn, never
+       driven, standing not reported, and output not observed — and it was
+       titled for the smallest of them: "Waiting to start — 113 people" sat
+       above a page whose own tile read "Still waiting to start 18". */
+    pipeline: ['Not yet earning', 'Everyone the roster holds who has produced nothing we can see: '
+      + 'onboarding or waitlisted, recruited but never driven, described in a word no provider '
+      + 'shares, or on a platform whose trips we do not collect. The Standing column says which.'],
     idle: ['Able to earn, earning nothing', 'A licence and a slot on at least one platform, and no '
       + 'booking in this window.'],
     blocked: ['Stopped everywhere', 'Not permitted to work on any platform they hold. A car in '

@@ -202,12 +202,24 @@ export function rosterRoutes(app, { q, wrap, range }) {
 
          And stopped is not the same fact as cannot-earn: a waitlisted driver
          cannot earn and has not been stopped. */
+      /* Trips in the window outrank a roster assertion, because a trip is
+         something that HAPPENED and a roster row is a claim about an account.
+         The rung below is right that our trip table may not cover somebody's
+         platform — but the reverse holds here and is what bit: the roster does
+         not cover theirs. Two people carrying a rejected Yango application and
+         a waitlisted Bolt one had 50 and 23 completed trips in the window and
+         2,465 lifetime between them, and were filed under "not yet able to
+         earn". That also made "Drove in this window" read 89 on a page where
+         91 people had trips. Blocked still comes first: being stopped today is
+         compatible with having driven earlier in the same window, and a
+         stopped driver holding a car is the fact worth surfacing. */
       const category = blocked ? 'blocked'
-        : r.cannot_earn_anywhere === true ? 'in_pipeline'
-          : r.can_earn_anywhere == null ? 'unclassified'
-            : !activityKnown ? 'activity_unknown'
-              : lifetime === 0 ? 'never_started'
-                : r.trips === 0 ? 'idle_this_window' : 'working';
+        : r.trips > 0 ? 'working'
+          : r.cannot_earn_anywhere === true ? 'in_pipeline'
+            : r.can_earn_anywhere == null ? 'unclassified'
+              : !activityKnown ? 'activity_unknown'
+                : lifetime === 0 ? 'never_started'
+                  : 'idle_this_window';
       return {
         ...r,
         revenue: r.revenue == null ? null : round(r.revenue, 0),
