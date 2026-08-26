@@ -147,12 +147,39 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          SELECT plate, count(*)::int alerts FROM alert
          WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
          GROUP BY plate
+       ),
+       /* What each car was PAID, not only what its riders were charged.
+          ─────────────────────────────────────────────────────────────────────
+          This table's money column was sum(trip.price) and nothing else, and
+          Uber's trip export carries no fare column at all. Measured on
+          production over thirty days: 108 of 140 vehicles showed no money
+          whatsoever, on the page whose job is to rank assets by what they
+          earn. The other 32 are the hotel channel's cars.
+
+          The money exists — it is simply not a fare. driver_payout_day knows
+          what each DRIVER was paid and vehicle_driver_day knows which car they
+          were in, so the same attribution the single-vehicle page has always
+          used (api/attribution_sql.js) answers it per plate. /api/economics/
+          assets already aggregates it exactly this way at fleet scale, so this
+          is the proven shape rather than a new one.
+
+          Kept in its own column beside the fares: a fare is what a rider was
+          charged for one trip and this is a share of a net weekly payout after
+          commission. Adding them would produce a number that is neither. */
+       pay AS (
+         SELECT att.plate,
+                round(sum(att.attributed)::numeric,2) payout,
+                count(DISTINCT att.day)::int payout_days,
+                bool_or(att.basis = 'even') AS payout_even_split
+         FROM (${attributedEarnings()}) att
+         GROUP BY 1
        )
        SELECT p.plate,
               coalesce(w.trips,0) trips,
               coalesce(w.telematics_journeys,0) telematics_journeys,
               coalesce(w.days,0) days, coalesce(w.days_moved,0) days_moved,
               w.km, w.telematics_km, w.revenue, coalesce(w.priced_trips,0) priced_trips,
+              pay.payout, coalesce(pay.payout_days,0) payout_days, pay.payout_even_split,
               coalesce(w.drivers,0) drivers, coalesce(w.platforms,0) platforms,
               w.last_trip, w.last_movement,
               coalesce(w.fleet_id, v.fleet_id, vp.fleet_id) fleet_id,
@@ -176,6 +203,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               cd.driver_name current_driver, cd.driver_ext_id current_driver_id, cd.as_of driver_as_of
        FROM plates p
        LEFT JOIN work w ON w.plate = p.plate
+       LEFT JOIN pay ON pay.plate = p.plate
        LEFT JOIN tel ON tel.plate = p.plate
        LEFT JOIN doc ON doc.plate = p.plate
        LEFT JOIN al  ON al.plate = p.plate

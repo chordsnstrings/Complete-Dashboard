@@ -815,7 +815,14 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   current_driver_id: i === 6 ? null : `drv-${i}`,
   // How stale the last fix is, so "no movement" and "no tracker" read apart.
   fix_age_min: i === 6 ? 41000 : i * 7,
-  km: i === 6 ? null : 6100 - i * 420, revenue: i === 6 ? null : 15800 - i * 1100,
+  /* Most cars have a payout and no fare — the production shape, where Uber is
+     most of the work and publishes no fare per trip. Two carry a fare too, and
+     the idle one carries neither, so all three empty states are reachable. */
+  km: i === 6 ? null : 6100 - i * 420,
+  revenue: i === 1 || i === 4 ? 15800 - i * 1100 : null,
+  payout: i === 6 ? null : 12400 - i * 900,
+  payout_days: i === 6 ? 0 : Math.max(1, 27 - i),
+  payout_even_split: i === 3,
   drivers: i === 6 ? 0 : 1 + (i % 3), platforms: 1 + (i % 2),
   last_trip: i === 6 ? null : new Date(Date.now() - i * 72e5).toISOString(),
   fleet_id: i % 3 ? 'ecosine' : 'egari',

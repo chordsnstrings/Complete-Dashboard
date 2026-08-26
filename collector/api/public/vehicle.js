@@ -1002,6 +1002,25 @@ export async function renderVehicleDirectory(root) {
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim" title="bookings on this vehicle that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
         : '<span class="ent-off" title="no booking on this vehicle reports a fare — Uber’s export has no fare column">—</span>') },
+    /* The money column this page was missing. Fares alone left 108 of 140
+       vehicles blank on production, because Uber's export has no fare column
+       and Uber is most of the work — on the page whose job is to rank assets
+       by what they earn. This is the driver's payout attributed to the car
+       they were in (api/attribution_sql.js), which is what the single-vehicle
+       page and #economics have always shown.
+
+       Its own column, never merged with the fares beside it: a fare is what a
+       rider was charged for one trip, and this is a share of a net weekly
+       payout after commission. */
+    { label: 'Payout', key: 'payout', num: true,
+      absent: 'no payout period in this window reaches any of these vehicles',
+      render: (r) => (r.payout == null
+        ? '<span class="ent-off" title="no driver payout in this window is attributable to this vehicle">—</span>'
+        : `${money(r.payout)}${r.payout_days
+          ? `<span class="dim" title="days of this window with a payout behind them"> · ${fmt(r.payout_days)}d</span>` : ''}`
+          + (r.payout_even_split
+            ? '<span class="dim" title="at least one period had no trip counts to weight by, so it was split evenly across the days the driver held cars"> ·&nbsp;~</span>'
+            : '')) },
     { label: 'Alerts', key: 'alerts', num: true },
     /* A count beside a Km column and no rate between them: a car doing 6,000km
        with 40 events and one doing 400km with 12 read as the first being

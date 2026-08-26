@@ -25,6 +25,7 @@ import { applySchema } from './schema.mjs';
 import { seedFleet, PLATES, WIDE_PLATES } from './fixture.mjs';
 import { rebuildCustody } from '../src/custody.js';
 import { peopleCountStored, personKey, JOIN_TRIP } from '../api/custody_sql.js';
+import { attributedEarnings } from '../api/attribution_sql.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -106,6 +107,9 @@ const ROUTE = SRC.slice(AT, SRC.indexOf('`, [from, to])', AT));
 let NEW = SRC.slice(OPEN + 1, SRC.indexOf('`, [from, to])', AT));
 NEW = NEW.replace("${personKey('a.driver_ext_id', 'a.driver_name')}",
   personKey('a.driver_ext_id', 'a.driver_name'));
+/* The payout attribution is a shared fragment, and substituting it here is
+   what keeps this equivalence check honest as the route grows. */
+NEW = NEW.replace('${attributedEarnings()}', attributedEarnings());
 if (/\$\{/.test(NEW)) throw new Error(`the route interpolates something this test does not substitute: ${NEW.match(/\$\{[^}]*\}/g)}`);
 
 const WIN = ['2026-08-01', '2026-08-31'];
@@ -122,8 +126,15 @@ async function compare(label, db) {
      once in every few runs and say nothing true when it did. It is compared as
      a bound instead, which is the only claim there is to make about it. */
   const CLOCK = 'fix_age_min';
+  /* Compared over the keys the ORIGINAL produced. This test exists to prove a
+     performance rewrite did not change any answer, and a column deliberately
+     ADDED afterwards is not a regression — the money columns are the case:
+     fares alone left 108 of 140 production vehicles blank, so the route now
+     also carries the payout attributed to each car. Those get their own
+     assertions below rather than failing this one. */
+    const KEYS = new Set(Object.keys(before[0] || {}));
   const fixed = (r) => JSON.stringify(Object.fromEntries(
-    Object.entries(r).filter(([k]) => k !== CLOCK)));
+    Object.entries(r).filter(([k]) => k !== CLOCK && KEYS.has(k))));
   const diffs = [];
   for (let i = 0; i < Math.min(before.length, after.length); i++) {
     if (fixed(before[i]) !== fixed(after[i])) {
@@ -144,6 +155,15 @@ const db = new PGlite();
 await applySchema(db);
 await seedFleet(db);
 await rebuildCustody({ from: WIN[0], to: WIN[1], db });
+/* ── the money column the page was missing ──────────────────────────────── */
+/* sum(trip.price) was the only money here, and Uber's export carries no fare
+   column — 108 of 140 production vehicles showed nothing at all on the page
+   whose job is to rank assets by what they earn. The payout is the driver's,
+   attributed to the car they were in. */
+async function payoutRows(database) {
+  const qq = (t, p = []) => database.query(t, p).then((r) => r.rows);
+  return qq(NEW, WIN);
+}
 const small = await compare('small fleet', db);
 check('and it is a fleet, not an empty answer',
   small.length >= PLATES.length, `${small.length} plates`);
@@ -236,6 +256,28 @@ const sql = readdirSync('sql').filter((f) => f.endsWith('.sql'))
 check('the index the plate register walks is declared',
   /CREATE INDEX[^;]*ON trip \(plate\)/i.test(sql),
   'no plain index on trip(plate) — the register would scan the table per plate');
+
+/* ── and it is actually populated ───────────────────────────────────────── */
+{
+  const rows = await payoutRows(db);
+  const withPay = rows.filter((r) => r.payout != null);
+  check('the directory carries a payout column at all',
+    rows.length > 0 && 'payout' in rows[0], Object.keys(rows[0] || {}).join(','));
+  check('and a car whose driver was paid carries a figure in it',
+    withPay.length > 0, `${withPay.length} of ${rows.length} plates`);
+  check('with the days behind it, so a reader can see what it covers',
+    withPay.every((r) => r.payout_days > 0), JSON.stringify(withPay.map((r) => r.payout_days)));
+  /* A payout is not a fare and the two must never be added: a fare is what a
+     rider was charged for one trip, a payout is a share of a net weekly
+     figure after commission. They stay in separate columns. */
+  check('the fares column is untouched by it',
+    rows.every((r) => 'revenue' in r), 'both money columns are present');
+  /* A plate nobody drove must stay null rather than becoming a zero — zero
+     earned and no payout period reaching the car are different facts. */
+  const idle = rows.filter((r) => !r.trips);
+  check('a car with no work has no payout attributed to it',
+    idle.every((r) => r.payout == null), JSON.stringify(idle.map((r) => [r.plate, r.payout])));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
