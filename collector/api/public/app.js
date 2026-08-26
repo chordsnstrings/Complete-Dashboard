@@ -719,9 +719,19 @@ V.demand = async (root) => {
     ctxP.body.append(kpiRow([
       { label: 'Hottest day', value: `${Math.max(...withWeather.map((r) => r.temp_max)).toFixed(1)}°C`,
         sub: `${fmt(withWeather.filter((r) => r.temp_max >= 42).length)} days at or above 42°C` },
-      { label: 'Trips on 42°C+ days', value: hot.length ? fmt(Math.round(avg(hot))) : '—',
-        sub: mild.length ? `vs ${fmt(Math.round(avg(mild)))} on cooler days` : 'no cooler days to compare' },
-      { label: 'Temp vs volume', value: rho.toFixed(2),
+      /* An AVERAGE, said so. `avg(hot)` is trips per hot day, and the label
+         "Trips on 42°C+ days" reads as the total: 363 against eighteen such
+         days, where the total is 6,534. The comparison beside it only works if
+         both halves are known to be per-day. */
+      { label: 'Trips per 42°C+ day', value: hot.length ? fmt(Math.round(avg(hot))) : '—',
+        sub: mild.length
+          ? `on average, over ${countOf(hot.length, 'hot day')} — against `
+            + `${fmt(Math.round(avg(mild)))} a day on the ${fmt(mild.length)} cooler ones`
+          : 'no cooler days to compare' },
+      /* toFixed emits an ASCII hyphen; every other number on this page uses a
+         true minus. A correlation is the one figure here whose sign is read
+         first. */
+      { label: 'Temp vs volume', value: rho.toFixed(2).replace(/^-/, '\u2212'),
         sub: Math.abs(rho) < 0.3 ? 'no meaningful relationship in this window'
           : rho < 0 ? 'hotter days run quieter' : 'hotter days run busier',
         tone: Math.abs(rho) < 0.3 ? null : 'warn' },

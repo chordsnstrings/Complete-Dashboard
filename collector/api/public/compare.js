@@ -68,7 +68,14 @@ function delta(now, then, { fmt: f = (v) => fmt(v), worse = false, pctToo = true
   if (!d) return '<span class="dim">—</span>';
   const up = d > 0;
   const good = worse ? !up : up;
-  const p = pctToo && b ? ` (${up ? '+' : ''}${Math.round((d / b) * 100)}%)` : '';
+  /* The magnitude and the percentage have to agree with each other.
+     ─────────────────────────────────────────────────────────────────────────
+     This printed "▼ 11 (-19%)": an arrow saying down, an ABSOLUTE magnitude,
+     and a SIGNED percentage — three statements of direction where one is
+     enough, and the minus an ASCII hyphen where every other number on the page
+     uses U+2212. The arrow already carries the sign, so the percentage is the
+     magnitude too. */
+  const p = pctToo && b ? ` (${Math.abs(Math.round((d / b) * 100))}%)` : '';
   return `<span class="dl ${good ? 'up' : 'dn'}">${up ? '▲' : '▼'} ${f(Math.abs(d))}${esc(p)}</span>`;
 }
 
@@ -317,8 +324,26 @@ export async function renderCompare(root, aParam, bParam) {
       { label: 'Last run', key: 'last_run', render: (r) => (r.last_run ? hhmm(r.last_run) : '—') },
       { label: 'Last success', key: 'last_ok',
         render: (r) => (stale(r) ? pill(stale(r), 'warn') : hhmm(r.last_ok)) },
-      { label: 'Rows, 24h', key: 'rows_24h', num: true, render: (r) => fmt(r.rows_24h) },
+      /* Named for what it counts, which is not what the old heading implied.
+         ─────────────────────────────────────────────────────────────────────
+         It is `sum(rows_written)` across every collection RUN that finished in
+         the last 24 hours, and a collector runs many times a day and re-upserts
+         the rows it already holds. Measured live: Uber reads 1,381,368 under a
+         heading of "Rows, 24h", on a fleet that takes about five hundred
+         bookings a day. The figure is not wrong — that many row-writes did
+         happen — but on a panel headed "Was everything collected?" it reads as
+         "1.4 million rows arrived today", which is off by three orders of
+         magnitude in the direction of reassurance.
+
+         The useful signal on this panel is the last two columns; this one only
+         answers "did anything move at all", so it says that instead. */
+      { label: 'Rows written', key: 'rows_24h', num: true, render: (r) => fmt(r.rows_24h) },
     ], { compact: true }));
+    freshP.body.append(el('p', 'cap',
+      'Rows written counts every write by every collection run that finished in the last 24 hours. '
+      + 'A collector runs many times a day and re-writes rows it already holds, so this is far '
+      + 'larger than the number of new records and is only useful as "did anything move at all". '
+      + 'Whether the day is complete is the Last success column.'));
     const bad = cols.filter((r) => stale(r));
     if (bad.length) {
       freshP.body.append(note(`${countOf(bad.length, 'source')} last succeeded over a day ago — `
