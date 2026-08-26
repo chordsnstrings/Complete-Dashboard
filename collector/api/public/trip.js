@@ -158,6 +158,13 @@ export async function renderTrip(root, platform, id) {
     const bank = Number(pd.earnings);
     const gap = bank - expect;
     const pctOff = expect ? Math.abs(gap / expect) * 100 : null;
+    /* Stated, not flagged. On a SINGLE day these two are on different grains
+       by construction: the payout is measured for the day, while the statement
+       figures come from whatever period covered it — usually a week, divided
+       evenly across its seven days. So a per-day gap is the normal state and
+       colouring it a warning would cry wolf on every trip in the fleet. The
+       arithmetic is still worth printing, because it is what the reader would
+       otherwise do by hand and get wrong. */
     mp.body.append(note(`The four figures above are the payout's own parts: `
       + `${money(sd.net, 'AED', 2)} + ${money(sd.tips, 'AED', 2)} tips `
       + `+ ${money(sd.salik, 'AED', 2)} Salik − ${money(sd.cash, 'AED', 2)} cash `
@@ -165,9 +172,10 @@ export async function renderTrip(root, platform, id) {
       + (Math.abs(gap) < 0.01 ? ' — they agree exactly.'
         : `, a gap of ${money(Math.abs(gap), 'AED', 2)}`
           + (pctOff == null ? '.' : ` (${pctOff.toFixed(1)}%).`)
-          + ' The two come from different Uber surfaces and settle on different'
-          + ' days, so a small gap is the normal state; a large one is worth a look.'),
-    Math.abs(gap) > Math.max(5, Math.abs(expect) * 0.05) ? 'warn' : null));
+          + ' Uber states the payout per day and the statement per period, so on'
+          + ' one day these are a measurement against a week’s average spread'
+          + ' across it. #reconcile is where the two are compared at a grain'
+          + ' where they should agree.')));
   }
 
   if (pd && Number(pd.period_days) > 1) {
