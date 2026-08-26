@@ -2128,7 +2128,10 @@ V.unauthorized = async (root) => {
 
   if (t.low_confidence) {
     const w = el('div', 'panel');
-    w.innerHTML = `<div class="note err">⚠ ${fmt(t.low_confidence)} flagged segment(s) were assessed while a revenue channel was unavailable — a booking may exist that we could not read. Fix the source in Settings before acting on these.</div>`;
+    w.innerHTML = `<div class="note err">⚠ ${countOf(t.low_confidence, 'flagged segment')} `
+      + `${plural(t.low_confidence, 'was', 'were')} assessed while a revenue channel was unavailable `
+      + '— a booking may exist that we could not read. Fix the source in Settings before acting on '
+      + 'these.</div>';
     root.insertBefore(w, g);
   }
 
@@ -2217,6 +2220,10 @@ const hasFix = (r) => r.lat != null && r.lng != null
   && Number.isFinite(+r.lat) && Number.isFinite(+r.lng)
   && !(Math.abs(+r.lat) < 0.5 && Math.abs(+r.lng) < 0.5);
 
+/* /api/live flags a fix stale at FIX_FRESH — thirty minutes. Kept here so the
+   tiles that count that flag can name the rule that produced it. */
+const FIX_FRESH_MIN = 30;
+
 V.live = async (root) => {
   const kh = el('div', 'kpis'); root.append(kh);
   /* Three feeds, not one. 80 of these rows are FMS, 48 are CABMAN and 2 are
@@ -2237,6 +2244,14 @@ V.live = async (root) => {
   if (!alive(gen)) return;
   const fresh = rows.filter((r) => !r.stale).length;
   const moving = rows.filter((r) => +r.speed > 3).length;
+  /* The threshold behind `stale`, written once so the label cannot drift from
+     the number again. /api/live sets the flag at FIX_FRESH — thirty minutes —
+     while this tile was headed "Fresh (<11 min)" and the map's read "no fix in
+     11 min", both counting the same flag. Eleven is the rule the vehicle and
+     economics endpoints use for their own telemetry columns, and it had been
+     copied onto a figure it does not describe: 82 of 130 fresh at thirty
+     minutes is 65 at eleven. Verified against production — `stale` and
+     `fix_age_min >= 30` agreed on all 130 rows, none excepted. */
   /* Denominators, and the right population.
      "Engaged 4 · passenger on board" mixed a CABMAN status STRING with a seat
      SENSOR reading and printed the result against nothing — 82 of these
@@ -2263,7 +2278,7 @@ V.live = async (root) => {
   kh.innerHTML = [
     ['Vehicles tracked', fmt(located.length),
       `with a usable fix${noLock ? ` · ${fmt(noLock)} reporting no satellite lock` : ''}`],
-    ['Fresh (<11 min)', fmt(fresh), `of ${fmt(rows.length)} reporting at all`],
+    [`Fresh (<${FIX_FRESH_MIN} min)`, fmt(fresh), `of ${fmt(rows.length)} reporting at all`],
     /* Not the same fact as "not fresh". A car in a basement is minutes behind;
        these have stopped reporting altogether. */
     ['Silent over a day', fmt(silent.length),
@@ -2455,7 +2470,7 @@ V.map = async (root) => {
         : fmt(withGps.filter((r) => /engag/i.test(r.status || '')).length),
         sensed.length ? 'of those whose feed reports a seat sensor' : 'no feed here reports a seat sensor'],
       ['Moving', fmt(withGps.filter((r) => +r.speed > 3).length), 'above 3 km/h'],
-      ['Stale', fmt(withGps.filter((r) => r.stale).length), 'no fix in 11 min'],
+      ['Stale', fmt(withGps.filter((r) => r.stale).length), `no fix in ${FIX_FRESH_MIN} min`],
     ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
     /* A fourth colour, because "Moving, empty" was asserted for the 82
        vehicles whose feed carries no seat sensor at all. renderJourney has been
@@ -3407,7 +3422,7 @@ V.settings = async (root) => {
     });
     if (!Object.keys(payload).length) { note.className = 'note'; note.textContent = 'nothing changed'; return; }
     const j = await post('/api/settings', payload);
-    if (j) { note.textContent = `saved ${j.updated.length} setting(s)`; render(); }
+    if (j) { note.textContent = `saved ${countOf(j.updated.length, 'setting')}`; render(); }
   };
   const RUN = {
     runInc: ['incremental', 'incremental queued — the collector claims it within ~20s'],
@@ -3526,7 +3541,7 @@ V.settings = async (root) => {
             : 'A run is in progress.')
           + ' Only one runs at a time, so anything queued behind it starts when this finishes.'
           + (live.attempts > 1
-            ? ` This job has been restarted ${live.attempts - 1} time(s) by a container restart — each restart`
+            ? ` This job has been restarted ${countOf(live.attempts - 1, 'time')} by a container restart — each restart`
               + ' begins the sequence again, so a long run may never reach its later sources.'
             : ''))));
       }

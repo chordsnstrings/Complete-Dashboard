@@ -265,7 +265,8 @@ export async function renderDay(root, day, onDetail) {
     { label: 'Fares', key: 'revenue', num: true, absent: FARE_ABSENT,
       render: (r) => money(r.revenue) },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    { label: 'Channels', key: 'platforms', render: (r) => esc((r.platforms || []).join(', ')) },
+    { label: 'Channels', key: 'platforms',
+      render: (r) => esc((r.platforms || []).map(sourceLabel).join(', ')) },
     { label: 'Vehicles', key: 'plates',
       render: (r) => (r.plates || []).slice(0, 3).map((p2) => entity('vehicle', p2, p2)).join(' ') },
     { label: 'On the road', key: 'first_trip',
@@ -314,15 +315,27 @@ export async function renderDay(root, day, onDetail) {
   cp.body.append(el('p', 'cap', bits.length ? bits.join(' · ')
     : 'No weather or calendar context was collected for this day.'));
   cp.body.append(tableFrom(d.coverage, [
-    { label: 'Source', key: 'source' },
+    { label: 'Source', key: 'source', render: (r) => sourceLabel(r.source) },
     { label: 'Rows this day', key: 'rows', num: true },
     { label: 'Normally', key: 'median_rows', num: true, render: (r) => fmt(r.median_rows) },
+    { label: 'Against normal', key: 'x', num: true,
+      render: (r) => (Number(r.median_rows) > 0
+        ? `${(r.rows / Number(r.median_rows)).toFixed(1)}×` : '—') },
+    /* This asked "was everything collected?" and only ever looked downwards, so
+       531 FMS rows against a median of 174 came back "normal". A day carrying
+       three times its usual volume is as much a collection event as one
+       carrying none — a backfill that ran twice looks exactly like this. */
     { label: 'Verdict', key: 'v', render: (r) => (!r.inside_span
       ? pill('no history here', '')
       : r.rows === 0 && Number(r.median_rows) > 0 ? pill('collected nothing', 'err')
         : Number(r.median_rows) > 0 && r.rows < Number(r.median_rows) * 0.3 ? pill('far below normal', 'warn')
-          : pill('normal', 'ok')) },
+          : Number(r.median_rows) > 0 && r.rows > Number(r.median_rows) * 3 ? pill('far above normal', 'warn')
+            : pill('normal', 'ok')) },
   ]));
+  cp.body.append(el('p', 'cap',
+    '"Normally" is the median row count for that source across every day it has collected. A day is '
+    + 'flagged below three tenths of it or above three times it; between those the variation is '
+    + 'ordinary. A high day is not necessarily wrong — it is worth knowing about.'));
   root.append(cp.panel);
   return d;
 }

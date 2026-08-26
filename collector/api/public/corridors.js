@@ -156,7 +156,7 @@ export async function renderCorridors(root) {
   hbars(b1, shownOrigins.map((o) => ({ label: o.area, n: o.trips })), { signed: false });
   if (unrecorded && unrecorded.trips) {
     b1.append(el('p', 'cap', esc(
-      `${fmt(unrecorded.trips)} further pickup(s) — `
+      `${countOf(unrecorded.trips, 'further pickup')} — `
       + `${pct((unrecorded.trips / (totalOrigin + unrecorded.trips)) * 100, 1)} of the window — carry an `
       + 'address with no community in it and are in none of these bars. Every share on this page is '
       + 'over the addressed pickups only.')));

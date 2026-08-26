@@ -163,7 +163,7 @@ async function tabOverview(root, plate, prof) {
       return { label: 'Idle days', value: fmt(k.idle_days), sub: 'reported a position, earned nothing',
         tone: k.idle_days === 0 ? 'good' : k.idle_days <= 3 ? 'warn' : 'critical' };
     })(),
-    { label: 'Drivers', value: fmt(k.drivers), sub: `across ${fmt(k.platforms)} platform(s)` },
+    { label: 'Drivers', value: fmt(k.drivers), sub: `across ${countOf(k.platforms, 'platform')}` },
     /* Completion, which the endpoint has always returned and this page never
        drew. A car with a normal booking count and a poor completion rate is a
        different problem from an idle one, and the vehicle page was the only
@@ -336,7 +336,7 @@ async function tabMovement(root, plate) {
     const recent = track.slice(-40).reverse();
     const age = Math.round((Date.now() - Date.parse(recent[0].captured_at)) / 60000);
     now.body.append(el('p', 'cap', age < 60
-      ? `Last fix ${age} minute(s) ago — CABMAN polls every five minutes.`
+      ? `Last fix ${countOf(age, 'minute')} ago — CABMAN polls every five minutes.`
       : `Last fix ${dtStr(recent[0].captured_at)}. This tracker is not currently reporting.`));
     now.body.append(tableFrom(recent, [
       { label: 'Time', key: 'captured_at', render: (r) => `${dateStr(r.captured_at)} ${timeStr(r.captured_at)}` },
@@ -749,7 +749,9 @@ async function tabCompliance(root, plate, prof) {
     ], { sortable: true, sortId: 'vdocs2', defaultSort: { key: 'days_left', dir: 'asc' } }));
     const soon = docs.filter((d) => d.days_left != null && d.days_left < 30);
     if (soon.length) p.body.append(el('p', 'cap',
-      `${soon.length} document(s) expire within 30 days. Renewal in the UAE is not same-day — leaving it to the final week risks losing the vehicle from service.`));
+      `${countOf(soon.length, 'document')} ${plural(soon.length, 'expires', 'expire')} within 30 days. `
+      + 'Renewal in the UAE is not same-day — leaving it to the final week risks losing the vehicle '
+      + 'from service.'));
   }
 
   const s = prof.spec || {};
