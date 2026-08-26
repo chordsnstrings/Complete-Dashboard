@@ -562,7 +562,15 @@ export const money = (v, cur = 'AED', d = 0) => {
   // "AED 3" — which is a different number.
   return `${cur} ${n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d })}`;
 };
-export const pct = (v, d = 0) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—' : `${Number(v).toFixed(d)}%`);
+/* A percentage, with the same minus sign as every other number on the page.
+   ─────────────────────────────────────────────────────────────────────────
+   toFixed emits an ASCII hyphen, and money() emits a true minus (U+2212). The
+   payout tree puts them in adjacent columns of one table — "−AED 600.59" beside
+   "-1.8%" — and the hyphen is narrower and sits higher, so a negative share is
+   the one number in the row a reader can scan past. One convention, applied
+   where the string is built rather than at ninety call sites. */
+export const pct = (v, d = 0) => (v == null || v === '' || !Number.isFinite(Number(v)) ? '—'
+  : `${Number(v).toFixed(d).replace(/^-/, '\u2212')}%`);
 /* An optional tone. Callers were already passing one — a rollup that failed
    and a rollup that is merely stale are different messages and were rendering
    identically, because the second argument was silently dropped. */
