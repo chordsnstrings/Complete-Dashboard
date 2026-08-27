@@ -21,6 +21,11 @@
    complete. Over the limit this refuses and says how many rows there are and
    what window would fit, rather than handing back a plausible lie. */
 
+/* The default cap. Overridable ONLY so a test can exercise the refusal against
+   a handful of rows instead of needing to seed two hundred thousand — the
+   alternative was a regex over this file asserting the refusal exists, which
+   is a check that the words are present, not that the arithmetic is right. It
+   was wrong: see the comment on the walk-back below. */
 const MAX_ROWS = 200000;
 
 /** RFC 4180: quote anything with a comma, quote or newline; double the quotes. */
@@ -37,7 +42,7 @@ function toCsv(rows, cols) {
   return `${out.join('\n')}\n`;
 }
 
-export function exportRoutes(app, { q, wrap, winDays }) {
+export function exportRoutes(app, { q, wrap, winDays, maxRows = MAX_ROWS }) {
   app.get('/api/export/trips.csv', wrap(async (req, res) => {
     const [from, to] = winDays(req);
     const grain = req.query.grain === 'trip' ? 'trip' : 'day';
@@ -53,15 +58,43 @@ export function exportRoutes(app, { q, wrap, winDays }) {
           AND ($3::text IS NULL OR platform = $3)
           AND ($4::text IS NULL OR fleet_id = $4)`, p);
 
-    if (grain === 'trip' && n > MAX_ROWS) {
-      const days = Math.max(1, Math.floor((Date.parse(to) - Date.parse(from)) / 864e5) + 1);
+    if (grain === 'trip' && n > maxRows) {
+      /* The window that WOULD fit, found rather than extrapolated.
+         ─────────────────────────────────────────────────────────────────
+         This scaled the requested day count by the row ratio, which assumes
+         bookings are spread evenly across the window — and they are not, in
+         the one direction that matters. Asked for 1,200 days it answered
+         "about 1,007 days would fit" over a record only 863 days long: every
+         one of those 1,007 days holds the same 238,330 rows, so following the
+         advice reproduces the refusal exactly. A suggestion that cannot work
+         is worse than none, because the reader spends a round trip on it.
+
+         Counting per day and walking back from the most recent one is exact
+         and costs a grouped count over the same predicate. Whole days only,
+         so the boundary is a date somebody can type. */
+      const perDay = await q(
+        `SELECT local_day::text d, count(*)::int c FROM trip_norm
+          WHERE local_day BETWEEN $1::date AND $2::date AND is_booking
+            AND ($3::text IS NULL OR platform = $3)
+            AND ($4::text IS NULL OR fleet_id = $4)
+          GROUP BY 1 ORDER BY 1 DESC`, p);
+      let acc = 0, start = null;
+      for (const r of perDay) {
+        if (acc + r.c > maxRows) break;
+        acc += r.c; start = r.d;
+      }
+      /* A single day over the limit has no narrower window to offer, so it
+         gets the other two routes out and no date. */
+      const fits = start
+        ? `The most recent ${start} → ${to} would fit, at ${acc.toLocaleString('en')} rows.`
+        : 'Even one day of this selection is over the limit.';
       return res.status(413).json({
         error: 'too many rows for one file',
-        rows: n, limit: MAX_ROWS,
+        rows: n, limit: maxRows,
+        fits_from: start, fits_to: start ? to : null, fits_rows: start ? acc : null,
         detail: `${n.toLocaleString('en')} bookings match this window, over the `
-          + `${MAX_ROWS.toLocaleString('en')}-row limit. Narrow the range — about `
-          + `${Math.max(1, Math.floor(days * (MAX_ROWS / n)))} days would fit — or export `
-          + 'one fleet or one channel at a time, or use grain=day.',
+          + `${maxRows.toLocaleString('en')}-row limit. ${fits} Or export one fleet `
+          + 'or one channel at a time, or use grain=day.',
       });
     }
 

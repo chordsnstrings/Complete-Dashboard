@@ -132,8 +132,64 @@ const src = (await import('node:fs')).readFileSync('api/export_routes.js', 'utf8
    is a check that fails for the wrong reason. */
 check('there is no SQL LIMIT in the query — nothing is silently dropped',
   !/\bLIMIT\s+(\d+|\$\d)/i.test(src), 'a silent LIMIT is exactly what this must not do');
-check('over the cap it refuses, with the count and a narrower window to try',
-  /status\(413\)/.test(src) && /rows: n/.test(src) && /Narrow the range/.test(src));
+/* The refusal, EXERCISED rather than grepped for.
+   ─────────────────────────────────────────────────────────────────────────
+   This used to be a regex over the source asserting that `status(413)` and the
+   words "Narrow the range" appear in the file. Both did, and the number the
+   message carried was wrong: it scaled the requested day count by the row
+   ratio, so a 1,200-day request over an 863-day record answered "about 1,007
+   days would fit" — a window holding every one of the rows it had just
+   refused. A check that reads the words cannot see that. This one mounts the
+   same route with a cap of 3 and reads the answer. */
+const tiny = express();
+exportRoutes(tiny, { q, wrap, winDays, maxRows: 3 });
+const tinySrv = tiny.listen(0);
+const tinyGet = async (path) => {
+  const r = await fetch(`http://127.0.0.1:${tinySrv.address().port}${path}`);
+  return { status: r.status, body: await r.json().catch(() => null) };
+};
+
+const over = await tinyGet(`/api/export/trips.csv?${W}&grain=trip`);
+check('over the cap it refuses rather than truncating',
+  over.status === 413 && over.body?.error === 'too many rows for one file',
+  `${over.status} ${JSON.stringify(over.body)}`);
+check('and says how many rows there actually are',
+  over.body?.rows === 7 && over.body?.limit === 3, JSON.stringify(over.body));
+
+/* 2026-08-26 holds 1 booking, 2026-08-25 holds 6. Walking back from the most
+   recent day, the 26th fits (1 ≤ 3) and adding the 25th would not (7 > 3), so
+   the only window that fits is the 26th alone. An extrapolation would have
+   said "about 1 day", landing on the same date by luck; the walk-back says it
+   because it counted. */
+check('the window it suggests is one the data actually fits into',
+  over.body?.fits_from === '2026-08-26' && over.body?.fits_to === '2026-08-26'
+  && over.body?.fits_rows === 1, JSON.stringify(over.body));
+/* And the suggestion is not advice — it is a request that works. */
+const retry = await tinyGet(
+  `/api/export/trips.csv?from=${over.body?.fits_from}&to=${over.body?.fits_to}&grain=trip`);
+check('and following that suggestion succeeds instead of refusing again',
+  retry.status === 200, String(retry.status));
+
+/* A window that extends far past the record must not be answered with a day
+   count longer than the record — the exact bug this replaced. */
+const wide = await tinyGet('/api/export/trips.csv?from=2020-01-01&to=2026-08-26&grain=trip');
+check('a window wider than the record still suggests a date inside it',
+  wide.status === 413 && wide.body?.fits_from === '2026-08-26',
+  JSON.stringify(wide.body));
+
+/* One day over the cap on its own has no narrower window to offer, and must
+   say so rather than naming a date that would refuse again. */
+const noneFit = express();
+exportRoutes(noneFit, { q, wrap, winDays, maxRows: 1 });
+const nfSrv = noneFit.listen(0);
+const nf = await fetch(
+  `http://127.0.0.1:${nfSrv.address().port}/api/export/trips.csv?from=2026-08-25&to=2026-08-25&grain=trip`)
+  .then((r) => r.json());
+check('a single day over the cap admits it has no window to offer',
+  nf.fits_from === null && /Even one day/.test(nf.detail || ''), JSON.stringify(nf));
+check('and still points at the two ways out that do work',
+  /one fleet/.test(nf.detail || '') && /grain=day/.test(nf.detail || ''), nf.detail);
+tinySrv.close(); nfSrv.close();
 
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();
