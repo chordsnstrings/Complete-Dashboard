@@ -108,20 +108,10 @@ const q = (text, params) => pool.query(text, params).then((r) => r.rows);
    which executes every route rather than grepping for it. */
 import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, JOIN_TRIP, personFold } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
-let errSeq = 0;
-const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
-  const ref = `e${Date.now().toString(36)}-${(++errSeq).toString(36)}`;
-  log.error('api', req.path, { ref, query: req.query, err: String(e) });
-  /* A route that has already begun writing cannot be given a status line, and
-     trying throws ERR_HTTP_HEADERS_SENT on top of whatever actually failed —
-     so the log names the wrong error and the process takes an unhandled
-     rejection. /api/export/trips.csv streams a CSV a day at a time and is the
-     first route here that can fail after its first byte. Destroying the socket
-     is the honest answer: the client sees an aborted transfer rather than a
-     truncated file that reads as complete. */
-  if (res.headersSent) return res.destroy();
-  res.status(500).json({ error: 'internal', ref });
-});
+import { makeWrap } from './wrap.js';
+/* Moved to api/wrap.js so the late-failure branch can be exercised by a test
+   rather than reasoned about — see the comment there. */
+const wrap = makeWrap({ log });
 
 // Writes (credential changes) require ADMIN_TOKEN via the x-admin-token header,
 // and an API with no ADMIN_TOKEN refuses every write rather than running open.

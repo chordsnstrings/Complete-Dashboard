@@ -531,9 +531,18 @@ check('the trip table survived the injection attempt',
     !/key='trigger'/.test(src2) && !/'trigger',\$1/.test(src2));
 }
 
-/* A 500 body must not hand an unauthenticated caller the storage engine. */
+/* A 500 body must not hand an unauthenticated caller the storage engine.
+   The boundary moved to api/wrap.js so its late-failure branch could be
+   exercised rather than reasoned about, and this check moved with it. What is
+   asserted here is the WIRING — that server.js still routes through that
+   boundary and has not grown a second one; the body's shape, the reference,
+   and what happens when a route fails after its first byte are exercised for
+   real in test/late_failure.test.mjs. */
 check('the error handler returns a reference, not the driver message',
-  /res\.status\(500\)\.json\(\{ error: 'internal', ref \}\)/.test(src));
+  /res\.status\(500\)\.json\(\{ error: 'internal', ref \}\)/.test(
+    readFileSync('api/wrap.js', 'utf8')));
+check('and server.js routes through that one boundary rather than its own',
+  /const wrap = makeWrap\(\{ log \}\)/.test(src) && !/const wrap = \(fn\)/.test(src));
 check('readiness is separate from liveness and names what is missing',
   /\/api\/ready/.test(src) && /schema incomplete/.test(src));
 check('the API refuses to serve on a failed migration', /process\.exit\(1\)/.test(src));
