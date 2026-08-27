@@ -112,6 +112,14 @@ let errSeq = 0;
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => {
   const ref = `e${Date.now().toString(36)}-${(++errSeq).toString(36)}`;
   log.error('api', req.path, { ref, query: req.query, err: String(e) });
+  /* A route that has already begun writing cannot be given a status line, and
+     trying throws ERR_HTTP_HEADERS_SENT on top of whatever actually failed —
+     so the log names the wrong error and the process takes an unhandled
+     rejection. /api/export/trips.csv streams a CSV a day at a time and is the
+     first route here that can fail after its first byte. Destroying the socket
+     is the honest answer: the client sees an aborted transfer rather than a
+     truncated file that reads as complete. */
+  if (res.headersSent) return res.destroy();
   res.status(500).json({ error: 'internal', ref });
 });
 
@@ -3059,7 +3067,7 @@ dayRoutes(app, { q, wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });
-exportRoutes(app, { q, wrap, winDays });
+exportRoutes(app, { q, wrap, winDays, log });
 
 /* Occupancy segments as pages rather than a modal: the list with its own
    facets, and one interval with every booking that stood near it. */

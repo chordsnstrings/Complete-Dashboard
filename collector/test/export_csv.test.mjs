@@ -117,6 +117,58 @@ check('a newline inside a field is quoted rather than breaking the row',
 check('the file ends with a newline, which some readers need to see the last row',
   quoted.endsWith('\n'));
 
+/* ── it STREAMS, because buffering it killed the process ─────────────────
+   The trip grain built the whole file in memory: every pg row object, then one
+   string, on a 512MB instance. Production answered 504 after ten seconds on
+   the 200,000-row window its own refusal message had just recommended — not a
+   timeout, an OOM kill and a container restart. It now writes a Dubai day at a
+   time, so memory is flat however long the window is.
+
+   What a test can hold onto: the response is chunked rather than measured,
+   which is only true if the first byte left before the last row was read; and
+   the rows still come out complete and in order across those chunk
+   boundaries, which is the thing chunking can silently break. */
+const raw = await fetch(`http://127.0.0.1:${port}/api/export/trips.csv?${W}&grain=trip`);
+const rawBody = await raw.text();
+check('the trip grain is sent as a stream, not measured and then sent',
+  raw.headers.get('content-length') === null, `content-length ${raw.headers.get('content-length')}`);
+/* Counted with the reader below, not with split('\n') — a field holding a
+   newline is exactly the case where those two disagree, and the header must
+   count ROWS. */
+/* Days are separate queries now, so a boundary is a place rows can be lost,
+   repeated or reordered. All three would still produce a plausible CSV. */
+/* A real RFC 4180 reader, because the naive split() above cannot see past the
+   quoted newline this file deliberately contains — and because a parser
+   written independently of the writer is the only thing that proves the
+   quoting round-trips rather than merely looking right. */
+const parseCsv = (text) => {
+  const out = [[]]; let cell = '', quoted = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quoted) {
+      if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+      else if (c === '"') quoted = false;
+      else cell += c;
+    } else if (c === '"') quoted = true;
+    else if (c === ',') { out[out.length - 1].push(cell); cell = ''; }
+    else if (c === '\n') { out[out.length - 1].push(cell); cell = ''; out.push([]); }
+    else if (c !== '\r') cell += c;
+  }
+  if (cell || out[out.length - 1].length) out[out.length - 1].push(cell);
+  return out.filter((r) => r.length > 1);
+};
+const streamed = parseCsv(rawBody).slice(1);
+check('a quoted newline survives the round trip through a real CSV reader',
+  streamed.some((r) => r[10] === 'B\nnewline'), JSON.stringify(streamed.map((r) => r[10])));
+check('no row is dropped or repeated across the day boundaries',
+  new Set(streamed.map((r) => r[3])).size === streamed.length, String(streamed.length));
+check('and the row-count header still tells a saved file what it holds',
+  Number(raw.headers.get('x-export-rows')) === streamed.length,
+  `${raw.headers.get('x-export-rows')} vs ${streamed.length}`);
+check('and the days still come out in order across chunks',
+  streamed.map((r) => r[0]).join() === [...streamed.map((r) => r[0])].sort().join(),
+  streamed.map((r) => r[0]).join(' '));
+
 /* ── an empty window is a file, not a failure ───────────────────────────── */
 const none = await get('/api/export/trips.csv?from=2025-01-01&to=2025-01-02');
 const nRows = parse(none.body);
