@@ -13,6 +13,7 @@ export const config = {
   get incrementalDays() { return getInt('INCREMENTAL_DAYS', Number(D.INCREMENTAL_DAYS)); },
   // CABMAN realtime GPS: fixed 5-minute refresh saved to telemetry_snapshot.
   get cabmanCron() { return get('CABMAN_CRON', D.CABMAN_CRON); },
+  get uberTimelineCron() { return get('UBER_TIMELINE_CRON', D.UBER_TIMELINE_CRON); },
   // Other live pollers (Uber online/on-trip status, FMS live) — lighter cadence.
   get liveStatusSeconds() { return getInt('LIVE_STATUS_SECONDS', 120); },
 

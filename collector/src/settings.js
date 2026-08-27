@@ -48,6 +48,9 @@ export const SETTING_DEFAULTS = {
   CABMAN_ECOSINE_ID: '81',
   CABMAN_ECOSINE_USER: 'admin_ecosine',
   CABMAN_CRON: '*/5 * * * *',
+  /* Three-hourly, offset off the hour so it does not start alongside the
+     thirty-minute incremental and compete with it for the same session. */
+  UBER_TIMELINE_CRON: '17 */3 * * *',
   /* Uber runs two OAuth environments and an application belongs to ONE of
      them. A Test-environment client answers `unauthorized_client — the current
      application environment is mismatched with the OAuth server runtime` on
@@ -115,6 +118,8 @@ export const SETTING_DEFS = [
   { key: 'BACKFILL_MONTHS', group: 'Collector', label: 'Backfill months', secret: false },
   { key: 'INCREMENTAL_DAYS', group: 'Collector', label: 'Incremental window (days)', secret: false },
   { key: 'CABMAN_CRON', group: 'Collector', label: 'CABMAN schedule (cron)', secret: false },
+  { key: 'UBER_TIMELINE_CRON', group: 'Collector', label: 'Uber driver-timeline schedule (cron)', secret: false,
+    hint: 'One request per working driver per run — three-hourly by default' },
 ];
 const DEF_BY_KEY = Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d]));
 

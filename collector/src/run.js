@@ -2,6 +2,7 @@
 import * as fms from './sources/fms.js';
 import * as uber from './sources/uber.js';
 import * as uberFleet from './sources/uber_fleet.js';
+import * as uberTimeline from './sources/uber_timeline.js';
 import * as yango from './sources/yango.js';
 import * as bolt from './sources/bolt.js';
 import * as cabman from './sources/cabman.js';
@@ -204,6 +205,32 @@ export const catchUp = (days = 30, onProgress, fleet = null) =>
 export async function cabmanTick() {
   try { await loadSettings(); await cabman.collect({ mode: 'realtime' }); }
   catch (e) { log.error('cabman', 'tick failed', { err: String(e) }); }
+}
+
+/* Uber driver availability — its own tick, not a step in the incremental.
+   ─────────────────────────────────────────────────────────────────────────
+   Deliberately outside HISTORICAL. This costs one request per driver per
+   window, and the backfill's whole design note above is about a long step
+   starving the ones behind it — putting a 2,600-request source in front of FMS
+   would recreate exactly that. It also must not ride the thirty-minute
+   incremental: ~74 working drivers a run is ten thousand requests a day at a
+   surface nobody has asked for more than a few hundred from.
+
+   The window is deliberately wider than the cadence. A driver's evening
+   straddles midnight, a missed tick must cost nothing, and re-asking is
+   idempotent — the rows are keyed on (driver, instant, kind, state). */
+export async function uberTimelineTick({ roster = false, days = 2 } = {}) {
+  await loadSettings();
+  try {
+    const to = new Date();
+    const from = daysAgo(days);
+    const n = await uberTimeline.collect({ from, to, mode: roster ? 'roster' : 'timeline', roster });
+    log.info('uber', 'timeline tick', { rows: n, days, roster });
+    return n;
+  } catch (e) {
+    log.error('uber', 'timeline tick failed', { err: String(e) });
+    return 0;
+  }
 }
 
 // Other live pollers (Uber online/on-trip status, FMS live telemetry).

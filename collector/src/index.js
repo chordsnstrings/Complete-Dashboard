@@ -9,7 +9,7 @@ import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility } from './settings.js';
-import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass } from './run.js';
+import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick } from './run.js';
 import { config } from './config.js';
 import { log } from './log.js';
 
@@ -22,6 +22,12 @@ async function main() {
   if (cmd === 'incremental') return incremental();
   if (cmd === 'analyst') return analystPass();
   if (cmd === 'probe') return probePass();
+  /* `timeline` and `timeline-roster`: the scheduled tick asks about drivers who
+     drove, which cannot find a driver who was online all evening and never got
+     a job. That driver is the point of the panel, so the full sweep is a
+     command rather than something nobody can run. */
+  if (cmd === 'timeline') return uberTimelineTick();
+  if (cmd === 'timeline-roster') return uberTimelineTick({ roster: true, days: 30 });
 
   if (cmd === 'schedule') {
     log.info('scheduler', 'starting', {
@@ -33,6 +39,15 @@ async function main() {
     setInterval(() => liveStatusTick(), config.liveStatusSeconds * 1000);
     // historical/aggregate refresh every 30 minutes
     cron.schedule('*/30 * * * *', () => incremental().catch((e) => log.error('scheduler', 'incremental', { err: String(e) })));
+    /* The driver availability timeline gets a cron of its OWN rather than a
+       place in the incremental, because its cost is one request per driver per
+       window. Scoped to drivers who worked in the window that is about 74
+       requests a run across both fleets; on the thirty-minute incremental that
+       would be ten thousand requests a day at a provider that has never been
+       asked for more than a few hundred. Three-hourly, and the window is wide
+       enough that a missed tick loses nothing. */
+    cron.schedule(config.uberTimelineCron, () => uberTimelineTick()
+      .catch((e) => log.error('scheduler', 'uber timeline', { err: String(e) })));
     /* Rollups on their own schedule as well as at the end of each run.
        The run-end refresh covers the normal path, but CABMAN writes trips on a
        five-minute tick of its own and a failed incremental leaves the rollups
