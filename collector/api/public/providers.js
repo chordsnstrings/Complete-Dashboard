@@ -12,7 +12,7 @@
 
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dtStr, dateStr, pct,
-  sourceLabel, countOf, plural, foldRows } from './ui.js';
+  sourceLabel, countOf, plural, foldRows, verdict } from './ui.js';
 import { api, href, state, store } from './data.js';
 import { dubaiDay } from './tz.js';
 
@@ -129,6 +129,41 @@ export async function renderProviders(root) {
   const live = probed.filter(answered);
   const refused = probed.filter((s) => !answered(s));
   const unmapped = live.reduce((a, s) => a + (s.unmapped_n || 0), 0);
+
+  /* Six tiles above 29 panels, and the question the page is open for is which
+     provider is telling us something we are throwing away — or refusing to
+     talk to us at all. */
+  {
+    const worst = [...live].sort((a, b) => (b.unmapped_n || 0) - (a.unmapped_n || 0))[0];
+    verdict(root, {
+      claim: refused.length
+        ? `${countOf(refused.length, 'surface')} would not answer`
+        : unmapped
+          ? `${fmt(unmapped)} fields arrive with nowhere to put them`
+          : `All ${fmt(probed.length)} surfaces answered and every field is kept`,
+      figure: refused.length ? fmt(refused.length) : fmt(unmapped),
+      unit: refused.length ? 'refused' : 'fields dropped',
+      tone: refused.length ? 'bad' : unmapped ? 'warn' : null,
+      meta: `${fmt(probed.length)} surfaces probed`,
+      sub: (refused.length
+        ? `${refused.slice(0, 3).map((f) => `${f.provider} ${f.surface}`).join(', ')}`
+          + `${refused.length > 3 ? ` and ${refused.length - 3} more` : ''}. `
+        : '')
+        + (worst?.unmapped_n
+          ? `The most is ${sourceLabel(worst.provider)}'s ${worst.surface}, with ${fmt(worst.unmapped_n)} `
+            + 'fields we store nowhere.'
+          : '')
+        + (unconfigured.length
+          ? ` ${unconfigured.map((x) => sourceLabel(x.provider)).join(', ')} `
+            + `${unconfigured.length === 1 ? 'has' : 'have'} no credentials at all.`
+          : ''),
+      recommend: unmapped
+        ? 'A field with no column is a question this product cannot answer yet. Click one to see '
+          + 'what the provider actually sends in it.'
+        : null,
+    });
+  }
+
   root.append(kpiRow([
     { label: 'Surfaces probed', value: fmt(probed.length),
       sub: `across ${countOf(new Set(probed.map((s) => s.provider)).size, 'provider')}` },

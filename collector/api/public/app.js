@@ -1784,6 +1784,7 @@ async function platformFunnel(root) {
 }
 
 V.finance = async (root) => {
+  const vfHost = el('div'); root.append(vfHost);
   const kh = el('div'); root.append(kh); loading(kh);
   const g = el('div', 'grid g2'); root.append(g);
   /* Fares per day, and titled as such. Platform statements are weekly, so this
@@ -1824,6 +1825,29 @@ V.finance = async (root) => {
      this and the Settlement page cannot disagree about what cash is. */
   const settle = await q('/api/settlement/mix').catch(() => ({ classes: [] }));
   const cash = (settle.classes || []).find((c) => c.settlement_class === 'cash');
+
+  /* Finance's headline is not how much came in — Revenue by channel answers
+     that. It is how much of it the fleet is still CHASING: cash a driver
+     collected is money the fleet has not got yet, and it is the one figure on
+     this page that is a task rather than a fact. */
+  {
+    const held = +cash?.revenue || 0;
+    const accounted = +k?.accounted || 0;
+    const pct = accounted ? Math.round((held / accounted) * 100) : 0;
+    verdict(vfHost, {
+      claim: held
+        ? `${money(held)} was collected in cash and has to be handed in`
+        : accounted ? `${money(accounted)} accounted for, none of it in cash`
+          : 'No money accounted for in this window',
+      figure: held ? `${pct}%` : (accounted ? money(accounted) : '—'),
+      unit: held ? 'of the money, in a driver’s hand' : 'accounted for',
+      tone: pct >= 25 ? 'warn' : null,
+      meta: accounted ? `${money(accounted)} in total` : null,
+      sub: held
+        ? 'Cash in hand names who holds it. Every other settlement route lands in the bank on its own.'
+        : 'Payment mix below splits what is left by how it settles.',
+    });
+  }
   /* Tolerant of both shapes. The backend audit gave /api/earnings/tips the
      {rows, total, shown, truncated} envelope every other list route carries —
      the same change it made to /api/driver/custody and /api/funnel/drivers.
