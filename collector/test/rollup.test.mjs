@@ -298,11 +298,12 @@ console.log('\nrollup: two refreshes do not race');
 console.log('\nrollup: it says how old it is');
 
 const state = await rollupState(db);
-/* Six passes: the three trip grains, the payout-day materialisation, the
-   on-trip statement derivation, and the driver lifetime. The count is asserted
-   rather than the names, because a pass that stops recording its state is one
-   nobody can tell has stopped running. */
-check('every rollup records a state row', state.length === 6, JSON.stringify(state.map((s) => s.name)));
+/* Seven passes: the three trip grains, the payout-day materialisation, the
+   on-trip statement derivation, the driver lifetime, and the per-driver-day
+   record (sql/schema_v38.sql). The count is asserted rather than the names,
+   because a pass that stops recording its state is one nobody can tell has
+   stopped running. */
+check('every rollup records a state row', state.length === 7, JSON.stringify(state.map((s) => s.name)));
 check('the payout pass is one of them', state.some((r) => r.name === 'driver_payout_day'));
 check('and the statement pass beside it', state.some((r) => r.name === 'driver_statement_day'));
 check('and the lifetime pass', state.some((r) => r.name === 'driver_lifetime'));

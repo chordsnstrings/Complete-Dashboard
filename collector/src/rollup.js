@@ -293,6 +293,11 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
   }));
   out.push(await runOne(db, 'rollup_person_month', () => refreshPersonMonth(db, since)));
   out.push(await runOne(db, 'driver_payout_day', () => refreshPayouts(db)));
+  /* After the payouts, before the lifetime fold: driver_day reads trip_norm and
+     driver_timeline_event and nothing either of those two writes, so its only
+     ordering requirement is that the collection that produced them has
+     finished — which is what being in this list at all means. */
+  out.push(await runOne(db, 'driver_day', () => refreshDriverDays(db, { since }))); 
   out.push(await runOne(db, 'driver_statement_day', () => refreshStatements(db)));
   out.push(await runOne(db, 'driver_lifetime', () => refreshLifetime(db)));
   /* Refresh the planner's statistics on the tables this just rewrote, and on
@@ -512,6 +517,118 @@ export async function refreshStatements(db = pool) {
    Rebuilt whole rather than incrementally. The measures are max() and count()
    over all time, so a narrow pass cannot update them without reading the rows
    it excluded — the cheap-looking version is the wrong one. */
+/* ── one row per driver per Dubai day ──────────────────────────────────────
+   The derived record, kept. See sql/schema_v38.sql for why a derivation that
+   lives only in a query is not good enough — the short version is that the
+   providers forget (Uber serves 31 days of availability and about 192 of
+   earnings), a query that changes changes the past with it, and
+   /api/driver/shift was running a lead() over the timeline plus a fold over
+   every trip, per driver, per request.
+
+   Pure SQL, like every other rollup here. The gap arithmetic looks sequential
+   and is not: "the waiting before this job" is its start minus the furthest
+   any EARLIER job ran to, which is a running max over the preceding rows.
+   Written as a fold in JS first — that version needed a second query, a
+   200-row chunked upsert and its own ordering, which is three more things that
+   can disagree with the endpoint than one statement has. */
+export async function refreshDriverDays(db = pool, { since = null } = {}) {
+  const MIN_OF = (c) => `(extract(hour FROM ${c} AT TIME ZONE 'Asia/Dubai') * 60`
+    + ` + extract(minute FROM ${c} AT TIME ZONE 'Asia/Dubai'))::int`;
+  /* A dropoff on a LATER Dubai day is minute 1440 of this one, not minute 20 —
+     as a raw number it would sit before its own request and make the job
+     negative. Clamped, the same way api/driver_routes.js clamps it. */
+  const END_MIN = `CASE WHEN n.ended_at IS NULL THEN NULL
+                        WHEN (n.ended_at AT TIME ZONE 'Asia/Dubai') >= (n.local_day + 1) THEN 1440
+                        ELSE greatest(${MIN_OF('n.ended_at')}, ${MIN_OF('n.requested_at')}) END`;
+  const p = since ? [since] : [];
+  const bound = since ? 'AND n.local_day >= $1::date' : '';
+
+  await db.query(
+    `WITH jobs AS (
+       SELECT n.driver_ext_id, n.local_day AS day, n.fleet_id, n.platform, n.plate,
+              n.outcome, n.distance_km, n.has_distance, n.price, n.has_fare, n.ended_at,
+              ${MIN_OF('n.requested_at')} AS s,
+              ${END_MIN} AS e
+         FROM trip_norm n
+        WHERE n.is_booking AND coalesce(btrim(n.driver_ext_id), '') <> '' ${bound}),
+     gapped AS (
+       /* The furthest any earlier job in this driver-day ran to. A job with no
+          dropoff contributes nothing to it — its end is unknown, not "now" —
+          so it cannot close a gap, which is what a NULL end already does
+          inside max(). */
+       SELECT j.*,
+              max(j.e) OVER (PARTITION BY j.driver_ext_id, j.day ORDER BY j.s
+                             ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_end
+         FROM jobs j),
+     agg AS (
+       SELECT driver_ext_id, day,
+              min(fleet_id) AS fleet_id,
+              array_agg(DISTINCT platform) FILTER (WHERE platform IS NOT NULL) AS platforms,
+              array_agg(DISTINCT plate) FILTER (WHERE plate IS NOT NULL) AS plates,
+              count(*)::int AS trips,
+              count(*) FILTER (WHERE outcome = 'completed')::int AS completed,
+              count(*) FILTER (WHERE outcome = 'not_completed')::int AS cancelled,
+              round(sum(distance_km) FILTER (WHERE has_distance)::numeric, 2) AS km,
+              round(sum(price) FILTER (WHERE has_fare)::numeric, 2) AS fares,
+              count(*) FILTER (WHERE ended_at IS NULL)::int AS unknown_end,
+              min(s) AS first_min,
+              max(e) AS last_min,
+              coalesce(sum(greatest(0, e - s)) FILTER (WHERE e IS NOT NULL), 0)::int AS on_job_min,
+              coalesce(sum(greatest(0, s - prev_end))
+                       FILTER (WHERE prev_end IS NOT NULL AND e IS NOT NULL), 0)::int AS wait_min,
+              coalesce(max(greatest(0, s - prev_end))
+                       FILTER (WHERE prev_end IS NOT NULL AND e IS NOT NULL), 0)::int AS longest_wait_min
+         FROM gapped GROUP BY 1, 2),
+     ev AS (
+       SELECT driver_ext_id, at, status,
+              lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
+         FROM driver_timeline_event WHERE kind = 'status' AND status <> ''),
+     spans AS (
+       SELECT driver_ext_id, at AS s, next_at AS e FROM ev
+        WHERE next_at IS NOT NULL AND status = 'ONLINE'),
+     online AS (
+       SELECT driver_ext_id, d AS day,
+              sum(greatest(0, extract(epoch FROM (
+                least(e AT TIME ZONE 'Asia/Dubai', d::timestamp + interval '1 day')
+                - greatest(s AT TIME ZONE 'Asia/Dubai', d::timestamp)))/60))::int AS online_min
+         FROM spans,
+              LATERAL generate_series((s AT TIME ZONE 'Asia/Dubai')::date,
+                                      (e AT TIME ZONE 'Asia/Dubai')::date, interval '1 day') AS g(d)
+        GROUP BY 1, 2)
+     INSERT INTO driver_day (driver_ext_id, day, fleet_id, platforms, plates, trips, completed,
+                             cancelled, km, fares, unknown_end, first_min, last_min, span_min,
+                             on_job_min, wait_min, longest_wait_min, online_min, idle_online_min,
+                             computed_at)
+     SELECT a.driver_ext_id, a.day, a.fleet_id, a.platforms, a.plates, a.trips, a.completed,
+            a.cancelled, a.km, a.fares, a.unknown_end, a.first_min, a.last_min,
+            CASE WHEN a.first_min IS NULL OR a.last_min IS NULL THEN NULL
+                 ELSE greatest(0, a.last_min - a.first_min) END,
+            a.on_job_min, a.wait_min, a.longest_wait_min,
+            o.online_min,
+            /* NULL, not zero, where availability was never collected — a day
+               nobody asked about is not a day the driver was offline. Floored
+               at zero where it was: the two series come from different
+               providers' clocks and a job can overhang its own online span by
+               seconds, which must not be stored as negative idle time. */
+            CASE WHEN o.online_min IS NULL THEN NULL
+                 ELSE greatest(0, o.online_min - a.on_job_min) END,
+            now()
+       FROM agg a
+       LEFT JOIN online o ON o.driver_ext_id = a.driver_ext_id AND o.day = a.day
+     ON CONFLICT (driver_ext_id, day) DO UPDATE SET
+       fleet_id = EXCLUDED.fleet_id, platforms = EXCLUDED.platforms, plates = EXCLUDED.plates,
+       trips = EXCLUDED.trips, completed = EXCLUDED.completed, cancelled = EXCLUDED.cancelled,
+       km = EXCLUDED.km, fares = EXCLUDED.fares, unknown_end = EXCLUDED.unknown_end,
+       first_min = EXCLUDED.first_min, last_min = EXCLUDED.last_min, span_min = EXCLUDED.span_min,
+       on_job_min = EXCLUDED.on_job_min, wait_min = EXCLUDED.wait_min,
+       longest_wait_min = EXCLUDED.longest_wait_min,
+       online_min = EXCLUDED.online_min, idle_online_min = EXCLUDED.idle_online_min,
+       computed_at = now()`, p);
+
+  const { rows } = await db.query('SELECT count(*)::int n FROM driver_day');
+  return rows[0].n;
+}
+
 export async function refreshLifetime(db = pool) {
   await db.query('BEGIN');
   try {
