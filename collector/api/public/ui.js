@@ -3,7 +3,7 @@
    detail pages of its own: a per-driver page needs the same panels, tables and
    modals as the overview, and copying them would have let the two drift. */
 import { fmt, empty } from './charts.js';
-import { href } from './data.js';
+import { href, params } from './data.js';
 import { TZ, TZ_LABEL, dubaiDay } from './tz.js';
 
 export const $ = (s, r = document) => r.querySelector(s);
@@ -743,4 +743,57 @@ export const signed = (v, { unit = '', d = 0 } = {}) => {
    and a rollup that is merely stale are different messages and were rendering
    identically, because the second argument was silently dropped. */
 export const note = (text, tone) => el('div', `note${tone ? ' ' + tone : ''}`, esc(text));
+/* ── taking the figures away ───────────────────────────────────────────────
+   Everything in this product could be read and none of it could be TAKEN. No
+   CSV, no download, no Content-Disposition anywhere in the API or the pages —
+   so an operator who wanted last month in a spreadsheet, or an accountant
+   reconciling against their own ledger, read numbers off a screen and retyped
+   them. The one question this answers most often is "give me the daily trips
+   for both organisations", and the answer was a manual transcription.
+
+   The link carries the page's own window and chips, so what downloads is what
+   is on screen. With NO fleet chip set that is both fleets, each row naming
+   its own — which is the whole point: one file, both organisations, rather
+   than two exports to stitch together in the spreadsheet.
+
+   The row limit is checked HERE as well as on the server, off the row count
+   the page already has. The server refuses an oversized export rather than
+   truncating it (api/export_routes.js), and a refusal arriving as a downloaded
+   file full of JSON is a worse answer than a link that says up front why it is
+   not offered. */
+export const CSV_MAX_ROWS = 200000;
+
+/**
+ * A download line for the trip export.
+ * @param bookings row count for the trip grain — the same predicate the
+ *   export uses, so the page can honour the server's limit without asking.
+ */
+export function exportRow(bookings = null) {
+  const bar = el('div', 'getout');
+  bar.append(el('span', 'getout-lab', 'Download'));
+  const link = (grain, label, hint) => {
+    const a = el('a', 'getout-a', esc(label));
+    a.href = `/api/export/trips.csv?${params({ grain })}`;
+    /* No value: the filename comes from the server's Content-Disposition,
+       which already names the grain, the window and any chip. */
+    a.setAttribute('download', '');
+    a.title = hint;
+    return a;
+  };
+  bar.append(link('day', 'daily totals',
+    'One row per fleet per channel per Dubai day: bookings, completed, drivers, vehicles, km and fares.'));
+  if (bookings == null || bookings <= CSV_MAX_ROWS) {
+    bar.append(el('span', 'getout-sep', '·'));
+    bar.append(link('trip', 'every trip',
+      'One row per booking: time, driver, plate, pickup, dropoff, distance, outcome and fare.'));
+  } else {
+    bar.append(el('span', 'getout-sep', '·'));
+    bar.append(el('span', 'getout-no',
+      `every trip — ${fmt(bookings)} bookings is over the ${fmt(CSV_MAX_ROWS)}-row file limit; `
+      + 'narrow the window or pick one fleet'));
+  }
+  bar.append(el('span', 'getout-tz', `CSV · days in ${TZ_LABEL}`));
+  return bar;
+}
+
 export { fmt, empty };

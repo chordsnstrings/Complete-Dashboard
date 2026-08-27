@@ -103,6 +103,24 @@ for (const route of usedByUi) {
      happy path on purpose. Counted, so a fixture that stops being compared
      because a route started 404ing is visible rather than silent. */
   if (realRes.status >= 400) { skipped++; continue; }
+  /* A CSV is a shape too, and it is the one shape nothing here could check:
+     JSON.parse throws on it, so /api/export/trips.csv fell into the skip
+     branch and its columns could drift from the fixture — and from whatever a
+     spreadsheet downloaded last month expects — with every test still green.
+     The header line IS the shape, so compare that. */
+  if (/text\/csv/.test(realRes.headers.get('content-type') || '')) {
+    compared++;
+    const head = (t) => (t.split(/\r?\n/)[0] || '').split(',');
+    const realCols = head(realTxt), mockCols = head(mockTxt);
+    const missing = realCols.filter((c) => !mockCols.includes(c));
+    if (missing.length) drift.push(`${route}: fixture header lacks ${missing.join(', ')}`);
+    /* And the other way, which the JSON check cannot do because a fixture may
+       legitimately carry more: a CSV header is the whole contract, so a column
+       the fixture invents is a column somebody will write a formula against. */
+    const extra = mockCols.filter((c) => !realCols.includes(c));
+    if (extra.length) drift.push(`${route}: fixture header invents ${extra.join(', ')}`);
+    continue;
+  }
   let real; let mock;
   try { real = JSON.parse(realTxt); mock = JSON.parse(mockTxt); } catch { skipped++; continue; }
   if (real && typeof real === 'object' && ('error' in real || 'reason' in real)) { skipped++; continue; }

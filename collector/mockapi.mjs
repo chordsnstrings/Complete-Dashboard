@@ -1305,6 +1305,38 @@ app.get('/api/trips/daily', (_, r) => {
   r.json(out);
 });
 
+/* The CSV export, fixtured so the header row can be compared against the real
+   one. A download is the one response in this API that nothing JSON-shaped
+   guards: JSON.parse fails on it, so the shape check would have skipped it and
+   the columns could drift for months without a test noticing. Comparing the
+   header line is the CSV equivalent of "fixture rows lack X", so the columns
+   here MUST track api/export_routes.js. */
+const EXPORT_COLS = {
+  day: ['day', 'fleet', 'channel', 'bookings', 'completed', 'drivers', 'vehicles',
+    'km', 'priced_bookings', 'fares', 'currency'],
+  trip: ['day', 'fleet', 'channel', 'trip_id', 'requested_at', 'ended_at', 'driver_name',
+    'driver_ext_id', 'plate', 'pickup_addr', 'dropoff_addr', 'distance_km',
+    'product', 'payment_type', 'status', 'outcome', 'price', 'currency'],
+};
+app.get('/api/export/trips.csv', (req, r) => {
+  const grain = req.query.grain === 'trip' ? 'trip' : 'day';
+  const cols = EXPORT_COLS[grain];
+  const day = dayISO(1).slice(0, 10);
+  /* Both fleets in one file, which is the property the page's link exists for:
+     with no fleet chip set the export covers both organisations and each row
+     names its own. A single-fleet fixture would let that regress unseen. */
+  const row = (fleet) => (grain === 'day'
+    ? [day, fleet, 'uber', 120, 113, 31, 28, 1480.5, 18, 4210.75, 'AED']
+    : [day, fleet, 'uber', `uber-1-1-${fleet}`, `${day}T09:12:00.000Z`, `${day}T09:41:00.000Z`,
+      'Khalid A', 'u-khalid', 'A 12345', 'Dubai Marina', 'DXB T3', 24.4,
+      'UberX', 'card', 'completed', 'completed', 78.5, 'AED']);
+  const body = [cols.join(','), row('ecosine').join(','), row('egari').join(',')].join('\n') + '\n';
+  r.setHeader('content-type', 'text/csv; charset=utf-8');
+  r.setHeader('content-disposition', `attachment; filename="trips-${grain}.csv"`);
+  r.setHeader('x-export-rows', '2');
+  r.send(body);
+});
+
 /* {rows, shown, history} — the endpoint returns the CURRENT target per platform
    and type, not a page of history. The mock returned a bare array, which is the
    shape the browser smoke test would then be validating against something the

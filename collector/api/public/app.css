@@ -404,6 +404,25 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .btn.primary:hover{filter:brightness(1.07)}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
+/* ── the download line ────────────────────────────────────────────────────
+   Deliberately quiet. An export is a thing you go looking for, not a thing
+   that should compete with the chart above it — so it reads as a caption with
+   two links in it rather than as a pair of buttons. The trailing note says
+   what the file is and whose calendar its days are on, because a CSV opened
+   next March cannot ask. */
+.getout{
+  display:flex;gap:8px;flex-wrap:wrap;align-items:baseline;
+  margin-top:12px;padding-top:10px;border-top:1px solid var(--rule);
+  font-size:12.5px;color:var(--ink-3);
+}
+.getout-lab{color:var(--ink-3);letter-spacing:.02em}
+.getout-a{color:var(--accent);text-decoration:none;border-bottom:1px solid transparent}
+.getout-a:hover{border-bottom-color:var(--accent)}
+.getout-a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+.getout-sep{color:var(--rule-strong)}
+.getout-no{color:var(--ink-3);font-style:italic;max-width:60ch}
+.getout-tz{margin-left:auto;color:var(--ink-3);font-size:11px;letter-spacing:.02em}
+
 /* ── charts ────────────────────────────────────────────────────────────── */
 /* Charts only — never Leaflet. A blanket `svg{width:100%;height:auto}` collapses
    Leaflet's overlay pane to zero height (polylines stay in the DOM but render

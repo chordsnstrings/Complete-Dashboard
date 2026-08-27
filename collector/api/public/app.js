@@ -5,7 +5,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
-  sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence} from './ui.js';
+  sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow} from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
@@ -726,6 +726,10 @@ V.demand = async (root) => {
         + `<span class="dim"> ${fmt(r.trips)}</span>`).join(' · ');
     daily.body.append(jump);
   }
+  /* The way out of the page. Placed on the daily series because that IS the
+     export's day grain — the same window, the same chips, the same Dubai
+     days — so what downloads is the chart above it, in a spreadsheet. */
+  daily.body.append(exportRow(bookings));
 
   /* Join the day's trips to that day's weather and calendar. Both sides are
      keyed on the calendar date, so a missing weather row leaves the trip row
