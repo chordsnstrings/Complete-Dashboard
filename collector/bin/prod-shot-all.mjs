@@ -143,7 +143,7 @@ const PAGES = [
   ['Decide', 'Action list', 'insights'],
   ['Decide', 'Action list — critical only', 'insights/severity/critical'],
   ['Decide', 'Action list — safety only', 'insights/safety'],
-  ['Decide', 'One action', 'action/idle_vehicle/:vehicle'],
+  ['Decide', 'One action', 'action/:actionCode/:actionEntity'],
   ['Decide', 'Analyst', 'analyst'],
   ['Decide', 'Analyst — refuted', 'analyst/refuted'],
   ['Decide', 'Analyst — immaterial', 'analyst/immaterial'],
@@ -153,7 +153,7 @@ const PAGES = [
   ['Trust', 'Data sources', 'sources'],
   ['Trust', 'Collection gaps', 'coverage'],
   ['Trust', 'What each API offers', 'providers'],
-  ['Trust', 'Providers — one field’s values', 'providers/uber/trips/Surge%20multiplier'],
+  ['Trust', 'Providers — one field’s values', 'providers/uber/trips/:rawField'],
 
   ['Set up', 'Settings', 'settings'],
 ];
@@ -177,15 +177,29 @@ const prevDay = iso(new Date(today.getTime() - 2 * 864e5));
 const WIN = `from=${iso(new Date(today.getTime() - 30 * 864e5))}&to=${iso(today)}`;
 
 process.stdout.write('resolving live ids … ');
-const [drv, veh, prop, seg] = await Promise.all([
+const YEAR = `from=${iso(new Date(today.getTime() - 364 * 864e5))}&to=${iso(today)}`;
+const [drv, veh, prop, seg, ins, raw] = await Promise.all([
   api(`/api/drivers/directory?${WIN}`), api(`/api/vehicles/directory?${WIN}`),
   api(`/api/corporate/properties?${WIN}`), api(`/api/segments?${WIN}`),
+  api(`/api/insights?${WIN}`), api(`/api/schema/raw-fields?table=trip&platform=uber&${YEAR}`),
 ]);
 const driver = rows(drv)[0] || {};
 const vehicle = rows(veh)[0] || {};
 const segment = rows(seg)[0] || {};
 const driverId = driver.ids?.[0] || driver.driver_ext_id || 'drv-0';
 const trip = rows(await api(`/api/driver/trips?id=${encodeURIComponent(driverId)}&${WIN}`))[0] || {};
+
+/* The action page and the raw-field drill-down are ABOUT a thing too, and the
+   thing has to be one that exists. `action/idle_vehicle/<busiest vehicle>` and
+   a hand-picked field name both rendered correctly — as "that finding is no
+   longer open" and "no stored record carries this field", which are true
+   sentences and useless screenshots. So: whatever the action list is actually
+   raising, and a field with a distribution worth reading (a couple of dozen
+   values at most — a UUID column that is 100% distinct says nothing). */
+const insight = (ins?.insights ?? [])[0] || {};
+const field = (raw?.fields ?? [])
+  .filter((f) => f.distinct_values > 1 && f.distinct_values <= 50)
+  .sort((a, b) => (b.fill_pct - a.fill_pct) || (b.distinct_values - a.distinct_values))[0];
 
 const ID = {
   driver: driverId,
@@ -199,6 +213,9 @@ const ID = {
   tripId: trip.external_id || 'none',
   segPlate: segment.plate || vehicle.plate || 'L45235',
   segAt: segment.started_at || `${day}T04:00:00.000Z`,
+  actionCode: insight.code || 'idle_vehicle',
+  actionEntity: insight.entity_id || vehicle.plate || 'L45235',
+  rawField: field?.key || 'Payment type',
 };
 console.log(Object.entries(ID).map(([k, v]) => `${k}=${String(v).slice(0, 24)}`).join('  '));
 
