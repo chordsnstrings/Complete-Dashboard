@@ -19,7 +19,7 @@
 
 import { empty, fmt, barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dayStr, dateStr,
-  countOf, plural, sourceLabel, signed } from './ui.js';
+  countOf, plural, sourceLabel, signed, verdict } from './ui.js';
 import { q, href, hrefFilter, state } from './data.js';
 
 const MONTH = (m) => {
@@ -60,6 +60,40 @@ export async function renderForecast(root) {
 
   const next = d.forecast[0];
   const ip = d.in_progress;
+
+  /* Fields verified against /api/forecast on production: slope_per_month, r2,
+     typical_error, n, months_used, beats_flat, flat_baseline.
+
+     A forecast's headline is not the number — it is how much of one it is. An
+     r² of 0.86 over five months with a typical error of 866 bookings is a
+     different object from the same point estimate fitted to twelve, and a page
+     that leads with the point invites it to be read as a promise. */
+  {
+    const r2 = +d.r2 || 0;
+    const err = +d.typical_error || 0;
+    const pct = next.point ? Math.round((err / next.point) * 100) : null;
+    const weak = r2 < 0.5 || d.n < 4 || d.beats_flat === false;
+    verdict(root, {
+      claim: weak
+        ? `${MONTH(next.m)} is a guess, not a forecast`
+        : `${MONTH(next.m)} lands near ${fmt(next.point)} bookings`,
+      figure: next.low != null ? `±${fmt(Math.round((next.high - next.low) / 2))}` : fmt(next.point),
+      unit: next.low != null ? 'bookings either way' : 'bookings',
+      tone: weak ? 'warn' : null,
+      meta: `fitted to ${d.n} ${plural(d.n, 'month')}`,
+      sub: `The fit explains ${Math.round(r2 * 100)}% of the movement and is typically `
+        + `${fmt(err)} bookings out${pct != null ? `, about ${pct}% of the number above` : ''}.`
+        + (d.beats_flat === false
+          ? ' It does not beat simply assuming next month looks like last month.'
+          : '')
+        + (d.months_excluded?.length
+          ? ` ${countOf(d.months_excluded.length, 'month')} excluded as being before the last break.`
+          : ''),
+      recommend: weak
+        ? 'Read the range, not the point — and treat the rota built on it as provisional.'
+        : null,
+    });
+  }
 
   root.append(kpiRow([
     { label: `Bookings in ${MONTH(next.m)}`, value: fmt(next.point),

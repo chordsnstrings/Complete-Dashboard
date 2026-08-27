@@ -720,6 +720,7 @@ V.overview = async (root) => {
 };
 
 V.demand = async (root) => {
+  const vdHost = el('div'); root.append(vdHost);
   const g = el('div', 'grid g2'); root.append(g);
   const hourly = panel('Hourly demand curve', 'Trip requests by hour of day'); g.append(hourly.panel);
   const daily = panel('Daily volume',
@@ -758,6 +759,32 @@ V.demand = async (root) => {
      `?platform=bolt` said the same about a channel whose collector is refused
      at the door. Both are answers; neither is a missing month. */
   const bookings = d.reduce((a, r) => a + (+r.trips || 0), 0);
+  /* Fields are /api/trips/daily's: d, trips, completed, cancelled,
+     telematics_journeys, km, revenue, uncollected, sources_silent. Demand is a
+     shape question, so the headline is WHEN rather than how much — the busiest
+     hour is what a rota is built against. */
+  if (bookings) {
+    const uncollected = d.filter((x) => x.uncollected).length;
+    const peak = (h || []).length ? [...h].sort((a, b) => (+b.trips || 0) - (+a.trips || 0))[0] : null;
+    const peakPct = peak && h.length
+      ? Math.round((peak.trips / h.reduce((a, x) => a + (+x.trips || 0), 0)) * 100) : 0;
+    const perDay = Math.round(bookings / Math.max(1, d.length - uncollected));
+    verdict(vdHost, {
+      claim: uncollected
+        ? `${uncollected} of these ${d.length} days were never collected`
+        : peak
+          ? `The busiest hour is ${String(peak.h).padStart(2, '0')}:00 — ${peakPct}% of the day's work`
+          : `${fmt(bookings)} bookings over ${d.length} days`,
+      figure: fmt(perDay),
+      unit: 'bookings a day',
+      tone: uncollected ? 'bad' : null,
+      meta: uncollected ? `over the ${d.length - uncollected} days collected` : `over ${d.length} days`,
+      sub: uncollected
+        ? 'The hourly curve and the heatmap below are over the days that WERE collected — a missing '
+          + 'day is drawn hatched rather than as zero.'
+        : 'The heatmap below splits this by weekday, which is what a rota is actually built against.',
+    });
+  }
   if (state.platform && !bookings) {
     const why = state.platform === 'fms'
       ? 'FMS is a telematics feed: it reports where the cars went, not what anybody booked. '

@@ -8,7 +8,7 @@
 
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
-  countOf, plural, sourceLabel, signed } from './ui.js';
+  countOf, plural, sourceLabel, signed, verdict } from './ui.js';
 import { q, href } from './data.js';
 
 /* "Aug 25" is how every other page in this product writes a DATE — the 25th of
@@ -95,6 +95,44 @@ export async function renderRetention(root) {
 
   const flowLast = d.flow[d.flow.length - 1] || {};
   const t = d.tenure || {};
+
+  /* Fields read off /api/retention on production before the sentence was
+     written: flow carries {m, active, joined, returning, left, net} per month
+     and last_complete_month names the last one that is whole.
+
+     A headcount cannot tell "people are leaving" from "nobody is arriving",
+     and those need opposite responses. That distinction is the page. */
+  {
+    const f = flowLast;
+    const net = f.net == null ? null : +f.net;
+    const joined = (+f.joined || 0) + (+f.returning || 0);
+    const left = +f.left || 0;
+    let claim, figure, unit, tone = null, recommend = null;
+    if (net != null && net < 0) {
+      tone = 'bad';
+      claim = left > joined * 2
+        ? `The roster shrank because people left — ${countOf(left, 'leaver')} against ${fmt(joined)} joining`
+        : `The roster shrank because hiring stalled — ${fmt(joined)} joined against ${countOf(left, 'leaver')}`;
+      figure = signed(net); unit = 'net drivers';
+      recommend = left > joined * 2
+        ? 'Retention, not recruitment. The cohorts below show how long people last before they go.'
+        : 'Recruitment, not retention. Leavers are normal at this rate; arrivals are not replacing them.';
+    } else if (net != null) {
+      claim = `${fmt(f.active)} drivers active — ${signed(net)} on the month before`;
+      figure = signed(net); unit = 'net drivers';
+    } else {
+      claim = `${fmt(f.active)} drivers active`;
+      figure = fmt(f.active); unit = 'active';
+    }
+    verdict(root, {
+      claim, figure, unit, tone, recommend,
+      meta: d.last_complete_month ? `to ${d.last_complete_month}` : null,
+      sub: `${fmt(joined)} arrived and ${fmt(left)} stopped in ${f.m}.`
+        + (d.current_month_excluded
+          ? ' The month in progress is left out — a partial month always looks like a collapse.'
+          : ''),
+    });
+  }
   const real = d.cohorts.filter((c) => !c.is_left_censored);
   const recruited = real.reduce((a, c) => a + c.size, 0);
   const kept = real.reduce((a, c) => a + c.still_active, 0);
