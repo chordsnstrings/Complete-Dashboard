@@ -32,7 +32,7 @@
    run of dashes. */
 import { empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, fmt, pct,
-  countOf, plural } from './ui.js';
+  countOf, plural, verdict } from './ui.js';
 import { api, state, href } from './data.js';
 
 /* Why a money column can be empty for a whole year of months.
@@ -171,6 +171,29 @@ export async function renderReconcile(root, month) {
   const coverage = (n) => (periods && n < periods
     ? `over the ${countOf(n, unit)} of ${fmt(periods)} that ${plural(n, 'carries', 'carry')} one`
     : over);
+  /* Reconciliation compares what the platforms WIRED against what their own
+     statements say they owed — and the honest headline is how many of the
+     periods can be compared at all. Expected payout needs a collected payout
+     breakdown and exists for one month of thirteen; bank payout needs only a
+     statement and exists for seven. A page that leads with a variance computed
+     over the overlap invites it to be read as the whole year's. */
+  {
+    const both = d.rows.filter((r) => r.expected_payout != null && r.bank_payout != null);
+    const gap = both.reduce((a, r) => a + ((+r.bank_payout || 0) - (+r.expected_payout || 0)), 0);
+    verdict(host, {
+      claim: both.length
+        ? `${countOf(both.length, unit)} of ${fmt(periods)} can be reconciled at all`
+        : `Nothing in this range can be reconciled`,
+      figure: both.length ? money(gap) : `0 of ${fmt(periods)}`,
+      unit: both.length ? (gap >= 0 ? 'more wired than owed' : 'less wired than owed') : 'comparable',
+      tone: both.length ? (Math.abs(gap) > 1000 ? 'warn' : null) : 'warn',
+      meta: `${fmt(periods)} ${plural(periods, unit)} on record`,
+      sub: `${fmt(withExpected)} ${plural(withExpected, unit)} carry an expected payout and `
+        + `${fmt(withBank)} carry a bank payout — the two are collected from different surfaces `
+        + 'and only where both exist is there anything to compare.',
+    });
+  }
+
   host.append(kpiRow([
     { label: 'Trips', value: t.trips != null ? fmt(t.trips) : '—',
       sub: `bookings ${over}` },

@@ -36,7 +36,7 @@
       carrying someone, measured from the trips, and it is labelled that. */
 import { hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
-  fmt, empty, noneChosen, sourceLabel, dateStr } from './ui.js';
+  fmt, empty, noneChosen, sourceLabel, dateStr, verdict, countOf } from './ui.js';
 import { q, href, state } from './data.js';
 
 /* Enough of a week to rank on. Two thirds of a working week: below it a
@@ -88,6 +88,35 @@ export async function renderPerformers(root, band) {
   const ranked = rows.filter(eligible).filter((r) => rate(r) != null);
   ranked.sort((a, b) => (top ? rate(b) - rate(a) : rate(a) - rate(b)));
   const rest = rows.filter((r) => !eligible(r) || rate(r) == null);
+
+  /* A ranking page's honest headline is the SPREAD, not the winner: "who did
+     best" is the list itself, and the question an operator has is whether the
+     gap between the ends is worth acting on. Stated with how many people are
+     not ranked at all, because a leaderboard over a third of the roster is a
+     different object from one over all of it. */
+  {
+    const best = ranked[0], worst = ranked[ranked.length - 1];
+    const bR = best ? rate(best) : null;
+    const wR = worst ? rate(worst) : null;
+    const spread = bR != null && wR != null && wR ? Math.round((Math.abs(bR - wR) / Math.abs(wR)) * 100) : null;
+    const led = top ? best : worst;
+    verdict(head, {
+      claim: led
+        ? `${led.driver_name || 'Somebody'} ${top ? 'earned most' : 'earned least'} per day worked`
+        : 'Nobody worked enough of this week to rank',
+      figure: led ? money(rate(led)) : '—',
+      unit: 'per day worked',
+      tone: null,
+      meta: `${fmt(ranked.length)} ranked`,
+      sub: (spread != null
+        ? `The two ends of the ranking are ${spread}% apart. `
+        : '')
+        + (rest.length
+          ? `${countOf(rest.length, 'person', 'people')} are not ranked at all — too little of the `
+            + 'week to carry a rate, and a rate over one day is not a rate.'
+          : 'Everybody who worked is ranked.'),
+    });
+  }
 
   const t = d.totals || {};
   kh.replaceWith(kpiRow([

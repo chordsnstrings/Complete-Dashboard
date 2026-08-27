@@ -45,6 +45,38 @@ async function settleMix(host) {
   const cash = s.classes.find((c) => c.settlement_class === 'cash');
   const owed = s.classes.filter((c) => ['on_account', 'salary'].includes(c.settlement_class));
   const clean = s.classes.filter((c) => ['card', 'wallet'].includes(c.settlement_class));
+
+  /* Fields read off /api/settlement/mix on production: total_trips,
+     unlabelled_trips, unlabelled_platforms, and classes[] with
+     settlement_class, trips, revenue.
+
+     A settlement route decides whether the fleet already HAS the money. Card
+     and wallet are done at the ride; cash is in somebody's hand; on-account
+     and salary are owed. The bookings that record no route at all are the ones
+     this page cannot say anything about, and they were a subtitle. */
+  {
+    const atRide = clean.reduce((a, c) => a + c.trips, 0);
+    const later = owed.reduce((a, c) => a + c.trips, 0);
+    const inHand = cash ? cash.trips : 0;
+    const blind = +s.unlabelled_trips || 0;
+    const outstanding = inHand + later;
+    verdict(host, {
+      claim: outstanding
+        ? `${Math.round((outstanding / total) * 100)}% of bookings are not settled at the ride`
+        : 'Every booking settles at the ride',
+      figure: fmt(outstanding), unit: 'still to collect',
+      tone: total && outstanding / total >= 0.3 ? 'warn' : null,
+      meta: `${fmt(total)} with a route`,
+      sub: `${fmt(atRide)} settled by card or wallet, ${fmt(inHand)} in cash and ${fmt(later)} on `
+        + 'account or against salary.'
+        + (blind
+          ? ` A further ${fmt(blind)} record no route at all${s.unlabelled_platforms?.length
+            ? ` (${s.unlabelled_platforms.map(sourceLabel).join(', ')})` : ''} — this page can say `
+            + 'nothing about those.'
+          : ''),
+    });
+  }
+
   host.append(kpiRow([
     { label: 'Bookings with a settlement route', value: fmt(total),
       sub: s.unlabelled_trips ? `${fmt(s.unlabelled_trips)} record none` : 'all of them' },
