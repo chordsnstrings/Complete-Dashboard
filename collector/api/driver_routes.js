@@ -872,6 +872,59 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     });
   }));
 
+  /* ── the KEPT per-day record ──────────────────────────────────────────
+     driver_day (sql/schema_v38.sql) rather than a fold over raw. The point of
+     the table is that it answers ranges the providers no longer serve: Uber
+     gives 31 days of availability and about 192 of earnings, and this row
+     survives both. It is also the only place idle-online exists as a stored
+     fact rather than as a subtraction done at read time.
+
+     Summed across a person's ACCOUNTS. The table is keyed on one driver id and
+     a person can hold several; resolve() returns the match set, and a day this
+     person worked on two accounts is one day of theirs. */
+  app.get('/api/driver/days', withDriver(async (req, res, d, p) => {
+    const rows = await q(
+      `SELECT to_char(day, 'YYYY-MM-DD') AS day,
+              min(fleet_id) AS fleet_id,
+              sum(trips)::int AS trips,
+              sum(completed)::int AS completed,
+              sum(cancelled)::int AS cancelled,
+              round(sum(km)::numeric, 1) AS km,
+              round(sum(fares)::numeric, 2) AS fares,
+              min(first_min)::int AS first_min,
+              max(last_min)::int AS last_min,
+              sum(on_job_min)::int AS on_job_min,
+              sum(wait_min)::int AS wait_min,
+              max(longest_wait_min)::int AS longest_wait_min,
+              /* NULL where no account has availability for the day, which is
+                 not the same as zero — sum() over all-NULL is NULL, which is
+                 the behaviour wanted here and the reason this is not a
+                 coalesce. */
+              sum(online_min)::int AS online_min,
+              sum(idle_online_min)::int AS idle_online_min,
+              max(computed_at) AS computed_at
+         FROM driver_day
+        WHERE driver_ext_id = ANY($3)
+          AND day BETWEEN $1::date AND $2::date
+        GROUP BY day
+        ORDER BY day`, p);
+    const covered = rows.filter((r) => r.online_min != null);
+    res.json({
+      days: rows,
+      basis: 'One row per day, written after every collection and kept. Uber serves 31 days of '
+        + 'availability and about 192 of earnings; these rows outlive both.',
+      online_days: covered.length,
+      totals: {
+        days: rows.length,
+        trips: rows.reduce((a, r) => a + (+r.trips || 0), 0),
+        on_job_min: rows.reduce((a, r) => a + (+r.on_job_min || 0), 0),
+        wait_min: rows.reduce((a, r) => a + (+r.wait_min || 0), 0),
+        online_min: covered.reduce((a, r) => a + (+r.online_min || 0), 0),
+        idle_online_min: covered.reduce((a, r) => a + (+r.idle_online_min || 0), 0),
+      },
+    });
+  }));
+
   /* ── one driver, one day, minute by minute ────────────────────────────
      "How the day was spent" answers the shape of a month. This answers a day:
      every job at its real time with where it went, and — the part that was

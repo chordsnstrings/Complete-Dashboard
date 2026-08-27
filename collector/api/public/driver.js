@@ -581,11 +581,30 @@ async function tabActivity(root, id) {
      "everything about this person" while a filter silently hides half their
      work is a lie, and on this panel it would erase whole jobs from the middle
      of a shift and redraw them as waiting. */
-  const [daily, custody, shift] = await Promise.all([
+  const [daily, custody, shift, kept] = await Promise.all([
     qAll('/api/driver/daily', { id }), qAll('/api/driver/custody', { id }),
-    qAll('/api/driver/shift', { id })]);
+    qAll('/api/driver/shift', { id }),
+    /* The KEPT record. /api/driver/shift derives from raw and is what the bars
+       are drawn from; this is driver_day, written after every collection and
+       outliving the providers' own retention. They should agree for any window
+       both can answer, and only one of them can answer a window older than
+       Uber's 31 days of availability. */
+    qAll('/api/driver/days', { id }).catch(() => null)]);
 
   shiftBars(sh.body, shift.days, shift, id);
+  /* Stated under the bars: what is kept, and how far back it goes. A reader
+     looking at a chart that is bare on the left should not have to infer
+     whether that is a quiet month or a provider that forgets. */
+  if (kept?.totals?.days) {
+    const t = kept.totals;
+    sh.body.append(el('p', 'cap', esc(
+      `${fmt(t.days)} of these days are also held as a stored record — `
+      + `${fmt(Math.round(t.on_job_min / 60))} h on job and ${fmt(Math.round(t.wait_min / 60))} h waiting, `
+      + `written after each collection rather than recomputed. `
+      + (kept.online_days
+        ? `${fmt(kept.online_days)} of them carry availability, which Uber itself only serves for 31 days.`
+        : 'None of them carry availability yet.'))));
+  }
 
   const withHours = daily.filter((d) => d.hours_online != null);
   hrs.body.innerHTML = '';

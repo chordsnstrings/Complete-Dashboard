@@ -1322,6 +1322,42 @@ const EXPORT_COLS = {
    joins three feeds on one clock and each of them can legitimately be empty —
    a day with no availability collected, a gap the tracker did not cover. The
    fixture carries all three so the smoke test compares a full shape. */
+/* The KEPT per-day record. Distinct from /api/driver/day, which is one day in
+   detail — this is the stored row per day, which is what answers a window the
+   provider no longer serves. online_min is deliberately NULL on one of them:
+   a day nobody collected availability for is not a day the driver was offline,
+   and the renderer has to keep being able to tell those apart. */
+app.get('/api/driver/days', (req, r) => {
+  const days = Array.from({ length: 6 }, (_, i) => {
+    const day = dayISO(6 - i).slice(0, 10);
+    const known = i > 1;
+    const onJob = 120 + i * 7;
+    return {
+      day, fleet_id: 'ecosine', trips: 8 + i, completed: 7 + i, cancelled: 1,
+      km: 96.4 + i, fares: null,
+      first_min: 8 * 60 + 30, last_min: 21 * 60 + 10,
+      on_job_min: onJob, wait_min: 430 - i * 5, longest_wait_min: 96,
+      online_min: known ? 690 : null,
+      idle_online_min: known ? 690 - onJob : null,
+      computed_at: new Date(Date.now() - 3600e3).toISOString(),
+    };
+  });
+  const covered = days.filter((d) => d.online_min != null);
+  r.json({
+    days,
+    basis: 'One row per day, written after every collection and kept.',
+    online_days: covered.length,
+    totals: {
+      days: days.length,
+      trips: days.reduce((a, d) => a + d.trips, 0),
+      on_job_min: days.reduce((a, d) => a + d.on_job_min, 0),
+      wait_min: days.reduce((a, d) => a + d.wait_min, 0),
+      online_min: covered.reduce((a, d) => a + d.online_min, 0),
+      idle_online_min: covered.reduce((a, d) => a + d.idle_online_min, 0),
+    },
+  });
+});
+
 app.get('/api/driver/day', (req, r) => {
   const day = String(req.query.day || dayISO(1)).slice(0, 10);
   const mins = (h, m) => h * 60 + m;
