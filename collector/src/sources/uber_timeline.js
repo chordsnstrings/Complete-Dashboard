@@ -141,9 +141,25 @@ export function toRows(o, driverUuid, events) {
 async function driverIdsFor(fleet, from, to, { roster = false } = {}) {
   const { rows } = roster
     ? await pool.query(
-      `SELECT DISTINCT driver_ext_id FROM driver_platform_state
-        WHERE platform = 'uber' AND fleet_id = $1
-          AND coalesce(btrim(driver_ext_id), '') <> ''`, [fleet])
+      /* UNION, because one of these two is empty for one of the fleets.
+         ─────────────────────────────────────────────────────────────────
+         driver_platform_state is written by the OAuth REST roster pull, and
+         that surface 403s for Egari — the API client is registered under the
+         Ecosine org and no org id changes that. So the first roster sweep
+         reported "ecosine 113 drivers, 79,674 rows / egari 0 drivers, 0 rows"
+         and looked like a fleet that does not exist rather than a credential
+         that cannot see it.
+
+         Every driver who has ever taken an Uber trip for this fleet is the
+         other half, and it needs no REST call at all. The union is the roster
+         until that client is fixed, and remains correct after. */
+      `SELECT DISTINCT driver_ext_id FROM (
+         SELECT driver_ext_id FROM driver_platform_state
+          WHERE platform = 'uber' AND fleet_id = $1
+         UNION
+         SELECT driver_ext_id FROM trip
+          WHERE platform = 'uber' AND fleet_id = $1
+       ) s WHERE coalesce(btrim(driver_ext_id), '') <> ''`, [fleet])
     : await pool.query(
       `SELECT DISTINCT driver_ext_id FROM trip
         WHERE platform = 'uber' AND fleet_id = $1
