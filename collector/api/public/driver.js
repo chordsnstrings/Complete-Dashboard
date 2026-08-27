@@ -176,7 +176,8 @@ function shiftBars(host, days, meta = {}) {
   const wrap = el('div', 'shifts');
   const hd = el('div', 'shift sh-head');
   hd.innerHTML = '<div class="sh-d"></div><div></div><div class="sh-v">first–last</div>'
-    + '<div class="sh-j">on job</div><div class="sh-w">waiting</div><div class="sh-t">jobs</div>';
+    + '<div class="sh-j">on job</div><div class="sh-o">online</div>'
+    + '<div class="sh-w">waiting</div><div class="sh-t">jobs</div>';
   wrap.append(hd);
   rows.forEach((d, i) => {
     const pctOf = (m) => (m / 1440) * 100;
@@ -201,25 +202,55 @@ function shiftBars(host, days, meta = {}) {
     const span = `<i class="w" style="left:${pctOf(d.first_min)}%;`
       + `width:${pctOf(Math.max(4, (d.last_min ?? d.first_min) - d.first_min))}%"></i>`;
 
+    /* ONLINE, drawn between the span and the jobs.
+       ─────────────────────────────────────────────────────────────────────
+       The waiting band was 81% of this panel and could not tell a driver
+       sitting at a rank with the app on from one who logged off and went home.
+       One is supply the fleet is paying for and failing to sell.
+
+       Layered the same way waiting already works: what a job does not cover of
+       the online band IS the idle-online time, so it needs no arithmetic and
+       cannot disagree with the bars above it. It is deliberately NOT clamped
+       to first–last: a driver online for two hours before their first job is
+       exactly the case worth seeing, and clipping it to the job span would
+       hide the only evidence of it. */
+    const onlineSegs = (d.online || []).map((o) =>
+      `<i class="o" style="left:${pctOf(o.s)}%;width:${pctOf(Math.max(2, o.e - o.s))}%" `
+      + `title="online ${esc(hhmm(o.s))}–${esc(hhmm(o.e))}"></i>`).join('');
+    const onlineMin = (d.online || []).reduce((a, o) => a + (o.e - o.s), 0);
+    /* Idle-online is the online time NOT on a job, and it is the number this
+       panel exists to produce. Floored at zero: the two series come from
+       different providers' clocks and a job can overhang its own online span
+       by a few seconds, which must not render as negative idle time. */
+    const idleMin = d.online ? Math.max(0, onlineMin - (d.on_job_min || 0)) : null;
+
     const share = d.span_min ? Math.round((d.wait_min / d.span_min) * 100) : null;
     const r = el('div', 'shift');
     r.innerHTML = `<div class="sh-d">${dayStr(d.day)}</div>
-      <div class="sh-track">${span}${segs}</div>
+      <div class="sh-track">${span}${onlineSegs}${segs}</div>
       <div class="sh-v num">${hhmm(d.first_min)}–${d.last_min != null ? hhmm(d.last_min) : '—'}</div>
       <div class="sh-j num">${d.on_job_min ? `${fmt(d.on_job_min / 60, 1)}h` : '<span class="dim">—</span>'}</div>
+      <div class="sh-o num">${d.online ? `${fmt(onlineMin / 60, 1)}h` : '<span class="dim">—</span>'}</div>
       <div class="sh-w num">${d.wait_min ? `${fmt(d.wait_min / 60, 1)}h${
         share != null ? ` <span class="dim">${share}%</span>` : ''}` : '<span class="dim">—</span>'}</div>
       <div class="sh-t num">${d.bookings}</div>`;
     r.title = `${dayStr(d.day)} · ${d.bookings} bookings · on job ${fmt(d.on_job_min / 60, 1)} h`
       + ` · waiting ${fmt(d.wait_min / 60, 1)} h`
+      + (d.online ? ` · online ${fmt(onlineMin / 60, 1)} h, of which ${fmt(idleMin / 60, 1)} h `
+        + 'available and not dispatched' : '')
       + (d.overlaps ? ` · ${d.overlaps} overlapping` : '')
       + (d.unknown_end ? ` · ${d.unknown_end} with no dropoff` : '');
     wrap.append(r);
   });
 
+  const anyOnline = rows.some((d) => d.online);
   host.append(legend([
     ['j', 'on job — request to dropoff'],
-    ['w', 'waiting between jobs'],
+    /* Only when there is some. A legend entry for a band that is nowhere on
+       the chart is an instruction to go looking for something that is not
+       there. */
+    ...(anyOnline ? [['o', 'online, waiting for a job']] : []),
+    ['w', anyOnline ? 'not online' : 'waiting between jobs'],
     ['u', 'no dropoff reported'],
   ]));
   host.append(wrap);
@@ -232,6 +263,28 @@ function shiftBars(host, days, meta = {}) {
     + `waiting between jobs — ${span ? Math.round((waited / span) * 100) : 0}% of the time between `
     + 'the first request and the last dropoff. '
     + (meta.basis || ''))));
+
+  /* The split, over the days that HAVE availability — not over all of them.
+     ─────────────────────────────────────────────────────────────────────────
+     Uber serves 31 days of this and nothing older, so on a 28-day chart some
+     days will have a band and some will not for a long time yet. Averaging the
+     covered days' online hours across the uncovered ones would report a fleet
+     that is offline far more than it is, which is the same class of lie as the
+     coverage table that once called fifteen dead trackers "840 missing days". */
+  const covered = rows.filter((d) => d.online);
+  if (covered.length) {
+    const onlineMin = covered.reduce((a, d) =>
+      a + d.online.reduce((x, o) => x + (o.e - o.s), 0), 0);
+    const jobMin = covered.reduce((a, d) => a + (d.on_job_min || 0), 0);
+    const idle = Math.max(0, onlineMin - jobMin);
+    host.append(el('p', 'cap', esc(
+      `Availability is collected for ${covered.length} of these ${rows.length} days. Over those: `
+      + `${fmt(onlineMin / 60, 1)} h online, of which ${fmt(idle / 60, 1)} h `
+      + `(${onlineMin ? Math.round((idle / onlineMin) * 100) : 0}%) was spent available and not `
+      + 'dispatched — supply the fleet was carrying and not selling. The rest of the waiting was '
+      + 'time the driver was not online at all.')));
+  }
+  if (meta.online_basis) host.append(el('p', 'cap', esc(meta.online_basis)));
   if (meta.unknown_end) {
     host.append(el('p', 'cap', esc(
       `${meta.unknown_end} booking${meta.unknown_end === 1 ? '' : 's'} in this window carry no `

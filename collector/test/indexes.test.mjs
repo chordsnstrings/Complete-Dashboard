@@ -67,7 +67,11 @@ const known = new Set(DUBAI_DAY.map(([, c]) => c));
 /* Columns that belong to views (which cannot be indexed) or to derived CTEs
    are not tables and have no index of their own; they are named here so the
    check below stays about real base tables. */
-const DERIVED = new Set(['local_day', 'day']);
+/* span_start/span_end are the ONLINE spans built in /api/driver/shift by a
+   window function over driver_timeline_event — values inside a CTE, not
+   columns of anything. The base-table filter in that query is a plain range on
+   `at`, which sql/schema_v37.sql indexes. */
+const DERIVED = new Set(['local_day', 'day', 'span_start', 'span_end']);
 const unlisted = [...used].filter((c) => !known.has(c) && !DERIVED.has(c));
 check('no column is filtered this way without being on the list',
   unlisted.length === 0, `${unlisted.join(', ')} — add it above with its table, or its filter scans`);

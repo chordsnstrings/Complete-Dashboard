@@ -783,6 +783,72 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         span_min: first == null || last == null ? null : Math.max(0, last - first) };
     }).sort((x, y) => (x.day < y.day ? -1 : 1));
 
+    /* ── was the gap ONLINE or OFF? ──────────────────────────────────────
+       The waiting band is 81% of this panel and said nothing: a driver sitting
+       at a rank with the app on and a driver who logged off and went home drew
+       the same colour. One is supply the fleet is paying for and failing to
+       sell; the other is somebody's evening.
+
+       Spans are derived here rather than stored, because the collector records
+       transitions (sql/schema_v37.sql) — a span is a pair of them, and storing
+       pairs means deciding at write time what a dangling ONLINE means and
+       re-deciding it when its OFFLINE arrives on the next run.
+
+       Clamped to the Dubai day, and a span crossing midnight is emitted on
+       both days it touches: an evening shift is one span in the data and two
+       bars on the chart. */
+    const online = await q(
+      `WITH ev AS (
+         /* PARTITIONED by account. A person can hold two Uber accounts
+            (resolve() above returns the match set, not one id), and one
+            ordering across both interleaves their transitions into spans that
+            belong to neither — an ONLINE on account A closed by an OFFLINE on
+            account B. */
+         SELECT at, status,
+                lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
+           FROM driver_timeline_event
+          WHERE driver_ext_id = ANY($3) AND kind = 'status' AND status <> ''
+            AND at >= $1::timestamptz AND at <= $2::timestamptz),
+       /* span_start/span_end, not s/e. These are CTE values, and
+          test/indexes.test.mjs reads every Dubai-day cast in api/ as a column
+          that needs an index — rightly, since an unindexed one scans the
+          table. A one-letter alias is indistinguishable from a real column to
+          that check and to a reader; a named one says what it is and can be
+          declared derived without the exemption swallowing some future column
+          called s. */
+       spans AS (
+         SELECT status, at AS span_start, next_at AS span_end FROM ev
+          WHERE next_at IS NOT NULL AND status = 'ONLINE'),
+       days AS (
+         SELECT generate_series((span_start AT TIME ZONE 'Asia/Dubai')::date,
+                                (span_end AT TIME ZONE 'Asia/Dubai')::date,
+                                interval '1 day')::date AS d, span_start, span_end
+           FROM spans)
+       SELECT to_char(d, 'YYYY-MM-DD') AS day,
+              greatest(0, extract(epoch FROM (
+                greatest(span_start AT TIME ZONE 'Asia/Dubai', d::timestamp)
+                - d::timestamp))/60)::int AS s,
+              least(1440, extract(epoch FROM (
+                least(span_end AT TIME ZONE 'Asia/Dubai', d::timestamp + interval '1 day')
+                - d::timestamp))/60)::int AS e
+         FROM days
+        ORDER BY 1, 2`, p);          // same $1..$3 order as TW, deliberately
+
+    const onlineByDay = new Map();
+    for (const r of online) {
+      if (r.e <= r.s) continue;                 // a span that ends where it starts
+      if (!onlineByDay.has(r.day)) onlineByDay.set(r.day, []);
+      onlineByDay.get(r.day).push({ s: r.s, e: r.e });
+    }
+    /* Attached to the day rows the chart already draws, and only where the day
+       HAS availability: a day with none must render as it always did rather
+       than as a day the driver was offline for, which is a different claim and
+       one the absence of data cannot support. */
+    for (const day of out) day.online = onlineByDay.get(day.day) || null;
+    /* Days the collector has covered at all, so the caption can say "no data
+       yet" instead of the chart implying everyone was logged out. */
+    const covered = out.filter((x) => x.online).length;
+
     res.json({
       days: out,
       /* Stated once, by the API, so every renderer says the same thing rather
@@ -791,6 +857,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         + 'rider and the wait for them as well as the ride itself. Uber\'s export carries two '
         + 'timestamps and no pickup time, and the hotel channel the same, so the ride cannot '
         + 'be separated from the approach on any booking channel.',
+      /* Uber serves 31 days of availability and nothing older, so this fills in
+         from the day the collector started and can never be backfilled past
+         it. Said here rather than left for a reader to infer from a chart that
+         is bare on the left. */
+      online_basis: covered
+        ? 'The lighter band is time the driver was ONLINE on Uber between jobs — available and '
+          + 'not dispatched. Where a day has no band, availability was not collected for it: '
+          + 'Uber serves only the last 31 days, so this fills in going forward.'
+        : 'Uber availability has not been collected for this driver yet. It arrives on a '
+          + 'three-hourly pull and covers at most the last 31 days.',
+      online_days: covered,
       unknown_end: out.reduce((a, x) => a + x.unknown_end, 0),
     });
   }));
