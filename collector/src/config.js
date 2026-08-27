@@ -54,18 +54,45 @@ export const config = {
        run for it never starts), so a half-pasted credential cannot produce a
        half-collected fleet. The unsuffixed keys stay Ecosine's: they predate
        the second fleet and every probe reads them. */
+    /* TWO LOGINS, and they are two different KINDS of login.
+       ─────────────────────────────────────────────────────────────────────
+       The supplier session (webCookie) is a browser login, and each org has
+       always had its own — that is why trips and the GraphQL earnings work
+       for both fleets today.
+
+       The OAuth client is not a login at all: it is a registered application,
+       and an application is registered UNDER one org. One client pair was
+       shared by both fleets here, and Uber answers 403 for every Egari call
+       through it — `/v1/vehicle-suppliers/orgs` on that client returns exactly
+       one org, ECOSINE TRANSPORTS, so no org id makes it work. That is not a
+       credential that expired; it is a client that was never scoped to the
+       second business.
+
+       So the client is per-fleet too, falling back to the shared pair when a
+       fleet has none of its own — which is exactly today's behaviour, and
+       stays exactly today's behaviour until an Egari-scoped client exists. */
+    const oauthFor = (suffix) => ({
+      clientId: get(`UBER_CLIENT_ID${suffix}`) || get('UBER_CLIENT_ID'),
+      clientSecret: get(`UBER_CLIENT_SECRET${suffix}`) || get('UBER_CLIENT_SECRET'),
+      /* Whether this fleet has a client of its OWN, which is what decides
+         whether a 403 means "re-register" or "wrong org id". The banner says
+         different things for the two and cannot tell them apart otherwise. */
+      own: Boolean(get(`UBER_CLIENT_ID${suffix}`) && get(`UBER_CLIENT_SECRET${suffix}`)),
+      idKey: get(`UBER_CLIENT_ID${suffix}`) ? `UBER_CLIENT_ID${suffix}` : 'UBER_CLIENT_ID',
+      secretKey: get(`UBER_CLIENT_SECRET${suffix}`) ? `UBER_CLIENT_SECRET${suffix}` : 'UBER_CLIENT_SECRET',
+    });
     const orgs = [
       { fleet: 'ecosine', orgUuid: get('UBER_ORG_UUID'), org: get('UBER_ORG_ENCRYPTED'),
-        webCookie: get('UBER_WEB_COOKIE') },
+        webCookie: get('UBER_WEB_COOKIE'), oauth: oauthFor('') },
       { fleet: 'egari', orgUuid: get('UBER_ORG_UUID_EGARI'), org: get('UBER_ORG_ENCRYPTED_EGARI'),
-        webCookie: get('UBER_WEB_COOKIE_EGARI') },
+        webCookie: get('UBER_WEB_COOKIE_EGARI'), oauth: oauthFor('_EGARI') },
     ].filter((o) => o.orgUuid && o.webCookie);
     return {
       orgs,
       org: get('UBER_ORG_ENCRYPTED'),
       orgUuid: get('UBER_ORG_UUID'),
       oauth: {
-        tokenUrl: 'https://login.uber.com/oauth/v2/token',
+        tokenUrl: get('UBER_TOKEN_URL', D.UBER_TOKEN_URL),
         clientId: get('UBER_CLIENT_ID'),
         clientSecret: get('UBER_CLIENT_SECRET'),
         scope: 'solutions.suppliers.metrics.read solutions.suppliers.drivers.status.read supplier.partner.payments vehicle_suppliers.organizations.read vehicle_suppliers.vehicles.read solutions.suppliers.reports',

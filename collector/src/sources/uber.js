@@ -601,7 +601,7 @@ export function uberOrgs(fleet = null) {
 }
 
 async function pullLiveOrg(o) {
-  const token = await uberOAuthToken();
+  const token = await uberOAuthToken(o);
   /* Paged. This asked once, with no limit and no cursor, and took whatever came
      back — which is the API's default page of 50. The fleet has 152 Uber
      drivers, so driver_platform_state held a third of the roster and every

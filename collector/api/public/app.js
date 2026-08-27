@@ -3453,7 +3453,15 @@ V.settings = async (root) => {
      collector had a working one. A credential held by the process that uses it
      is not missing. */
   const sourceTag = (d) => {
-    if (d.configured) return `<span class="tag ${d.source === 'settings' ? 'ok' : 'dim'}">${esc(d.source)}</span>`;
+    /* `configured` now means "some component holds this", which is the honest
+       thing for an API field to mean — the row used to say configured:false
+       directly above a seen_by naming the collector that held it. But the
+       useful sentence on THIS page is which component, so 'elsewhere' falls
+       through to the branch below that names it rather than rendering the word
+       "elsewhere" in a dim tag, which says less than what was here before. */
+    if (d.configured && d.source !== 'elsewhere') {
+      return `<span class="tag ${d.source === 'settings' ? 'ok' : 'dim'}">${esc(d.source)}</span>`;
+    }
     const others = d.seen_by || [];
     if (others.length) {
       const where = others.map((o) => o.component).join(', ');

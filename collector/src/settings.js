@@ -48,6 +48,14 @@ export const SETTING_DEFAULTS = {
   CABMAN_ECOSINE_ID: '81',
   CABMAN_ECOSINE_USER: 'admin_ecosine',
   CABMAN_CRON: '*/5 * * * *',
+  /* Uber runs two OAuth environments and an application belongs to ONE of
+     them. A Test-environment client answers `unauthorized_client — the current
+     application environment is mismatched with the OAuth server runtime` on
+     the production endpoint while being perfectly valid on the sandbox one,
+     which is a sentence nobody decodes on the first read. Overridable so a
+     Test application can be pointed at the environment it was registered in
+     rather than looking broken. */
+  UBER_TOKEN_URL: 'https://login.uber.com/oauth/v2/token',
   YANGO_BASE: 'https://fleet.yango.com',
   HOTEL_BASE: 'https://whale-app-iofbt.ondigitalocean.app',
   HOTEL_DOMAIN: 'hotel.ecosine.ae',
@@ -70,6 +78,16 @@ export const SETTING_DEFS = [
 
   { key: 'UBER_CLIENT_ID', group: 'Uber', label: 'OAuth client id', secret: false },
   { key: 'UBER_CLIENT_SECRET', group: 'Uber', label: 'OAuth client secret', secret: true },
+  /* An Uber OAuth application is registered UNDER one org, so a second business
+     needs a second application — not a second copy of the first one's keys.
+     Left unset, both fleets share the pair above, which is what they did before
+     these existed. */
+  { key: 'UBER_TOKEN_URL', group: 'Uber', label: 'OAuth token endpoint', secret: false,
+    hint: 'Leave as-is for production apps; sandbox-login.uber.com for a Test-environment app' },
+  { key: 'UBER_CLIENT_ID_EGARI', group: 'Uber', label: 'OAuth client id — Egari', secret: false,
+    hint: 'Only if Egari has its own Uber application; otherwise the shared client is used' },
+  { key: 'UBER_CLIENT_SECRET_EGARI', group: 'Uber', label: 'OAuth client secret — Egari', secret: true,
+    hint: 'Must be a PRODUCTION application registered under the Egari org, not a Test one' },
   { key: 'UBER_ORG_ENCRYPTED', group: 'Uber', label: 'Org id (encrypted, REST)', secret: false },
   { key: 'UBER_ORG_UUID', group: 'Uber', label: 'Org uuid (GraphQL/reports)', secret: false },
   { key: 'UBER_WEB_COOKIE', group: 'Uber', label: 'Supplier web session cookie', secret: true, hint: 'Expires — re-paste from a logged-in supplier.uber.com session' },
@@ -199,15 +217,31 @@ export async function describeSettings() {
        operator to fix something that works. */
     const dflt = SETTING_DEFAULTS[d.key];
     const val = cache[d.key] ?? process.env[d.key] ?? dflt ?? '';
+    /* Held by SOME component, not necessarily this one.
+       ─────────────────────────────────────────────────────────────────────
+       seen_by below was added because a key scoped to the collector is not a
+       missing key — and then `configured` was left meaning "this process can
+       see it", so the row said configured:false directly above a seen_by
+       naming the collector that holds it. Half the fix.
+
+       UBER_WEB_COOKIE is the live case: it is deliberately only on the
+       collector, which is the component that calls Uber, and the Settings page
+       reported it unset while the collector was pulling both fleets' trips
+       with it every thirty minutes. That is the same wrong errand the comment
+       above describes, arriving by a different route — and it cost real time
+       during the Egari session investigation, where the page's "not set" was
+       read as evidence the Ecosine session had lapsed. */
+    const held = (elsewhere[d.key] || []).some((v) => v.configured);
     return {
       key: d.key, group: d.group, label: d.label, hint: d.hint || null, secret: !!d.secret,
-      source: fromDb ? 'settings' : process.env[d.key] ? 'environment' : dflt != null ? 'default' : 'unset',
+      source: fromDb ? 'settings' : process.env[d.key] ? 'environment'
+        : dflt != null ? 'default' : held ? 'elsewhere' : 'unset',
       /* What the code would fall back to, so a reader can tell an operator's
          value from the one that shipped with the deploy. Never for a secret:
          no secret has a default, and if one ever did, publishing it here would
          be the leak this whole file exists to avoid. */
       default_value: !d.secret && dflt != null ? dflt : null,
-      configured: !!val,
+      configured: !!val || held,
       value: d.secret ? (val ? `••••••••${String(val).slice(-4)}` : '') : val,
       updated_at: updated[d.key] || null,
       /* A credential that expires on a schedule nobody is watching fails

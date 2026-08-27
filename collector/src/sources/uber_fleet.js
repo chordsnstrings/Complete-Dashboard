@@ -207,7 +207,7 @@ const EARNER_PAGES_MAX = 40;
    same surface saw some, the request is wrong. If one week answered, the silent
    ones are simply outside the period Uber serves. */
 async function pullEarningsComponents(from, to, o) {
-  const token = await uberOAuthToken();
+  const token = await uberOAuthToken(o);
   let totalRows = 0, earners = 0, weeks = 0, served = 0;
   for (const wk of weekChunks(from, to)) {
     /* `until`, not `end`: the range is HALF-OPEN, so an end of Sunday asks for

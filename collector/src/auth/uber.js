@@ -6,30 +6,59 @@ import { log } from '../log.js';
 import { pool } from '../db.js';
 import { noteCredential } from '../auth_state.js';
 
-let cached = { token: null, exp: 0 };
+/* Keyed by client id, not one slot.
+   ─────────────────────────────────────────────────────────────────────────
+   A single `cached` was correct while there was a single client. With a
+   per-fleet client it is a bug that hides itself: the first fleet's token is
+   handed to the second fleet's calls, which then 403 against an org that
+   client cannot see — the exact symptom we already spent a session chasing,
+   reproduced by the fix for it. */
+const cache = new Map();
 
-export async function uberOAuthToken() {
-  if (cached.token && Date.now() < cached.exp - 60000) return cached.token;
-  const o = config.uber.oauth;
+/**
+ * @param o an entry from config.uber.orgs, or null for the shared client.
+ *   The probes pass nothing and keep the behaviour they have always had.
+ */
+export async function uberOAuthToken(o = null) {
+  const cfg = config.uber.oauth;
+  const clientId = o?.oauth?.clientId || cfg.clientId;
+  const clientSecret = o?.oauth?.clientSecret || cfg.clientSecret;
+  const credential = o?.oauth?.secretKey || 'UBER_CLIENT_SECRET';
+  /* Recorded against the fleet whose client it is. '*' was right when one
+     client served everybody; it is misleading the moment two do, because a
+     grant that failed for one fleet would show as every fleet's problem. */
+  const fleet = o?.oauth?.own ? o.fleet : '*';
+
+  const hit = cache.get(clientId);
+  if (hit && Date.now() < hit.exp - 60000) return hit.token;
+
+  if (!clientId || !clientSecret) {
+    await noteCredential(pool, { provider: 'uber', fleet, credential,
+      state: 'missing', detail: 'no OAuth client is configured for this fleet',
+      surface: 'oauth token grant' });
+    throw new Error(`uber oauth: no client configured${o?.fleet ? ` for ${o.fleet}` : ''}`);
+  }
+
   const body = new URLSearchParams({
-    client_id: o.clientId, client_secret: o.clientSecret,
-    grant_type: 'client_credentials', scope: o.scope,
+    client_id: clientId, client_secret: clientSecret,
+    grant_type: 'client_credentials', scope: cfg.scope,
   }).toString();
-  const { data } = await http(o.tokenUrl, {
+  const { data } = await http(cfg.tokenUrl, {
     method: 'POST', body,
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
   });
   if (!data.access_token) {
     const detail = String(data?.error_description || data?.error || JSON.stringify(data)).slice(0, 200);
-    await noteCredential(pool, { provider: 'uber', fleet: '*', credential: 'UBER_CLIENT_SECRET',
+    await noteCredential(pool, { provider: 'uber', fleet, credential,
       state: 'expired', detail, surface: 'oauth token grant' });
     throw new Error('uber oauth failed: ' + JSON.stringify(data));
   }
-  await noteCredential(pool, { provider: 'uber', fleet: '*', credential: 'UBER_CLIENT_SECRET',
+  await noteCredential(pool, { provider: 'uber', fleet, credential,
     state: 'ok', detail: null, surface: 'oauth token grant' });
-  cached = { token: data.access_token, exp: Date.now() + (data.expires_in || 2592000) * 1000 };
-  log.info('uber', 'oauth token refreshed', { expires_in: data.expires_in });
-  return cached.token;
+  const token = data.access_token;
+  cache.set(clientId, { token, exp: Date.now() + (data.expires_in || 2592000) * 1000 });
+  log.info('uber', 'oauth token refreshed', { expires_in: data.expires_in, credential, fleet });
+  return token;
 }
 
 // Headers for the supplier web session (reports + graphql). Each org carries

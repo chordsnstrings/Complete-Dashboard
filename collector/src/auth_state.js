@@ -159,36 +159,55 @@ export function uberOrgCredential(fleet) {
    this API client, and the fix is an Uber account change rather than a string
    somebody has not found yet. That is a different errand, and a banner that
    sends an operator on the wrong one costs more than saying nothing. */
-let orgList = null;
-async function knownOrgs(token) {
-  if (orgList) return orgList;
+/* Cached per CLIENT, not once.
+   ─────────────────────────────────────────────────────────────────────────
+   A single slot was right while one client served both fleets. With a client
+   per fleet it would answer the second fleet's question with the first
+   client's org list — and this cache exists precisely to tell an operator
+   which orgs their client can see, so a wrong answer here sends them on the
+   errand the whole comment above is about avoiding. */
+const orgLists = new Map();
+async function knownOrgs(token, key = 'shared') {
+  if (orgLists.has(key)) return orgLists.get(key);
   try {
     const { data } = await http('https://api.uber.com/v1/vehicle-suppliers/orgs',
       { headers: { authorization: `Bearer ${token}` }, timeoutMs: 20000, retries: 0 });
     const rows = data?.organizations || data?.orgs || [];
     if (Array.isArray(rows) && rows.length) {
-      orgList = rows.map((r) => r.name || r.id).filter(Boolean);
+      orgLists.set(key, rows.map((r) => r.name || r.id).filter(Boolean));
     }
   } catch { /* a diagnosis is not worth failing a run for */ }
-  return orgList;
+  return orgLists.get(key) || null;
 }
 
 export async function noteUberRest(db, url, res, o, surface, token = null) {
   const bad = authFailure(url, res);
   const fleet = o?.fleet || '*';
-  const cred = bad?.blames === 'token' ? 'UBER_CLIENT_SECRET' : uberOrgCredential(fleet);
+  /* Whichever secret actually signed this call. Blaming UBER_CLIENT_SECRET for
+     a grant made with UBER_CLIENT_SECRET_EGARI would point an operator at a
+     working credential. */
+  const secretKey = o?.oauth?.secretKey || 'UBER_CLIENT_SECRET';
+  const cred = bad?.blames === 'token' ? secretKey : uberOrgCredential(fleet);
   let detail = bad ? bad.reason : null;
   /* A 403 means the org_id was refused. Naming what this client CAN see turns
-     "find the right string" into "this fleet is not on this credential". */
+     "find the right string" into "this fleet is not on this credential" — and
+     now into one of two different errands, because the remedy depends on
+     whether this fleet has a client of its own. Sharing one means the fix is at
+     Uber's end (register or grant); having its own and still being refused
+     means the application exists but is pointed at the wrong org. */
   if (bad && bad.blames === 'resource' && token) {
-    const orgs = await knownOrgs(token);
+    const orgs = await knownOrgs(token, o?.oauth?.clientId || 'shared');
     if (orgs?.length) {
       detail += ` — this API client covers only ${orgs.join(', ')}, so no org id `
-        + 'will work for this fleet until Uber grants the client access to it';
+        + 'will work for this fleet until ';
+      detail += o?.oauth?.own
+        ? `the ${o.oauth.idKey} application is granted access to this org`
+        : `this fleet gets its own Uber application (set ${uberClientKeys(fleet).id}`
+          + ` and ${uberClientKeys(fleet).secret}) or Uber grants the shared client access to it`;
     }
   }
   await noteCredential(db, {
-    provider: 'uber', fleet: bad?.blames === 'token' ? '*' : fleet,
+    provider: 'uber', fleet: bad?.blames === 'token' ? (o?.oauth?.own ? fleet : '*') : fleet,
     credential: cred,
     state: bad ? 'expired' : 'ok',
     detail,
@@ -196,3 +215,9 @@ export async function noteUberRest(db, url, res, o, surface, token = null) {
   });
   return bad;
 }
+
+/* The setting names a fleet's own OAuth application would live under. Written
+   once so the banner cannot invent a key that does not exist. */
+export const uberClientKeys = (fleet) => (fleet === 'ecosine' || !fleet
+  ? { id: 'UBER_CLIENT_ID', secret: 'UBER_CLIENT_SECRET' }
+  : { id: `UBER_CLIENT_ID_${fleet.toUpperCase()}`, secret: `UBER_CLIENT_SECRET_${fleet.toUpperCase()}` });
