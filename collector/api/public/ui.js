@@ -886,12 +886,22 @@ export function dominantBar(host, parts, { total = null, unitLabel = '' } = {}) 
    screen at rest. The rows beyond the fold are `hidden`, so they are out of
    find-in-page while folded — every page with a table this long carries its
    own search box, and that one searches the data rather than the DOM. */
-export function foldRows(host, table, { shown = 10, total, noun = 'row', key = null } = {}) {
-  host.append(table);
-  const body = table.tBodies?.[0];
-  const trs = body ? [...body.rows] : [];
+export function foldRows(host, node, { shown = 10, total, noun = 'row', key = null } = {}) {
+  host.append(node);
+  /* tableFrom returns a `div.tscroll` WRAPPING the table, not the table — so
+     reading `node.tBodies` found nothing, the fold returned early, and the
+     drivers page stayed 44,625px with no error anywhere. The second silent
+     no-op of this session: it rendered, it looked right, it did nothing.
+     Accept either, and say so loudly when there is no table at all rather than
+     returning quietly a third time. */
+  const table = node?.tagName === 'TABLE' ? node : node?.querySelector?.('table');
+  const trs = table?.tBodies?.[0] ? [...table.tBodies[0].rows] : [];
+  if (!trs.length) {
+    if (total > shown) console.warn('[foldRows] no rows found to fold', node?.className);
+    return;
+  }
   const hidden = Math.max(0, (total ?? trs.length) - shown);
-  if (!hidden || !trs.length) return;
+  if (!hidden) return;
   /* Remembered, because a reader who opens the long form on every visit is
      telling you their default. Guarded: a browser with site data blocked
      throws on the getter rather than returning null. */
