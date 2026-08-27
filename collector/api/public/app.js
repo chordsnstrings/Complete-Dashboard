@@ -2157,10 +2157,15 @@ V.safety = async (root) => {
       tone: null,
       meta: tracked ? `${fmt(tracked)} tracked vehicles` : null,
       sub: `${fmt(total)} events across ${fmt(byType.length)} ${plural(byType.length, 'type')}.`
-        + (worst?.driver_name
+        /* Not when the top row is the unattributed bucket. The telematics feed
+           raises an event against a VEHICLE, and where no custody record puts
+           somebody in it that hour the row is "(unattributed)" — which is a
+           bucket, not a person, and naming it in a sentence about whose
+           driving is worst is an accusation against nobody. */
+        + (worst?.driver_name && !/^\(|unattributed|unknown/i.test(worst.driver_name)
           ? ` The highest rate belongs to ${worst.driver_name}; a rate is only comparable per 100 km, `
             + 'which is what the table below ranks on.'
-          : '')
+          : ' A rate is only comparable per 100 km, which is what the table below ranks on.')
         + ' These come from the telematics box, so no channel filter narrows them.',
     });
   }
