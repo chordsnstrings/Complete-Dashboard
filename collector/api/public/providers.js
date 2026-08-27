@@ -12,7 +12,7 @@
 
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, dtStr, dateStr, pct,
-  sourceLabel, countOf, plural } from './ui.js';
+  sourceLabel, countOf, plural, foldRows } from './ui.js';
 import { api, href, state, store } from './data.js';
 import { dubaiDay } from './tz.js';
 
@@ -246,7 +246,7 @@ export async function renderProviders(root) {
             : 'This surface answered and described no fields.'));
           root.append(p); return;
         }
-        body.append(tableFrom(fields, [
+        const fieldTable = tableFrom(fields, [
           { label: 'Field', key: 'key',
             render: (f) => `<a class="ent" href="${href('providers', provider, s.surface)}/${encodeURIComponent(f.key)}"><code>${esc(f.key)}</code></a>` },
           { label: 'Type', key: 'type' },
@@ -278,7 +278,9 @@ export async function renderProviders(root) {
             : '<span class="dim">wide — an identifier or free text, contents not recorded</span>') },
           { label: 'Kept', key: 'k', render: (f) => (s.unmapped?.includes(f.key)
             ? pill('no', 'warn') : pill('yes', 'ok')) },
-        ], { compact: true, sortable: true, sortId: `pf-${provider}-${s.surface}` }));
+        ], { compact: true, sortable: true, sortId: `pf-${provider}-${s.surface}` });
+        foldRows(body, fieldTable,
+          { shown: 8, total: fields.length, noun: 'field', key: `pf-${provider}-${s.surface}` });
         root.append(p);
       });
     }

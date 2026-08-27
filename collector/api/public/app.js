@@ -358,10 +358,23 @@ function renderNav() {
 function setHeader(detail) {
   const crumb = $('#crumb');
   if (state.view === 'driver') {
+    /* `day` is a destination, not a tab, so it is not in DRIVER_TABS and the
+       lookup fell back to Overview — the page read "Overview — every platform
+       this person works on" while showing one date. A subtitle that names the
+       wrong thing is worse on this page than most, because the whole point of
+       it is that you are looking at ONE day. */
+    const on = state.sub === 'day'
+      ? new URLSearchParams(location.hash.split('?')[1] || '').get('on') : null;
     const tab = DRIVER_TABS.find((t) => t.id === (state.sub || 'overview')) || DRIVER_TABS[0];
     $('#viewTitle').textContent = detail?.name || 'Driver';
-    $('#viewSub').textContent = `${tab.label} — every platform this person works on, combined`;
-    crumb.innerHTML = `<a href="${href('drivers')}">Drivers</a><span>/</span><b>${esc(detail?.name || state.param || '')}</b>`;
+    $('#viewSub').textContent = on
+      ? `${dayStr(`${on}T12:00:00`)} — every job, and the waiting between them`
+      : `${tab.label} — every platform this person works on, combined`;
+    crumb.innerHTML = `<a href="${href('drivers')}">Drivers</a><span>/</span>`
+      + (on
+        ? `<a href="${href('driver', state.param, 'activity')}">${esc(detail?.name || state.param || '')}</a>`
+          + `<span>/</span><b>${esc(dayStr(`${on}T12:00:00`))}</b>`
+        : `<b>${esc(detail?.name || state.param || '')}</b>`);
     crumb.style.display = 'flex';
   } else if (state.view === 'vehicle') {
     const tab = VEHICLE_TABS.find((t) => t.id === (state.sub || 'overview')) || VEHICLE_TABS[0];

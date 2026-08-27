@@ -10,7 +10,7 @@
 
 import { hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, money, pct,
-  countOf, plural, sourceLabel } from './ui.js';
+  countOf, plural, sourceLabel, foldRows } from './ui.js';
 import { q, href, hrefFilter, state, currentGen, alive } from './data.js';
 
 /* How many bars and wave rows this page draws. One constant, used by the
@@ -183,7 +183,7 @@ export async function renderCorridors(root) {
      declared and never written. A column of dashes reads as "these particular
      corridors have no timing"; one sentence says what it actually is. */
   const anyMin = c.corridors.some((r) => r.avg_min != null);
-  b3.append(tableFrom(c.corridors, [
+  const corrTable = tableFrom(c.corridors, [
     { label: 'From', key: 'from_area' },
     { label: 'To', key: 'to_area' },
     { label: 'Trips', key: 'trips', num: true },
@@ -206,7 +206,8 @@ export async function renderCorridors(root) {
         pct(r.trips ? (r.priced / r.trips) * 100 : 0, 0)}</span>` },
     { label: 'Channels', key: 'platforms', render: (r) => esc((r.platforms || []).map(sourceLabel).join(', ')) },
   ], { sortable: true, sortId: 'corr', defaultSort: { key: 'trips', dir: 'desc' },
-    capped: c.truncated ? `all ${fmt(t.corridors_3plus ?? c.corridors.length)} corridors` : null }));
+    capped: c.truncated ? `all ${fmt(t.corridors_3plus ?? c.corridors.length)} corridors` : null });
+  foldRows(b3, corrTable, { shown: 12, total: c.corridors.length, noun: 'corridor', key: 'corridors' });
 
   const caps = [];
   if (c.truncated || (t.corridors_3plus && t.corridors_3plus > c.corridors.length)) {

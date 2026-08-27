@@ -14,7 +14,7 @@
 
 import { empty, fmt, heatmap } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, countOf, plural,
-  signed } from './ui.js';
+  signed, foldRows } from './ui.js';
 import { q, href } from './data.js';
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -78,7 +78,8 @@ export async function renderCapacity(root) {
   g.append(sp);
   if (!d.shortfall.length) empty(sb, 'No hour is projected to need more than it currently gets.');
   else {
-    sb.append(gapTable(d.shortfall, 'short'));
+    foldRows(sb, gapTable(d.shortfall, 'short'),
+      { shown: 10, total: d.shortfall.length, noun: 'hour', key: 'cap-short' });
     if (t.cells_short > d.shortfall.length) {
       sb.append(el('p', 'cap',
         `The ${fmt(d.shortfall.length)} largest gaps of ${countOf(t.cells_short, 'hour')} that read short. `
@@ -99,7 +100,8 @@ export async function renderCapacity(root) {
   g.append(pp);
   if (!d.surplus.length) empty(pb, 'No hour is covered beyond its projection.');
   else {
-    pb.append(gapTable(d.surplus, 'spare'));
+    foldRows(pb, gapTable(d.surplus, 'spare'),
+      { shown: 10, total: d.surplus.length, noun: 'hour', key: 'cap-spare' });
     if (t.cells_spare > d.surplus.length) {
       pb.append(el('p', 'cap',
         `The ${fmt(d.surplus.length)} largest of ${countOf(t.cells_spare, 'hour')} with cover to spare.`));
