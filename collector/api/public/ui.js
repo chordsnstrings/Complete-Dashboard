@@ -801,3 +801,116 @@ export function exportRow(bookings = null) {
 }
 
 export { fmt, empty };
+
+/* ── the verdict band ──────────────────────────────────────────────────────
+   Every page in this product opened with a title, a subtitle and then data. A
+   reader had to do the interpreting themselves, on all 32 of them: the fleet
+   overview showed six tiles and three charts without ever saying what it
+   found, and the drivers page opened onto a 361-row table 44,000 pixels tall.
+   Measured across the whole app: 275,000 pixels of scroll and 76,000 words,
+   none of which states a conclusion.
+
+   A verdict is the page's answer, computed and written as a sentence, above
+   everything that supports it. It is not a caption — a caption describes the
+   chart beneath it; this says what the chart MEANS, and carries the one figure
+   that decides it.
+
+   Rules it enforces, so 32 pages cannot each invent their own:
+     · one sentence, present tense, about THIS window
+     · the figure that decides it, rendered once and large
+     · a tone that is earned — `warn`/`bad` only when something needs doing
+     · an optional recommendation, which is the only bold text allowed here */
+export function verdict(host, { claim, figure, unit, sub, tone = null, recommend = null, meta = null }) {
+  const v = el('div', `vdct${tone ? ' ' + tone : ''}`);
+  const main = el('div', 'vdct-main');
+  main.append(el('h2', 'vdct-claim', esc(claim)));
+  if (sub) main.append(el('p', 'vdct-sub', esc(sub)));
+  if (recommend) {
+    const r = el('p', 'vdct-rec');
+    r.innerHTML = `<b>Recommendation:</b> ${esc(recommend)}`;
+    main.append(r);
+  }
+  v.append(main);
+  if (figure != null) {
+    const f = el('div', 'vdct-fig');
+    f.innerHTML = `<b>${esc(figure)}</b>${unit ? `<i>${esc(unit)}</i>` : ''}`;
+    if (meta) f.append(el('span', 'vdct-meta', esc(meta)));
+    v.append(f);
+  }
+  host.append(v);
+  return v;
+}
+
+/* ── one bar that carries the headline ─────────────────────────────────────
+   A donut of six channels where one is 92.7% is a picture of a fact nobody
+   needs six colours to read. A single stacked bar, with the leader named
+   INSIDE it and the rest listed beneath with what each one is worth, says the
+   same thing in one line and leaves room for why it matters.
+
+   `parts`: [{ label, value, note, cls }] — cls picks the series colour. */
+export function dominantBar(host, parts, { total = null, unitLabel = '' } = {}) {
+  const sum = total ?? parts.reduce((a, p) => a + (+p.value || 0), 0);
+  const wrap = el('div', 'domb');
+  const bar = el('div', 'domb-bar');
+  bar.innerHTML = parts.filter((p) => +p.value > 0).map((p, i) => {
+    const pct = sum ? (p.value / sum) * 100 : 0;
+    /* The label rides inside the segment only when it fits. Below about a
+       tenth of the width it overflows into its neighbour and reads as that
+       segment's name, which is worse than no label. */
+    const inside = pct >= 18
+      ? `<span>${esc(p.label)}</span><b>${fmt(p.value)}</b><i>${pct.toFixed(1)}%</i>` : '';
+    return `<span class="domb-seg ${esc(p.cls || `c${i + 1}`)}" style="width:${pct}%" `
+      + `title="${esc(p.label)} · ${fmt(p.value)} · ${pct.toFixed(1)}%">${inside}</span>`;
+  }).join('');
+  wrap.append(bar);
+  const keys = el('div', 'domb-keys');
+  keys.innerHTML = parts.map((p, i) =>
+    `<span class="domb-key"><i class="sw ${esc(p.cls || `c${i + 1}`)}"></i>`
+    + `<b>${esc(p.label)} · ${fmt(p.value)}</b>`
+    + (p.note ? `<em>${esc(p.note)}</em>` : '') + '</span>').join('');
+  wrap.append(keys);
+  if (unitLabel) wrap.append(el('p', 'domb-total', esc(unitLabel)));
+  host.append(wrap);
+  return wrap;
+}
+
+/* ── a table that respects the fold ────────────────────────────────────────
+   The drivers table is 361 rows and 44,000 pixels; the roster 280 and 33,000.
+   Nobody scrolls either. But truncating to a top ten and calling it "All
+   drivers" is the lie this product spent a session removing, so the rows stay
+   — folded, with the count of what is folded stated on the control that opens
+   them, and the fold remembered per table so a reader who wants the long form
+   gets it every time.
+
+   `table` is already built and complete; this only decides how much of it is on
+   screen at rest. The rows beyond the fold are `hidden`, so they are out of
+   find-in-page while folded — every page with a table this long carries its
+   own search box, and that one searches the data rather than the DOM. */
+export function foldRows(host, table, { shown = 10, total, noun = 'row', key = null } = {}) {
+  host.append(table);
+  const body = table.tBodies?.[0];
+  const trs = body ? [...body.rows] : [];
+  const hidden = Math.max(0, (total ?? trs.length) - shown);
+  if (!hidden || !trs.length) return;
+  /* Remembered, because a reader who opens the long form on every visit is
+     telling you their default. Guarded: a browser with site data blocked
+     throws on the getter rather than returning null. */
+  const K = key ? `fold:${key}` : null;
+  let open = false;
+  try { open = K ? localStorage.getItem(K) === 'open' : false; } catch { open = false; }
+  const apply = () => {
+    trs.forEach((tr, i) => { tr.hidden = !open && i >= shown; });
+    btn.textContent = open
+      ? `Show fewer — the first ${fmt(shown)}`
+      : `Show the other ${fmt(hidden)} ${plural(hidden, noun)} →`;
+    btn.setAttribute('aria-expanded', String(open));
+  };
+  const btn = el('button', 'foldbtn');
+  btn.addEventListener('click', () => {
+    open = !open;
+    try { if (K) localStorage.setItem(K, open ? 'open' : 'shut'); } catch { /* not essential */ }
+    apply();
+  });
+  apply();
+  host.append(btn);
+}

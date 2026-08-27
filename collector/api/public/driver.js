@@ -17,7 +17,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
-  sourceLabel, plural, countOf, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen} from './ui.js';
+  sourceLabel, plural, countOf, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 
 /* Why a whole column is empty, in the words the page prints under it.
@@ -1219,6 +1219,11 @@ export async function renderDriver(root, id, tab = 'overview') {
 
 /* ── the directory that links into the pages above ───────────────────────── */
 export async function renderDriverDirectory(root) {
+  /* The verdict goes above the search box. This page was 44,399 pixels tall —
+     forty-four laptop screens — and opened on a search field and a 361-row
+     table, so the first thing a reader saw was an instruction to go looking
+     rather than an answer. */
+  const vHost = el('div'); root.append(vHost);
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="dq" type="search" placeholder="Search drivers by name, plate or platform…">
     <span class="cap" id="dn"></span>`;
@@ -1447,11 +1452,51 @@ export async function renderDriverDirectory(root) {
         + 'not a page of it.'));
       return;
     }
-    tblP.body.append(tableFrom(list, cols, {
+    const tbl = tableFrom(list, cols, {
       sortable: true, sortId: 'dir', defaultSort: { key: 'trips', dir: 'desc' },
       onRow: (r) => { location.hash = href('driver', r.driver_ext_id); },
-    }));
+    });
+    /* Folded, not truncated. Every row is still built and still sortable — the
+       fold decides what is on screen at rest, and the control says exactly how
+       many it is holding back. A search narrows the list, so a filtered result
+       shorter than the fold simply has no control. */
+    foldRows(tblP.body, tbl, { shown: 12, total: list.length, noun: 'driver', key: 'drivers-dir' });
   };
+  /* ── the verdict ────────────────────────────────────────────────────────
+     Chosen by what is worst, not by a fixed sentence. The question an operator
+     opens this page with is "who is on the books and not earning" — that is
+     what the 125 idle and 120 never-driven rows are, and they were previously
+     findable only by scrolling past everyone who IS working. */
+  {
+    const idlePct = rows.length ? Math.round(((idle.length + never.length) / rows.length) * 100) : 0;
+    const blocked = rows.filter((r) => /suspend|deact|block|reject/i.test(r.platform_state || '')).length;
+    let claim, tone = null, figure, unit, recommend = null;
+    if (expired.length) {
+      tone = 'bad';
+      claim = `${countOf(expired.length, 'driver')} cannot legally work — the licence has expired`;
+      figure = fmt(expired.length); unit = 'expired';
+      recommend = 'Sort by Licence to bring them together, or open Compliance, which counts the same '
+        + 'people the same way and shows every document with a date on it.';
+    } else if (idlePct >= 50) {
+      tone = 'warn';
+      claim = `${idlePct}% of the people on the books did not drive in this window`;
+      figure = fmt(idle.length + never.length); unit = 'not earning';
+      recommend = blocked
+        ? `${countOf(blocked, 'person', 'people')} of them are suspended or deactivated on the platform, `
+          + 'which is a different problem from somebody on leave — sort by Standing to separate them.'
+        : 'Sort by Standing to separate people the platform has blocked from people simply not rostered.';
+    } else {
+      claim = `${fmt(active.length)} of ${fmt(rows.length)} drivers worked this window`;
+      figure = fmt(active.length); unit = 'drove';
+    }
+    verdict(vHost, {
+      claim, figure, unit, tone, recommend,
+      meta: `${fmt(rows.length)} on the books`,
+      sub: `${fmt(active.length)} drove, ${fmt(idle.length)} did not, ${fmt(never.length)} never have.`
+        + (notFilled.length ? ` ${fmt(notFilled.length)} carry no real licence date, so they are not counted as expired.` : ''),
+    });
+  }
+
   draw(rows, '');
   bar.querySelector('#dq').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();

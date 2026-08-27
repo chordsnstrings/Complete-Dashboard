@@ -1215,3 +1215,75 @@ a.insight-row:hover{border-color:var(--accent)}
    of amber is harder to read than a paragraph of text with an amber rule. */
 .authbanner .ab-detail{color:var(--fg); opacity:.85}
 @media (prefers-reduced-motion:reduce){ .authbanner{animation:none} }
+
+/* ── the verdict band ──────────────────────────────────────────────────────
+   The page's answer, above the evidence for it. Deliberately quiet furniture:
+   a hairline card and a left rule in the tone colour, so the SENTENCE is the
+   loudest thing rather than the box around it. Scandinavian functionalism —
+   the structure is what earns attention, not the decoration. */
+.vdct{
+  display:flex;gap:34px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);
+  border-radius:var(--r-md,10px);padding:22px 26px;margin:0 0 20px;
+}
+.vdct.warn{border-left-color:var(--warn)}
+.vdct.bad{border-left-color:var(--critical)}
+.vdct.good{border-left-color:var(--good)}
+.vdct-main{flex:1 1 34rem;min-width:0}
+.vdct-claim{font-size:1.42rem;line-height:1.24;margin:0;color:var(--ink)}
+.vdct-sub{margin:9px 0 0;color:var(--ink-2);font-size:.88rem;line-height:1.62;max-width:74ch}
+.vdct-rec{margin:11px 0 0;color:var(--ink-2);font-size:.86rem;line-height:1.6;max-width:74ch}
+.vdct-rec b{color:var(--ink);font-weight:650}
+/* The deciding figure. Mono and tabular so it lines up with every other number
+   in the product, and large enough to be read before the sentence beside it —
+   a reader who takes only one thing from the page should take this. */
+.vdct-fig{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:0 0 auto}
+.vdct-fig>b{
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;
+  font-size:2.45rem;line-height:1;font-weight:600;color:var(--ink);letter-spacing:-.02em;
+}
+.vdct-fig>i{font-style:normal;font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.vdct-meta{font-size:.72rem;color:var(--ink-3);margin-top:4px;text-align:right;max-width:24ch}
+.vdct.warn .vdct-fig>b{color:var(--warn)}
+.vdct.bad .vdct-fig>b{color:var(--critical)}
+
+/* ── the dominant bar ─────────────────────────────────────────────────────
+   One row instead of a six-colour donut, because the shape of the fact is
+   "one of these is almost all of it" and a ring makes the reader measure
+   angles to find that out. */
+.domb{margin:2px 0 0}
+.domb-bar{display:flex;height:44px;border-radius:8px;overflow:hidden;background:var(--surface-2)}
+.domb-seg{display:flex;align-items:center;gap:9px;padding:0 14px;min-width:3px;color:#fff;overflow:hidden;white-space:nowrap}
+.domb-seg>span{font-size:.85rem;font-weight:600}
+.domb-seg>b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;font-size:.92rem;font-weight:600}
+.domb-seg>i{font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:.78rem;opacity:.82}
+.domb-seg.c1{background:var(--s1)} .domb-seg.c2{background:var(--s2)} .domb-seg.c3{background:var(--s3)}
+.domb-seg.c4{background:var(--s4)} .domb-seg.c5{background:var(--s5)} .domb-seg.c6{background:var(--s6)}
+.domb-seg.dead{background:var(--surface-3);color:var(--ink-3)}
+.domb-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:8px 26px;margin-top:14px}
+.domb-key{display:flex;flex-wrap:wrap;align-items:baseline;gap:7px;font-size:.83rem}
+.domb-key>b{font-weight:600;color:var(--ink)}
+.domb-key>em{font-style:normal;flex:1 1 100%;color:var(--ink-3);font-size:.78rem;line-height:1.5;padding-left:17px}
+.domb-total{margin:12px 0 0;font-size:.78rem;color:var(--ink-3)}
+.sw.c1{background:var(--s1)} .sw.c2{background:var(--s2)} .sw.c3{background:var(--s3)}
+.sw.c4{background:var(--s4)} .sw.c5{background:var(--s5)} .sw.c6{background:var(--s6)}
+.sw.dead{background:var(--surface-3)}
+
+/* ── the fold ─────────────────────────────────────────────────────────────
+   A 361-row table is not a table anybody reads; it is a table anybody
+   searches. Folded to its first rows with the remainder one click away, and
+   the count of what is hidden written on the control — never truncated
+   silently, which is the failure this product has already fixed twice. */
+/* The hiding itself is done in JS, not here: nth-child cannot take a custom
+   property in any engine, so a configurable fold cannot be expressed in CSS
+   at all. Folded rows are `hidden`, which does take them out of find-in-page
+   — the pages with long tables carry their own search box, which searches the
+   data rather than the rendered rows. */
+.foldbtn{
+  display:block;width:100%;margin-top:10px;padding:9px 12px;
+  background:var(--surface);border:1px dashed var(--rule-strong);border-radius:8px;
+  color:var(--accent);font:inherit;font-size:.8rem;cursor:pointer;
+  transition:background .18s var(--ease),border-color .18s var(--ease);
+}
+.foldbtn:hover{background:var(--surface-2);border-color:var(--accent)}
+.foldbtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

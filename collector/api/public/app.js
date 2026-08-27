@@ -5,7 +5,8 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
-  sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow} from './ui.js';
+  sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
+  verdict, dominantBar, foldRows} from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
@@ -498,6 +499,11 @@ function setHeader(detail) {
 const V = {};
 
 V.overview = async (root) => {
+  /* The verdict goes in FIRST, before anything it summarises, and is filled
+     once the figures land. This page opened with six unlabelled tiles and
+     three charts and never said what it found — a reader did the interpreting
+     themselves on the product's front door. */
+  const vHost = el('div'); root.append(vHost);
   const kpiHost = el('div', 'kpis'); root.append(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
   const trend = panel('Trips per day',
@@ -572,6 +578,55 @@ V.overview = async (root) => {
   ].map(([l, n, d]) => (GO[l]
     ? `<a class="kpi clickable" href="${GO[l]}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></a>`
     : `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`)).join('');
+
+  /* ── the verdict ────────────────────────────────────────────────────────
+     Written from the figures already fetched, so it cannot disagree with the
+     tiles beneath it. It states the ONE thing this window is about, chosen by
+     what is furthest out of line rather than by a fixed sentence: a fleet with
+     a collection hole has a different headline from one with a cancellation
+     spike, and a page that always says the same thing is a caption. */
+  {
+    const days = daily.length || 1;
+    const perDay = Math.round((k.trips || 0) / days);
+    const uncollected = daily.filter((d) => d.uncollected).length;
+    const partial = daily.filter((d) => !d.uncollected && d.sources_silent > 0).length;
+    const lead = [...byPlat].sort((a, b) => (+b.value || 0) - (+a.value || 0))[0];
+    const leadPct = lead && k.trips ? Math.round((lead.value / k.trips) * 100) : 0;
+    const money = k.accounted || 0;
+
+    /* Ranked by what a reader must not miss. A hole in the record makes every
+       rate computed across it wrong, so it outranks any figure the rates
+       produce — including a bad one. */
+    let claim, tone = null, recommend = null, figure, unit, meta = null;
+    if (uncollected) {
+      tone = 'bad';
+      claim = `${uncollected} of these ${days} days were never collected`;
+      figure = fmt(uncollected); unit = uncollected === 1 ? 'day missing' : 'days missing';
+      recommend = 'Read every rate on this page as an average over the days that WERE collected — '
+        + 'the missing ones are drawn hatched rather than as zero, and Collection gaps names which source failed.';
+    } else if (k.cancel_pct != null && k.cancel_pct >= 15) {
+      tone = 'warn';
+      claim = `${k.cancel_pct}% of bookings did not complete`;
+      figure = `${k.completion_pct}%`; unit = 'completed';
+      recommend = 'Open Platforms for the acceptance funnel — an offer refused and a rider cancelling '
+        + 'are different failures and only one of them is the fleet’s.';
+    } else {
+      claim = lead && leadPct >= 80
+        ? `This is a single-channel fleet — ${sourceLabel(lead.label)} is ${leadPct}% of the work`
+        : `${fmt(k.trips)} bookings across ${fmt(k.vehicles)} vehicles`;
+      figure = fmt(perDay); unit = 'bookings a day';
+      meta = `${fmt(k.drivers)} drivers · ${fmt(k.vehicles)} vehicles`;
+    }
+    const sub = [
+      `${fmt(k.trips)} bookings over ${days} ${plural(days, 'day')}, `
+      + `${money ? `AED ${fmt(money)} accounted for` : 'no money accounted for in this window'}.`,
+      partial ? `${partial} more ${plural(partial, 'day')} had at least one source silent, so those bars are understated.` : '',
+      k.telematics_journeys
+        ? `The trackers saw ${fmt(k.telematics_journeys)} journeys behind these bookings — the same cars, counted by a different feed.`
+        : '',
+    ].filter(Boolean).join(' ');
+    verdict(vHost, { claim, figure, unit, sub, tone, recommend, meta });
+  }
 
   gapBars(trend.body, daily, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
     // A day is an address now, not a modal containing a driver list.
