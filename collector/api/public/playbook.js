@@ -14,7 +14,7 @@
 
 import { dec, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money,
-         entity, custody, custodyAsOf, dateStr, countOf, plural } from './ui.js';
+         entity, custody, custodyAsOf, dateStr, countOf, plural, verdict } from './ui.js';
 import { q, href, store } from './data.js';
 
 const GROUPS = [
@@ -52,6 +52,34 @@ export async function renderPlaybook(root) {
 
   const t = d.totals || {};
   const fleet = d.fleet || {};
+
+  /* Fields read off /api/playbook on production: totals carries aed_measured,
+     aed_modelled, bookings_ceiling_gain, bookings_at_risk, ceiling_unit; each
+     action carries a horizon. A to-do list's headline is what the list is
+     WORTH, and only the part of it with arithmetic behind it can be totalled —
+     the rest is real and unpriced, and saying so is the difference between a
+     number and a claim. */
+  {
+    const measured = +t.aed_measured || 0;
+    const soon = d.actions.filter((a) => a.horizon === 'today' || a.horizon === 'this week').length;
+    const modelled = t.aed_modelled == null ? null : +t.aed_modelled;
+    verdict(root, {
+      claim: measured
+        ? `${countOf(d.actions.length, 'thing')} to do, worth ${money(measured)} a month`
+        : `${countOf(d.actions.length, 'thing')} to do`,
+      figure: measured ? money(measured) : fmt(d.actions.length),
+      unit: measured ? `over ${d.window_days} days` : 'actions',
+      tone: soon ? 'warn' : null,
+      meta: soon ? `${fmt(soon)} this week or sooner` : null,
+      sub: (measured
+        ? 'That figure is only the items with arithmetic behind them. '
+        : 'None of these carry a size yet. ')
+        + (modelled ? `A further ${money(modelled)} is modelled rather than measured. ` : '')
+        + (t.bookings_at_risk
+          ? `${fmt(t.bookings_at_risk)} ${t.ceiling_unit || 'bookings'} are at risk if nothing changes.`
+          : ''),
+    });
+  }
   /* Which window produced this list. `d.window` is the response's first key and
      the page printed it nowhere — so "13 vehicles took no booking at all this
      window" is a different list at 7, 30 and 365 days, with nothing on screen

@@ -39,7 +39,7 @@
 
 import { areaChart, hbars, scatter, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
-  dayStr, money, pct, sourceLabel, countOf, plural } from './ui.js';
+  dayStr, money, pct, sourceLabel, countOf, plural, verdict } from './ui.js';
 import { q, href, state } from './data.js';
 import { makeMap, fitTo } from './map.js';
 
@@ -151,6 +151,7 @@ function coverageNote(host, cov, windowDays) {
 
 /* ── tab: the money ─────────────────────────────────────────────────────── */
 async function moneyTab(root) {
+  const vuHost = el('div'); root.append(vuHost);
   const covHost = el('div'); root.append(covHost);
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
 
@@ -215,6 +216,39 @@ async function moneyTab(root) {
     q('/api/economics/assets'), q('/api/economics/drivers'),
   ]);
   const t = A.totals, dt = D.totals;
+
+  /* Fields read off /api/economics/drivers on production: totals carries
+     people, earning, drove_unpaid, idle, money, payouts, fares, bookings, km,
+     worked_days, aed_per_day_worked, aed_per_booking, aed_per_km.
+
+     Unit economics is a page of rates, and a rate is a lie if its denominator
+     is wrong. The one that matters here is that "per driver" over the whole
+     roster and "per driver who worked" are different numbers, and the gap
+     between them is the headline. */
+  {
+    const people = +dt.people || 0;
+    const earning = +dt.earning || 0;
+    const idle = +dt.idle || 0;
+    const perWorked = +dt.aed_per_day_worked || 0;
+    const unpaid = +dt.drove_unpaid || 0;
+    verdict(vuHost, {
+      claim: unpaid
+        ? `${countOf(unpaid, 'driver')} drove and ${unpaid === 1 ? 'was' : 'were'} paid nothing`
+        : perWorked
+          ? `${money(perWorked)} per driver-day actually worked`
+          : `${fmt(earning)} of ${fmt(people)} drivers earned`,
+      figure: perWorked ? money(perWorked) : fmt(earning),
+      unit: perWorked ? 'per day worked' : 'earning',
+      tone: unpaid ? 'bad' : (people && idle / people >= 0.4 ? 'warn' : null),
+      meta: `${fmt(dt.worked_days)} driver-days`,
+      /* The denominator, stated. Spreading the same money over everybody on the
+         books gives a per-driver number roughly half this one, and both are
+         "per driver". */
+      sub: `Over the ${fmt(earning)} people who earned, not the ${fmt(people)} on the books — `
+        + `${fmt(idle)} of those earned nothing, and spreading the same `
+        + `${money(dt.money)} across all of them would halve every rate on this page.`,
+    });
+  }
 
   coverageNote(covHost, A.coverage, A.window_days);
 

@@ -32,7 +32,7 @@
       work. Said once, on the page, rather than implied by a small number. */
 import { barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
-  fmt, empty, dayStr, plural, countOf, sourceLabel } from './ui.js';
+  fmt, empty, dayStr, plural, countOf, sourceLabel, verdict, signed } from './ui.js';
 import { q, href, parseHash, state } from './data.js';
 import { dubaiDay } from './tz.js';
 
@@ -140,6 +140,32 @@ export async function renderCompare(root, aParam, bParam) {
 
   const A = p.totals.a, B = p.totals.b;
   const partial = p.cut_minutes < 1440;
+
+  /* Fields read off /api/compare on production: totals.a/.b carry bookings,
+     completed, cancelled, telematics, km, fares, priced, drivers, vehicles,
+     on_trip_min; cut_minutes/cut_label say where the day was cut.
+
+     The whole reason this page exists is that a partial today looks like a
+     collapse, so the verdict states the cut BEFORE the number it changes. */
+  {
+    const d0 = (+A.bookings || 0) - (+B.bookings || 0);
+    const pctMove = B.bookings ? Math.round((d0 / B.bookings) * 100) : null;
+    const bigger = Math.abs(pctMove ?? 0) >= 15;
+    verdict(root, {
+      claim: d0 === 0
+        ? 'Both days took the same number of bookings'
+        : `${Math.abs(d0)} ${plural(Math.abs(d0), 'booking')} ${d0 > 0 ? 'more' : 'fewer'} than the day before`,
+      figure: pctMove == null ? fmt(A.bookings) : signed(pctMove, { unit: '%' }),
+      unit: pctMove == null ? 'bookings' : 'on the day before',
+      tone: bigger && d0 < 0 ? 'warn' : null,
+      meta: `${fmt(A.bookings)} against ${fmt(B.bookings)}`,
+      /* The cut is the first thing said, not a footnote. */
+      sub: partial
+        ? `Both days are cut at ${p.cut_label} so the comparison is like for like — today is `
+          + 'still being collected, and a whole day against a part-day always reads as a collapse.'
+        : 'Both days are shown in full.',
+    });
+  }
 
   /* The toggle is built after the fetch so its label can name the actual cut
      the server chose, rather than guessing at the reader's clock. */
