@@ -16,8 +16,9 @@
    collector that needs a credential, and naming it is the point. */
 import { empty, fmt, hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, pct,
-  dayStr, dateStr, dtStr, sourceLabel, countOf, plural, verdict } from './ui.js';
+  dayStr, dateStr, dtStr, sourceLabel, countOf, plural, verdict, andList } from './ui.js';
 import { q, href, hrefFilter, state } from './data.js';
+import { revenueVerdict } from './verdicts.js';
 
 const BASIS = {
   fares: { label: 'measured', tone: 'ok',
@@ -68,29 +69,26 @@ export async function renderRevenue(root) {
      product is "money in", and the reason it is misread is DARK bookings — work
      that happened and that no channel has told us the price of. */
   {
-    const dark = t.dark_pct;
-    const lead = [...live].sort((a, b) => (+b.bookings || 0) - (+a.bookings || 0))[0];
-    const leadPct = lead && t.bookings ? Math.round((lead.bookings / t.bookings) * 100) : 0;
-    /* A channel that reports bookings and no money at all. That is the shape
-       Uber has here, and it is the whole reason this page exists. */
-    const silent = live.filter((r) => !(+r.accounted));
+    const v = revenueVerdict({ platforms: d.platforms, totals: t });
+    const { dark0, payoutOnly, lead, leadPct } = { dark0: v.dark, payoutOnly: v.payoutOnly, lead: v.lead, leadPct: v.leadPct };
     let claim, figure, unit, tone = null, recommend = null;
-    if (dark != null && dark >= 50) {
+    if (v.branch === 'dark') {
       tone = 'bad';
-      claim = `${Math.round(dark)}% of bookings carry no money at all`;
-      figure = `${Math.round(100 - dark)}%`; unit = 'accounted for';
-      recommend = silent.length
-        ? `${silent.map((r) => sourceLabel(r.platform)).join(', ')} report `
-          + `${silent.length === 1 ? 'bookings' : 'bookings'} and no fare. Every per-booking rate in `
-          + 'this product is computed over the minority that do.'
-        : 'Every per-booking rate in this product is computed over the minority that report a price.';
-    } else if (silent.length) {
+      const n = v.darkBookings;
+      claim = `${andList(dark0.map((r) => sourceLabel(r.platform)))} `
+        + `${dark0.length === 1 ? 'reports' : 'report'} work and no money anywhere`;
+      figure = fmt(n); unit = 'bookings, no money';
+      recommend = 'Neither a fare nor a payout statement covers them, so nothing this product '
+        + 'reports about revenue includes that work.';
+    } else if (v.branch === 'payout-only') {
       tone = 'warn';
-      claim = `${silent.map((r) => sourceLabel(r.platform)).join(' and ')} `
-        + `${silent.length === 1 ? 'reports' : 'report'} work and no money`;
-      figure = fmt(silent.reduce((a, r) => a + (+r.bookings || 0), 0)); unit = 'bookings, no fare';
-      recommend = 'Their money arrives in the weekly payout statement instead, which is what '
-        + '"Bank reconciliation" and "On-trip revenue" above are reading.';
+      const n = v.payoutOnlyBookings;
+      claim = `${andList(payoutOnly.map((r) => sourceLabel(r.platform)))} `
+        + `${payoutOnly.length === 1 ? 'reports' : 'report'} no fare on the trip itself`;
+      figure = fmt(n); unit = 'bookings, no fare';
+      recommend = 'Their money arrives in the weekly payout statement instead — which is what '
+        + '"Bank reconciliation" and "On-trip revenue" above are reading. Any figure divided by '
+        + 'a booking count is over the minority of trips that carry a price.';
     } else {
       claim = leadPct >= 80
         ? `${sourceLabel(lead.platform)} is ${leadPct}% of the work and ${

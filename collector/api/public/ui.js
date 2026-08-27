@@ -637,6 +637,15 @@ export const countOf = (n, one, many) => `${fmt(n)} ${plural(n, one, many)}`;
    `unavailable_sources: "bolt, yango"`, `channels_checked: "uber,yango,hotel"` —
    and others return a real array for the same idea. Calling .join on the
    string form throws and takes the whole view with it. */
+/* "A, B and C" — never "A and B and C", which is what join(' and ') produces
+   the moment a list has three items in it. A verdict that reads like a machine
+   wrote it is a verdict a reader trusts less. */
+export const andList = (a) => {
+  const x = (a || []).filter(Boolean).map(String);
+  return x.length <= 1 ? (x[0] || '')
+    : `${x.slice(0, -1).join(', ')} and ${x[x.length - 1]}`;
+};
+
 export const asList = (v) => (Array.isArray(v) ? v.filter(Boolean)
   : (v == null || v === '' ? [] : String(v).split(',').map((s) => s.trim()).filter(Boolean)));
 

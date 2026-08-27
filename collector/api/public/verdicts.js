@@ -64,3 +64,34 @@ export function driversVerdict({ rows = [], expired = [], idle = [], never = [],
     active: total - notEarning,
   };
 }
+
+/**
+ * Revenue by channel. Two different silences, which the first draft conflated
+ * and shipped: there is no `accounted` field on a platform row, so testing it
+ * was true for every channel and the page announced "Uber and Hotel and Yango
+ * report work and no money" over a window in which all three reported money.
+ *
+ *   dark        bookings and no money ANYWHERE — nothing this product reports
+ *               about revenue includes that work
+ *   payoutOnly  money exists but never on the trip. This is Uber here, and it
+ *               is the single fact that makes every per-booking rate in the
+ *               product read low if you do not know it.
+ */
+export const platformMoney = (r) => (+r?.fares || 0) + (+r?.payouts || 0) + (+r?.statement_net || 0);
+
+export function revenueVerdict({ platforms = [], totals = {} } = {}) {
+  const live = platforms.filter((r) => (+r.bookings || 0) > 0);
+  const dark = live.filter((r) => !platformMoney(r));
+  const payoutOnly = live.filter((r) => platformMoney(r) && !(+r.fares));
+  const lead = [...live].sort((a, b) => (+b.bookings || 0) - (+a.bookings || 0))[0] || null;
+  const bookings = +totals.bookings || live.reduce((a, r) => a + (+r.bookings || 0), 0);
+  const leadPct = lead && bookings ? Math.round((lead.bookings / bookings) * 100) : 0;
+  const branch = dark.length ? 'dark' : payoutOnly.length ? 'payout-only' : 'priced';
+  return {
+    branch,
+    tone: branch === 'dark' ? 'bad' : branch === 'payout-only' ? 'warn' : null,
+    live, dark, payoutOnly, lead, leadPct, bookings,
+    darkBookings: dark.reduce((a, r) => a + (+r.bookings || 0), 0),
+    payoutOnlyBookings: payoutOnly.reduce((a, r) => a + (+r.bookings || 0), 0),
+  };
+}
