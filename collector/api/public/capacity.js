@@ -14,7 +14,7 @@
 
 import { empty, fmt, heatmap } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, countOf, plural,
-  signed, foldRows } from './ui.js';
+  signed, foldRows, verdict } from './ui.js';
 import { q, href } from './data.js';
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -38,6 +38,36 @@ export async function renderCapacity(root) {
   }
 
   const t = d.totals || {};
+
+  /* A rota page opened on four tiles and 188 rows of hours. The question it is
+     open for is whether next month's work is covered — and by how much it is
+     not, in people rather than in cells. */
+  {
+    const short = t.cells_short || 0;
+    const spare = t.cells_spare || 0;
+    const cells = (d.cells || []).length || (short + spare);
+    const shortPct = cells ? Math.round((short / cells) * 100) : 0;
+    const heads = (d.shortfall || []).reduce((a, r) =>
+      a + Math.max(0, (+r.expected_per_occurrence || 0) - (+r.drivers_per_occurrence || 0)), 0);
+    verdict(root, {
+      claim: short
+        ? `${fmt(short)} ${plural(short, 'hour')} of the week ${short === 1 ? 'is' : 'are'} short of people`
+        : 'Every hour of the week is covered for the forecast',
+      figure: short ? fmt(Math.ceil(heads)) : fmt(spare),
+      unit: short ? 'driver-shifts short' : 'hours with people to spare',
+      tone: shortPct >= 25 ? 'bad' : short ? 'warn' : null,
+      meta: `${fmt(d.target_bookings)} bookings expected in ${MONTH(d.target_month)}`,
+      sub: `${fmt(spare)} ${plural(spare, 'hour')} ${spare === 1 ? 'has' : 'have'} people to spare, so `
+        + 'some of this is a rota that can be moved rather than people who have to be hired.'
+        + (d.forecast_kind === 'extrapolation'
+          ? ' The forecast behind it is an extrapolation, not a fitted model — read the range, not the point.'
+          : ''),
+      recommend: short
+        ? 'Each hour below opens its own slot page, with who currently works it.'
+        : null,
+    });
+  }
+
   root.append(kpiRow([
     { label: `Bookings expected in ${MONTH(d.target_month)}`, value: fmt(d.target_bookings),
       sub: d.target_low != null ? `${fmt(d.target_low)} – ${fmt(d.target_high)}` : null,

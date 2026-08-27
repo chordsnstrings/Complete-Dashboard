@@ -2088,6 +2088,31 @@ V.safety = async (root) => {
       + 'telematics layer — check Collection gaps before reading that as good news.'));
     return;
   }
+
+  /* Verified against /api/alerts/summary: it returns [{alert_type, n}] and
+     nothing else, so every rate on this page has to come from the vehicle and
+     driver totals beside it rather than from this array. */
+  {
+    const top = [...byType].sort((a, b) => b.n - a.n)[0];
+    const tracked = +fleetK?.tracked_vehicles || vTot.vehicles || 0;
+    const per = tracked ? Math.round(total / tracked) : null;
+    const worst = (byDrv || [])[0];
+    verdict(host, {
+      claim: top
+        ? `${top.alert_type} is ${Math.round((top.n / total) * 100)}% of every event the trackers raised`
+        : `${fmt(total)} harsh-driving events`,
+      figure: per != null ? fmt(per) : fmt(total),
+      unit: per != null ? 'events per tracked vehicle' : 'events',
+      tone: null,
+      meta: tracked ? `${fmt(tracked)} tracked vehicles` : null,
+      sub: `${fmt(total)} events across ${fmt(byType.length)} ${plural(byType.length, 'type')}.`
+        + (worst?.driver_name
+          ? ` The highest rate belongs to ${worst.driver_name}; a rate is only comparable per 100 km, `
+            + 'which is what the table below ranks on.'
+          : '')
+        + ' These come from the telematics box, so no channel filter narrows them.',
+    });
+  }
   /* A tracker losing power is a hardware fault, not a driving style. Charted
      together they were one number under a heading about harsh driving. */
   const DEVICE = /power|battery|tamper|disconnect|gps/i;
@@ -2265,6 +2290,7 @@ V.safety = async (root) => {
 };
 
 V.unauthorized = async (root) => {
+  const vuHost = el('div'); root.append(vuHost);
   const kh = el('div', 'kpis'); root.append(kh);
   const g = el('div', 'grid g23'); root.append(g);
   const trend = panel('Occupancy per day', 'Unexplained intervals against every occupancy interval seen'); g.append(trend.panel);
@@ -2287,6 +2313,34 @@ V.unauthorized = async (root) => {
   // {rows, total, shown, truncated} — tolerant of the old bare array.
   const vehRows = byVeh.rows || (Array.isArray(byVeh) ? byVeh : []);
   const t = sum.totals || {};
+
+  /* Verified against /api/unauthorized/summary on production before writing
+     the sentence: totals carries unauthorized, authorized, unverifiable,
+     pending, partial, stationary, segments, unauth_km, needs_a_human. */
+  {
+    const unauth = +t.unauthorized || 0;
+    const human = +t.needs_a_human || 0;
+    const segs = +t.segments || 0;
+    const km = +t.unauth_km || 0;
+    verdict(vuHost, {
+      claim: unauth
+        ? `${countOf(unauth, 'journey')} moved a car with no booking behind it`
+        : segs ? 'Every journey in this window has a booking behind it'
+          : 'No telematics journey in this window',
+      figure: unauth ? fmt(unauth) : fmt(+t.authorized || 0),
+      unit: unauth ? 'unauthorized' : 'accounted for',
+      tone: unauth ? 'bad' : null,
+      meta: segs ? `${fmt(segs)} journeys examined` : null,
+      sub: `${fmt(km)} km ran under those journeys.`
+        + (human ? ` ${fmt(human)} more ${plural(human, 'journey')} cannot be decided by the `
+          + 'data alone and are waiting on a person.' : '')
+        + (+t.partial ? ` ${fmt(t.partial)} are partial matches — a booking covers some of the `
+          + 'movement and not all of it.' : ''),
+      recommend: unauth
+        ? 'Each one opens its own segment page with the trace and the bookings it was compared against.'
+        : null,
+    });
+  }
   const segTotal = (sum.byVerdict || []).reduce((a, r) => a + (+r.n || 0), 0);
   /* Five tiles accounted for 299 of 382 segments. `stationary` and
      `unverifiable` were in the donut beside them and had no tile, so the

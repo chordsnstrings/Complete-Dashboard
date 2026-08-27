@@ -10,7 +10,7 @@
 
 import { hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, money, pct,
-  countOf, plural, sourceLabel, foldRows } from './ui.js';
+  countOf, plural, sourceLabel, foldRows, verdict } from './ui.js';
 import { q, href, hrefFilter, state, currentGen, alive } from './data.js';
 
 /* How many bars and wave rows this page draws. One constant, used by the
@@ -111,6 +111,37 @@ export async function renderCorridors(root) {
   const totalOrigin = named.reduce((a, o) => a + o.trips, 0);
   const t = c.totals || {};
   kpiHost.innerHTML = '';
+  /* This page rolls addresses into areas, and the fact that decides whether any
+     of it can be trusted is how many pickups carry an address at all. */
+  {
+    /* `pickups_all` and `pickups_named` — the fields the endpoint really sends.
+       Checked against production before writing the sentence, having shipped
+       three verdicts today that read a field name I had assumed. */
+    const all = +t.pickups_all || 0;
+    const withArea = +t.pickups_named || 0;
+    const noArea = all ? ((all - withArea) / all) * 100 : 0;
+    const top = named[0];
+    const topPct = top && withArea ? Math.round((top.trips / withArea) * 100) : 0;
+    verdict(kpiHost, {
+      /* Not escaped here: verdict() escapes the claim it is given, and doing it
+         twice renders an area called "Al Qouz 1 & 2" as "Al Qouz 1 &amp; 2". */
+      claim: noArea >= 20
+        ? `${Math.round(noArea)}% of pickups carry no usable address`
+        : top
+          ? `${top.area} is the busiest pickup area — ${topPct}% of addressed jobs`
+          : 'No addressed pickup in this window',
+      figure: noArea >= 20 ? `${Math.round(100 - noArea)}%` : fmt(t.corridors_3plus ?? c.corridors.length),
+      unit: noArea >= 20 ? 'addressed' : 'corridors seen 3+ times',
+      tone: noArea >= 40 ? 'bad' : noArea >= 20 ? 'warn' : null,
+      meta: `${fmt(t.origins_all ?? named.length)} pickup areas`,
+      sub: `${fmt(withArea)} of ${fmt(all)} pickups carry an address. `
+        + (noArea >= 20
+          ? 'Every share on this page is over those — a corridor is only as real as the addresses behind it.'
+          : `They roll into ${fmt(t.origins_all ?? named.length)} areas and `
+            + `${fmt(t.corridors_all ?? c.corridors.length)} origin–destination pairs.`),
+    });
+  }
+
   kpiHost.append(kpiRow([
     { label: 'Distinct pickup areas', value: fmt(t.origins_all ?? named.length),
       sub: named.length > SHOWN
