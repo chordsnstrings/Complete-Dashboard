@@ -6,7 +6,7 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBa
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
-  verdict, dominantBar, foldRows} from './ui.js';
+  verdict, dominantBar, foldRows, foldChildren} from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
@@ -3066,7 +3066,12 @@ V.insights = async (root) => {
         </div>`;
       list.append(item);
     });
-    listPanel.body.append(list);
+    /* 24,270px of cards. Each carries a claim, a size, the arithmetic behind
+       the size and a link to the evidence — right for the ones being acted on,
+       and unreadable for all of them at once. The list is ranked, so the first
+       few ARE the ones to act on. */
+    foldChildren(listPanel.body, list,
+      { shown: 6, total: rows.length, noun: 'action', key: 'insights' });
     if (rows.some((r) => r.impact_kind === 'modelled' || r.code === 'idle_vehicle')) {
       listPanel.body.append(el('p', 'cap',
         '* a modelled figure — what it would cost if an assumption holds — never a measurement, and '

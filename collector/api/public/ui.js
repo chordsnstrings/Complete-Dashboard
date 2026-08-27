@@ -811,6 +811,41 @@ export function exportRow(bookings = null) {
 
 export { fmt, empty };
 
+/* ── the same fold, for things that are not tables ────────────────────────
+   The action list is 24,270px — twenty-four laptop screens — and it is a list
+   of CARDS, so foldRows cannot reach it: there is no tbody to hide rows in.
+   Every argument for folding a 361-row table applies to a 200-card list, and
+   more strongly, because a card is taller than a row.
+
+   Takes the container and hides its children past `shown`. Same control, same
+   remembered choice, same rule: folded, never truncated. */
+export function foldChildren(host, box, { shown = 8, total = null, noun = 'item', key = null } = {}) {
+  host.append(box);
+  const kids = [...box.children];
+  const n = total ?? kids.length;
+  const hidden = Math.max(0, n - shown);
+  if (!hidden || !kids.length) return;
+  const K = key ? `fold:${key}` : null;
+  let open = false;
+  try { open = K ? localStorage.getItem(K) === 'open' : false; } catch { open = false; }
+  const btn = el('button', 'foldbtn');
+  const apply = () => {
+    kids.forEach((c, i2) => { c.hidden = !open && i2 >= shown; });
+    btn.textContent = open
+      ? `Show fewer — the first ${fmt(shown)}`
+      : `Show the other ${fmt(hidden)} ${plural(hidden, noun)} →`;
+    btn.setAttribute('aria-expanded', String(open));
+  };
+  btn.addEventListener('click', () => {
+    open = !open;
+    try { if (K) localStorage.setItem(K, open ? 'open' : 'shut'); } catch { /* not essential */ }
+    apply();
+  });
+  apply();
+  host.append(btn);
+}
+
+
 /* ── the verdict band ──────────────────────────────────────────────────────
    Every page in this product opened with a title, a subtitle and then data. A
    reader had to do the interpreting themselves, on all 32 of them: the fleet
