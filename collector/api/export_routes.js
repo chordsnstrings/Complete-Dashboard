@@ -22,12 +22,30 @@
    which window WOULD fit, rather than handing back a plausible lie. */
 import { once } from 'node:events';
 
-/* The default cap. Overridable ONLY so a test can exercise the refusal against
-   a handful of rows instead of needing to seed two hundred thousand — the
-   alternative was a regex over this file asserting the refusal exists, which
-   is a check that the words are present, not that the arithmetic is right. It
-   was wrong: see the comment on the walk-back below. */
-const MAX_ROWS = 200000;
+/* The cap, set from a measurement rather than a round number.
+   ─────────────────────────────────────────────────────────────────────────
+   200,000 was picked when this buffered the whole file in memory, and it was
+   above what the instance could survive — the refusal recommended a window
+   that OOM-killed the container. Streaming took memory out of it, so the
+   remaining cost is time. Measured on the production instance (basic-xxs,
+   managed PG in the same region), streaming runs about 15µs a row over ~0.7s
+   of fixed cost:
+
+       2,864 rows  →  1.0s        31,657 rows  →  2.8s
+      11,870 rows  →  1.7s       199,916 rows  → 12.9s   (72MB)
+
+   400,000 is roughly 25 seconds, and about 1.7× the whole record as it stands
+   (238,333 bookings over 863 days), so "export everything" now succeeds
+   instead of being refused for a reason that no longer exists. It stays a cap
+   rather than becoming unlimited because the record grows by ~700 bookings a
+   day and a request that would take minutes should be told so, not attempted.
+
+   Overridable ONLY so a test can exercise the refusal against a handful of
+   rows instead of needing to seed four hundred thousand — the alternative was
+   a regex over this file asserting the refusal exists, which is a check that
+   the words are present, not that the arithmetic is right. It was wrong: see
+   the comment on the walk-back below. */
+const MAX_ROWS = 400000;
 
 /* Declared, not discovered.
    ─────────────────────────────────────────────────────────────────────────

@@ -761,7 +761,11 @@ export const note = (text, tone) => el('div', `note${tone ? ' ' + tone : ''}`, e
    truncating it (api/export_routes.js), and a refusal arriving as a downloaded
    file full of JSON is a worse answer than a link that says up front why it is
    not offered. */
-export const CSV_MAX_ROWS = 200000;
+/* Must equal MAX_ROWS in api/export_routes.js — a browser module cannot import
+   a server one, so test/export_csv.test.mjs asserts the two agree. A page
+   guard set below the server's refuses downloads that would have worked; set
+   above it, the refusal arrives as a file full of JSON. */
+export const CSV_MAX_ROWS = 400000;
 
 /**
  * A download line for the trip export.

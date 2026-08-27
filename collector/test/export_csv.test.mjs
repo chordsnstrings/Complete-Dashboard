@@ -243,6 +243,20 @@ check('and still points at the two ways out that do work',
   /one fleet/.test(nf.detail || '') && /grain=day/.test(nf.detail || ''), nf.detail);
 tinySrv.close(); nfSrv.close();
 
+/* ── the page's copy of the limit must be the server's ──────────────────── */
+/* The download link is drawn or withheld by a constant in api/public/ui.js,
+   because the page already knows the row count and a refusal that arrives as a
+   downloaded file full of JSON is a poor answer. A browser module cannot
+   import a server one, so the two numbers are written twice — and two numbers
+   that must agree, with nothing checking, is a number that will disagree. Set
+   too low, the page refuses downloads that would have worked; too high, it
+   offers one the server will refuse. */
+const uiSrc = (await import('node:fs')).readFileSync('api/public/ui.js', 'utf8');
+const uiMax = Number((uiSrc.match(/CSV_MAX_ROWS\s*=\s*(\d+)/) || [])[1]);
+const srvMax = Number((src.match(/const MAX_ROWS\s*=\s*(\d+)/) || [])[1]);
+check('the page and the server agree on the row limit',
+  uiMax > 0 && uiMax === srvMax, `ui ${uiMax} vs server ${srvMax}`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();
 process.exit(fail ? 1 : 0);
