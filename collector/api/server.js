@@ -1969,7 +1969,7 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
    request it was about to throw away. A row per request, and a duplicate of
    something already pending is REFUSED rather than merged, because "queued"
    for a job that will never run is the same lie in a different shape. */
-const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe'];
+const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster'];
 /* The fleets a run can be narrowed to. Taken from the configured Uber orgs
    rather than written down twice: a third fleet is a credential the operator
    pastes, not a code change, and a list that has to be edited alongside is a

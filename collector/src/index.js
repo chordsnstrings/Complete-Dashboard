@@ -143,6 +143,14 @@ async function main() {
           if (job.mode === 'backfill') await backfill(progress, job.fleet || null);
           else if (job.mode === 'analyst') await analystPass();
           else if (job.mode === 'probe') await probePass();
+          /* `timeline` runs the availability pull on demand. It has its own
+             three-hourly cron, which means a freshly pasted supplier session
+             cannot be checked for three hours — and Uber serves only 31 days
+             of this data, so a session that turns out to be broken has already
+             cost history that cannot be recovered later. `timeline-roster`
+             sweeps the whole roster rather than the drivers who drove. */
+          else if (job.mode === 'timeline') await uberTimelineTick();
+          else if (job.mode === 'timeline-roster') await uberTimelineTick({ roster: true, days: 30 });
           else await incremental(progress, job.fleet || null);
           await pool.query(
             `UPDATE collector_job SET status='done', finished_at=now() WHERE id=$1`, [job.id]);
