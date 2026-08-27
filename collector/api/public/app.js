@@ -11,7 +11,7 @@ import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
 import { volatilePath } from './swr.js';
-import { fleetVerdict } from './verdicts.js';
+import { fleetVerdict, shareOf } from './verdicts.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCauses } from './causes.js';
@@ -1433,6 +1433,7 @@ V.platforms = async (root) => {
 };
 
 async function platformShare(root) {
+  const vHost = el('div'); root.append(vHost);
   const g = el('div', 'grid g2'); root.append(g);
   const share = panel('Trips by platform', 'Share of total volume'); g.append(share.panel);
   const fleetMix = panel('Trips by fleet', 'Ecosine vs Egari'); g.append(fleetMix.panel);
@@ -1456,6 +1457,43 @@ async function platformShare(root) {
      now sets the platform filter and goes to the driver directory — the same
      answer, on a page with the search box, the compliance columns and an
      address that carries the filter with it. */
+  /* ── one bar, not a ring ────────────────────────────────────────────────
+     The shape of this fact is "one of these is almost all of it", and a
+     six-colour donut makes a reader measure angles to discover that. The bar
+     names the leader inside itself and lists what every other channel is
+     worth underneath, with the ones that report NOTHING kept in the list —
+     a channel absent from a chart reads as a channel that does not exist,
+     and Bolt existing and delivering nothing is a fact about this fleet. */
+  {
+    const v = fleetVerdict({ kpis: { trips: byPlat.reduce((a, r) => a + shareOf(r), 0) }, daily: [], byPlatform: byPlat });
+    const total = v.charted;
+    const dead = plats.filter((r) => !byPlat.some((b) => b.label === r.platform)
+      && !(+r.window_bookings));
+    verdict(vHost, {
+      claim: v.branch === 'single-channel'
+        ? `This is a single-channel fleet — ${sourceLabel(v.lead.label)} is ${v.leadPct}% of the work`
+        : `${fmt(total)} bookings across ${byPlat.length} ${plural(byPlat.length, 'channel')}`,
+      figure: v.branch === 'single-channel' ? `${v.leadPct}%` : fmt(total),
+      unit: v.branch === 'single-channel' ? `on ${sourceLabel(v.lead.label)}` : 'bookings',
+      meta: `${fmt(total)} bookings this window`,
+      sub: dead.length
+        ? `${dead.map((r) => sourceLabel(r.platform)).join(', ')} `
+          + `${dead.length === 1 ? 'is configured and has' : 'are configured and have'} delivered nothing `
+          + 'in this window — every rate computed "per platform" for those is arithmetic over no rows.'
+        : 'Every configured channel delivered bookings in this window.',
+      recommend: v.branch === 'single-channel'
+        ? `Any figure this product reports "per platform" is ${sourceLabel(v.lead.label)}'s figure for `
+          + `${v.leadPct}% of its weight. Read the others as samples, not as rates.`
+        : null,
+    });
+    dominantBar(vHost, byPlat.map((r, i) => ({
+      label: sourceLabel(r.label), value: shareOf(r), cls: `c${i + 1}`,
+      note: r.revenue ? `${money(r.revenue)} reported` : 'reports no money on the trip',
+    })).concat(dead.map((r) => ({
+      label: sourceLabel(r.platform), value: 0, cls: 'dead', note: 'no booking in this window',
+    }))), { total, unitLabel: `${fmt(total)} bookings this window · click a slice below to filter the dashboard` });
+  }
+
   /* Same raw-label donut as the one on the fleet's front page. */
   donut(share.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
     { onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'drivers', param: null, sub: null }) });

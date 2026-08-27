@@ -16,7 +16,7 @@
    collector that needs a credential, and naming it is the point. */
 import { empty, fmt, hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, pct,
-  dayStr, dateStr, dtStr, sourceLabel, countOf, plural } from './ui.js';
+  dayStr, dateStr, dtStr, sourceLabel, countOf, plural, verdict } from './ui.js';
 import { q, href, hrefFilter, state } from './data.js';
 
 const BASIS = {
@@ -62,6 +62,50 @@ export async function renderRevenue(root) {
   }
 
   const t = d.totals;
+
+  /* This page exists to say which channels report money and which do not, and
+     it opened on six tiles of totals. The single most misread figure in the
+     product is "money in", and the reason it is misread is DARK bookings — work
+     that happened and that no channel has told us the price of. */
+  {
+    const dark = t.dark_pct;
+    const lead = [...live].sort((a, b) => (+b.bookings || 0) - (+a.bookings || 0))[0];
+    const leadPct = lead && t.bookings ? Math.round((lead.bookings / t.bookings) * 100) : 0;
+    /* A channel that reports bookings and no money at all. That is the shape
+       Uber has here, and it is the whole reason this page exists. */
+    const silent = live.filter((r) => !(+r.accounted));
+    let claim, figure, unit, tone = null, recommend = null;
+    if (dark != null && dark >= 50) {
+      tone = 'bad';
+      claim = `${Math.round(dark)}% of bookings carry no money at all`;
+      figure = `${Math.round(100 - dark)}%`; unit = 'accounted for';
+      recommend = silent.length
+        ? `${silent.map((r) => sourceLabel(r.platform)).join(', ')} report `
+          + `${silent.length === 1 ? 'bookings' : 'bookings'} and no fare. Every per-booking rate in `
+          + 'this product is computed over the minority that do.'
+        : 'Every per-booking rate in this product is computed over the minority that report a price.';
+    } else if (silent.length) {
+      tone = 'warn';
+      claim = `${silent.map((r) => sourceLabel(r.platform)).join(' and ')} `
+        + `${silent.length === 1 ? 'reports' : 'report'} work and no money`;
+      figure = fmt(silent.reduce((a, r) => a + (+r.bookings || 0), 0)); unit = 'bookings, no fare';
+      recommend = 'Their money arrives in the weekly payout statement instead, which is what '
+        + '"Bank reconciliation" and "On-trip revenue" above are reading.';
+    } else {
+      claim = leadPct >= 80
+        ? `${sourceLabel(lead.platform)} is ${leadPct}% of the work and ${
+          t.accounted ? money(t.accounted) : 'no money'} of the money`
+        : `${fmt(live.length)} channels reported money this window`;
+      figure = t.accounted != null ? money(t.accounted) : '—'; unit = 'accounted for';
+    }
+    verdict(host, {
+      claim, figure, unit, tone, recommend,
+      meta: `${fmt(t.bookings)} bookings`,
+      sub: `${fmt(t.accounted_bookings)} of ${fmt(t.bookings)} bookings have a price behind them`
+        + `${t.priced_bookings != null ? `, and ${fmt(t.priced_bookings)} carry a fare on the trip itself` : ''}.`,
+    });
+  }
+
   host.append(kpiRow([
     { label: 'Accounted for', value: t.accounted != null ? money(t.accounted) : '—',
       sub: `across ${fmt(t.accounted_bookings)} of ${fmt(t.bookings)} bookings`,
