@@ -23,6 +23,7 @@ import { uberOAuthToken, uberWebHeaders } from '../src/auth/uber.js';
 import { probeEarnerWindow } from '../src/sources/uber.js';
 import { loadSettings } from '../src/settings.js';
 import { log } from '../src/log.js';
+import { isAdmin } from './admin_gate.js';
 
 /* The org a probe asks about: the first with a full credential pair. The
    legacy fields carry Ecosine's values where they are set, but on a component
@@ -147,6 +148,67 @@ export function probeRoutes(app, { wrap }) {
       columns: header.map((h, i) => {
         const vals = new Set(cells.map((c) => (c[i] || '').replace(/^"|"$/g, '')).filter(Boolean));
         return { column: h, distinct_seen: vals.size, values: vals.size <= 12 ? [...vals] : null };
+      }),
+    });
+  }));
+
+  /* ── which orgs can this OAuth credential actually see? ───────────────────
+     The REST surface is keyed on an ENCRYPTED org id, a different identifier
+     from the uuid the GraphQL and report surfaces use, and one cannot be
+     derived from the other. It is issued by this endpoint and nowhere else —
+     it is not in the supplier portal, not in the session cookie, and not in
+     any payload the web app renders. An org whose encrypted id nobody has
+     pasted is therefore invisible to every REST-keyed source, live driver
+     status and per-driver online hours among them, and pullLive skips it
+     silently. That is the state Egari is in, and this is the only way out of
+     it that does not involve reading the client secret off a server.
+
+     Gated on isAdmin, NOT on the adminGate middleware its neighbours would
+     suggest. adminGate deliberately runs OPEN while ADMIN_TOKEN is unset —
+     right for writes on an unconfigured instance, wrong here: redactSettings()
+     withholds exactly this value from anonymous readers, on the grounds that
+     the org ids "together are most of what somebody needs to impersonate the
+     fleet to its providers", and a route that prints it to any caller would
+     quietly undo that. Strict is the only correct reading for this one. */
+  app.get('/api/probe/uber/orgs', wrap(async (req, res) => {
+    if (!isAdmin(req)) {
+      return res.status(403).json({ error: 'admin only',
+        detail: 'This route prints an org credential in clear. Send x-admin-token; '
+          + 'if ADMIN_TOKEN is unset on this instance the route stays closed.' });
+    }
+    await loadSettings();
+    const token = await uberOAuthToken();
+    const { data, status } = await http('https://api.uber.com/v1/vehicle-suppliers/orgs', {
+      timeoutMs: 30000, retries: 0, headers: { authorization: `Bearer ${token}` },
+    });
+    const list = Array.isArray(data) ? data
+      : Object.values(data || {}).find((v) => Array.isArray(v)) || [];
+
+    /* Which settings key each org belongs in, so the answer is a filling-in
+       exercise rather than a matching one. Matched on uuid when the payload
+       carries one and on name when it does not — the response shape is the
+       provider's to change, and a hint that degrades is better than a crash. */
+    const byUuid = new Map();
+    for (const o of (config.uber.orgs || [])) {
+      if (o.orgUuid) byUuid.set(String(o.orgUuid), o.fleet);
+    }
+    const fleetOf = (o) => byUuid.get(String(o.uuid ?? o.orgUUID ?? ''))
+      || (/egari/i.test(o.name || '') ? 'egari' : /ecosine/i.test(o.name || '') ? 'ecosine' : null);
+    const KEY = { ecosine: 'UBER_ORG_ENCRYPTED', egari: 'UBER_ORG_ENCRYPTED_EGARI' };
+
+    res.json({
+      status: status || 200,
+      count: list.length,
+      orgs: list.map((o) => {
+        const fleet = fleetOf(o);
+        return {
+          name: o.name ?? o.orgName ?? null,
+          org_id: o.id ?? o.orgId ?? null,          // the encrypted id — the point of this route
+          uuid: o.uuid ?? o.orgUUID ?? null,
+          types: o.types ?? o.orgTypes ?? null,
+          fleet,
+          setting_key: fleet ? KEY[fleet] : null,
+        };
       }),
     });
   }));
