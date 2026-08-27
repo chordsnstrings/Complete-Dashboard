@@ -19,7 +19,7 @@
 
 import { empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, pill, note, dayStr, dateStr, fmt, pct,
-  sourceLabel, countOf, plural, signed } from './ui.js';
+  sourceLabel, countOf, plural, signed, verdict } from './ui.js';
 import { api, qChan, href, hrefFilter } from './data.js';
 
 /* How much of a partial month is actually in the record.
@@ -198,6 +198,7 @@ function breakCard(b) {
 }
 
 export async function renderCauses(root) {
+  const vcHost = el('div'); root.append(vcHost);
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const trend = panel('Trips per month', 'Click a month to see what was happening. Hatched columns are months we hold no data for.');
   root.append(trend.panel);
@@ -246,6 +247,34 @@ export async function renderCauses(root) {
   const allBreaks = [...(t.breaks || [])].sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
   const artifacts = allBreaks.filter((b) => b.boundary_artifact);
   const biggest = allBreaks.find((b) => !b.boundary_artifact) || allBreaks[0];
+
+  /* Fields read off the monthly trend and /api/breaks on production: a break
+     carries change_pct, from, to, boundary_artifact and the supply/demand
+     decomposition. The page's whole job is separating "the fleet changed" from
+     "we started collecting", and the artefact is always the biggest number on
+     it — +377% between eleven days of August and a whole September. */
+  {
+    const gapMonths = (t.gaps || []).reduce((a, x) => a + x.months, 0);
+    const real = allBreaks.filter((b) => !b.boundary_artifact);
+    verdict(vcHost, {
+      claim: biggest && !biggest.boundary_artifact
+        ? `The largest real move is ${signed(biggest.change_pct, { unit: '%' })}, `
+          + `${MONTH(biggest.from)} to ${MONTH(biggest.to)}`
+        : artifacts.length
+          ? 'Every move above 30% is a collection boundary, not something the fleet did'
+          : `${fmt(observed.length)} months on record with no structural break`,
+      figure: fmt(real.length), unit: 'real breaks',
+      tone: gapMonths ? 'warn' : null,
+      meta: `${observed.length} of ${months.length} months observed`,
+      sub: (artifacts.length
+        ? `${fmt(artifacts.length)} of the ${fmt(allBreaks.length)} moves touch a partial month, `
+          + 'which is when we started collecting rather than anything the fleet did. '
+        : '')
+        + (gapMonths
+          ? `${fmt(gapMonths)} months have no data at all, so any trend drawn across them is drawn across nothing.`
+          : 'The run of months is complete.'),
+    });
+  }
 
   kpiHost.replaceWith(kpiRow([
     { label: 'Months observed', value: `${observed.length} of ${months.length}`,

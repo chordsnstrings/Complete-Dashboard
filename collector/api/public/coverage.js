@@ -12,7 +12,7 @@
 
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, dayStr, dateStr,
-  sourceLabel, countOf, plural } from './ui.js';
+  sourceLabel, countOf, plural, verdict } from './ui.js';
 import { dubaiDay } from './tz.js';
 import { q, api, state, href, currentGen, alive } from './data.js';
 
@@ -42,6 +42,37 @@ export async function renderCoverage(root) {
 
   const holed = c.sources.filter((s) => s.missing_days > 0);
   const winHoled = win ? win.sources.filter((s) => s.missing_days > 0) : [];
+
+  /* Fields read off /api/coverage/calendar on production: each source carries
+     total_rows, days_with_data, first_day, last_day, median_rows_per_day,
+     gaps, missing_days, days.
+
+     A hole here makes every rate computed across it wrong, on every other page
+     in the product. That is the strongest claim any page in this app can make,
+     and it was six tiles. */
+  {
+    const missing = c.sources.reduce((a, x) => a + (+x.missing_days || 0), 0);
+    const worst = [...holed].sort((a, b) => b.missing_days - a.missing_days)[0];
+    verdict(root, {
+      claim: missing
+        ? `${fmt(missing)} ${plural(missing, 'day')} ${missing === 1 ? 'is' : 'are'} missing from the record`
+        : 'Every source has a row for every day it has been collecting',
+      figure: fmt(holed.length), unit: 'sources with a hole',
+      tone: missing ? (holed.length > 1 ? 'bad' : 'warn') : null,
+      meta: `${fmt(c.sources.length)} sources`,
+      sub: worst
+        ? `The worst is ${sourceLabel(worst.source)}, missing ${fmt(worst.missing_days)} of the days `
+          + `between ${String(worst.first_day).slice(0, 10)} and ${String(worst.last_day).slice(0, 10)}. `
+          + 'Every figure counted inside a source’s own span is only over the days it actually has.'
+        : 'Counted inside each source’s own collecting span — a source that started in July is not '
+          + 'missing June.',
+      recommend: missing
+        ? 'Any rate on any page that crosses one of these gaps is an average over the days that '
+          + 'were collected, not over the days that happened.'
+        : null,
+    });
+  }
+
   root.append(kpiRow([
     { label: 'Sources with data', value: fmt(c.sources.length), sub: 'over the whole record' },
     { label: 'Sources with a hole', value: fmt(holed.length),

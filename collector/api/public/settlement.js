@@ -14,7 +14,7 @@
 
 import { donut, hbars, stackedBar, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
-  dayStr, dateStr, dtStr, timeStr, money, pct, sourceLabel, countOf, plural } from './ui.js';
+  dayStr, dateStr, dtStr, timeStr, money, pct, sourceLabel, countOf, plural, verdict } from './ui.js';
 import { q, href, state } from './data.js';
 
 export const SETTLE_TABS = [
@@ -161,6 +161,33 @@ async function settleCash(host) {
     ? (rev.totals.cash != null || rev.totals.statement_cash != null
       ? (+rev.totals.cash || 0) + (+rev.totals.statement_cash || 0) : null)
     : null;
+  /* Fields read off /api/settlement/cash-exposure on production:
+     total_cash_trips, total_cash_value_known, value_known_pct, and the
+     per-driver rows. Cash in a driver's hand is the fleet's money somewhere
+     else, and the number that matters is how much of it we cannot even see —
+     a cash booking with no fare on it is real money with no figure attached. */
+  {
+    const known = +c.total_cash_value_known || 0;
+    const seen = c.value_known_pct == null ? null : +c.value_known_pct;
+    const blind = seen == null ? null : Math.round(100 - seen);
+    verdict(host, {
+      claim: blind
+        ? `${blind}% of cash bookings carry no fare at all`
+        : known ? `${money(known)} is in drivers’ hands` : 'No cash booking in this window',
+      figure: money(known), unit: 'we can put a figure on',
+      tone: blind != null && blind >= 40 ? 'warn' : null,
+      meta: `${fmt(c.total_cash_trips)} cash bookings`,
+      sub: blind
+        ? `The figure above is over the ${Math.round(seen)}% that report one — the rest is real money `
+          + 'with no number against it, so this is a floor and not a total.'
+        : 'Every cash booking in this window reports a fare.',
+      recommend: reported != null && reported > known
+        ? `The platforms' own statements say ${money(reported)} — a different measurement of the same `
+          + 'money, and the larger of the two.'
+        : null,
+    });
+  }
+
   host.append(kpiRow([
     { label: 'Cash bookings', value: fmt(c.total_cash_trips), sub: 'driver collected the money directly' },
     { label: 'Value we can see', value: money(c.total_cash_value_known),

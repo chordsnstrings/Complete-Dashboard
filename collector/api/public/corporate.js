@@ -20,7 +20,7 @@
 
 import { donut, hbars, areaChart, stackedBar, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
-  dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural, noneChosen} from './ui.js';
+  dayStr, dateStr, dtStr, money, pct, tripTime, sourceLabel, countOf, plural, noneChosen, verdict } from './ui.js';
 import { q, qAll, href, state } from './data.js';
 
 /* Why a whole column is empty, in the words the page prints under it. Shared
@@ -65,6 +65,39 @@ async function corpOverview(host) {
   // per booking; the API says whether what it stored as `cost` is genuinely a
   // second figure, and if it is not there is no margin to show.
   const grossMargin = s.has_cost ? s.revenue - s.cost : null;
+
+  /* Fields read off /api/corporate/summary on production: bookings, priced,
+     revenue, cost, km, deadhead_km, deadhead_measured, foc_trips,
+     overrun_trips, scheduled_trips.
+
+     This is the one channel that reports a cost, a property and a guest — so
+     it is the only one where a booking given away for free is visible as such.
+     That, and the empty kilometres driven to reach the pickup, are what the
+     channel is actually costing. */
+  {
+    const dead = +s.deadhead_km || 0;
+    const km = +s.km || 0;
+    const deadPct = km ? Math.round((dead / (km + dead)) * 100) : 0;
+    const foc = +s.foc_trips || 0;
+    verdict(kpiHost, {
+      claim: foc
+        ? `${countOf(foc, 'booking')} ${foc === 1 ? 'was' : 'were'} given away`
+        : s.deadhead_measured && deadPct
+          ? `${deadPct}% of the kilometres on this channel are empty`
+          : `${fmt(s.bookings)} corporate bookings`,
+      figure: s.revenue != null ? money(s.revenue) : fmt(s.bookings),
+      unit: s.revenue != null ? 'reported' : 'bookings',
+      tone: foc ? 'warn' : null,
+      meta: `${fmt(s.bookings)} bookings`,
+      sub: (s.deadhead_measured
+        ? `${fmt(dead)} km were driven to reach a pickup and carried nobody. `
+        : 'Empty kilometres are not measured on this channel. ')
+        + (s.priced != null && s.priced < s.bookings
+          ? `${fmt(s.bookings - s.priced)} of these bookings carry no price at all.`
+          : 'Every booking carries a price.'),
+    });
+  }
+
   kpiHost.append(kpiRow([
     { label: 'Bookings', value: fmt(s.bookings), sub: `${s.properties} properties · ${s.guests} guests` },
     { label: 'Revenue', value: money(s.revenue), sub: `over ${fmt(s.priced)} priced bookings` },
