@@ -39,6 +39,7 @@
        WIDTH=412 node bin/prod-shot-all.mjs      # shoot it as a phone
        ONLY=roster,vehicles node bin/prod-shot-all.mjs
        OUT=/tmp/shots node bin/prod-shot-all.mjs
+       QUANT=1 node bin/prod-shot-all.mjs        # an archive you can send
 */
 import { launchChromium } from '../test/browser.mjs';
 import { mkdirSync, writeFileSync, rmSync, statSync } from 'node:fs';
@@ -52,6 +53,15 @@ const ZIP = process.env.ZIP || `${OUT}.zip`;
 const READY_MS = Number(process.env.READY_MS || 30000);
 const SETTLE = Number(process.env.SETTLE || 600);
 const ONLY = (process.env.ONLY || '').split(',').map((s) => s.trim()).filter(Boolean);
+/* Full-height shots of a product with forty-thousand-pixel tables run to eighty
+   megabytes, and PNG is already deflate so the zip takes off about a tenth —
+   past what most places accept as an attachment. QUANT=1 palettes them through
+   pngquant, which is a third of the size for a screenshot of a UI: flat fills,
+   one typeface and a handful of chart colours quantise to 256 without a visible
+   difference, checked against the map page as the only one carrying anything
+   photographic. Off by default, because this doubles as the render audit's
+   evidence and that wants the pixels it shot. */
+const QUANT = process.env.QUANT === '1';
 
 /* ─────────── the pages ───────────
    In sidebar order, so the archive reads like the product. A `:name` is a
@@ -337,6 +347,13 @@ const csv = ['file,group,page,route,width,height,bytes,panels,issues',
     s.bad.join('; ')].map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
 writeFileSync(join(OUT, 'manifest.csv'), `${csv}\n`);
 
+if (QUANT) {
+  try {
+    execFileSync('sh', ['-c', 'ls *.png | xargs -P 8 -I{} pngquant --quality=70-95 --speed 1 '
+      + '--force --ext .png {}'], { cwd: OUT, stdio: 'ignore' });
+  } catch { /* pngquant exits non-zero for a file it cannot better; that one keeps its original */ }
+}
+
 rmSync(ZIP, { force: true });
 try {
   execFileSync('zip', ['-r', '-q', '-9', ZIP, '.'], { cwd: OUT });
@@ -344,7 +361,7 @@ try {
   console.log(`\ncould not zip (${String(e.message).slice(0, 60)}) — the PNGs are in ${OUT}`);
 }
 
-const total = shots.reduce((a, s) => a + s.bytes, 0);
+const total = shots.reduce((a, s) => a + statSync(join(OUT, s.file)).size, 0);
 const broken = shots.filter((s) => s.bad.length);
 console.log(`\n${shots.length} pages · ${(total / 1048576).toFixed(1)} MB of PNG`
   + `${statSync(ZIP, { throwIfNoEntry: false }) ? ` · ${(statSync(ZIP).size / 1048576).toFixed(1)} MB zipped → ${ZIP}` : ''}`);
