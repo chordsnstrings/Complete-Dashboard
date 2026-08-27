@@ -93,7 +93,12 @@ check('and every per-vehicle page', VEHICLE_PAGES.length >= 8, VEHICLE_PAGES.joi
 const deadDriver = [], deadVehicle = [];
 for (const id of drivers) {
   for (const page of DRIVER_PAGES) {
-    const extra = page === '/api/driver/vehicles' ? `&driver=${encodeURIComponent(id)}` : '';
+    /* Two of these carry a required argument beyond the id: /vehicles takes the
+       driver twice under two names, and /day is one CALENDAR day and refuses a
+       request without one — a driver's day page is reached by clicking a bar,
+       so an id alone is not an address it can answer. */
+    const extra = page === '/api/driver/vehicles' ? `&driver=${encodeURIComponent(id)}`
+      : page === '/api/driver/day' ? '&day=2026-08-25' : '';
     const { status } = await get(`${page}?id=${encodeURIComponent(id)}&${WIN}${extra}`);
     if (status !== 200) deadDriver.push(`${page}?id=${id} → ${status}`);
   }
@@ -136,7 +141,8 @@ check('every vehicle a list names opens on every one of its pages',
 {
   const unknown = [];
   for (const page of DRIVER_PAGES) {
-    const extra = page === '/api/driver/vehicles' ? '&driver=no-such-person' : '';
+    const extra = page === '/api/driver/vehicles' ? '&driver=no-such-person'
+      : page === '/api/driver/day' ? '&day=2026-08-25' : '';
     const { status, body } = await get(`${page}?id=no-such-person&${WIN}${extra}`);
     if (status !== 404) unknown.push(`${page} → ${status} ${JSON.stringify(body).slice(0, 60)}`);
   }

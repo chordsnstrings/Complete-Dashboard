@@ -872,6 +872,102 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     });
   }));
 
+  /* ── one driver, one day, minute by minute ────────────────────────────
+     "How the day was spent" answers the shape of a month. This answers a day:
+     every job at its real time with where it went, and — the part that was
+     missing — what happened in the GAPS. A driver page could say somebody
+     waited 7h 36m and could not say whether they were online, where they sat,
+     or whether they moved while they waited.
+
+     Three feeds joined on one clock:
+       trip                     the jobs, with addresses, tier and payment
+       driver_timeline_event    ONLINE spans (sql/schema_v37.sql)
+       telemetry_snapshot       where the car was during each gap
+
+     The telematics side is keyed by PLATE, not by driver, so it is reached
+     through the custody record for that day — which is also why a gap can come
+     back with no position at all and must say so rather than drawing nothing. */
+  app.get('/api/driver/day', withDriver(async (req, res, d) => {
+    const day = String(req.query.day || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      return res.status(400).json({ error: 'a day is addressed as YYYY-MM-DD' });
+    }
+    /* Dubai bounds for the calendar day, built once and reused by all three
+       queries so they cannot disagree about where the day starts. */
+    const p = [d.keys, day];
+
+    const trips = await q(
+      `SELECT external_id, platform, fleet_id, plate,
+              requested_at, ended_at, status, outcome,
+              distance_km, price, currency, product, payment_type,
+              pickup_addr, dropoff_addr,
+              (extract(hour FROM requested_at AT TIME ZONE 'Asia/Dubai') * 60
+               + extract(minute FROM requested_at AT TIME ZONE 'Asia/Dubai'))::int AS s,
+              CASE WHEN ended_at IS NULL THEN NULL ELSE
+                (extract(hour FROM ended_at AT TIME ZONE 'Asia/Dubai') * 60
+                 + extract(minute FROM ended_at AT TIME ZONE 'Asia/Dubai'))::int END AS e,
+              (ended_at IS NOT NULL
+               AND (ended_at AT TIME ZONE 'Asia/Dubai') >= (($2::date) + 1)) AS past_midnight
+         FROM trip_norm
+        WHERE ${PKEY} = ANY($1) AND is_booking
+          AND (requested_at AT TIME ZONE 'Asia/Dubai')::date = $2::date
+        ORDER BY requested_at`, p);
+
+    /* ONLINE spans clipped to this Dubai day. A shift that starts at 21:00 and
+       ends at 03:00 is one span in the data and belongs to two days; this asks
+       only for the part inside the day being drawn. */
+    const online = await q(
+      `WITH ev AS (
+         SELECT at, status, lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
+           FROM driver_timeline_event
+          WHERE driver_ext_id = ANY($1) AND kind = 'status' AND status <> ''
+            AND at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+            AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai'))
+       SELECT greatest(0, extract(epoch FROM (
+                greatest(at AT TIME ZONE 'Asia/Dubai', $2::timestamp) - $2::timestamp))/60)::int AS s,
+              least(1440, extract(epoch FROM (
+                least(next_at AT TIME ZONE 'Asia/Dubai', $2::timestamp + interval '1 day')
+                - $2::timestamp))/60)::int AS e
+         FROM ev
+        WHERE next_at IS NOT NULL AND status = 'ONLINE'
+          AND next_at > (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+        ORDER BY 1`, p);
+
+    /* Where the car was, minute-bucketed. Returned as fixes rather than as
+       per-gap rollups because the gaps are computed on the client from the
+       jobs, and doing it twice in two places is how the two stop agreeing. */
+    const plates = [...new Set(trips.map((t) => t.plate).filter(Boolean))];
+    const fixes = plates.length ? await q(
+      `SELECT plate,
+              (extract(hour FROM captured_at AT TIME ZONE 'Asia/Dubai') * 60
+               + extract(minute FROM captured_at AT TIME ZONE 'Asia/Dubai'))::int AS m,
+              lat, lng, speed
+         FROM telemetry_snapshot
+        WHERE plate = ANY($1)
+          AND (captured_at AT TIME ZONE 'Asia/Dubai')::date = $2::date
+          AND lat IS NOT NULL AND lng IS NOT NULL
+        ORDER BY captured_at`, [plates, day]) : [];
+
+    res.json({
+      day,
+      driver: { id: d.driver_ext_id, name: d.name, keys: d.keys },
+      trips: trips.map((t) => ({
+        ...t,
+        /* Clamped, not wrapped: a dropoff after midnight is minute 20 of the
+           NEXT day, which as a raw number sits before its own request. */
+        e: t.e == null ? null : (t.past_midnight || t.e < t.s ? 1440 : t.e),
+      })),
+      online,
+      fixes,
+      /* Said by the API so every renderer says the same thing. */
+      basis: 'A job runs from the request to the dropoff, so it contains the drive to the rider. '
+        + 'The gaps between jobs are waiting; where the tracker saw the car during one, its '
+        + 'position and how much of it was stationary are shown against that gap.',
+      online_known: online.length > 0,
+    });
+  }));
+
   /* ── weekday × hour: when this person actually works ───────────────── */
   app.get('/api/driver/heatmap', withDriver(async (req, res, d, p) => res.json(await q(
     `SELECT extract(dow from requested_at AT TIME ZONE 'Asia/Dubai')::int dow,

@@ -20,6 +20,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   sourceLabel, plural, countOf, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
+import { renderDriverDay } from './driverday.js';
 
 /* Why a whole column is empty, in the words the page prints under it.
    ─────────────────────────────────────────────────────────────────────────
@@ -34,6 +35,9 @@ import { driversVerdict } from './verdicts.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo } from './map.js';
 
+/* `day` is deliberately NOT in this list. It is a destination reached by
+   clicking a bar on Activity, not a seventh tab somebody picks cold — a tab
+   labelled "Day" with no day chosen has nothing to show. */
 export const DRIVER_TABS = [
   { id: 'overview', label: 'Overview', ic: '◱' },
   { id: 'activity', label: 'Activity', ic: '◷' },
@@ -167,7 +171,7 @@ function startScatter(host, days) {
    The third exists so that missing data is never quietly rendered as idleness.
    Uber reports a dropoff on most trips and none on the others, and folding
    those into the gaps would invent waiting that nobody can verify. */
-function shiftBars(host, days, meta = {}) {
+function shiftBars(host, days, meta = {}, shiftId = null) {
   host.innerHTML = '';
   const rows = (days || []).filter((d) => d.first_min != null).slice(-28);
   if (!rows.length) return empty(host);
@@ -226,7 +230,13 @@ function shiftBars(host, days, meta = {}) {
     const idleMin = d.online ? Math.max(0, onlineMin - (d.on_job_min || 0)) : null;
 
     const share = d.span_min ? Math.round((d.wait_min / d.span_min) * 100) : null;
-    const r = el('div', 'shift');
+    /* A row is an address now. The month view could total a day's waiting and
+       never say what happened inside it; the day page answers that, and the
+       bar for that day is the obvious way in. */
+    const dayKeyStr = String(d.day).slice(0, 10);
+    const to = shiftId ? href('driver', shiftId, 'day') : null;
+    const r = el(to ? 'a' : 'div', `shift${to ? ' clickable' : ''}`);
+    if (to) r.href = `${to}${to.includes('?') ? '&' : '?'}on=${encodeURIComponent(dayKeyStr)}`;
     r.innerHTML = `<div class="sh-d">${dayStr(d.day)}</div>
       <div class="sh-track">${span}${onlineSegs}${segs}</div>
       <div class="sh-v num">${hhmm(d.first_min)}–${d.last_min != null ? hhmm(d.last_min) : '—'}</div>
@@ -575,7 +585,7 @@ async function tabActivity(root, id) {
     qAll('/api/driver/daily', { id }), qAll('/api/driver/custody', { id }),
     qAll('/api/driver/shift', { id })]);
 
-  shiftBars(sh.body, shift.days, shift);
+  shiftBars(sh.body, shift.days, shift, id);
 
   const withHours = daily.filter((d) => d.hours_online != null);
   hrs.body.innerHTML = '';
@@ -1213,6 +1223,15 @@ export async function renderDriver(root, id, tab = 'overview') {
       + 'Everything below is the combined picture.'));
   }
 
+  /* `day` carries its date in the query string rather than in the path,
+     because the router's three slots are already view/param/sub and the sub is
+     the tab. It is reached by clicking a bar on Activity; typed cold with no
+     date it says so rather than rendering an empty timeline. */
+  if (tab === 'day') {
+    const on = new URLSearchParams(location.hash.split('?')[1] || '').get('on');
+    await renderDriverDay(body, id, on);
+    return prof;
+  }
   const fn = TABS[tab] || tabOverview;
   await fn(body, id, prof);
   return prof;

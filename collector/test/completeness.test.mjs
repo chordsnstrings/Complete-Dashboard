@@ -42,6 +42,7 @@ const ARGS = {
   '/api/driver/mix': 'id=u-khalid', '/api/driver/earnings': 'id=u-khalid',
   '/api/driver/quality': 'id=u-khalid', '/api/driver/trips': 'id=u-khalid',
   '/api/driver/custody': 'id=u-khalid', '/api/driver/vehicles': 'driver=u-khalid&id=u-khalid',
+  '/api/driver/day': 'id=u-khalid&day=2026-08-25',
   '/api/vehicle/profile': `plate=${PLATES[0]}`, '/api/vehicle/kpis': `plate=${PLATES[0]}`,
   '/api/vehicle/daily': `plate=${PLATES[0]}`, '/api/vehicle/drivers-detail': `plate=${PLATES[0]}`,
   '/api/vehicle/movement': `plate=${PLATES[0]}`, '/api/vehicle/safety': `plate=${PLATES[0]}`, '/api/vehicle/trips': `plate=${PLATES[0]}`,

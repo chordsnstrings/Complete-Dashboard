@@ -1318,6 +1318,42 @@ const EXPORT_COLS = {
     'driver_ext_id', 'plate', 'pickup_addr', 'dropoff_addr', 'distance_km',
     'product', 'payment_type', 'status', 'outcome', 'price', 'currency'],
 };
+/* One driver, one day. The shape matters more than the values: the renderer
+   joins three feeds on one clock and each of them can legitimately be empty —
+   a day with no availability collected, a gap the tracker did not cover. The
+   fixture carries all three so the smoke test compares a full shape. */
+app.get('/api/driver/day', (req, r) => {
+  const day = String(req.query.day || dayISO(1)).slice(0, 10);
+  const mins = (h, m) => h * 60 + m;
+  const trip = (i, s, e, extra = {}) => ({
+    external_id: `uber-day-${i}`, platform: 'uber', fleet_id: 'ecosine', plate: 'A 12345',
+    requested_at: `${day}T0${Math.floor(s / 60)}:00:00.000Z`,
+    ended_at: `${day}T0${Math.floor(e / 60)}:00:00.000Z`,
+    status: 'completed', outcome: 'completed',
+    distance_km: 8.4, price: null, currency: 'AED', product: 'UberX', payment_type: 'cash',
+    pickup_addr: 'Dubai Marina - Dubai - United Arab Emirates',
+    dropoff_addr: 'DXB Terminal 3 - Dubai - United Arab Emirates',
+    s, e, past_midnight: false, ...extra,
+  });
+  r.json({
+    day,
+    driver: { id: req.query.id || 'u-khalid', name: 'Khalid A', keys: [req.query.id || 'u-khalid'] },
+    trips: [
+      trip(1, mins(9, 43), mins(9, 54)),
+      trip(2, mins(12, 38), mins(12, 47), { product: 'Comfort', payment_type: 'apple_pay' }),
+      trip(3, mins(13, 7), mins(13, 23)),
+    ],
+    online: [{ s: mins(9, 20), e: mins(19, 35) }],
+    fixes: [
+      { plate: 'A 12345', m: mins(10, 10), lat: 25.247, lng: 55.347, speed: 0 },
+      { plate: 'A 12345', m: mins(11, 10), lat: 25.247, lng: 55.347, speed: 0 },
+      { plate: 'A 12345', m: mins(12, 10), lat: 25.251, lng: 55.352, speed: 14 },
+    ],
+    basis: 'A job runs from the request to the dropoff, so it contains the drive to the rider.',
+    online_known: true,
+  });
+});
+
 app.get('/api/export/trips.csv', (req, r) => {
   const grain = req.query.grain === 'trip' ? 'trip' : 'day';
   const cols = EXPORT_COLS[grain];
