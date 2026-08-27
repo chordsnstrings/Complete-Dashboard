@@ -19,6 +19,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
   sourceLabel, plural, countOf, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
+import { driversVerdict } from './verdicts.js';
 
 /* Why a whole column is empty, in the words the page prints under it.
    ─────────────────────────────────────────────────────────────────────────
@@ -1468,32 +1469,29 @@ export async function renderDriverDirectory(root) {
      what the 125 idle and 120 never-driven rows are, and they were previously
      findable only by scrolling past everyone who IS working. */
   {
-    const idlePct = rows.length ? Math.round(((idle.length + never.length) / rows.length) * 100) : 0;
-    const blocked = rows.filter((r) => /suspend|deact|block|reject/i.test(r.platform_state || '')).length;
-    let claim, tone = null, figure, unit, recommend = null;
-    if (expired.length) {
-      tone = 'bad';
-      claim = `${countOf(expired.length, 'driver')} cannot legally work — the licence has expired`;
-      figure = fmt(expired.length); unit = 'expired';
+    const v = driversVerdict({ rows, expired, idle, never, notFilled });
+    let claim, figure, unit, recommend = null;
+    if (v.branch === 'expired') {
+      claim = `${countOf(v.expired, 'driver')} cannot legally work — the licence has expired`;
+      figure = fmt(v.expired); unit = 'expired';
       recommend = 'Sort by Licence to bring them together, or open Compliance, which counts the same '
         + 'people the same way and shows every document with a date on it.';
-    } else if (idlePct >= 50) {
-      tone = 'warn';
-      claim = `${idlePct}% of the people on the books did not drive in this window`;
-      figure = fmt(idle.length + never.length); unit = 'not earning';
-      recommend = blocked
-        ? `${countOf(blocked, 'person', 'people')} of them are suspended or deactivated on the platform, `
+    } else if (v.branch === 'idle') {
+      claim = `${v.idlePct}% of the people on the books did not drive in this window`;
+      figure = fmt(v.notEarning); unit = 'not earning';
+      recommend = v.blocked
+        ? `${countOf(v.blocked, 'person', 'people')} of them are suspended or deactivated on the platform, `
           + 'which is a different problem from somebody on leave — sort by Standing to separate them.'
         : 'Sort by Standing to separate people the platform has blocked from people simply not rostered.';
     } else {
-      claim = `${fmt(active.length)} of ${fmt(rows.length)} drivers worked this window`;
-      figure = fmt(active.length); unit = 'drove';
+      claim = `${fmt(v.active)} of ${fmt(v.total)} drivers worked this window`;
+      figure = fmt(v.active); unit = 'drove';
     }
     verdict(vHost, {
-      claim, figure, unit, tone, recommend,
-      meta: `${fmt(rows.length)} on the books`,
-      sub: `${fmt(active.length)} drove, ${fmt(idle.length)} did not, ${fmt(never.length)} never have.`
-        + (notFilled.length ? ` ${fmt(notFilled.length)} carry no real licence date, so they are not counted as expired.` : ''),
+      claim, figure, unit, tone: v.tone, recommend,
+      meta: `${fmt(v.total)} on the books`,
+      sub: `${fmt(v.active)} drove, ${fmt(v.idle)} did not, ${fmt(v.never)} never have.`
+        + (v.notFilled ? ` ${fmt(v.notFilled)} carry no real licence date, so they are not counted as expired.` : ''),
     });
   }
 

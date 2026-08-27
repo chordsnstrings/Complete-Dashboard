@@ -11,6 +11,7 @@ import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
 import { volatilePath } from './swr.js';
+import { fleetVerdict } from './verdicts.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCauses } from './causes.js';
@@ -586,46 +587,41 @@ V.overview = async (root) => {
      a collection hole has a different headline from one with a cancellation
      spike, and a page that always says the same thing is a caption. */
   {
-    const days = daily.length || 1;
-    const perDay = Math.round((k.trips || 0) / days);
-    const uncollected = daily.filter((d) => d.uncollected).length;
-    const partial = daily.filter((d) => !d.uncollected && d.sources_silent > 0).length;
-    const lead = [...byPlat].sort((a, b) => (+b.value || 0) - (+a.value || 0))[0];
-    const leadPct = lead && k.trips ? Math.round((lead.value / k.trips) * 100) : 0;
+    const v = fleetVerdict({ kpis: k, daily, byPlatform: byPlat });
     const money = k.accounted || 0;
-
-    /* Ranked by what a reader must not miss. A hole in the record makes every
-       rate computed across it wrong, so it outranks any figure the rates
-       produce — including a bad one. */
-    let claim, tone = null, recommend = null, figure, unit, meta = null;
-    if (uncollected) {
-      tone = 'bad';
-      claim = `${uncollected} of these ${days} days were never collected`;
-      figure = fmt(uncollected); unit = uncollected === 1 ? 'day missing' : 'days missing';
+    let claim, figure, unit, recommend = null, meta = null;
+    if (v.branch === 'gap') {
+      claim = `${v.uncollected} of these ${v.days} days were never collected`;
+      figure = fmt(v.uncollected); unit = plural(v.uncollected, 'day missing', 'days missing');
       recommend = 'Read every rate on this page as an average over the days that WERE collected — '
         + 'the missing ones are drawn hatched rather than as zero, and Collection gaps names which source failed.';
-    } else if (k.cancel_pct != null && k.cancel_pct >= 15) {
-      tone = 'warn';
+    } else if (v.branch === 'cancellations') {
       claim = `${k.cancel_pct}% of bookings did not complete`;
       figure = `${k.completion_pct}%`; unit = 'completed';
       recommend = 'Open Platforms for the acceptance funnel — an offer refused and a rider cancelling '
         + 'are different failures and only one of them is the fleet’s.';
     } else {
-      claim = lead && leadPct >= 80
-        ? `This is a single-channel fleet — ${sourceLabel(lead.label)} is ${leadPct}% of the work`
-        : `${fmt(k.trips)} bookings across ${fmt(k.vehicles)} vehicles`;
-      figure = fmt(perDay); unit = 'bookings a day';
+      claim = v.branch === 'single-channel'
+        ? `This is a single-channel fleet — ${sourceLabel(v.lead.label)} is ${v.leadPct}% of the work`
+        : v.branch === 'multi-channel'
+          ? `${fmt(k.trips)} bookings across ${v.others + 1} channels that matter`
+          : `${fmt(k.trips)} bookings across ${fmt(k.vehicles)} vehicles`;
+      figure = fmt(v.perDay); unit = 'bookings a day';
       meta = `${fmt(k.drivers)} drivers · ${fmt(k.vehicles)} vehicles`;
+      if (v.branch === 'single-channel') {
+        recommend = `Every rate on this page is ${sourceLabel(v.lead.label)}'s rate wearing the fleet's `
+          + 'name. Revenue by channel shows what each one actually reports.';
+      }
     }
     const sub = [
-      `${fmt(k.trips)} bookings over ${days} ${plural(days, 'day')}, `
+      `${fmt(k.trips)} bookings over ${v.days} ${plural(v.days, 'day')}, `
       + `${money ? `AED ${fmt(money)} accounted for` : 'no money accounted for in this window'}.`,
-      partial ? `${partial} more ${plural(partial, 'day')} had at least one source silent, so those bars are understated.` : '',
+      v.partial ? `${v.partial} more ${plural(v.partial, 'day')} had at least one source silent, so those bars are understated.` : '',
       k.telematics_journeys
         ? `The trackers saw ${fmt(k.telematics_journeys)} journeys behind these bookings — the same cars, counted by a different feed.`
         : '',
     ].filter(Boolean).join(' ');
-    verdict(vHost, { claim, figure, unit, sub, tone, recommend, meta });
+    verdict(vHost, { claim, figure, unit, sub, tone: v.tone, recommend, meta });
   }
 
   gapBars(trend.body, daily, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
