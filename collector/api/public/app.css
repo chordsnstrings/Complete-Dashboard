@@ -672,8 +672,18 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    part of it a job does not cover IS the idle-online time — the same trick the
    waiting band already uses, one layer down. A tint of the on-job colour
    rather than a new hue: it is the same driver in the same shift, available
-   instead of carrying somebody. */
-.sh-track>i.o{background:var(--s1);opacity:.34}
+   instead of carrying somebody.
+
+   OPAQUE, not a translucent overlay. At opacity .34 it composited over the
+   sand waiting band beneath it and came out a muddy grey-brown that read as
+   neither colour — two translucent layers make a third thing, and the third
+   thing is in the legend under neither name. color-mix bakes the tint in so
+   the band paints over the sand instead of blending with it; the rgba line
+   before it is the fallback where color-mix is unavailable. */
+.sh-track>i.o{background:rgba(74,124,166,.42)}
+@supports (background: color-mix(in srgb, red 50%, blue)) {
+  .sh-track>i.o{background:color-mix(in srgb, var(--s1) 42%, var(--surface-2))}
+}
 .sh-track>i.u{
   background:repeating-linear-gradient(135deg,
     var(--ink-3) 0 2px, var(--surface) 2px 5px);
