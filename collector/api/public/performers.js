@@ -95,11 +95,19 @@ export async function renderPerformers(root, band) {
      not ranked at all, because a leaderboard over a third of the roster is a
      different object from one over all of it. */
   {
-    const best = ranked[0], worst = ranked[ranked.length - 1];
-    const bR = best ? rate(best) : null;
-    const wR = worst ? rate(worst) : null;
-    const spread = bR != null && wR != null && wR ? Math.round((Math.abs(bR - wR) / Math.abs(wR)) * 100) : null;
-    const led = top ? best : worst;
+    /* `ranked` is already sorted FOR THIS PAGE — descending on Top, ascending
+       on Low — so position 0 is always the person the page is about. Written
+       as `top ? ranked[0] : ranked.at(-1)` first, which on the Low page is the
+       far end of an ascending list: the best earner in the fleet, labelled
+       "earned least". Both pages named the same man, one calling him the most
+       and the other the least, and each sentence was individually plausible. */
+    const led = ranked[0];
+    const other = ranked[ranked.length - 1];
+    const lR = led ? rate(led) : null;
+    const oR = other ? rate(other) : null;
+    const base = Math.min(Math.abs(lR ?? 0), Math.abs(oR ?? 0));
+    const spread = lR != null && oR != null && base
+      ? Math.round((Math.abs(lR - oR) / base) * 100) : null;
     verdict(head, {
       claim: led
         ? `${led.driver_name || 'Somebody'} ${top ? 'earned most' : 'earned least'} per day worked`
