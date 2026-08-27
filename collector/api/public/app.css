@@ -1358,3 +1358,16 @@ a.insight-row:hover{border-color:var(--accent)}
 a.shift.clickable{text-decoration:none;color:inherit;border-radius:6px;transition:background .16s var(--ease)}
 a.shift.clickable:hover{background:var(--surface-2)}
 a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* [hidden] must actually hide.
+   ─────────────────────────────────────────────────────────────────────────
+   The UA stylesheet gives [hidden] `display:none` at the lowest possible
+   specificity, so any rule that sets a display wins over it. `a.insight-row`
+   sets `display:grid`, which meant the action list folded — the control
+   appeared, the state toggled, `hidden` was set on 112 of 118 cards — and the
+   page stayed 24,514px. The third fold in this session that ran correctly and
+   changed nothing on screen.
+
+   Global, and !important, because the whole point of the attribute is that it
+   outranks presentation. */
+[hidden]{display:none !important}
