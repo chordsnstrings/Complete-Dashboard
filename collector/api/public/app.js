@@ -2426,7 +2426,11 @@ V.unauthorized = async (root) => {
      hardcoded English sentence keyed on the verdict, with no entry for
      `unverifiable` or `pending`, so eight of fifty-two segments opened a blank
      "Why this verdict". Every row is a link to that segment's own page. */
-  list.body.innerHTML = ''; list.body.append(segmentTable(rows));
+  list.body.innerHTML = '';
+  /* 33 flagged segments render 6,505px — each row carries an evidence trail,
+     which is right for the ones being examined and wrong for all of them at
+     once. */
+  foldRows(list.body, segmentTable(rows), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' });
 
   health.body.innerHTML = '';
   /* "NEVER TRIGGERS" needs enough fixes to be a claim. A plate with 0 occupied

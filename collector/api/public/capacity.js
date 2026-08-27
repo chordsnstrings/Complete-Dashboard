@@ -160,8 +160,8 @@ export async function renderCapacity(root) {
   /* Every hour of the week, not sixty of them. A panel titled "Every hour"
      that draws 60 of 168 rows is the one caption on this page nobody would
      think to check — and the table already lives in a scroll container. */
-  ab.append(tableFrom(
-    [...d.cells].sort((a, b) => (b.driver_gap ?? -99) - (a.driver_gap ?? -99)), [
+  const allHours = [...d.cells].sort((a, b) => (b.driver_gap ?? -99) - (a.driver_gap ?? -99));
+  const hoursTable = tableFrom(allHours, [
       { label: 'Hour', key: '_s', render: (r) => `<a href="${slotLink(r)}">${SHORT[r.dow]} ${hhmm(r.hour)}</a>`
         + (r.thin ? ' <span class="tag warn">thin history</span>' : '') },
       { label: 'Share of the month', key: 'share_pct', num: true, render: (r) => `${r.share_pct}%` },
@@ -175,7 +175,12 @@ export async function renderCapacity(root) {
       { label: 'Gap', key: 'driver_gap', num: true, render: (r) => (r.driver_gap == null ? '—'
         : `<span class="pill ${r.driver_gap >= 0.5 ? 'bad' : r.driver_gap <= -0.5 ? 'ok' : ''}">`
           + `${esc(signed(r.driver_gap, { d: 1 }))}</span>`) },
-    ], { sortable: true, sortId: 'cells', defaultSort: { key: 'driver_gap', dir: 'desc' } }));
+    ], { sortable: true, sortId: 'cells', defaultSort: { key: 'driver_gap', dir: 'desc' } });
+  /* 168 rows — every hour of the week — is 7,460px on its own, and the hours
+     that need a decision are the ones at the top. Folded to those; the rest
+     stay one click away, still sortable, because "every hour" has to keep
+     meaning every hour. */
+  foldRows(ab, hoursTable, { shown: 14, total: allHours.length, noun: 'hour', key: 'cap-cells' });
   ab.append(el('p', 'cap',
     `All ${countOf(d.cells.length, 'hour')} of the week, largest gap first. The table scrolls; nothing is cut.`));
 
