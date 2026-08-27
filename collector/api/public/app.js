@@ -3015,6 +3015,30 @@ V.insights = async (root) => {
       + 'most severe first. Use a category above to narrow it rather than scrolling.'));
   }
 
+  /* Fields read off /api/insights on production: {insights, truncated, limit,
+     filter}, and a row carries severity, category, title, action, impact_aed
+     and impact_kind. */
+  {
+    const bySev2 = all.reduce((a, r) => ((a[r.severity] = (a[r.severity] || 0) + 1), a), {});
+    const crit = bySev2.critical || 0;
+    const top = all.find((r) => r.severity === 'critical') || all[0];
+    verdict(root, {
+      claim: crit
+        ? `${countOf(crit, 'thing')} ${crit === 1 ? 'needs' : 'need'} doing today`
+        : all.length ? `${countOf(all.length, 'open action')}, none of them urgent`
+          : 'Nothing is flagged',
+      figure: measured ? money(measured) : fmt(all.length),
+      unit: measured ? 'a month, quantified' : 'open actions',
+      tone: crit ? 'bad' : (bySev2.warning ? 'warn' : null),
+      meta: `${fmt(sum?.total?.n ?? all.length)} open`,
+      sub: (top ? `The one at the top: ${top.title}. ` : '')
+        + (measured
+          ? 'Only the items with arithmetic behind them are in that figure — the rest are real and unpriced.'
+          : 'None of the open items carry a size, so there is nothing to total.')
+        + (page?.truncated ? ` The list is capped at ${fmt(page.limit)}.` : ''),
+    });
+  }
+
   const listPanel = panel('Ranked actions', 'Most consequential first — click any row for the evidence behind it');
   root.append(listPanel.panel);
 
@@ -3331,6 +3355,7 @@ V.compliance = async (root) => {
 };
 
 V.sources = async (root) => {
+  const vsHost = el('div'); root.append(vsHost);
   /* Guarded like every other long view. This one was not, and it is the
      longest: five panels, six fetches and a nested draw. An abandoned render
      goes on writing into panels the reader has already left — which is how the
@@ -3372,6 +3397,44 @@ V.sources = async (root) => {
     api('/api/status'), api('/api/coverage'), api('/api/rollups').catch(() => []),
     api('/api/cache-stats').catch(() => null)]);
   if (!alive(gen)) return;
+
+  /* Fields read off /api/status on production: one row per (source, fleet,
+     mode) with status, rows_written, finished_at, error, chunks_failed. The
+     question this page is open for is which collector has stopped — a source
+     that says "ok" and wrote nothing is the failure the whole page exists to
+     surface, and "partial" is how a 299-day Uber hole survived for months. */
+  {
+    const rows = Array.isArray(status) ? status : [];
+    const bad = rows.filter((r) => r.status === 'error' || r.error);
+    const partial = rows.filter((r) => r.status === 'partial' || (+r.chunks_failed || 0) > 0);
+    const quietOk = rows.filter((r) => r.status === 'ok' && !(+r.rows_written));
+    const oldest = rows
+      .filter((r) => r.finished_at)
+      .sort((a, b) => new Date(a.finished_at) - new Date(b.finished_at))[0];
+    const ageH = oldest ? Math.round((Date.now() - new Date(oldest.finished_at)) / 36e5) : null;
+    verdict(vsHost, {
+      claim: bad.length
+        ? `${countOf(bad.length, 'collector')} failed on ${bad.length === 1 ? 'its' : 'their'} last run`
+        : partial.length
+          ? `${countOf(partial.length, 'run')} wrote rows and left windows unfetched`
+          : quietOk.length
+            ? `${countOf(quietOk.length, 'collector')} reported success and wrote nothing`
+            : `All ${fmt(rows.length)} collectors last ran clean`,
+      figure: fmt(bad.length + partial.length + quietOk.length),
+      unit: 'need attention',
+      tone: bad.length ? 'bad' : (partial.length || quietOk.length) ? 'warn' : null,
+      meta: `${fmt(rows.length)} runs on record`,
+      sub: (ageH != null
+        ? `The stalest source last finished ${fmt(ageH)} h ago${oldest?.source ? ` (${sourceLabel(oldest.source)})` : ''}. `
+        : '')
+        + 'A "partial" run is one that wrote rows AND left windows unfetched — which is how a '
+        + '299-day hole in the Uber trip history survived for months behind a run that said ok.',
+      recommend: bad.length || partial.length
+        ? 'Collection gaps shows which DAYS each source actually covered, which a row count between '
+          + 'two dates cannot.'
+        : null,
+    });
+  }
 
   ru.body.innerHTML = '';
   if (!rollups.length) {
