@@ -16,7 +16,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
-  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, noneChosen} from './ui.js';
+  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, noneChosen, verdict, foldRows } from './ui.js';
 import { qAll, href, parseHash, currentGen, alive } from './data.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
@@ -895,6 +895,7 @@ export async function renderVehicle(root, plate, tab = 'overview') {
 
 /* ── the directory that links into the pages above ───────────────────────── */
 export async function renderVehicleDirectory(root) {
+  const vHost = el('div'); root.append(vHost);
   const bar = el('div', 'toolbar');
   bar.innerHTML = `<input id="vdq" type="search" placeholder="Search by plate, make, model or driver…">
     <span class="cap" id="vdn"></span>`;
@@ -918,6 +919,39 @@ export async function renderVehicleDirectory(root) {
   const tracked = rows.filter((r) => r.last_fix).length;
   const staleN = rows.filter((r) => r.stale).length;
   const expiring = rows.filter((r) => r.doc_days_left != null && r.doc_days_left < 30).length;
+
+  /* The question this page answers is which cars are NOT working, and it opened
+     on a search box and 170 rows sorted by the ones that are. */
+  {
+    const idle = rows.length - earning;
+    const idlePct = rows.length ? Math.round((idle / rows.length) * 100) : 0;
+    let claim, figure, unit, tone = null, recommend = null;
+    if (movedOnly) {
+      tone = 'bad';
+      claim = `${countOf(movedOnly, 'vehicle')} moved with nothing paying for it`;
+      figure = fmt(movedOnly); unit = 'moved, no money';
+      recommend = 'The tracker logged the kilometres and no channel reported a booking against them. '
+        + 'Unauthorized trips lists the journeys themselves.';
+    } else if (idlePct >= 25) {
+      tone = 'warn';
+      claim = `${idlePct}% of the fleet took no booking in this window`;
+      figure = fmt(idle); unit = 'standing still';
+      recommend = expiring
+        ? `${countOf(expiring, 'vehicle')} of the fleet also has a document expiring within 30 days.`
+        : 'Sort by Idle to bring the longest-standing cars together.';
+    } else {
+      claim = `${fmt(earning)} of ${fmt(rows.length)} vehicles earned this window`;
+      figure = fmt(earning); unit = 'earning';
+    }
+    verdict(vHost, {
+      claim, figure, unit, tone, recommend,
+      meta: `${fmt(rows.length)} on the books`,
+      sub: `${fmt(earning)} took a booking, ${fmt(movedOnly)} moved without one, ${fmt(still)} did not move at all.`
+        + (tracked < rows.length ? ` ${fmt(rows.length - tracked)} carry no tracker fix, so nothing can say where they are.` : '')
+        + (staleN ? ` ${fmt(staleN)} have a tracker that has gone quiet.` : ''),
+    });
+  }
+
   kpiHost.replaceWith(kpiRow([
     { label: 'Vehicles', value: fmt(rows.length), sub: 'with any record at all' },
     { label: 'Took a booking', value: fmt(earning), sub: 'earned in this window',
@@ -1060,10 +1094,11 @@ export async function renderVehicleDirectory(root) {
         + 'and not a page of it.'));
       return;
     }
-    tblP.body.append(tableFrom(list, cols, {
+    const tbl = tableFrom(list, cols, {
       sortable: true, sortId: 'vdir', defaultSort: { key: 'trips', dir: 'desc' },
       onRow: (r) => { location.hash = href('vehicle', r.plate); },
-    }));
+    });
+    foldRows(tblP.body, tbl, { shown: 12, total: list.length, noun: 'vehicle', key: 'vehicles-dir' });
   };
   draw(rows, '');
   bar.querySelector('#vdq').oninput = (e) => {

@@ -18,7 +18,7 @@
 
 import { donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
-  dayStr, dateStr, dtStr, money, pct, sourceLabel, countOf, plural } from './ui.js';
+  dayStr, dateStr, dtStr, money, pct, sourceLabel, countOf, plural, verdict, foldRows } from './ui.js';
 import { q, href, state } from './data.js';
 
 export const ROSTER_TABS = [
@@ -54,6 +54,37 @@ export async function renderRoster(root) {
   const d = await q('/api/roster');
   host.innerHTML = '';
   const t = d.totals;
+
+  /* The roster exists to find the people who are NOT earning, and it opened on
+     four tiles and a 280-row table 33,019 pixels tall. */
+  {
+    const notEarning = (t.idle_this_window || 0) + (t.never_started || 0);
+    const pct = t.people ? Math.round((notEarning / t.people) * 100) : 0;
+    const blocked = t.blocked ?? 0;
+    let claim, figure, unit, tone = null, recommend = null;
+    if (blocked) {
+      tone = 'bad';
+      claim = `${countOf(blocked, 'person', 'people')} cannot work on any platform they hold`;
+      figure = fmt(blocked); unit = 'stopped everywhere';
+      recommend = 'A car in their custody is depreciating, insured and parked. The Stopped '
+        + 'everywhere tab lists them with the platforms that refused them.';
+    } else if (pct >= 40) {
+      tone = 'warn';
+      claim = `${pct}% of the roster earned nothing this window`;
+      figure = fmt(notEarning); unit = 'not earning';
+      recommend = `${fmt(t.never_started || 0)} of them have never taken a booking at all — that is a `
+        + 'recruitment pipeline that stalled, not an attendance problem.';
+    } else {
+      claim = `${fmt(t.working)} of ${fmt(t.people)} people drove this window`;
+      figure = fmt(t.working); unit = 'working';
+    }
+    verdict(host, {
+      claim, figure, unit, tone, recommend,
+      meta: `${fmt(t.people)} on the books`,
+      sub: `${fmt(t.idle_this_window || 0)} could earn and did not, ${fmt(t.never_started || 0)} never have`
+        + `${t.multi_platform ? `, and ${fmt(t.multi_platform)} work on more than one platform` : ''}.`,
+    });
+  }
 
   host.append(kpiRow([
     { label: 'People on the books', value: fmt(t.people),
@@ -173,7 +204,7 @@ export async function renderRoster(root) {
   const [rTitle, rSub] = TITLE[tab] || TITLE.all;
   const rp = panel(`${rTitle} — ${countOf(shown.length, 'person', 'people')}`, rSub);
   host.append(rp.panel);
-  rp.body.append(tableFrom(shown, [
+  const rosterTable = tableFrom(shown, [
     /* The roster exists to find the people who are not earning. A row you
        cannot open is a person you cannot look into. */
     { label: 'Driver', key: 'name',
@@ -255,7 +286,8 @@ export async function renderRoster(root) {
         ? `<span class="wrap" title="${esc(r.reason)}">${esc(String(r.reason).slice(0, 90))}${
           String(r.reason).length > 90 ? '…' : ''}</span>`
         : '—') },
-  ], { sortable: true, sortId: 'roster', defaultSort: { key: 'trips', dir: 'desc' } }));
+  ], { sortable: true, sortId: 'roster', defaultSort: { key: 'trips', dir: 'desc' } });
+  foldRows(rp.body, rosterTable, { shown: 12, total: shown.length, noun: 'person', key: `roster-${tab}` });
 
   if (tab === 'blocked') {
     const holding = shown.filter((x) => x.holding_vehicle_while_blocked);

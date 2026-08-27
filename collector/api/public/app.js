@@ -2371,6 +2371,7 @@ const hasFix = (r) => r.lat != null && r.lng != null
 const FIX_FRESH_MIN = 30;
 
 V.live = async (root) => {
+  const vHost = el('div'); root.append(vHost);
   const kh = el('div', 'kpis'); root.append(kh);
   /* Three feeds, not one. 80 of these rows are FMS, 48 are CABMAN and 2 are
      Uber — and only CABMAN polls every five minutes. The caption named the
@@ -2523,7 +2524,33 @@ V.live = async (root) => {
        the replayable days the modal never had — and an address you can send.
        Bound through onRow so re-sorting cannot open the wrong vehicle. */
     onRow: (r) => { location.hash = href('vehicle', r.plate, 'movement'); } });
-  p.body.append(t);
+  /* The page an operator has open all day, and it opened on 130 rows. The
+     question it is open FOR is which vehicles have stopped reporting. */
+  {
+    const stale = rows.filter((r) => r.stale).length;
+    const noFix = rows.filter((r) => !hasFix(r)).length;
+    const moving = rows.filter((r) => (+r.speed || 0) > 5).length;
+    let claim, figure, unit, tone = null, recommend = null;
+    if (stale) {
+      tone = stale > rows.length / 4 ? 'bad' : 'warn';
+      claim = `${countOf(stale, 'vehicle')} ${stale === 1 ? 'has' : 'have'} a stale fix`;
+      figure = fmt(stale); unit = 'not reporting';
+      recommend = 'Sort by Fix age to bring them together. A fix that is old while the poll is '
+        + 'recent means the provider is still listing the vehicle and telling us nothing new '
+        + 'about it — a different fault from our collector having stopped asking.';
+    } else {
+      claim = `${fmt(moving)} of ${fmt(rows.length)} vehicles are moving right now`;
+      figure = fmt(moving); unit = 'moving';
+    }
+    verdict(vHost, {
+      claim, figure, unit, tone, recommend,
+      meta: `${fmt(rows.length)} reporting`,
+      sub: `${feeds.map((f) => `${sourceLabel(f)} ${fmt(rows.filter((r) => r.source === f).length)}`).join(' · ')}`
+        + `${noFix ? ` · ${fmt(noFix)} with no usable fix at all` : ''}. `
+        + 'Only CABMAN polls every five minutes and only CABMAN carries a seat sensor.',
+    });
+  }
+  foldRows(p.body, t, { shown: 12, total: rows.length, noun: 'vehicle', key: 'live' });
   p.body.append(el('p', 'cap',
     'Click a row for that vehicle’s movement page — the map, the replayable days and every stationary cluster.'));
 };
@@ -2970,6 +2997,7 @@ V.insights = async (root) => {
 /* Compliance is the one place where the data is unambiguous: a date, and a vehicle
    that is either legal or not. Sorted by urgency, not by plate. */
 V.compliance = async (root) => {
+  const vHost = el('div'); root.append(vHost);
   const kh = el('div', 'kpis'); root.append(kh); loading(kh);
   const [vehPage, drvPage] = await Promise.all([
     api('/api/compliance/vehicles').catch(() => ({ rows: [], totals: {} })),
@@ -2999,6 +3027,42 @@ V.compliance = async (root) => {
     && String(r.licence_expires).slice(0, 10) !== placeholder && dl(r) < 0).length;
   const dPlaceholder = drvPage.placeholder_rows || 0;
   const dNoDate = dt.no_date_at_all || 0;
+
+  /* Compliance is the one page where the data is unambiguous — a date, and a
+     vehicle either legal or not — and it opened on eight tiles with no ranking
+     between them, above 235 rows. Expired outranks expiring outranks unknown:
+     the first stops a car today, the second stops it this week, the third
+     means nobody can say. */
+  {
+    const soon = vWeek + (dt.within_7 || 0);
+    let claim, figure, unit, tone = null, recommend = null;
+    if (vExpired || dExpired) {
+      tone = 'bad';
+      const bits = [vExpired ? `${countOf(vExpired, 'vehicle document')}` : '',
+        dExpired ? `${countOf(dExpired, 'driver licence')}` : ''].filter(Boolean).join(' and ');
+      claim = `${bits} ${vExpired + dExpired === 1 ? 'has' : 'have'} already expired`;
+      figure = fmt(vExpired + dExpired); unit = 'expired';
+      recommend = 'Those cars and those people cannot legally work today. Both tables below are '
+        + 'sorted soonest-first, so they are the rows at the top.';
+    } else if (soon) {
+      tone = 'warn';
+      claim = `${fmt(soon)} ${plural(soon, 'document')} ${soon === 1 ? 'expires' : 'expire'} within a week`;
+      figure = fmt(soon); unit = 'due this week';
+      recommend = 'Nothing has lapsed yet — this is the week to renew rather than the week after.';
+    } else {
+      claim = 'Nothing has expired and nothing expires this week';
+      figure = fmt(vMonth + (dt.within_45 || 0)); unit = 'due in 45 days';
+    }
+    const blind = dPlaceholder + dNoDate;
+    verdict(vHost, {
+      claim, figure, unit, tone, recommend,
+      sub: blind
+        ? `${fmt(blind)} ${plural(blind, 'licence')} cannot be checked at all — `
+          + `${fmt(dPlaceholder)} carry the source's default date and ${fmt(dNoDate)} carry no date. `
+          + 'They are not counted as expired, because an absent date is not an expiry.'
+        : 'Every licence and document on the books carries a real date.',
+    });
+  }
 
   kh.innerHTML = [
     ['Vehicle docs expired', fmt(vExpired), 'cannot legally work', vExpired ? 'err' : 'ok'],
@@ -3032,7 +3096,7 @@ V.compliance = async (root) => {
     : 'documents with an expiry date');
   root.append(vp.panel);
   if (!veh.length) empty(vp.body, 'No vehicle documents collected yet');
-  else vp.body.append(tableFrom(veh.slice(0, 120), [
+  else foldRows(vp.body, tableFrom(veh.slice(0, 120), [
     { label: 'Due', key: 'days_left', num: true, render: (r) => {
       const d = dl(r);
       const cls = d < 0 ? 'err' : d <= 7 ? 'err' : d <= 45 ? 'warn' : 'ok';
@@ -3060,7 +3124,8 @@ V.compliance = async (root) => {
         ? ` <span class="tag warn" title="the custody record is ${fmt(ageD)} days old — confirm before ringing">stale</span>`
         : '');
     } },
-  ], { sortable: true, sortId: 'vdocs', defaultSort: { key: 'days_left', dir: 'asc' } }));
+  ], { sortable: true, sortId: 'vdocs', defaultSort: { key: 'days_left', dir: 'asc' } }),
+    { shown: 12, total: Math.min(120, veh.length), noun: 'document', key: 'compl-veh' });
   if (veh.length) vp.body.append(el('p', 'cap',
     `Showing ${fmt(Math.min(120, veh.length))} of ${fmt(vt.total ?? veh.length)} documents with an expiry date`
     + `${vt.vehicles ? ` across ${fmt(vt.vehicles)} vehicles` : ''}, soonest first. `
@@ -3073,7 +3138,7 @@ V.compliance = async (root) => {
     : 'from the platforms that publish an expiry date');
   root.append(dp.panel);
   if (!drv.length) empty(dp.body, 'No driver licence dates collected yet — Hotel publishes these, Uber does not expose them to this role');
-  else dp.body.append(tableFrom(drv.slice(0, 120), [
+  else foldRows(dp.body, tableFrom(drv.slice(0, 120), [
     { label: 'Due', key: 'days_left', num: true,
       /* Placeholder dates sort to the BOTTOM whichever way you order. They are
          not an expiry, so ranking them among real ones puts 77 rows that mean
@@ -3115,7 +3180,8 @@ V.compliance = async (root) => {
     } },
     { label: 'State', key: 'state', render: (r) => `<span class="tag ${/suspend|deact/i.test(r.state || '') ? 'warn' : 'ok'}">${esc(r.state || '—')}</span>`
       + (r.suspension_reason ? `<div class="dim">${esc(String(r.suspension_reason).slice(0, 90))}</div>` : '') },
-  ], { sortable: true, sortId: 'licences', defaultSort: { key: 'days_left', dir: 'asc' } }));
+  ], { sortable: true, sortId: 'licences', defaultSort: { key: 'days_left', dir: 'asc' } }),
+    { shown: 12, total: Math.min(120, drv.length), noun: 'licence', key: 'compl-drv' });
   if (drv.length) dp.body.append(el('p', 'cap',
     `Showing ${fmt(Math.min(120, drv.length))} of ${fmt(dt.total ?? drv.length)} driver records, `
     + `${fmt(dt.with_date ?? 0)} of which carry an expiry date at all`
