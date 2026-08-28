@@ -291,10 +291,14 @@ export async function measure(proposal, [from, to, fleet]) {
    guests, no addresses, no phone numbers — and every figure already correct
    by the rules in schema_v7/v9, so the model is reasoning about the same
    numbers the dashboard shows rather than a second, worse version of them. */
-export async function buildBrief([from, to, fleet]) {
+/* `db` is injectable for the same reason rebuildCustody's is: the brief is
+   read-only aggregate SQL, and a route or a test that already holds a
+   connection should not have to reach for the module-level pool to see what
+   the model was shown. */
+export async function buildBrief([from, to, fleet], { db = pool } = {}) {
   const p = [from, to, fleet];
   const W = `local_day BETWEEN $1::date AND $2::date AND ($3::text IS NULL OR fleet_id = $3)`;
-  const q = (t) => pool.query(t, p).then((r) => r.rows);
+  const q = (t) => db.query(t, p).then((r) => r.rows);
   const [headline, byDim, tiers, settle, hotels, dayparts, coverage] = await Promise.all([
     q(`SELECT count(*) FILTER (WHERE is_booking)::int bookings,
               count(*) FILTER (WHERE NOT is_booking)::int telematics,
@@ -324,7 +328,7 @@ export async function buildBrief([from, to, fleet]) {
                     / nullif(count(*) FILTER (WHERE outcome IS NOT NULL), 0), 1) cancel_pct,
               round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km
        FROM trip_ext WHERE ${W} GROUP BY 1 ORDER BY n DESC`),
-    pool.query(
+    db.query(
       `SELECT source, count(*)::int days, sum(rows)::int rows
        FROM source_day_coverage WHERE day BETWEEN $1::date AND $2::date GROUP BY 1`, [from, to])
       .then((r) => r.rows),

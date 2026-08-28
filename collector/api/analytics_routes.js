@@ -1496,6 +1496,24 @@ export function analystRoutes(app, { q, wrap, range }) {
   /* What the checker is allowed to check, published so the rules are readable
      rather than folklore. A threshold nobody can see is a threshold nobody can
      argue with. */
+  /* What the model was actually shown.
+     ─────────────────────────────────────────────────────────────────────────
+     The analyst's whole claim is that a proposal is a hypothesis the database
+     then settles — but a reader looking at a refuted finding has no way to see
+     the input that produced it, and neither did anybody tuning the prompt. The
+     brief is aggregate rows this API already serves in other shapes, computed
+     read-only, with no model call and no cost, so exposing it adds no surface
+     beyond what #analyst already implies. */
+  app.get('/api/analyst/brief', wrap(async (req, res) => {
+    const { buildBrief } = await import('../src/analyst.js');
+    const [from, to, , fleet] = range(req);
+    /* The route's own connection, not the collector's module-level pool: this
+       process may not have one, and a 500 reading "ENOTFOUND db" is a worse
+       answer than the brief. */
+    res.json(await buildBrief([from, to, fleet || null],
+      { db: { query: (text, params) => q(text, params).then((rows) => ({ rows })) } }));
+  }));
+
   app.get('/api/analyst/rules', wrap(async (_req, res) => {
     const { METRICS, DIMENSIONS, MATERIALITY } = await import('../src/analyst.js');
     res.json({
