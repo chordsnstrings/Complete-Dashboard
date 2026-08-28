@@ -102,6 +102,13 @@ check('a share is taken over every row, not the visible ones',
   /const all = list\.filter[\s\S]*?const total = all\.reduce/.test(bare(uiSrc))
   && !/const total = rowsIn\.reduce/.test(uiSrc));
 
+/* A percentile is a rank, and the two ends of it are not shares.
+   "top 0%" is what the best driver in the fleet scored before this. */
+check('the top of the fleet is not called "top 0%"',
+  /percentile >= 100 \? 'highest in the fleet'/.test(bare(screensSrc)));
+check('…and the bottom is named as a bottom',
+  /percentile < 50|`bottom \$\{m\.percentile\}%`/.test(bare(screensSrc)));
+
 /* ── the PWA files ──────────────────────────────────────────────────────── */
 const manifest = JSON.parse(readFileSync(`${PUB}/manifest.webmanifest`, 'utf8'));
 check('the manifest names the app', !!manifest.name && !!manifest.short_name);

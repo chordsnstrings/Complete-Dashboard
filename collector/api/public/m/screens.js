@@ -548,9 +548,13 @@ async function driver(deck, ctx) {
       sub: m.median != null ? `fleet median ${fmt(m.median)}` : null,
       value: fmt(m.value),
       /* "top 76%" is not a compliment and not an insult; it is a number
-         facing the wrong way. Below the median it is said as a bottom. */
+         facing the wrong way, so below the median it is said as a bottom. And
+         the best in the fleet came out as "top 0%", which is not a share of
+         anything — at the very top the honest phrasing names the rank. */
       note: m.percentile == null ? null
-        : m.percentile >= 50 ? `top ${100 - m.percentile}%` : `bottom ${m.percentile}%`,
+        : m.percentile >= 100 ? 'highest in the fleet'
+          : m.percentile <= 0 ? 'lowest in the fleet'
+            : m.percentile >= 50 ? `top ${100 - m.percentile}%` : `bottom ${m.percentile}%`,
       tone: m.percentile >= 75 ? 'good' : m.percentile <= 25 ? 'warn' : null,
     })));
   }
