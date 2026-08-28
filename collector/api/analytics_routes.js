@@ -1460,7 +1460,11 @@ export function analystRoutes(app, { q, wrap, range }) {
               count(*) FILTER (WHERE verdict = 'unsupported')::int unsupported,
               count(DISTINCT run_id)::int runs, max(created_at) last_run, max(model) model
        FROM analyst_finding
-       WHERE window_start >= $1::date AND window_end <= $2::date
+       /* The same overlap the list above uses. These two predicates were
+          written apart and drifted apart: the list matched by overlap and the
+          counts by containment, so the page showed eleven findings under four
+          tab counts all reading zero. One window rule, both queries. */
+       WHERE window_start <= $2::date AND window_end >= $1::date
          AND ($3::text IS NULL OR fleet_id = $3)`, [from, to, req.query.fleet || null]);
     /* What the last pass actually did.
        ─────────────────────────────────────────────────────────────────────

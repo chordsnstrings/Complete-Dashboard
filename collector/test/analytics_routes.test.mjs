@@ -916,5 +916,17 @@ const W = 'from=2026-08-01&to=2026-08-31';
 }
 
 server.close();
+/* The list and the counts must answer the same window question. They were
+   written apart and drifted: the list matched by overlap, the counts by
+   containment, and production served eleven findings under four tab counts
+   all reading zero. */
+{
+  const src = readFileSync(new URL('../api/analytics_routes.js', import.meta.url), 'utf8');
+  const overlap = (src.match(/window_start <= \$2::date AND window_end >= \$1::date/g) || []).length;
+  check('one window rule, used by both the list and the counts', overlap === 2, `found ${overlap}`);
+  check('and no containment predicate is left on analyst_finding',
+    !/window_start >= \$1::date AND window_end <= \$2::date/.test(src));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
