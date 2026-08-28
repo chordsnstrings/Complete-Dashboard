@@ -538,7 +538,11 @@ second revised array. If you reconsider, edit the array before you emit it.
 
 Return ONLY a JSON array, at most 12 items:
 [{"claim":"...","metric":"...","dimension":"...","segment":"...","direction":"higher|lower",
-  "claimed_value":<number or null>,"why":"one sentence on the consequence","action":"one sentence on what to do"}]`;
+  "claimed_value":<number or null>,"why":"one sentence on the consequence","action":"one sentence on what to do"}]
+
+claimed_value is your estimate of the segment's own value in the metric's unit, and null when
+you are not estimating one. Write null rather than 0: the finding prints your number beside the
+measured one, and a placeholder zero reads as a prediction that the segment earns nothing.`;
 
 export async function propose(brief) {
   if (!config.analystModel?.apiKey) {
