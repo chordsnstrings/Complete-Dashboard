@@ -253,10 +253,17 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
     const aria = on ? (active.dir === 'asc' ? 'ascending' : 'descending') : 'none';
     const cls = `${c.num ? 'num' : ''}${sortable && c.key ? ' sortable' : ''}${on ? ' sorted' : ''}`.trim();
     const mark = on ? `<i class="sarr">${active.dir === 'asc' ? '↑' : '↓'}</i>` : '';
+    /* data-key on every header, sortable or not: the column's own field name.
+       A heading is free to say something other than its key — the source
+       panel's "Rows written" is rows_24h, and its caption explains why — and
+       a tool matching a payload field to a column on the WORDS of the
+       heading then attributed one endpoint's figure to another's column.
+       The key is the fact; the label is the writing. */
+    const dk = c.key ? ` data-key="${esc(c.key)}"` : '';
     return sortable && c.key
-      ? `<th class="${cls}" aria-sort="${aria}"><button type="button" data-sk="${esc(c.key)}">`
+      ? `<th class="${cls}"${dk} aria-sort="${aria}"><button type="button" data-sk="${esc(c.key)}">`
         + `${esc(c.label)}${mark}</button></th>`
-      : `<th class="${cls}" aria-sort="none">${esc(c.label)}</th>`;
+      : `<th class="${cls}"${dk} aria-sort="none">${esc(c.label)}</th>`;
   }).join('')}</tr></thead>`;
 
   const body = (list) => `<tbody>${list.map((r) => `<tr>${cols.map((c) =>

@@ -107,7 +107,21 @@ const identityOf = (row) => {
 /* Every (identity, figure) pair in a payload, from the lists inside it. */
 function rowFigures(o, out = [], where = '') {
   if (Array.isArray(o)) {
-    o.slice(0, 80).forEach((r) => {
+    const slice = o.slice(0, 80);
+    /* How many ROWS of this list each identity stands for, counted before the
+       size filter below throws most of their fields away. /api/status holds
+       four `fms` records and two `hotel` ones; the source panel shows the
+       latest of each, which is what the panel is for. Counting the survivors
+       instead missed that entirely — hotel's other run wrote 136 rows, under
+       the thousand this audit looks at, so the identity looked unique and one
+       backfill total was demanded on screen. */
+    const rowsWithId = new Map();
+    for (const r of slice) {
+      if (!r || typeof r !== 'object') continue;
+      const id = identityOf(r);
+      if (id) rowsWithId.set(id, (rowsWithId.get(id) || 0) + 1);
+    }
+    slice.forEach((r) => {
       if (!r || typeof r !== 'object') return;
       const id = identityOf(r);
       if (!id) return;
@@ -115,7 +129,7 @@ function rowFigures(o, out = [], where = '') {
       for (const [k, v] of Object.entries(r)) {
         if (!isNum(v)) continue;
         const n = big(v);
-        if (n != null) out.push({ id, key: k, n, where, siblings });
+        if (n != null) out.push({ id, key: k, n, where, siblings, rows: rowsWithId.get(id) || 1 });
       }
     });
     return out;
@@ -189,6 +203,7 @@ for (const route of routes) {
        the table HAS a column for it and the row is on screen without it. */
     const tables = [...root.querySelectorAll('table')].map((t) => ({
       heads: [...t.querySelectorAll('thead th')].map((h) => h.textContent.trim()),
+      keys: [...t.querySelectorAll('thead th')].map((h) => h.getAttribute('data-key') || ''),
       rows: [...t.querySelectorAll('tbody tr')].map((r) => ({
         /* A row is ABOUT its first cell. Matching the identity anywhere in the
            row found a driver's name in the "Held by" column of a VEHICLE row
@@ -252,7 +267,16 @@ for (const route of routes) {
      audit demanded the raw number appear in a cell that correctly holds
      something else. */
   const DERIVED = /[/%]|\bper\b|\bshare\b|\brate\b|\bavg\b|\baverage\b|\bper 100\b/i;
-  const columnFor = (heads, key) => {
+  const columnFor = (heads, key, keys) => {
+    /* The column's own field name settles it when the table carries one.
+       Matching on the words of a HEADING made "Rows written" (rows_24h, every
+       write in the last day) accept rows_written (one run's all-time total)
+       from a different endpoint, and reported a column correctly reading 0. */
+    if (keys && keys.length) {
+      const at = keys.indexOf(key);
+      if (at !== -1) return heads[at];
+      if (keys.some(Boolean)) return null;
+    }
     const kw = tok(key, 2);
     if (!kw.length) return null;
     return heads.find((h) => {
@@ -284,6 +308,45 @@ for (const route of routes) {
 
   const pairs = [];
   latest.forEach((body, u) => rowFigures(body).forEach((f) => pairs.push({ ...f, url: u.split('?')[0] })));
+  /* Every NUMERIC field each endpoint offers per identity, whatever its size.
+     The rival test below has to see fields the thousand-row floor throws
+     away: the source table's rows_24h is 0 for the ledger, and 0 never
+     becomes a figure, so the collision it causes was invisible. */
+  const keysAt = new Map();
+  latest.forEach((body, u) => {
+    const url = u.split('?')[0];
+    const walk = (o) => {
+      if (Array.isArray(o)) {
+        for (const r of o.slice(0, 80)) {
+          if (!r || typeof r !== 'object') continue;
+          const id = identityOf(r);
+          if (!id) continue;
+          const k = `${url}|${id}`;
+          const set = keysAt.get(k) || new Set();
+          for (const [kk, vv] of Object.entries(r)) if (isNum(vv)) set.add(kk);
+          keysAt.set(k, set);
+        }
+        return;
+      }
+      if (o && typeof o === 'object') Object.values(o).forEach(walk);
+    };
+    walk(body);
+  });
+
+  /* Every identity each endpoint names, so a loose match can be stopped from
+     landing on a row that belongs to a different one. */
+  const idsByUrl = new Map();
+  for (const f of pairs) {
+    const set = idsByUrl.get(f.url) || new Set();
+    set.add(String(f.id).toLowerCase().trim());
+    idsByUrl.set(f.url, set);
+  }
+  /* How many payload rows one endpoint offers under the same identity. */
+  const idCount = new Map();
+  for (const f of pairs) {
+    const k = `${f.url}|${f.id}`;
+    idCount.set(k, Math.max(idCount.get(k) || 1, f.rows || 1));
+  }
 
   const onPage = new Set(dom.page);
   const anywhere = (v) => onPage.has(String(v)) || onPage.has(String(v - 1)) || onPage.has(String(v + 1));
@@ -299,7 +362,7 @@ for (const route of routes) {
     if (STEM.test(f.key) && f.siblings.some((k) => k !== f.key
       && k.replace(STEM, '') === f.key.replace(STEM, ''))) continue;
     for (const t of dom.tables) {
-      const col = columnFor(t.heads, f.key);
+      const col = columnFor(t.heads, f.key, t.keys);
       if (!col) continue;
       /* EVERY row carrying this identity, not the first.
          A platform name is not unique — /api/revenue has an `uber` row per
@@ -308,10 +371,63 @@ for (const route of routes) {
          six perfectly displayed figures as missing. The claim being tested is
          "this value is nowhere in its own column", so all the candidate rows
          are searched. */
-      const rows = t.rows.filter((r) => r.subject.includes(f.id.toLowerCase().slice(0, 18)));
+      /* Exact first, substring only as a fallback.
+         ─────────────────────────────────────────────────────────────────
+         "Muhammad Khalid" is a prefix of "Muhammad Khalid Gul" — two
+         different drivers, both in /api/earnings/tips — so a substring
+         match handed the first man's figure to the second man's row and
+         called a correctly drawn table wrong. A row whose subject IS the
+         identity is the row; anything else is a guess. */
+      const want = f.id.toLowerCase().trim();
+      const exact = t.rows.filter((r) => r.subject.trim() === want);
+      /* The fallback exists because a subject often carries more than the
+         identity — a plate beside a badge, a name beside a tag. It must not
+         reach a row that is somebody ELSE's exact match: "Muhammad Khalid"
+         is a prefix of "Muhammad Khalid Gul", both are drivers in
+         /api/earnings/tips, and the loose match handed one man's fare to
+         the other's row. When the man's own row is simply not drawn — the
+         table is sorted and cut — the honest answer is no row at all. */
+      const others = idsByUrl.get(f.url) || new Set();
+      const rows = exact.length ? exact
+        : t.rows.filter((r) => r.subject.includes(want.slice(0, 18))
+          && !(others.has(r.subject.trim()) && r.subject.trim() !== want));
       if (!rows.length) continue;                          // this row is not drawn here
-      const near = (r, v) => r.nums.includes(String(v))
-        || r.nums.includes(String(v - 1)) || r.nums.includes(String(v + 1));
+      /* More payload rows share this identity than the page draws.
+         ─────────────────────────────────────────────────────────────────
+         /api/status holds one record per (source, mode, fleet) — four for
+         `fms` — and the source panel shows the latest of them, which is the
+         whole point of the panel. Demanding all four reported fifteen
+         figures on #compare that no reader was ever meant to see. The same
+         thing happens to two drivers who share a name. When the payload is
+         more granular than the table, this check cannot say which row a
+         figure belongs to, so it says nothing. */
+      if ((idCount.get(`${f.url}|${f.id}`) || 1) > rows.length) break;
+      /* Two endpoints, one column heading, different measurements.
+         ─────────────────────────────────────────────────────────────────
+         The source-health table's "Rows written" is rows_24h — every write
+         by every run that FINISHED IN THE LAST DAY, and its own caption
+         says so. /api/status carries rows_written, the all-time total of
+         one run. Both reduce to the words "rows written", so a figure from
+         the run log was demanded in a column that means something else: the
+         ledger imported 39,797 rows a hundred hours ago and the column
+         correctly reads 0. When more than one endpoint offers this identity
+         a field that lands on this column, the column cannot be attributed
+         to either. */
+
+      /* A column is free to render a duration in the unit that reads best.
+         /api/rollups reports duration_ms and the "Took" column prints 3.5s;
+         the STEM rule above only covers a payload carrying BOTH units on the
+         same row, and this one carries only the small one. So the ordinary
+         conversions count as shown. */
+      const forms = (v) => {
+        const out = new Set([v, v - 1, v + 1]);
+        for (const d of [1000, 60, 3600, 60000]) {
+          const q2 = Math.round(v / d);
+          if (q2 >= 1) { out.add(q2); out.add(q2 - 1); out.add(q2 + 1); }
+        }
+        return [...out].map(String);
+      };
+      const near = (r, v) => forms(v).some((x) => r.nums.includes(x));
       if (!rows.some((r) => near(r, f.n)) && !anywhere(f.n)) missing.push({ ...f, col });
       break;
     }

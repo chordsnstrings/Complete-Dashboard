@@ -124,7 +124,23 @@ console.log(`windows: ${WINDOWS.join(', ')}  (today ${TO})`
    partner on /api/corporate/property, so sending one value for both handed the
    corporate page a driver uuid, got an honest 404, and left that panel
    unaudited — while the run still said the view was fine. */
+/* One real booking, for /api/trip: the platform and the provider's own id,
+   taken from a vehicle's trip list the same way PLATE and DRIVER are found. */
+const TRIP = await (async () => {
+  try {
+    const r = await fetch(`${B}/api/vehicle/trips?plate=${encodeURIComponent(PLATE)}&${WIN}`);
+    const j = await r.json();
+    const rows = Array.isArray(j) ? j : (j.rows || j.trips || []);
+    const t = rows.find((x) => x.platform && x.external_id);
+    return t ? { platform: t.platform, id: t.external_id } : null;
+  } catch { return null; }
+})();
+
 const NEEDS_FOR = (path) => {
+  /* /api/trip is ONE booking by the provider's own platform and id, and asking
+     without them is a 400 the audit then reported as an unreached panel on
+     every window of every run. A real one, taken from the segments feed. */
+  if (path === '/api/trip') return { platform: TRIP?.platform, id: TRIP?.id };
   if (path.startsWith('/api/driver/')) return { id: DRIVER };
   if (path.startsWith('/api/corporate/property')) return { id: PROPERTY };
   if (path.startsWith('/api/vehicle/')) return { plate: PLATE };
@@ -282,7 +298,12 @@ for (const view of VIEWS) {
      was taking it with them. That left the Providers page as the one view of
      thirty-six this tool never called at all, reported as "1 endpoint, all
      excluded", which reads like a decision rather than a hole. */
+  /* /api/analyst/run only answers POST — a GET falls through to the 404
+     handler, which this tool read as a missing endpoint on every window of
+     every run. It is also a route that STARTS an analyst pass, so it belongs
+     beside the settings writes rather than in a read-only audit. */
   const ps = all.filter((p) => !/^\/api\/settings/.test(p)
+    && p !== '/api/analyst/run'
     && !/^\/api\/probe\/(?!results)/.test(p));
   if (!ps.length) {
     /* Three different things used to print as "static page": a view with no
@@ -514,19 +535,34 @@ if (NARROW !== WIDE) {
        the run is not the same thing and does not work: by the time this
        section runs the fleet has moved on, and every endpoint looks
        volatile. */
-    const settled = [];
+    const moved = [], still = [], restless = [];
     for (const path of asked) {
-      if (a.get(path) === b.get(path)) continue;
+      if (a.get(path) === b.get(path)) { still.push(path); continue; }
       const n1 = await ask(path, NARROW);
       const w1 = await ask(path, WIDE);
       const w2 = await ask(path, WIDE);
       const n2 = await ask(path, NARROW);
-      if (n1 != null && n1 === n2 && w1 != null && w1 === w2 && n1 !== w1) settled.push(path);
+      if (n1 == null || w1 == null) { restless.push(path); continue; }
+      /* Disagreeing with its own pair is INCONCLUSIVE, not unchanged.
+         /api/economics/drivers is 200KB of live aggregate and moves between
+         two calls seconds apart; treating that as "the window changed
+         nothing" reported the range control on the product's first screen
+         as decoration, when the same endpoint answers 200,627 bytes at
+         seven days and 231,060 at a year. A path that will not hold still
+         is not evidence in either direction and leaves the count. */
+      if (n1 !== n2 || w1 !== w2) { restless.push(path); continue; }
+      (n1 === w1 ? still : moved).push(path);
     }
-    const moved = settled;
+    const judged = moved.length + still.length;
+    if (!judged) {
+      console.log(`${view.padEnd(20)} ${(hidden.has(view) ? 'hidden' : 'shown').padEnd(9)} `
+        + `nothing comparable — all ${restless.length} windowed call(s) are still moving`);
+      continue;
+    }
     const shows = !hidden.has(view);
     const line = `${view.padEnd(20)} ${(shows ? 'shown' : 'hidden').padEnd(9)} `
-      + `${moved.length} of ${asked.length}`;
+      + `${moved.length} of ${judged}`
+      + (restless.length ? `  (${restless.length} too volatile to judge)` : '');
     if (shows && moved.length === 0) {
       quiet += 1;
       console.log(`${line}   ← the control is on screen and changes nothing`);
