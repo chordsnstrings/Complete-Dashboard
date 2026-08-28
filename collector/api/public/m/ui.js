@@ -13,6 +13,34 @@ import { fmt } from '../charts.js';
 
 export { el, esc, money, pct, dayStr, fmt };
 
+/* Most list endpoints answer with an envelope — {rows, shown, truncated} —
+   and a few answer with a bare array. Reading `.rows` off an array yields
+   undefined and an empty screen that looks like a quiet week, so both shapes
+   are unwrapped in one place. The count and the truncation come with it,
+   because a list that was cut has to say so. */
+export const unwrap = (d) => {
+  if (Array.isArray(d)) return { rows: d, total: d.length, truncated: false };
+  if (!d || typeof d !== 'object') return { rows: [], total: 0, truncated: false };
+  const rows = d.rows || d.list || [];
+  return {
+    rows,
+    total: d.total ?? d.people ?? d.totals?.vehicles ?? rows.length,
+    truncated: !!d.truncated,
+  };
+};
+
+/* The line under a cut list. Never omitted: a phone shows ten rows of
+   seventy-four and the reader cannot see the scrollbar that would have
+   hinted at it. */
+export const cut = (host, { rows, total, truncated }, noun) => {
+  if (!truncated && rows.length >= total) return null;
+  const p = el('p', 'm-cap');
+  p.style.cssText = 'margin:8px 2px 0;text-align:center';
+  p.textContent = `The ${rows.length} busiest of ${fmt(total)} ${noun}.`;
+  host.append(p);
+  return p;
+};
+
 export const card = (title, cap) => {
   const c = el('div', 'm-card');
   if (title) c.append(el('h2', null, esc(title)));

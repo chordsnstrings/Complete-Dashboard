@@ -11,8 +11,8 @@
    over by the first one's response arriving late.
 */
 import { state, q, api, href } from '../data.js';
-import { el, money, fmt, dayStr, card, lede, stats, rows, row,
-  seg, search, skeleton, empty, failed, spark, bars } from './ui.js';
+import { el, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
+  skeleton, empty, failed, spark, bars, unwrap, cut } from './ui.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -203,50 +203,36 @@ async function people(deck, ctx) {
   deck.append(list);
   skeleton(list, 5);
 
-  const board = await q('/api/drivers/leaderboard').catch(() => []);
+  const board = unwrap(await q('/api/drivers/leaderboard').catch(() => []));
   if (!ctx.alive()) return;
   list.innerHTML = '';
-  if (!board?.length) { empty(list, 'Nobody drove in this window', 'Widen the window from the ⋮ menu.'); return; }
-
-  /* One person, not one platform account.
-     ─────────────────────────────────────────────────────────────────────
-     driver_ext_id is the CHANNEL's id for someone, so a man who drives for
-     Uber and Yango is two rows in this payload. Keyed on that, the list read
-     "Kashif Ali" three times with different numbers against each — accurate,
-     and unusable as a list of people. Folded on the name instead, with the
-     channels as the subtitle and the drill-down pointed at the id that holds
-     the most of their work. */
-  const byName = new Map();
-  for (const r of board) {
-    const name = r.driver_name || r.driver_ext_id || '—';
-    const cur = byName.get(name)
-      || { id: r.driver_ext_id, name, trips: 0, km: 0, revenue: 0, plats: new Set(), top: 0 };
-    const t = n(r.trips) || 0;
-    cur.trips += t;
-    cur.km += n(r.km) || 0;
-    cur.revenue += n(r.revenue) || 0;
-    if (r.platform) cur.plats.add(r.platform);
-    if (t >= cur.top) { cur.top = t; cur.id = r.driver_ext_id || cur.id; }
-    byName.set(name, cur);
+  if (!board.rows.length) {
+    empty(list, 'Nobody drove in this window', 'Widen the window from the \u22ee menu.');
+    return;
   }
-  const all = [...byName.values()];
-  let sort = 'trips', term = '';
 
+  /* No folding here. /api/drivers/leaderboard already answers per PERSON —
+     `platforms` and `accounts` are how many channel identities that person
+     holds — so folding again on this side would only be a second, worse copy
+     of a rule the server already applies. */
+  let sort = 'trips', term = '';
   const draw = () => {
     list.innerHTML = '';
-    const shown = all
-      .filter((d) => !term || d.name.toLowerCase().includes(term.toLowerCase()))
-      .sort((a, b) => b[sort] - a[sort]);
+    const shown = board.rows
+      .filter((d) => !term || String(d.driver_name || d.person || '')
+        .toLowerCase().includes(term.toLowerCase()))
+      .sort((a, b) => (n(b[sort]) || 0) - (n(a[sort]) || 0));
     if (!shown.length) { empty(list, 'Nobody matches that', 'Try part of a name.'); return; }
     rows(list, shown.map((d) => row({
-      title: d.name,
-      sub: `${[...d.plats].join(', ') || 'no channel'} · ${fmt(Math.round(d.km))} km`,
-      value: sort === 'revenue' ? money(d.revenue) : fmt(d[sort]),
-      note: sort === 'revenue' ? 'fares' : sort,
-      to: href('driver', d.id),
+      title: d.driver_name || d.person || d.driver_ext_id,
+      sub: `${(d.platforms || []).join(', ') || 'no channel'} \u00b7 ${fmt(d.km)} km`
+        + (d.accounts > 1 ? ` \u00b7 ${d.accounts} accounts` : ''),
+      value: sort === 'revenue' ? money(n(d.revenue)) : fmt(n(d[sort])),
+      note: { trips: 'bookings', km: 'km', revenue: 'fares' }[sort],
+      to: href('driver', d.driver_ext_id),
     })));
+    if (!term) cut(list, board, 'people who drove');
   };
-
   search(bar, 'Search people', (v) => { term = v; draw(); });
   seg(bar, [{ id: 'trips', label: 'Bookings' }, { id: 'km', label: 'Distance' },
     { id: 'revenue', label: 'Fares' }], sort, (id) => { sort = id; draw(); });
@@ -262,33 +248,41 @@ async function fleet(deck, ctx) {
   deck.append(list);
   skeleton(list, 5);
 
-  const [cars, live] = await Promise.all([
+  const [carsRaw, live] = await Promise.all([
     q('/api/vehicles').catch(() => []),
     api('/api/live').catch(() => []),
   ]);
   if (!ctx.alive()) return;
+  const cars = unwrap(carsRaw);
   list.innerHTML = '';
-  if (!cars?.length) { empty(list, 'No vehicle worked in this window', 'Widen the window from the ⋮ menu.'); return; }
+  if (!cars.rows.length) {
+    empty(list, 'No vehicle worked in this window', 'Widen the window from the \u22ee menu.');
+    return;
+  }
 
   const pos = new Map((live || []).map((l) => [l.plate, l]));
   let sort = 'trips', term = '';
   const draw = () => {
     list.innerHTML = '';
-    const shown = cars
-      .filter((c) => !term || c.plate.toLowerCase().includes(term.toLowerCase()))
-      .sort((a, b) => (n(b[sort]) || 0) - (n(a[sort]) || 0));
+    const key = (c) => (sort === 'trips' ? (c.trips ?? c.bookings) : c[sort]);
+    const shown = cars.rows
+      .filter((c) => !term || String(c.plate).toLowerCase().includes(term.toLowerCase()))
+      .sort((a, b) => (n(key(b)) || 0) - (n(key(a)) || 0));
     if (!shown.length) { empty(list, 'No plate matches that', 'Try part of a plate.'); return; }
     rows(list, shown.map((c) => {
       const p = pos.get(c.plate);
-      const where = p ? (p.stale ? 'stale fix' : p.speed > 3 ? `moving ${Math.round(p.speed)} km/h` : 'stopped') : 'not reporting';
+      const where = p ? (p.stale ? 'stale fix'
+        : (p.speed || 0) > 3 ? `moving ${Math.round(p.speed)} km/h` : 'stopped')
+        : 'not reporting';
       return row({
         title: c.plate,
-        sub: `${where} · ${fmt(c.drivers)} drivers`,
-        value: sort === 'revenue' ? money(n(c.revenue)) : fmt(n(c[sort])),
-        note: sort === 'revenue' ? 'fares' : sort === 'km' ? 'km' : 'bookings',
+        sub: `${where}${c.current_driver ? ` \u00b7 ${c.current_driver}` : ''}`,
+        value: sort === 'revenue' ? money(n(c.revenue)) : fmt(n(key(c))),
+        note: { trips: 'bookings', km: 'km', revenue: 'fares' }[sort],
         to: href('vehicle', c.plate),
       });
     }));
+    if (!term) cut(list, cars, 'vehicles');
   };
   search(bar, 'Search plates', (v) => { term = v; draw(); });
   seg(bar, [{ id: 'trips', label: 'Bookings' }, { id: 'km', label: 'Distance' },
@@ -332,10 +326,11 @@ async function live(deck, ctx) {
 /* ── Safety and unauthorized ────────────────────────────────────────────── */
 async function safety(deck, ctx) {
   skeleton(deck, 3);
-  const [sum, byVeh] = await Promise.all([
+  const [sum, byVehRaw] = await Promise.all([
     q('/api/alerts/summary').catch(() => []),
     q('/api/alerts/by-vehicle').catch(() => []),
   ]);
+  const byVeh = unwrap(byVehRaw);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   const total = (sum || []).reduce((a, r) => a + (n(r.n) || 0), 0);
@@ -345,18 +340,21 @@ async function safety(deck, ctx) {
   const c = card('By kind', null);
   bars(c.body, (sum || []).map((r) => ({ label: r.alert_type, n: n(r.n) })), { max: 8 });
   deck.append(c.card);
-  if (byVeh?.length) {
+  if (byVeh.rows.length) {
     deck.append(el('p', 'm-sec', 'By vehicle'));
-    rows(deck, byVeh.slice(0, 25).map((r) => row({
-      title: r.plate, sub: r.driver_name || 'no driver on the row',
-      value: fmt(n(r.n ?? r.alerts)), note: 'events', to: href('vehicle', r.plate),
+    rows(deck, byVeh.rows.map((r) => row({
+      title: r.plate,
+      sub: [r.harsh_brake && `${r.harsh_brake} brake`, r.harsh_accel && `${r.harsh_accel} accel`,
+        r.sharp_turn && `${r.sharp_turn} turn`].filter(Boolean).join(' \u00b7 ') || 'events recorded',
+      value: fmt(n(r.alerts ?? r.n)), note: 'events', to: href('vehicle', r.plate),
     })));
+    cut(deck, byVeh, 'vehicles with an event');
   }
 }
 
 async function unauthorized(deck, ctx) {
   skeleton(deck, 3);
-  const [sum, list] = await Promise.all([
+  const [sum, listRaw] = await Promise.all([
     q('/api/unauthorized/summary').catch(() => null),
     q('/api/unauthorized/list').catch(() => []),
   ]);
@@ -375,13 +373,25 @@ async function unauthorized(deck, ctx) {
     sub: `${fmt(v[key].km)} km`,
     tone: key === 'unauthorized' ? 'bad' : key === 'authorized' ? 'good' : null,
   })).filter(Boolean));
-  const items = Array.isArray(list) ? list : (list.rows || []);
+  /* The window asked for is not the window answered: this measurement needs a
+     seat sensor AND a telematics journey, and only the days carrying both can
+     be judged. Saying "21 trips in 30 days" over three days of evidence would
+     be the most misleading sentence on the phone. */
+  const cov = sum.coverage;
+  if (cov && cov.complete === false) {
+    const c2 = el('div', 'm-stale');
+    c2.textContent = `Only ${cov.days_with_data} of the ${cov.days_in_window} days in this `
+      + 'window carry both a seat sensor and a journey, so this is over those days.';
+    deck.append(c2);
+  }
+  const items = unwrap(listRaw).rows;
   if (items.length) {
     deck.append(el('p', 'm-sec', 'Every one of them'));
     rows(deck, items.slice(0, 40).map((r) => row({
       title: r.plate || '—',
       sub: `${r.driver_name || 'no driver'}${r.started_at ? ` · ${dayStr(r.started_at)}` : ''}`,
-      value: r.km != null ? `${n(r.km)}` : '', note: r.km != null ? 'km' : '',
+      value: r.distance_km != null ? `${n(r.distance_km)}` : '',
+      note: r.distance_km != null ? 'km' : '',
       to: href('vehicle', r.plate),
     })));
   }
