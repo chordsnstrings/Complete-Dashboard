@@ -25,6 +25,12 @@ export const ROUTES = [
   'vehicles', 'vehicle/L45235', 'vehicle/L45235/drivers', 'vehicle/L45235/movement',
   'vehicle/L45235/earnings', 'vehicle/L45235/safety', 'vehicle/L45235/compliance',
   'vehicle/L45235/trips',
+  /* The drill-downs behind the tiles. One of each kind — a driver set from a
+     ledger, a vehicle set from a directory, a roster bucket — plus a key
+     nothing declares, because a stale bookmark must render a message rather
+     than the first entry of VIEWS under somebody else's title. */
+  'cohort/unit-drove-unpaid', 'cohort/unit-idle-documented',
+  'cohort/vehicles-moved-no-booking', 'cohort/roster-blocked', 'cohort/not-a-cohort',
   'platforms', 'platforms/tiers', 'platforms/funnel',
   'corridors', 'finance', 'settlement', 'settlement/cash', 'settlement/receivables',
   'corporate', 'corporate/properties', 'corporate/guests',

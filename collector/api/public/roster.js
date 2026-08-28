@@ -80,6 +80,8 @@ export async function renderRoster(root) {
     }
     verdict(host, {
       claim, figure, unit, tone, recommend,
+      /* Whichever set the claim counted, that is the set the link opens. */
+      cohort: blocked ? 'roster-blocked' : pct >= 40 ? 'roster-idle' : null,
       meta: `${fmt(t.people)} on the books`,
       sub: `${fmt(t.idle_this_window || 0)} could earn and did not, ${fmt(t.never_started || 0)} never have`
         + `${t.multi_platform ? `, and ${fmt(t.multi_platform)} work on more than one platform` : ''}.`,
@@ -95,14 +97,18 @@ export async function renderRoster(root) {
     { label: 'Drove in this window', value: fmt(t.working),
       sub: t.people ? `of ${fmt(t.people)} people on the roster` : null, tone: 'good' },
     { label: 'Able to earn, earning nothing', value: fmt(t.idle_this_window),
-      tone: t.idle_this_window ? 'warn' : null, sub: 'a licence and a slot standing still' },
+      tone: t.idle_this_window ? 'warn' : null, sub: 'a licence and a slot standing still',
+      cohort: t.idle_this_window ? 'roster-idle' : null },
     { label: 'Recruited, never driven', value: fmt(t.never_started),
       sub: t.people ? `of ${fmt(t.people)} — no booking on any channel, ever` : 'no booking on any channel, ever',
-      tone: t.never_started ? 'critical' : null },
-    { label: 'Still waiting to start', value: fmt(t.in_pipeline), sub: 'onboarding or waitlisted' },
+      tone: t.never_started ? 'critical' : null,
+      cohort: t.never_started ? 'roster-never-started' : null },
+    { label: 'Still waiting to start', value: fmt(t.in_pipeline), sub: 'onboarding or waitlisted',
+      cohort: t.in_pipeline ? 'roster-pipeline' : null },
     t.unclassified
       ? { label: 'Standing not reported', value: fmt(t.unclassified),
-          sub: 'no provider used a word we recognise', tone: 'warn' }
+          sub: 'no provider used a word we recognise', tone: 'warn',
+          cohort: 'roster-unclassified' }
       : null,
     t.activity_unknown
       ? { label: 'Output not observed', value: fmt(t.activity_unknown),
@@ -113,11 +119,13 @@ export async function renderRoster(root) {
        `blocked` was in the same totals object and shown nowhere. */
     { label: 'Stopped everywhere', value: fmt(t.blocked),
       tone: t.blocked ? 'critical' : 'good',
-      sub: 'not permitted to work on any platform they hold' },
+      sub: 'not permitted to work on any platform they hold',
+      cohort: t.blocked ? 'roster-blocked' : null },
     { label: 'Holding a car while stopped',
       value: t.blocked ? `${fmt(t.holding_vehicle_while_blocked)} of ${fmt(t.blocked)}` : fmt(t.holding_vehicle_while_blocked),
       tone: t.holding_vehicle_while_blocked ? 'critical' : null,
-      sub: 'earns nothing, still depreciates, insures and parks' },
+      sub: 'earns nothing, still depreciates, insures and parks',
+      cohort: t.holding_vehicle_while_blocked ? 'roster-blocked-holding' : null },
   ]));
 
   if (!d.people.length) {

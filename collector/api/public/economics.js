@@ -254,6 +254,10 @@ async function moneyTab(root) {
       figure: perHour ? money(perHour) : perWorked ? money(perWorked) : fmt(earning),
       unit: perHour ? 'per online hour' : perWorked ? 'per day worked' : 'earning',
       tone: unpaid ? 'bad' : (people && idle / people >= 0.4 ? 'warn' : null),
+      /* The claim counts a set, so the claim leads to it. "1 driver drove and
+         was paid nothing" was the sentence a reader most wanted to click and
+         the one thing on the page that went nowhere. */
+      cohort: unpaid ? 'unit-drove-unpaid' : idle ? 'unit-earned-nothing' : null,
       meta: `${fmt(dt.worked_days)} driver-days`,
       /* The denominator, stated. Spreading the same money over everybody on the
          books gives a per-driver number roughly half this one, and both are
@@ -316,10 +320,14 @@ async function moneyTab(root) {
     { label: 'Assets earning', value: `${fmt(t.earning)} / ${fmt(t.vehicles)}`,
       tone: t.earning === t.vehicles ? 'good'
         : t.vehicles - t.earning > t.vehicles / 4 ? 'critical' : 'warn',
-      sub: `${fmt(t.moved_unpaid)} moved without earning · ${fmt(t.still)} never moved` },
+      sub: `${fmt(t.moved_unpaid)} moved without earning · ${fmt(t.still)} never moved`,
+      cohort: t.moved_unpaid ? 'unit-moved-unpaid' : t.still ? 'unit-still' : null },
+    /* The one tile on this page that is closest to "losing money", and it was
+       a number with no way to reach the cars it counted. */
     { label: 'Insured and idle', value: fmt(t.idle_but_documented),
       tone: t.idle_but_documented ? 'critical' : 'good',
-      sub: 'earned nothing, papers still current' },
+      sub: 'earned nothing, papers still current',
+      cohort: t.idle_but_documented ? 'unit-idle-documented' : null },
     { label: 'Idle vehicle-days', value: fmt(t.idle_vehicle_days),
       tone: 'warn',
       sub: t.forgone_at_own_rate
@@ -589,11 +597,13 @@ async function assetsTab(root) {
       sub: `${fmt(t.earning_vehicle_days)} earned · ${fmt(t.idle_vehicle_days)} idle` },
     { label: 'Earning', value: fmt(t.earning), tone: 'good', sub: `of ${fmt(t.vehicles)} vehicles` },
     { label: 'Moved, no money', value: fmt(t.moved_unpaid),
-      tone: t.moved_unpaid ? 'critical' : 'good', sub: 'the tracker saw it drive' },
+      tone: t.moved_unpaid ? 'critical' : 'good', sub: 'the tracker saw it drive',
+      cohort: t.moved_unpaid ? 'unit-moved-unpaid' : null },
     { label: 'Never moved', value: fmt(t.still), tone: t.still ? 'warn' : 'good',
-      sub: 'no booking and no journey' },
+      sub: 'no booking and no journey', cohort: t.still ? 'unit-still' : null },
     { label: 'Insured and idle', value: fmt(t.idle_but_documented),
-      tone: t.idle_but_documented ? 'critical' : 'good', sub: 'papers current, earned nothing' },
+      tone: t.idle_but_documented ? 'critical' : 'good', sub: 'papers current, earned nothing',
+      cohort: t.idle_but_documented ? 'unit-idle-documented' : null },
   ]), bar);
 
   const withKm = A.rows.filter((r) => (r.km ?? 0) > 0 && (r.money ?? 0) > 0);
@@ -706,7 +716,12 @@ async function driversTab(root) {
       sub: `of ${fmt(t.people)} who drove or were paid in this window` },
     { label: 'Drove, no money', value: fmt(t.drove_unpaid),
       tone: t.drove_unpaid ? 'critical' : 'good',
-      sub: 'took bookings, no payout statement reaches them' },
+      sub: 'took bookings, no payout statement reaches them',
+      cohort: t.drove_unpaid ? 'unit-drove-unpaid' : null },
+    { label: 'Earned nothing', value: fmt(t.idle),
+      tone: t.idle ? 'warn' : 'good',
+      sub: 'on the books, no booking and no payout',
+      cohort: t.idle ? 'unit-earned-nothing' : null },
     { label: 'Per hour online', value: '—',
       sub: t.hours_note },
   ]), bar);

@@ -910,6 +910,10 @@ async function handoverPanel(host) {
   try { h = await qAll('/api/vehicles/handover'); } catch (e) { empty(host, 'Could not load handovers'); return; }
   const t = h?.totals || {};
   const rows = h?.plates || [];
+  /* The skeleton is REPLACED. Everything below appends, so leaving it renders
+     a finished panel with a spinner still turning above it — which a reader,
+     and the smoke test, both read as "this never loaded". */
+  host.innerHTML = '';
   if (!t.handovers) {
     empty(host, 'No car changed hands inside a day in this range');
     return;
@@ -936,8 +940,10 @@ async function handoverPanel(host) {
   const top = rows.slice(0, 12);
   if (top.length > 2) {
     const bars = el('div'); host.append(bars);
+    /* One measure across named cars, so one hue: the bar length already
+       carries the magnitude and six colours would imply six categories. */
     hbars(bars, top.map((r) => ({ label: r.plate, n: r.idle_h, plate: r.plate })), {
-      value: 'n', valueFmt: (v) => `${fmt(v, 1)} h`, signed: false,
+      value: 'n', valueFmt: (v) => `${fmt(v, 1)} h`, signed: false, color: '--b500',
       onClick: (d) => { location.hash = href('vehicle', d.plate); },
     });
   }
@@ -1039,6 +1045,7 @@ export async function renderVehicleDirectory(root) {
     }
     verdict(vHost, {
       claim, figure, unit, tone, recommend,
+      cohort: movedOnly ? 'vehicles-moved-no-booking' : idle ? 'vehicles-still' : null,
       meta: `${fmt(rows.length)} on the books`,
       sub: `${fmt(earning)} took a booking, ${fmt(movedOnly)} moved without one, ${fmt(still)} did not move at all.`
         + (tracked < rows.length ? ` ${fmt(rows.length - tracked)} carry no tracker fix, so nothing can say where they are.` : '')
@@ -1052,9 +1059,11 @@ export async function renderVehicleDirectory(root) {
       tone: earning === rows.length ? 'good' : rows.length - earning > rows.length / 4 ? 'critical' : 'warn' },
     { label: 'Moved, no booking', value: fmt(movedOnly),
       sub: 'the tracker saw it drive and nothing paid for it',
-      tone: movedOnly ? 'critical' : 'good' },
+      tone: movedOnly ? 'critical' : 'good',
+      cohort: movedOnly ? 'vehicles-moved-no-booking' : null },
     { label: 'Did not move', value: fmt(still), sub: 'no booking and no journey',
-      tone: still ? 'warn' : 'good' },
+      tone: still ? 'warn' : 'good',
+      cohort: still ? 'vehicles-still' : null },
     /* Named, because the product carries two rules for the word "stale" and
        this page uses the other one. /api/vehicles flags a fix stale after 11
        minutes; /api/live flags it after 30, which is what #live and #map show.
@@ -1070,8 +1079,21 @@ export async function renderVehicleDirectory(root) {
     { label: 'Tracked', value: fmt(tracked),
       sub: `${fmt(staleN)} with no fix in 11 min`,
       tone: staleN === 0 ? 'good' : 'warn' },
+    /* Its own tile rather than a link on the one above: a tile whose number
+       counts the cars that ARE tracked cannot lead to the ones that are not,
+       and a reader who clicks 65 and lands on a list of 12 has been told two
+       things at once. Whichever blind spot exists is the one named. */
+    staleN
+      ? { label: 'Tracker gone quiet', value: fmt(staleN), tone: 'warn',
+          sub: 'reported a position once and has stopped',
+          cohort: 'vehicles-stale' }
+      : tracked < rows.length
+        ? { label: 'No tracker fix', value: fmt(rows.length - tracked), tone: 'warn',
+            sub: 'nothing can say where these are', cohort: 'vehicles-untracked' }
+        : null,
     { label: 'Documents due', value: fmt(expiring), sub: 'expiring within 30 days',
-      tone: expiring === 0 ? 'good' : 'critical' },
+      tone: expiring === 0 ? 'good' : 'critical',
+      cohort: expiring ? 'vehicles-docs-due' : null },
   ]));
   /* Bookings with no vehicle recorded appear on no vehicle page, so this table
      sums to fewer trips than the fleet does. Said plainly, because a reader who

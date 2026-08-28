@@ -631,6 +631,39 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    by its overflow:hidden. Broken anywhere rather than truncated: half an
    endpoint name is not an endpoint name. */
 .kpi .s{font-size:.75rem;color:var(--ink-2);margin-top:2px;line-height:1.35;overflow-wrap:anywhere}
+/* A tile that leads to the set behind its number. The affordance is quiet
+   until the tile is hovered or focused: the number is what the reader came
+   for, and a permanent call to action on nine tiles is nine calls to action.
+   Kept in flow rather than absolutely positioned so it cannot sit on top of a
+   long sub-line. */
+a.kpi{display:block;text-decoration:none;color:inherit}
+a.kpi:hover,a.kpi:focus-visible{border-color:var(--accent)}
+.kpi-who{
+  font-family:"IBM Plex Mono",monospace;font-size:.62rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--accent);margin-top:7px;
+  opacity:0;transform:translateX(-3px);
+  transition:opacity .2s var(--ease),transform .2s var(--ease);
+}
+a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:none}
+@media (hover:none){.kpi-who{opacity:.75;transform:none}}
+
+/* The same door on a verdict, where the claim itself is the number. */
+.vdct-who{
+  display:inline-block;margin-top:12px;font-family:"IBM Plex Mono",monospace;
+  font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--accent);text-decoration:none;border-bottom:1px solid transparent;
+}
+.vdct-who:hover,.vdct-who:focus-visible{border-bottom-color:var(--accent)}
+
+/* One card per member of a cohort: the header names them, the tiles beneath
+   are what each source said. Stacked rather than gridded — a card is read, not
+   compared, and the table above is what comparison is for. */
+.cohort-cards{display:flex;flex-direction:column;gap:14px}
+.cohort-card{padding:16px 18px}
+.cohort-head h3{margin:0;font-size:1.02rem}
+.cohort-head .cap{margin:3px 0 0}
+.cohort-card .kpis{margin-top:12px}
+.cohort-card>.cap:last-child{margin:11px 0 0;font-size:.74rem}
 .kpi.t-good .n{color:var(--good)} .kpi.t-good::after{background:var(--good)}
 .kpi.t-warn .n{color:var(--warn)} .kpi.t-warn::after{background:var(--warn)}
 .kpi.t-serious .n{color:var(--serious)} .kpi.t-serious::after{background:var(--serious)}

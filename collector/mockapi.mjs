@@ -7,6 +7,17 @@ import { dirname, join } from 'node:path';
 const __dir = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const plates = ['L45235', 'L12615', 'L46174', 'L40971', 'L94178', 'L36397', 'L76098', 'L82923'];
+/* One person's category, in one place. The roster fixture and the cohort
+   drill-down fixture both read it, so a mock driver who is "stopped
+   everywhere" on one screen is not "active, 60 bookings" on the next — which
+   is the exact contradiction the drill-down exists to make impossible, and a
+   fixture that fakes it teaches the smoke test to accept it. */
+const ROSTER_CATS = ['working', 'working', 'working', 'idle_this_window',
+  'never_started', 'in_pipeline', 'blocked', 'working'];
+const catOf = (id) => {
+  const i = /^drv-(\d+)$/.test(String(id)) ? Number(String(id).slice(4)) : -1;
+  return i < 0 ? 'working' : ROSTER_CATS[i % ROSTER_CATS.length];
+};
 const drivers = ['Ahmed Tarig Mohamed', 'Muhammad Ashraf Bakhsh', 'Najeeb Ullah Khan', 'Roy Vellespen Ocdol',
   'Muhammad Khalid Gul', 'Aliyan Khalil', 'Asad Khan Khan', 'Mohammed Alsous'];
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -866,6 +877,101 @@ app.get('/api/vehicles/handover', (_, r) => {
       timed_rows: 412, custody_rows: 460,
     },
     plates: rows,
+  });
+});
+
+/* The all-source join behind a cohort. Shaped so every branch of the card
+   renderer is reachable: one member with every source answering, one with a
+   silent tracker, one nobody holds. */
+const idsOf = (req) => String(req.query.ids || '').split(',').map((x) => x.trim()).filter(Boolean);
+
+app.get('/api/cohort/drivers', (req, r) => {
+  const ids = idsOf(req);
+  r.json({
+    window: [dayISO(DAYS).slice(0, 10), dayISO(0).slice(0, 10)],
+    ids,
+    rows: ids.map((id, i) => {
+      /* Consistent with /api/roster for the same person — see ROSTER_CATS. */
+      const cat = catOf(id);
+      const works = cat === 'working';
+      const stopped = cat === 'blocked';
+      return {
+      id,
+      work: !works ? [] : [
+        { platform: 'uber', bookings: 60 - i * 3, completed: 55 - i * 3, bookable: 60 - i * 3,
+          days: 22 - i, km: 900 - i * 40, fares: i % 2 ? 1200 - i * 50 : null, priced: i % 2 ? 12 : 0,
+          first_trip: dayISO(DAYS), last_trip: dayISO(1) },
+      ],
+      pay: !works ? [] : [
+        { platform: 'uber', payout: 4200 - i * 120, cash: 300, payout_days: 20 - i,
+          first_day: dayISO(DAYS).slice(0, 10), last_day: dayISO(1).slice(0, 10) },
+      ],
+      availability: works && i % 2 ? { days: 21, online_min: 18000 - i * 300, idle_min: 15000 - i * 250,
+        on_job_min: 3000, avg_first_min: 430, avg_last_min: 1310, longest_wait_min: 240 } : null,
+      standing: [{ platform: 'uber', state: stopped ? 'deactivated' : cat === 'in_pipeline' ? 'waitlist' : 'active',
+        state_reason: stopped ? 'document expired' : null, can_earn: !stopped && cat !== 'in_pipeline',
+        plate: plates[i % plates.length],
+        observed_at: new Date().toISOString(), fleet_id: 'ecosine' }],
+      compliance: [{ platform: 'uber', licence_expires: dayISO(-40 + i * 10).slice(0, 10),
+        state: 'ACTIVE', rating: 4.7, licence_days_left: 40 - i * 10,
+        updated_at: new Date().toISOString() }],
+      cars: (!works && !stopped) ? [] : [
+        { plate: plates[i % plates.length], days: 18 - i, trips: 90 - i * 5, last_day: dayISO(1).slice(0, 10) },
+      ],
+      alerts: works && i % 2 ? [{ alert_type: 'Overspeed', n: 9 - i }, { alert_type: 'Harsh Braking', n: 3 }] : [],
+      performance: !works ? [] : [{ platform: 'uber', hours_online: 180 - i * 6, hours_on_trip: 40,
+        acceptance: 0.91, cancellation: 0.04, rating: 4.72 }],
+      not_completed: !works ? [] : [
+        { platform: 'uber', status: 'rider_cancelled', outcome: 'not_completed', n: 7 - i },
+        { platform: 'uber', status: 'driver_cancelled', outcome: 'not_completed', n: 2 }],
+      }; }),
+  });
+});
+
+app.get('/api/cohort/vehicles', (req, r) => {
+  const ids = idsOf(req);
+  r.json({
+    window: [dayISO(DAYS).slice(0, 10), dayISO(0).slice(0, 10)],
+    ids,
+    rows: ids.map((plate, i) => ({
+      plate,
+      spec: { plate, make: vehSpec[i % vehSpec.length][0], model: vehSpec[i % vehSpec.length][1],
+        year: vehSpec[i % vehSpec.length][2], colour: 'White', vin: '5YJ' + (100000 + i),
+        fuel_type: 'electric', fleet_id: i % 3 ? 'ecosine' : 'egari' },
+      /* Mirrors /api/vehicles/directory for the same plate. A fixture whose
+         detail contradicts its own directory renders a drill-down claiming 120
+         bookings under a table row that says 0, which is exactly the bug this
+         page exists to make impossible — so the mock must not fake it. */
+      work: (() => {
+        const j = plates.indexOf(plate);
+        const k = j < 0 ? i : j;
+        const trips = k === 6 ? 0 : 470 - k * 44;
+        const journeys = k === 6 ? 38 : Math.round(trips * 1.3);
+        return trips || journeys ? [{ platform: 'uber', bookings: trips, journeys,
+          days: k === 6 ? 0 : 27 - k, km: k === 6 ? null : 6100 - k * 420,
+          journey_km: k === 6 ? 512 : Math.round((6100 - k * 420) * 1.25),
+          fares: k === 1 || k === 4 ? 15800 - k * 1100 : null,
+          last_trip: trips ? dayISO(1) : null, last_movement: dayISO(0) }] : [];
+      })(),
+      custody: i % 5 === 4 ? [] : [
+        { plate, driver_ext_id: `drv-${i}`, driver_name: drivers[i % drivers.length],
+          days: 19 - i, trips: 110 - i * 8, last_day: dayISO(1).slice(0, 10) },
+      ],
+      documents: [
+        { plate, platform: 'uber', doc_type: 'Vehicle Registration Form', status: 'ACTIVE',
+          expires_at: dayISO(-20 + i * 12), days_left: 20 - i * 12 },
+        { plate, platform: 'uber', doc_type: 'Insurance', status: 'ACTIVE',
+          expires_at: dayISO(-200), days_left: 200 },
+      ],
+      telematics: i % 6 === 5 ? null : { plate, source: 'cabman', last_fix: dayISO(i ? 1 : 0),
+        status: 'Idle', speed: 0, odometer: 91000 + i * 900, ignition: false,
+        fix_age_min: i * 90 },
+      alerts: i % 2 ? [{ plate, alert_type: 'Overspeed', n: 12 - i, last_at: dayISO(1) }] : [],
+      segments: [{ plate, verdict: 'partial', n: 14, km: 190, minutes: 620 },
+        ...(i % 3 === 0 ? [{ plate, verdict: 'unauthorized', n: 3, km: 41, minutes: 96 }] : [])],
+      utilisation: [{ plate, platform: 'uber', hours_online: 210 - i * 7, hours_on_trip: 88,
+        utilisation: 0.42, earnings: 5400 - i * 110 }],
+    })),
   });
 });
 
@@ -2124,7 +2230,7 @@ app.get('/api/probe/results', (_, r) => {
 
 
 app.get('/api/roster', (_, r) => {
-  const cats = ['working', 'working', 'working', 'idle_this_window', 'never_started', 'in_pipeline', 'blocked', 'working'];
+  const cats = ROSTER_CATS;
   const people = drivers.map((name, i) => {
     const category = cats[i % cats.length];
     const blocked = category === 'blocked';

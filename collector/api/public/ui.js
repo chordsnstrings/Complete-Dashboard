@@ -448,6 +448,16 @@ function scrollCue(box, wrap) {
    characters of margin are what stops the next boundary case from clipping. */
 const KPI_ONE_LINE = 12;
 
+/* A tile may name the SET behind its number.
+   ─────────────────────────────────────────────────────────────────────────
+   "33 insured and idle" is a true sentence nobody can act on: it is thirty-
+   three named cars printed as a cardinality, and reaching them meant knowing
+   which page listed them and how to filter it. A tile carrying `cohort` is a
+   link to that list — the same rows, gathered with every other source that
+   holds anything about them (see api/public/cohorts.js).
+
+   Rendered as an <a> so it is a real destination: linkable, bookmarkable, and
+   openable in a new tab, which a click handler on a div is not. */
 export function kpiRow(items) {
   const host = el('div', 'kpis');
   host.innerHTML = items.filter(Boolean).map((k) => {
@@ -455,12 +465,16 @@ export function kpiRow(items) {
        reader actually sees rather than by the length of its span tags. */
     const plain = String(k.html ? k.html.replace(/<[^>]*>/g, '') : (k.value ?? '—'));
     const long = plain.length > KPI_ONE_LINE ? ' long' : '';
+    const to = k.to || (k.cohort ? href('cohort', k.cohort) : null);
+    const tag = to ? 'a' : 'div';
+    const attr = to ? ` href="${to}"` : '';
     return `
-    <div class="kpi${k.tone ? ' t-' + k.tone : ''}">
+    <${tag} class="kpi${k.tone ? ' t-' + k.tone : ''}${to ? ' kpi-open' : ''}"${attr}>
       <div class="l">${esc(k.label)}</div>
       <div class="n num${long}">${k.html || esc(k.value ?? '—')}</div>
       ${k.sub ? `<div class="s">${esc(k.sub)}</div>` : ''}
-    </div>`;
+      ${to ? '<div class="kpi-who">Who exactly? →</div>' : ''}
+    </${tag}>`;
   }).join('');
   return host;
 }
@@ -864,7 +878,12 @@ export function foldChildren(host, box, { shown = 8, total = null, noun = 'item'
      · the figure that decides it, rendered once and large
      · a tone that is earned — `warn`/`bad` only when something needs doing
      · an optional recommendation, which is the only bold text allowed here */
-export function verdict(host, { claim, figure, unit, sub, tone = null, recommend = null, meta = null }) {
+/* `cohort` names the set the claim counts, and turns the headline into a way
+   of reaching it. "1 driver drove and was paid nothing" is the sentence a
+   reader most wants to click, and until this it was the one thing on the page
+   that led nowhere. */
+export function verdict(host, { claim, figure, unit, sub, tone = null, recommend = null,
+  meta = null, cohort = null }) {
   const v = el('div', `vdct${tone ? ' ' + tone : ''}`);
   const main = el('div', 'vdct-main');
   main.append(el('h2', 'vdct-claim', esc(claim)));
@@ -873,6 +892,12 @@ export function verdict(host, { claim, figure, unit, sub, tone = null, recommend
     const r = el('p', 'vdct-rec');
     r.innerHTML = `<b>Recommendation:</b> ${esc(recommend)}`;
     main.append(r);
+  }
+  if (cohort) {
+    const a = el('a', 'vdct-who');
+    a.href = href('cohort', cohort);
+    a.textContent = 'Who exactly? →';
+    main.append(a);
   }
   v.append(main);
   if (figure != null) {

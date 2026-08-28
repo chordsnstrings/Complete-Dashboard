@@ -14,6 +14,8 @@ import { volatilePath } from './swr.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
+import { renderCohort } from './cohort.js';
+import { COHORTS } from './cohorts.js';
 import { renderCauses } from './causes.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
 import { renderTrip } from './trip.js';
@@ -484,6 +486,18 @@ function setHeader(detail) {
       ? `${tab.label} — every row carries a rate, and every column ranks by it`
       : v.sub;
     crumb.style.display = 'none';
+  } else if (state.view === 'cohort') {
+    /* Named here for the same reason #performer and #trip are: without a
+       branch this falls through to VIEWS[0] and every drill-down on the
+       product is titled "Unit economics" in the largest type on the screen. */
+    const c = COHORTS[state.param];
+    $('#viewTitle').textContent = c ? c.label : 'Who exactly?';
+    $('#viewSub').textContent = c ? c.question
+      : 'The set behind a number, with every source that holds anything about it';
+    crumb.innerHTML = c
+      ? `<a href="${href(c.from)}">${esc(c.fromLabel)}</a><span>/</span><b>${esc(c.label)}</b>`
+      : `<b>Who exactly?</b>`;
+    crumb.style.display = 'flex';
   } else {
     const v = VIEWS.find((x) => x.id === state.view) || VIEWS[0];
     $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
@@ -516,6 +530,10 @@ function setHeader(detail) {
 }
 /* ─────────── views ─────────── */
 const V = {};
+
+/* The set behind a number. Reached from a tile or a verdict, never from the
+   nav: it is a drill-down, and it only means anything with a key. */
+V.cohort = (root) => renderCohort(root, state.param);
 
 V.overview = async (root) => {
   /* The verdict goes in FIRST, before anything it summarises, and is filled

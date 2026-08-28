@@ -15,6 +15,7 @@ import { log } from '../src/log.js';
 import { economicsRoutes } from './economics_routes.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
+import { cohortRoutes } from './cohort_routes.js';
 import { analyticsRoutes, analystRoutes } from './analytics_routes.js';
 import { rosterRoutes } from './roster_routes.js';
 import { dayRoutes } from './day_routes.js';
@@ -3035,6 +3036,7 @@ economicsRoutes(app, { q, wrap, range });
 
 /* ───────────────── per-vehicle detail pages ───────────────── */
 vehicleRoutes(app, { q, wrap, endOfDay });
+cohortRoutes(app, { q, wrap });
 
 /* ───────────────── commercial analytics ─────────────────
    Settlement, the corporate channel, product tiers, coverage holes and
