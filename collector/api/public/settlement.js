@@ -60,10 +60,17 @@ async function settleMix(host) {
     const inHand = cash ? cash.trips : 0;
     const blind = +s.unlabelled_trips || 0;
     const outstanding = inHand + later;
+    /* The claim says what the figure MEASURES. It used to read "not settled
+       at the ride", which is a different set from the one it counted: cash IS
+       settled at the ride — the driver was handed the money — it simply has
+       not been banked, while the 2,302 bookings the platform settles
+       off-platform are not settled at the ride in any sense and are not in
+       this number. The tile directly below it says "Settled at the ride
+       54.8%", so the two sentences contradicted each other on one screen. */
     verdict(host, {
       claim: outstanding
-        ? `${Math.round((outstanding / total) * 100)}% of bookings are not settled at the ride`
-        : 'Every booking settles at the ride',
+        ? `${Math.round((outstanding / total) * 100)}% of bookings are still to be collected`
+        : 'Every booking is already in the bank',
       figure: fmt(outstanding), unit: 'still to collect',
       tone: total && outstanding / total >= 0.3 ? 'warn' : null,
       meta: `${fmt(total)} with a route`,

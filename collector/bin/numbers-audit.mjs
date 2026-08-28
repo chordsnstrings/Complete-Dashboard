@@ -141,7 +141,20 @@ for (const route of routes) {
   page.on('response', onResp);
   process.stderr.write(`\r[${++n}/${routes.length}] ${route.slice(0, 44).padEnd(44)}`);
   try {
-    await page.goto(`${BASE}/#${route}`, { waitUntil: 'domcontentloaded', timeout: 60000 });
+    /* An EXPLICIT window, and an empty cache before it.
+       ─────────────────────────────────────────────────────────────────────
+       A bare `#route` inherits whatever window the previous route's drift
+       check left in localStorage, and data.js paints a cached copy before
+       revalidating — so the payload this listener captured and the numbers
+       on screen could belong to two different windows. That is what
+       reported nine perfectly displayed figures on #vehicles: the DOM said
+       801 for a 7-day window, the captured payload said 1,286 for a
+       30-day one, and the page had rendered exactly what it was given.
+       Pinning the window and dropping the store makes the two comparable. */
+    await page.goto(`${BASE}/#${route}${route.includes('?') ? '&' : '?'}days=30`,
+      { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.evaluate(() => { try { localStorage.removeItem('fleet.swr.v1'); } catch { /* none */ } });
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
     await page.waitForTimeout(SETTLE);
   } catch (e) {
     findings.push({ route, code: 'crashed', detail: String(e.message).slice(0, 120) });
@@ -157,6 +170,20 @@ for (const route of routes) {
     const norm = (s2) => (s2 || '')
       .replace(/(\d),(?=\d{3}\b)/g, '$1')
       .replace(/[^\d]/g, ' ');
+    /* Every text node, joined by a space — not innerText.
+       ───────────────────────────────────────────────────────────────────
+       innerText separates table cells with a tab only while they are laid
+       out as cells. At 412px they are not, and a row came back as one
+       unbroken string: "L46174" and "2025" fused into "461742025", the
+       Alerts value fused with its neighbours, and nine figures that were
+       plainly on screen were reported missing. Text nodes carry their own
+       boundaries whatever the display mode. */
+    const words2 = (el) => {
+      const w = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const out = []; let node;
+      while ((node = w.nextNode())) out.push(node.nodeValue);
+      return out.join(' ');
+    };
     /* Each table as the reader meets it: what its columns are called, and what
        each row says. The check needs both — a figure only counts as missing if
        the table HAS a column for it and the row is on screen without it. */
@@ -168,8 +195,8 @@ for (const route of routes) {
            and then demanded that driver's earnings appear in a row describing
            a car — four findings that were the matcher's fault, not the page's. */
         subject: ((r.children[0] || {}).textContent || '').trim().toLowerCase(),
-        text: (r.innerText || '').toLowerCase(),
-        nums: norm(r.innerText).split(/\s+/).filter(Boolean),
+        text: words2(r).toLowerCase(),
+        nums: norm(words2(r)).split(/\s+/).filter(Boolean),
       })),
     }));
     /* A table that scrolls sideways WITHOUT a pinned first column: a figure
@@ -201,7 +228,7 @@ for (const route of routes) {
        hbars chart and tables only their children — is SHOWN, and a check that
        reads table cells alone called four of those missing. The last gate is
        "nowhere on the page", not "not in this cell". */
-    return { tables, looseTables: loose.length, indexPinned, page: norm(root.innerText).split(/\s+/).filter(Boolean) };
+    return { tables, looseTables: loose.length, indexPinned, page: norm(words2(root)).split(/\s+/).filter(Boolean) };
   });
 
   /* Does this table have a column for that field? Compared on words, so
@@ -352,16 +379,30 @@ for (const route of CARD_ROUTES) {
      7d isolates what MOVED from what the window CHANGED: a fact that differs
      between the two identical loads is volatile and says nothing, and only a
      fact that held still across them and differs at 365d is windowed. */
+  /* FOUR loads, and BRACKETED: 7d, 365d, 365d, 7d.
+     ───────────────────────────────────────────────────────────────────────
+     Three loads in the order 7, 365, 7 catch a fast-moving value and miss a
+     slow one. "Last fix" is a GPS timestamp that advances every few minutes:
+     the two 7d loads ran close together and agreed, the 365d load between
+     them did not, and a clock was reported as a window. Bracketing puts the
+     repeat of each window on the far side of the other, so anything drifting
+     over the run differs from itself and is excluded, while a genuinely
+     windowed fact still agrees with its own pair. */
+  let wide2;
   try {
     a = await cardFacts(route, 7);
     wide = await cardFacts(route, 365);
+    wide2 = await cardFacts(route, 365);
     again = await cardFacts(route, 7);
   } catch { continue; }
-  if (!a.length || a.length !== wide.length || a.length !== again.length) continue;
+  if (!a.length || a.length !== wide.length || a.length !== again.length
+    || a.length !== wide2.length) continue;
 
-  const drifted = a.map((f, i) => ({ f, w: wide[i], v: again[i] }))
-    .filter(({ f, w, v }) => w.label === f.label && v.label === f.label
+  const drifted = a.map((f, i) => ({ f, w: wide[i], v: again[i], w2: wide2[i] }))
+    .filter(({ f, w, v, w2 }) => w.label === f.label && v.label === f.label
+      && w2.label === f.label
       && v.value === f.value                       // held still while the clock ran
+      && w2.value === w.value                      // …at the other window too
       && w.value !== f.value                       // …and moved when the window did
       && !NAMES_WINDOW.test(f.label));
   if (drifted.length) {

@@ -411,14 +411,68 @@ if (NARROW !== WIDE) {
      own — #performer picks its Monday-to-Sunday week that way — so a call site
      passing from/to is windowed by the page and not by the reader's selector,
      and is not counted. */
+  /* Scoped to the code the view ACTUALLY runs, not to the whole module.
+     ───────────────────────────────────────────────────────────────────────
+     sourceFor() hands back the entire file a delegate lives in, which is the
+     right answer for "which endpoints does this page touch" and the wrong one
+     here: renderSegment and renderSegments are neighbours in segments.js, so
+     #segment was credited with `q('/api/segments')` — a call it never makes —
+     and reported on every run as a page whose numbers move with a window it
+     does not offer. It makes exactly one call, through bare api(), and sends
+     no window at all.
+
+     So this walks the delegate's own body and the bodies of the same-module
+     helpers that body calls. One level of helpers is enough for this codebase
+     and keeps a sibling function out. */
+  const bodyOf = (srcText, fn) => {
+    const m = srcText.match(new RegExp(`(export )?(async )?function ${fn}\\b`));
+    if (!m) return null;
+    const from = srcText.slice(m.index + 1);
+    const nextAt = from.search(/^(export )?(async )?(function|const) /m);
+    return nextAt === -1 ? srcText.slice(m.index) : srcText.slice(m.index, m.index + 1 + nextAt);
+  };
+  const runSourceFor = (view) => {
+    const start = app.indexOf(`V.${view} = `);
+    if (start === -1) return '';
+    const rest = app.slice(start + 1);
+    const nextAt = rest.search(/^V\.[a-z]+ = /m);
+    const slice = nextAt === -1 ? app.slice(start) : app.slice(start, start + 1 + nextAt);
+    const parts = [slice];
+    for (const m of slice.matchAll(/\b(render[A-Z][a-zA-Z]*)\(/g)) {
+      for (const [name, srcText] of Object.entries(modules)) {
+        if (name === 'app') continue;
+        const body = bodyOf(srcText, m[1]);
+        if (!body) continue;
+        parts.push(body);
+        /* one level of same-module helpers */
+        for (const h of body.matchAll(/\b([a-z][a-zA-Z0-9]*)\(/g)) {
+          const hb = bodyOf(srcText, h[1]);
+          if (hb && hb !== body) parts.push(hb);
+        }
+        break;
+      }
+    }
+    return [...new Set(parts)].join('\n');
+  };
+
   const windowedBy = (view) => {
-    const { text } = sourceFor(view);
+    const text = runSourceFor(view);
     const out = new Set();
     for (const m of text.matchAll(/\bq(?:All)?\(\s*[`'"](\/api\/[a-z0-9/_-]+)[`'"]\s*(,([^)]*))?\)/gi)) {
       if (m[3] && /\bfrom\s*:/.test(m[3])) continue;      // brings its own window
       out.add(m[1]);
     }
     return out;
+  };
+
+  /* One endpoint, one window, one fingerprint — the same shape the run
+     recorded, so the two are comparable. */
+  const ask = async (path, w) => {
+    const keep = WIN;
+    WIN = windowQs(w);
+    try { const { json } = await call(path); return fingerprint(json); }
+    catch { return null; }
+    finally { WIN = keep; }
   };
 
   console.log(`\n${'='.repeat(78)}\nrange honesty — ${NARROW}d against ${WIDE}d`);
@@ -442,7 +496,34 @@ if (NARROW !== WIDE) {
           : 'sends no window on any call'}`);
       continue;
     }
-    const moved = asked.filter((path) => a.get(path) !== b.get(path));
+    /* A difference is only evidence if the endpoint holds still.
+       ───────────────────────────────────────────────────────────────────
+       The run's own two windows are fetched minutes apart and the collector
+       writes throughout, so an endpoint reading whole-history rollups
+       answers differently for reasons that have nothing to do with a
+       window. #capacity was reported on that basis; asked twice at the same
+       window it is byte-identical, and its handler does not read from/to at
+       all.
+
+       So a candidate is re-asked here and now, bracketed — narrow, wide,
+       wide, narrow — the same shape the numbers audit uses on identity
+       cards. Anything drifting over the four calls disagrees with its own
+       pair and is dropped; only an endpoint that answers one way at one
+       window and another way at the other, twice each, is windowed.
+       Comparing a fresh call against the fingerprint recorded at the top of
+       the run is not the same thing and does not work: by the time this
+       section runs the fleet has moved on, and every endpoint looks
+       volatile. */
+    const settled = [];
+    for (const path of asked) {
+      if (a.get(path) === b.get(path)) continue;
+      const n1 = await ask(path, NARROW);
+      const w1 = await ask(path, WIDE);
+      const w2 = await ask(path, WIDE);
+      const n2 = await ask(path, NARROW);
+      if (n1 != null && n1 === n2 && w1 != null && w1 === w2 && n1 !== w1) settled.push(path);
+    }
+    const moved = settled;
     const shows = !hidden.has(view);
     const line = `${view.padEnd(20)} ${(shows ? 'shown' : 'hidden').padEnd(9)} `
       + `${moved.length} of ${asked.length}`;
