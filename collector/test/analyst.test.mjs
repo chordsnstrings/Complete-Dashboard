@@ -204,5 +204,71 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     (await q(`SELECT to_regclass('analyst_finding') IS NOT NULL AS ok`))[0].ok);
 }
 
+/* ── the shapes a real model actually returns ───────────────────────────────
+   Both of these came back from MiniMax-M3 against the production brief, and
+   both parsed to nothing before the parser was fixed — which the product
+   reported as "the analyst had nothing to add". */
+{
+  const { parseProposals, jsonArrays } = await import('../src/analyst.js');
+  const one = `[{"claim":"a","metric":"cancel_pct","dimension":"daypart","segment":"night","direction":"higher"}]`;
+  const two = `[{"claim":"a","metric":"cancel_pct","dimension":"daypart","segment":"night","direction":"lower"}]`;
+
+  check('a plain array parses', parseProposals(one).proposals.length === 1);
+  check('a fenced array parses', parseProposals('```json\n' + one + '\n```').proposals.length === 1);
+
+  /* The failure that mattered: an answer, a change of mind in prose, then a
+     corrected answer. A greedy first-[-to-last-] match spans both and parses
+     as neither. */
+  const revised = '```json\n' + one + '\n```\n\nWait — that direction is wrong. Corrected:\n\n```json\n' + two + '\n```';
+  const r = parseProposals(revised);
+  check('a model that revises itself is not read as unparseable', r.proposals.length === 1, JSON.stringify(r.rejected));
+  check('and the LAST array wins, because that is the answer',
+    r.proposals[0]?.direction === 'lower', JSON.stringify(r.proposals[0]));
+
+  check('a think block is not mistaken for the answer',
+    parseProposals('<think>I could return [1,2,3] here</think>' + one).proposals.length === 1);
+  /* Brackets inside a claim must not close the array early. */
+  check('a bracket inside a string does not end the scan',
+    parseProposals(`[{"claim":"cars [L1] and [L2]","metric":"cancel_pct","dimension":"vehicle","segment":"L1","direction":"higher"}]`)
+      .proposals.length === 1);
+  check('two top-level arrays are found separately', jsonArrays('[1] then [2]').length === 2);
+  check('no array at all is reported as such',
+    parseProposals('I could not find anything worth reporting.').rejected[0].reason.includes('no JSON array'));
+}
+
+/* A metric measured on the dimension it is derived from confirms with an
+   enormous effect and says nothing — and the model proposed exactly that with
+   the rule in the prompt, so the rule lives in code. */
+{
+  const { parseProposals, TAUTOLOGIES } = await import('../src/analyst.js');
+  const mk = (metric, dimension, segment) => JSON.stringify([{ claim: 'c', metric, dimension, segment, direction: 'higher' }]);
+  check('premium_pct on a tier is refused', parseProposals(mk('premium_pct', 'tier', 'Black')).proposals.length === 0);
+  check('premium_pct on the product that IS the tier is refused too',
+    parseProposals(mk('premium_pct', 'booking_type', 'Black')).proposals.length === 0);
+  check('cash_pct on a settlement class is refused', parseProposals(mk('cash_pct', 'settlement', 'cash')).proposals.length === 0);
+  check('and the reason says why, not just that it was dropped',
+    /true by definition/.test(parseProposals(mk('cash_pct', 'settlement', 'cash')).rejected[0].reason));
+  /* The same metric on an unrelated dimension is a real question. */
+  check('premium_pct by daypart is still a real claim', parseProposals(mk('premium_pct', 'daypart', 'night')).proposals.length === 1);
+  check('every tautology names a metric that exists', Object.keys(TAUTOLOGIES).every((k) => k in METRICS));
+}
+
+/* ── the defects the measurement carried ──────────────────────────────────── */
+{
+  const { DIMENSIONS } = await import('../src/analyst.js');
+  /* to_char(…, 'Day') pads to nine characters, so an unbtrimmed weekday
+     dimension matches no row and every weekday claim is unanswerable. */
+  check('the weekday dimension is trimmed', /btrim\(/.test(DIMENSIONS.weekday), DIMENSIONS.weekday);
+  const src = readFileSync(new URL('../src/analyst.js', import.meta.url), 'utf8');
+  /* NOT (dim = $4) is NULL where the dimension is NULL, so those rows fall out
+     of both sides and the baseline stops being the complement the verdict
+     sentence claims it is. */
+  check('the baseline is the complement, nulls included', src.includes('IS DISTINCT FROM $4'));
+  check('and no measurement still negates the segment predicate', !src.includes('NOT (${inSeg})'));
+  check('the brief carries the segments that can be proposed on', src.includes('candidates:'));
+  check('and where each metric is defined at all', src.includes('metric_coverage:'));
+}
+
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

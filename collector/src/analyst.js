@@ -123,6 +123,23 @@ export const DIMENSIONS = {
   driver: 'driver_name',
 };
 
+/* ── claims the definitions already settle ────────────────────────────────
+   A metric measured on the dimension it is DERIVED from is a tautology, and a
+   tautology confirms with an enormous effect: "Black-tier trips are more often
+   on a premium tier" is true, unfalsifiable, and would sit at the top of the
+   findings list above everything an operator could act on. is_premium_tier is
+   computed from uber_tier (schema_v18), and `product` carries the same values
+   for Uber rows, so both dimensions are the metric restated. settlement_class
+   = 'cash' IS the numerator of cash_pct.
+
+   Asked not to, the model proposed premium_pct × tier anyway on the first run
+   with the rule in the prompt — so it is refused here instead, where a rule
+   holds whatever the model does. */
+export const TAUTOLOGIES = {
+  premium_pct: ['tier', 'booking_type'],
+  cash_pct: ['settlement'],
+};
+
 /* ── materiality ──────────────────────────────────────────────────────────
    The rules that decide whether a true statement is worth an operator's
    attention. They are deliberately blunt and deliberately visible: a
@@ -217,17 +234,66 @@ const fmt = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? '—'
 /* Keep only the proposals the code can actually check, and normalise them.
    A model that invents a metric name gets its proposal dropped here with a
    reason, rather than producing an unsupported row for every run. */
+/* Every top-level [...] in the text, by bracket matching rather than by a
+   greedy regex.
+   ─────────────────────────────────────────────────────────────────────────
+   `text.match(/\[[\s\S]*\]/)` spans the FIRST open bracket to the LAST close
+   one, which is a single array only when the model emits a single array.
+   MiniMax-M3, asked for twelve proposals against the real brief, emitted a
+   complete array, then wrote "Wait — I should drop the two inert entries",
+   then emitted a corrected one. The greedy match swallowed the prose between
+   them and the whole run parsed to nothing: a model that checks its own work
+   produced zero findings and the page reported a quiet night.
+
+   Brackets inside strings do not count, so the scan tracks quoting and
+   escapes. The LAST array that parses wins, because a model that revises
+   itself puts its answer last. */
+export function jsonArrays(text) {
+  const s = String(text || '');
+  const out = [];
+  let depth = 0, start = -1, inStr = false, esc = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === '\\') esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') { inStr = true; continue; }
+    if (c === '[') { if (depth === 0) start = i; depth++; continue; }
+    if (c === ']') {
+      depth--;
+      if (depth === 0 && start >= 0) { out.push(s.slice(start, i + 1)); start = -1; }
+      if (depth < 0) depth = 0;
+    }
+  }
+  return out;
+}
+
 export function parseProposals(text) {
-  const m = String(text || '').match(/\[[\s\S]*\]/);
-  if (!m) return { proposals: [], rejected: [{ reason: 'no JSON array in the response' }] };
-  let arr;
-  try { arr = JSON.parse(m[0]); } catch (e) { return { proposals: [], rejected: [{ reason: 'unparseable JSON' }] }; }
+  /* Reasoning models may interleave a think block; it is not the answer. */
+  const clean = String(text || '').replace(/<think>[\s\S]*?<\/think>/gi, '');
+  const blocks = jsonArrays(clean);
+  if (!blocks.length) return { proposals: [], rejected: [{ reason: 'no JSON array in the response' }] };
+  let arr = null;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    try {
+      const v = JSON.parse(blocks[i]);
+      if (Array.isArray(v)) { arr = v; break; }
+    } catch { /* try the one before it */ }
+  }
+  if (!arr) return { proposals: [], rejected: [{ reason: 'unparseable JSON' }] };
   const proposals = [], rejected = [];
-  for (const p of Array.isArray(arr) ? arr : []) {
+  for (const p of arr) {
     const claim = String(p.claim || '').trim();
     if (!claim) { rejected.push({ raw: p, reason: 'no claim' }); continue; }
     if (!METRICS[p.metric]) { rejected.push({ raw: p, reason: `metric not in the allowlist: ${p.metric}` }); continue; }
     if (!DIMENSIONS[p.dimension]) { rejected.push({ raw: p, reason: `dimension not in the allowlist: ${p.dimension}` }); continue; }
+    if ((TAUTOLOGIES[p.metric] || []).includes(p.dimension)) {
+      rejected.push({ raw: p, reason: `${p.metric} is derived from ${p.dimension} — the claim is true by definition` });
+      continue;
+    }
     if (!String(p.segment || '').trim()) { rejected.push({ raw: p, reason: 'no segment named' }); continue; }
     if (!['higher', 'lower'].includes(p.direction)) { rejected.push({ raw: p, reason: `direction must be higher or lower` }); continue; }
     proposals.push({
@@ -433,9 +499,18 @@ Rules you must follow exactly:
 - A claim is only worth making if it would still be worth acting on when true. The measurement
   discards anything under a 15% relative difference, so do not propose one you expect to be
   marginal — spend the twelve slots on the segments the brief makes look most extreme.
-- Do not propose the same segment twice on the same metric, and do not propose a claim whose
-  answer is already visible in the brief as an identity (a platform's own completion rate
-  against itself, a daypart that is most of the window).
+- Do not propose the same segment twice on the same metric, and never propose one the metric's
+  own definition guarantees: premium_pct is computed FROM the tier, and cash_pct FROM the
+  settlement class, so a claim pairing them is true whatever the fleet does. Those pairs are
+  refused before they are measured.
+
+- Spread the twelve slots: at most three claims on any one metric and at most three on any one
+  dimension. Five variations on one channel's fares is one finding wearing five hats, and the
+  dimensions with the most operational leverage — vehicle, driver, hour, weekday — are the ones
+  a summary table never shows.
+
+Output the JSON array and nothing else: no prose before it, no commentary after it, and no
+second revised array. If you reconsider, edit the array before you emit it.
 
 Return ONLY a JSON array, at most 12 items:
 [{"claim":"...","metric":"...","dimension":"...","segment":"...","direction":"higher|lower",
@@ -469,6 +544,14 @@ export async function propose(brief) {
         messages: [{ role: 'system', content: prompt },
           { role: 'user', content: JSON.stringify(brief) }],
         max_tokens: 3000, temperature: 0.4,
+        /* MiniMax's M-series reasons by default on the OpenAI-compatible
+           surface, which spends the token budget on a think block this caller
+           throws away and pushes a 36-second call toward the 120-second
+           timeout. Sent only where it is understood: an unknown field is a
+           400 on a stricter server, and the analyst has already spent one
+           production outage on a request that never returned. */
+        ...(/minimax/i.test(config.analystModel.baseUrl || '')
+          ? { thinking: { type: 'disabled' } } : {}),
       }),
     }));
   } catch (e) {
