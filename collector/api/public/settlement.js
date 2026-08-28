@@ -237,7 +237,8 @@ async function settleCash(host) {
        fact. It is right until the fleet has more than 200 drivers taking cash,
        and then it is quietly a cap. */
     { label: 'Drivers holding cash', value: fmt(c.driver_count ?? c.drivers.length),
-      sub: c.truncated ? `${fmt(c.drivers.length)} shown below` : 'every one of them listed below' },
+      sub: c.truncated ? `${fmt(c.drivers.length)} shown below` : 'every one of them listed below',
+      cohort: c.drivers.length ? 'settlement-cash' : null },
   ]));
   if (c.caveat) host.append(note(c.caveat));
   if (!c.drivers.length) return empty(host, 'No cash booking in this window');

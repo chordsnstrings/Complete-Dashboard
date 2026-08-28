@@ -2224,12 +2224,14 @@ V.safety = async (root) => {
     { label: 'Vehicles involved', value: fleetVehicles
       ? `${fmt(vTot.vehicles ?? byVeh.length)} of ${fmt(fleetVehicles)}`
       : fmt(vTot.vehicles ?? byVeh.length),
+      cohort: byVeh.length ? 'safety-vehicles' : null,
       sub: fleetVehicles
         ? `${pct(((vTot.vehicles ?? byVeh.length) / fleetVehicles) * 100, 0)} of the tracked fleet`
         : (vehPage.truncated ? `${fmt(byVeh.length)} shown` : 'every one of them listed below') },
     { label: 'Drivers named', value: fmt(dTot.drivers
       ?? byDrv.filter((r) => r.driver_name !== '(unattributed)').length),
-      sub: 'people custody could attribute an event to' },
+      sub: 'people custody could attribute an event to',
+      cohort: byDrv.length ? 'safety-drivers' : null },
     { label: 'Events nobody held the car for', value: fmt(unattributed),
       sub: unattributed ? 'no custody record for that plate on that day' : 'every event has a driver',
       tone: unattributed ? 'warn' : null },

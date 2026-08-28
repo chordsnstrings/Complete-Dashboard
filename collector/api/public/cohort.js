@@ -21,6 +21,14 @@ import { empty } from './charts.js';
 import { COHORTS, membersOf, idOf, accountsOf } from './cohorts.js';
 
 const hrs = (min, d = 0) => (min == null ? null : fmt(Number(min) / 60, d));
+/* The cars named on a row, whichever of the four shapes this source uses:
+   {plate, days} objects on the money ledger, plain strings on the roster and
+   the cash list, a COUNT under `plates` on the alert feed (whose array is
+   `plate_list`), and nothing at all on the rest. */
+const plateList = (r) => {
+  const v = Array.isArray(r.plate_list) ? r.plate_list : r.plates;
+  return Array.isArray(v) ? v.map((x) => (x && typeof x === 'object' ? x.plate : x)).filter(Boolean) : [];
+};
 const sumOf = (a, f) => a.reduce((x, r) => x + (Number(f(r)) || 0), 0);
 
 /* One card: everything every source holds about one member. Sections are
@@ -267,12 +275,14 @@ export async function renderCohort(root, key) {
     { label: c.kind === 'vehicle' ? plural(rows.length, 'Vehicle') : plural(rows.length, 'Person', 'People'),
       value: fmt(rows.length),
       sub: all.length ? `of ${fmt(all.length)} the source listed` : null },
-    { label: 'Bookings', value: fmt(sumOf(rows, (r) => r.trips ?? r.bookings)),
-      sub: `${fmt(sumOf(rows, (r) => r.km))} km` },
+    rows.some((r) => (r.trips ?? r.bookings) != null)
+      ? { label: 'Bookings', value: fmt(sumOf(rows, (r) => r.trips ?? r.bookings)),
+          sub: `${fmt(sumOf(rows, (r) => r.km))} km` } : null,
     /* For a set defined by having earned nothing, what it COST is the number
        worth printing — the asset ledger already computes it at each car's own
        daily rate, which is honest in a way a fleet average would not be. */
-    has('forgone_at_own_rate') && !sumOf(rows, (r) => r.money)
+    !rows.some((r) => (r.money ?? r.revenue ?? r.payout) != null) ? null
+      : has('forgone_at_own_rate') && !sumOf(rows, (r) => r.money)
       ? { label: 'Forgone', value: money(sumOf(rows, (r) => r.forgone_at_own_rate)), tone: 'warn',
           sub: 'at each asset’s own daily rate — unearned, not lost' }
       : { label: 'Money', value: money(sumOf(rows, (r) => r.money ?? r.revenue ?? r.payout)),
@@ -281,8 +291,12 @@ export async function renderCohort(root, key) {
       ? { label: 'Idle days', value: fmt(sumOf(rows, (r) => r.idle_days)), tone: 'warn',
           sub: 'days in this window with nothing at all' }
       : has('days_worked') || has('days')
-        ? { label: 'Days worked', value: fmt(sumOf(rows, (r) => r.days_worked ?? r.days)),
-            sub: 'person-days inside the window' }
+        /* Named for what the row IS. On a vehicle set these are days a car
+           took a booking, and calling them "person-days" describes a different
+           unit on the same screen as the cars themselves. */
+        ? { label: c.kind === 'vehicle' ? 'Days with a booking' : 'Days worked',
+            value: fmt(sumOf(rows, (r) => r.days_worked ?? r.days)),
+            sub: c.kind === 'vehicle' ? 'vehicle-days that earned' : 'person-days inside the window' }
         : null,
     /* Null everywhere and zero are different answers. A set nobody's
        availability was collected for reads "0 h" under a label that implies a
@@ -302,6 +316,14 @@ export async function renderCohort(root, key) {
     has('last_fix')
       ? { label: 'No tracker fix', value: fmt(rows.filter((r) => !r.last_fix).length),
           sub: 'nothing can say where they are' } : null,
+    has('alerts')
+      ? { label: 'Harsh events', value: fmt(sumOf(rows, (r) => r.alerts)), tone: 'warn',
+          sub: 'across the whole set' } : null,
+    has('cash_trips')
+      ? { label: 'Cash bookings', value: fmt(sumOf(rows, (r) => r.cash_trips)),
+          sub: sumOf(rows, (r) => r.cash_value)
+            ? `${money(sumOf(rows, (r) => r.cash_value))} of it reports a fare`
+            : 'none of them reports a fare at all' } : null,
   ]));
 
   if (!rows.length) {
@@ -324,17 +346,18 @@ export async function renderCohort(root, key) {
      described. */
   const view = rows.map((r) => (c.kind === 'vehicle' ? {
     ...r,
-    n_bookings: r.trips ?? r.bookings ?? 0,
+    n_bookings: r.trips ?? r.bookings ?? null,
     n_journeys: r.telematics_journeys ?? null,
     n_money: r.money ?? r.revenue ?? r.payout ?? null,
   } : {
     ...r,
-    n_bookings: r.bookings ?? r.trips ?? 0,
+    n_bookings: r.bookings ?? r.trips ?? null,
     n_money: r.money ?? r.payout ?? r.revenue ?? null,
     n_days: r.days_worked ?? r.days ?? null,
     n_online: r.measured_hours_online ?? null,
     standing: r.state || r.category || null,
     channels: (r.platforms || []).map(sourceLabel).join(', ') || null,
+    n_plates: plateList(r),
   }));
 
   const cols = c.kind === 'vehicle'
@@ -343,11 +366,16 @@ export async function renderCohort(root, key) {
       { label: 'Make & model', key: 'make',
         render: (r) => esc([r.year, r.make, r.model].filter(Boolean).join(' ') || '—'),
         absent: 'No vehicle here is in the fleet register.' },
-      { label: 'Bookings', key: 'n_bookings', num: true },
+      /* Null, not zero, where the source counts no bookings at all — the alert
+         feed and the retention list measure something else entirely, and a
+         column of zeroes under "Bookings" reads as a fleet that did no work
+         rather than as a question this source was never asked. */
+      { label: 'Bookings', key: 'n_bookings', num: true,
+        absent: 'This list does not count bookings.' },
       { label: 'Journeys', key: 'n_journeys', num: true,
         absent: 'No tracker journey is counted on this list.' },
       { label: 'Money', key: 'n_money', num: true, render: (r) => money(r.n_money),
-        absent: 'None of these earned anything.' },
+        absent: 'No money figure reaches this list — either nothing was earned, or this source does not carry one.' },
       { label: 'Idle days', key: 'idle_days', num: true,
         absent: 'Idle days are not computed on this list.' },
       { label: 'Papers', key: 'doc_days_left', num: true,
@@ -359,15 +387,25 @@ export async function renderCohort(root, key) {
       { label: 'Held by', key: 'current_driver',
         render: (r) => entity('driver', r.current_driver_id, r.current_driver || '—'),
         absent: 'Nobody is recorded as holding any of these.' },
+      /* Whatever the SOURCE ranked on. A set that came from the alert feed is
+         ordered by harsh events and had none of its own numbers on screen —
+         eight names and a column of zeroes, because every generic column
+         describes a window this source does not measure in. Each of these
+         prunes itself on the sets that do not carry it. */
+      { label: 'Harsh events', key: 'alerts', num: true,
+        absent: 'No driving event is counted on this list.' },
+      { label: 'Drivers', key: 'drivers', num: true,
+        absent: 'No driver count reaches this list.' },
     ]
     : [
       { label: 'Driver', key: 'driver_name',
         render: (r) => entity('driver', idOf('driver', r), r.driver_name || r.name || '—') },
       { label: 'Channels', key: 'channels',
         absent: 'No channel is named on any of these people.' },
-      { label: 'Bookings', key: 'n_bookings', num: true },
+      { label: 'Bookings', key: 'n_bookings', num: true,
+        absent: 'This list does not count bookings.' },
       { label: 'Money', key: 'n_money', num: true, render: (r) => money(r.n_money),
-        absent: 'None of these was paid anything.' },
+        absent: 'No money figure reaches this list — either nobody was paid, or this source does not carry one.' },
       { label: 'Days worked', key: 'n_days', num: true,
         absent: 'No day count reaches this list.' },
       { label: 'Online h', key: 'n_online', num: true, render: (r) => fmt(r.n_online, 0),
@@ -390,6 +428,23 @@ export async function renderCohort(root, key) {
         absent: 'No lifetime total reaches this list.' },
       { label: 'Last month worked', key: 'last_month',
         absent: 'No last-active month reaches this list.' },
+      { label: 'Harsh events', key: 'alerts', num: true,
+        absent: 'No driving event is counted on this list.' },
+      { label: 'Per 100 km', key: 'per_100km', num: true,
+        absent: 'No per-distance rate reaches this list.' },
+      { label: 'Cash bookings', key: 'cash_trips', num: true,
+        absent: 'No cash booking is counted on this list.' },
+      { label: 'Cash we can see', key: 'cash_value', num: true, render: (r) => money(r.cash_value),
+        absent: 'No cash booking on this list reports a fare at all.' },
+      /* `plates` is three different things across these sources: an array of
+         {plate, days} on the money ledger, an array of strings on the roster
+         and cash lists, and a COUNT on the alert feed — where the array is
+         called plate_list. Read blind, `.slice` threw and the whole page
+         rendered "could not load this view". Normalised once, above. */
+      { label: 'Cars', key: 'n_plates',
+        render: (r) => esc(r.n_plates.slice(0, 3).join(', ') || '—')
+          + (r.n_plates.length > 3 ? ` <span class="dim">+${fmt(r.n_plates.length - 3)}</span>` : ''),
+        absent: 'No car is named against anybody here.' },
     ];
   foldRows(tblP.body, tableFrom(view, cols, { compact: true, sortable: true, sortId: 'coh' }),
     { shown: 12, total: rows.length, noun: c.kind === 'vehicle' ? 'vehicle' : 'person', key: `cohort-${key}` });
@@ -425,6 +480,14 @@ export async function renderCohort(root, key) {
     if (c.cap && all.length >= c.cap) {
       cardsP.body.append(note(`${c.fromLabel} returns at most ${fmt(c.cap)} rows and returned `
         + `${fmt(all.length)}, so this set is drawn from those and may be short.`, 'warn'));
+    }
+    /* An endpoint that caps its own rows and says so. Reading the flag beats
+       guessing from the row count: /api/alerts/by-vehicle returns 65 of a
+       larger set with truncated:true, and 65 is not a number anything could
+       recognise as a cap. */
+    if (c.trunc && payload?.[c.trunc]) {
+      cardsP.body.append(note(`${c.fromLabel} truncated its answer, so this set is drawn from the `
+        + `${fmt(all.length)} rows it returned and is short of the whole.`, 'warn'));
     }
     if (ids.length >= 400) {
       cardsP.body.append(note('This set is larger than the 400 the detail join will gather at once, '

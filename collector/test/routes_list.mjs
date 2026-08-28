@@ -31,7 +31,7 @@ export const ROUTES = [
      than the first entry of VIEWS under somebody else's title. */
   'cohort/unit-drove-unpaid', 'cohort/unit-idle-documented',
   'cohort/vehicles-moved-no-booking', 'cohort/roster-blocked', 'cohort/not-a-cohort',
-  'cohort/retention-stopped',
+  'cohort/retention-stopped', 'cohort/safety-drivers', 'cohort/settlement-cash',
   'platforms', 'platforms/tiers', 'platforms/funnel',
   'corridors', 'finance', 'settlement', 'settlement/cash', 'settlement/receivables',
   'corporate', 'corporate/properties', 'corporate/guests',

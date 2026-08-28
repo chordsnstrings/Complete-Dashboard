@@ -216,6 +216,48 @@ export const COHORTS = {
       + 'given to drive, and how much of their time was idle, is what predicts it.',
     test: () => true,
   },
+
+  /* ── Safety · who and what the box flagged ───────────────────────────────
+     An alert names a plate and never a person; custody is what reaches one.
+     Both endpoints cap their rows and say so, so both carry the flag the page
+     reads to warn that a long set is short. */
+  'safety-vehicles': {
+    kind: 'vehicle', source: '/api/alerts/by-vehicle', pick: 'rows', chips: true,
+    trunc: 'truncated',
+    from: 'safety', fromLabel: 'Safety',
+    label: 'Vehicles with a driving event',
+    question: 'Which cars did the telematics box flag for harsh driving?',
+    why: 'The events are on the car; the coaching conversation is with whoever was holding it. '
+      + 'What else is true of these cars — who held them, what they earned, what their papers say '
+      + '— is the difference between a list and a plan.',
+    test: (r) => (Number(r.alerts) || 0) > 0,
+  },
+  'safety-drivers': {
+    kind: 'driver', source: '/api/alerts/by-driver', pick: 'rows', chips: true,
+    trunc: 'truncated',
+    from: 'safety', fromLabel: 'Safety',
+    label: 'Drivers with a driving event',
+    question: 'Who was holding the car when the box flagged it?',
+    /* "(unattributed)" is not a person: it is every event on a plate no
+       custody row covers for that day, gathered under one label. Counting it
+       as a driver put a fictional worst performer at the top of the list. */
+    why: 'People custody could attribute an event to. Events on a car nobody is recorded as '
+      + 'holding are counted separately on the page behind this one — they are not a person.',
+    test: (r) => r.driver_name !== '(unattributed)' && (Number(r.alerts) || 0) > 0,
+  },
+
+  /* ── Settlement · who is holding the fleet's money ───────────────────── */
+  'settlement-cash': {
+    kind: 'driver', source: '/api/settlement/cash-exposure', pick: 'drivers', chips: true,
+    trunc: 'truncated',
+    from: 'settlement', fromLabel: 'Settlement',
+    label: 'Holding cash',
+    question: 'Who took a cash booking and is carrying the fare?',
+    why: 'Money the fleet is owed by its own drivers. Most of these fares carry no value at all '
+      + 'in the record, so the exposure is larger than the figure — and who is still driving, and '
+      + 'who has stopped, decides which of them will be settled.',
+    test: (r) => (Number(r.cash_trips) || 0) > 0,
+  },
 };
 
 /* Everything a page needs to make a tile clickable, without importing the DOM

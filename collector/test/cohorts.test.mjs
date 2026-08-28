@@ -156,6 +156,43 @@ check('the roster categories are mutually exclusive', (() => {
   return true;
 })());
 
+/* /api/alerts/by-driver — "(unattributed)" is not a person: it is every event
+   on a plate no custody row covers, gathered under one label. Counted as a
+   driver it puts a fictional worst performer at the top of the list. */
+const alerts = { rows: [
+  { driver_name: '(unattributed)', driver_ext_id: null, alerts: 2585, plates: 34, plate_list: ['A', 'B'] },
+  { driver_name: 'Ali', driver_ext_id: 'a1', alerts: 40, plates: 2, plate_list: ['A', 'B'] },
+  { driver_name: 'Sara', driver_ext_id: 'a2', alerts: 0, plates: 1, plate_list: ['C'] },
+], truncated: true };
+check('the unattributed bucket is not a person',
+  JSON.stringify(m('safety-drivers', alerts)) === '["a1"]',
+  JSON.stringify(m('safety-drivers', alerts)));
+check('a person with no event is not on the list',
+  !membersOf('safety-drivers', alerts).some((r) => r.driver_name === 'Sara'));
+
+/* /api/settlement/cash-exposure — rows under `drivers`. */
+const cash = { drivers: [
+  { driver_ext_id: 'c1', driver_name: 'A', cash_trips: 74, cash_value: null },
+  { driver_ext_id: 'c2', driver_name: 'B', cash_trips: 0, cash_value: null },
+], truncated: false };
+check('holding cash needs a cash booking',
+  JSON.stringify(m('settlement-cash', cash)) === '["c1"]');
+
+/* Retention hands back the set itself — the endpoint has already decided who
+   stopped by comparing consecutive months. */
+const ret = { stopped_last_month: [{ driver_ext_id: 's1', name: 'A' }, { driver_ext_id: 's2', name: 'B' }],
+  started_last_month: [{ driver_ext_id: 'n1', name: 'C' }] };
+check('the leaver list is the set the endpoint returned',
+  membersOf('retention-stopped', ret).length === 2 && membersOf('retention-started', ret).length === 1);
+check('and reading the wrong key returns nothing rather than the wrong people',
+  membersOf('retention-stopped', { started_last_month: ret.started_last_month }).length === 0);
+
+/* A source that truncates has to be able to say so, or a page headed "every
+   one of them" is drawn from a capped answer. */
+check('every capped source declares how it says it is capped',
+  ['safety-drivers', 'safety-vehicles', 'settlement-cash'].every((k) => COHORTS[k].trunc)
+  && ['vehicles-moved-no-booking', 'vehicles-still'].every((k) => COHORTS[k].cap));
+
 /* ── the ids the page hands to the detail endpoint ───────────────────────── */
 check('a vehicle is its plate', idOf('vehicle', { plate: 'L46174' }) === 'L46174');
 check('a driver is their provider id', idOf('driver', { driver_ext_id: 'd1', ids: ['d1', 'd2'] }) === 'd1');
