@@ -41,7 +41,25 @@ agg AS (
          round(sum(t.distance_km)::numeric, 1)::double precision AS km,
          round(sum(t.price)::numeric, 2) AS revenue,
          min(t.requested_at) AS first_trip_at,
-         max(t.requested_at) AS last_trip_at
+         max(t.requested_at) AS last_trip_at,
+         /* The last moment the car was demonstrably still working — added in
+            v39, and added HERE rather than by replacing this view there, so
+            the fold that decides who counts as a custodian stays in one file.
+            (A second CREATE OR REPLACE elsewhere also breaks a replay from
+            scratch: this file runs first, and shortening the column list of a
+            view is not something Postgres will do.)
+
+            Custody stored only starts, and a gap measured from max(requested)
+            silently includes the whole duration of the last trip. The
+            platforms do send a drop-off — Uber's "Trip drop-off time", FMS
+            "End Time", Yango and the hotel channel their own.
+
+            NULL, not the request time, when NOTHING in the group carried one,
+            so "we know when this ended" and "we assumed it ended when it
+            started" stay distinguishable and a reader can be told which of the
+            two a number rests on. */
+         CASE WHEN count(t.ended_at) = 0 THEN NULL
+              ELSE max(coalesce(t.ended_at, t.requested_at)) END AS last_end_at
   FROM trip t
   LEFT JOIN known k ON k.canon = lower(regexp_replace(btrim(t.driver_name), '\s+', ' ', 'g'))
   WHERE t.plate IS NOT NULL AND t.plate <> ''
@@ -50,9 +68,15 @@ agg AS (
     AND (coalesce(btrim(t.driver_ext_id), '') <> '' OR coalesce(btrim(t.driver_name), '') <> '')
   GROUP BY 1, 2, 3, 4
 )
-SELECT agg.*,
+/* Columns listed rather than agg.*, and last_end_at LAST: CREATE OR REPLACE
+   VIEW may append a column and may not reorder or rename one, so a database
+   already holding the twelve-column version of this view accepts the
+   thirteenth only in this position. */
+SELECT plate, day, driver_ext_id, platform, driver_name, fleet_id,
+       trips, km, revenue, first_trip_at, last_trip_at,
        (row_number() OVER (PARTITION BY plate, day
-                           ORDER BY trips DESC, first_trip_at ASC) = 1) AS is_primary
+                           ORDER BY trips DESC, first_trip_at ASC) = 1) AS is_primary,
+       last_end_at
 FROM agg;
 
 -- The view groups on the normalised plate and the Dubai day, so a page asking

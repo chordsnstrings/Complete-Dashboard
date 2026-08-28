@@ -835,6 +835,40 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   driver_as_of: new Date().toISOString(),
 }))));
 
+/* Handover gaps. Shaped like the real one: a few cars with several
+   change-overs, one that only ever has one driver (absent from the list), and
+   a fixture where the drop-off time is missing on some rows so the page's
+   "measured from the request instead" note is reachable. */
+app.get('/api/vehicles/handover', (_, r) => {
+  const rows = plates.slice(0, 6).map((pl, i) => ({
+    plate: pl,
+    handovers: 6 - i,
+    idle_h: +(28 - i * 4.1).toFixed(1),
+    median_h: +(4.4 - i * 0.3).toFixed(1),
+    worst_h: +(11.2 - i * 0.8).toFixed(1),
+    worst_from: drivers[i % drivers.length],
+    worst_to: drivers[(i + 3) % drivers.length],
+    worst_at: new Date(Date.now() - (i + 1) * 86400e3).toISOString(),
+    driver_refs: [{ name: drivers[i % drivers.length], id: `drv-${i}` },
+                  { name: drivers[(i + 3) % drivers.length], id: `drv-${(i + 3) % drivers.length}` }],
+  }));
+  const handovers = rows.reduce((a, x) => a + x.handovers, 0);
+  const handover_h = +rows.reduce((a, x) => a + x.idle_h, 0).toFixed(1);
+  r.json({
+    window: [dayISO(DAYS).slice(0, 10), dayISO(0).slice(0, 10)],
+    max_gap_h: 24,
+    totals: {
+      handovers, plates: rows.length, handover_h,
+      handover_days: +(handover_h / 24).toFixed(1),
+      median_h: 3.6, quick_h: 1.4, p90_h: 9.8,
+      parked: 3, parked_days: 7.4,
+      recoverable_h: +(handover_h - 1.4 * handovers).toFixed(1),
+      timed_rows: 412, custody_rows: 460,
+    },
+    plates: rows,
+  });
+});
+
 app.get('/api/vehicle/profile', (req, r) => {
   const i = pIndex(req.query.plate), [make, model, year, colour] = vehSpec[i];
   r.json({

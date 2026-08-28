@@ -894,6 +894,97 @@ export async function renderVehicle(root, plate, tab = 'overview') {
 }
 
 /* ── the directory that links into the pages above ───────────────────────── */
+
+/* ── the hours between drivers ────────────────────────────────────────────
+   The tiles above answer "is this car earning". This answers the question
+   underneath it: on a car two people share, how long does it stand still
+   between them? Every per-day number in this product calls that car used on
+   both days, so the change-over is the one cost of a shared asset that no
+   other view can show.
+
+   Rendered after the directory rather than beside it: the table above is what
+   the page is for, and this query walks custody stint by stint. Loading it in
+   the same Promise.all would hold the whole page on the slower of the two. */
+async function handoverPanel(host) {
+  let h;
+  try { h = await qAll('/api/vehicles/handover'); } catch (e) { empty(host, 'Could not load handovers'); return; }
+  const t = h?.totals || {};
+  const rows = h?.plates || [];
+  if (!t.handovers) {
+    empty(host, 'No car changed hands inside a day in this range');
+    return;
+  }
+  const hrs = (v, d = 1) => (v == null ? '—' : `${fmt(v, d)} h`);
+
+  /* The reading, first — the numbers below it are the detail. "Car-days" is
+     the unit an operator prices: 8.6 hours across the fleet is a third of a
+     car, and 260 hours is eleven cars that could have been rented out. */
+  host.append(el('p', 'cap',
+    `<b>${fmt(t.handovers)}</b> ${plural(t.handovers, 'change-over')} on `
+    + `<b>${fmt(t.plates)}</b> ${plural(t.plates, 'car')} left the fleet standing for `
+    + `<b>${hrs(t.handover_h, 0)}</b> — ${fmt(t.handover_days, 1)} car-days. `
+    + `Half of them turn round inside <b>${hrs(t.median_h)}</b>`
+    + (t.p90_h != null ? `, one in ten takes more than ${hrs(t.p90_h)}` : '') + '. '
+    + (t.recoverable_h
+      ? `The quickest quarter already manage ${hrs(t.quick_h)}; every change-over at that speed `
+        + `would give back <b>${hrs(t.recoverable_h, 0)}</b>.`
+      : '')));
+
+  /* Ranked by hours lost, not by count: a car handed over twice with a
+     six-hour gap each time costs more than one handed over ten times in
+     twenty minutes, and sorting on the count says the opposite. */
+  const top = rows.slice(0, 12);
+  if (top.length > 2) {
+    const bars = el('div'); host.append(bars);
+    hbars(bars, top.map((r) => ({ label: r.plate, n: r.idle_h, plate: r.plate })), {
+      value: 'n', valueFmt: (v) => `${fmt(v, 1)} h`, signed: false,
+      onClick: (d) => { location.hash = href('vehicle', d.plate); },
+    });
+  }
+
+  const cols = [
+    { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
+    { label: 'Change-overs', key: 'handovers', num: true },
+    { label: 'Hours idle', key: 'idle_h', num: true, render: (r) => hrs(r.idle_h) },
+    { label: 'Median gap', key: 'median_h', num: true, render: (r) => hrs(r.median_h) },
+    { label: 'Worst', key: 'worst_h', num: true, render: (r) => hrs(r.worst_h) },
+    /* Named, because the fix is a conversation with two people and a table of
+       plates does not say who to have it with. */
+    /* Both people, both openable. A plate is not actionable — shortening a
+       change-over is a conversation with the person who finished and the
+       person who started, and this is the only column that names them. */
+    { label: 'That one was', key: 'worst_from',
+      render: (r) => {
+        const [out, inc] = r.driver_refs || [];
+        if (!out && !inc) return '';
+        return `${out ? entity('driver', out.id, out.name) : '<span class="dim">—</span>'}`
+          + ` → ${inc ? entity('driver', inc.id, inc.name) : '<span class="dim">—</span>'}`;
+      },
+      absent: 'No custody row behind these gaps names a driver.' },
+    { label: 'Free from', key: 'worst_at', render: (r) => dtStr(r.worst_at) },
+  ];
+  foldRows(host, tableFrom(rows, cols, { compact: true, sortable: true, sortId: 'ho' }),
+    { shown: 8, total: rows.length, noun: 'car', key: 'vehicles-handover' });
+
+  /* A car parked for a day or more between drivers is a different business to
+     a slow change-over, and averaging the two lets one long-term-off-road
+     vehicle set the fleet's handover time. Counted, named, and kept out. */
+  if (t.parked) {
+    host.append(note(`${countOf(t.parked, 'gap')} of a day or more `
+      + `${plural(t.parked, 'is', 'are')} excluded — ${fmt(t.parked_days, 1)} car-days where the car went `
+      + 'out of service between drivers rather than changing hands. Those are the idle assets the '
+      + 'tiles above count.'));
+  }
+  /* The gap starts at the outgoing driver's DROP-OFF. Where a channel sends no
+     drop-off time the request time stands in, and that gap is one trip too
+     long — said here rather than quietly folded into the median. */
+  if (t.custody_rows && t.timed_rows < t.custody_rows) {
+    host.append(note(`${fmt(t.custody_rows - t.timed_rows)} of ${fmt(t.custody_rows)} custody records carry no `
+      + 'drop-off time, so the gap after them is measured from the last request instead and reads one '
+      + 'trip too long.', 'warn'));
+  }
+}
+
 export async function renderVehicleDirectory(root) {
   const vHost = el('div'); root.append(vHost);
   const bar = el('div', 'toolbar');
@@ -901,6 +992,9 @@ export async function renderVehicleDirectory(root) {
     <span class="cap" id="vdn"></span>`;
   root.append(bar);
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
+  const hoP = panel('Between drivers',
+    'Hours a car stood still between one driver\'s last drop-off and the next driver\'s first pickup'); root.append(hoP.panel);
+  loading(hoP.body);
   const tblP = panel('Every vehicle', 'Including assets with no trips in this window — those are the ones worth finding'); root.append(tblP.panel);
   loading(tblP.body);
 
@@ -1107,5 +1201,6 @@ export async function renderVehicleDirectory(root) {
     bar.querySelector('#vdn').textContent = `${fmt(list.length)} of ${fmt(rows.length)} vehicles`;
     draw(list, t);
   };
+  await handoverPanel(hoP.body);
   return rows;
 }

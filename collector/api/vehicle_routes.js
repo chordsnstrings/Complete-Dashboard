@@ -214,6 +214,164 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        LIMIT 500`, [from, to]));
   }));
 
+  /* ── the hours between drivers ──────────────────────────────────────────
+     A vehicle is the expensive thing on this fleet and roughly one vehicle-day
+     in eight has more than one driver on it. Both of those drivers "worked
+     that day", so every per-day number in this product reports the car as
+     used — while the asset itself stood still between the two of them.
+
+     A handover gap is measured from the moment the outgoing driver's last job
+     ENDED to the moment the incoming driver's first job was requested. The end
+     matters: custody only ever stored max(requested_at), so a gap measured
+     from that silently swallows the whole duration of the last trip. See
+     sql/schema_v39.sql, which adds the drop-off time to the fold.
+
+     Two kinds of gap, kept apart because they are different businesses:
+       · under a day  — the change-over itself, which a rota can shorten
+       · a day or more — the car went out of service between drivers, which is
+         the idle-asset question the directory above already answers
+     Reporting one number for both would let a single car parked for a week
+     drown out every real handover on the fleet. */
+  const HANDOVER_MAX_H = 24;
+  app.get('/api/vehicles/handover', wrap(async (req, res) => {
+    /* winDays plus the two chips, spelled out rather than threading server.js's
+       range() through this module's injected dependencies — the precedent is
+       /api/drivers/directory, and a new required dep silently 500s every
+       harness that mounts these routes without it. */
+    const [from, to] = winDays(req);
+    const p = [from, to, req.query.platform || null, req.query.fleet || null];
+
+    /* One stint = one person's work on one plate on one Dubai day. Grouping by
+       day splits a shift that crosses midnight in two, which costs nothing:
+       only a gap where the PERSON changes is counted, so two consecutive
+       stints of the same driver never produce one. */
+    const GAPS = `
+      WITH stint AS (
+        SELECT plate,
+               coalesce(nullif(person_key, ''), driver_ext_id) AS person,
+               max(driver_name) AS driver_name,
+               /* The provider id, kept beside the folded key: the fold is what
+                  decides two records are one human, and the id is what a link
+                  to that human needs. A page that can only print a name cannot
+                  open the person whose shift ran late. */
+               min(driver_ext_id) AS person_id,
+               min(first_trip_at) AS s,
+               max(coalesce(last_end_at, last_trip_at)) AS e
+          FROM vehicle_driver_day
+         WHERE day BETWEEN $1::date AND $2::date
+           AND first_trip_at IS NOT NULL
+           AND ($3::text IS NULL OR platform = $3)
+           AND ($4::text IS NULL OR fleet_id = $4)
+         GROUP BY plate, day, 2
+      ),
+      ord AS (
+        /* prev_end is a RUNNING MAX, not the previous row's end. Two drivers
+           whose stints overlap — the same car reported by two platforms, or a
+           booking recorded a minute before the last one closed — would
+           otherwise produce a gap measured from a stint that had already been
+           superseded, and the number would read as free time the car never
+           had. */
+        SELECT plate, person, driver_name, person_id, s, e,
+               lag(person)      OVER w AS prev_person,
+               lag(driver_name) OVER w AS prev_name,
+               lag(person_id)   OVER w AS prev_id,
+               max(e) OVER (PARTITION BY plate ORDER BY s
+                            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_end
+          FROM stint
+        WINDOW w AS (PARTITION BY plate ORDER BY s)
+      ),
+      gap AS (
+        SELECT plate, prev_name AS from_driver, prev_id AS from_id,
+               driver_name AS to_driver, person_id AS to_id,
+               prev_end AS free_at, s AS taken_at,
+               extract(epoch FROM (s - prev_end)) / 3600 AS h
+          FROM ord
+         WHERE prev_person IS NOT NULL AND prev_person <> person AND s > prev_end
+      )`;
+
+    const [tot, plates, cover] = await Promise.all([
+      q(`${GAPS}
+         SELECT count(*) FILTER (WHERE h < ${HANDOVER_MAX_H})::int              AS handovers,
+                count(DISTINCT plate) FILTER (WHERE h < ${HANDOVER_MAX_H})::int AS plates,
+                round(sum(h) FILTER (WHERE h < ${HANDOVER_MAX_H})::numeric, 1)  AS handover_h,
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY h)
+                        FILTER (WHERE h < ${HANDOVER_MAX_H})::numeric, 1)       AS median_h,
+                round(percentile_cont(0.25) WITHIN GROUP (ORDER BY h)
+                        FILTER (WHERE h < ${HANDOVER_MAX_H})::numeric, 1)       AS quick_h,
+                round(percentile_cont(0.9) WITHIN GROUP (ORDER BY h)
+                        FILTER (WHERE h < ${HANDOVER_MAX_H})::numeric, 1)       AS p90_h,
+                count(*) FILTER (WHERE h >= ${HANDOVER_MAX_H})::int             AS parked,
+                round((sum(h) FILTER (WHERE h >= ${HANDOVER_MAX_H}))::numeric / 24, 1) AS parked_days
+           FROM gap`, p),
+      q(`${GAPS}
+         SELECT plate,
+                count(*)::int AS handovers,
+                round(sum(h)::numeric, 1) AS idle_h,
+                round(percentile_cont(0.5) WITHIN GROUP (ORDER BY h)::numeric, 1) AS median_h,
+                round(max(h)::numeric, 1) AS worst_h,
+                (array_agg(from_driver ORDER BY h DESC))[1] AS worst_from,
+                (array_agg(from_id     ORDER BY h DESC))[1] AS worst_from_id,
+                (array_agg(to_driver   ORDER BY h DESC))[1] AS worst_to,
+                (array_agg(to_id       ORDER BY h DESC))[1] AS worst_to_id,
+                (array_agg(free_at     ORDER BY h DESC))[1] AS worst_at
+           FROM gap
+          WHERE h < ${HANDOVER_MAX_H}
+          GROUP BY plate
+          ORDER BY sum(h) DESC, plate
+          LIMIT 200`, p),
+      /* How much of this is measured rather than assumed. A stint whose last
+         row carries no drop-off time contributes its request time instead, so
+         its gap is that trip's duration too long. Stated, not hidden. */
+      q(`SELECT count(*)::int AS rows_in,
+                count(*) FILTER (WHERE last_end_at IS NOT NULL)::int AS timed
+           FROM vehicle_driver_day
+          WHERE day BETWEEN $1::date AND $2::date
+            AND first_trip_at IS NOT NULL
+            AND ($3::text IS NULL OR platform = $3)
+            AND ($4::text IS NULL OR fleet_id = $4)`, p),
+    ]);
+
+    const t = tot[0] || {};
+    const c = cover[0] || { rows_in: 0, timed: 0 };
+    const num = (v) => (v == null ? null : Number(v));
+    const handovers = num(t.handovers) || 0;
+    const quick = num(t.quick_h);
+    const total = num(t.handover_h) || 0;
+    res.json({
+      window: [from, to],
+      max_gap_h: HANDOVER_MAX_H,
+      totals: {
+        handovers,
+        plates: num(t.plates) || 0,
+        handover_h: total,
+        handover_days: Math.round((total / 24) * 10) / 10,
+        median_h: num(t.median_h),
+        quick_h: quick,
+        p90_h: num(t.p90_h),
+        parked: num(t.parked) || 0,
+        parked_days: num(t.parked_days) || 0,
+        /* The fleet's own benchmark, not an invented target: what it would
+           recover if every change-over went as fast as its own quickest
+           quarter already do. */
+        recoverable_h: quick != null && handovers
+          ? Math.round(Math.max(0, total - quick * handovers) * 10) / 10 : null,
+        timed_rows: c.timed, custody_rows: c.rows_in,
+      },
+      plates: plates.map((r) => ({
+        plate: r.plate,
+        handovers: r.handovers,
+        idle_h: num(r.idle_h),
+        median_h: num(r.median_h),
+        worst_h: num(r.worst_h),
+        worst_from: r.worst_from, worst_to: r.worst_to, worst_at: r.worst_at,
+        /* Both people on the worst gap, in the shape every other list in this
+           API uses for a custodian — {name, id} pairs, so the reader can open
+           whichever of the two they need to talk to. */
+        driver_refs: [{ name: r.worst_from, id: r.worst_from_id },
+                      { name: r.worst_to, id: r.worst_to_id }].filter((d) => d.name),
+      })),
+    });
+  }));
   /* ── what this asset is ────────────────────────────────────────────────── */
   app.get('/api/vehicle/profile', withVehicle(async (req, res, plate, p) => {
     const [spec] = await q(

@@ -235,6 +235,8 @@ async function moneyTab(root) {
     const idleH = +dt.measured_idle_h || 0;
     const covered = +dt.people_with_availability || 0;
     const unpaid = +dt.drove_unpaid || 0;
+    const measMoney = dt.measured_money != null ? +dt.measured_money : +dt.money || 0;
+    const nothing = Math.max(0, people - earning);
     verdict(vuHost, {
       /* Per ONLINE HOUR where we have measured it, because a day worked can be
          one job or fourteen hours logged in and dividing by it calls those the
@@ -256,13 +258,22 @@ async function moneyTab(root) {
       /* The denominator, stated. Spreading the same money over everybody on the
          books gives a per-driver number roughly half this one, and both are
          "per driver". */
-      sub: (perHour
-        ? `Measured over ${fmt(onlineH)} online hours for ${countOf(covered, 'driver')}`
-          + `${idleH ? `, ${fmt(Math.round((idleH / onlineH) * 100))}% of which nobody was in the car` : ''}. `
-        : '')
-        + `Over the ${fmt(earning)} people who earned, not the ${fmt(people)} on the books — `
-        + `${fmt(idle)} of those earned nothing, and spreading the same `
-        + `${money(dt.money)} across all of them would halve every rate on this page.`,
+      /* Both halves of the rate name the same people. `idle` is the band that
+         never drove; `people - earning` is everyone who earned nothing,
+         which is that band plus whoever drove unpaid — the sentence used to
+         say "N of those earned nothing" about the people who HAD earned,
+         which read as 126 of 122. */
+      sub: perHour
+        ? `${money(measMoney)} earned over ${fmt(onlineH)} online hours by the `
+          + `${countOf(covered, 'driver')} whose availability is measured`
+          + `${idleH ? ` — ${fmt(Math.round((idleH / onlineH) * 100))}% of those hours `
+            + 'with nobody in the car' : ''}. `
+          + `The other ${fmt(people - covered)} on the books have no measured hours, and `
+          + `${fmt(nothing)} of the ${fmt(people)} earned nothing at all.`
+        : `Over the ${fmt(earning)} people who earned, not the ${fmt(people)} on the books — `
+          + `the other ${fmt(nothing)} earned nothing, and spreading the same ${money(dt.money)} `
+          + `across all ${fmt(people)} would cut every rate here to `
+          + `${fmt(Math.round((earning / (people || 1)) * 100))}% of what it shows.`,
     });
   }
 

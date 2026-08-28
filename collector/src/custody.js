@@ -20,7 +20,7 @@ export async function rebuildCustody({ from, to, db = pool } = {}) {
   // slower and pointless.
   await db.query(
     `INSERT INTO vehicle_driver_day
-       (plate, day, driver_ext_id, platform, driver_name, fleet_id, trips, km, revenue, first_trip_at, last_trip_at, is_primary)
+       (plate, day, driver_ext_id, platform, driver_name, fleet_id, trips, km, revenue, first_trip_at, last_trip_at, is_primary, last_end_at)
      /* The fold itself lives in sql/schema_v19.sql as custody_live. It used to
         be written out here, which meant the rule for who counts as a driver
         existed in two places and drifted: this copy required driver_ext_id IS
@@ -31,13 +31,14 @@ export async function rebuildCustody({ from, to, db = pool } = {}) {
         does not always carry an id. This job's only job now is to materialise
         a window of the one definition. */
      SELECT plate, day, driver_ext_id, platform, driver_name, fleet_id,
-            trips, km, revenue, first_trip_at, last_trip_at, is_primary
+            trips, km, revenue, first_trip_at, last_trip_at, is_primary, last_end_at
      FROM custody_live
      WHERE day >= $1::date AND day <= $2::date
      ON CONFLICT (plate, day, driver_ext_id, platform) DO UPDATE SET
        driver_name = EXCLUDED.driver_name, fleet_id = EXCLUDED.fleet_id,
        trips = EXCLUDED.trips, km = EXCLUDED.km, revenue = EXCLUDED.revenue,
        first_trip_at = EXCLUDED.first_trip_at, last_trip_at = EXCLUDED.last_trip_at,
+       last_end_at = EXCLUDED.last_end_at,
        is_primary = EXCLUDED.is_primary`,
     [start, end]);
 

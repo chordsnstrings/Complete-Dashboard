@@ -885,6 +885,10 @@ export function economicsRoutes(app, { q, wrap, range }) {
     const money = sum((r) => r.money);
     const workedDays = rows.reduce((a, r) => a + r.days_worked, 0);
     const withHours = rows.filter((r) => r.hours_online > 0).length;
+    /* The people an availability window was actually collected for. Every rate
+       whose denominator is measured hours is summed over exactly these. */
+    const withAvail = rows.filter((r) => r.measured_hours_online > 0);
+    const msum = (f) => round(withAvail.reduce((a, r) => a + (Number(f(r)) || 0), 0), 2);
 
     res.json({
       window: [from, to],
@@ -907,8 +911,14 @@ export function economicsRoutes(app, { q, wrap, range }) {
            infinity. */
         measured_hours_online: sum((r) => r.measured_hours_online) || null,
         measured_idle_h: sum((r) => r.measured_idle_h) || null,
-        aed_per_measured_hour: rate(money, sum((r) => r.measured_hours_online)),
-        people_with_availability: rows.filter((r) => r.measured_hours_online > 0).length,
+        /* Numerator and denominator must describe the SAME people. Availability
+           is measured for 90 of 249 here, and dividing everybody's money by
+           those 90 people's hours reads 17% high (AED 20.26 against 17.28 on
+           the 30 days to 2026-08-28) because it credits the hours of 90 with
+           the earnings of 249. Money from the measured people only. */
+        measured_money: withAvail.length ? round(msum((r) => r.money), 2) : null,
+        aed_per_measured_hour: rate(msum((r) => r.money), msum((r) => r.measured_hours_online)),
+        people_with_availability: withAvail.length,
         aed_per_booking: rate(money, rows.reduce((a, r) => a + r.bookings, 0)),
         aed_per_km: rate(money, sum((r) => r.km)),
         /* How many people an hourly rate could be computed for at all. On this
