@@ -35,6 +35,7 @@ import { renderReconcile } from './reconcile.js';
 import { renderEconomics, UNIT_TABS } from './economics.js';
 import { renderPerformers, renderPerformer } from './performers.js';
 import { renderCompare } from './compare.js';
+import { renderSupply } from './supply.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -264,6 +265,10 @@ const VIEWS = [
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Money', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
   { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Work', sub: 'Volume, mix and quality across every platform — the work behind the money' },
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Work', sub: 'When trips happen — by day, hour and weekday' },
+  /* The other half of the market, and the only page in the product that
+     measures supply. It sits beside Demand because it is the same axes with
+     the other series on them. */
+  { id: 'supply', label: 'Supply vs demand', ic: '◑', grp: 'Work', sub: 'Where and when the fleet is online and nobody is in the car — the hours we pay for and do not sell' },
   { id: 'compare', label: 'Today vs yesterday', ic: '⧉', grp: 'Work', sub: 'Two days beside each other, cut at the same Dubai minute so a partial today is not read as a collapse' },
   { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Work', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
   { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Work', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
@@ -718,6 +723,8 @@ V.overview = async (root) => {
       ? `The 12 busiest of ${fmt(drivers.people)} people who drove in this window.`
       : '')));
 };
+
+V.supply = async (root) => renderSupply(root);
 
 V.demand = async (root) => {
   const vdHost = el('div'); root.append(vdHost);

@@ -25,6 +25,7 @@ import { retentionRoutes } from './retention_routes.js';
 import { tripRoutes } from './trip_routes.js';
 import { authRoutes } from './auth_routes.js';
 import { exportRoutes } from './export_routes.js';
+import { supplyRoutes } from './supply_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
 import { revenueRoutes } from './revenue_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
@@ -3039,6 +3040,7 @@ vehicleRoutes(app, { q, wrap, endOfDay });
    Settlement, the corporate channel, product tiers, coverage holes and
    corridors — all built on trip_ext, all registered before the catch-all. */
 analyticsRoutes(app, { q, wrap, range, F, FB });
+supplyRoutes(app, { q, wrap, range, FB });
 
 /* ───────────────── the analyst ─────────────────
    Read-only. A generation pass costs a model call and runs from the collector

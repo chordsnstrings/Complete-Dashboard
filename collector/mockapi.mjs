@@ -1327,6 +1327,45 @@ const EXPORT_COLS = {
    provider no longer serves. online_min is deliberately NULL on one of them:
    a day nobody collected availability for is not a day the driver was offline,
    and the renderer has to keep being able to tell those apart. */
+/* Supply against demand, every hour of the week. The fixture deliberately
+   leaves some hours with NO availability, because that is the shape the real
+   data has — Uber serves 31 days and nothing older, and an hour nobody
+   collected must not draw as an hour with no drivers. */
+app.get('/api/supply/balance', (req, r) => {
+  const cells = [];
+  for (let dow = 0; dow < 7; dow++) {
+    for (let h = 0; h < 24; h++) {
+      if (h < 5 && dow % 3 === 0) continue;                 // uncollected
+      const online = Math.round((4 + Math.sin(h / 3) * 3 + (h > 16 ? 6 : 0)) * 10) / 10;
+      const jobs = Math.max(0, Math.round(online * (h > 6 && h < 23 ? 0.9 : 0.1)));
+      const onJob = Math.round(jobs * 0.35 * 10) / 10;
+      cells.push({ dow, h, online_h: online, drivers: Math.max(1, Math.round(online / 2)),
+        on_job_h: onJob, idle_h: Math.round((online - onJob) * 10) / 10, jobs,
+        jobs_per_online_h: online ? Math.round((jobs / online) * 100) / 100 : null });
+    }
+  }
+  const s = (k) => cells.reduce((a, c) => a + (c[k] || 0), 0);
+  r.json({
+    cells,
+    totals: { online_h: Math.round(s('online_h')), on_job_h: Math.round(s('on_job_h')),
+      idle_h: Math.round(s('idle_h')), jobs: s('jobs'),
+      idle_pct: Math.round((s('idle_h') / s('online_h')) * 100),
+      jobs_per_online_h: Math.round((s('jobs') / s('online_h')) * 100) / 100 },
+    covered: true,
+    basis: 'Online hours are split across the hours they were actually online in.',
+  });
+});
+
+app.get('/api/supply/areas', (_, r) => r.json({
+  areas: [
+    { area: 'Al Garhoud', waits: 412, median_wait_min: 34, mean_wait_min: 51, waiting_h: 350.2 },
+    { area: 'Business Bay', waits: 288, median_wait_min: 41, mean_wait_min: 58, waiting_h: 278.4 },
+    { area: 'Dubai Marina', waits: 190, median_wait_min: 28, mean_wait_min: 39, waiting_h: 123.5 },
+    { area: '(unrecorded)', waits: 96, median_wait_min: 46, mean_wait_min: 62, waiting_h: 99.2 },
+  ],
+  basis: 'Measured from a dropoff to that driver’s next request.',
+}));
+
 app.get('/api/driver/days', (req, r) => {
   const days = Array.from({ length: 6 }, (_, i) => {
     const day = dayISO(6 - i).slice(0, 10);
