@@ -1427,8 +1427,17 @@ export function analystRoutes(app, { q, wrap, range }) {
        segment may itself BE a platform — narrowing the list by one would hide
        every finding about the others rather than narrowing anything. */
     const rows = await q(
+      /* Overlap, not containment.
+         ─────────────────────────────────────────────────────────────────────
+         A pass runs over "the last 30 days" measured from the collector's
+         clock; the page asks for the last 30 days measured from the reader's.
+         The two windows differ by a day, and `window_start >= from` then hid
+         every finding at the exact range the page opens on — five confirmed
+         claims on production, invisible on the default view and visible at 60
+         days. A reader asking about a period wants the analysis that covers
+         it. */
       `SELECT * FROM analyst_finding
-       WHERE window_start >= $1::date AND window_end <= $2::date
+       WHERE window_start <= $2::date AND window_end >= $1::date
          AND ($3::text[] IS NULL OR verdict = ANY($3))
          AND ($4::text IS NULL OR fleet_id = $4)
        ORDER BY created_at DESC,

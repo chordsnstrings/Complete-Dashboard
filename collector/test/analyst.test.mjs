@@ -236,6 +236,31 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     parseProposals('I could not find anything worth reporting.').rejected[0].reason.includes('no JSON array'));
 }
 
+/* A rate near the ceiling cannot clear a relative floor, and the first real
+   pass on production proved it: Uber completing 88.3% against 99.2% elsewhere,
+   over 11,645 trips at p < 0.0001, was filed immaterial because 10.9 points is
+   11% of 99.2. Percentage metrics are judged on the absolute floor alone. */
+{
+  const near = (metric, seg, base) => adjudicate(
+    { metric, dimension: 'platform', segment: 's', direction: 'lower' },
+    { measured_value: seg, baseline_value: base, segment_n: 11645, baseline_n: 932, p_value: 0.00001 });
+  check('a ten-point completion gap near the ceiling is a finding',
+    near('completion_pct', 88.3, 99.2).verdict === 'confirmed', JSON.stringify(near('completion_pct', 88.3, 99.2)));
+  check('and a two-point one is still not',
+    near('completion_pct', 97.2, 99.2).verdict === 'immaterial');
+  /* The relative rule still guards unbounded units, where a small absolute
+     move on a large base is noise. */
+  const km = adjudicate({ metric: 'avg_km', dimension: 'daypart', segment: 'night', direction: 'higher' },
+    { measured_value: 13.9, baseline_value: 13.1, segment_n: 2195, baseline_n: 18791, p_value: 0.009 });
+  check('a 6% move in kilometres is still immaterial', km.verdict === 'immaterial', JSON.stringify(km));
+  const fare = adjudicate({ metric: 'avg_fare', dimension: 'settlement', segment: 'cash', direction: 'lower' },
+    { measured_value: 41.4, baseline_value: 95.9, segment_n: 313, baseline_n: 607, p_value: 0.00001 });
+  check('and a halved fare is not', fare.verdict === 'confirmed', JSON.stringify(fare));
+  check('the reason drops the relative floor where it does not apply',
+    !/or 15%/.test(near('completion_pct', 97.2, 99.2).verdict_reason),
+    near('completion_pct', 97.2, 99.2).verdict_reason);
+}
+
 /* A metric measured on the dimension it is derived from confirms with an
    enormous effect and says nothing — and the model proposed exactly that with
    the rule in the prompt, so the rule lives in code. */

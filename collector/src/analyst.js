@@ -147,6 +147,9 @@ export const TAUTOLOGIES = {
 export const MATERIALITY = {
   minSegmentN: 30,        // fewer rows than this and the estimate is noise
   minBaselineN: 30,
+  /* Applied to unbounded units only — see adjudicate(). A percentage point is
+     already an absolute scale, and requiring 15% OF a rate that sits near 100
+     makes a ten-point gap immaterial by arithmetic. */
   minRelEffect: 0.15,     // the segment must differ from the rest by 15%+
   minAbsEffect: { '%': 3, AED: 5, km: 0.5, min: 2 },
   maxP: 0.05,             // where a test applies at all
@@ -210,11 +213,28 @@ export function adjudicate(proposal, m) {
   }
 
   const absFloor = MATERIALITY.minAbsEffect[metric.unit] ?? 0;
-  if (Math.abs(effect) < absFloor || (relEffect != null && relEffect < MATERIALITY.minRelEffect)) {
+  /* A rate near the ceiling can never clear a RELATIVE floor.
+     ─────────────────────────────────────────────────────────────────────────
+     Uber completes 88.3% of its bookings against 99.2% everywhere else, over
+     11,645 trips, p < 0.0001 — and the first real pass filed it immaterial,
+     because 10.9 points is only 11% of 99.2 and the rule wanted 15%. The same
+     rule buried the hotel channel's 99.7% against 88.3%. Both are the largest
+     quality facts on this fleet.
+
+     Relative change is the right test for an unbounded quantity, where 3 AED
+     on a 500 AED base is noise. It is the wrong test for something measured in
+     percentage points and living near 100, where the absolute floor already
+     says what matters: three points of completion is three points whether the
+     base is 12% or 99%. So percentage metrics are judged on the absolute floor
+     alone, and everything else on both. */
+  const relApplies = metric.unit !== '%';
+  if (Math.abs(effect) < absFloor
+      || (relApplies && relEffect != null && relEffect < MATERIALITY.minRelEffect)) {
     return { verdict: 'immaterial',
       verdict_reason: `${fmt(m.measured_value)}${metric.unit} against ${fmt(m.baseline_value)}${metric.unit} — `
         + `a difference of ${fmt(Math.abs(effect))}${metric.unit}, below the floor of `
-        + `${absFloor}${metric.unit} or ${Math.round(MATERIALITY.minRelEffect * 100)}% that makes it worth acting on` };
+        + `${absFloor}${metric.unit}${relApplies ? ` or ${Math.round(MATERIALITY.minRelEffect * 100)}%` : ''} `
+        + 'that makes it worth acting on' };
   }
   if (m.p_value != null && m.p_value > MATERIALITY.maxP) {
     return { verdict: 'immaterial',
@@ -490,6 +510,10 @@ Rules you must follow exactly:
   them: a claim about 34 trips survives measurement far less often than one about 3,400.
 - Do not propose anything the brief does not contain the numbers for. In particular, the Uber
   trip export has NO fare, so no claim about Uber money is checkable.
+- A candidate's record count is over the WHOLE window. Inside a metric's own population it can
+  be far smaller — settlement=wallet has thousands of trips and thirteen with a fare on them,
+  because Uber publishes no fare. Check metric_coverage before pairing a metric with a segment
+  that mostly lives outside it.
 - "metric_coverage" says where each metric is defined and which platforms carry it. A claim is
   only settleable if BOTH sides exist inside that population: if a metric is carried by one
   platform alone, a claim about that platform has no complement to compare against and is
