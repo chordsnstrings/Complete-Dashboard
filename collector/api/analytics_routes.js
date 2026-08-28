@@ -1474,9 +1474,9 @@ export function analystRoutes(app, { q, wrap, range }) {
       fleet: req.query.fleet || null,
       /* Whether the model that writes these is configured at all. An empty
          list means "no finding" only when the generator can run; with
-         ARK_API_KEY unset it means the pass has never happened, and the page
+         no model key set it means the pass has never happened, and the page
          described that as a scheduling delay. */
-      configured: !!process.env.ARK_API_KEY,
+      configured: !!(process.env.ANALYST_API_KEY || process.env.ARK_API_KEY),
       last_pass: lastRun || null,
       /* The sentence the page prints above an empty list, composed here so
          every surface that shows it says the same thing. */

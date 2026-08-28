@@ -95,7 +95,7 @@ async function fetchNews() {
 // Ask an LLM whether a headline plausibly affects Dubai ride demand, and how.
 // Conservative by design: default to "unknown / low confidence" rather than inventing a story.
 async function classifyNews(articles) {
-  if (!articles.length || !config.modelark?.apiKey) return [];
+  if (!articles.length || !config.analystModel?.apiKey) return [];
   const list = articles.slice(0, 30).map((a, i) => `${i}. ${a.title}`).join('\n');
   const prompt = `You assess whether news affects a taxi/ride-hailing fleet operating in Dubai, UAE.
 For each headline return: index, effect (demand_up|demand_down|supply_down|risk_up|none), confidence 0-1, and one short reason.
@@ -104,10 +104,10 @@ Return ONLY a JSON array like [{"i":0,"effect":"none","confidence":0.1,"reason":
 
 ${list}`;
   try {
-    const { data } = await http(`${config.modelark.baseUrl}/chat/completions`, {
+    const { data } = await http(`${config.analystModel.baseUrl}/chat/completions`, {
       method: 'POST', timeoutMs: 90000, retries: 1,
-      headers: { authorization: `Bearer ${config.modelark.apiKey}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ model: config.modelark.model, messages: [{ role: 'user', content: prompt }], max_tokens: 1600 }),
+      headers: { authorization: `Bearer ${config.analystModel.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ model: config.analystModel.model, messages: [{ role: 'user', content: prompt }], max_tokens: 1600 }),
     });
     const txt = data?.choices?.[0]?.message?.content || '';
     const m = txt.match(/\[[\s\S]*\]/);

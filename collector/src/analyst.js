@@ -109,7 +109,12 @@ export const DIMENSIONS = {
   settlement: 'settlement_class',
   tier: 'uber_tier',
   daypart: 'daypart',
-  weekday: `to_char(requested_at AT TIME ZONE 'Asia/Dubai', 'Day')`,
+  /* btrim, because to_char's 'Day' pads to nine characters — 'Monday   '.
+     Without it `(dim) = 'Monday'` is false for every row in the table, so a
+     weekday claim could only ever come back "no rows for weekday = Monday".
+     Every weekday proposal the model has ever made was unanswerable, and the
+     verdict said so in a way that read like a fact about the fleet. */
+  weekday: `btrim(to_char(requested_at AT TIME ZONE 'Asia/Dubai', 'Day'))`,
   hour: 'local_hour::text',
   property: 'partner_name',
   zone: 'zone',
@@ -248,14 +253,24 @@ export async function measure(proposal, [from, to, fleet]) {
       AND ($3::text IS NULL OR fleet_id = $3)
       AND ${metric.where}`;
   const inSeg = `(${dim}) = $4`;
+  /* The baseline is `IS DISTINCT FROM`, not `NOT (= )`.
+     ─────────────────────────────────────────────────────────────────────────
+     `NOT (dim = $4)` is NULL wherever the dimension is NULL, so those rows
+     count toward neither side. On any dimension that only some rows carry —
+     partner_name is set on hotel bookings alone, uber_tier on Uber alone —
+     that silently changes the question: "this property completes worse than
+     the rest of the fleet" was measured as "…than the other hotel bookings",
+     while the verdict sentence beneath it said "across the other N trips".
+     The claim and the measurement have to be the same claim. */
+  const outSeg = `(${dim}) IS DISTINCT FROM $4`;
 
   if (metric.kind === 'rate') {
     const { rows } = await pool.query(
       `SELECT
          count(*) FILTER (WHERE (${metric.num}) AND ${inSeg})::int       AS seg_x,
          count(*) FILTER (WHERE (${metric.den}) AND ${inSeg})::int       AS seg_n,
-         count(*) FILTER (WHERE (${metric.num}) AND NOT (${inSeg}))::int AS base_x,
-         count(*) FILTER (WHERE (${metric.den}) AND NOT (${inSeg}))::int AS base_n
+         count(*) FILTER (WHERE (${metric.num}) AND ${outSeg})::int      AS base_x,
+         count(*) FILTER (WHERE (${metric.den}) AND ${outSeg})::int      AS base_n
        ${base}`, [from, to, fleet, proposal.segment]);
     const r = rows[0] || {};
     if (!r.seg_n || !r.base_n) return { segment_n: r.seg_n || 0, baseline_n: r.base_n || 0 };
@@ -272,9 +287,9 @@ export async function measure(proposal, [from, to, fleet]) {
        avg(${metric.val}) FILTER (WHERE ${inSeg})            AS seg_m,
        stddev_samp(${metric.val}) FILTER (WHERE ${inSeg})    AS seg_s,
        count(${metric.val}) FILTER (WHERE ${inSeg})::int     AS seg_n,
-       avg(${metric.val}) FILTER (WHERE NOT (${inSeg}))         AS base_m,
-       stddev_samp(${metric.val}) FILTER (WHERE NOT (${inSeg})) AS base_s,
-       count(${metric.val}) FILTER (WHERE NOT (${inSeg}))::int  AS base_n
+       avg(${metric.val}) FILTER (WHERE ${outSeg})            AS base_m,
+       stddev_samp(${metric.val}) FILTER (WHERE ${outSeg})    AS base_s,
+       count(${metric.val}) FILTER (WHERE ${outSeg})::int     AS base_n
      ${base}`, [from, to, fleet, proposal.segment]);
   const r = rows[0] || {};
   if (!r.seg_n || !r.base_n) return { segment_n: r.seg_n || 0, baseline_n: r.base_n || 0 };
@@ -333,35 +348,81 @@ export async function buildBrief([from, to, fleet], { db = pool } = {}) {
        FROM source_day_coverage WHERE day BETWEEN $1::date AND $2::date GROUP BY 1`, [from, to])
       .then((r) => r.rows),
   ]);
+  /* The segments that can actually be proposed on.
+     ─────────────────────────────────────────────────────────────────────────
+     The prompt told the model to pick a dimension from a list of twelve and a
+     segment "spelled exactly as it appears in the brief" — and the brief
+     enumerated values for five of them. For the other seven the model had to
+     invent a spelling, and an invented spelling measures zero rows and comes
+     back "unsupported": a run that looks like the fleet has nothing to say
+     when it is really the prompt that could not be followed.
+
+     So the brief now carries the candidate list itself, straight out of the
+     same DIMENSIONS map the measurement composes from — every value with at
+     least the materiality floor of rows behind it, capped per dimension so a
+     high-cardinality one cannot crowd out the rest. A proposal against this
+     list can be wrong about the fleet, which is the point, but it cannot be
+     wrong about what the fleet contains. */
+  const candidates = await Promise.all(Object.entries(DIMENSIONS).map(async ([name, expr]) => {
+    const rows = await q(
+      `SELECT (${expr})::text AS segment, count(*)::int AS n
+         FROM trip_ext WHERE ${W} AND (${expr}) IS NOT NULL
+        GROUP BY 1 HAVING count(*) >= ${MATERIALITY.minSegmentN}
+        ORDER BY 2 DESC LIMIT ${CANDIDATES_PER_DIMENSION}`).catch(() => []);
+    return [name, rows];
+  }));
+
   return { window: [from, to], fleet: fleet || 'both', headline: headline[0], by_platform: byDim,
     uber_tier_by_daypart: tiers, settlement: settle, properties: hotels, by_daypart: dayparts,
-    coverage };
+    coverage,
+    candidates: Object.fromEntries(candidates.filter(([, rows]) => rows.length)) };
 }
 
+/* Enough for a model to find the interesting one, few enough that two hundred
+   plates do not become most of the prompt. */
+const CANDIDATES_PER_DIMENSION = 12;
+
 const SYSTEM = `You are a fleet analyst for a Dubai limousine and ride-hailing operator.
-You will be given aggregate figures for one window. Propose specific, testable claims about
-where this fleet is losing money or leaving it on the table.
+You will be given aggregate figures for one window, and a list of the segments that can be
+measured. Propose specific, testable claims about where this fleet is losing money or leaving
+it on the table.
+
+Each claim is settled by a query the operator's code composes — you never write SQL, and the
+numbers you guess at are not what gets stored. What gets stored is the measurement and whether
+it agreed with you, so a confident claim that the data refutes costs more than a cautious one
+that holds.
 
 Rules you must follow exactly:
-- Every claim must be a comparison between ONE named segment and the rest of the fleet.
+- Every claim must be a comparison between ONE named segment and every other record in the
+  window — not against a hand-picked comparison group. "Cash trips cancel more" is checked as
+  cash trips against all non-cash trips where the metric is defined.
 - metric MUST be one of: {METRICS}
-- dimension MUST be one of: {DIMENSIONS}
-- segment MUST be a value that appears in the brief for that dimension, spelled exactly as it appears.
+- dimension and segment MUST be one of the pairs listed under "candidates" in the brief,
+  copied exactly — same dimension key, same segment string, character for character. The
+  candidate list is generated from the same query the measurement runs, so anything not on it
+  measures zero rows and is thrown away unmeasured.
 - direction is "higher" or "lower" — how the segment compares to everything else.
-- Do not propose a claim about a segment with fewer than 30 records in the brief.
+- Every candidate already clears the 30-record floor. Prefer segments with more rows behind
+  them: a claim about 34 trips survives measurement far less often than one about 3,400.
 - Do not propose anything the brief does not contain the numbers for. In particular, the Uber
   trip export has NO fare, so no claim about Uber money is checkable.
 - Prefer claims an operator could act on this week over interesting-but-inert observations.
+- A claim is only worth making if it would still be worth acting on when true. The measurement
+  discards anything under a 15% relative difference, so do not propose one you expect to be
+  marginal — spend the twelve slots on the segments the brief makes look most extreme.
+- Do not propose the same segment twice on the same metric, and do not propose a claim whose
+  answer is already visible in the brief as an identity (a platform's own completion rate
+  against itself, a daypart that is most of the window).
 
 Return ONLY a JSON array, at most 12 items:
 [{"claim":"...","metric":"...","dimension":"...","segment":"...","direction":"higher|lower",
   "claimed_value":<number or null>,"why":"one sentence on the consequence","action":"one sentence on what to do"}]`;
 
 export async function propose(brief) {
-  if (!config.modelark?.apiKey) {
-    log.warn(SRC, 'no ARK_API_KEY — the analyst cannot propose, only measure');
+  if (!config.analystModel?.apiKey) {
+    log.warn(SRC, 'no analyst model key — the analyst cannot propose, only measure');
     return { proposals: [], rejected: [{ reason: 'no model configured' }],
-      model: null, outcome: 'no_model', error: 'no ARK_API_KEY is set for the component that runs the analyst' };
+      model: null, outcome: 'no_model', error: 'no ANALYST_API_KEY is set for the component that runs the analyst' };
   }
   const prompt = SYSTEM
     .replace('{METRICS}', Object.keys(METRICS).join(', '))
@@ -377,11 +438,11 @@ export async function propose(brief) {
      with no findings, and only one of them is somebody's job to fix. */
   let data;
   try {
-    ({ data } = await http(`${config.modelark.baseUrl}/chat/completions`, {
+    ({ data } = await http(`${config.analystModel.baseUrl}/chat/completions`, {
       method: 'POST', timeoutMs: 120000, retries: 1,
-      headers: { authorization: `Bearer ${config.modelark.apiKey}`, 'content-type': 'application/json' },
+      headers: { authorization: `Bearer ${config.analystModel.apiKey}`, 'content-type': 'application/json' },
       body: JSON.stringify({
-        model: config.modelark.model,
+        model: config.analystModel.model,
         messages: [{ role: 'system', content: prompt },
           { role: 'user', content: JSON.stringify(brief) }],
         max_tokens: 3000, temperature: 0.4,
@@ -389,9 +450,9 @@ export async function propose(brief) {
     }));
   } catch (e) {
     const err = String(e?.message || e).slice(0, 200);
-    log.error(SRC, 'model call failed', { err, model: config.modelark.model });
+    log.error(SRC, 'model call failed', { err, model: config.analystModel.model });
     return { proposals: [], rejected: [{ reason: err }],
-      model: config.modelark.model, outcome: 'failed', error: err };
+      model: config.analystModel.model, outcome: 'failed', error: err };
   }
   /* A body that is not the shape asked for is a failure too. A 429 answers
      with an error object and no choices, and reading that as "no proposals"
@@ -400,12 +461,12 @@ export async function propose(brief) {
     const err = String(data?.error?.message || data?.message
       || (typeof data === 'string' ? data.slice(0, 160) : JSON.stringify(data || {}).slice(0, 160)))
       || 'the model returned no choices';
-    log.error(SRC, 'model returned nothing usable', { err, model: config.modelark.model });
+    log.error(SRC, 'model returned nothing usable', { err, model: config.analystModel.model });
     return { proposals: [], rejected: [{ reason: err }],
-      model: config.modelark.model, outcome: 'failed', error: err };
+      model: config.analystModel.model, outcome: 'failed', error: err };
   }
   const txt = data?.choices?.[0]?.message?.content || '';
-  return { ...parseProposals(txt), model: config.modelark.model, outcome: null, error: null };
+  return { ...parseProposals(txt), model: config.analystModel.model, outcome: null, error: null };
 }
 
 /* One full pass: brief → propose → measure → adjudicate → store. */

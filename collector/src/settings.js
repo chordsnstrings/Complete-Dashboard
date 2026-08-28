@@ -62,8 +62,12 @@ export const SETTING_DEFAULTS = {
   YANGO_BASE: 'https://fleet.yango.com',
   HOTEL_BASE: 'https://whale-app-iofbt.ondigitalocean.app',
   HOTEL_DOMAIN: 'hotel.ecosine.ae',
-  ARK_BASE_URL: 'https://ark.ap-southeast.bytepluses.com/api/v3',
-  ARK_MODEL: 'glm-5-2-260617',
+  /* MiniMax's OpenAI-compatible surface. The previous default was ByteDance
+     ModelArk, which every analyst pass on production timed out against — the
+     stored runs show `outcome: failed, error: This operation was aborted`
+     after 242s, and the page reported the analyst as simply quiet. */
+  ANALYST_BASE_URL: 'https://api.minimax.io/v1',
+  ANALYST_MODEL: 'MiniMax-M3',
   BACKFILL_MONTHS: '12',
   INCREMENTAL_DAYS: '3',
 };

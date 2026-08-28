@@ -18,11 +18,19 @@ export const config = {
   get liveStatusSeconds() { return getInt('LIVE_STATUS_SECONDS', 120); },
 
   // LLM used to judge whether a news headline can plausibly move a Dubai fleet.
-  get modelark() {
+  /* The model the analyst proposes with.
+     ─────────────────────────────────────────────────────────────────────────
+     Named for the JOB, not the vendor. It was `modelark` and read ARK_*, which
+     was accurate while ByteDance ModelArk served it and became a lie the day
+     it did not — and the analyst is a chat/completions caller, so any
+     OpenAI-compatible endpoint serves it equally. ANALYST_* wins where set and
+     the old ARK_* names still work, so a deploy that changes one component's
+     environment before the other does not leave the analyst unconfigured. */
+  get analystModel() {
     return {
-      baseUrl: get('ARK_BASE_URL', D.ARK_BASE_URL),
-      apiKey: get('ARK_API_KEY'),
-      model: get('ARK_MODEL', D.ARK_MODEL),
+      baseUrl: get('ANALYST_BASE_URL', get('ARK_BASE_URL', D.ANALYST_BASE_URL)),
+      apiKey: get('ANALYST_API_KEY', get('ARK_API_KEY')),
+      model: get('ANALYST_MODEL', get('ARK_MODEL', D.ANALYST_MODEL)),
     };
   },
 
