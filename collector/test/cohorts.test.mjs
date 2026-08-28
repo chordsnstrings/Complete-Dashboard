@@ -187,6 +187,19 @@ for (const [file, key] of [
   const src = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
   check(`${file.split('/').pop()} links its tiles to the registry`, src.includes(key), '');
 }
+/* A fare and a payout are different measurements of different money, and for a
+   channel that reports both the product drops one of them (chooseBasis, in
+   api/economics_routes.js). Added together on a card, they produced "AED 79"
+   for the one person on the fleet whose page is titled "drove and was paid
+   nothing" — his booking is priced at zero and the 79 is a statement spanning
+   31 days. The card states each source separately and totals neither. */
+{
+  const card = readFileSync(new URL('../api/public/cohort.js', import.meta.url), 'utf8');
+  check('the member card never adds a fare to a payout',
+    !/payout\s*\+\s*fares|fares\s*\+\s*payout/.test(card));
+  check('and labels each with the source it came from',
+    card.includes('Paid by statement') && card.includes('Fares charged'));
+}
 {
   const ui = readFileSync(new URL('../api/public/ui.js', import.meta.url), 'utf8');
   check('a tile carrying a cohort renders as a link', /a\.kpi|tag = to \? 'a'/.test(ui));

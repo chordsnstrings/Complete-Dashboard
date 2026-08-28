@@ -87,7 +87,7 @@ export const COHORTS = {
 
   /* ── Vehicles · the directory ────────────────────────────────────────── */
   'vehicles-moved-no-booking': {
-    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false,
+    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
     from: 'vehicles', fromLabel: 'Vehicles',
     label: 'Moved with no booking',
     question: 'Which cars drove with nothing paying for the journey?',
@@ -96,7 +96,7 @@ export const COHORTS = {
     test: (r) => !r.trips && r.telematics_journeys > 0,
   },
   'vehicles-still': {
-    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false,
+    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
     from: 'vehicles', fromLabel: 'Vehicles',
     label: 'Did not move',
     question: 'Which cars produced neither a booking nor a journey?',
@@ -105,7 +105,7 @@ export const COHORTS = {
     test: (r) => !r.trips && !r.telematics_journeys,
   },
   'vehicles-untracked': {
-    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false,
+    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
     from: 'vehicles', fromLabel: 'Vehicles',
     label: 'No tracker fix',
     question: 'Which cars has no tracker ever reported a position for?',
@@ -114,7 +114,7 @@ export const COHORTS = {
     test: (r) => !r.last_fix,
   },
   'vehicles-stale': {
-    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false,
+    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
     from: 'vehicles', fromLabel: 'Vehicles',
     label: 'Tracker gone quiet',
     question: 'Which cars have a tracker that has not reported in 11 minutes?',
@@ -123,7 +123,7 @@ export const COHORTS = {
     test: (r) => !!r.stale && !!r.last_fix,
   },
   'vehicles-docs-due': {
-    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false,
+    kind: 'vehicle', source: '/api/vehicles/directory', pick: null, chips: false, cap: 500,
     from: 'vehicles', fromLabel: 'Vehicles',
     label: 'Documents due',
     question: 'Which cars have a document expiring within 30 days?',
@@ -190,6 +190,32 @@ export const COHORTS = {
       + 'would assert something no provider said.',
     test: (r) => r.category === 'unclassified',
   },
+
+  /* ── Retention · who left and who arrived ────────────────────────────────
+     These two are not filters over a population: the endpoint has already
+     decided who stopped and who started by comparing consecutive months, and
+     the array IT returns is the set. The predicate is therefore the identity
+     one, which is the honest expression of "this list is the answer" — and it
+     still runs through the same machinery, so the tile and the page count the
+     same rows. */
+  'retention-stopped': {
+    kind: 'driver', source: '/api/retention', pick: 'stopped_last_month', chips: true,
+    from: 'retention', fromLabel: 'Retention',
+    label: 'Stopped last month',
+    question: 'Who worked the month before last and took no booking last month?',
+    why: 'A leaver the fleet may not have recorded as one. Some are still holding a car, '
+      + 'and some have a licence the fleet is still renewing.',
+    test: () => true,
+  },
+  'retention-started': {
+    kind: 'driver', source: '/api/retention', pick: 'started_last_month', chips: true,
+    from: 'retention', fromLabel: 'Retention',
+    label: 'Started last month',
+    question: 'Who took their first booking anywhere last month?',
+    why: 'The recruits whose first month decides whether they stay. What each of them was '
+      + 'given to drive, and how much of their time was idle, is what predicts it.',
+    test: () => true,
+  },
 };
 
 /* Everything a page needs to make a tile clickable, without importing the DOM
@@ -204,7 +230,11 @@ export function membersOf(key, payload) {
   const c = COHORTS[key];
   if (!c) return [];
   const rows = c.pick ? (payload?.[c.pick] || []) : (Array.isArray(payload) ? payload : []);
-  return rows.filter((r) => { try { return !!c.test(r); } catch { return false; } });
+  /* The payload reaches the predicate too: some sets are defined by a fact the
+     RESPONSE carries rather than the row — the licence date a source writes
+     when the field was never filled in is one value for the whole payload, and
+     a row cannot know it is the placeholder without being told. */
+  return rows.filter((r) => { try { return !!c.test(r, payload); } catch { return false; } });
 }
 
 /* The entity id of a member row, whichever shape its source uses. A driver row

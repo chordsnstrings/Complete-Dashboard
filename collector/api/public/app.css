@@ -638,14 +638,16 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    long sub-line. */
 a.kpi{display:block;text-decoration:none;color:inherit}
 a.kpi:hover,a.kpi:focus-visible{border-color:var(--accent)}
+/* Visible, not hover-revealed. The complaint this whole mechanism answers is
+   that a number leads nowhere; an affordance that only appears once the reader
+   already suspects it is there answers a different complaint. Quiet at rest,
+   full strength on hover. */
 .kpi-who{
   font-family:"IBM Plex Mono",monospace;font-size:.62rem;letter-spacing:.1em;
   text-transform:uppercase;color:var(--accent);margin-top:7px;
-  opacity:0;transform:translateX(-3px);
-  transition:opacity .2s var(--ease),transform .2s var(--ease);
+  opacity:.62;transition:opacity .2s var(--ease),transform .2s var(--ease);
 }
-a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:none}
-@media (hover:none){.kpi-who{opacity:.75;transform:none}}
+a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX(2px)}
 
 /* The same door on a verdict, where the claim itself is the number. */
 .vdct-who{

@@ -144,10 +144,12 @@ export async function renderRetention(root) {
       tone: flowLast.net < 0 ? 'critical' : flowLast.net > 0 ? 'good' : null },
     { label: 'Stopped that month', value: fmt(d.stopped_last_month.length),
       sub: 'worked the month before and not this one',
-      tone: d.stopped_last_month.length ? 'warn' : 'good' },
+      tone: d.stopped_last_month.length ? 'warn' : 'good',
+      cohort: d.stopped_last_month.length ? 'retention-stopped' : null },
     { label: 'Started that month', value: fmt(d.started_last_month.length),
       sub: 'first booking anywhere',
-      tone: d.started_last_month.length < d.stopped_last_month.length ? 'warn' : 'good' },
+      tone: d.started_last_month.length < d.stopped_last_month.length ? 'warn' : 'good',
+      cohort: d.started_last_month.length ? 'retention-started' : null },
     /* This tile could never be green: the tone was `< 0.4 ? critical : warn`,
        so a fleet keeping every single recruit still read as a warning. A rate
        that has no good value is not a measurement, it is a mood. */

@@ -14,7 +14,7 @@
    car from custody, harsh braking from a telematics box, papers from the
    fleet portal. That join used to be a page load per person. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
-  dayStr, dtStr, money, fmt, pct, plural, countOf, verdict, foldRows, foldChildren,
+  dayStr, dtStr, money, fmt, pct, plural, countOf, andList, verdict, foldRows, foldChildren,
   sourceLabel } from './ui.js';
 import { q, qAll, api, href, params, unfiltered } from './data.js';
 import { empty } from './charts.js';
@@ -121,12 +121,30 @@ function memberCard(host, kind, row, detail) {
         sub: `${countOf(sumOf(w, (r) => r.days) ? new Set(w.map((r) => r.platform)).size : 0, 'channel')}`
           + ` · ${fmt(sumOf(w, (r) => r.km))} km` });
     } else silent.push('no channel reports a booking in this window');
-    if ((d.pay || []).length || fares) {
+    /* NEVER added together.
+       ─────────────────────────────────────────────────────────────────────
+       A fare is what a rider was charged for one trip; a payout is a share of
+       a net statement after the platform's commission, and for a channel that
+       reports both, the product's rule is that one of them counts and the
+       other is dropped (see chooseBasis in api/economics_routes.js). Summed
+       here, this card showed "AED 79" for the one person on the fleet the page
+       behind it calls "drove and was paid nothing" — his Yango booking is
+       priced at zero, and the 79 is a statement spanning 31 days that no
+       single trip earned. Two tiles, each labelled with the source it came
+       from, and no total that belongs to neither. */
+    if ((d.pay || []).length) {
       said.push('payout statements');
-      facts.push({ label: 'Money', value: money(payout + fares),
-        sub: payout && fares ? 'payouts and fares' : payout ? 'bank payouts' : 'fares only',
-        tone: payout + fares ? null : 'critical' });
-    } else silent.push('no statement pays them anything in this window');
+      const days = Math.max(...d.pay.map((x) => Number(x.payout_days) || 0), 0);
+      facts.push({ label: 'Paid by statement', value: money(payout),
+        sub: `${andList([...new Set(d.pay.map((x) => sourceLabel(x.platform)))])}`
+          + (days ? ` · over ${countOf(days, 'payout day')}` : '') });
+    }
+    if (fares) {
+      said.push('priced bookings');
+      facts.push({ label: 'Fares charged', value: money(fares),
+        sub: 'the rider\u2019s price, on the channels that report one — not a payout' });
+    }
+    if (!(d.pay || []).length && !fares) silent.push('no statement and no priced booking reaches them');
     const a = d.availability;
     if (a && a.online_min) {
       said.push('supplier availability');
@@ -220,7 +238,8 @@ export async function renderCohort(root, key) {
 
   verdict(vHost, {
     claim: rows.length
-      ? `${countOf(rows.length, c.kind === 'vehicle' ? 'vehicle' : 'person')} — ${c.label.toLowerCase()}`
+      ? `${c.kind === 'vehicle' ? countOf(rows.length, 'vehicle')
+        : countOf(rows.length, 'person', 'people')} — ${c.label.toLowerCase()}`
       : `Nobody is ${c.label.toLowerCase()} in this window`,
     figure: fmt(rows.length),
     unit: c.kind === 'vehicle' ? plural(rows.length, 'vehicle') : plural(rows.length, 'person', 'people'),
@@ -265,9 +284,15 @@ export async function renderCohort(root, key) {
         ? { label: 'Days worked', value: fmt(sumOf(rows, (r) => r.days_worked ?? r.days)),
             sub: 'person-days inside the window' }
         : null,
+    /* Null everywhere and zero are different answers. A set nobody's
+       availability was collected for reads "0 h" under a label that implies a
+       measurement, which is the one thing this column exists not to do. */
     has('measured_hours_online')
-      ? { label: 'Online', value: `${fmt(sumOf(rows, (r) => r.measured_hours_online), 0)} h`,
-          sub: 'measured, where availability was collected' } : null,
+      ? (rows.some((r) => r.measured_hours_online != null)
+        ? { label: 'Online', value: `${fmt(sumOf(rows, (r) => r.measured_hours_online), 0)} h`,
+            sub: 'measured, where availability was collected' }
+        : { label: 'Online', value: '—',
+            sub: 'availability was collected for nobody on this list' }) : null,
     has('doc_days_left')
       ? { label: 'Papers due', value: fmt(near('doc_days_left')),
           sub: 'expiring within 30 days', tone: over('doc_days_left') ? 'critical' : null } : null,
@@ -355,6 +380,16 @@ export async function renderCohort(root, key) {
             : r.licence_days_left < 30 ? pill(`${fmt(r.licence_days_left)} d`, 'warn')
               : `${fmt(r.licence_days_left)} d`),
         absent: 'No licence date is recorded for anybody here.' },
+      /* A leaver's window is empty by definition — that is what made them a
+         leaver — so the columns that describe this window say nothing about
+         them. What does is how long they ran and when they stopped. Both
+         prune themselves on the sets that do not carry them. */
+      { label: 'Months active', key: 'months_active', num: true,
+        absent: 'No month count reaches this list.' },
+      { label: 'Bookings, all time', key: 'lifetime_bookings', num: true,
+        absent: 'No lifetime total reaches this list.' },
+      { label: 'Last month worked', key: 'last_month',
+        absent: 'No last-active month reaches this list.' },
     ];
   foldRows(tblP.body, tableFrom(view, cols, { compact: true, sortable: true, sortId: 'coh' }),
     { shown: 12, total: rows.length, noun: c.kind === 'vehicle' ? 'vehicle' : 'person', key: `cohort-${key}` });
@@ -383,6 +418,14 @@ export async function renderCohort(root, key) {
        table above is what a reader uses to pick which of them to read. */
     foldChildren(cardsP.body, box, { shown: 6, total: rows.length,
       noun: c.kind === 'vehicle' ? 'vehicle' : 'person', key: `cohort-cards-${key}` });
+    /* A source that caps its own rows caps this set too. The vehicles directory
+       stops at 500 and the fleet is a few hundred, so it has never bitten —
+       but a page that silently lists "every one of them" from a truncated
+       answer is the same lie as a tile that counts a capped list. */
+    if (c.cap && all.length >= c.cap) {
+      cardsP.body.append(note(`${c.fromLabel} returns at most ${fmt(c.cap)} rows and returned `
+        + `${fmt(all.length)}, so this set is drawn from those and may be short.`, 'warn'));
+    }
     if (ids.length >= 400) {
       cardsP.body.append(note('This set is larger than the 400 the detail join will gather at once, '
         + 'so the cards below cover the first 400. The table above is complete.', 'warn'));

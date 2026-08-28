@@ -972,6 +972,17 @@ async function handoverPanel(host) {
   foldRows(host, tableFrom(rows, cols, { compact: true, sortable: true, sortId: 'ho' }),
     { shown: 8, total: rows.length, noun: 'car', key: 'vehicles-handover' });
 
+  /* What this measure cannot see, said where the numbers are.
+     ─────────────────────────────────────────────────────────────────────
+     A stint is one person's whole day on the car — first job to last — so two
+     drivers who alternate INSIDE a day produce no gap here at all: the second
+     person's stint sits inside the first's, and a car handed back and forth
+     over one afternoon reads as no change-over. It errs downwards on purpose;
+     nothing here is a gap the car did not actually have. */
+  host.append(note('A stint is one person\'s whole day on the car, so two drivers who alternate '
+    + 'within a single day produce no gap here. The measure is conservative — it never invents a '
+    + 'change-over, and it misses the ones that happen inside a day.'));
+
   /* A car parked for a day or more between drivers is a different business to
      a slow change-over, and averaging the two lets one long-term-off-road
      vehicle set the fleet's handover time. Counted, named, and kept out. */
