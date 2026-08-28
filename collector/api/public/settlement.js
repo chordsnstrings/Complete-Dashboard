@@ -29,7 +29,7 @@ const TONE = { cash: 'warn', on_account: 'warn', salary: 'warn', complimentary: 
 export async function renderSettlement(root, tab = 'mix') {
   root.innerHTML = '';
   root.append(tabBar(SETTLE_TABS, tab, (id) => href('settlement', id === 'mix' ? null : id)));
-  const host = el('div'); root.append(host);
+  const host = el('div', 'stack'); root.append(host);
   await ({ mix: settleMix, cash: settleCash, receivables: settleReceivables }[tab] || settleMix)(host);
 }
 

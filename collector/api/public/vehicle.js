@@ -876,7 +876,7 @@ export async function renderVehicle(root, plate, tab = 'overview') {
      complaint. #day has always answered this properly; these four did not. */
   if (!plate) return noneChosen(root, 'vehicle', 'vehicles', 'Every vehicle');
   const head = el('div'); root.append(head); loading(head);
-  const body = el('div'); root.append(body);
+  const body = el('div', 'stack'); root.append(body);
 
   let prof;
   try { prof = await qAll('/api/vehicle/profile', { plate }); }

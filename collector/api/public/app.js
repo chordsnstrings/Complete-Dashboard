@@ -1478,7 +1478,7 @@ const PLATFORM_TABS = [
 V.platforms = async (root) => {
   const tab = PLATFORM_TABS.some((t) => t.id === state.param) ? state.param : 'share';
   root.append(tabBar(PLATFORM_TABS, tab, (id) => href('platforms', id === 'share' ? null : id)));
-  const host = el('div'); root.append(host);
+  const host = el('div', 'stack'); root.append(host);
   if (tab === 'tiers') return platformTiers(host);
   if (tab === 'funnel') return platformFunnel(host);
   return platformShare(host);
@@ -2147,7 +2147,7 @@ const SAFETY_TABS = [
 V.safety = async (root) => {
   const tab = SAFETY_TABS.some((t) => t.id === state.param) ? state.param : 'people';
   root.append(tabBar(SAFETY_TABS, tab, (id) => href('safety', id === 'people' ? null : id)));
-  const host = el('div'); root.append(host);
+  const host = el('div', 'stack'); root.append(host);
   loading(host);
   const gen = currentGen();
   const [byType, vehPage, drvPage, fleetK] = await Promise.all([

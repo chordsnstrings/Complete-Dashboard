@@ -57,7 +57,9 @@ function whyNotRanked(r) {
 
 export async function renderPerformers(root, band) {
   const top = band === 'top';
-  const head = el('div'); root.append(head);
+  /* The week note and the verdict beneath it are two sections, not one block —
+     see .stack in app.css. Without it they touched. */
+  const head = el('div', 'stack'); root.append(head);
   const kh = el('div', 'kpis'); root.append(kh);
   const listP = panel(top ? 'Ranked highest' : 'Ranked lowest',
     `Money in per day worked, over the last complete week. At least ${MIN_DAYS} days `

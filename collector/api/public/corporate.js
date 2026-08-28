@@ -50,7 +50,7 @@ const add = (host, title, cap, render) => {
 export async function renderCorporate(root, tab = 'overview') {
   root.innerHTML = '';
   root.append(tabBar(CORP_TABS, tab, (id) => href('corporate', id === 'overview' ? null : id)));
-  const host = el('div'); root.append(host);
+  const host = el('div', 'stack'); root.append(host);
   const page = { overview: corpOverview, properties: corpProperties, guests: corpGuests,
     leakage: corpLeakage, approach: corpApproach }[tab] || corpOverview;
   await page(host);
@@ -625,7 +625,7 @@ export async function renderProperty(root, id, tab = 'overview', onDetail) {
      complaint about a missing query parameter. */
   if (!id) return noneChosen(root, 'property', 'corporate', 'Every property that books', 'properties');
   root.append(tabBar(PROPERTY_TABS, tab, (t) => href('property', id, t === 'overview' ? null : t)));
-  const host = el('div'); root.append(host); loading(host);
+  const host = el('div', 'stack'); root.append(host); loading(host);
   let d;
   try { d = await qAll('/api/corporate/property', { id }); }
   catch (e) {

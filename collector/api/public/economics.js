@@ -129,7 +129,7 @@ export async function renderEconomics(root) {
   const tab = UNIT_TABS.some((t) => t.id === state.param) ? state.param : 'overview';
   root.innerHTML = '';
   root.append(tabBar(UNIT_TABS, tab, (id) => href('unit', id === 'overview' ? null : id)));
-  const host = el('div'); root.append(host);
+  const host = el('div', 'stack'); root.append(host);
   if (tab === 'assets') return assetsTab(host);
   if (tab === 'drivers') return driversTab(host);
   return moneyTab(host);

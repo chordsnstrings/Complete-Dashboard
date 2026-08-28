@@ -1215,7 +1215,7 @@ export async function renderDriver(root, id, tab = 'overview') {
      complaint. #day has always answered this properly; these four did not. */
   if (!id) return noneChosen(root, 'driver', 'drivers', 'Every driver');
   const head = el('div'); root.append(head); loading(head);
-  const body = el('div'); root.append(body);
+  const body = el('div', 'stack'); root.append(body);
 
   let prof;
   try { prof = await qAll('/api/driver/profile', { id }); }

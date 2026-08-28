@@ -128,7 +128,7 @@ export async function renderReconcile(root, month) {
   if (month != null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     return empty(root, 'A reconciliation address is #reconcile/<YYYY-MM>.');
   }
-  const host = el('div'); root.append(host); loading(host);
+  const host = el('div', 'stack'); root.append(host); loading(host);
 
   /* The window selector does not apply here — the whole record is the point of
      a reconciliation — but the platform and fleet filters do, and the endpoint

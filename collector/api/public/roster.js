@@ -47,7 +47,7 @@ export async function renderRoster(root) {
   const tab = ROSTER_TABS.some((t) => t.id === state.param) ? state.param : 'all';
   root.innerHTML = '';
   root.append(tabBar(ROSTER_TABS, tab, (id) => href('roster', id === 'all' ? null : id)));
-  const host = el('div'); root.append(host);
+  const host = el('div', 'stack'); root.append(host);
   if (tab === 'states') return rosterStates(host);
 
   loading(host);

@@ -226,6 +226,22 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 #view{padding:22px clamp(18px,3vw,36px) 72px;display:flex;flex-direction:column;gap:22px;min-width:0}
 
+/* The same rhythm, one level down.
+   ─────────────────────────────────────────────────────────────────────────
+   #view spaces its own children and nothing else, so a page that renders its
+   body into a wrapper — every tabbed page and every detail page does, to keep
+   the tab bar outside the part that swaps — loses the gap entirely. What is
+   left is whatever margin each section carries on its own, and a .panel
+   carries none: measured on production, Unit economics stacked seven pairs of
+   sections at exactly 0px, and twenty routes across twelve pages did the same.
+
+   A wrapper that holds a page body says so. The value is not repeated —
+   both rules read the same custom property, so the rhythm cannot drift
+   between a page that stacks directly and one that stacks through a host. */
+:root{--stack-gap:22px}
+#view{gap:var(--stack-gap)}
+.stack{display:flex;flex-direction:column;gap:var(--stack-gap);min-width:0}
+
 /* ── entrance choreography: content settles, it doesn't slam in ────────── */
 @keyframes fadeUp{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}

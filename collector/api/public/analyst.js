@@ -62,7 +62,7 @@ export async function renderAnalyst(root) {
   const tab = ANALYST_TABS.some((t) => t.id === state.param) ? state.param : 'confirmed';
   root.innerHTML = '';
   root.append(tabBar(ANALYST_TABS, tab, (id) => href('analyst', id === 'confirmed' ? null : id)));
-  const host = el('div'); root.append(host);
+  const host = el('div', 'stack'); root.append(host);
   if (tab === 'rules') return analystRules(host);
 
   loading(host);

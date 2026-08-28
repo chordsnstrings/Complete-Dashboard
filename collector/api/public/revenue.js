@@ -37,7 +37,7 @@ const BASIS = {
 
 export async function renderRevenue(root) {
   root.innerHTML = '';
-  const host = el('div'); root.append(host); loading(host);
+  const host = el('div', 'stack'); root.append(host); loading(host);
   const d = await q('/api/revenue');
   host.innerHTML = '';
 
