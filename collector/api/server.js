@@ -3175,7 +3175,7 @@ const YEAR = 31536000;
    which change only when somebody deliberately vendors different ones. They are
    content rather than code: nothing about a deploy alters them, so they are
    immutable for a year instead of re-fetched every five minutes. */
-for (const dir of ['vendor', 'fonts']) {
+for (const dir of ['vendor', 'fonts', 'icons']) {
   app.use(`/${dir}`, express.static(join(__dir, 'public', dir), {
     maxAge: YEAR * 1000, immutable: true,
   }));
@@ -3183,6 +3183,19 @@ for (const dir of ['vendor', 'fonts']) {
 app.use(express.static(join(__dir, 'public'), {
   etag: true,
   setHeaders(res, path) {
+    /* The service worker is the one file that must never be served stale.
+       ─────────────────────────────────────────────────────────────────
+       It decides what every OTHER file is answered from, so a copy cached
+       for five minutes keeps a whole deploy out for five minutes, and a copy
+       cached by a proxy for longer strands an installed app on an old shell
+       with no way for the reader to tell. Browsers now revalidate sw.js on
+       every update check by default; saying so here means nothing between
+       here and the phone can decide otherwise. */
+    if (path.endsWith('sw.js')) {
+      res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+      res.setHeader('Service-Worker-Allowed', '/');
+      return;
+    }
     res.setHeader('Cache-Control', path.endsWith('index.html')
       ? 'public, max-age=0, must-revalidate'
       : 'public, max-age=300, stale-while-revalidate=604800');

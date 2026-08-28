@@ -207,7 +207,10 @@ a.m-stat:active{ transform:scale(.985) }
   border:1px solid var(--rule); border-radius:11px;
 }
 .m-seg button{
-  flex:1 1 0; min-width:0; appearance:none; border:0; background:none; cursor:pointer;
+  /* 40px, measured rather than assumed: at the padding this had, the buttons
+     came out 30px tall — a control a thumb misses is a control that is not
+     there, whatever it looks like. */
+  flex:1 1 0; min-width:0; min-height:40px; appearance:none; border:0; background:none; cursor:pointer;
   padding:8px 6px; border-radius:8px; font-size:.78rem; font-weight:600;
   color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   transition:background .18s var(--ease), color .18s var(--ease);

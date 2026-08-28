@@ -154,7 +154,12 @@ async function render() {
   deck.classList.add(depth < lastDepth ? 'pop' : 'push');
   lastDepth = depth;
 
-  const screen = SCREENS[id];
+  /* A detail page has a phone screen; its TABS do not. `#driver/x` is the
+     person, and `#driver/x/earnings` is one of the desktop's tabs about them —
+     which the fallback renders from the real module rather than this app
+     reimplementing seven of them badly. */
+  const screen = (sub && (id === 'driver' || id === 'vehicle'))
+    ? SCREENS.fallback : SCREENS[id];
   const t = titleFor(id, param, sub);
   titleEl.textContent = t.title;
   subEl.textContent = t.sub || '';
@@ -165,7 +170,17 @@ async function render() {
   deck.scrollTop = 0;
   deck.innerHTML = '';
   try {
-    await (screen || SCREENS.fallback)(deck, { view: id, param, sub, alive: () => g === gen });
+    /* A detail screen only learns whose page it is after it has fetched, so it
+       is given a way to name the header. The desktop does the same thing with
+       setHeader(detail); here it matters more, because the header IS the only
+       place the name can go. */
+    const setTitle = (title, sub2) => {
+      if (g !== gen) return;
+      if (title) { titleEl.textContent = title; document.title = `${title} · Fleet`; }
+      if (sub2 != null) subEl.textContent = sub2;
+    };
+    await (screen || SCREENS.fallback)(deck,
+      { view: id, param, sub, alive: () => g === gen, setTitle });
   } catch (e) {
     if (g !== gen) return;
     deck.innerHTML = '';

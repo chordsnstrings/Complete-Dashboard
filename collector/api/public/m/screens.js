@@ -10,8 +10,8 @@
    connection a reader taps twice, and the second screen must not be painted
    over by the first one's response arriving late.
 */
-import { state, q, api, href } from '../data.js';
-import { el, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
+import { state, q, qAll, api, href } from '../data.js';
+import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
   skeleton, empty, failed, spark, bars, unwrap, cut } from './ui.js';
 
 export const TABS = [
@@ -20,7 +20,8 @@ export const TABS = [
   { id: 'people', route: 'people', label: 'People', ic: '◧', owns: ['people', 'drivers', 'driver'] },
   { id: 'fleet', route: 'fleet', label: 'Fleet', ic: '▤', owns: ['fleet', 'vehicles', 'vehicle'] },
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
-    owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance', 'sources', 'settings'] },
+    owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance',
+      'sources', 'settings', 'corporate', 'analyst', 'property'] },
 ];
 
 const WINDOW_NOTE = () => `Last ${state.days} days`
@@ -41,6 +42,8 @@ export function titleFor(view, param) {
     vehicle: [param || 'Vehicle', 'Everything on this car'],
     /* Named, even where the screen is the fallback: a header reading
        "insights" is the router's word for the page, not the product's. */
+    corporate: ['Corporate', 'The hotel channel'],
+    analyst: ['Analyst', 'Claims the data was asked to settle'],
     insights: ['Action list', 'Built for a bigger screen'],
     compliance: ['Compliance', 'Built for a bigger screen'],
     demand: ['Demand', 'Built for a bigger screen'],
@@ -142,10 +145,10 @@ async function today(deck, ctx) {
 /* ── Money ──────────────────────────────────────────────────────────────── */
 async function moneyScreen(deck, ctx) {
   skeleton(deck, 4);
-  const [k, daily, mix, plats] = await Promise.all([
+  const [k, daily, settle, plats] = await Promise.all([
     q('/api/kpis').catch(() => null),
     q('/api/trips/daily').catch(() => []),
-    q('/api/mix', { by: 'payment' }).catch(() => []),
+    q('/api/settlement/mix').catch(() => null),
     q('/api/platforms').catch(() => []),
   ]);
   if (!ctx.alive()) return;
@@ -154,42 +157,72 @@ async function moneyScreen(deck, ctx) {
 
   const rev = (daily || []).map((d) => n(d.revenue) || 0);
   const total = n(k.revenue) || 0;
-  const priced = rev.filter(Boolean).length;
+  const priced = (daily || []).reduce((a, d) => a + (n(d.priced_trips) || 0), 0);
+
+  /* Cash in a driver's hand and a fare charged to a room are money the fleet
+     has EARNED and does not HOLD. That distinction is the reason this screen
+     exists on a phone, so it is the headline rather than a tile. */
+  const cls = settle?.classes || [];
+  const owed = cls.filter((c) => ['cash', 'on_account', 'salary'].includes(c.settlement_class))
+    .reduce((a, c) => a + (n(c.trips) || 0), 0);
+  const routed = cls.reduce((a, c) => a + (n(c.trips) || 0), 0);
 
   lede(deck, {
-    claim: `${money(total)} on record`,
-    sub: `Over ${fmt(k.trips)} bookings — ${total && k.trips
-      ? money(Math.round(total / k.trips)) : '—'} a booking. Only the channels that report a `
-      + 'fare are in this figure; the rest arrive as platform statements.',
+    claim: owed && routed
+      ? `${Math.round((owed / routed) * 100)}% of bookings are still to be collected`
+      : `${money(total)} on record`,
+    sub: owed && routed
+      ? `${fmt(owed)} of ${fmt(routed)} bookings settled into a driver's hand, onto a room, or `
+        + `against salary. ${money(total)} is what the priced bookings came to.`
+      : `Over ${fmt(k.trips)} bookings — ${total && priced ? money(Math.round(total / priced))
+        : '\u2014'} a priced booking. Only the channels that report a fare are in this figure.`,
+    tone: routed && owed / routed >= 0.3 ? 'warn' : null,
   });
 
-  const c = card('Fares a day', `${priced} of ${rev.length} days carry a fare`);
+  const c = card('Fares a day', priced
+    ? `${fmt(priced)} of ${fmt(k.trips)} bookings carry a fare` : 'no booking carries a fare');
   c.body.append(spark(rev, { h: 46, tone: 'var(--s3)' }));
   deck.append(c.card);
 
   stats(deck, [
-    { label: 'Total fares', value: money(total) },
-    { label: 'Per booking', value: total && k.trips ? money(Math.round(total / k.trips)) : '—' },
-    { label: 'Per km', value: total && n(k.km) ? money(Math.round(total / n(k.km))) : '—' },
+    { label: 'Fares on record', value: money(total) },
+    { label: 'Per priced booking',
+      value: total && priced ? money(Math.round(total / priced)) : '\u2014',
+      sub: priced ? `${fmt(priced)} priced` : 'none priced' },
+    { label: 'Per km', value: total && n(k.km) ? money(Math.round(total / n(k.km))) : '\u2014' },
     { label: 'Bookings', value: fmt(k.trips), sub: `${fmt(k.drivers)} drivers` },
   ]);
 
-  if (mix?.length) {
-    /* /api/mix?by=payment groups on payment_type — the card said "what was
-       booked" over a list reading cash, apple_pay, braintree. */
-    const m = card('How fares were settled', 'Payment type, by booking count');
-    bars(m.body, mix.map((r) => ({ label: r.label, n: n(r.n) })));
+  if (cls.length) {
+    const m = card('How fares settle', 'Every booking that records a settlement route');
+    bars(m.body, cls.map((r) => ({ label: r.label || r.settlement_class, n: n(r.trips) })), { max: 6 });
+    if (settle.unlabelled_trips) {
+      const note = el('p', 'm-cap');
+      note.style.cssText = 'margin:9px 0 0';
+      note.textContent = `${fmt(settle.unlabelled_trips)} more record no route at all`
+        + `${settle.unlabelled_platforms?.length ? ` (${settle.unlabelled_platforms.join(', ')})` : ''}`
+        + ' — this card can say nothing about those.';
+      m.body.append(note);
+    }
     deck.append(m.card);
   }
 
-  if (plats?.length) {
+  const pl = unwrap(plats).rows;
+  if (pl.length) {
     deck.append(el('p', 'm-sec', 'By channel'));
-    const byPlat = {};
-    plats.forEach((p) => { byPlat[p.platform] = (byPlat[p.platform] || 0) + (n(p.trips) || 0); });
-    rows(deck, Object.entries(byPlat).sort((a, b) => b[1] - a[1]).map(([p, t]) => row({
-      title: p === 'fms' ? 'FMS telematics' : p[0].toUpperCase() + p.slice(1),
-      sub: `${Math.round((t / k.trips) * 100)}% of bookings`,
-      value: fmt(t), note: 'bookings',
+    const byPlat = new Map();
+    pl.forEach((p2) => {
+      const cur = byPlat.get(p2.platform) || { trips: 0, fares: 0 };
+      cur.trips += n(p2.window_bookings ?? p2.bookings ?? p2.trips) || 0;
+      cur.fares += n(p2.fares) || 0;
+      byPlat.set(p2.platform, cur);
+    });
+    const totalTrips = [...byPlat.values()].reduce((a, v) => a + v.trips, 0) || 1;
+    rows(deck, [...byPlat.entries()].sort((a, b) => b[1].trips - a[1].trips).map(([name, v]) => row({
+      title: name === 'fms' ? 'FMS telematics' : name[0].toUpperCase() + name.slice(1),
+      sub: `${Math.round((v.trips / totalTrips) * 100)}% of bookings`,
+      value: v.fares ? money(v.fares) : fmt(v.trips),
+      note: v.fares ? 'fares' : 'bookings',
     })));
   }
 }
@@ -430,6 +463,11 @@ async function sources(deck, ctx) {
 
 /* ── More ───────────────────────────────────────────────────────────────── */
 async function more(deck) {
+  deck.append(el('p', 'm-sec', 'Analyse'));
+  rows(deck, [
+    row({ title: 'Corporate', sub: 'the hotel channel', value: '›', to: href('corporate') }),
+    row({ title: 'Analyst', sub: 'claims the data was asked to settle', value: '›', to: href('analyst') }),
+  ]);
   deck.append(el('p', 'm-sec', 'Operate'));
   rows(deck, [
     row({ title: 'Live fleet', sub: 'positions now', value: '›', to: href('live') }),
@@ -458,12 +496,245 @@ async function more(deck) {
   deck.append(c.card);
 }
 
+/* ── driver ─────────────────────────────────────────────────────────────
+   One person, everything about them, in the order a phone is read in: who
+   they are, how they are doing against the fleet, then the detail. The
+   standing block is the part a desktop table buries — a percentile answers
+   "is 268 trips good?", which the number alone never does. */
+async function driver(deck, ctx) {
+  const id = ctx.param;
+  skeleton(deck, 4);
+  const [profile, kpis, daily, standing, alerts] = await Promise.all([
+    qAll('/api/driver/profile', { id }).catch(() => null),
+    qAll('/api/driver/kpis', { id }).catch(() => null),
+    qAll('/api/driver/daily', { id }).catch(() => []),
+    qAll('/api/driver/standing', { id }).catch(() => null),
+    qAll('/api/alerts/by-driver', { id }).catch(() => null),
+  ]);
+  if (!ctx.alive()) return;
+  deck.innerHTML = '';
+  if (!profile) { failed(deck, new Error('Nothing in the record matches this id.')); return; }
+
+  const k = kpis || {};
+  ctx.setTitle(profile.name || id, `${fmt(k.trips)} bookings in this window`);
+  lede(deck, {
+    claim: profile.name || id,
+    sub: `${(profile.platforms || []).join(', ') || 'no channel'}`
+      + `${profile.span?.days_worked ? ` \u00b7 ${profile.span.days_worked} days worked` : ''}`
+      + `${(profile.ids || []).length > 1 ? ` \u00b7 ${profile.ids.length} platform accounts` : ''}`,
+  });
+
+  stats(deck, [
+    { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${k.days_worked} days worked` : null },
+    { label: 'Fares', value: money(n(k.revenue)), sub: k.avg_fare ? `${money(n(k.avg_fare))} a booking` : null },
+    { label: 'Completed', value: k.completion_pct != null ? `${n(k.completion_pct)}%` : '\u2014',
+      sub: k.not_completed != null ? `${fmt(k.not_completed)} did not` : null,
+      tone: n(k.completion_pct) >= 90 ? 'good' : n(k.completion_pct) >= 80 ? null : 'warn' },
+    { label: 'Distance', value: `${fmt(k.km)} km`, sub: k.avg_km ? `${n(k.avg_km)} km a booking` : null },
+  ]);
+
+  const series = (daily || []).map((d) => n(d.trips) || 0);
+  if (series.length > 1) {
+    const c = card('Bookings a day', `${series.length} days in this window`);
+    c.body.append(spark(series, { h: 44 }));
+    deck.append(c.card);
+  }
+
+  /* Against the fleet, not against nothing. */
+  if (standing?.metrics?.length) {
+    deck.append(el('p', 'm-sec', `Against the other ${fmt(standing.n_peers)} who drove`));
+    rows(deck, standing.metrics.slice(0, 6).map((m) => row({
+      title: m.label,
+      sub: m.median != null ? `fleet median ${fmt(m.median)}` : null,
+      value: fmt(m.value),
+      /* "top 76%" is not a compliment and not an insult; it is a number
+         facing the wrong way. Below the median it is said as a bottom. */
+      note: m.percentile == null ? null
+        : m.percentile >= 50 ? `top ${100 - m.percentile}%` : `bottom ${m.percentile}%`,
+      tone: m.percentile >= 75 ? 'good' : m.percentile <= 25 ? 'warn' : null,
+    })));
+  }
+
+  const alertRows = unwrap(alerts).rows;
+  if (alertRows.length) {
+    deck.append(el('p', 'm-sec', 'Harsh-driving events'));
+    rows(deck, alertRows.slice(0, 6).map((r) => row({
+      title: r.alert_type || r.plate || 'event',
+      sub: r.plate && r.alert_type ? r.plate : null,
+      value: fmt(n(r.n ?? r.alerts)), note: 'events',
+    })));
+  }
+
+  deck.append(el('p', 'm-sec', 'More'));
+  rows(deck, [
+    row({ title: 'Their bookings', sub: 'every trip, on the desktop', value: '\u203a',
+      to: `#driver/${encodeURIComponent(id)}/trips` }),
+    row({ title: 'Their vehicles', sub: 'custody, on the desktop', value: '\u203a',
+      to: `#driver/${encodeURIComponent(id)}/activity` }),
+  ]);
+}
+
+/* ── vehicle ────────────────────────────────────────────────────────────── */
+async function vehicle(deck, ctx) {
+  const plate = ctx.param;
+  skeleton(deck, 4);
+  const [profile, kpis, daily, drivers, safe] = await Promise.all([
+    qAll('/api/vehicle/profile', { plate }).catch(() => null),
+    qAll('/api/vehicle/kpis', { plate }).catch(() => null),
+    qAll('/api/vehicle/daily', { plate }).catch(() => []),
+    qAll('/api/vehicle/drivers', { plate }).catch(() => []),
+    qAll('/api/vehicle/safety', { plate }).catch(() => null),
+  ]);
+  if (!ctx.alive()) return;
+  deck.innerHTML = '';
+  if (!profile) { failed(deck, new Error('No vehicle in the record carries this plate.')); return; }
+
+  const k = kpis || {}, spec = profile.spec || {};
+  ctx.setTitle(plate, [spec.make, spec.model].filter(Boolean).join(' ') || 'vehicle');
+  lede(deck, {
+    claim: plate,
+    sub: [spec.year, spec.make, spec.model].filter(Boolean).join(' ')
+      + (spec.colour ? ` \u00b7 ${spec.colour}` : '')
+      + (spec.compliance_status ? ` \u00b7 ${spec.compliance_status.toLowerCase()}` : ''),
+    tone: spec.compliance_status && spec.compliance_status !== 'ACTIVE' ? 'warn' : null,
+  });
+
+  stats(deck, [
+    { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${k.days_worked} days worked` : null },
+    { label: 'Fares', value: money(n(k.revenue)), sub: k.avg_fare ? `${money(n(k.avg_fare))} a booking` : null },
+    { label: 'Distance', value: `${fmt(k.km)} km`, sub: k.avg_km ? `${n(k.avg_km)} km a booking` : null },
+    { label: 'Drivers', value: fmt(k.attributed_drivers ?? unwrap(drivers).total),
+      sub: 'held this car' },
+  ]);
+
+  const series = (daily || []).map((d) => n(d.trips) || 0);
+  if (series.length > 1) {
+    const c = card('Bookings a day', `${series.length} days in this window`);
+    c.body.append(spark(series, { h: 44 }));
+    deck.append(c.card);
+  }
+
+  if (safe?.by_type?.length) {
+    const c = card('Harsh-driving events', 'A count says more about how far this car drove than how it was driven.');
+    bars(c.body, safe.by_type.map((r) => ({ label: r.alert_type, n: n(r.n) })), { max: 6 });
+    deck.append(c.card);
+  }
+
+  const dr = unwrap(drivers).rows;
+  if (dr.length) {
+    deck.append(el('p', 'm-sec', 'Who drove it'));
+    rows(deck, dr.slice(0, 10).map((r) => row({
+      title: r.driver_name || r.driver_ext_id || '\u2014',
+      sub: r.days ? `${fmt(r.days)} days` : null,
+      value: fmt(n(r.trips)), note: 'bookings',
+      to: r.driver_ext_id ? href('driver', r.driver_ext_id) : null,
+    })));
+  }
+
+  deck.append(el('p', 'm-sec', 'More'));
+  rows(deck, [
+    row({ title: 'Where it went', sub: 'movement and replay, on the desktop', value: '\u203a',
+      to: `#vehicle/${encodeURIComponent(plate)}/movement` }),
+    row({ title: 'Its documents', sub: 'compliance, on the desktop', value: '\u203a',
+      to: `#vehicle/${encodeURIComponent(plate)}/compliance` }),
+  ]);
+}
+
+/* ── corporate ──────────────────────────────────────────────────────────── */
+async function corporate(deck, ctx) {
+  skeleton(deck, 4);
+  const [sum, props] = await Promise.all([
+    q('/api/corporate/summary').catch(() => null),
+    q('/api/corporate/properties').catch(() => []),
+  ]);
+  if (!ctx.alive()) return;
+  deck.innerHTML = '';
+  if (!sum || !sum.bookings) {
+    empty(deck, 'No hotel booking in this window', 'Widen the window from the \u22ee menu.');
+    return;
+  }
+  const margin = sum.has_cost && sum.revenue ? Math.round(((sum.revenue - sum.cost) / sum.revenue) * 100) : null;
+  lede(deck, {
+    claim: `${money(n(sum.revenue))} from ${fmt(sum.bookings)} hotel bookings`,
+    sub: margin != null
+      ? `${money(n(sum.cost))} of that is what the driver was paid, leaving ${margin}%.`
+      : 'The channel reports a fare but no cost, so no margin can be taken from it.',
+  });
+  stats(deck, [
+    { label: 'Average fare', value: money(n(sum.avg_fare)) },
+    { label: 'Per km', value: sum.revenue_per_km ? money(n(sum.revenue_per_km)) : '\u2014' },
+    { label: 'Unpaid approach', value: sum.deadhead_km != null ? `${fmt(sum.deadhead_km)} km` : '\u2014',
+      sub: sum.deadhead_ratio_pct != null ? `${n(sum.deadhead_ratio_pct)}% of the driving` : null,
+      tone: n(sum.deadhead_ratio_pct) > 20 ? 'warn' : null },
+    { label: 'Free of charge', value: fmt(sum.foc_trips ?? sum.foc ?? 0), sub: 'billed to nobody' },
+  ]);
+  const rowsIn = unwrap(props);
+  if (rowsIn.rows.length) {
+    deck.append(el('p', 'm-sec', 'By property'));
+    rows(deck, rowsIn.rows.map((r) => row({
+      title: r.name || r.partner_id,
+      sub: `${fmt(r.bookings)} bookings \u00b7 ${money(n(r.avg_fare))} average`,
+      value: money(n(r.revenue)), note: 'fares',
+      to: r.partner_id ? href('property', r.partner_id) : null,
+    })));
+    cut(deck, rowsIn, 'properties');
+  }
+}
+
+/* ── analyst ────────────────────────────────────────────────────────────── */
+async function analyst(deck, ctx) {
+  skeleton(deck, 3);
+  const d = await q('/api/analyst/findings').catch(() => null);
+  if (!ctx.alive()) return;
+  deck.innerHTML = '';
+  if (!d) { failed(deck, new Error('The analyst could not be reached.')); return; }
+  if (!d.runs) {
+    empty(deck, 'The analyst has not run yet', 'Nothing has been proposed or tested on this fleet.');
+    return;
+  }
+  lede(deck, {
+    claim: `${fmt(d.confirmed)} of ${fmt(d.confirmed + d.refuted + d.immaterial + d.unsupported)} claims held up`,
+    sub: `Across ${fmt(d.runs)} passes. A claim the data refuses is as much of an answer as one it `
+      + 'supports, so the refuted and the immaterial are kept rather than discarded.',
+    tone: d.confirmed ? null : 'warn',
+  });
+  stats(deck, [
+    { label: 'Confirmed', value: fmt(d.confirmed), tone: 'good' },
+    { label: 'Refuted', value: fmt(d.refuted) },
+    { label: 'Immaterial', value: fmt(d.immaterial) },
+    { label: 'Unsupported', value: fmt(d.unsupported), tone: d.unsupported ? 'warn' : null },
+  ]);
+  const found = d.findings || [];
+  if (found.length) {
+    deck.append(el('p', 'm-sec', 'What it found'));
+    found.slice(0, 12).forEach((f) => {
+      const c = card(null, null);
+      c.card.classList.add('m-finding');
+      const b = el('b', null, esc(f.claim || ''));
+      b.style.cssText = 'display:block;font-size:.92rem;line-height:1.35;margin-bottom:5px';
+      const tag = el('span', 'm-chip');
+      tag.textContent = f.verdict || '';
+      tag.style.cssText = 'font-size:.66rem;padding:3px 9px;'
+        + `color:var(--${f.verdict === 'confirmed' ? 'good' : f.verdict === 'refuted' ? 'critical' : 'ink-3'})`;
+      c.body.append(b, tag);
+      deck.append(c.card);
+    });
+  }
+  if (d.last_run) {
+    const p = el('p', 'm-cap');
+    p.style.cssText = 'margin:4px 2px 0;text-align:center';
+    p.textContent = `Last pass ${new Date(d.last_run).toLocaleString()}`
+      + (d.model ? ` \u00b7 ${d.model}` : '');
+    deck.append(p);
+  }
+}
+
 /* ── the fallback ───────────────────────────────────────────────────────
    A route this app has no screen for still has to resolve: an address someone
-   sent to a phone must not dead-end. Driver and vehicle detail render the real
-   desktop module, which exports its renderer and is styled by app.css; the
-   rest are pages built around a wide table, and the honest answer for those is
-   the desktop build, one tap away and returning to this exact address. */
+   sent to a phone must not dead-end. A driver or vehicle SUB-page renders the
+   real desktop module, which exports its renderer and is styled by app.css;
+   the rest are pages built around a wide table, and the honest answer for
+   those is the desktop build, one tap away and returning to this address. */
 async function fallback(deck, ctx) {
   const { view, param, sub } = ctx;
   const box = el('div', 'm-fallback');
@@ -497,8 +768,15 @@ async function fallback(deck, ctx) {
 }
 
 export const SCREENS = {
-  today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more, fallback,
+  today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more,
+  corporate, analyst, fallback,
+  /* A driver or vehicle with no sub-page gets the phone screen; a sub-page
+     (`#driver/x/earnings`) is a desktop tab and goes to the fallback, which
+     renders the real module. Decided in render() rather than here, because a
+     route table cannot see whether `sub` is set. */
+  driver, vehicle,
   /* The desktop's own addresses, so a link that predates this app still lands
      somewhere sensible rather than on the fallback. */
   overview: today, drivers: people, vehicles: fleet, finance: moneyScreen,
+  unit: moneyScreen, settlement: moneyScreen, revenue: moneyScreen,
 };
