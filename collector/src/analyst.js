@@ -621,17 +621,24 @@ export async function runAnalyst({ from, to, fleet = null } = {}) {
      in the third state reporting the first. */
   await pool.query(
     `INSERT INTO analyst_run (run_id, window_start, window_end, fleet_id, outcome,
-       proposed, dropped, confirmed, model, error, duration_ms, started_at, finished_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now())
+       proposed, dropped, confirmed, model, error, duration_ms, started_at, finished_at,
+       dropped_reasons)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, now(), $13)
      ON CONFLICT (run_id) DO UPDATE SET outcome = EXCLUDED.outcome,
        proposed = EXCLUDED.proposed, dropped = EXCLUDED.dropped,
        confirmed = EXCLUDED.confirmed, model = EXCLUDED.model, error = EXCLUDED.error,
-       duration_ms = EXCLUDED.duration_ms, finished_at = now()`,
+       duration_ms = EXCLUDED.duration_ms, finished_at = now(),
+       dropped_reasons = EXCLUDED.dropped_reasons`,
     [runId, from, to, fleet,
       outcome || (proposals.length ? 'ok' : 'empty'),
       proposals.length, rejected.length, kept, model,
       error ? String(error).slice(0, 400) : null,
-      Date.now() - startedAt.getTime(), startedAt])
+      Date.now() - startedAt.getTime(), startedAt,
+      /* Distinct, because twelve proposals refused for one reason is one
+         problem and reads as twelve. */
+      rejected.length
+        ? [...new Set(rejected.map((r) => String(r.reason || 'unknown')))].join('; ').slice(0, 600)
+        : null])
     .catch((e) => log.warn(SRC, 'could not record the run', { err: String(e).slice(0, 120) }));
   log.info(SRC, 'run complete', { run: runId, proposed: proposals.length, confirmed: kept });
   return { run_id: runId, brief, proposed: proposals.length, dropped: rejected,

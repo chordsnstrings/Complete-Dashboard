@@ -2038,6 +2038,38 @@ app.post('/api/import/statement-days', requireAdmin, wrap(async (req, res) => {
   res.json({ ok: true, written, rejected: bad.length, rejected_indexes: bad.slice(0, 10) });
 }));
 
+/* Running the analyst needs no credential.
+   ─────────────────────────────────────────────────────────────────────────
+   /api/settings/trigger is admin-gated because most of what it queues touches
+   collection: a backfill re-pulls a provider with stored credentials, and the
+   same handler's siblings rewrite those credentials. The analyst does none of
+   that. It reads aggregates this API already serves, asks a model for
+   hypotheses, measures them against the same database, and writes rows to
+   analyst_finding — nothing it can reach is a secret and nothing it does is
+   destructive.
+
+   Gating it made "look at the fleet again" the one thing on this product that
+   required a token nobody holds, which on a fleet whose last twelve analyst
+   passes all failed is the difference between finding that out and not. The
+   duplicate guard below is the real protection worth having: a second pass
+   while one is queued or running does the same work twice and is refused. */
+app.post('/api/analyst/run', wrap(async (req, res) => {
+  const fleet = FLEETS.includes(req.body?.fleet) ? req.body.fleet : null;
+  const [existing] = await q(
+    `SELECT id, status, requested_at FROM collector_job
+      WHERE mode = 'analyst' AND fleet IS NOT DISTINCT FROM $1
+        AND status IN ('queued', 'running') ORDER BY requested_at LIMIT 1`, [fleet]);
+  if (existing) {
+    return res.status(409).json({ ok: false, mode: 'analyst', fleet,
+      already: existing.status, job_id: existing.id, requested_at: existing.requested_at,
+      detail: 'an analyst pass is already queued or running; a second one would do the same work twice' });
+  }
+  const [job] = await q(
+    `INSERT INTO collector_job (mode, fleet, requested_by) VALUES ('analyst', $1, 'analyst-run')
+     RETURNING id, mode, fleet, status, requested_at`, [fleet]);
+  res.json({ ok: true, queued: 'analyst', fleet, job_id: job.id, job });
+}));
+
 app.post('/api/settings/trigger', requireAdmin, wrap(async (req, res) => {
   const mode = JOB_MODES.includes(req.body?.mode) ? req.body.mode : 'incremental';
   /* One fleet, or both. Ecosine and Egari are separate businesses with

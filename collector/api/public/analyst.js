@@ -30,6 +30,34 @@ export const ANALYST_TABS = [
 
 const TONE = { confirmed: 'ok', refuted: 'err', immaterial: 'warn', unsupported: '' };
 
+/* Ask for a pass now.
+   ─────────────────────────────────────────────────────────────────────────
+   The analyst runs on the collector's nightly schedule, which is the right
+   default and the wrong loop to debug in: a fix to the prompt could only be
+   checked the next morning, and on this fleet every pass for weeks had failed
+   without anybody being able to try again. The endpoint queues one job and
+   refuses a second while one is in flight, so the button cannot be leaned on.
+   No credential: see the note on POST /api/analyst/run. */
+function runButton() {
+  const wrap = el('div', 'toolbar');
+  const b = el('button', 'btn', 'Run a pass now');
+  const said = el('span', 'cap');
+  b.onclick = async () => {
+    b.disabled = true; said.textContent = 'queueing…';
+    try {
+      const j = await api('/api/analyst/run', { method: 'POST', body: '{}' });
+      said.textContent = j?.ok
+        ? `queued as job ${j.job_id} — a pass takes about a minute; reload to see it`
+        : (j?.detail || 'could not queue a pass');
+      /* Left disabled where a retry is the wrong move: a 409 means a pass is
+         already in flight, and pressing again queues nothing twice. */
+      if (!j?.ok && !j?.already) b.disabled = false;
+    } catch (e) { said.textContent = 'could not reach the API'; b.disabled = false; }
+  };
+  wrap.append(b, said);
+  return wrap;
+}
+
 export async function renderAnalyst(root) {
   const tab = ANALYST_TABS.some((t) => t.id === state.param) ? state.param : 'confirmed';
   root.innerHTML = '';
@@ -39,6 +67,12 @@ export async function renderAnalyst(root) {
 
   loading(host);
   const d = await q('/api/analyst/findings', { verdict: tab });
+
+  /* Running a pass is a button, not a credential. The analyst reads what this
+     API already serves and writes only its own findings, so it is not gated —
+     see the note on POST /api/analyst/run. The page needs it because the
+     alternative is waiting for a nightly cron to find out whether a fix
+     worked. */
   host.innerHTML = '';
   host.append(kpiRow([
     { label: 'Survived the check', value: fmt(d.confirmed), tone: 'good' },
@@ -101,8 +135,10 @@ export async function renderAnalyst(root) {
     if (d.last_pass) {
       host.append(el('p', 'cap', `Last pass ${dtStr(d.last_pass.finished_at)}`
         + `${d.last_pass.model ? ` · ${d.last_pass.model}` : ''}`
-        + ` · ${d.last_pass.proposed} proposed, ${d.last_pass.confirmed} confirmed`));
+        + ` · ${d.last_pass.proposed} proposed, ${d.last_pass.confirmed} confirmed`
+        + `${d.last_pass.dropped ? `, ${d.last_pass.dropped} dropped` : ''}`));
     }
+    host.append(runButton());
     return;
   }
 

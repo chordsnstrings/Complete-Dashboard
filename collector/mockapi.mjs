@@ -2172,6 +2172,8 @@ app.get('/api/analyst/findings', (req, r) => {
     empty_reason: null,
     platform_applies: false });
 });
+app.post('/api/analyst/run', (_, r) => r.json({ ok: true, queued: 'analyst', fleet: null, job_id: '42' }));
+
 app.get('/api/analyst/brief', (_, r) => r.json({
   window: [dayISO(30), dayISO(0)], fleet: 'both',
   headline: { bookings: 2043, telematics: 1500, completed: 1820, bookable: 2043,

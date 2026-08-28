@@ -1487,7 +1487,14 @@ export function analystRoutes(app, { q, wrap, range }) {
             : lastRun.outcome === 'no_model'
               ? 'no model is configured for the collector, so the analyst can measure but not propose'
               : lastRun.outcome === 'empty'
-                ? 'the last pass ran and the model proposed nothing worth checking'
+                /* "The model had nothing to say" and "we could not read what
+                   it said" are different facts about different problems, and
+                   the page reported the first while production was in the
+                   second — twelve good proposals thrown away by the parser. */
+                ? (lastRun.dropped_reasons
+                  ? `the last pass proposed ${lastRun.dropped} and none survived the checks before `
+                    + `measurement: ${lastRun.dropped_reasons}`
+                  : 'the last pass ran and the model proposed nothing worth checking')
                 : 'the last pass ran and nothing it proposed survived measurement',
       platform_applies: false,
     });
