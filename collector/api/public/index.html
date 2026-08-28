@@ -3,7 +3,63 @@
 <head>
 <meta charset="utf-8">
 <title>Fleet Dashboard</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+
+<!-- Installable, and dark before the first paint: a home-screen app that
+     flashes linen and then goes dark reads as a web page in a costume. -->
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#14171a" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f2ed" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fleet">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+<link rel="icon" href="/icons/icon-192.png" type="image/png">
+
+<!-- Which of the two applications this is.
+     ─────────────────────────────────────────────────────────────────────
+     The phone build is not the desktop one reflowed: it is a different set
+     of screens with a different shape, and loading both would mean shipping
+     each reader the one they cannot use. The choice is made HERE, before any
+     stylesheet or module is requested, so nothing is downloaded twice and
+     there is no flash of the wrong app.
+
+     Coarse pointer AND a narrow viewport, so a touchscreen laptop and a
+     narrow desktop window both stay on the desktop build — the phone build
+     assumes a thumb, and a mouse user in a small window wants the real thing.
+     ?ui=phone / ?ui=desktop overrides it and is remembered, which is also how
+     the phone build is opened on a desktop to work on it. -->
+<script>
+(function () {
+  var q = new URLSearchParams(location.search).get('ui');
+  try {
+    if (q === 'phone' || q === 'desktop') localStorage.setItem('ui', q);
+    else if (q === 'auto') localStorage.removeItem('ui');
+  } catch (e) { /* private mode: the choice just does not stick */ }
+  var saved = null;
+  try { saved = localStorage.getItem('ui'); } catch (e) { /* as above */ }
+  var pick = q || saved;
+  var phone = pick ? pick === 'phone'
+    : matchMedia('(max-width: 760px)').matches && matchMedia('(pointer: coarse)').matches;
+  var r = document.documentElement;
+  r.dataset.ui = phone ? 'phone' : 'desktop';
+  if (phone) {
+    /* The theme, before the stylesheet — same key the desktop button writes,
+       so a reader who set light on their laptop gets light here too. */
+    try {
+      var t = localStorage.getItem('theme');
+      if (t) r.setAttribute('data-theme', t);
+    } catch (e) { /* default to the OS preference */ }
+    var css = document.createElement('link');
+    css.rel = 'stylesheet'; css.href = '/m/m.css';
+    document.head.appendChild(css);
+  }
+  var js = document.createElement('script');
+  js.type = 'module'; js.src = phone ? '/m/app.js' : '/app.js';
+  document.head.appendChild(js);
+}());
+</script>
 <!-- Fonts served from this origin. From fonts.googleapis.com a cold visit paid
      two DNS lookups and two TLS handshakes to a third party before the stylesheet
      naming the files could be read, then two more before the files arrived — the
@@ -74,6 +130,8 @@
   </main>
 </div>
 <div id="tt"></div>
-<script src="/app.js" type="module"></script>
+<!-- The phone build mounts here. Empty and unstyled on desktop, where m.css is
+     never loaded, so it cannot affect the layout above it. -->
+<div id="m"></div>
 </body>
 </html>

@@ -1,0 +1,300 @@
+/* ============================================================================
+   Fleet Dashboard — the phone application
+   ----------------------------------------------------------------------------
+   Loaded ONLY when index.html decides this is a phone, on top of app.css. That
+   order is deliberate and is the whole reason this file is short: app.css
+   already carries the design tokens, the type scale, and every rule that makes
+   a .panel, a table or a .note look like this product. Redeclaring them here
+   would be two systems drifting apart within a week — and the fallback screen
+   renders real desktop modules, which need those rules to be present anyway.
+
+   So this file does three things and nothing else: it hides the desktop shell,
+   it builds the phone shell (a fixed header, a scrolling deck, a tab bar), and
+   it defines the handful of components a thumb needs that a mouse does not.
+
+   Everything here assumes: one column, a thumb, a notch, and a reader standing
+   in a car park rather than sitting at a desk.
+   ========================================================================== */
+
+html[data-ui="phone"] #app { display: none; }
+
+:root{
+  --m-head: 54px;                      /* fixed header, excluding the notch */
+  --m-tabs: 56px;                      /* fixed tab bar, excluding the chin */
+  --m-gap: 12px;
+  --m-pad: 14px;
+  --m-r: 14px;
+  /* The safe areas, named once. iOS reports 0 for these outside standalone
+     mode, so the same rules work in Safari and on the home screen. */
+  --m-top: env(safe-area-inset-top, 0px);
+  --m-bot: env(safe-area-inset-bottom, 0px);
+}
+
+html[data-ui="phone"], html[data-ui="phone"] body{
+  height:100%; overflow:hidden;        /* the DECK scrolls, not the document */
+  overscroll-behavior:none;            /* no rubber band under a fixed bar */
+}
+html[data-ui="phone"] body{
+  font-size:15px;
+  -webkit-tap-highlight-color:transparent;
+  background:var(--paper);
+}
+#m{ display:flex; flex-direction:column; height:100dvh; }
+
+/* ── header ─────────────────────────────────────────────────────────────
+   Sticky, because on a phone the only reliable way back is a control that is
+   always where you left it. It carries the notch as padding rather than
+   sitting under it. */
+.m-head{
+  position:relative; z-index:20; flex:0 0 auto;
+  padding:calc(var(--m-top) + 7px) var(--m-pad) 7px;
+  display:flex; align-items:center; gap:10px; min-height:var(--m-head);
+  background:color-mix(in srgb, var(--paper) 86%, transparent);
+  backdrop-filter:saturate(1.6) blur(14px);
+  -webkit-backdrop-filter:saturate(1.6) blur(14px);
+  border-bottom:1px solid var(--rule);
+}
+.m-head h1{
+  margin:0; font-size:1.14rem; line-height:1.2; font-weight:600;
+  letter-spacing:-.01em; flex:1 1 auto; min-width:0;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.m-head .m-sub{
+  display:block; font-family:"IBM Plex Mono",monospace; font-size:.62rem;
+  letter-spacing:.13em; text-transform:uppercase; color:var(--ink-3);
+  font-weight:500; margin-top:1px;
+}
+/* Every header control is a 40px circle: the smallest target a thumb finds
+   without looking, and small enough that three fit beside a title. */
+.m-ico{
+  flex:0 0 auto; width:40px; height:40px; border-radius:50%;
+  display:grid; place-items:center; font-size:1.02rem;
+  background:var(--surface-2); color:var(--ink-2);
+  border:1px solid var(--rule); cursor:pointer; padding:0;
+  transition:transform .18s var(--ease), background .18s var(--ease);
+}
+.m-ico:active{ transform:scale(.92); background:var(--surface-3); }
+.m-ico.on{ color:var(--accent); border-color:var(--accent-line); }
+
+/* ── the scrolling deck ─────────────────────────────────────────────────── */
+.m-deck{
+  flex:1 1 auto; overflow-y:auto; overflow-x:hidden;
+  -webkit-overflow-scrolling:touch; overscroll-behavior-y:contain;
+  padding:var(--m-gap) var(--m-pad) calc(var(--m-tabs) + var(--m-bot) + 26px);
+  display:flex; flex-direction:column; gap:var(--m-gap);
+  scroll-behavior:smooth;
+}
+/* A flex column shrinks its children to fit before it agrees to scroll, so a
+   list of twenty rows arrived as one row with the rest cut off inside a box
+   the right shape. Nothing in this deck is allowed to be compressed: the deck
+   grows and the deck scrolls. */
+.m-deck>*{ flex:0 0 auto }
+/* A screen that pushes in from the right, so a drill-down feels like going
+   deeper rather than like the page being replaced. */
+@keyframes m-push{ from{ opacity:0; transform:translateX(14px) } to{ opacity:1; transform:none } }
+@keyframes m-pop{ from{ opacity:0; transform:translateX(-10px) } to{ opacity:1; transform:none } }
+.m-deck.push>*{ animation:m-push .26s var(--ease-out) backwards }
+.m-deck.pop>*{ animation:m-pop .26s var(--ease-out) backwards }
+.m-deck>*:nth-child(2){ animation-delay:.03s } .m-deck>*:nth-child(3){ animation-delay:.06s }
+.m-deck>*:nth-child(4){ animation-delay:.09s } .m-deck>*:nth-child(n+5){ animation-delay:.12s }
+@media (prefers-reduced-motion:reduce){ .m-deck>*{ animation:none } }
+
+/* ── tab bar ────────────────────────────────────────────────────────────── */
+.m-tabs{
+  position:relative; z-index:20; flex:0 0 auto;
+  display:grid; grid-template-columns:repeat(5,1fr);
+  padding-bottom:var(--m-bot);
+  background:color-mix(in srgb, var(--paper) 88%, transparent);
+  backdrop-filter:saturate(1.6) blur(14px);
+  -webkit-backdrop-filter:saturate(1.6) blur(14px);
+  border-top:1px solid var(--rule);
+}
+.m-tab{
+  appearance:none; border:0; background:none; cursor:pointer;
+  min-height:var(--m-tabs); padding:7px 2px 6px;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:3px;
+  color:var(--ink-3); font-size:.63rem; font-weight:600; letter-spacing:.02em;
+  transition:color .18s var(--ease);
+}
+.m-tab i{ font-style:normal; font-size:1.16rem; line-height:1; transition:transform .22s var(--ease-out) }
+.m-tab.on{ color:var(--accent) }
+.m-tab.on i{ transform:translateY(-1px) scale(1.06) }
+.m-tab:active i{ transform:scale(.9) }
+
+/* ── cards ──────────────────────────────────────────────────────────────
+   The phone's unit of content. Not .panel: a panel is a desktop object with a
+   heading, a caption and 20px of side padding, and four of them stacked on a
+   390px screen is a column of frames with almost no content inside each. */
+.m-card{
+  background:var(--surface); border:1px solid var(--rule);
+  border-radius:var(--m-r); padding:13px 14px;
+  box-shadow:var(--shadow-1); min-width:0;
+}
+.m-card>h2{
+  margin:0 0 2px; font-size:.95rem; font-weight:600; letter-spacing:-.005em;
+}
+.m-card>.m-cap{ margin:0 0 10px; font-size:.76rem; color:var(--ink-3); line-height:1.45 }
+.m-card.tap{ cursor:pointer; transition:transform .18s var(--ease) }
+.m-card.tap:active{ transform:scale(.985) }
+
+/* The headline card: one sentence a reader can act on, and the number it is
+   about. Left rule in the tone colour, the way the desktop verdict reads. */
+.m-lede{
+  background:var(--surface); border:1px solid var(--rule);
+  border-left:3px solid var(--accent); border-radius:var(--m-r);
+  padding:14px 15px;
+}
+.m-lede.good{ border-left-color:var(--good) } .m-lede.warn{ border-left-color:var(--warn) }
+.m-lede.bad{ border-left-color:var(--critical) }
+.m-lede b{
+  display:block; font-family:"Fraunces",Georgia,serif; font-weight:600;
+  font-size:1.28rem; line-height:1.22; letter-spacing:-.012em; color:var(--ink);
+}
+.m-lede p{ margin:7px 0 0; font-size:.82rem; color:var(--ink-2); line-height:1.55 }
+
+/* ── stat grid ──────────────────────────────────────────────────────────── */
+.m-stats{ display:grid; grid-template-columns:1fr 1fr; gap:var(--m-gap) }
+.m-stats.three{ grid-template-columns:repeat(3,1fr) }
+.m-stat{
+  background:var(--surface); border:1px solid var(--rule); border-radius:var(--m-r);
+  padding:11px 12px 12px; min-width:0; position:relative; overflow:hidden;
+}
+.m-stat .l{
+  font-family:"IBM Plex Mono",monospace; font-size:.58rem; letter-spacing:.13em;
+  text-transform:uppercase; color:var(--ink-3); font-weight:500;
+  display:block; margin-bottom:5px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+.m-stat .n{
+  font-family:"Fraunces",Georgia,serif; font-weight:600; font-size:1.42rem;
+  line-height:1.1; letter-spacing:-.02em; font-variant-numeric:tabular-nums;
+  display:block; overflow-wrap:anywhere;
+}
+.m-stat .n.sm{ font-size:1.1rem }
+.m-stat .s{ display:block; font-size:.7rem; color:var(--ink-3); margin-top:3px; line-height:1.4 }
+.m-stat.good .n{ color:var(--good) } .m-stat.warn .n{ color:var(--warn) }
+.m-stat.bad .n{ color:var(--critical) }
+a.m-stat{ text-decoration:none; color:inherit; display:block }
+a.m-stat:active{ transform:scale(.985) }
+
+/* ── rows: the phone's table ────────────────────────────────────────────
+   A table on a 390px screen is a horizontal scroller nobody scrolls. A row is
+   an identity, a number, and one line of why — which is what the desktop table
+   was being read for anyway. */
+.m-rows{ display:flex; flex-direction:column; background:var(--surface);
+  border:1px solid var(--rule); border-radius:var(--m-r); overflow:hidden }
+.m-row{
+  display:grid; grid-template-columns:1fr auto; align-items:center; gap:10px;
+  padding:11px 13px; border-top:1px solid var(--rule);
+  text-decoration:none; color:inherit; min-height:52px;
+  transition:background .16s var(--ease);
+}
+.m-row:first-child{ border-top:0 }
+.m-row:active{ background:var(--surface-2) }
+.m-row .k{ min-width:0 }
+.m-row .k b{ display:block; font-weight:600; font-size:.9rem; letter-spacing:-.004em;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.m-row .k span{ display:block; font-size:.72rem; color:var(--ink-3); margin-top:1px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.m-row .v{ text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap }
+.m-row .v b{ display:block; font-size:.92rem; font-weight:600 }
+.m-row .v span{ display:block; font-size:.7rem; color:var(--ink-3) }
+.m-row.go{ grid-template-columns:1fr auto auto }
+.m-row .chev{ color:var(--ink-3); font-size:1.1rem; line-height:1; margin-left:2px }
+
+/* ── segmented control, chips, sheet ────────────────────────────────────── */
+.m-seg{
+  display:flex; gap:3px; padding:3px; background:var(--surface-2);
+  border:1px solid var(--rule); border-radius:11px;
+}
+.m-seg button{
+  flex:1 1 0; min-width:0; appearance:none; border:0; background:none; cursor:pointer;
+  padding:8px 6px; border-radius:8px; font-size:.78rem; font-weight:600;
+  color:var(--ink-2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  transition:background .18s var(--ease), color .18s var(--ease);
+}
+.m-seg button.on{ background:var(--surface); color:var(--ink); box-shadow:var(--shadow-1) }
+
+.m-chips{ display:flex; gap:7px; overflow-x:auto; padding-bottom:2px;
+  scrollbar-width:none; -ms-overflow-style:none }
+.m-chips::-webkit-scrollbar{ display:none }
+.m-chip{
+  flex:0 0 auto; padding:7px 13px; border-radius:999px; font-size:.76rem; font-weight:600;
+  background:var(--surface); border:1px solid var(--rule); color:var(--ink-2);
+  text-decoration:none; cursor:pointer;
+}
+.m-chip.on{ background:var(--accent-soft); border-color:var(--accent-line); color:var(--accent-ink) }
+
+/* A sheet, not a modal: it comes from the edge a thumb can reach. */
+.m-scrim{
+  position:fixed; inset:0; z-index:60; background:rgba(20,23,26,.42);
+  opacity:0; transition:opacity .22s var(--ease); backdrop-filter:blur(2px);
+}
+.m-scrim.in{ opacity:1 }
+.m-sheet{
+  position:fixed; left:0; right:0; bottom:0; z-index:61;
+  background:var(--paper); border-top-left-radius:20px; border-top-right-radius:20px;
+  border-top:1px solid var(--rule); box-shadow:var(--shadow-2);
+  padding:8px var(--m-pad) calc(var(--m-bot) + 18px);
+  transform:translateY(101%); transition:transform .28s var(--ease-out);
+  max-height:82dvh; overflow-y:auto;
+}
+.m-sheet.in{ transform:none }
+.m-grab{ width:38px; height:4px; border-radius:2px; background:var(--rule-strong);
+  margin:6px auto 12px }
+.m-sheet h3{ margin:0 0 10px; font-size:.95rem; font-weight:600 }
+.m-sheet .m-seg{ margin-bottom:14px }
+.m-opt{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  width:100%; padding:13px 4px; border:0; border-top:1px solid var(--rule);
+  background:none; color:inherit; font-size:.92rem; text-align:left; cursor:pointer;
+}
+.m-opt:first-of-type{ border-top:0 }
+.m-opt.on{ color:var(--accent); font-weight:600 }
+
+/* ── search ─────────────────────────────────────────────────────────────── */
+.m-search{
+  display:flex; align-items:center; gap:8px; padding:0 12px;
+  background:var(--surface-2); border:1px solid var(--rule); border-radius:11px;
+}
+.m-search input{
+  flex:1 1 auto; min-width:0; appearance:none; border:0; background:none; outline:none;
+  padding:11px 0; font:inherit; font-size:.92rem; color:var(--ink);
+}
+.m-search input::placeholder{ color:var(--ink-3) }
+.m-search span{ color:var(--ink-3); font-size:.9rem }
+
+/* ── odds and ends ──────────────────────────────────────────────────────── */
+.m-sec{
+  font-family:"IBM Plex Mono",monospace; font-size:.6rem; letter-spacing:.15em;
+  text-transform:uppercase; color:var(--ink-3); font-weight:500;
+  margin:6px 2px -4px;
+}
+.m-skel{ background:var(--surface); border:1px solid var(--rule); border-radius:var(--m-r);
+  height:76px; position:relative; overflow:hidden }
+.m-skel::after{
+  content:''; position:absolute; inset:0; transform:translateX(-100%);
+  background:linear-gradient(90deg,transparent,color-mix(in srgb,var(--ink) 6%,transparent),transparent);
+  animation:m-shim 1.25s infinite;
+}
+@keyframes m-shim{ to{ transform:translateX(100%) } }
+@media (prefers-reduced-motion:reduce){ .m-skel::after{ animation:none } }
+.m-empty{ padding:26px 14px; text-align:center; color:var(--ink-3); font-size:.85rem }
+.m-empty b{ display:block; color:var(--ink-2); font-size:.95rem; margin-bottom:4px }
+.m-err{ border-left:3px solid var(--critical); background:var(--critical-bg) }
+
+/* The staleness bar: what the reader is looking at, when the network is gone
+   and the service worker answered from its cache. */
+.m-stale{
+  display:flex; align-items:center; gap:8px; padding:9px 12px; font-size:.76rem;
+  background:var(--warn-bg); border:1px solid var(--rule); border-left:3px solid var(--warn);
+  border-radius:var(--m-r); color:var(--ink-2);
+}
+
+/* The fallback screen renders a real desktop module. It is given the desktop
+   view's own class so app.css applies, then reined in: the desktop stack gap
+   and side padding are the page's, and this is inside a card-width column. */
+.m-fallback{ display:flex; flex-direction:column; gap:16px; min-width:0 }
+.m-fallback .panel{ padding:13px 14px; border-radius:var(--m-r) }
+.m-fallback .kpis{ grid-template-columns:1fr 1fr; gap:10px }
+.m-fallback table{ font-size:.8rem }
+.m-fallback .tscroll{ border-radius:var(--r-sm) }
