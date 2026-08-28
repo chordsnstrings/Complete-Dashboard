@@ -2172,6 +2172,25 @@ app.get('/api/analyst/findings', (req, r) => {
     empty_reason: null,
     platform_applies: false });
 });
+app.get('/api/analyst/brief', (_, r) => r.json({
+  window: [dayISO(30), dayISO(0)], fleet: 'both',
+  headline: { bookings: 2043, telematics: 1500, completed: 1820, bookable: 2043,
+    avg_fare: '76.98', priced: 904, vehicles: 8, drivers: 9 },
+  by_platform: [{ platform: 'uber', n: 1600, completion_pct: '88.3', avg_km: '13.7' }],
+  uber_tier_by_daypart: [], settlement: [], properties: [], by_daypart: [], coverage: [],
+  /* One metric carried by a single platform, so the "no complement" line is
+     reachable in the smoke test. */
+  metric_coverage: {
+    completion_pct: { rows: 2043, platforms: ['hotel', 'uber'], unit: '%' },
+    avg_deadhead_km: { rows: 874, platforms: ['hotel'], unit: 'km' },
+  },
+  candidates: {
+    platform: [{ segment: 'uber', n: 1600 }, { segment: 'hotel', n: 443 }],
+    daypart: [{ segment: 'evening', n: 700 }, { segment: 'night', n: 240 }],
+    weekday: [{ segment: 'Thursday', n: 420 }],
+  },
+}));
+
 app.get('/api/analyst/rules', (_, r) => r.json({
   metrics: [
     { metric: 'completion_pct', label: 'completion rate', kind: 'rate', unit: '%', defined_over: 'is_booking AND outcome IS NOT NULL' },

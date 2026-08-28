@@ -174,6 +174,40 @@ async function analystRules(host) {
     'The model names one of these and one value of it. It never writes a query.');
   b2.innerHTML = `<div class="chips">${r.dimensions.map((d) => `<span class="chip">${esc(d)}</span>`).join('')}</div>`;
   host.append(p2);
+  /* The list the model actually chose from, this window.
+     ─────────────────────────────────────────────────────────────────────────
+     "What can be sliced" names the twelve dimensions in the abstract. This is
+     what each of them CONTAINED when the brief was built — and it is the
+     difference between a reader thinking the analyst ignored their worst
+     vehicle and seeing that the vehicle cleared the floor and was offered. */
+  const { panel: pc, body: bc } = panel('What the model was given, this window',
+    'Every segment with at least the minimum records behind it, and where each metric is defined '
+    + 'at all. A metric carried by one platform alone has no complement to compare against, so a '
+    + 'claim about that platform cannot be settled and is never shown.');
+  loading(bc);
+  host.append(pc);
+  q('/api/analyst/brief').then((brief) => {
+    bc.innerHTML = '';
+    const cand = brief?.candidates || {};
+    const cov = brief?.metric_coverage || {};
+    if (!Object.keys(cand).length) { empty(bc, 'No window to build a brief from'); return; }
+    bc.append(tableFrom(Object.entries(cov).map(([metric, v]) => ({
+      metric, rows: v.rows, unit: v.unit, platforms: (v.platforms || []).join(', ') })), [
+      { label: 'Metric', key: 'metric', render: (x) => `<code>${esc(x.metric)}</code>` },
+      { label: 'Rows it is defined on', key: 'rows', num: true },
+      { label: 'Carried by', key: 'platforms',
+        render: (x) => (x.platforms.split(', ').length === 1
+          ? `${esc(x.platforms)} <span class="dim">— one platform, so no complement</span>`
+          : esc(x.platforms)) },
+    ]));
+    for (const [dim, rows] of Object.entries(cand)) {
+      const line = el('p', 'cap');
+      line.innerHTML = `<b>${esc(dim)}</b> — ` + rows
+        .map((x) => `${esc(x.segment)} <span class="dim">${fmt(x.n)}</span>`).join(' · ');
+      bc.append(line);
+    }
+  }).catch(() => { bc.innerHTML = ''; empty(bc, 'Could not read the brief'); });
+
   const { panel: p3, body: b3 } = panel('Minimum absolute difference, by unit', null);
   b3.append(tableFrom(Object.entries(m.minAbsEffect).map(([unit, v]) => ({ unit, v })), [
     { label: 'Unit', key: 'unit' },
