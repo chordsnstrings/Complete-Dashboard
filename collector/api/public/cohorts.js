@@ -258,6 +258,24 @@ export const COHORTS = {
       + 'who has stopped, decides which of them will be settled.',
     test: (r) => (Number(r.cash_trips) || 0) > 0,
   },
+
+  /* ── Product tiers · which cars carry the premium work ───────────────────
+     The benchmark here is one car per model — the best of them — so almost
+     every other car is behind it by construction. That is a distance, not a
+     failing, and the set is worth opening precisely to see WHICH cars and by
+     how much, beside what else is true of them. */
+  'tiers-behind': {
+    kind: 'vehicle', source: '/api/tiers/by-vehicle', pick: 'vehicles', chips: true,
+    from: 'platforms', fromLabel: 'Product tiers',
+    label: 'Behind the best car of their own model',
+    question: 'Which cars carry a smaller share of premium work than the best car of the same model?',
+    why: 'The benchmark is one car per model, so most are behind it by construction — what matters '
+      + 'is the size of the gap and who has been driving the ones at the bottom of it.',
+    /* Not `> 0`: the page's own tile counts every car that HAS a gap, and a
+       car level with the benchmark is still behind none. Matching the tile is
+       the contract; a stricter test here is a second definition. */
+    test: (r) => r.premium_gap_pct != null,
+  },
 };
 
 /* Everything a page needs to make a tile clickable, without importing the DOM

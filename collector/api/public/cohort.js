@@ -15,7 +15,7 @@
    fleet portal. That join used to be a page load per person. */
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
   dayStr, dtStr, money, fmt, pct, plural, countOf, andList, verdict, foldRows, foldChildren,
-  sourceLabel } from './ui.js';
+  sourceLabel, custody } from './ui.js';
 import { q, qAll, api, href, params, unfiltered } from './data.js';
 import { empty } from './charts.js';
 import { COHORTS, membersOf, idOf, accountsOf } from './cohorts.js';
@@ -349,6 +349,7 @@ export async function renderCohort(root, key) {
     n_bookings: r.trips ?? r.bookings ?? null,
     n_journeys: r.telematics_journeys ?? null,
     n_money: r.money ?? r.revenue ?? r.payout ?? null,
+    held: r.current_driver ?? (r.driver_refs || []).map((d) => d.name).join(', ') ?? null,
   } : {
     ...r,
     n_bookings: r.bookings ?? r.trips ?? null,
@@ -384,9 +385,22 @@ export async function renderCohort(root, key) {
             : r.doc_days_left < 30 ? pill(`${fmt(r.doc_days_left)} d`, 'warn')
               : `${fmt(r.doc_days_left)} d`),
         absent: 'No document on any of these carries an expiry date.' },
-      { label: 'Held by', key: 'current_driver',
-        render: (r) => entity('driver', r.current_driver_id, r.current_driver || '—'),
+      /* Two shapes again: the directories name one current holder, the tier
+         ledger hands back every custodian as {name, id} pairs. custody() reads
+         the pairs and falls back to the comma-joined names, so both render as
+         people you can open rather than as text. */
+      { label: 'Held by', key: 'held',
+        render: (r) => (r.driver_refs?.length ? custody(r)
+          : entity('driver', r.current_driver_id, r.current_driver || '—')),
         absent: 'Nobody is recorded as holding any of these.' },
+      /* What the tier ledger ranks on. Premium share is the measure; the gap
+         is the distance from the best car of the same model, which is why the
+         set exists at all. */
+      { label: 'Premium jobs', key: 'premium', num: true,
+        absent: 'No premium count reaches this list.' },
+      { label: 'Behind by', key: 'premium_gap_pct', num: true,
+        render: (r) => pct(r.premium_gap_pct, 1),
+        absent: 'No premium gap is computed on this list.' },
       /* Whatever the SOURCE ranked on. A set that came from the alert feed is
          ordered by harsh events and had none of its own numbers on screen —
          eight names and a column of zeroes, because every generic column

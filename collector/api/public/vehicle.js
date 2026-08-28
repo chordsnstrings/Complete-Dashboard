@@ -18,6 +18,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
   custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, noneChosen, verdict, foldRows } from './ui.js';
 import { qAll, href, parseHash, currentGen, alive } from './data.js';
+import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
 import { makeMap, fitTo, renderJourney } from './map.js';
 
@@ -1024,12 +1025,16 @@ export async function renderVehicleDirectory(root) {
      with no booking behind it counted as "Earning" — inverting the exact
      question the tile exists to answer. Three states now, and the middle one is
      the operationally interesting bucket that was hidden inside the first. */
-  const earning = rows.filter((r) => r.trips > 0).length;
-  const movedOnly = rows.filter((r) => !r.trips && r.telematics_journeys > 0).length;
-  const still = rows.length - earning - movedOnly;
-  const tracked = rows.filter((r) => r.last_fix).length;
-  const staleN = rows.filter((r) => r.stale).length;
-  const expiring = rows.filter((r) => r.doc_days_left != null && r.doc_days_left < 30).length;
+  /* Counted through the registry, so the tile and the page behind it cannot
+     drift apart — see api/public/cohorts.js. `earning` has no drill-down of
+     its own (it is the whole point of the fleet, not an exception), so it
+     stays a subtraction and the three still sum to the fleet. */
+  const movedOnly = membersOf('vehicles-moved-no-booking', rows).length;
+  const still = membersOf('vehicles-still', rows).length;
+  const earning = rows.length - movedOnly - still;
+  const tracked = rows.length - membersOf('vehicles-untracked', rows).length;
+  const staleN = membersOf('vehicles-stale', rows).length;
+  const expiring = membersOf('vehicles-docs-due', rows).length;
 
   /* The question this page answers is which cars are NOT working, and it opened
      on a search box and 170 rows sorted by the ones that are. */

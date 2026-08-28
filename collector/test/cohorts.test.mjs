@@ -213,6 +213,33 @@ check('a person with no ids array still yields their one account',
   COHORTS['unit-still'].test = saved;
 }
 
+/* ── the pages COUNT through it, not merely link to it ───────────────────── */
+/* A tile and its list agreeing today because both were written from the same
+   sentence is not the same as their being unable to disagree. Where the tile
+   is computed in the browser from rows it already holds, it calls membersOf. */
+{
+  const veh = readFileSync(new URL('../api/public/vehicle.js', import.meta.url), 'utf8');
+  check('the vehicles tiles count through the registry',
+    /membersOf\('vehicles-moved-no-booking', rows\)/.test(veh)
+    && /membersOf\('vehicles-still', rows\)/.test(veh)
+    && /membersOf\('vehicles-docs-due', rows\)/.test(veh));
+  check('and no longer re-derive the same filter inline',
+    !/rows\.filter\(\(r\) => !r\.trips && r\.telematics_journeys > 0\)/.test(veh));
+  const app = readFileSync(new URL('../api/public/app.js', import.meta.url), 'utf8');
+  check('the tier tile counts through the registry', /membersOf\('tiers-behind'/.test(app));
+}
+/* The three vehicle buckets must still partition the fleet after that change:
+   earning is a subtraction, so a predicate that widened would show up here as
+   a negative or an overlap rather than as a wrong tile nobody checks. */
+{
+  const moved = membersOf('vehicles-moved-no-booking', dir);
+  const stillV = membersOf('vehicles-still', dir);
+  check('moved-unpaid and never-moved never overlap',
+    !moved.some((r) => stillV.includes(r)));
+  check('and neither contains a car that took a booking',
+    ![...moved, ...stillV].some((r) => r.trips > 0));
+}
+
 /* ── the pages actually use it ───────────────────────────────────────────── */
 /* The point of one definition is defeated the moment a page re-derives a set
    inline. These are the three files whose tiles this replaces. */

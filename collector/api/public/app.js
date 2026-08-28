@@ -15,7 +15,7 @@ import { fleetVerdict, shareOf } from './verdicts.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
 import { renderCohort } from './cohort.js';
-import { COHORTS } from './cohorts.js';
+import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
 import { renderTrip } from './trip.js';
@@ -1624,7 +1624,10 @@ async function platformTiers(root) {
   const [t, mix] = await Promise.all([q('/api/tiers/by-vehicle'), q('/api/tiers/mix', { by: 'daypart' })]);
   root.innerHTML = '';
   if (!t.vehicles.length) return empty(root, 'No Uber trip with a vehicle in this range');
-  const under = t.vehicles.filter((v) => v.premium_gap_pct != null)
+  /* The registry's predicate, not a second copy of it. A tile and the list
+     behind it agreeing today because both were written from the same sentence
+     is not the same as their being unable to disagree. */
+  const under = membersOf('tiers-behind', t)
     .sort((a, b) => b.premium_gap_pct - a.premium_gap_pct);
   root.append(kpiRow([
     { label: 'Premium share', value: pct(t.fleet_premium_pct, 1), sub: 'Black and Comfort, fleet-wide' },
@@ -1635,7 +1638,8 @@ async function platformTiers(root) {
        painting it amber turned an arithmetic identity into 58 findings. */
     { label: 'Behind the best car of their own model', value: fmt(under.length),
       sub: `of ${fmt(t.vehicles.length)} carrying Uber work — the benchmark is one car per model, `
-        + 'so most are behind it by construction' },
+        + 'so most are behind it by construction',
+      cohort: under.length ? 'tiers-behind' : null },
     { label: 'Largest shortfall', value: under.length ? pct(under[0].premium_gap_pct, 1) : '—',
       sub: under.length ? `${under[0].plate} · ${under[0].model_key}` : null },
   ]));
