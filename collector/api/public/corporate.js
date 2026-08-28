@@ -464,7 +464,7 @@ const APPROACH_BY = [
 async function corpApproach(host) {
   const by = APPROACH_BY.some((b) => b.id === state.sub) ? state.sub : 'property';
   host.append(tabBar(APPROACH_BY, by, (id) => href('corporate', 'approach', id)));
-  const body = el('div'); host.append(body); loading(body);
+  const body = el('div', 'stack'); host.append(body); loading(body);
   const [rows, stranding] = await Promise.all([
     q('/api/corporate/approach', { by }),
     q('/api/corporate/stranding').catch(() => []),

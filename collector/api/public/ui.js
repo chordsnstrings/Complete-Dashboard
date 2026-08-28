@@ -19,7 +19,12 @@ export function panel(title, cap) {
   const p = el('div', 'panel');
   if (title) p.append(el('h3', null, title));
   if (cap) p.append(el('p', 'cap', cap));
-  const body = el('div'); p.append(body);
+  /* .pbody, not a bare div: a panel that holds more than one thing — a note,
+     a KPI row and a table, say — stacked them at 0px for as long as this
+     helper has existed, because a <div> is not a stack and a .panel carries
+     no margins of its own. The class is the whole fix, and it is applied
+     here rather than at the three hundred call sites that append to a body. */
+  const body = el('div', 'pbody'); p.append(body);
   return { panel: p, body };
 }
 /* A skeleton, optionally saying how long it expects to be one.

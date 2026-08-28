@@ -242,6 +242,46 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #view{gap:var(--stack-gap)}
 .stack{display:flex;flex-direction:column;gap:var(--stack-gap);min-width:0}
 
+/* And one level down again — inside a panel.
+   ─────────────────────────────────────────────────────────────────────────
+   panel() has always built its body as a bare <div>, so the same thing that
+   happened to page bodies happened inside every panel that holds more than
+   one section. Measured on production: "Volume against the weather and the
+   calendar" stacked a note, a KPI row and a table at 0px, 0px; thirty-odd
+   pairs across the product read the same way, and #settlement's chart sat
+   flush under its own heading.
+
+   A panel's rhythm is tighter than a page's, so it names its own step rather
+   than borrowing the page's — the two are set here, together, so the
+   relationship between them stays visible. */
+:root{--panel-gap:14px}
+.pbody{display:flex;flex-direction:column;gap:var(--panel-gap);min-width:0}
+.pbody>*{min-width:0}
+/* A titled panel with no caption: the caption's own bottom margin was the
+   only thing that had ever held a body off the heading. */
+.panel>h3+.pbody{margin-top:13px}
+
+/* Attached by design, in any of the three stacks.
+   A caption belongs to whatever it captions and a tab bar to the subject
+   above it; a gap-based stack would push both a full step away and break the
+   one reading they exist to give. So they claw the step back down to the few
+   pixels app.css already gave them — and never as a first child, where there
+   is no gap above to claw back. The bottom margins go too: they were there
+   to make room in a block container, and in a stack they only add to the
+   gap below. */
+#view>.cap,.stack>.cap,.pbody>.cap,.pbody>.legend,
+#view>.cards,.stack>.cards,.pbody>.cards,
+#view>.toolbar,.stack>.toolbar,.pbody>.toolbar{margin:0}
+#view>.cap:not(:first-child),.stack>.cap:not(:first-child){margin-top:calc(3px - var(--stack-gap))}
+.pbody>.cap:not(:first-child){margin-top:calc(3px - var(--panel-gap))}
+/* A legend belongs to the chart above it and had 11px of its own. */
+.pbody>.legend:not(:first-child){margin-top:calc(11px - var(--panel-gap))}
+/* Two things are appended to the PANEL rather than to its body on purpose —
+   a caveat that must survive the body being cleared on every keystroke. They
+   fall outside the body's stack, so they are given the same step here. */
+.panel>.pbody+*{margin-top:var(--panel-gap)}
+#view>.tabs:not(:first-child),.stack>.tabs:not(:first-child){margin-top:calc(4px - var(--stack-gap))}
+
 /* ── entrance choreography: content settles, it doesn't slam in ────────── */
 @keyframes fadeUp{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
@@ -264,7 +304,6 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 }
 .panel:hover{box-shadow:var(--shadow-2);border-color:var(--rule-strong)}
 .panel h3{font-size:1.02rem;margin:0}
-.panel .cap{font-size:.79rem;color:var(--ink-3);margin:3px 0 15px}
 .grid{display:grid;gap:18px;min-width:0}
 .g2{grid-template-columns:1fr 1fr}
 .g3{grid-template-columns:1fr 1fr 1fr}

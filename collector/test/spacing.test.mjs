@@ -14,6 +14,15 @@
    in a browser, on every route, and a section that touches the one above it
    fails the suite.
 
+   The first version of this test only looked at #view and the wrappers
+   directly under it, which is why it passed clean while the same defect sat
+   one level deeper: every panel body is a wrapper too, and a panel holding a
+   note, a KPI row and a table stacked all three at 0px. So it walks the whole
+   subtree now. What keeps that from drowning in false positives is a
+   definition rather than a depth limit — two SECTIONS owe each other room;
+   the parts inside one (a KPI's label and its number, a table's head and its
+   body, a caption and what it captions) do not, and are not sections.
+
    Not part of `npm test`: it needs Chromium and a server. Run it the same way
    as the smoke test:
 
@@ -31,39 +40,50 @@ const MIN_GAP = 10;
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-const MEASURE = (minGap) => {
+/* A SECTION is a block that holds content of its own — the things a page or a
+   panel stacks. Everything else on screen is a part of one, and parts are
+   spaced by their component, tightly and on purpose. The list is the
+   product's own vocabulary; a new section class added to app.css and not
+   added here is simply not measured, which is the safe direction to fail. */
+const SECTION = ['panel', 'pbody', 'note', 'kpis', 'tblock', 'tscroll', 'cards',
+  'cohort-cards', 'setgrid', 'hbars', 'idcard', 'vdct', 'chips', 'legend',
+  'toolbar', 'stack', 'grid', 'g2', 'g3', 'g23', 'wave', 'cal', 'empty'];
+
+const MEASURE = ([minGap, SECTION]) => {
   const view = document.querySelector('#view');
   if (!view) return { error: 'no #view' };
   const nm = (e) => `${e.tagName.toLowerCase()}${e.className && typeof e.className === 'string'
     ? '.' + e.className.trim().split(/\s+/)[0] : ''}`;
   const visible = (e) => {
     const s = getComputedStyle(e);
-    return !e.hidden && s.display !== 'none' && e.getBoundingClientRect().height > 4;
+    return !e.hidden && s.display !== 'none' && s.position !== 'absolute'
+      && s.position !== 'fixed' && e.getBoundingClientRect().height > 4;
   };
-  /* Two things are attached to a neighbour by design and are not sections.
-     A tab bar belongs to the subject above it and carries its own 4px/2px in
-     app.css; a caption belongs to whatever it captions. Spacing either to 22px
-     would break the thing this test exists to protect. Everything else is a
-     section and owes its neighbour room. */
-  const attached = (e) => e.classList.contains('tabs') || e.classList.contains('cap')
-    || e.tagName === 'H2' || e.tagName === 'H3';
+  const isSection = (e) => [...e.classList].some((c) => SECTION.includes(c));
   const bad = [];
-  /* Only the containers that STACK a page's sections: #view itself and any
-     wrapper a page renders its body into. A panel's own internals are not
-     sections — an h3 sits 2px above its caption on purpose. */
-  const hosts = [view, ...[...view.children].filter((k) => k.tagName === 'DIV'
-    && [...k.classList].every((c) => c === 'stack') && k.children.length >= 2)];
-  for (const host of hosts) {
-    const kids = [...host.children].filter(visible);
+  const pairs = [];
+  const walk = (el, depth) => {
+    if (depth > 9) return;
+    const kids = [...el.children].filter(visible);
     for (let i = 1; i < kids.length; i++) {
-      const a = kids[i - 1].getBoundingClientRect(), b = kids[i].getBoundingClientRect();
-      if (b.top < a.bottom - 1) continue;                       // side by side
-      if (attached(kids[i]) || attached(kids[i - 1])) continue;
-      const gap = Math.round(b.top - a.bottom);
-      if (gap < minGap) bad.push(`${nm(kids[i - 1])} →${gap}px→ ${nm(kids[i])}`);
+      const a = kids[i - 1], b = kids[i];
+      const ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+      if (rb.top < ra.bottom - 1) continue;                     // side by side
+      const gap = Math.round(rb.top - ra.bottom);
+      /* Two sections stacked: they owe each other room. */
+      if (isSection(a) && isSection(b)) pairs.push([a, b, gap]);
+      /* A panel's body against its own heading. Neither an h3 nor an h2 is a
+         section, so the rule above cannot see the one pairing that made
+         #settlement's chart sit flush under its title. */
+      else if (b.classList.contains('pbody')) pairs.push([a, b, gap]);
     }
+    for (const k of kids) walk(k, depth + 1);
+  };
+  walk(view, 0);
+  for (const [a, b, gap] of pairs) {
+    if (gap < minGap) bad.push(`${nm(a)} →${gap}px→ ${nm(b)}`);
   }
-  return { bad };
+  return { bad, seen: pairs.length };
 };
 
 const browser = await launchChromium();
@@ -82,7 +102,7 @@ for (const route of routes) {
        already laid out the sections it has. */
     await page.goto(`${BASE}/#${route}?days=30`, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(1800);
-    const m = await page.evaluate(MEASURE, MIN_GAP);
+    const m = await page.evaluate(MEASURE, [MIN_GAP, SECTION]);
     if (m.error) continue;
     measured += 1;
     if (m.bad.length) offenders.push(`${route}: ${m.bad.slice(0, 3).join(' | ')}`);
