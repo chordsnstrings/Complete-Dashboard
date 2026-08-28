@@ -3307,6 +3307,14 @@ app.get('/api/economics/drivers', (_, r) => {
         // Uber reports no online hours at all, so this is null for everyone the
         // fleet actually runs on. The column says why rather than showing 0.
         aed_per_hour_online: null, hours_online: null,
+        /* Ours, from the supplier session rather than a payout statement. The
+           last two rows leave it NULL on purpose: availability is collected
+           from a 31-day window, so a fixture where every driver has it would
+           stop the renderer ever meeting the case it has to handle. */
+        measured_hours_online: i < 4 ? rt(180 - i * 12, 1) : null,
+        measured_idle_h: i < 4 ? rt(148 - i * 11, 1) : null,
+        availability_days: i < 4 ? 24 : 0,
+        aed_per_measured_hour: i < 4 ? rt(money, 180 - i * 12) : null,
         alerts: 40 - i * 3, alerts_per_100km: rt((40 - i * 3) * 100, km),
         state: i === 3 ? 'suspended' : 'active',
         platform_state: i === 3 ? 'suspended' : 'active', can_earn: i !== 3,
@@ -3322,7 +3330,9 @@ app.get('/api/economics/drivers', (_, r) => {
       bookings: 0, completed: 0, completion_pct: null, km: null, vehicles: 0, plates: [],
       days_worked: 0, payout_days: 0, idle_days: uWindowDays, window_days: uWindowDays,
       aed_per_day_worked: null, aed_per_booking: null, aed_per_km: null, bookings_per_day: null,
-      aed_per_hour_online: null, hours_online: null, alerts: 0, alerts_per_100km: null,
+      aed_per_hour_online: null, hours_online: null,
+      measured_hours_online: null, measured_idle_h: null, availability_days: 0,
+      aed_per_measured_hour: null, alerts: 0, alerts_per_100km: null,
       state: 'active', platform_state: 'active', can_earn: true,
       licence_expires: '2026-06-01', licence_days_left: -81, last_trip: null, band: 'idle' },
   ].sort((a, b) => (b.money ?? 0) - (a.money ?? 0));
@@ -3342,6 +3352,10 @@ app.get('/api/economics/drivers', (_, r) => {
       aed_per_day_worked: Math.round((money / worked) * 100) / 100,
       aed_per_booking: Math.round((money / bookings) * 100) / 100,
       aed_per_km: Math.round((money / sum((x) => x.km)) * 100) / 100,
+      measured_hours_online: sum((x) => x.measured_hours_online || 0),
+      measured_idle_h: sum((x) => x.measured_idle_h || 0),
+      aed_per_measured_hour: Math.round((money / Math.max(1, sum((x) => x.measured_hours_online || 0))) * 100) / 100,
+      people_with_availability: rows.filter((x) => x.measured_hours_online).length,
       people_with_hours: 0,
       hours_note: 'No platform on this fleet reports online hours, so there is no hourly rate to compute.',
     },

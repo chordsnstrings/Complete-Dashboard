@@ -230,21 +230,37 @@ async function moneyTab(root) {
     const earning = +dt.earning || 0;
     const idle = +dt.idle || 0;
     const perWorked = +dt.aed_per_day_worked || 0;
+    const perHour = +dt.aed_per_measured_hour || 0;
+    const onlineH = +dt.measured_hours_online || 0;
+    const idleH = +dt.measured_idle_h || 0;
+    const covered = +dt.people_with_availability || 0;
     const unpaid = +dt.drove_unpaid || 0;
     verdict(vuHost, {
+      /* Per ONLINE HOUR where we have measured it, because a day worked can be
+         one job or fourteen hours logged in and dividing by it calls those the
+         same day. This page used to note that the hourly rate was "the one
+         this fleet cannot have" — true while it depended on payout statements
+         Uber does not write, and untrue since the availability collector
+         landed. It falls back to per day worked where nothing is measured. */
       claim: unpaid
         ? `${countOf(unpaid, 'driver')} drove and ${unpaid === 1 ? 'was' : 'were'} paid nothing`
-        : perWorked
-          ? `${money(perWorked)} per driver-day actually worked`
-          : `${fmt(earning)} of ${fmt(people)} drivers earned`,
-      figure: perWorked ? money(perWorked) : fmt(earning),
-      unit: perWorked ? 'per day worked' : 'earning',
+        : perHour
+          ? `${money(perHour)} for every hour a driver was online`
+          : perWorked
+            ? `${money(perWorked)} per driver-day actually worked`
+            : `${fmt(earning)} of ${fmt(people)} drivers earned`,
+      figure: perHour ? money(perHour) : perWorked ? money(perWorked) : fmt(earning),
+      unit: perHour ? 'per online hour' : perWorked ? 'per day worked' : 'earning',
       tone: unpaid ? 'bad' : (people && idle / people >= 0.4 ? 'warn' : null),
       meta: `${fmt(dt.worked_days)} driver-days`,
       /* The denominator, stated. Spreading the same money over everybody on the
          books gives a per-driver number roughly half this one, and both are
          "per driver". */
-      sub: `Over the ${fmt(earning)} people who earned, not the ${fmt(people)} on the books — `
+      sub: (perHour
+        ? `Measured over ${fmt(onlineH)} online hours for ${countOf(covered, 'driver')}`
+          + `${idleH ? `, ${fmt(Math.round((idleH / onlineH) * 100))}% of which nobody was in the car` : ''}. `
+        : '')
+        + `Over the ${fmt(earning)} people who earned, not the ${fmt(people)} on the books — `
         + `${fmt(idle)} of those earned nothing, and spreading the same `
         + `${money(dt.money)} across all of them would halve every rate on this page.`,
     });
@@ -443,6 +459,19 @@ async function moneyTab(root) {
     { label: 'Days', key: 'days_worked', num: true, render: (r) => fmt(r.days_worked) },
     { label: 'Per day', key: 'aed_per_day_worked', num: true,
       render: (r) => money(r.aed_per_day_worked, 'AED', 0) },
+    /* Per hour ONLINE, beside per day worked rather than instead of it: the
+       two disagree for a reason worth seeing. Somebody earning well per day
+       may be logged in fourteen hours to do it. `absent` prunes the column
+       where nothing has been measured, which on a window older than Uber's
+       31-day availability retention is every row. */
+    { label: 'Per online h', key: 'aed_per_measured_hour', num: true,
+      absent: 'availability has not been collected for anyone in this window — Uber serves the '
+        + 'last 31 days and nothing older, so this fills in going forward',
+      render: (r) => (r.aed_per_measured_hour == null
+        ? '<span class="ent-off" title="no availability collected for this driver in this window">—</span>'
+        : `${money(r.aed_per_measured_hour, 'AED', 0)}`
+          + (r.measured_hours_online
+            ? `<span class="dim" title="hours online"> · ${fmt(r.measured_hours_online, 0)}h</span>` : '')) },
     { label: 'Bookings/day', key: 'bookings_per_day', num: true,
       render: (r) => fmt(r.bookings_per_day, 1) },
     { label: 'Per booking', key: 'aed_per_booking', num: true,

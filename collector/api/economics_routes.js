@@ -556,7 +556,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
        never anything to join TO. */
     const PK = `coalesce(nullif(btrim(t.driver_ext_id), ''), 'name:' || t.person_key)`;
 
-    const [pay, work, who, custody, held, coverage] = await Promise.all([
+    const [pay, avail, work, who, custody, held, coverage] = await Promise.all([
       /* What each account was actually paid, at day grain with the overlapping
          report windows already resolved — never driver_performance directly,
          where one driver's twenty-eight weeks were held as sixty-seven rows.
@@ -574,6 +574,41 @@ export function economicsRoutes(app, { q, wrap, range }) {
          WHERE day BETWEEN $1::date AND $2::date
            AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
          GROUP BY 1`, p),
+
+      /* AVAILABILITY WE MEASURED OURSELVES.
+         ─────────────────────────────────────────────────────────────────
+         The comment below on aed_per_hour_online used to say this was "the
+         rate an operator most wants and the one this fleet cannot have",
+         because Uber's payout rows carry no hours and Uber is nine bookings in
+         ten. That stopped being true the day the availability collector
+         landed: driver_day.online_min is our own measurement of when each
+         person was logged in and dispatchable, and it exists for every fleet
+         and every channel because it comes from the supplier session rather
+         than from a payout statement.
+
+         Kept SEPARATE from the platform figure rather than merged into it. A
+         platform's reported hours and our observed availability are two
+         different measurements — one is what Yango says it paid for, the other
+         is what Uber's own timeline shows — and quietly adding them would
+         produce a denominator that is neither. */
+      q(`SELECT driver_ext_id,
+                round(sum(online_min)::numeric / 60, 1) AS measured_hours_online,
+                round(sum(idle_online_min)::numeric / 60, 1) AS measured_idle_h,
+                count(*)::int AS availability_days
+           FROM driver_day
+          WHERE day BETWEEN $1::date AND $2::date
+            AND online_min IS NOT NULL
+            /* $3 is the platform chip. Every other query here binds it, and
+               leaving it out made Postgres refuse the statement outright —
+               "could not determine data type of parameter $3", because a
+               placeholder below the highest-numbered one still has to be
+               inferable. driver_day carries the platforms a person worked that
+               day as an array, so honouring the chip here is also correct:
+               narrowing the page to one channel should narrow the availability
+               to the people who worked it. */
+            AND ($3::text IS NULL OR $3 = ANY(platforms))
+            AND ($4::text IS NULL OR fleet_id = $4)
+          GROUP BY 1`, p),
 
       /* What they drove. Keyed on the stored person fold as a GROUP BY, never
          as a WHERE predicate — written as a predicate it matches the partial
@@ -722,6 +757,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
           bookings: 0, completed: 0, bookable: 0, days_worked: 0, worked: new Set(), km: 0, fares: 0,
           priced_bookings: 0, vehicles: 0, plates: [], alerts: 0, reported_km: 0,
           hours_online: null,
+          measured_hours_online: null, measured_idle_h: null, availability_days: 0,
           fleet_id: null, last_trip: null });
       }
       const r = people.get(k);
@@ -759,6 +795,27 @@ export function economicsRoutes(app, { q, wrap, range }) {
       r.fleet_id = r.fleet_id || y.fleet_id;
       r.alerts += alerts.get(y.driver_ext_id) || 0;
     }
+    /* Our own measurement, folded onto the same person.
+       ─────────────────────────────────────────────────────────────────────
+       People here are keyed by the canonicalised NAME with an `ids` array,
+       because one human holds several platform accounts — so an availability
+       row keyed on a single account id has to be routed through an index built
+       from those arrays, not looked up directly. Two accounts belonging to one
+       person are summed, which is the rule every other figure on this endpoint
+       already follows. */
+    const byAccount = new Map();
+    for (const r of people.values()) for (const id of r.ids) byAccount.set(id, r);
+    for (const a of avail) {
+      const r = byAccount.get(a.driver_ext_id);
+      if (!r) continue;
+      r.measured_hours_online = add(r.measured_hours_online, a.measured_hours_online);
+      r.measured_idle_h = add(r.measured_idle_h, a.measured_idle_h);
+      /* Summed, not maxed: two accounts online on the same day is two accounts
+         of availability. Days is a count of account-days for that reason and
+         is only used to say whether there is any measurement at all. */
+      r.availability_days = (r.availability_days || 0) + (a.availability_days || 0);
+    }
+
     // Alerts for accounts that appear in the work set but took no payout.
     for (const r of people.values()) {
       if (r.alerts) continue;
@@ -800,8 +857,18 @@ export function economicsRoutes(app, { q, wrap, range }) {
            fleet cannot have: Uber's payout rows carry no hours at all, and Uber
            is nine bookings in ten. Null rather than a zero, with the reason
            carried on the response so the column can say why it is empty. */
+        /* The platform's own figure, kept as it was — on this fleet it is the
+           Yango handful, because Uber's payout rows carry no hours. */
         aed_per_hour_online: rate(money, r.hours_online),
         hours_online: r.hours_online,
+        /* Ours, from the supplier session rather than from a payout statement,
+           so it exists for every channel. This is the honest denominator: a
+           day worked can be one job or fourteen hours logged in, and dividing
+           by it calls those the same day. */
+        measured_hours_online: r.measured_hours_online,
+        measured_idle_h: r.measured_idle_h,
+        availability_days: r.availability_days || 0,
+        aed_per_measured_hour: rate(money, r.measured_hours_online),
         alerts: r.alerts, alerts_per_100km: rate(r.alerts * 100, r.km, 1),
         state: st.state ?? null,
         platform_state: st.platform_state ?? null,
@@ -833,6 +900,15 @@ export function economicsRoutes(app, { q, wrap, range }) {
         km: sum((r) => r.km),
         worked_days: workedDays,
         aed_per_day_worked: rate(money, workedDays),
+        /* The honest denominator, where we have it. A day worked can be one
+           job or fourteen hours logged in, and dividing by it calls those the
+           same day. Null when nothing has been measured yet rather than zero,
+           so a page can say "not collected" instead of drawing a rate of
+           infinity. */
+        measured_hours_online: sum((r) => r.measured_hours_online) || null,
+        measured_idle_h: sum((r) => r.measured_idle_h) || null,
+        aed_per_measured_hour: rate(money, sum((r) => r.measured_hours_online)),
+        people_with_availability: rows.filter((r) => r.measured_hours_online > 0).length,
         aed_per_booking: rate(money, rows.reduce((a, r) => a + r.bookings, 0)),
         aed_per_km: rate(money, sum((r) => r.km)),
         /* How many people an hourly rate could be computed for at all. On this
