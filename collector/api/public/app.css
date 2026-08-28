@@ -1411,3 +1411,6 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
   .sup-row{grid-template-columns:28px repeat(24,1fr);gap:2px}
   .sup-c{height:14px}
 }
+/* A sixth band: quintiles need five plus the "sold nothing" case. */
+.sup-c.b5{background:var(--s1)}
+.sw.b5{background:var(--s1)}

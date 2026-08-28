@@ -82,30 +82,61 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
       `SELECT local_dow AS dow, local_hour AS h, count(*)::int AS jobs
          FROM trip_norm WHERE ${FB} GROUP BY 1, 2`, p);
 
+    /* How many times each weekday actually OCCURRED in the window.
+       ─────────────────────────────────────────────────────────────────────
+       A 30-day window holds five of two weekdays and four of the other five,
+       so summed hours make those two look 25% bigger for calendar reasons.
+       The first version of this endpoint reported "the worst single hour of
+       the week is Thu 18:00" — and every one of its top six idle slots was a
+       Thursday, because Thursday happened five times. That is a fact about the
+       calendar, not about the fleet.
+
+       Everything below is therefore PER OCCURRENCE: what a typical Thursday
+       at 18:00 looks like, which is the only form a rota can be built from.
+       The Rota gaps page already learned this lesson; this one had to too. */
+    const occ = await q(
+      `SELECT extract(dow FROM d)::int AS dow, count(*)::int AS n
+         FROM generate_series($1::date, $2::date, interval '1 day') AS g(d)
+        GROUP BY 1`, [String(p[0]).slice(0, 10), String(p[1]).slice(0, 10)]);
+    const occBy = new Map(occ.map((r) => [r.dow, r.n || 1]));
+    const per = (dow, v) => Math.round((v / (occBy.get(dow) || 1)) * 100) / 100;
+
     const key = (r) => `${r.dow}|${r.h}`;
     const jobBy = new Map(onJob.map((r) => [key(r), +r.on_job_h || 0]));
     const demBy = new Map(demand.map((r) => [key(r), r.jobs]));
     const cells = supply.map((r) => {
       const on = +r.online_h || 0;
       const busy = jobBy.get(key(r)) || 0;
+      const jobs = demBy.get(key(r)) || 0;
+      /* Floored: the two series come from different providers' clocks, and a
+         job overhanging its own online span by seconds must not render as
+         negative idle supply. */
+      const idle = Math.max(0, on - busy);
       return {
-        dow: r.dow, h: r.h, online_h: on, drivers: r.drivers,
-        on_job_h: Math.round(busy * 10) / 10,
-        /* Floored: the two series come from different providers' clocks, and a
-           job overhanging its own online span by seconds must not render as
-           negative idle supply. */
-        idle_h: Math.round(Math.max(0, on - busy) * 10) / 10,
-        jobs: demBy.get(key(r)) || 0,
-        /* Jobs per online hour — the slot's own sell-through. A slot with 40
-           driver-hours and 4 jobs and one with 4 and 4 are the same "10 jobs"
-           to a demand heatmap and opposite problems to a rota. */
-        jobs_per_online_h: on ? Math.round((demBy.get(key(r)) || 0) / on * 100) / 100 : null,
+        dow: r.dow, h: r.h,
+        occurrences: occBy.get(r.dow) || 1,
+        /* Per a typical occurrence of this weekday-hour. The raw totals are
+           kept alongside because a reader checking the arithmetic needs them,
+           but nothing is CHARTED off them. */
+        online_h: per(r.dow, on), on_job_h: per(r.dow, busy), idle_h: per(r.dow, idle),
+        jobs: per(r.dow, jobs),
+        drivers: r.drivers,
+        total_online_h: Math.round(on * 10) / 10, total_jobs: jobs,
+        /* Jobs per online hour — the slot's own sell-through, and the one
+           figure occurrence count cannot distort: it is a ratio of two things
+           counted over the same days. */
+        jobs_per_online_h: on ? Math.round((jobs / on) * 100) / 100 : null,
       };
     });
 
+    /* The totals are over the REAL window, not over the per-occurrence figures
+       — "80% of the hours drivers were online" is a fact about what happened,
+       and normalising it would answer a question nobody asked. */
     const tot = cells.reduce((a, c) => ({
-      online_h: a.online_h + c.online_h, on_job_h: a.on_job_h + c.on_job_h,
-      idle_h: a.idle_h + c.idle_h, jobs: a.jobs + c.jobs,
+      online_h: a.online_h + c.total_online_h,
+      on_job_h: a.on_job_h + (jobBy.get(key(c)) || 0),
+      idle_h: a.idle_h + Math.max(0, c.total_online_h - (jobBy.get(key(c)) || 0)),
+      jobs: a.jobs + c.total_jobs,
     }), { online_h: 0, on_job_h: 0, idle_h: 0, jobs: 0 });
 
     res.json({
@@ -122,8 +153,10 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
          reads as a fleet that was never online. */
       covered: supply.length > 0,
       basis: 'Online hours are split across the hours they were actually online in, not attributed '
-        + 'to the hour a shift started. Time on a job is split the same way, so idle is a '
-        + 'subtraction over identical slots.',
+        + 'to the hour a shift started; time on a job is split the same way, so idle is a '
+        + 'subtraction over identical slots. Every per-hour figure is PER OCCURRENCE of that '
+        + 'weekday — a 30-day window holds five of two weekdays and four of the rest, and summing '
+        + 'raw hours makes those two look 25% busier for reasons that are the calendar’s.',
     });
   }));
 
