@@ -363,6 +363,23 @@ export async function buildBrief([from, to, fleet], { db = pool } = {}) {
      high-cardinality one cannot crowd out the rest. A proposal against this
      list can be wrong about the fleet, which is the point, but it cannot be
      wrong about what the fleet contains. */
+  /* Where each metric is defined at all.
+     ─────────────────────────────────────────────────────────────────────────
+     A metric's population is not the window. avg_deadhead_km exists only on
+     rows that carry an approach leg, and on this fleet that is the hotel
+     channel — so "hotel trips deadhead less than the rest" has an EMPTY
+     complement and cannot be settled by anything. The model proposed exactly
+     that on the first run against real figures. It is not a wrong claim, it
+     is an unanswerable one, and the brief now says so before it is made. */
+  const metricCoverage = Object.fromEntries((await Promise.all(
+    Object.entries(METRICS).map(async ([name, m]) => {
+      const [row] = await q(
+        `SELECT count(*)::int AS n,
+                array_agg(DISTINCT platform ORDER BY platform) AS platforms
+           FROM trip_ext WHERE ${W} AND ${m.where}`).catch(() => [null]);
+      return [name, row ? { rows: row.n, platforms: row.platforms || [], unit: m.unit } : null];
+    }))).filter(([, v]) => v && v.rows));
+
   const candidates = await Promise.all(Object.entries(DIMENSIONS).map(async ([name, expr]) => {
     const rows = await q(
       `SELECT (${expr})::text AS segment, count(*)::int AS n
@@ -375,6 +392,7 @@ export async function buildBrief([from, to, fleet], { db = pool } = {}) {
   return { window: [from, to], fleet: fleet || 'both', headline: headline[0], by_platform: byDim,
     uber_tier_by_daypart: tiers, settlement: settle, properties: hotels, by_daypart: dayparts,
     coverage,
+    metric_coverage: metricCoverage,
     candidates: Object.fromEntries(candidates.filter(([, rows]) => rows.length)) };
 }
 
@@ -406,6 +424,11 @@ Rules you must follow exactly:
   them: a claim about 34 trips survives measurement far less often than one about 3,400.
 - Do not propose anything the brief does not contain the numbers for. In particular, the Uber
   trip export has NO fare, so no claim about Uber money is checkable.
+- "metric_coverage" says where each metric is defined and which platforms carry it. A claim is
+  only settleable if BOTH sides exist inside that population: if a metric is carried by one
+  platform alone, a claim about that platform has no complement to compare against and is
+  discarded unmeasured. Use such a metric on a dimension that varies WITHIN its population
+  instead — by property or by daypart, not by platform.
 - Prefer claims an operator could act on this week over interesting-but-inert observations.
 - A claim is only worth making if it would still be worth acting on when true. The measurement
   discards anything under a 15% relative difference, so do not propose one you expect to be
