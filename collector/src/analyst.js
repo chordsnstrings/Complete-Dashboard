@@ -322,7 +322,23 @@ export function parseProposals(text) {
       action: String(p.action || '').slice(0, 400) || null,
       metric: p.metric, dimension: p.dimension,
       segment: String(p.segment).slice(0, 120), direction: p.direction,
-      claimed_value: Number.isFinite(Number(p.claimed_value)) ? Number(p.claimed_value) : null,
+      /* An exact zero is the model's placeholder, not an estimate.
+         ─────────────────────────────────────────────────────────────────────
+         Asked for "a number or null", MiniMax-M3 writes 0 when it is not
+         estimating — four of eleven proposals in one production pass — and the
+         finding card prints the field beside the measurement, so every one of
+         them read "the model said 0 AED; the measurement says 156.8 AED": a
+         prediction it never made, shown as one it got badly wrong. Told not
+         to in the prompt, it still did.
+
+         A genuine estimate of exactly zero is not worth protecting here. The
+         segment has rows or the claim would not have been proposed, so a real
+         zero would be a claim that a live segment completes none of its trips
+         or earns nothing at all — and that claim survives as the CLAIM, which
+         is what the reader acts on. The estimate is decoration beside a
+         measurement; a decoration that lies is worse than an absent one. */
+      claimed_value: Number.isFinite(Number(p.claimed_value)) && Number(p.claimed_value) !== 0
+        ? Number(p.claimed_value) : null,
     });
   }
   return { proposals, rejected };

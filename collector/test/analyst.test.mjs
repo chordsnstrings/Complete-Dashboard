@@ -236,6 +236,20 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     parseProposals('I could not find anything worth reporting.').rejected[0].reason.includes('no JSON array'));
 }
 
+/* The model writes 0 where it means "not estimating" — four of eleven in one
+   production pass — and the card prints that beside the measurement as a
+   prediction it never made. */
+{
+  const { parseProposals } = await import('../src/analyst.js');
+  const mk = (v) => JSON.stringify([{ claim: 'c', metric: 'avg_fare', dimension: 'settlement',
+    segment: 'cash', direction: 'lower', claimed_value: v }]);
+  check('a placeholder zero is read as no estimate', parseProposals(mk(0)).proposals[0].claimed_value === null);
+  check('a real estimate is kept', parseProposals(mk(41.4)).proposals[0].claimed_value === 41.4);
+  check('a negative estimate is kept', parseProposals(mk(-3)).proposals[0].claimed_value === -3);
+  check('null stays null', parseProposals(mk(null)).proposals[0].claimed_value === null);
+  check('and the claim itself survives either way', parseProposals(mk(0)).proposals.length === 1);
+}
+
 /* A rate near the ceiling cannot clear a relative floor, and the first real
    pass on production proved it: Uber completing 88.3% against 99.2% elsewhere,
    over 11,645 trips at p < 0.0001, was filed immaterial because 10.9 points is
