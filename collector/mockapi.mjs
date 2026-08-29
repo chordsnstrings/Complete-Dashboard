@@ -1499,7 +1499,10 @@ app.get('/api/optimise', (req, r) => {
     .sort((a, b) => b.idle_per_occurrence - a.idle_per_occurrence);
   const surplus = surplusAll.slice(0, 20);
   /* Two of the mock's own areas, so the charging caveat is exercised. */
-  const SITES = ['Al Garhoud', 'Dubai Production City'];
+  const SITES = [
+    { label: 'Al Garhoud', names: ['Al Garhoud', "Dubai Int'l Airport"] },
+    { label: 'Dubai Production City', names: ['Dubai Production City'] },
+  ];
   const waits = [];
   for (let dow = 0; dow < 7; dow++) {
     for (const [i, area] of AREAS.entries()) {
@@ -1507,7 +1510,8 @@ app.get('/api/optimise', (req, r) => {
         waits.push({ area, dow, h,
           handovers: 3 + ((dow + i + h) % 9),
           median_wait_min: 35 + ((i * 13 + h * 7) % 110),
-          charging_site: SITES.some((x) => area.toLowerCase() === x.toLowerCase()),
+          charging_site: SITES.find((x) => x.names
+            .some((nm) => area.toLowerCase() === nm.toLowerCase()))?.label || null,
           idle_h: Math.round((4 + ((dow * 3 + i * 5 + h) % 13)) * 10) / 10 });
       }
     }
@@ -1521,7 +1525,9 @@ app.get('/api/optimise', (req, r) => {
     placed_bookings: placed, empty_arrivals: gap,
     empty_arrival_pct: placed ? Math.round((gap / placed) * 1000) / 10 : null,
     idle_h_between_jobs: Math.round(waits.reduce((a, w) => a + w.idle_h, 0) * 10) / 10,
-    charging_sites: SITES,
+    charging_sites: SITES.map((x) => x.label),
+    charging_aliases: SITES.filter((x) => x.names.length > 1)
+      .map((x) => ({ site: x.label, written: x.names })),
     idle_h_at_charging_sites: Math.round(waits.filter((w) => w.charging_site)
       .reduce((a, w) => a + w.idle_h, 0) * 10) / 10,
     idle_h_charging_pct: Math.round((waits.filter((w) => w.charging_site)

@@ -932,7 +932,10 @@ async function optimise(deck, ctx) {
       + 'address, so two providers writing one place two ways cannot distort it.');
     body.append(c.card);
     rows(c.body, top.map((r) => ({
-      title: (r.area || 'Unnamed area') + (r.charging_site ? ' \u00b7 charger' : ''),
+      title: (r.area || 'Unnamed area')
+        + (r.charging_site
+          ? (r.charging_site === r.area ? ' \u00b7 charger' : ` \u00b7 charger at ${r.charging_site}`)
+          : ''),
       sub: `${D3M[r.dow]} ${String(r.h).padStart(2, '0')}:00 · ${fmt(n(r.handovers))} `
         + `${n(r.handovers) === 1 ? 'handover' : 'handovers'}`,
       value: `${fmt(Math.round(n(r.idle_h)))} h`,
@@ -953,7 +956,11 @@ async function optimise(deck, ctx) {
         + `${opt.idle_h_at_charging_sites != null ? `${fmt(opt.idle_h_at_charging_sites)} idle hours ` : 'Some idle time '}`
         + `${opt.idle_h_charging_pct != null ? `(${opt.idle_h_charging_pct}%) ` : ''}`
         + 'sit in an area with one, so that time mixes waiting with refuelling. '
-        + 'It matches the address, not a plug — treat it as an upper bound.'));
+        + 'It matches the address, not a plug — treat it as an upper bound.'
+        + ((opt.charging_aliases || []).length
+          ? ` ${opt.charging_aliases.map((a) => `${a.site} is written `
+            + `${a.written.map((x) => `\u201c${x}\u201d`).join(' and ')}`).join('; ')}.`
+          : '')));
     }
     if (opt.empty_arrival_pct != null) {
       c.body.append(el('p', 'm-cap',

@@ -38,13 +38,27 @@ import { config } from '../src/config.js';
    contains a charger", never "this car was plugged in". That is a weaker
    claim and every surface that uses it says so rather than netting the hours
    off silently. */
-export const chargingSites = () => config.chargingSites.map((x) => x.toLowerCase());
+export const chargingSites = () => config.chargingSites;
 
-export const isCharging = (area, sites) => {
-  if (!area) return false;
-  const a = String(area).toLowerCase();
-  return sites.some((s) => a === s || a.startsWith(`${s} `) || a.startsWith(`${s},`));
+/* Anchored, not a substring: an area that merely CONTAINS the words is a
+   different place, and flagging it would excuse idle time with no charger
+   behind it. The trailing space and comma admit the one variant providers
+   actually write — "Al Garhoud DU, AE". */
+const hits = (a, name) => {
+  const n = String(name).toLowerCase();
+  return a === n || a.startsWith(`${n} `) || a.startsWith(`${n},`);
 };
+
+/* Returns the SITE a wait sits on, or null — the label, so the page can name
+   it, and so an area written under an alias is attributed to the site it
+   actually is rather than to itself. */
+export const chargingSiteOf = (area, sites) => {
+  if (!area) return null;
+  const a = String(area).toLowerCase();
+  return sites.find((s) => s.names.some((n) => hits(a, n)))?.label || null;
+};
+
+export const isCharging = (area, sites) => chargingSiteOf(area, sites) != null;
 
 export function supplyRoutes(app, { q, wrap, range, FB }) {
   /* ── when: supply against demand, by weekday and hour ─────────────────── */
@@ -343,7 +357,7 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
       /* True where the AREA holds a charger, which is not the same as this
          car having been plugged in. Named `charging_site`, not `charging`,
          so nothing downstream can read it as a measurement. */
-      charging_site: isCharging(r.area, sites),
+      charging_site: chargingSiteOf(r.area, sites),
     }));
     const totalIdle = waits.reduce((a, x) => a + (x.idle_h || 0), 0);
     const chargeIdle = waits.filter((x) => x.charging_site)
@@ -366,7 +380,12 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
       /* The share of that idle standing somewhere with a charger. An upper
          bound on charging, and a floor on how much of the ranking above is
          about refuelling rather than about waiting for work. */
-      charging_sites: sites,
+      charging_sites: sites.map((s2) => s2.label),
+      /* Where a site is written more than one way, the page has to say so —
+         a reader looking at twenty rows labelled with the alias would
+         otherwise read them as pure waiting. */
+      charging_aliases: sites.filter((s2) => s2.names.length > 1)
+        .map((s2) => ({ site: s2.label, written: s2.names })),
       idle_h_at_charging_sites: Math.round(chargeIdle * 10) / 10,
       idle_h_charging_pct: totalIdle ? Math.round((chargeIdle / totalIdle) * 1000) / 10 : null,
       handovers: totalHandovers,
@@ -403,10 +422,13 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
         + "follows each VEHICLE from one drop-off to its next pick-up, so it measures the car's "
         + 'own idle time without reference to what either place was called. Gaps over four hours '
         + 'are excluded as shift ends rather than waiting. Rows in an area that '
-        + 'holds a charging station are flagged `charging_site`: this fleet is '
-        + 'largely electric, so idle time there is an upper bound that mixes '
-        + 'waiting with refuelling, and it is a name match on the address, not a '
-        + 'geofence and not a plug event.',
+        + 'holds a charging station carry `charging_site`, naming that site: this '
+        + 'fleet is largely electric, so idle time there is an upper bound that '
+        + 'mixes waiting with refuelling, and it is a name match on the address, '
+        + 'not a geofence and not a plug event. `charging_aliases` lists any site '
+        + 'written more than one way — the airport charger is reached under both '
+        + "\"Al Garhoud\" and \"Dubai Int'l Airport\", so rows under either name "
+        + 'are attributed to it.',
     });
   }));
 

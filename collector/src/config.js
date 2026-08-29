@@ -18,9 +18,19 @@ export const config = {
      Not a credential — a fact about the fleet that decides whether an idle
      hour reads as waste or as refuelling, which for a largely electric fleet
      is the difference between a good recommendation and a costly one. */
+  /* One entry per SITE. `names` holds every way that site is written in an
+     address — a `|` list — and `label` is the first of them, which is what a
+     reader is shown. Two names for one place is not a hypothetical here: the
+     product measures it, says so on /api/optimise, and a charger sits at the
+     exact pair it happens to. */
   get chargingSites() {
     return String(get('CHARGING_SITES', D.CHARGING_SITES) || '')
-      .split(',').map((x) => x.trim()).filter(Boolean);
+      .split(',').map((x) => x.trim()).filter(Boolean)
+      .map((entry) => {
+        const names = entry.split('|').map((n) => n.trim()).filter(Boolean);
+        return { label: names[0], names };
+      })
+      .filter((s2) => s2.names.length);
   },
   // Other live pollers (Uber online/on-trip status, FMS live) — lighter cadence.
   get liveStatusSeconds() { return getInt('LIVE_STATUS_SECONDS', 120); },

@@ -20,7 +20,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
-import { isCharging } from '../api/supply_routes.js';
+import { isCharging, chargingSiteOf } from '../api/supply_routes.js';
 import { config } from '../src/config.js';
 import { SETTING_DEFS, SETTING_DEFAULTS } from '../src/settings.js';
 
@@ -39,16 +39,42 @@ check('…defaulting to the two sites this fleet actually has',
   /Al Garhoud/.test(SETTING_DEFAULTS.CHARGING_SITES)
   && /Dubai Production City/.test(SETTING_DEFAULTS.CHARGING_SITES),
   SETTING_DEFAULTS.CHARGING_SITES);
-check('…and reaching config as a trimmed list',
-  config.chargingSites.length === 2 && config.chargingSites[1] === 'Dubai Production City',
+check('…and reaching config as one entry per site',
+  config.chargingSites.length === 2
+  && config.chargingSites[1].label === 'Dubai Production City',
   JSON.stringify(config.chargingSites));
 
+/* ── one site, written two ways ─────────────────────────────────────────────
+   The strict name match found 95 of production's 1,603 idle hours and marked
+   one row in forty, because the airport's idle is filed under "Dubai Int'l
+   Airport" while the charger is at "Al Garhoud" — the same two names for one
+   place this endpoint already warns about on its area ranking. Twenty rows
+   showing no charger flag, in the very catchment that has one, is worse than
+   no flag at all: it reads as a cleared row. So a site carries the names it
+   is written under, and both are attributed to it. */
+check('a site can declare the names it is written under',
+  config.chargingSites[0].names.length === 2
+  && config.chargingSites[0].names.includes("Dubai Int'l Airport"),
+  JSON.stringify(config.chargingSites[0]));
+check('…and the first of them is the label a reader sees',
+  config.chargingSites[0].label === 'Al Garhoud');
+
 /* ── the match ──────────────────────────────────────────────────────────── */
-const SITES = ['al garhoud', 'dubai production city'];
+const SITES = [
+  { label: 'Al Garhoud', names: ['Al Garhoud', "Dubai Int'l Airport"] },
+  { label: 'Dubai Production City', names: ['Dubai Production City'] },
+];
 check('an exact area name matches', isCharging('Al Garhoud', SITES));
 check('…case-insensitively', isCharging('AL GARHOUD', SITES));
 check('…and a provider that suffixes the country still matches',
   isCharging('Al Garhoud DU, AE', SITES));
+check('an area written under the site\u2019s other name also matches',
+  isCharging("Dubai Int'l Airport", SITES));
+check('…and is attributed to the SITE, not to itself',
+  chargingSiteOf("Dubai Int'l Airport", SITES) === 'Al Garhoud',
+  String(chargingSiteOf("Dubai Int'l Airport", SITES)));
+check('…while a site with one name is attributed to itself',
+  chargingSiteOf('Dubai Production City', SITES) === 'Dubai Production City');
 /* The reason the match is anchored rather than a substring: an area that
    merely CONTAINS the words is a different place, and flagging it would
    excuse idle time that has no charger behind it. */
@@ -57,6 +83,7 @@ check('a different area that merely contains the words does not match',
 check('an unrelated area does not match', !isCharging('Dubai Marina', SITES));
 check('a missing area does not match', !isCharging(null, SITES));
 check('nothing matches when no site is configured', !isCharging('Al Garhoud', []));
+check('…and an unconfigured area names no site', chargingSiteOf('Deira', SITES) === null);
 
 /* ── the route ──────────────────────────────────────────────────────────── */
 /* One plate, four Thursdays. It drops in Al Garhoud (a charging site) at
@@ -86,12 +113,23 @@ const d = (await get('/api/optimise?from=2026-08-01&to=2026-08-31')).body;
 check('the route names the sites it was configured with',
   Array.isArray(d.charging_sites) && d.charging_sites.length === 2,
   JSON.stringify(d.charging_sites));
+/* Lower-cased for matching internally; a page that printed the internal form
+   told the operator about "al garhoud", which is not what they configured. */
+check('…in the casing they were written in, not the casing used to match',
+  d.charging_sites.includes('Al Garhoud'), JSON.stringify(d.charging_sites));
 const garhoud = d.waits.find((w) => w.area === 'Al Garhoud');
 const marina = d.waits.find((w) => w.area === 'Dubai Marina');
-check('a wait in a charging area is flagged', garhoud?.charging_site === true,
-  JSON.stringify(garhoud));
-check('…and a wait anywhere else is not', marina?.charging_site === false,
+check('a wait in a charging area names the site it is on',
+  garhoud?.charging_site === 'Al Garhoud', JSON.stringify(garhoud));
+check('…and a wait anywhere else names none', marina?.charging_site == null,
   JSON.stringify(marina));
+/* Said in the response, not only on the page: a reader of the API sees forty
+   rows and needs to know that two of the names on them are one site. */
+check('the response discloses which sites are written more than one way',
+  (d.charging_aliases || []).some((a) => a.site === 'Al Garhoud'
+    && a.written.includes("Dubai Int'l Airport")), JSON.stringify(d.charging_aliases));
+check('…and a site written one way is not listed as an alias',
+  !(d.charging_aliases || []).some((a) => a.site === 'Dubai Production City'));
 
 /* The central decision. Netting the hours off would make the fleet look more
    efficient than the data can show; leaving them unmarked would make the

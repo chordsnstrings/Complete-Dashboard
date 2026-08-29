@@ -73,7 +73,15 @@ export const SETTING_DEFAULTS = {
   /* The two sites the operator named. Written as they appear in the address
      text, because that is the only handle the trip data gives — there is no
      geofence to match against. */
-  CHARGING_SITES: 'Al Garhoud, Dubai Production City',
+  /* Comma-separated sites; a `|` inside one lists the ways that ONE site is
+     written in trip addresses. Terminal 3's parking stands in Al Garhoud and
+     the two providers address it both ways — a fact this codebase already
+     measures and states on /api/optimise — so a car recorded at "Dubai Int'l
+     Airport" may be sitting on the Al Garhoud charger, and the address text
+     cannot say which. Listing the alias is not a claim that the terminal has
+     its own charger; it is a refusal to pretend the two names are two
+     places. */
+  CHARGING_SITES: "Al Garhoud|Dubai Int'l Airport, Dubai Production City",
 };
 
 // The full catalogue the Settings page renders. `secret:true` values are never returned in clear.
@@ -136,7 +144,7 @@ export const SETTING_DEFS = [
      this list the optimiser reads charging as waste and recommends moving
      the cars away from the only place they can refuel. */
   { key: 'CHARGING_SITES', group: 'Fleet', label: 'Areas with a charging station', secret: false,
-    hint: 'Comma-separated area names as they appear in trip addresses, e.g. Al Garhoud, Dubai Production City' },
+    hint: "Comma-separated area names as they appear in trip addresses. Use | to list the ways one site is written: Al Garhoud|Dubai Int'l Airport" },
 ];
 const DEF_BY_KEY = Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d]));
 

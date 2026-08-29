@@ -173,14 +173,19 @@ export async function renderOptimise(root) {
      without knowing a charger stands in two of them would move the cars away
      from the only place this largely-electric fleet can refuel. */
   if ((opt.charging_sites || []).length) {
+    const alias = (opt.charging_aliases || [])
+      .map((a) => `${a.site} is written ${a.written.map((n) => `“${n}”`).join(' and ')}`)
+      .join('; ');
     w.body.append(note(`${opt.charging_sites.join(' and ')} hold charging stations, so idle `
       + 'time in those rows mixes waiting for work with plugging in — '
       + `${opt.idle_h_at_charging_sites != null ? `${fmt(opt.idle_h_at_charging_sites)} hours ` : ''}`
       + `${opt.idle_h_charging_pct != null ? `(${opt.idle_h_charging_pct}% of all the waiting) ` : ''}`
       + 'sit in an area with one. That is an upper bound: this matches the area '
       + 'written in the address, not a plug event, so it says a charger was '
-      + 'nearby and never that the car was on it. Do not reposition out of a '
-      + 'flagged row without checking the charge plan first.', 'warn'));
+      + `nearby and never that the car was on it.${alias ? ` ${alias}, and rows `
+        + 'under either name are attributed to that one site.' : ''} `
+      + 'Do not reposition out of a flagged row without checking the charge '
+      + 'plan first.', 'warn'));
   }
   const waits = (opt.waits || []).map((r) => ({ ...r, _when: when(r) }));
   if (waits.length) {
@@ -202,7 +207,9 @@ export async function renderOptimise(root) {
          name has to be escaped by hand here. */
       { label: 'Where the car was left', key: 'area',
         render: (r) => (r.charging_site
-          ? `${esc(r.area)} <span class="tag">charger</span>` : esc(r.area)) },
+          ? `${esc(r.area)} <span class="tag">${r.charging_site === r.area
+            ? 'charger' : `charger · ${esc(r.charging_site)}`}</span>`
+          : esc(r.area)) },
       { label: 'Idle hours', key: 'idle_h', num: true, render: (r) => fmt(r.idle_h) },
       { label: 'Handovers', key: 'handovers', num: true, render: (r) => fmt(r.handovers) },
       { label: 'Median wait', key: 'median_wait_min', num: true,
