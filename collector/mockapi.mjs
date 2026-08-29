@@ -1471,6 +1471,73 @@ const EXPORT_COLS = {
    leaves some hours with NO availability, because that is the shape the real
    data has — Uber serves 31 days and nothing older, and an hour nobody
    collected must not draw as an hour with no drivers. */
+/* The optimiser: two areas that are the SAME place under different names, so
+   the page's own warning about that is exercised rather than described. */
+app.get('/api/optimise', (req, r) => {
+  const AREAS = ["Dubai Int'l Airport", 'Al Garhoud', 'Downtown Dubai', 'Dubai Marina',
+    'Business Bay', 'Deira', 'Al Barsha', 'Nakhlat Jumeira'];
+  const slots = [];
+  for (let dow = 0; dow < 7; dow++) {
+    for (const [i, area] of AREAS.entries()) {
+      for (const h of [7, 9, 13, 17, 18, 21]) {
+        const pickups = Math.max(0, Math.round(6 + Math.sin((h + i) / 2) * 5 + (h > 16 ? 6 : 0)));
+        const arrivals = Math.max(0, Math.round(pickups * (i === 0 ? 1.8 : i === 1 ? 0.1 : 0.7)));
+        if (pickups + arrivals < 3) continue;
+        slots.push({ area, dow, h, occurrences: 4, pickups, arrivals,
+          gap: pickups - arrivals, per_occurrence: Math.round((pickups / 4) * 100) / 100,
+          avg_fare: 40 + i * 9 });
+      }
+    }
+  }
+  const movesAll = slots.filter((s) => s.gap > 0 && s.pickups >= 4)
+    .map((s) => ({ ...s, gap_per_occurrence: Math.round((s.gap / s.occurrences) * 100) / 100,
+      weekly: Math.round((s.gap / s.occurrences) * 100) / 100 }))
+    .sort((a, b) => b.gap_per_occurrence - a.gap_per_occurrence);
+  const moves = movesAll.slice(0, 40);
+  const surplusAll = slots.filter((s) => s.gap < 0 && s.arrivals >= 4)
+    .map((s) => ({ ...s, idle_per_occurrence: Math.round((-s.gap / s.occurrences) * 100) / 100 }))
+    .sort((a, b) => b.idle_per_occurrence - a.idle_per_occurrence);
+  const surplus = surplusAll.slice(0, 20);
+  /* Two of the mock's own areas, so the charging caveat is exercised. */
+  const SITES = ['Al Garhoud', 'Dubai Production City'];
+  const waits = [];
+  for (let dow = 0; dow < 7; dow++) {
+    for (const [i, area] of AREAS.entries()) {
+      for (const h of [6, 7, 13, 16, 18]) {
+        waits.push({ area, dow, h,
+          handovers: 3 + ((dow + i + h) % 9),
+          median_wait_min: 35 + ((i * 13 + h * 7) % 110),
+          charging_site: SITES.some((x) => area.toLowerCase() === x.toLowerCase()),
+          idle_h: Math.round((4 + ((dow * 3 + i * 5 + h) % 13)) * 10) / 10 });
+      }
+    }
+  }
+  waits.sort((a, b) => b.idle_h - a.idle_h);
+  const placed = slots.reduce((a, s) => a + s.pickups, 0);
+  const gap = moves.reduce((a, s) => a + Math.max(0, s.gap), 0);
+  r.json({
+    window: [req.query.from || '2026-07-30', req.query.to || '2026-08-29'],
+    areas_seen: AREAS.length, slots_seen: slots.length,
+    placed_bookings: placed, empty_arrivals: gap,
+    empty_arrival_pct: placed ? Math.round((gap / placed) * 1000) / 10 : null,
+    idle_h_between_jobs: Math.round(waits.reduce((a, w) => a + w.idle_h, 0) * 10) / 10,
+    charging_sites: SITES,
+    idle_h_at_charging_sites: Math.round(waits.filter((w) => w.charging_site)
+      .reduce((a, w) => a + w.idle_h, 0) * 10) / 10,
+    idle_h_charging_pct: Math.round((waits.filter((w) => w.charging_site)
+      .reduce((a, w) => a + w.idle_h, 0) / waits.reduce((a, w) => a + w.idle_h, 0)) * 1000) / 10,
+    handovers: waits.reduce((a, w) => a + w.handovers, 0),
+    median_wait_overall: 52,
+    waits: waits.slice(0, 40), moves, surplus, slots,
+    totals: { waits: waits.length, moves: movesAll.length, surplus: surplusAll.length, slots: slots.length },
+    shown: { waits: Math.min(waits.length, 40), moves: moves.length, surplus: surplus.length, slots: slots.length },
+    note: 'An area is the second dash-separated segment of the address text, not a polygon, and '
+      + "two providers can write one place two ways — Terminal 3 is addressed both as Dubai Int'l "
+      + 'Airport and as Al Garhoud. `waits` follows each VEHICLE instead. Gaps over four hours are '
+      + 'excluded as shift ends rather than waiting.',
+  });
+});
+
 app.get('/api/supply/balance', (req, r) => {
   const cells = [];
   for (let dow = 0; dow < 7; dow++) {
@@ -1479,12 +1546,20 @@ app.get('/api/supply/balance', (req, r) => {
       const online = Math.round((4 + Math.sin(h / 3) * 3 + (h > 16 ? 6 : 0)) * 10) / 10;
       const jobs = Math.max(0, Math.round(online * (h > 6 && h < 23 ? 0.9 : 0.1)));
       const onJob = Math.round(jobs * 0.35 * 10) / 10;
-      cells.push({ dow, h, online_h: online, drivers: Math.max(1, Math.round(online / 2)),
+      /* Per OCCURRENCE of the weekday, exactly as the real route answers: a
+         30-day window holds five of two weekdays and four of the rest. The
+         fixture used to omit this, so a page that summed the 168 cells and
+         called the result the window's total looked correct here and was
+         wrong by a factor of four against production. */
+      const occurrences = dow < 2 ? 5 : 4;
+      cells.push({ dow, h, occurrences, online_h: online, drivers: Math.max(1, Math.round(online / 2)),
         on_job_h: onJob, idle_h: Math.round((online - onJob) * 10) / 10, jobs,
+        total_online_h: Math.round(online * occurrences * 10) / 10,
+        total_jobs: jobs * occurrences,
         jobs_per_online_h: online ? Math.round((jobs / online) * 100) / 100 : null });
     }
   }
-  const s = (k) => cells.reduce((a, c) => a + (c[k] || 0), 0);
+  const s = (k) => cells.reduce((a, c) => a + (c[k] || 0) * c.occurrences, 0);
   r.json({
     cells,
     totals: { online_h: Math.round(s('online_h')), on_job_h: Math.round(s('on_job_h')),

@@ -23,7 +23,7 @@ import { launchChromium } from './browser.mjs';
 
 const BASE = process.env.PHONE_BASE || process.env.SMOKE_BASE || 'http://localhost:8099';
 const ROUTES = ['today', 'money', 'people', 'fleet', 'more', 'live', 'safety',
-  'unauthorized', 'sources', 'corporate', 'analyst',
+  'unauthorized', 'sources', 'corporate', 'analyst', 'optimise',
   'driver/drv-0', 'vehicle/L45235',
   /* A sub-page goes to the fallback, which renders a real desktop module —
      the one place the two applications touch. */

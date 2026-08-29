@@ -38,6 +38,7 @@ import { renderEconomics, UNIT_TABS } from './economics.js';
 import { renderPerformers, renderPerformer } from './performers.js';
 import { renderCompare } from './compare.js';
 import { renderSupply } from './supply.js';
+import { renderOptimise } from './optimise.js';
 
 /* Postgres sends a DATE over JSON as a full ISO timestamp, so `d.d` is
    "2026-08-21T00:00:00.000Z" and not "2026-08-21". Passing that straight back
@@ -288,6 +289,7 @@ const VIEWS = [
   { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Decide', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
   { id: 'forecast', label: 'Forecast', ic: '◠', grp: 'Decide', sub: 'What next month looks like, day by day, and how much of that is a guess' },
   { id: 'playbook', label: 'To-do list', ic: '☑', grp: 'Decide', sub: 'What to do this month to earn more — each item with the arithmetic that sized it' },
+  { id: 'optimise', label: 'Optimise', ic: '◎', grp: 'Decide', sub: 'The most trips for the least downtime — when an online hour sells, and where the waiting happens' },
   { id: 'capacity', label: 'Rota gaps', ic: '◫', grp: 'Decide', sub: 'Where next month’s forecast work lands, against who currently covers that hour' },
   { id: 'insights', label: 'Action list', ic: '✦', grp: 'Decide', sub: 'What needs doing, ranked by what it costs to ignore' },
   { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Decide', sub: 'Claims a model proposed and the database judged — with the numbers that decided each one' },
@@ -1325,6 +1327,7 @@ V.trip = async (root) => renderTrip(root, state.param, state.sub);
 V.playbook = async (root) => renderPlaybook(root);
 V.forecast = async (root) => renderForecast(root);
 V.retention = async (root) => renderRetention(root);
+V.optimise = async (root) => renderOptimise(root);
 V.capacity = async (root) => renderCapacity(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */
 V.unit = async (root) => renderEconomics(root);
@@ -3826,7 +3829,9 @@ function pastePanel(root) {
   root.append(p.panel);
 
   const ta = el('textarea');
-  ta.placeholder = 'Paste here. Several credentials at once is fine — separate them with a blank line.';
+  ta.placeholder = 'Paste here. A browser\u2019s "Copy as cURL" works as-is, Windows form included — '
+    + 'the command is read and only the credential inside it is kept. Several at once is fine; '
+    + 'separate them with a blank line.';
   ta.rows = 6;
   ta.style.cssText = 'width:100%;background:var(--paper);border:1px solid var(--rule-strong);'
     + "border-radius:var(--r-sm);padding:10px 12px;font-family:'IBM Plex Mono',monospace;"

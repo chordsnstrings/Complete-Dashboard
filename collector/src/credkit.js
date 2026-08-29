@@ -59,10 +59,51 @@ export function cookieMap(text) {
 }
 
 /** The cookie header out of a pasted curl command, or the text itself. */
-export function cookieText(text) {
+/* Windows cmd, unescaped.
+   ─────────────────────────────────────────────────────────────────────────
+   Chrome's "Copy as cURL (cmd)" is what a Windows operator actually has on
+   the clipboard, and it is not the POSIX form. Every quote arrives as `^"`,
+   every `%` as `^%^`, every `$` as `^$`, and each line ends in a bare `^`
+   continuation:
+
+       -b ^"sid=QA...; utag_main__ss=0^%^3Bexp-session^" ^
+
+   In cmd a caret escapes exactly one following character, so collapsing every
+   `^X` to `X` — after joining the continued lines — restores the original
+   string, `^%^3B` included: the first caret releases the `%`, the second the
+   `3`. A caret that survived as data was written `^^` by the same rule and
+   collapses to one.
+
+   Applied only when the text actually carries `^"`, so a POSIX curl with
+   single quotes, or a bare cookie jar pasted on its own, is left untouched. */
+export function deCmd(text) {
   const s = String(text || '');
-  const m = s.match(/(?:-b|--cookie)\s+'([^']+)'/) || s.match(/cookie:\s*([^\n]+)/i);
+  if (!s.includes('^"')) return s;
+  return s.replace(/\^\r?\n\s*/g, ' ').replace(/\^([\s\S])/g, '$1');
+}
+
+/* The cookie jar out of whatever it arrived inside: a POSIX curl, a Windows
+   curl, a raw `cookie:` header, or the jar on its own. `--cookie`/`-b` is
+   preferred over a `cookie:` header because a curl carrying both puts the
+   real jar in the flag. */
+export function cookieText(text) {
+  const s = deCmd(text);
+  const m = s.match(/(?:^|\s)(?:-b|--cookie)\s+'([^']+)'/)
+    || s.match(/(?:^|\s)(?:-b|--cookie)\s+"((?:[^"\\]|\\.)+)"/)
+    || s.match(/(?:^|\s)(?:-b|--cookie)\s+([^\s'"][^\s]*)/)
+    || s.match(/["\s]cookie:\s*([^"\n]+)/i)
+    || s.match(/cookie:\s*([^\n]+)/i);
   return (m ? m[1] : s).trim();
+}
+
+/* What a pasted curl was calling, which is how a credential that carries no
+   org of its own can still be attributed to a provider. */
+export function curlUrl(text) {
+  const s = deCmd(text);
+  const m = s.match(/(?:--url|curl)\s+"(https?:\/\/[^"\s]+)"/)
+    || s.match(/(?:--url|curl)\s+'(https?:\/\/[^'\s]+)'/)
+    || s.match(/(?:--url|curl)\s+(https?:\/\/\S+)/);
+  return m ? m[1] : null;
 }
 
 /* ── the recognisers ───────────────────────────────────────────────────── */
@@ -195,5 +236,12 @@ export function recognise(text) {
     model is asked about, and what a person is shown when it cannot help. */
 export function unrecognised(text) {
   const named = new Set(recognise(text).map((f) => f.value));
-  return splitBlocks(text).filter((b) => ![...named].some((v) => b.includes(v.slice(0, 40))));
+  /* Compared against the DE-ESCAPED block. A Windows curl's jar is read
+     through deCmd, so its value never appears literally in the raw text, and
+     an already-recognised paste would otherwise be handed to the model a
+     second time as if nothing had understood it. */
+  return splitBlocks(text).filter((b) => {
+    const plain = deCmd(b);
+    return ![...named].some((v) => b.includes(v.slice(0, 40)) || plain.includes(v.slice(0, 40)));
+  });
 }

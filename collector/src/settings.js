@@ -70,6 +70,10 @@ export const SETTING_DEFAULTS = {
   ANALYST_MODEL: 'MiniMax-M3',
   BACKFILL_MONTHS: '12',
   INCREMENTAL_DAYS: '3',
+  /* The two sites the operator named. Written as they appear in the address
+     text, because that is the only handle the trip data gives — there is no
+     geofence to match against. */
+  CHARGING_SITES: 'Al Garhoud, Dubai Production City',
 };
 
 // The full catalogue the Settings page renders. `secret:true` values are never returned in clear.
@@ -124,6 +128,15 @@ export const SETTING_DEFS = [
   { key: 'CABMAN_CRON', group: 'Collector', label: 'CABMAN schedule (cron)', secret: false },
   { key: 'UBER_TIMELINE_CRON', group: 'Collector', label: 'Uber driver-timeline schedule (cron)', secret: false,
     hint: 'One request per working driver per run — three-hourly by default' },
+
+  /* Not a credential — a fact about the fleet that changes what a number
+     MEANS. A car parked for fifty minutes at a place with a charger is not
+     necessarily waiting for work; it may be plugged in, which for a fleet
+     that is 44% electric is a large share of its measured downtime. Without
+     this list the optimiser reads charging as waste and recommends moving
+     the cars away from the only place they can refuel. */
+  { key: 'CHARGING_SITES', group: 'Fleet', label: 'Areas with a charging station', secret: false,
+    hint: 'Comma-separated area names as they appear in trip addresses, e.g. Al Garhoud, Dubai Production City' },
 ];
 const DEF_BY_KEY = Object.fromEntries(SETTING_DEFS.map((d) => [d.key, d]));
 

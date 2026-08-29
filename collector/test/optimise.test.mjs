@@ -134,5 +134,61 @@ check('the wait is measured from drop-off to the next pick-up',
   bay?.median_wait_min === 40, JSON.stringify(bay));
 check('…and the note says a shift end is not a wait', /shift end/.test(d.note || ''));
 
+/* Every ranking on this endpoint is a head, not a census. Forty rows out of
+   forty and forty rows out of six hundred are different claims, and the
+   reader cannot tell them apart from the rows alone. */
+check('each capped ranking names the population it was cut from',
+  d.totals && typeof d.totals.waits === 'number' && typeof d.totals.moves === 'number'
+  && typeof d.totals.surplus === 'number', JSON.stringify(d.totals));
+check('…and says how many of them it actually sent',
+  d.shown && d.shown.waits === d.waits.length && d.shown.moves === d.moves.length
+  && d.shown.surplus === d.surplus.length, JSON.stringify(d.shown));
+check('…with the population never smaller than the slice',
+  d.totals.waits >= d.waits.length && d.totals.moves >= d.moves.length
+  && d.totals.surplus >= d.surplus.length);
+
+/* ── The per-occurrence trap ───────────────────────────────────────────────
+   /api/supply/balance answers 168 cells that are each an average PER
+   OCCURRENCE of that weekday, which is the only way a Tuesday and a Thursday
+   are comparable in a window holding five of one and four of the other. The
+   sum of those 168 cells is therefore about one WEEK of hours, not the
+   window's total — and the Optimise page printed that sum as "online hours
+   measured" and sized its trip upside against it, understating both by
+   roughly four times on a 30-day window. The percentages survived, because
+   they were ratios of two equally-shrunken numbers; the counts a board would
+   read did not.
+
+   The route already answers the honest totals. This pins the gap between the
+   two so a page cannot quietly go back to summing cells. */
+/* Availability, so the balance route has something to divide. August 2026
+   opens on a Saturday, so the window holds five Sundays (2, 9, 16, 23, 30)
+   and four Thursdays (6, 13, 20, 27) — an uneven count, which is the whole
+   reason the route answers per-occurrence averages and the reason summing
+   its cells cannot be the window's total. */
+const online = (day, from, to) => q(
+  `INSERT INTO driver_timeline_event (platform, fleet_id, driver_ext_id, at, kind, status, state)
+   VALUES ('uber','ecosine','d1', $1::timestamptz, 'status', $2, ''),
+          ('uber','ecosine','d1', $3::timestamptz, 'status', 'OFFLINE', '')`,
+  [`2026-08-${String(day).padStart(2, '0')}T${String(from).padStart(2, '0')}:00:00+04`, 'ONLINE',
+    `2026-08-${String(day).padStart(2, '0')}T${String(to).padStart(2, '0')}:00:00+04`]);
+for (const d of [2, 9, 16, 23, 30]) await online(d, 8, 12);   // five Sundays
+for (const d of [6, 13, 20, 27]) await online(d, 8, 12);      // four Thursdays
+
+const bal = (await get('/api/supply/balance?from=2026-08-01&to=2026-08-31')).body;
+check('the balance route answers window totals, not just cells',
+  bal.totals && bal.totals.online_h > 0, JSON.stringify(bal.totals));
+check('…and every cell says how many times its weekday occurred',
+  bal.cells.length > 0 && bal.cells.every((c) => Number(c.occurrences) > 0));
+const cellSum = bal.cells.reduce((a, c) => a + Number(c.online_h || 0), 0);
+const scaled = bal.cells.reduce((a, c) => a + Number(c.online_h || 0) * Number(c.occurrences), 0);
+check('…so summing the cells is NOT the window total',
+  Math.round(scaled) > Math.round(cellSum), `${Math.round(cellSum)} vs ${Math.round(scaled)}`);
+check('…and multiplying each cell back out reproduces it',
+  Math.abs(scaled - Number(bal.totals.online_h)) <= Math.max(2, Number(bal.totals.online_h) * 0.01),
+  `${Math.round(scaled)} vs ${bal.totals.online_h}`);
+check('…the jobs total agrees with the same reconstruction',
+  Math.abs(bal.cells.reduce((a, c) => a + Number(c.jobs || 0) * Number(c.occurrences), 0)
+    - Number(bal.totals.jobs)) <= Math.max(2, Number(bal.totals.jobs) * 0.01));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

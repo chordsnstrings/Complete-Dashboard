@@ -526,6 +526,12 @@ Rules you must follow exactly:
   them: a claim about 34 trips survives measurement far less often than one about 3,400.
 - Do not propose anything the brief does not contain the numbers for. In particular, the Uber
   trip export has NO fare, so no claim about Uber money is checkable.
+- The fleet is largely electric and has charging stations in these areas: {CHARGING_SITES}. Idle
+  or dwell time in one of those areas is NOT evidence of a car waiting for work — it mixes
+  waiting with refuelling, and the data cannot separate the two because it matches an address
+  string, not a plug event. Do not claim those areas are over-supplied, and do not propose
+  moving cars out of them. A claim about time spent in a charging area is only useful if it is
+  about something other than idleness.
 - A candidate's record count is over the WHOLE window. Inside a metric's own population it can
   be far smaller — settlement=wallet has thousands of trips and thirteen with a fare on them,
   because Uber publishes no fare. Check metric_coverage before pairing a metric with a segment
@@ -566,9 +572,15 @@ export async function propose(brief) {
     return { proposals: [], rejected: [{ reason: 'no model configured' }],
       model: null, outcome: 'no_model', error: 'no ANALYST_API_KEY is set for the component that runs the analyst' };
   }
+  /* A fact about the fleet the numbers cannot carry. Without it the model
+     reads a charging session as an over-supplied area and proposes moving the
+     cars away from the only place they can refuel — which the measurement
+     would then confirm, because the dwell time is real. */
+  const sites = config.chargingSites;
   const prompt = SYSTEM
     .replace('{METRICS}', Object.keys(METRICS).join(', '))
-    .replace('{DIMENSIONS}', Object.keys(DIMENSIONS).join(', '));
+    .replace('{DIMENSIONS}', Object.keys(DIMENSIONS).join(', '))
+    .replace('{CHARGING_SITES}', sites.length ? sites.join(', ') : 'none recorded');
   /* The call is allowed to fail, and saying so is the whole point.
      ─────────────────────────────────────────────────────────────────────────
      This threw, analystPass caught it, logged it and returned null, and the

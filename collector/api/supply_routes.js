@@ -24,6 +24,27 @@
    already rolled into areas by /api/geo/corridors, and a lat/lng has no area
    without a geocoder we do not run. It is a proxy, and it is named as one. */
 import { areaOf } from './analytics_routes.js';
+import { config } from '../src/config.js';
+
+/* ── charging ─────────────────────────────────────────────────────────────
+   A car standing still for fifty minutes is not automatically waste. This
+   fleet is 44% electric and has chargers at two of the very places the idle
+   ranking puts at the top, so without this the optimiser reads a charging
+   session as downtime and recommends moving the cars away from the only
+   place they can refuel — advice that would cost trips rather than win them.
+
+   It is a NAME match, not a geofence: the trip data gives an address string
+   and nothing else, so this can only say "the area this car was left in
+   contains a charger", never "this car was plugged in". That is a weaker
+   claim and every surface that uses it says so rather than netting the hours
+   off silently. */
+export const chargingSites = () => config.chargingSites.map((x) => x.toLowerCase());
+
+export const isCharging = (area, sites) => {
+  if (!area) return false;
+  const a = String(area).toLowerCase();
+  return sites.some((s) => a === s || a.startsWith(`${s} `) || a.startsWith(`${s},`));
+};
 
 export function supplyRoutes(app, { q, wrap, range, FB }) {
   /* ── when: supply against demand, by weekday and hour ─────────────────── */
@@ -251,7 +272,7 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
        driving in empty most often. Sorted by the gap PER OCCURRENCE, because
        a slot that happens four times in a month and a slot that happens
        thirty times are not the same opportunity at the same total. */
-    const moves = slots
+    const movesAll = slots
       .filter((s2) => s2.gap > 0 && s2.pickups >= 4)
       .map((s2) => ({
         ...s2,
@@ -259,16 +280,16 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
         /* A week's worth, which is the unit a rota is written in. */
         weekly: Math.round((s2.gap / s2.occurrences) * 100) / 100,
       }))
-      .sort((a, b) => b.gap_per_occurrence - a.gap_per_occurrence)
-      .slice(0, 40);
+      .sort((a, b) => b.gap_per_occurrence - a.gap_per_occurrence);
+    const moves = movesAll.slice(0, 40);
 
     /* And the other side of the same coin: where cars land and nothing
        starts. That is where the idle hours are actually being spent. */
-    const surplus = slots
+    const surplusAll = slots
       .filter((s2) => s2.gap < 0 && s2.arrivals >= 4)
       .map((s2) => ({ ...s2, idle_per_occurrence: Math.round((-s2.gap / s2.occurrences) * 100) / 100 }))
-      .sort((a, b) => b.idle_per_occurrence - a.idle_per_occurrence)
-      .slice(0, 20);
+      .sort((a, b) => b.idle_per_occurrence - a.idle_per_occurrence);
+    const surplus = surplusAll.slice(0, 20);
 
     /* The measurement that cannot be fooled by an address book.
        ─────────────────────────────────────────────────────────────────────
@@ -313,13 +334,20 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
          FROM gaps GROUP BY 1, 2, 3 HAVING count(*) >= 3
          ORDER BY sum(wait_min) DESC`, p);
 
+    const sites = chargingSites();
     const waits = chains.map((r) => ({
       area: r.area, dow: num(r.dow), h: num(r.h),
       handovers: num(r.handovers),
       median_wait_min: num(r.median_wait_min),
       idle_h: num(r.idle_h),
+      /* True where the AREA holds a charger, which is not the same as this
+         car having been plugged in. Named `charging_site`, not `charging`,
+         so nothing downstream can read it as a measurement. */
+      charging_site: isCharging(r.area, sites),
     }));
     const totalIdle = waits.reduce((a, x) => a + (x.idle_h || 0), 0);
+    const chargeIdle = waits.filter((x) => x.charging_site)
+      .reduce((a, x) => a + (x.idle_h || 0), 0);
     const totalHandovers = waits.reduce((a, x) => a + x.handovers, 0);
 
     const totalPickups = slots.reduce((a, x) => a + x.pickups, 0);
@@ -335,6 +363,12 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
          jobs, and where. Trips are what a fleet sells; this is what it pays
          for and does not sell. */
       idle_h_between_jobs: Math.round(totalIdle * 10) / 10,
+      /* The share of that idle standing somewhere with a charger. An upper
+         bound on charging, and a floor on how much of the ranking above is
+         about refuelling rather than about waiting for work. */
+      charging_sites: sites,
+      idle_h_at_charging_sites: Math.round(chargeIdle * 10) / 10,
+      idle_h_charging_pct: totalIdle ? Math.round((chargeIdle / totalIdle) * 1000) / 10 : null,
       handovers: totalHandovers,
       median_wait_overall: waits.length
         ? Math.round(waits.reduce((a, x) => a + (x.median_wait_min || 0) * x.handovers, 0)
@@ -346,13 +380,33 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
       moves,
       surplus,
       slots,
+      /* Every ranking above is a head, not a census. A reader who sees forty
+         rows has no way to know whether that is the whole fleet or the worst
+         forty of six hundred, and the difference changes what the ranking
+         means — so each list names the population it was cut from. */
+      totals: {
+        waits: waits.length,
+        moves: movesAll.length,
+        surplus: surplusAll.length,
+        slots: slots.length,
+      },
+      shown: {
+        waits: Math.min(waits.length, 40),
+        moves: moves.length,
+        surplus: surplus.length,
+        slots: slots.length,
+      },
       note: 'An area is the second dash-separated segment of the address text, not a polygon, and '
         + 'two providers can write one place two ways — Terminal 3 is addressed both as Dubai '
         + "Int'l Airport and as Al Garhoud, so `moves` and `surplus` will rank them against each "
         + 'other as though they were different places. `waits` does not have that problem: it '
         + "follows each VEHICLE from one drop-off to its next pick-up, so it measures the car's "
         + 'own idle time without reference to what either place was called. Gaps over four hours '
-        + 'are excluded as shift ends rather than waiting.',
+        + 'are excluded as shift ends rather than waiting. Rows in an area that '
+        + 'holds a charging station are flagged `charging_site`: this fleet is '
+        + 'largely electric, so idle time there is an upper bound that mixes '
+        + 'waiting with refuelling, and it is a name match on the address, not a '
+        + 'geofence and not a plug event.',
     });
   }));
 

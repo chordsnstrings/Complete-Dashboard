@@ -21,7 +21,8 @@ export const TABS = [
   { id: 'fleet', route: 'fleet', label: 'Fleet', ic: '▤', owns: ['fleet', 'vehicles', 'vehicle'] },
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
     owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance',
-      'sources', 'settings', 'corporate', 'analyst', 'property', 'credentials'] },
+      'sources', 'settings', 'corporate', 'analyst', 'property', 'credentials',
+      'optimise'] },
 ];
 
 const WINDOW_NOTE = () => `Last ${state.days} days`
@@ -45,6 +46,7 @@ export function titleFor(view, param) {
     corporate: ['Corporate', 'The hotel channel'],
     credentials: ['Credentials', 'Tested before they are stored'],
     analyst: ['Analyst', 'Claims the data was asked to settle'],
+    optimise: ['Optimise', 'Where the next trip is'],
     insights: ['Action list', 'Built for a bigger screen'],
     compliance: ['Compliance', 'Built for a bigger screen'],
     demand: ['Demand', 'Built for a bigger screen'],
@@ -58,6 +60,7 @@ export function titleFor(view, param) {
    unless something converts it — `round(sum(...)::numeric)` comes back as
    "100733", and "100733" + 0 is a bug waiting for a total. */
 const n = (v) => (v == null || v === '' ? null : Number(v));
+const D3M = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /* ── Today ──────────────────────────────────────────────────────────────── */
 async function today(deck, ctx) {
@@ -466,6 +469,7 @@ async function sources(deck, ctx) {
 async function more(deck) {
   deck.append(el('p', 'm-sec', 'Analyse'));
   rows(deck, [
+    row({ title: 'Optimise', sub: 'where the next trip is', value: '›', to: href('optimise') }),
     row({ title: 'Corporate', sub: 'the hotel channel', value: '›', to: href('corporate') }),
     row({ title: 'Analyst', sub: 'claims the data was asked to settle', value: '›', to: href('analyst') }),
   ]);
@@ -816,6 +820,156 @@ async function credentials(deck, ctx) {
    real desktop module, which exports its renderer and is styled by app.css;
    the rest are pages built around a wide table, and the honest answer for
    those is the desktop build, one tap away and returning to this address. */
+/* ── Optimise ───────────────────────────────────────────────── */
+/* The desktop leads with a 168-cell heatmap. A phone cannot read one, and the
+   person holding the phone is usually deciding one thing: where to be in the
+   next hour. So the same two measurements arrive as two ranked lists — the
+   hours worth being out for, and the place-hours where cars sit — with the
+   week's own numbers, not a shrunken grid. */
+async function optimise(deck, ctx) {
+  skeleton(deck, 4);
+  const [opt, bal] = await Promise.all([
+    q('/api/optimise').catch((e) => ({ error: e.message })),
+    q('/api/supply/balance').catch(() => null),
+  ]);
+  if (!ctx.alive()) return;
+  deck.innerHTML = '';
+  if (opt?.error) { failed(deck, new Error(opt.error)); return; }
+
+  /* A balance cell is PER OCCURRENCE of its weekday, not the window's total —
+     see the desktop page for why. Rates and rankings use the cell; every
+     absolute hour count comes from the route's totals. */
+  const cells = (bal?.cells || []).filter((c) => n(c.online_h) > 5);
+  const occ = (c) => n(c.occurrences) || 1;
+  const T = bal?.totals || null;
+  const onlineH = T ? n(T.online_h) : cells.reduce((a, c) => a + (n(c.online_h) || 0) * occ(c), 0);
+  const jobH = T ? n(T.on_job_h) : cells.reduce((a, c) => a + (n(c.on_job_h) || 0) * occ(c), 0);
+  const idlePct = T && T.idle_pct != null ? Math.round(n(T.idle_pct))
+    : (onlineH ? Math.round(((onlineH - jobH) / onlineH) * 100) : null);
+  const rated = [...cells].sort((a, b) => n(b.jobs_per_online_h) - n(a.jobs_per_online_h));
+  const sorted = rated.map((c) => n(c.jobs_per_online_h)).sort((a, b) => a - b);
+  const med = sorted.length
+    ? (sorted.length % 2 ? sorted[(sorted.length - 1) / 2]
+      : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2)
+    : null;
+  const upside = med == null ? 0
+    : cells.filter((c) => n(c.jobs_per_online_h) < med)
+      .reduce((a, c) => a + (med - n(c.jobs_per_online_h)) * n(c.online_h) * occ(c), 0);
+
+  lede(deck, {
+    claim: idlePct != null ? `${idlePct}% of paid hours are idle`
+      : 'Availability is not being collected yet',
+    sub: idlePct != null
+      ? `${fmt(Math.round(jobH))} of ${fmt(Math.round(onlineH))} online hours went on a job. `
+        + `Median ${opt.median_wait_overall ?? '\u2014'} min between one job and the next.`
+      : 'Idle time cannot be separated from time off until the availability collector writes.',
+    tone: idlePct >= 70 ? 'warn' : null,
+  });
+
+  stats(deck, [
+    { label: 'Idle hours', value: `${fmt(opt.idle_h_between_jobs)} h`,
+      sub: `over ${fmt(opt.handovers)} handovers`, tone: 'warn' },
+    { label: 'Median wait',
+      value: opt.median_wait_overall != null ? `${opt.median_wait_overall} min` : '\u2014',
+      sub: 'drop-off to next pick-up' },
+    { label: 'Extra trips', value: upside ? `+${fmt(Math.round(upside))}` : '\u2014',
+      sub: 'a month, at the fleet median', tone: upside ? 'good' : null },
+  ], true);
+
+  const body = el('div');
+  const bar = el('div');
+  deck.append(bar, body);
+
+  const hours = () => {
+    body.innerHTML = '';
+    if (!rated.length) {
+      empty(body, 'No hour carries enough online time to rank',
+        'Availability has to be collected before an hour can be judged.');
+      return;
+    }
+    const c = card('Worth being out for',
+      'Jobs won per hour online — a rate, so a thin Tuesday with two drivers can out-rank '
+      + 'a busy Friday with twenty.');
+    body.append(c.card);
+    rows(c.body, rated.slice(0, 12).map((r) => ({
+      title: `${D3M[r.dow]} ${String(r.h).padStart(2, '0')}:00`,
+      sub: `${fmt(Math.round(n(r.online_h)))} online h · ${fmt(n(r.jobs))} `
+        + `${n(r.jobs) === 1 ? 'job' : 'jobs'}`,
+      value: n(r.jobs_per_online_h).toFixed(2),
+      note: 'per online h',
+      tone: med != null && n(r.jobs_per_online_h) >= med ? 'good' : null,
+    })));
+    if (med != null) {
+      c.body.append(el('p', 'm-cap',
+        `Fleet median ${med.toFixed(2)}. Every hour above it is the fleet proving to itself `
+        + 'what the hours below it could do.'));
+    }
+    const worst = [...rated].reverse().slice(0, 6);
+    const w = card('Hours that do not pay for themselves',
+      'Same rate, the other end. These are the hours to move drivers OFF, not to staff harder.');
+    body.append(w.card);
+    rows(w.body, worst.map((r) => ({
+      title: `${D3M[r.dow]} ${String(r.h).padStart(2, '0')}:00`,
+      sub: `${fmt(Math.round(n(r.online_h)))} online h · ${fmt(n(r.jobs))} `
+        + `${n(r.jobs) === 1 ? 'job' : 'jobs'}`,
+      value: n(r.jobs_per_online_h).toFixed(2),
+      note: 'per online h',
+      tone: 'bad',
+    })));
+  };
+
+  const places = () => {
+    body.innerHTML = '';
+    const waits = opt.waits || [];
+    if (!waits.length) {
+      empty(body, 'No vehicle completed two bookings here',
+        'A wait needs a drop-off and the same plate picking up again.');
+      return;
+    }
+    const top = waits.slice(0, 15);
+    const c = card('Where the cars are standing',
+      'Each vehicle followed from one drop-off to its next pick-up. This counts a CAR, not an '
+      + 'address, so two providers writing one place two ways cannot distort it.');
+    body.append(c.card);
+    rows(c.body, top.map((r) => ({
+      title: (r.area || 'Unnamed area') + (r.charging_site ? ' \u00b7 charger' : ''),
+      sub: `${D3M[r.dow]} ${String(r.h).padStart(2, '0')}:00 · ${fmt(n(r.handovers))} `
+        + `${n(r.handovers) === 1 ? 'handover' : 'handovers'}`,
+      value: `${fmt(Math.round(n(r.idle_h)))} h`,
+      note: `${fmt(n(r.median_wait_min))} min median`,
+      tone: 'warn',
+    })));
+    const idle = top.reduce((a, r) => a + (n(r.idle_h) || 0), 0);
+    c.body.append(el('p', 'm-cap',
+      `These ${top.length} place-hours hold ${fmt(Math.round(idle))} of the fleet's `
+      + `${fmt(opt.idle_h_between_jobs)} idle hours — `
+      + `${Math.round((idle / Math.max(1, n(opt.idle_h_between_jobs))) * 100)}% of all the waiting, `
+      + `in ${top.length} cells of a 168-cell week`
+      + (opt.totals?.waits > top.length
+        ? `, out of ${fmt(opt.totals.waits)} that had a measurable wait.` : '.')));
+    if ((opt.charging_sites || []).length) {
+      c.body.append(el('p', 'm-cap',
+        `${opt.charging_sites.join(' and ')} hold charging stations. `
+        + `${opt.idle_h_at_charging_sites != null ? `${fmt(opt.idle_h_at_charging_sites)} idle hours ` : 'Some idle time '}`
+        + `${opt.idle_h_charging_pct != null ? `(${opt.idle_h_charging_pct}%) ` : ''}`
+        + 'sit in an area with one, so that time mixes waiting with refuelling. '
+        + 'It matches the address, not a plug — treat it as an upper bound.'));
+    }
+    if (opt.empty_arrival_pct != null) {
+      c.body.append(el('p', 'm-cap',
+        `Separately, ${opt.empty_arrival_pct}% of placeable bookings began in an area where no car `
+        + 'had finished a trip in the hour before.'));
+    }
+  };
+
+  let tab = 'hours';
+  seg(bar, [{ id: 'hours', label: 'When' }, { id: 'places', label: 'Where' }], tab, (id) => {
+    tab = id;
+    (id === 'hours' ? hours : places)();
+  });
+  hours();
+}
+
 async function fallback(deck, ctx) {
   const { view, param, sub } = ctx;
   const box = el('div', 'm-fallback');
@@ -850,7 +1004,7 @@ async function fallback(deck, ctx) {
 
 export const SCREENS = {
   today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more,
-  corporate, analyst, credentials, fallback,
+  corporate, analyst, credentials, optimise, fallback,
   /* A driver or vehicle with no sub-page gets the phone screen; a sub-page
      (`#driver/x/earnings`) is a desktop tab and goes to the fallback, which
      renders the real module. Decided in render() rather than here, because a

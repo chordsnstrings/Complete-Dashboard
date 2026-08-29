@@ -11,7 +11,7 @@
    session, and the only claims that carry meaning are the ones the code reads:
    fleet_owner_id, and supplierOrgUUID.
 */
-import { jwtPayload, cookieMap, cookieText, recognise, splitBlocks } from '../src/credkit.js';
+import { jwtPayload, cookieMap, cookieText, recognise, splitBlocks, unrecognised, deCmd, curlUrl } from '../src/credkit.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -103,6 +103,94 @@ check('a label on its own is not mistaken for a block', splitBlocks('Bolt').leng
    wins half the time. */
 const dupe = recognise([uberJar(ECO_ORG), uberJar(ECO_ORG)].join('\n\n'));
 check('the same key claimed twice refuses BOTH', dupe.length === 2 && dupe.every((f) => !f.ok));
+
+/* ── a curl command, which is what is actually on the clipboard ──────────
+   Nobody copies a cookie jar. They open devtools, right-click the request and
+   choose "Copy as cURL", and what lands is a whole command with the jar
+   buried in a `-b` flag. On Windows that command is cmd-escaped, and the
+   escaping is aggressive enough that the jar is not a cookie jar any more:
+   every quote is `^"`, every `%` is `^%^`, every `$` is `^$`, and the lines
+   are joined by a bare trailing `^`.
+
+   Both forms have to land on the same credential, because the operator has no
+   way to know which one their browser gave them. */
+const posix = (jar) => `curl 'https://supplier.uber.com/chronicle/graphql' \\
+  -H 'accept: */*' \\
+  -b '${jar}' \\
+  -H 'origin: https://supplier.uber.com'`;
+
+/* Escaped exactly as cmd.exe requires, built here rather than pasted so the
+   fixture stays synthetic. */
+const cmdEsc = (v) => String(v).replace(/[%$"{}!^]/g, (c) => (c === '%' ? '^%^' : `^${c}`));
+const wincurl = (jar) => `curl --url ^"https://supplier.uber.com/chronicle/graphql^" ^
+  -H ^"accept: */*^" ^
+  -b ^"${cmdEsc(jar)}^" ^
+  -H ^"origin: https://supplier.uber.com^"`;
+
+const ecoJar = uberJar(ECO_ORG);
+
+check('a POSIX curl yields the jar and nothing else',
+  cookieText(posix(ecoJar)) === ecoJar, cookieText(posix(ecoJar)).slice(0, 60));
+check('…and the flags around it are not swept in',
+  !/-H|--url|curl /.test(cookieText(posix(ecoJar))));
+
+/* The escaping is not cosmetic: a value carrying `%` or `$` comes back wrong
+   if the carets are stripped by a rule that does not understand `^%^`. */
+const trapped = `${ecoJar}; utag_main__ss=0%3Bexp-session; _ga_X=GS2.1$o5$g0`;
+check('a Windows curl unescapes to exactly the same jar',
+  cookieText(wincurl(trapped)) === trapped, cookieText(wincurl(trapped)).slice(-70));
+check('…so a percent-encoded value survives',
+  cookieMap(cookieText(wincurl(trapped))).utag_main__ss === '0%3Bexp-session');
+check('…and a dollar sign survives',
+  cookieMap(cookieText(wincurl(trapped)))._ga_X === 'GS2.1$o5$g0');
+check('no caret is left anywhere in the jar',
+  !cookieText(wincurl(trapped)).includes('^'));
+
+check('the url the curl was calling is read back',
+  curlUrl(wincurl(ecoJar)) === 'https://supplier.uber.com/chronicle/graphql', curlUrl(wincurl(ecoJar)));
+check('…from the POSIX form too',
+  curlUrl(posix(ecoJar)) === 'https://supplier.uber.com/chronicle/graphql');
+
+/* deCmd is a no-op on anything that is not cmd-escaped, so a jar pasted on
+   its own — the original supported form — cannot be damaged by it. */
+check('a bare jar passes through deCmd untouched', deCmd(ecoJar) === ecoJar);
+check('…and a POSIX curl does too', deCmd(posix(ecoJar)) === posix(ecoJar));
+/* A caret that was DATA is written `^^` by cmd, and must come back as one
+   caret — but only inside text that is cmd-escaped at all. A bare jar that
+   happens to contain `^^` is not cmd output and is left exactly as it is,
+   which is why deCmd looks for `^"` before touching anything. */
+check('a literal caret inside a cmd-escaped command comes back as one',
+  deCmd('-b ^"a=1^^2^"') === '-b "a=1^2"', deCmd('-b ^"a=1^^2^"'));
+check('…while the same sequence in a bare jar is left alone',
+  deCmd('a=1^^2') === 'a=1^^2');
+
+/* The point of all of it: the same credential, recognised, on the same key. */
+for (const [name, cmd] of [['POSIX', posix(ecoJar)], ['Windows', wincurl(ecoJar)]]) {
+  const f = recognise(cmd);
+  check(`a ${name} curl is recognised as one credential`, f.length === 1, String(f.length));
+  check(`…named by the org inside it, not by the paste`, f[0]?.key === 'UBER_WEB_COOKIE',
+    String(f[0]?.key));
+  check(`…on the fleet that org belongs to`, f[0]?.fleet === 'ecosine', String(f[0]?.fleet));
+  check(`…storing the jar, not the command`,
+    f[0]?.value === ecoJar, String(f[0]?.value).slice(0, 50));
+}
+
+/* And once it IS recognised, it must not also be handed to the model as
+   something nothing understood — the de-escaped value never appears
+   literally in the escaped text, which is exactly how that regression
+   happens. */
+check('a recognised Windows curl leaves nothing for the model',
+  unrecognised(wincurl(ecoJar)).length === 0);
+check('…while genuinely unknown text is still passed along',
+  unrecognised('SOME_UNKNOWN_TOKEN_' + 'z'.repeat(40)).length === 1);
+
+/* Two fleets, two curls, one paste — the shape an operator actually sends. */
+const both = recognise([wincurl(ecoJar), 'Ecosine', posix(uberJar(EGA_ORG)), 'Egari'].join('\n\n'));
+check('two curls in one paste land on two different keys',
+  both.length === 2 && new Set(both.map((f) => f.key)).size === 2,
+  both.map((f) => f.key).join(','));
+check('…mixing the two curl dialects freely',
+  both.map((f) => f.key).sort().join(',') === 'UBER_WEB_COOKIE,UBER_WEB_COOKIE_EGARI');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
