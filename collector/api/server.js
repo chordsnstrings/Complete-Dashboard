@@ -6,6 +6,10 @@ import { dirname, join } from 'node:path';
 import { pool, migrate } from '../src/db.js';
 import { config } from '../src/config.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
+import { recognise, unrecognised } from '../src/credkit.js';
+import { checkAll } from '../src/credcheck.js';
+import { proposeKeys } from '../src/credmodel.js';
+import { SETTING_DEFS } from '../src/settings.js';
 import { win, winDays } from './window.js';
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
 import { responseCache } from './cache.js';
@@ -1961,6 +1965,90 @@ app.put('/api/settings', requireAdmin, wrap(async (req, res) => {
   }
   await loadSettings(true);
   res.json({ ok: true, updated: done });
+}));
+
+/* Paste whatever the provider gave you.
+   ─────────────────────────────────────────────────────────────────────────
+   The operator's actual workflow is: open the provider's dashboard, open
+   devtools, copy, come here. What they hold is a cookie jar, a bare JWT, or a
+   curl command — and what this app wants is one of twenty-four named keys,
+   half of which come in per-fleet pairs that are indistinguishable by eye.
+   Matching one to the other by hand is a step that adds nothing and goes
+   wrong silently: the Egari cookie on UBER_WEB_COOKIE points the Ecosine
+   collector at another business, and Uber answers happily.
+
+   So the text is read, not interpreted by a person:
+
+     1. recognise()   decodes the identifying field inside each block — Bolt's
+                      fleet_owner_id, Uber's supplierOrgUUID, Yango's Yandex
+                      markers — and names the key exactly, or declines.
+     2. proposeKeys() asks the model about ONLY what was left over, and only
+                      ever sees a redacted silhouette. Its answer is a
+                      candidate, never a decision.
+     3. checkAll()    tries every candidate against its own provider, with the
+                      pasted value in hand and nothing written yet.
+     4. apply         stores the ones that answered, and nothing else.
+
+   Step 3 before step 4 is the whole point. Writing first and discovering on
+   the next tick means the working credential is already gone, fifteen minutes
+   pass, and the dashboard stops updating for a reason nothing on screen
+   explains. `dry_run` stops after step 3 so the operator sees the verdicts
+   before anything moves; it is the default. */
+app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
+  const text = typeof req.body?.text === 'string' ? req.body.text : '';
+  const apply = req.body?.apply === true;
+  if (text.trim().length < 20) {
+    return res.status(400).json({ error: 'nothing to read', detail: 'paste the credential, or upload the file you copied it into' });
+  }
+  await loadSettings();
+
+  const found = recognise(text);
+  /* The model is asked about the leftovers only, and its proposals join the
+     same queue — same live check, same right to be refused. */
+  const leftovers = unrecognised(text);
+  let guessed = [];
+  try {
+    guessed = (await proposeKeys(leftovers)).map((g) => {
+      const def = SETTING_DEFS.find((d) => d.key === g.key);
+      const fleet = /_EGARI$/.test(g.key) ? 'egari' : /_ECOSINE$/.test(g.key) ? 'ecosine' : null;
+      return {
+        provider: def?.group || 'unknown', key: g.key, fleet, ok: true,
+        value: leftovers[g.index], source: 'model', confidence: g.confidence,
+        why: `${g.why} (proposed by the model, not read from the credential)`,
+      };
+    });
+  } catch { /* an absent model is one less step, not an error */ }
+
+  const candidates = [...found.map((f) => ({ ...f, source: 'recognised' })), ...guessed];
+  const tested = await checkAll(candidates);
+
+  const applied = [];
+  if (apply) {
+    for (const t of tested) {
+      if (t.verdict !== 'pass' || !t.key) continue;
+      await setSetting(t.key, t.value);
+      applied.push(t.key);
+    }
+    if (applied.length) await loadSettings(true);
+  }
+
+  /* The value never comes back out. A page that echoes a credential is a page
+     that puts it in a browser cache, a screenshot and a support ticket. */
+  res.json({
+    ok: true,
+    applied,
+    dry_run: !apply,
+    unread: leftovers.length - guessed.length,
+    proposals: tested.map((t) => ({
+      provider: t.provider, key: t.key, fleet: t.fleet || null,
+      source: t.source, confidence: t.confidence || null,
+      verdict: t.verdict, detail: t.detail, why: t.why,
+      expires_at: t.expires_at || null,
+      account: t.account || null, org_uuid: t.org_uuid || null,
+      chars: t.value ? String(t.value).length : 0,
+      applied: applied.includes(t.key),
+    })),
+  });
 }));
 
 // trigger a collector run on demand (backfill/incremental) — the worker owns scheduling,

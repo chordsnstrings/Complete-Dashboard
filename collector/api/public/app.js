@@ -3806,7 +3806,128 @@ V.sources = async (root) => {
   rawBar.querySelector('#rawWin').onchange = () => drawRaw(rawBar.querySelector('#rawSrc').value, rawWin());
 };
 
+/* Paste whatever the provider gave you.
+   ─────────────────────────────────────────────────────────────────────────
+   The twenty-four boxes below this panel are the right thing to HAVE and the
+   wrong thing to use: the operator arrives holding a cookie jar copied out of
+   devtools, and matching it to a key by hand is a step that adds nothing and
+   goes wrong quietly — this fleet is two businesses on the same providers, and
+   the pairs of keys that separate them differ by a suffix.
+
+   So this reads the paste instead, shows what it found and what each one
+   answered when it was tried against its own provider, and applies only what
+   passed. The dry run is not an extra click for its own sake: it is the
+   difference between an operator seeing "this cookie is for the Egari org"
+   before it lands and finding out from a dashboard that stopped updating. */
+function pastePanel(root) {
+  const p = panel('Paste a credential',
+    'A cookie jar, a token, or the whole curl command — for one provider or several at once. '
+    + 'Nothing is stored until it has been tried against the provider it claims to be from.');
+  root.append(p.panel);
+
+  const ta = el('textarea');
+  ta.placeholder = 'Paste here. Several credentials at once is fine — separate them with a blank line.';
+  ta.rows = 6;
+  ta.style.cssText = 'width:100%;background:var(--paper);border:1px solid var(--rule-strong);'
+    + "border-radius:var(--r-sm);padding:10px 12px;font-family:'IBM Plex Mono',monospace;"
+    + 'font-size:.78rem;line-height:1.5;resize:vertical;color:var(--ink)';
+  p.body.append(ta);
+
+  const bar = el('div', 'btnrow');
+  bar.style.marginTop = '10px';
+  const fileBtn = el('label', 'btn sec');
+  fileBtn.textContent = 'Upload a .txt';
+  fileBtn.style.cursor = 'pointer';
+  const file = el('input');
+  file.type = 'file';
+  file.accept = '.txt,.json,.log,text/plain';
+  file.style.display = 'none';
+  file.onchange = async () => {
+    const f = file.files?.[0];
+    if (f) ta.value = await f.text();
+    file.value = '';
+  };
+  fileBtn.append(file);
+  const readBtn = el('button', 'btn');
+  readBtn.textContent = 'Read and test';
+  const note = el('span', 'note');
+  bar.append(fileBtn, readBtn, note);
+  p.body.append(bar);
+
+  const out = el('div');
+  out.style.marginTop = '14px';
+  p.body.append(out);
+
+  const TONE = { pass: 'good', fail: 'critical', unknown: 'warn' };
+  const post = async (apply) => {
+    const text = ta.value.trim();
+    if (text.length < 20) { note.textContent = 'Nothing to read yet.'; return; }
+    readBtn.disabled = true;
+    note.textContent = apply ? 'Applying…' : 'Reading, and asking each provider…';
+    out.innerHTML = '';
+    let d;
+    try {
+      d = await api('/api/settings/paste', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...(state.admin ? { 'x-admin-token': state.admin } : {}) },
+        body: JSON.stringify({ text, apply }),
+      });
+    } catch (e) {
+      note.textContent = '';
+      out.append(note(`Could not read that: ${e.message}`, 'err'));
+      readBtn.disabled = false;
+      return;
+    }
+    readBtn.disabled = false;
+    note.textContent = '';
+    out.innerHTML = '';
+
+    if (!d.proposals.length) {
+      out.append(note('Nothing in that paste looked like a credential this dashboard stores.', 'warn'));
+      return;
+    }
+    out.append(tableFrom(d.proposals, [
+      { label: 'Provider', key: 'provider' },
+      { label: 'Goes to', key: 'key',
+        render: (r) => (r.key ? `<code>${esc(r.key)}</code>` : '<span class="ent-off">could not be named</span>') },
+      { label: 'Fleet', key: 'fleet', render: (r) => esc(r.fleet || '—') },
+      { label: 'Read from', key: 'source',
+        render: (r) => (r.source === 'recognised'
+          ? 'the credential itself'
+          : `<span title="a model's guess, tested like any other">the model · ${esc(r.confidence || '')}</span>`) },
+      { label: 'Provider says', key: 'verdict',
+        render: (r) => pill(r.verdict === 'pass' ? 'accepted'
+          : r.verdict === 'unknown' ? 'could not ask' : 'refused', TONE[r.verdict] || null) },
+      { label: 'Expires', key: 'expires_at', render: (r) => (r.expires_at ? dtStr(r.expires_at) : '—') },
+      { label: 'Detail', key: 'detail', render: (r) => esc(r.detail || r.why || '') },
+    ]));
+
+    const good = d.proposals.filter((r) => r.verdict === 'pass');
+    if (d.applied?.length) {
+      out.append(note(`Stored ${d.applied.join(', ')}. The collector picks these up on its next tick — `
+        + 'no redeploy.', 'ok'));
+    } else if (good.length) {
+      const go = el('button', 'btn');
+      go.textContent = `Apply the ${good.length} the provider accepted`;
+      go.style.marginTop = '12px';
+      go.onclick = () => post(true);
+      out.append(go);
+      if (good.length < d.proposals.length) {
+        out.append(note(`${d.proposals.length - good.length} will not be applied — a credential the `
+          + 'provider refused would replace one that works.', 'warn'));
+      }
+    } else {
+      out.append(note('None of these were accepted, so nothing has been changed.', 'err'));
+    }
+    if (d.unread) {
+      out.append(note(`${d.unread} block${d.unread > 1 ? 's' : ''} could not be identified at all.`, 'warn'));
+    }
+  };
+  readBtn.onclick = () => post(false);
+}
+
 V.settings = async (root) => {
+  pastePanel(root);
   const auth = panel('Admin access', 'Changes require the admin token configured on the server'); root.append(auth.panel);
   const tokRow = el('div', 'btnrow');
   tokRow.innerHTML = `<input id="admTok" type="password" placeholder="admin token" style="flex:1;min-width:220px;background:var(--paper);border:1px solid var(--rule-strong);border-radius:3px;padding:8px 10px;font-family:'IBM Plex Mono';font-size:.8rem" value="${esc(state.admin)}">

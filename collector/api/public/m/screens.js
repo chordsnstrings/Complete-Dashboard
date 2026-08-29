@@ -21,7 +21,7 @@ export const TABS = [
   { id: 'fleet', route: 'fleet', label: 'Fleet', ic: '▤', owns: ['fleet', 'vehicles', 'vehicle'] },
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
     owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance',
-      'sources', 'settings', 'corporate', 'analyst', 'property'] },
+      'sources', 'settings', 'corporate', 'analyst', 'property', 'credentials'] },
 ];
 
 const WINDOW_NOTE = () => `Last ${state.days} days`
@@ -43,6 +43,7 @@ export function titleFor(view, param) {
     /* Named, even where the screen is the fallback: a header reading
        "insights" is the router's word for the page, not the product's. */
     corporate: ['Corporate', 'The hotel channel'],
+    credentials: ['Credentials', 'Tested before they are stored'],
     analyst: ['Analyst', 'Claims the data was asked to settle'],
     insights: ['Action list', 'Built for a bigger screen'],
     compliance: ['Compliance', 'Built for a bigger screen'],
@@ -474,6 +475,7 @@ async function more(deck) {
     row({ title: 'Safety', sub: 'harsh-driving events', value: '›', to: href('safety') }),
     row({ title: 'Unauthorized trips', sub: 'moved with no booking', value: '›', to: href('unauthorized') }),
     row({ title: 'Data sources', sub: 'collector health', value: '›', to: href('sources') }),
+    row({ title: 'Paste a credential', sub: 'read, tested, then stored', value: '›', to: href('credentials') }),
   ]);
   deck.append(el('p', 'm-sec', 'On the desktop'));
   rows(deck, ['insights', 'compliance', 'demand', 'map', 'settings'].map((v) => row({
@@ -733,6 +735,81 @@ async function analyst(deck, ctx) {
   }
 }
 
+/* ── paste a credential ─────────────────────────────────────────────────
+   On a phone this is not a devtools workflow — it is the one where somebody
+   sends you a token and you want it in before the collector's next tick,
+   standing somewhere that is not a desk. Same endpoint as the desktop panel,
+   same rule: nothing is stored until the provider has accepted it. */
+async function credentials(deck, ctx) {
+  const c = card('Paste a credential',
+    'A cookie jar, a token, or a whole curl command. It is tried against the provider before anything is stored.');
+  deck.append(c.card);
+
+  const ta = el('textarea');
+  ta.rows = 6;
+  ta.placeholder = 'Paste here — several at once is fine, separated by a blank line.';
+  ta.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--rule);'
+    + "border-radius:11px;padding:11px 12px;font-family:'IBM Plex Mono',monospace;font-size:.76rem;"
+    + 'line-height:1.5;resize:vertical;color:var(--ink);-webkit-appearance:none';
+  c.body.append(ta);
+
+  const btn = el('button', 'm-chip');
+  btn.type = 'button';
+  btn.textContent = 'Read and test';
+  btn.style.cssText = 'margin-top:10px;min-height:40px;padding:9px 16px';
+  c.body.append(btn);
+
+  const out = el('div');
+  deck.append(out);
+
+  const post = async (apply) => {
+    const text = ta.value.trim();
+    if (text.length < 20) return;
+    btn.disabled = true;
+    btn.textContent = apply ? 'Applying…' : 'Asking each provider…';
+    out.innerHTML = '';
+    let d;
+    try {
+      d = await api('/api/settings/paste', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ text, apply }),
+      });
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Read and test';
+      failed(out, e);
+      return;
+    }
+    if (!ctx.alive()) return;
+    btn.disabled = false; btn.textContent = 'Read and test';
+    out.innerHTML = '';
+    if (!d.proposals.length) {
+      empty(out, 'Nothing recognised', 'No part of that looked like a credential this dashboard stores.');
+      return;
+    }
+    rows(out, d.proposals.map((r) => row({
+      title: r.key || 'could not be named',
+      sub: `${r.provider}${r.fleet ? ` \u00b7 ${r.fleet}` : ''} \u00b7 ${r.detail || r.why || ''}`,
+      value: r.verdict === 'pass' ? 'accepted' : r.verdict === 'unknown' ? 'no answer' : 'refused',
+      tone: r.verdict === 'pass' ? 'good' : r.verdict === 'unknown' ? 'warn' : 'critical',
+    })));
+    const good = d.proposals.filter((r) => r.verdict === 'pass');
+    if (d.applied?.length) {
+      out.append(el('div', 'm-stale', `Stored ${d.applied.join(', ')} — live on the collector's next tick.`));
+    } else if (good.length) {
+      const go = el('button', 'm-chip');
+      go.type = 'button';
+      go.textContent = `Apply the ${good.length} that were accepted`;
+      go.style.cssText = 'margin-top:12px;min-height:40px;padding:9px 16px';
+      go.onclick = () => post(true);
+      const wrap = el('div');
+      wrap.style.cssText = 'display:flex;justify-content:center';
+      wrap.append(go);
+      out.append(wrap);
+    }
+  };
+  btn.onclick = () => post(false);
+}
+
 /* ── the fallback ───────────────────────────────────────────────────────
    A route this app has no screen for still has to resolve: an address someone
    sent to a phone must not dead-end. A driver or vehicle SUB-page renders the
@@ -773,7 +850,7 @@ async function fallback(deck, ctx) {
 
 export const SCREENS = {
   today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more,
-  corporate, analyst, fallback,
+  corporate, analyst, credentials, fallback,
   /* A driver or vehicle with no sub-page gets the phone screen; a sub-page
      (`#driver/x/earnings`) is a desktop tab and goes to the fallback, which
      renders the real module. Decided in render() rather than here, because a
