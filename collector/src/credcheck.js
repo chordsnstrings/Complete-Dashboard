@@ -92,16 +92,31 @@ async function checkYango({ value }) {
   if (!config.yango.parkId || !config.yango.apiKey) {
     return { verdict: 'unknown', detail: 'YANGO_PARK_ID and YANGO_API_KEY must be set before a cookie can be tested' };
   }
+  /* The endpoint the COLLECTOR calls, with the headers it sends.
+     ─────────────────────────────────────────────────────────────────────
+     A check that picks its own endpoint tests its own choice. The first
+     version of this asked /api/v1/parks/orders/list and got a 403 for a
+     cookie the collector was using successfully at that moment — a false
+     failure, which is the one outcome worse than no check: it tells an
+     operator to go and re-capture a session that is fine. */
+  const day = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
   try {
-    const { data, status } = await http(`${config.yango.base}/api/v1/parks/orders/list`, {
+    const { data, status } = await http(`${config.yango.base}/api/reports-api/v1/orders/list`, {
       method: 'POST', timeoutMs: 30000, retries: 0,
       headers: {
         'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
         'content-type': 'application/json', 'Accept-Language': 'en', cookie: value,
       },
-      body: JSON.stringify({ query: { park: { id: config.yango.parkId } }, limit: 1 }),
+      body: JSON.stringify({
+        date_type: 'booked_at',
+        date_from: `${day(1)}T00:00:00+04:00`, date_to: `${day(0)}T23:59:59+04:00`,
+      }),
     });
     if (status === 401 || status === 403) return verdict(false, `the fleet portal refused this session (${status})`);
+    /* `orders` present — even empty — is the portal answering as this park. */
+    if (data && typeof data === 'object' && Array.isArray(data.orders)) {
+      return verdict(true, `the fleet portal answered for park ${config.yango.parkId}`);
+    }
     if (data && typeof data === 'object') return verdict(true, 'the fleet portal answered with this session');
     return verdict(false, String(status || 'no answer').slice(0, 200));
   } catch (e) {

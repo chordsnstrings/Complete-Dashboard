@@ -65,6 +65,15 @@ check('the check uses the CANDIDATE value, not the stored one',
   /cookie: value/.test(chk) && /refresh_token: value/.test(chk));
 check('the Uber check is scoped to the org the credential itself declared',
   /orgId: \{ uuid: \{ value: org_uuid \} \}/.test(chk));
+/* A check that picks its own endpoint tests its own choice. The Yango check
+   asked a path the collector never calls and returned a false failure for a
+   cookie that was working — which is worse than no check, because it sends an
+   operator to re-capture a session that is fine. */
+for (const [name, path] of [['Yango', '/api/reports-api/v1/orders/list']]) {
+  check(`the ${name} check calls the endpoint the collector calls`, chk.includes(path));
+}
+check('…and that path is really the collector\'s',
+  readFileSync('src/sources/yango.js', 'utf8').includes('/api/reports-api/v1/orders/list'));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
