@@ -161,6 +161,134 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
   }));
 
   /* ── where: how long the wait is after a dropoff in each area ──────────── */
+  /* Where the cars should BE, and when.
+     ─────────────────────────────────────────────────────────────────────
+     /api/supply/balance answers WHEN the fleet is over-supplied and
+     /api/supply/areas answers WHERE a driver waits, and neither answers the
+     question the operator actually has, which is both at once: at 17:00 on a
+     Thursday, which areas are producing work that no car is already standing
+     in?
+
+     The join that makes it answerable is arrivals against departures in the
+     SAME place one hour apart. A trip that ends in an area leaves a car
+     there; a trip that starts in that area an hour later can use it. Where
+     departures exceed the arrivals before them, the difference is cars
+     driving in empty — which is the deadhead the corporate page already
+     measures, here attributed to a place and an hour so it can be pre-empted
+     rather than reported.
+
+     Three things this is careful not to claim:
+
+       · the area is parsed from address text, the same second dash-separated
+         segment /api/geo/corridors uses. It is a community, not a polygon,
+         and rows whose address does not carry one are excluded rather than
+         bucketed into a fake area that would then rank.
+       · a car that ended a trip in an area may have left it for reasons this
+         cannot see. The arrival count is an UPPER bound on cars available,
+         so the gap it implies is a lower bound — the honest direction.
+       · bookings only. An FMS row is the tracker's record of a journey a ride
+         platform already reported, and counting it would double every place. */
+  app.get('/api/optimise', wrap(async (req, res) => {
+    const p = range(req);
+    const rows = await q(
+      `WITH t AS (
+         SELECT requested_at AT TIME ZONE 'Asia/Dubai' AS s,
+                ended_at AT TIME ZONE 'Asia/Dubai' AS e,
+                ${areaOf('pickup_addr')} AS from_area,
+                ${areaOf('dropoff_addr')} AS to_area,
+                price
+           FROM trip_norm
+          WHERE ${FB} AND is_booking),
+       pick AS (
+         SELECT from_area AS area, extract(dow FROM s)::int AS dow,
+                extract(hour FROM s)::int AS h, count(*)::int AS pickups,
+                round(avg(price)::numeric, 1) AS avg_fare
+           FROM t WHERE from_area IS NOT NULL GROUP BY 1, 2, 3),
+       /* Shifted an hour forward: a car that arrives at 16:00 is the car
+          available to a 17:00 booking, and comparing the two hours as if they
+          were the same one understates every evening peak. */
+       arrive AS (
+         SELECT to_area AS area, extract(dow FROM e + interval '1 hour')::int AS dow,
+                extract(hour FROM e + interval '1 hour')::int AS h, count(*)::int AS arrivals
+           FROM t WHERE to_area IS NOT NULL AND e IS NOT NULL GROUP BY 1, 2, 3),
+       /* How many times this weekday-hour happened in the window, so a slot
+          is a RATE rather than a count that rewards the longer window. */
+       occ AS (
+         SELECT extract(dow FROM g)::int AS dow, extract(hour FROM g)::int AS h,
+                count(*)::int AS occurrences
+           FROM generate_series($1::timestamptz AT TIME ZONE 'Asia/Dubai',
+                                $2::timestamptz AT TIME ZONE 'Asia/Dubai',
+                                interval '1 hour') AS g
+          GROUP BY 1, 2)
+       SELECT coalesce(p.area, a.area) AS area,
+              coalesce(p.dow, a.dow) AS dow, coalesce(p.h, a.h) AS h,
+              coalesce(p.pickups, 0) AS pickups,
+              coalesce(a.arrivals, 0) AS arrivals,
+              p.avg_fare,
+              o.occurrences
+         FROM pick p
+         FULL OUTER JOIN arrive a ON a.area = p.area AND a.dow = p.dow AND a.h = p.h
+         LEFT JOIN occ o ON o.dow = coalesce(p.dow, a.dow) AND o.h = coalesce(p.h, a.h)
+        WHERE coalesce(p.pickups, 0) + coalesce(a.arrivals, 0) >= 3
+        ORDER BY coalesce(p.pickups, 0) DESC`, p);
+
+    const num = (v) => (v == null ? null : Number(v));
+    const slots = rows.map((r) => {
+      const occ = Math.max(1, num(r.occurrences) || 1);
+      const pickups = num(r.pickups) || 0;
+      const arrivals = num(r.arrivals) || 0;
+      return {
+        area: r.area, dow: num(r.dow), h: num(r.h), occurrences: occ,
+        pickups, arrivals,
+        /* Positive: work starts here that no car was already standing in. */
+        gap: pickups - arrivals,
+        per_occurrence: Math.round((pickups / occ) * 100) / 100,
+        avg_fare: num(r.avg_fare),
+      };
+    });
+
+    /* The ranking the board asks for: the place-hours where the fleet is
+       driving in empty most often. Sorted by the gap PER OCCURRENCE, because
+       a slot that happens four times in a month and a slot that happens
+       thirty times are not the same opportunity at the same total. */
+    const moves = slots
+      .filter((s2) => s2.gap > 0 && s2.pickups >= 4)
+      .map((s2) => ({
+        ...s2,
+        gap_per_occurrence: Math.round((s2.gap / s2.occurrences) * 100) / 100,
+        /* A week's worth, which is the unit a rota is written in. */
+        weekly: Math.round((s2.gap / s2.occurrences) * 100) / 100,
+      }))
+      .sort((a, b) => b.gap_per_occurrence - a.gap_per_occurrence)
+      .slice(0, 40);
+
+    /* And the other side of the same coin: where cars land and nothing
+       starts. That is where the idle hours are actually being spent. */
+    const surplus = slots
+      .filter((s2) => s2.gap < 0 && s2.arrivals >= 4)
+      .map((s2) => ({ ...s2, idle_per_occurrence: Math.round((-s2.gap / s2.occurrences) * 100) / 100 }))
+      .sort((a, b) => b.idle_per_occurrence - a.idle_per_occurrence)
+      .slice(0, 20);
+
+    const totalPickups = slots.reduce((a, x) => a + x.pickups, 0);
+    const totalGap = moves.reduce((a, x) => a + Math.max(0, x.gap), 0);
+    res.json({
+      window: [p[0], p[1]],
+      areas_seen: new Set(slots.map((x) => x.area)).size,
+      slots_seen: slots.length,
+      placed_bookings: totalPickups,
+      empty_arrivals: totalGap,
+      empty_arrival_pct: totalPickups ? Math.round((totalGap / totalPickups) * 1000) / 10 : null,
+      moves,
+      surplus,
+      slots,
+      note: 'An area is the second dash-separated segment of the address text, not a polygon. '
+        + 'Arrivals are counted in the hour AFTER a trip ended, because that is the car a booking '
+        + 'in the next hour can use, and they are an upper bound on cars present — so the gap is '
+        + 'a floor, not an estimate.',
+    });
+  }));
+
   app.get('/api/supply/areas', wrap(async (req, res) => {
     const p = range(req);
     const rows = await q(
