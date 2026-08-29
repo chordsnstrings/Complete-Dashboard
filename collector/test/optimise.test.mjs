@@ -109,7 +109,30 @@ check('and the share arriving empty is a real fraction of what was placed',
   d.empty_arrivals === 32 && d.empty_arrival_pct === 80,
   `${d.empty_arrivals} / ${d.placed_bookings} = ${d.empty_arrival_pct}%`);
 check('the note says an area is parsed text, not a polygon', /not a polygon/.test(d.note || ''));
-check('…and that the gap is a floor', /floor/.test(d.note || ''));
+/* The trap this endpoint walked into on real data: Terminal 3 is addressed
+   both as "Dubai Int'l Airport" and as "Al Garhoud", so the area arithmetic
+   ranked one as the fleet's worst shortfall and the other as its largest
+   surplus — for every hour of every day. "Move the cars from the airport to
+   the airport". The note has to say so, because a reader who does not know
+   that will act on the ranking. */
+check('…and warns that one place can be written two ways',
+  /two ways|two different ways/.test(d.note || ''), d.note);
+check('…naming the pair it actually happened to', /Al Garhoud/.test(d.note || ''));
+
+/* Which is why the vehicle-linked measurement exists: it follows a CAR from
+   one drop-off to its next pick-up, so what the places were called does not
+   enter into it. */
+check('a vehicle-linked idle figure is reported', typeof d.idle_h_between_jobs === 'number',
+  String(d.idle_h_between_jobs));
+check('…with the handovers it is averaged over', d.handovers > 0, String(d.handovers));
+check('…and it is the same one car, in order', Array.isArray(d.waits));
+/* One plate, four Thursdays, trips at 16:00 and 17:00 — the 16:00 job ends at
+   16:30 and the next starts at 17:10, so forty minutes of waiting, four
+   times, in whatever area the 16:00 job ended in. */
+const bay = d.waits.find((w) => w.area === 'Deira' && w.h === 16);
+check('the wait is measured from drop-off to the next pick-up',
+  bay?.median_wait_min === 40, JSON.stringify(bay));
+check('…and the note says a shift end is not a wait', /shift end/.test(d.note || ''));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

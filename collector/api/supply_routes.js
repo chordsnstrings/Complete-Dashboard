@@ -270,6 +270,58 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
       .sort((a, b) => b.idle_per_occurrence - a.idle_per_occurrence)
       .slice(0, 20);
 
+    /* The measurement that cannot be fooled by an address book.
+       ─────────────────────────────────────────────────────────────────────
+       The area arithmetic above ranked Al Garhoud as the fleet's worst
+       shortfall and Dubai Int'l Airport as its largest surplus, for every
+       hour of every day — which reads as "move the cars from the airport to
+       the airport", because Terminal 1 and 3 stand IN Al Garhoud and the two
+       providers write the same place two different ways. An area parsed from
+       text cannot know that, and no amount of counting fixes it.
+
+       A CAR knows. Take each vehicle's trips in order: the minutes between
+       one drop-off and its next pick-up is that vehicle's idle gap, measured
+       without reference to what either place was called. Where the gap is
+       long, the car is waiting. Where it is short, the last drop-off left it
+       somewhere with work — which is the definition of a good position and
+       the only one this data can honestly support.
+
+       Capped at four hours: a longer gap is a shift ending, not a car
+       waiting for a fare, and averaging the two together turns every
+       overnight break into a repositioning problem. */
+    const chains = await q(
+      `WITH t AS (
+         SELECT plate,
+                requested_at AT TIME ZONE 'Asia/Dubai' AS s,
+                ended_at AT TIME ZONE 'Asia/Dubai' AS e,
+                ${areaOf('dropoff_addr')} AS to_area
+           FROM trip_norm
+          WHERE ${FB} AND is_booking AND plate IS NOT NULL AND ended_at IS NOT NULL),
+       chain AS (
+         SELECT plate, to_area AS area, e,
+                lead(s) OVER (PARTITION BY plate ORDER BY e) AS next_s
+           FROM t),
+       gaps AS (
+         SELECT area, extract(dow FROM e)::int AS dow, extract(hour FROM e)::int AS h,
+                extract(epoch FROM (next_s - e)) / 60 AS wait_min
+           FROM chain
+          WHERE next_s IS NOT NULL AND next_s > e AND area IS NOT NULL
+            AND next_s - e <= interval '4 hours')
+       SELECT area, dow, h, count(*)::int AS handovers,
+              round(percentile_cont(0.5) WITHIN GROUP (ORDER BY wait_min)::numeric, 0) AS median_wait_min,
+              round(sum(wait_min)::numeric / 60, 1) AS idle_h
+         FROM gaps GROUP BY 1, 2, 3 HAVING count(*) >= 3
+         ORDER BY sum(wait_min) DESC`, p);
+
+    const waits = chains.map((r) => ({
+      area: r.area, dow: num(r.dow), h: num(r.h),
+      handovers: num(r.handovers),
+      median_wait_min: num(r.median_wait_min),
+      idle_h: num(r.idle_h),
+    }));
+    const totalIdle = waits.reduce((a, x) => a + (x.idle_h || 0), 0);
+    const totalHandovers = waits.reduce((a, x) => a + x.handovers, 0);
+
     const totalPickups = slots.reduce((a, x) => a + x.pickups, 0);
     const totalGap = moves.reduce((a, x) => a + Math.max(0, x.gap), 0);
     res.json({
@@ -279,13 +331,28 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
       placed_bookings: totalPickups,
       empty_arrivals: totalGap,
       empty_arrival_pct: totalPickups ? Math.round((totalGap / totalPickups) * 1000) / 10 : null,
+      /* The headline the whole page exists for: hours a car spent between
+         jobs, and where. Trips are what a fleet sells; this is what it pays
+         for and does not sell. */
+      idle_h_between_jobs: Math.round(totalIdle * 10) / 10,
+      handovers: totalHandovers,
+      median_wait_overall: waits.length
+        ? Math.round(waits.reduce((a, x) => a + (x.median_wait_min || 0) * x.handovers, 0)
+          / Math.max(1, totalHandovers)) : null,
+      /* Ranked by idle hours, which is the quantity a rota can actually
+         reduce — a long median in a place with three handovers is a story
+         about three cars. */
+      waits: waits.slice(0, 40),
       moves,
       surplus,
       slots,
-      note: 'An area is the second dash-separated segment of the address text, not a polygon. '
-        + 'Arrivals are counted in the hour AFTER a trip ended, because that is the car a booking '
-        + 'in the next hour can use, and they are an upper bound on cars present — so the gap is '
-        + 'a floor, not an estimate.',
+      note: 'An area is the second dash-separated segment of the address text, not a polygon, and '
+        + 'two providers can write one place two ways — Terminal 3 is addressed both as Dubai '
+        + "Int'l Airport and as Al Garhoud, so `moves` and `surplus` will rank them against each "
+        + 'other as though they were different places. `waits` does not have that problem: it '
+        + "follows each VEHICLE from one drop-off to its next pick-up, so it measures the car's "
+        + 'own idle time without reference to what either place was called. Gaps over four hours '
+        + 'are excluded as shift ends rather than waiting.',
     });
   }));
 
