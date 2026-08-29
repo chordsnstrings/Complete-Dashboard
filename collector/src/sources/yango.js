@@ -14,7 +14,32 @@ const headers = () => ({
   'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
   'content-type': 'application/json', 'Accept-Language': 'en', cookie: config.yango.cookie,
 });
-const post = (path, body) => http(`${config.yango.base}${path}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
+/* A refusal is not an empty day.
+   ─────────────────────────────────────────────────────────────────────────
+   This returned the response whatever its status, and every caller then read
+   `data?.orders || []`. So a 403 — which is what an expired Yandex session
+   gets — came back as zero orders, the loop ended, and the run logged `ok`
+   with the rows the OTHER two pulls had written off the API key. Measured on
+   production: the last Yango trip on record was 2026-08-26, three days before
+   the source last reported itself healthy, and nothing anywhere said the
+   session had stopped working.
+
+   The credential check added alongside this is what found it — it asked this
+   same endpoint with the same headers and got the 403 the collector had been
+   swallowing. So the refusal is raised here, where the run can record it,
+   which is the same fix fms.js already carries for the same reason. */
+const post = async (path, body) => {
+  const r = await http(`${config.yango.base}${path}`, {
+    method: 'POST', headers: headers(), body: JSON.stringify(body),
+  });
+  if (r.status && r.status >= 400) {
+    const hint = r.status === 401 || r.status === 403
+      ? ' — the Yandex session has expired; re-paste YANGO_COOKIE from a logged-in fleet.yango.com tab'
+      : '';
+    throw new Error(`yango ${path} refused: HTTP ${r.status}${hint}`);
+  }
+  return r;
+};
 const dubai = (d, end) => `${iso(d)}T${end ? '23:59:59' : '00:00:00'}+04:00`;
 
 async function pullTrips(from, to) {
