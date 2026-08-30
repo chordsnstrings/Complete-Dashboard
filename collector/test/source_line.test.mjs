@@ -57,7 +57,8 @@ check('…and ordered with the largest first', all.indexOf('Uber') < all.indexOf
    what it is. */
 check('a feed with journeys and no bookings is not called silent',
   /FMS telematics 54,152 in journeys rather than bookings/.test(all), all);
-check('…while a channel with neither still is', /Bolt contributed nothing/.test(all), all);
+check('…while a channel with neither still is',
+  /Bolt \(last run partial\) contributed nothing/.test(all), all);
 check('…and the two are not confused for one another',
   !/FMS telematics contributed nothing/.test(all), all);
 
@@ -67,7 +68,9 @@ check('…and the two are not confused for one another',
 check('a collection error is named against the fleet it belongs to',
   /Yango \(Ecosine: error\)/.test(all), all);
 check('…and a provider with no fleet of its own says only what is wrong',
-  /Bolt \(partial\)/.test(all) && !/Bolt \(fleet:/.test(all), all);
+  /Bolt \(last run partial\)/.test(all) && !/fleet:/.test(all), all);
+check('…said once, not repeated in a clause of its own',
+  (all.match(/Bolt/g) || []).length === 1, all);
 
 /* /api/platforms answers the whole catalogue whatever the request carries, so
    a filtered page has to filter it here. Left unfiltered, #overview?platform=
@@ -98,6 +101,15 @@ check('…and says "on record" rather than "to this window"',
 
 check('an empty catalogue produces no line at all', (await line([])) === null);
 check('…as does a filter that matches nothing', (await line(PROD, { only: ['careem'] })) === null);
+
+/* A page filtered to a channel that reported nothing is where this line earns
+   its keep most: the reader is looking at a screen of zeros, and the line is
+   the only thing distinguishing a dead collector from a market the fleet does
+   not work. It said "Bolt contributed nothing to this window. Bolt (partial)."
+   — two sentences about one fact. */
+const bolt = await line(PROD, { only: ['bolt'] });
+check('a channel that reported nothing says so once, with its collection state',
+  /^Bolt \(last run partial\) contributed nothing to this window\.$/.test(bolt), bolt);
 
 const noted = await line(PROD, { only: ['hotel'], note: 'measured on the corporate channel' });
 check('a page can add what its own feeds are used for',

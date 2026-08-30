@@ -709,15 +709,25 @@ export function sourceLine(platforms = [], { only = null, fleet = null, note = n
       + 'in journeys rather than bookings — these feeds watch the cars, they do not sell rides');
   }
   if (silent.length) {
-    /* Named, not omitted. A channel with nothing at all is either a market this
-       fleet does not work or a collector that has stopped, and the page cannot
-       tell which — but leaving it out lets the reader assume the first. */
-    parts.push(`${silent.map(([k]) => esc(sourceLabel(k))).join(' and ')} `
+    /* Named, not omitted, and named WITH its collection state. A channel with
+       nothing at all is either a market this fleet does not work or a
+       collector that has stopped, and the page cannot tell which — but leaving
+       it out lets the reader assume the first, and separating the state into
+       its own clause said "Bolt contributed nothing. Bolt (partial)." */
+    parts.push(`${silent.map(([k, v]) => esc(sourceLabel(k))
+      + (v.bad.length ? ` (last run ${esc(v.bad.join(', '))})` : '')).join(' and ')} `
       + `contributed nothing ${whole ? 'on record' : 'to this window'}`);
   }
+  /* A channel already named as silent does not need naming again for its
+     collection state — "Bolt contributed nothing to this window. Bolt
+     (partial)." was two sentences about one fact. Where it is the ONLY thing
+     on the line, the two are merged; otherwise the states are listed apart
+     from the counts, which is where a reader looks for them. */
+  const silentKeys = new Set(silent.map(([k]) => k));
   const broken = [...byPlatform.entries()].filter(([, v]) => v.bad.length);
-  if (broken.length) {
-    parts.push(`${broken.map(([k, v]) => `${esc(sourceLabel(k))} (${esc(v.bad.join(', '))})`).join('; ')}`);
+  const brokenElsewhere = broken.filter(([k]) => !silentKeys.has(k));
+  if (brokenElsewhere.length) {
+    parts.push(`${brokenElsewhere.map(([k, v]) => `${esc(sourceLabel(k))} (${esc(v.bad.join(', '))})`).join('; ')}`);
   }
   el2.innerHTML = parts.join('. ') + (note ? `. ${esc(note)}` : '') + '.';
   return el2;
