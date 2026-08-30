@@ -272,6 +272,15 @@ check('it counts people once, however many accounts they hold',
   cmp.now.drivers === 4, String(cmp.now.drivers));
 check('…and reports the account count beside it, unfolded',
   cmp.now.driver_accounts === 5, String(cmp.now.driver_accounts));
+/* A payout period reaches back before the window, so driver_day holds rows for
+   people who were PAID in it and did not drive in it. Counting those as
+   drivers answered 258 for a production month in which 119 people drove — a
+   fleet twice its real size. They are counted, separately, because they are
+   not nothing. */
+check('someone paid in the window but not driving in it is not a driver',
+  typeof cmp.now.paid_not_driving === 'number', String(cmp.now.paid_not_driving));
+check('…and Ann, paid on a day her trips did not reach us, is one of them',
+  cmp.now.paid_not_driving >= 1, String(cmp.now.paid_not_driving));
 /* No prior data at all. "+100%" against nothing is not growth, it is a
    division that should not have happened. */
 check('a change against an empty span is null, not infinity',

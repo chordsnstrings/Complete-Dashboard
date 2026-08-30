@@ -482,8 +482,22 @@ app.get('/api/compare/period', wrap(async (req, res) => {
      one human holds several of those — counting distinct ids reported more
      drivers than the fleet employs, which reads as growth. person_key is the
      stored fold (sql/schema_v41.sql), so this is a count and not a join. */
-  const SUMS = `count(DISTINCT coalesce(person_key, driver_ext_id))::int AS drivers,
-                count(DISTINCT driver_ext_id)::int  AS driver_accounts,
+  /* Who DROVE, and who was merely PAID, counted apart.
+     ─────────────────────────────────────────────────────────────────────
+     driver_day carries a row for every driver-day any source knows about,
+     including days where a payout landed and no trip did — a payout period
+     usually covers work from before the window. Counting every row's person
+     answered 258 for a month in which 119 people actually drove, which reads
+     as a fleet twice its size.
+
+     So `drivers` is people with work in the window, matching what /api/kpis
+     answers for the same window, and the people who only appear through money
+     are counted beside it rather than folded in or dropped. */
+  const PERSON = 'coalesce(person_key, driver_ext_id)';
+  const SUMS = `count(DISTINCT ${PERSON}) FILTER (WHERE trips > 0)::int AS drivers,
+                count(DISTINCT driver_ext_id) FILTER (WHERE trips > 0)::int AS driver_accounts,
+                count(DISTINCT ${PERSON}) FILTER (WHERE trips = 0 AND money IS NOT NULL)::int
+                  AS paid_not_driving,
                 coalesce(sum(trips), 0)::int        AS trips,
                 coalesce(sum(completed), 0)::int    AS completed,
                 coalesce(sum(cancelled), 0)::int    AS cancelled,
@@ -535,7 +549,10 @@ app.get('/api/compare/period', wrap(async (req, res) => {
     basis: 'Summed from driver_day — one row per driver per day carrying both the work and the '
       + 'money — so every measure here covers exactly the same days. The comparison span is the '
       + 'same number of days immediately before the window, not the whole previous calendar '
-      + 'period, so a month-to-date is compared against the same slice of the month before it.',
+      + 'period, so a month-to-date is compared against the same slice of the month before it. '
+      + '`drivers` counts PEOPLE who drove, folded across their platform accounts; '
+      + '`paid_not_driving` counts people who appear only through money, which a payout period '
+      + 'reaching back before the window will produce.',
   });
 }));
 
