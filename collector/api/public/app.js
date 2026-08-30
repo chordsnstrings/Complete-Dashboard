@@ -6,7 +6,7 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBa
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
-  verdict, dominantBar, foldRows, foldChildren} from './ui.js';
+  verdict, dominantBar, foldRows, foldChildren, sourceLine } from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
@@ -4367,6 +4367,7 @@ async function render() {
     const detail = await (V[state.view] || V.unit)(root);
     if (!alive(gen)) return;
     setHeader(detail);                      // detail pages only know their title after fetching
+    await stampSource(root, gen);
     animateView(root);
   } catch (e) {
     if (!alive(gen)) return;                // superseded: not this reader's error
@@ -4374,6 +4375,48 @@ async function render() {
     root.append(failureBox(e, () => render()));
   }
   if (alive(gen)) { freshness(); authBanner(); }
+}
+
+/* ── every page says what it was built from ───────────────────────────────
+   An audit of production found page after page showing money and counts with
+   nothing on them naming which feeds those numbers came from. On a fleet that
+   is 93% one channel that cuts both ways: a reader takes a figure to cover the
+   business when it covers Uber alone, and takes a thin number for a bad week
+   when it is a channel that stopped answering.
+
+   Stamped here rather than in thirty page modules, so a page cannot be added
+   without one. Three rules keep it honest:
+
+     · pages with no window and no channel filter are skipped — a provenance
+       line about "this window" under a settings form is noise, and worse,
+       it would be describing a window the page does not use.
+     · a page that already writes its own source line keeps it. Optimise and
+       Capacity say something specific about how their feeds are used, and a
+       generic line under it would be a second, blander answer to the same
+       question.
+     · /api/platforms is fetched ONCE per render and reused. It is the same
+       call the Data sources page makes, and it is cheap, but a page that
+       already fetched it should not fetch it twice. */
+const NO_SOURCE_STAMP = new Set([
+  /* No numbers of their own to attribute: a form, a credential screen, a
+     health board that IS the source list, and the two pages whose whole
+     subject is which collector is broken. */
+  'settings', 'sources', 'providers', 'coverage',
+]);
+
+async function stampSource(root, gen) {
+  if (!root || NO_SOURCE_STAMP.has(state.view)) return;
+  if (root.querySelector('.srcline')) return;      // the page wrote its own
+  try {
+    const plats = await q('/api/platforms');
+    if (!alive(gen)) return;
+    /* A page with no range selector is not answering about a window — #causes
+       is a monthly trend over the whole record, #map is one day's replay — so
+       its provenance is the whole record rather than the default thirty days
+       the request happened to carry. */
+    const line = sourceLine(plats, { whole: hidesRange(state.view) });
+    if (line) root.append(line);
+  } catch { /* provenance is an addition to the page, never a reason it fails */ }
 }
 
 /* A dead end with a way out. The generic catch printed the message and left

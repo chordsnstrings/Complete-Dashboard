@@ -650,7 +650,7 @@ export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()] ||
    `only` narrows it to the channels a page genuinely draws on — the safety
    page is telematics and nothing else, and listing Uber under it would be a
    worse lie than saying nothing. */
-export function sourceLine(platforms = [], { only = null, note = null } = {}) {
+export function sourceLine(platforms = [], { only = null, note = null, whole = false } = {}) {
   const rows = (Array.isArray(platforms) ? platforms : [])
     .filter((r) => !only || only.includes(String(r.platform || '').toLowerCase()));
   if (!rows.length) return null;
@@ -661,8 +661,12 @@ export function sourceLine(platforms = [], { only = null, note = null } = {}) {
   const byPlatform = new Map();
   for (const r of rows) {
     const key = String(r.platform || '').toLowerCase();
-    const cur = byPlatform.get(key) || { n: 0, bad: [], fleets: 0 };
-    cur.n += Number(r.window_bookings || 0);
+    const cur = byPlatform.get(key) || { n: 0, rows: 0, bad: [], fleets: 0 };
+    /* A page that hides the range selector is not answering about a window,
+       and quoting `window_bookings` under it would attribute its numbers to a
+       span it does not use. Those pages get the whole record instead. */
+    cur.n += Number((whole ? r.bookings : r.window_bookings) || 0);
+    cur.rows += Number(r.rows_seen || 0);
     cur.fleets += 1;
     if (r.collection_status && r.collection_status !== 'ok') {
       /* Bolt carries no fleet_id, and the placeholder rendered as the literal
@@ -675,21 +679,30 @@ export function sourceLine(platforms = [], { only = null, note = null } = {}) {
   }
   const live = [...byPlatform.entries()].filter(([, v]) => v.n > 0)
     .sort((a, b) => b[1].n - a[1].n);
-  const silent = [...byPlatform.entries()].filter(([, v]) => v.n === 0);
+  /* "Contributed nothing" was wrong about the telematics feed, which
+     contributes 30,176 rows and zero BOOKINGS — it watches cars move, it does
+     not sell rides. Reported as silent it looked like a dead collector, which
+     is the opposite of what it is. A channel with rows and no bookings is
+     doing its job; a channel with neither is not. */
+  const noBookings = [...byPlatform.entries()].filter(([, v]) => v.n === 0 && v.rows > 0);
+  const silent = [...byPlatform.entries()].filter(([, v]) => v.n === 0 && v.rows === 0);
 
   const el2 = el('p', 'cap srcline');
   const parts = [];
   if (live.length) {
-    parts.push('Built from ' + live
+    parts.push(`Built from ${whole ? 'the whole record — ' : ''}` + live
       .map(([k, v]) => `${esc(sourceLabel(k))} ${fmtInt(v.n)}`).join(' · '));
   }
+  if (noBookings.length) {
+    parts.push(`${noBookings.map(([k, v]) => `${esc(sourceLabel(k))} ${fmtInt(v.rows)}`).join(' · ')} `
+      + 'in journeys rather than bookings — these feeds watch the cars, they do not sell rides');
+  }
   if (silent.length) {
-    /* Named, not omitted. A channel with nothing in the window is either a
-       market this fleet does not work or a collector that has stopped, and the
-       page cannot tell which — but leaving it out lets the reader assume the
-       first. */
+    /* Named, not omitted. A channel with nothing at all is either a market this
+       fleet does not work or a collector that has stopped, and the page cannot
+       tell which — but leaving it out lets the reader assume the first. */
     parts.push(`${silent.map(([k]) => esc(sourceLabel(k))).join(' and ')} `
-      + `contributed nothing to this window`);
+      + `contributed nothing ${whole ? 'on record' : 'to this window'}`);
   }
   const broken = [...byPlatform.entries()].filter(([, v]) => v.bad.length);
   if (broken.length) {

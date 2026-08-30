@@ -220,6 +220,35 @@ check('people arrive ranked by money',
     multi.slice(0, 3).map((x) => `${x.driver_name} ${x.platforms} ${x.days_worked}`).join(' | '));
 }
 
+/* ── the fleet total, and the part of it that lands on a vehicle ──────────
+   Audited against production: this endpoint reported AED 471,407 where
+   /api/kpis reported AED 469,915 for the same window, at the same instant, and
+   neither page mentioned the other. Both are real answers to different
+   questions — chooseBasis picks fares-or-payout ONCE for a channel at fleet
+   level, and again PER PLATE here, so a channel counted on its fares fleet-wide
+   can be counted on its payout for a vehicle whose coverage of it is thinner.
+
+   The per-plate sum is what the page is FOR — money placed on an asset. It is
+   not the fleet's income, and the endpoint now carries both so the page can say
+   which is which instead of presenting one as the other. */
+{
+  const t = A.totals || {};
+  check('the assets endpoint reports the fleet total as well as the placed sum',
+    Number.isFinite(+t.fleet_money), JSON.stringify({ money: t.money, fleet: t.fleet_money }));
+  const chan = (A.by_platform || []).reduce((a, c) => a + (Number(c.money) || 0), 0);
+  check('…and that total is the channel-level basis, not the per-plate one',
+    Math.abs(+t.fleet_money - chan) < 0.05, `${t.fleet_money} vs ${chan.toFixed(2)}`);
+  check('…with the placed share stated against it',
+    t.fleet_money ? Number.isFinite(+t.placed_pct) : t.placed_pct === null,
+    String(t.placed_pct));
+  /* Placed can exceed the fleet figure — that is the whole point of carrying
+     both — but never by an order of magnitude, which would mean the per-plate
+     rule had gone wrong rather than merely differed. */
+  check('…and the two are the same order of magnitude',
+    !t.fleet_money || (+t.money > +t.fleet_money * 0.5 && +t.money < +t.fleet_money * 2),
+    `${t.money} vs ${t.fleet_money}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close(); await db.close();
 process.exit(fail ? 1 : 0);

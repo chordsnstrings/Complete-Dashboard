@@ -308,9 +308,18 @@ async function moneyTab(root) {
        over a year and 53% over a week.
 
        So the tile says which one this is, and names the other. */
+    /* PLACED, and it says so — this is not the fleet's income. The per-plate
+       basis choice can differ from the fleet-level one, so summing the plates
+       gives a number a few thousand dirhams away from what Finance reports,
+       and until now neither page mentioned the other. The tile names both. */
     { label: 'Money placed on assets', value: money(t.money),
       sub: `${money(t.fares || 0)} in fares · ${money(t.payouts || 0)} of platform payouts placed `
-        + `on the days each driver actually drove · over ${fmt(A.window_days)} days` },
+        + `on the days each driver actually drove · over ${fmt(A.window_days)} days`
+        + (t.fleet_money
+          ? ` · ${t.placed_pct}% of the fleet's ${money(t.fleet_money)}, which is what Finance `
+            + 'reports: that figure picks fares-or-payout once for the whole channel, this one '
+            + 'picks per vehicle'
+          : '') },
     { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day, 'AED', 0),
       sub: `${fmt(t.earning_vehicle_days)} vehicle-days actually earned` },
     { label: 'Per km', value: money(t.aed_per_km, 'AED', 2),
