@@ -548,6 +548,15 @@ const get = async (p) => {
     k.vehicles === carried, `kpis ${k.vehicles} vs directory ${carried}`);
   check('the overview and the driver directory agree on how many people drove',
     k.drivers === drove, `kpis ${k.drivers} vs directory ${drove}`);
+  /* And they agree because they fold on the SAME key, not because the fixture
+     happens to be tidy. The directory used to fold on a display name taken as
+     a max over four sources — the window's trips, the whole history, a
+     compliance record, a standing — so a spelling from March decided who was
+     one person on a page describing this week. */
+  check('the directory folds people on the stored key, not on a display name',
+    (Array.isArray(ddir) ? ddir : ddir.rows).filter((r) => (r.trips || 0) > 0)
+      .every((r) => !!r.person_key),
+    'a person who drove came back with no person_key to fold on');
 
   /* The tracker-only movement is not lost — it is reported beside the booking
      count rather than inside it, which is the whole of the fix. */

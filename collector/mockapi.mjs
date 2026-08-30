@@ -475,7 +475,9 @@ app.get('/api/compare', (req, r) => {
 
 app.get('/api/drivers/directory', (_, r) => r.json([
   ...drivers.map((name, i) => ({
-    driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name, fleet_id: i % 3 ? 'ecosine' : 'egari',
+    driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name,
+    // The stored fold the directory groups on — the same key the overview counts.
+    person_key: name.toLowerCase(), fleet_id: i % 3 ? 'ecosine' : 'egari',
     trips: 420 - i * 37, completed: 400 - i * 36, bookable: 420 - i * 37,
     days: 26 - i, km: 5400 - i * 380, revenue: i === 7 ? null : 14200 - i * 900, priced_trips: i === 7 ? 0 : 60 - i * 5,
     /* Most drivers have a payout and no fare — the production shape, where

@@ -695,9 +695,14 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
 
      `to` in the past means the live half matches nothing and costs nothing. */
   const TODAY = "(now() AT TIME ZONE 'Asia/Dubai')::date";
+  /* Served at the precision it is stored at, not rounded again here. A page
+     that sums thirty daily buckets was summing thirty roundings: the overview
+     said 157,709 km and its own chart said 157,712, which is a rounding
+     artefact wearing the clothes of a disagreement. Rounding is a display
+     decision and the front end already makes it. */
   const pick = (src) => `SELECT g.day AS d, g.bookings AS trips, g.completed,
               g.not_completed AS cancelled, g.telematics AS telematics_journeys,
-              round(g.km, 0) AS km, round(g.revenue, 0) AS revenue, g.priced_trips, g.drivers
+              g.km, g.revenue, g.priced_trips, g.drivers
          FROM (${src}) g
         WHERE g.day BETWEEN $1::date AND $2::date
           AND g.platform = coalesce($3, '*') AND g.fleet_id = coalesce($4, '*')`;
@@ -708,8 +713,7 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
         AND platform = coalesce($3, '*') AND fleet_id = coalesce($4, '*') LIMIT 1`, p)).length > 0;
   const aggSql = rollupReady
     ? `SELECT day AS d, bookings AS trips, completed, not_completed AS cancelled,
-              telematics AS telematics_journeys, round(km, 0) AS km,
-              round(revenue, 0) AS revenue, priced_trips, drivers
+              telematics AS telematics_journeys, km, revenue, priced_trips, drivers
          FROM rollup_day
         WHERE day BETWEEN $1::date AND $2::date AND day < ${TODAY}
           AND platform = coalesce($3, '*') AND fleet_id = coalesce($4, '*')

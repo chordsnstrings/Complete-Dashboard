@@ -282,6 +282,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          SELECT coalesce(nullif(btrim(n.driver_ext_id), ''),
                          'name:' || bt.person_key) AS driver_ext_id,
                 max(n.driver_name) AS work_name,
+                /* The STORED fold of the name this person drove under, carried
+                   out so the fold below can key on it. See the note at the
+                   fold. */
+                max(bt.person_key) AS person_key,
                 min(n.fleet_id) fleet_id,
                 count(*) FILTER (WHERE n.is_booking)::int trips,
                 count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
@@ -368,7 +372,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           person_key rather than the fold, because that scan is unbounded and
           folding 175,000 names per request is what the stored, indexed column
           exists to avoid. */
-       SELECT who.driver_ext_id, who.driver_name,
+       SELECT who.driver_ext_id, who.driver_name, w.person_key,
               coalesce(w.trips, 0) AS trips, coalesce(w.completed, 0) AS completed,
               coalesce(w.bookable, 0) AS bookable, coalesce(w.days, 0) AS days,
               w.km, w.revenue, coalesce(w.priced_trips, 0) AS priced_trips,
@@ -419,9 +423,29 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        humans rather than accounts. Counts are carried through and the ratios
        are computed ONCE at the end — folding a pre-computed percentage keeps
        one account's number and calls it the person's. */
+    /* Keyed on the STORED fold where the window has one.
+       ─────────────────────────────────────────────────────────────────────
+       This folded on canonName(who.driver_name), and who.driver_name is a max
+       over four sources — the window's trips, the whole trip history, a
+       compliance record and a platform standing. So the directory could be
+       folding on a spelling from March while every other page in the product
+       folds on the one from this window, and the two then answer "how many
+       people drove" differently: 118 here against 119 on the overview, live,
+       for the same fleet on the same days. Neither number was wrong and
+       nothing on either page could explain the other.
+
+       person_key is that same fold, generated and stored on the trip row
+       (sql/schema_v20.sql), and it is what /api/kpis, the ranking and the
+       vehicle pages count. Using it here makes the directory's headcount the
+       overview's headcount by construction rather than by coincidence.
+
+       canonName stays as the fallback for the people the window has no work
+       for — a name on the books and nothing else — where there is no stored
+       key to prefer. It is the same rule; test/consistency.test.mjs runs both
+       over the same names and requires the same answer. */
     const byName = new Map();
     for (const r of rows) {
-      const k = canonName(r.driver_name);
+      const k = r.person_key || canonName(r.driver_name);
       const cur = byName.get(k);
       if (!cur) {
         byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],
