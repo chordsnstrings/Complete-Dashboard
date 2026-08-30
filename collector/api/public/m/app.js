@@ -17,8 +17,8 @@
                    because a service worker that caches the phone shell for a
                    desktop reader would be caching an app they never see.
 */
-import { state, api, parseHash, href } from '../data.js';
-import { el, esc } from '../ui.js';
+import { state, api, parseHash, href, q, qAll, hidesRange, hidesChannel } from '../data.js';
+import { el, esc, sourceLine } from '../ui.js';
 import { SCREENS, TABS, titleFor } from './screens.js';
 
 const root = document.getElementById('m');
@@ -181,6 +181,7 @@ async function render() {
     };
     await (screen || SCREENS.fallback)(deck,
       { view: id, param, sub, alive: () => g === gen, setTitle });
+    await stampSource(g, id);
   } catch (e) {
     if (g !== gen) return;
     deck.innerHTML = '';
@@ -189,6 +190,32 @@ async function render() {
     deck.append(d);
   }
   if (g === gen) freshness();
+}
+
+/* ── the phone says what it was built from too ────────────────────────────
+   The desktop grew this first, and the phone is the surface an operator
+   actually opens — the screenshots that started this audit were phone
+   screenshots. Same rule, same helper, so the two applications cannot
+   describe the fleet's sources differently.
+
+   Set apart from the desktop only in where it sits: the phone has no page
+   footer, so it goes at the end of the scrolling deck as its own quiet block. */
+const NO_SOURCE = new Set(['more', 'sources', 'credentials', 'settings']);
+
+async function stampSource(g, id) {
+  if (g !== gen || NO_SOURCE.has(id)) return;
+  if (deck.querySelector('.srcline')) return;
+  if (!deck.querySelector('.m-card, .m-stat, .m-row, .m-lede')) return;
+  try {
+    const plats = hidesChannel(id) ? await qAll('/api/platforms') : await q('/api/platforms');
+    if (g !== gen) return;
+    const line = sourceLine(plats, {
+      whole: hidesRange(id),
+      only: !hidesChannel(id) && state.platform ? [state.platform] : null,
+      fleet: !hidesChannel(id) && state.fleet ? state.fleet : null,
+    });
+    if (line) { line.classList.add('m-src'); deck.append(line); }
+  } catch { /* provenance never breaks a screen */ }
 }
 
 function refresh() {

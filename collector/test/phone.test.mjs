@@ -219,5 +219,27 @@ check('…to two decimals, because a rate under one dirham rounds to nothing',
 check('…and no money figure on this screen is Math.round-ed into a whole',
   !/money\(Math\.round\(/.test(scr));
 
+/* ── the phone says what it was built from too ────────────────────────────
+   The desktop grew provenance first, and the phone is the surface an operator
+   actually opens — the screenshots that started this audit were phone
+   screenshots. Not a second implementation: the same sourceLine the desktop
+   uses, so the two applications cannot describe the fleet's feeds
+   differently. */
+const mapp = readFileSync(`${PUB}/m/app.js`, 'utf8');
+check('the phone stamps a source line on its screens',
+  /async function stampSource/.test(mapp));
+check('…using the desktop’s helper rather than its own',
+  /sourceLine/.test(mapp) && /from '\.\.\/ui\.js'/.test(mapp));
+check('…unfiltered where the screen is unfiltered',
+  /hidesChannel\(id\) \? await qAll/.test(mapp));
+check('…over the whole record where the screen has no window',
+  /whole: hidesRange\(id\)/.test(mapp));
+check('…and never on a screen with nothing on it',
+  /deck\.querySelector\('\.m-card, \.m-stat, \.m-row, \.m-lede'\)/.test(mapp));
+check('the credential and settings screens are exempt',
+  /NO_SOURCE = new Set\(\['more', 'sources', 'credentials', 'settings'\]\)/.test(mapp));
+check('and the phone styles it rather than inheriting a desktop footer rule',
+  /\.m-src\{/.test(readFileSync(`${PUB}/m/m.css`, 'utf8')));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

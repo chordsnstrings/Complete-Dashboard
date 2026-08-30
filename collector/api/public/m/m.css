@@ -301,3 +301,8 @@ a.m-stat:active{ transform:scale(.985) }
 .m-fallback .kpis{ grid-template-columns:1fr 1fr; gap:10px }
 .m-fallback table{ font-size:.8rem }
 .m-fallback .tscroll{ border-radius:var(--r-sm) }
+
+/* What the screen was built from. The phone has no footer, so it closes the
+   scrolling deck — quiet, rule above it, and never competing with the cards. */
+.m-src{ margin:6px 2px 4px; padding-top:12px; border-top:1px solid var(--rule);
+  color:var(--ink-3); font-size:.74rem; line-height:1.5 }
