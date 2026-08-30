@@ -650,9 +650,20 @@ export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()] ||
    `only` narrows it to the channels a page genuinely draws on — the safety
    page is telematics and nothing else, and listing Uber under it would be a
    worse lie than saying nothing. */
-export function sourceLine(platforms = [], { only = null, note = null, whole = false } = {}) {
+export function sourceLine(platforms = [], { only = null, fleet = null, note = null,
+  whole = false } = {}) {
+  /* /api/platforms answers the whole catalogue whatever the request carries —
+     it is the collector's inventory, not a windowed aggregate — so the page's
+     own channel and fleet filters have to be applied here. Without it,
+     #overview?platform=hotel rendered "Built from Uber 11,724 · Hotel 877"
+     under a page showing 877 hotel bookings and nothing else: the exact claim
+     this line exists to stop anyone making. */
   const rows = (Array.isArray(platforms) ? platforms : [])
-    .filter((r) => !only || only.includes(String(r.platform || '').toLowerCase()));
+    .filter((r) => !only || only.includes(String(r.platform || '').toLowerCase()))
+    .filter((r) => !fleet || String(r.fleet_id || '').toLowerCase() === String(fleet).toLowerCase()
+      /* A provider with no fleet of its own — Bolt — belongs to whichever
+         fleet is being viewed rather than to neither. */
+      || !r.fleet_id);
   if (!rows.length) return null;
 
   /* One entry per CHANNEL, with the fleets folded in: two Uber rows are two

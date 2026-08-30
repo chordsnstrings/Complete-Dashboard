@@ -469,21 +469,27 @@ export function economicsRoutes(app, { q, wrap, range }) {
     const sum = (f) => round(rows.reduce((a, r) => a + (Number(f(r)) || 0), 0), 2);
     const placed = sum((r) => r.money);
     const attributedAll = sum((r) => r.attributed);
-    /* The FLEET's money by the same rule /api/kpis applies — chooseBasis run
-       once over the channel rows, which byPlatform above has already done.
+    /* NOT the fleet's income, and it took two passes to establish why.
        ─────────────────────────────────────────────────────────────────────
-       `placed` is a different quantity and always has been: chooseBasis is run
-       again PER PLATE, and a channel judged "count the fares" over the whole
-       fleet can be judged "count the payout" on an individual vehicle whose
-       coverage of that channel is thinner. Summing those per-plate choices
-       gave AED 471,407 against the fleet's AED 469,915 on the same instant —
-       a page-to-page disagreement of AED 1,492 that neither page mentioned,
-       because neither knew the other's number.
+       The first attempt recomputed a "fleet total" from byPlatform, on the
+       theory that the gap against /api/revenue was chooseBasis running per
+       plate here and once per channel there. It came out identical to the
+       per-plate sum, which disproved that: the basis rule is not the cause.
 
-       Both are answers to real questions. Only one of them is the fleet's
-       income, so the endpoint now carries it and the page reconciles against
-       it rather than presenting a per-plate sum as the fleet total. */
-    const fleetMoney = round(byPlatform.reduce((a, c) => a + (Number(c.money) || 0), 0), 2);
+       Measured per channel on production, same window, same instant:
+
+           Uber payouts    revenue 404,599.46   assets 406,053.06
+           Yango payouts   revenue   5,612.20   assets   1,590.33
+
+       The two endpoints ATTRIBUTE the same driver_payout_day rows differently
+       — this one walks them through vehicle custody to reach a plate, and a
+       payout it cannot place is reported separately as `unplaced_payouts`.
+       Yango's 4,022 missing here is most of that unplaced figure. Uber's
+       going the other way is the part still unexplained.
+
+       So no total is invented here. The page fetches /api/kpis and compares
+       against the number Finance actually shows, which cannot drift from it
+       because it IS it. */
     /* Withheld under a fleet filter rather than narrowed — see the query. */
     const unplaced = p[3] ? null
       : round((unatt || []).reduce((a, r) => a + Number(r.earnings || 0), 0), 2);
@@ -506,11 +512,6 @@ export function economicsRoutes(app, { q, wrap, range }) {
         idle_but_documented: rows.filter((r) => !r.money && r.doc_days_left != null
           && r.doc_days_left >= 0).length,
         money: placed,
-        /* What the fleet took, by the fleet-level basis. `money` above is what
-           could be placed on a named vehicle, which is a subset and is
-           computed differently — see the note where fleetMoney is built. */
-        fleet_money: fleetMoney,
-        placed_pct: fleetMoney ? round((placed / fleetMoney) * 100, 1) : null,
         fares: sum((r) => r.fares), payouts: sum((r) => r.payouts),
         attributed: attributedAll,
         km: sum((r) => r.km), bookings: rows.reduce((a, r) => a + r.bookings, 0),

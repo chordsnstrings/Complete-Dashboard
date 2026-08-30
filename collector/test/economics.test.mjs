@@ -233,20 +233,23 @@ check('people arrive ranked by money',
    which is which instead of presenting one as the other. */
 {
   const t = A.totals || {};
-  check('the assets endpoint reports the fleet total as well as the placed sum',
-    Number.isFinite(+t.fleet_money), JSON.stringify({ money: t.money, fleet: t.fleet_money }));
-  const chan = (A.by_platform || []).reduce((a, c) => a + (Number(c.money) || 0), 0);
-  check('…and that total is the channel-level basis, not the per-plate one',
-    Math.abs(+t.fleet_money - chan) < 0.05, `${t.fleet_money} vs ${chan.toFixed(2)}`);
-  check('…with the placed share stated against it',
-    t.fleet_money ? Number.isFinite(+t.placed_pct) : t.placed_pct === null,
-    String(t.placed_pct));
-  /* Placed can exceed the fleet figure — that is the whole point of carrying
-     both — but never by an order of magnitude, which would mean the per-plate
-     rule had gone wrong rather than merely differed. */
-  check('…and the two are the same order of magnitude',
-    !t.fleet_money || (+t.money > +t.fleet_money * 0.5 && +t.money < +t.fleet_money * 2),
-    `${t.money} vs ${t.fleet_money}`);
+  /* The page places money on VEHICLES, which means walking each payout through
+     custody to a plate. A payout it cannot place has to be reported, not
+     dropped — that figure is the whole reason the total differs from Finance's
+     and the only thing that makes the difference legible. */
+  check('the placed total is accompanied by what could NOT be placed',
+    t.unplaced_payouts === null || Number.isFinite(+t.unplaced_payouts),
+    JSON.stringify({ money: t.money, unplaced: t.unplaced_payouts }));
+  check('…and no invented "fleet total" is returned beside it',
+    t.fleet_money === undefined,
+    'a total recomputed from the same per-plate rows equalled the per-plate sum exactly, '
+    + 'which disproved the basis-rule theory rather than reconciling anything');
+  /* The per-channel attribution is what actually differs between this endpoint
+     and /api/revenue, so the channel rows have to carry their own basis for
+     anyone to see which side a channel fell on. */
+  check('every channel row names the basis its money was taken on',
+    (A.by_platform || []).every((c) => typeof c.basis === 'string'),
+    JSON.stringify((A.by_platform || []).map((c) => [c.platform, c.basis])));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

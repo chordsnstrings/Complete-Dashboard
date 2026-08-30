@@ -4407,14 +4407,32 @@ const NO_SOURCE_STAMP = new Set([
 async function stampSource(root, gen) {
   if (!root || NO_SOURCE_STAMP.has(state.view)) return;
   if (root.querySelector('.srcline')) return;      // the page wrote its own
+  /* Nothing to attribute. A "no such driver" page, or any view that resolved
+     to a single empty state, has no numbers on it — and a full provenance
+     line under "Nothing in the record matches this id" is noise attached to
+     an answer that came from no source at all. */
+  if (!root.querySelector('.kpi, .panel, table, .card')) return;
   try {
-    const plats = await q('/api/platforms');
+    /* Unfiltered where the PAGE is unfiltered. A detail page answers
+       "everything about this person or car" through qAll(), and the channel
+       chips are hidden on it — but state.platform can still be set from the
+       page the reader came from, and q() applies it unconditionally. The
+       provenance line would then describe one channel under a page showing
+       all of them. */
+    const plats = hidesChannel(state.view)
+      ? await qAll('/api/platforms') : await q('/api/platforms');
     if (!alive(gen)) return;
     /* A page with no range selector is not answering about a window — #causes
        is a monthly trend over the whole record, #map is one day's replay — so
        its provenance is the whole record rather than the default thirty days
        the request happened to carry. */
-    const line = sourceLine(plats, { whole: hidesRange(state.view) });
+    const line = sourceLine(plats, {
+      whole: hidesRange(state.view),
+      /* The page's own filters, applied to its provenance. A filtered page
+         that names every channel is describing a different page. */
+      only: !hidesChannel(state.view) && state.platform ? [state.platform] : null,
+      fleet: !hidesChannel(state.view) && state.fleet ? state.fleet : null,
+    });
     if (line) root.append(line);
   } catch { /* provenance is an addition to the page, never a reason it fails */ }
 }

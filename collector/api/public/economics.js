@@ -212,8 +212,16 @@ async function moneyTab(root) {
      from the ledger costs nothing, removes the slowest request on the page,
      and guarantees the marker and the row it belongs to describe one vehicle
      rather than two answers fetched a minute apart. */
-  const [A, D] = await Promise.all([
+  const [A, D, K] = await Promise.all([
     q('/api/economics/assets'), q('/api/economics/drivers'),
+    /* Finance's own figure, fetched rather than recomputed. This page places
+       money on vehicles by walking payouts through custody to a plate, and
+       /api/kpis sums the same payout rows without that walk — measured on
+       production the two differ by about AED 1,450 on Uber and by 4,000 on
+       Yango in the other direction. Both are real; presenting either as "the
+       fleet's money" without the other was the problem. Comparing against the
+       number Finance actually renders means the two cannot drift. */
+    q('/api/kpis').catch(() => null),
   ]);
   const t = A.totals, dt = D.totals;
 
@@ -315,10 +323,10 @@ async function moneyTab(root) {
     { label: 'Money placed on assets', value: money(t.money),
       sub: `${money(t.fares || 0)} in fares · ${money(t.payouts || 0)} of platform payouts placed `
         + `on the days each driver actually drove · over ${fmt(A.window_days)} days`
-        + (t.fleet_money
-          ? ` · ${t.placed_pct}% of the fleet's ${money(t.fleet_money)}, which is what Finance `
-            + 'reports: that figure picks fares-or-payout once for the whole channel, this one '
-            + 'picks per vehicle'
+        + (K?.accounted
+          ? ` · against ${money(K.accounted)} on Finance, which counts the same payouts without `
+            + 'walking them through custody to a vehicle — this page can only place what it can '
+            + `name a car for, and reports ${money(t.unplaced_payouts || 0)} it could not`
           : '') },
     { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day, 'AED', 0),
       sub: `${fmt(t.earning_vehicle_days)} vehicle-days actually earned` },
