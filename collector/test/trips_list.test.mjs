@@ -183,6 +183,7 @@ await page.goto(`${url}/?ui=desktop#trips?days=7`, { waitUntil: 'domcontentloade
 await page.waitForSelector('#view table tbody tr', { timeout: 20000 }).catch(() => {});
 await page.waitForTimeout(1500);
 
+const fmtNum = (v) => Number(v).toLocaleString('en-US');
 const read = () => page.evaluate(() => ({
   tiles: [...document.querySelectorAll('#view .kpi')].map((k) => k.innerText.replace(/\n/g, ' | ')),
   rows: document.querySelectorAll('#view table tbody tr').length,
@@ -207,10 +208,14 @@ check('the page agrees with the route about how many carry a fare',
 check('the CSV of the same rows is offered', /Download every trip/i.test(v.text));
 
 /* Search, driven through the real box. */
-await page.fill('#view input[type=search]', 'hotel');
+/* A term that matches SOME of the window. Matching none would let every
+   assertion below pass on an empty table. */
+await page.fill('#view input[type=search]', 'm3');
 await page.waitForTimeout(900);
-const searched = (await get('/api/trips/list?days=7&q=hotel&limit=100')).body;
+const searched = (await get('/api/trips/list?days=7&q=m3&limit=100')).body;
 const s = await read();
+check('the search term matches part of the window, not none of it and not all',
+  searched.total > 0 && searched.total < api.total, `${searched.total} of ${api.total}`);
 check('typing in the box filters the table', s.rows === searched.shown && s.rows < v.rows,
   `${s.rows} vs ${searched.shown}`);
 check('and the count follows the search', s.tiles[0].includes(String(searched.total)), s.tiles[0]);
@@ -247,6 +252,40 @@ check('the kind selector changes the population', t.tiles[0].includes(String(api
   `${t.tiles[0]} — api ${apiT.total}`);
 check('and the page names it, so a journey is never read as a booking',
   /journeys/i.test(t.tiles[0]) && /Telematics/i.test(t.text), t.tiles[0]);
+
+/* ── and on the phone, which is where the question gets asked ─────────── */
+/* "What happened on that job" is asked standing next to the car. The desktop's
+   nine-column table does not survive 390px, so the phone renders the same list
+   as cards — and the number at the top of it has to be the same number. */
+console.log('\nthe phone');
+const ph = await browser.newPage({
+  viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true,
+  userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 '
+    + '(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+});
+const phErrs = [];
+ph.on('pageerror', (e) => phErrs.push(String(e.message)));
+await ph.goto(`${url}/#trips?days=7`, { waitUntil: 'domcontentloaded' });
+await ph.waitForSelector('.m-row', { timeout: 20000 }).catch(() => {});
+await ph.waitForTimeout(1200);
+const m = await ph.evaluate(() => ({
+  text: document.body.innerText,
+  cards: document.querySelectorAll('.m-row').length,
+  wide: document.documentElement.scrollWidth > window.innerWidth + 1,
+}));
+check('the phone screen rendered without throwing', phErrs.length === 0, phErrs.join(' | '));
+check('it drew a card per trip', m.cards >= 40, String(m.cards));
+check('and leads with the same total the desktop does',
+  m.text.includes(fmtNum(api.total)), `looking for ${api.total}`);
+check('nothing pushes the phone sideways', !m.wide);
+check('the channel is on every card, not in a filter above',
+  /Uber/.test(m.text) && /Hotel/.test(m.text), '');
+check('a cancelled trip says so on the card', /cancelled/i.test(m.text));
+await ph.fill('.m-search input', 'm3');
+await ph.waitForTimeout(900);
+const ms = await ph.evaluate(() => ({ text: document.body.innerText, cards: document.querySelectorAll('.m-row').length }));
+check('the phone search narrows the list', ms.cards < m.cards && ms.cards > 0, `${ms.cards} vs ${m.cards}`);
+check('and says what it is showing', /matching/i.test(ms.text), ms.text.slice(0, 120));
 
 await browser.close();
 server.close();

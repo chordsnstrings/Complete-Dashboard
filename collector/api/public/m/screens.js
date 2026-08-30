@@ -13,6 +13,9 @@
 import { state, q, qAll, api, href, windowLabel } from '../data.js';
 import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
   skeleton, empty, failed, spark, bars, unwrap, cut, splitToday } from './ui.js';
+/* The one place a channel key becomes a word a person reads. Shared with the
+   desktop rather than copied, so 'fms' is "FMS telematics" on both. */
+import { sourceLabel } from '../ui.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -22,7 +25,7 @@ export const TABS = [
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
     owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance',
       'sources', 'settings', 'corporate', 'analyst', 'property', 'credentials',
-      'optimise'] },
+      'optimise', 'trips'] },
 ];
 
 /* The header names the window the screen is ACTUALLY showing. It said
@@ -38,6 +41,7 @@ export function titleFor(view, param) {
     people: ['People', WINDOW_NOTE()],
     fleet: ['Fleet', WINDOW_NOTE()],
     more: ['More', 'Everything else'],
+    trips: ['Every trip', WINDOW_NOTE()],
     live: ['Live fleet', 'Positions now'],
     safety: ['Safety', 'Harsh-driving events'],
     unauthorized: ['Unauthorized', 'Moved with no booking'],
@@ -515,6 +519,90 @@ async function sources(deck, ctx) {
   })));
 }
 
+/* ── Every trip ─────────────────────────────────────────────────────────── */
+/* The record, on the device it gets asked about from.
+   ─────────────────────────────────────────────────────────────────────────
+   "What happened on that job" is a question asked standing next to the car,
+   not at a desk. The desktop's nine-column table does not survive a 390px
+   screen, so this is the same list as a stack of cards: who, which car, when,
+   and the two ends of the journey — with the same search, because a plate and
+   a name are the two things somebody has in their head at that moment.
+
+   The channel is on every card for the same reason it is on every desktop
+   row: a mixed list with the channel in a filter somewhere above reads as one
+   channel's. */
+const AREA = (a) => { const s = String(a || ''); return (s.split(' - ')[1] || s).trim(); };
+
+async function tripsScreen(deck, ctx) {
+  const host = el('div');
+  let term = '', kind = 'bookings', offset = 0;
+
+  search(deck, 'Plate, driver or place', (v) => { term = v; offset = 0; draw(); });
+  seg(deck, [{ id: 'bookings', label: 'Bookings' }, { id: 'telematics', label: 'Journeys' },
+    { id: 'all', label: 'Both' }], kind, (v) => { kind = v; offset = 0; draw(); });
+  deck.append(host);
+
+  async function draw() {
+    skeleton(host, 4);
+    let d;
+    try {
+      d = await q('/api/trips/list', { limit: 40, offset, q: term, kind: kind === 'bookings' ? '' : kind });
+    } catch (e) { if (ctx.alive()) { host.innerHTML = ''; failed(host, e); } return; }
+    if (!ctx.alive()) return;
+    host.innerHTML = '';
+
+    lede(host, {
+      claim: `${fmt(d.total)} ${kind === 'telematics' ? 'telematics journeys' : 'bookings'}`
+        + (term ? ` matching “${term}”` : ''),
+      sub: kind === 'bookings'
+        ? 'Newest first. The telematics journeys behind them are the same cars, counted again.'
+        : kind === 'telematics' ? 'What the trackers saw. These are movement, not work.'
+          : 'Bookings and tracker journeys together.',
+    });
+    if (!d.rows.length) {
+      empty(host, term ? 'Nothing matches that' : 'No trip in this window',
+        term ? 'Try a plate, part of a name, or a community.' : '');
+      return;
+    }
+    /* Two columns, and what goes in each is decided by what a phone can fit.
+       The left is who and where — the half that identifies the job and the
+       half that is long. The right is when and on whose behalf, both short.
+       Putting the route in the right column, beside a channel name, gave
+       every card an ellipsis three words in. */
+    const clock = (t) => new Date(t).toLocaleTimeString([],
+      { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Dubai' });
+    rows(host, d.rows.map((r) => row({
+      title: r.driver_name || r.driver_ext_id || 'Unnamed driver',
+      sub: (r.has_fare ? `${money(r.price, r.currency || 'AED')} · ` : '')
+        + `${r.plate || 'no vehicle'} · ${AREA(r.pickup_addr) || '—'} → ${AREA(r.dropoff_addr) || '—'}`,
+      value: clock(r.requested_at),
+      note: `${dayStr(r.requested_at)} · ${sourceLabel(r.platform)}`
+        + (r.outcome === 'not_completed' ? ' · cancelled' : ''),
+      tone: r.outcome === 'not_completed' ? 'critical' : null,
+      to: r.plate ? href('vehicle', r.plate) : (r.driver_ext_id ? href('driver', r.driver_ext_id) : null),
+    })));
+
+    /* Rows, not page numbers: what a reader wants to know is how much of the
+       window is behind them, not which page they are on. */
+    const nav = el('div', 'm-seg');
+    const mk = (label, on, go) => {
+      const b = el('button', null, label);
+      b.type = 'button'; b.disabled = !on;
+      b.onclick = () => { offset = go; draw(); window.scrollTo({ top: 0 }); };
+      nav.append(b);
+    };
+    mk('‹ Newer', offset > 0, Math.max(0, offset - 40));
+    mk('Older ›', d.truncated, offset + 40);
+    host.append(nav);
+    host.append(el('p', 'm-cap',
+      `${fmt(d.offset + 1)}–${fmt(d.offset + d.shown)} of ${fmt(d.total)}`
+      + (kind !== 'telematics' && d.priced < d.shown
+        ? ` · ${fmt(d.shown - d.priced)} of these carry no fare, because the channel publishes none`
+        : '')));
+  }
+  await draw();
+}
+
 /* ── More ───────────────────────────────────────────────────────────────── */
 async function more(deck) {
   deck.append(el('p', 'm-sec', 'Analyse'));
@@ -527,6 +615,7 @@ async function more(deck) {
   rows(deck, [
     row({ title: 'Live fleet', sub: 'positions now', value: '›', to: href('live') }),
     row({ title: 'Safety', sub: 'harsh-driving events', value: '›', to: href('safety') }),
+    row({ title: 'Every trip', sub: 'one card per booking, searchable', value: '›', to: href('trips') }),
     row({ title: 'Unauthorized trips', sub: 'moved with no booking', value: '›', to: href('unauthorized') }),
     row({ title: 'Data sources', sub: 'collector health', value: '›', to: href('sources') }),
     row({ title: 'Paste a credential', sub: 'read, tested, then stored', value: '›', to: href('credentials') }),
@@ -1061,7 +1150,7 @@ async function fallback(deck, ctx) {
 
 export const SCREENS = {
   today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more,
-  corporate, analyst, credentials, optimise, fallback,
+  corporate, analyst, credentials, optimise, trips: tripsScreen, fallback,
   /* A driver or vehicle with no sub-page gets the phone screen; a sub-page
      (`#driver/x/earnings`) is a desktop tab and goes to the fallback, which
      renders the real module. Decided in render() rather than here, because a
