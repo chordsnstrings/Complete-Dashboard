@@ -58,6 +58,114 @@ export function daysWindow(v, now = Date.now()) {
   return [dubaiDay(new Date(now - (n - 1) * 864e5)), dubaiDay(new Date(now))];
 }
 
+/* ── calendar periods ─────────────────────────────────────────────────────
+   A rolling window and a calendar period are different questions and the
+   product only answered the first. "Last 30 days" cannot tell you how August
+   went, because on the 12th it is half of July; a board asking "how is this
+   month" is not asking for a thirty-day average that straddles two of them.
+
+   So `period` names a real span on the Dubai calendar. `today`, `week` and
+   `month` run from the start of the period to TODAY — period-to-date, which is
+   the only honest thing to show for a period still running — and the previous_
+   forms give the same number of days ending at the same point in the period
+   before, so a comparison is like against like rather than a full month
+   against a part of one.
+
+   Everything here is computed on Dubai's calendar via dubaiDay, never on the
+   server's UTC clock: at 02:00 Dubai those are different dates, and the fleet
+   works through that hour. */
+const dayMs = 864e5;
+const parse = (d) => new Date(`${d}T00:00:00Z`);
+const shift = (d, n) => { const x = parse(d); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+/* ISO week: Monday. `getUTCDay()` is Sunday-0, so the offset is (dow+6)%7 —
+   which is 0 on a Monday and 6 on a Sunday, rather than the other way round. */
+const weekStart = (d) => shift(d, -((parse(d).getUTCDay() + 6) % 7));
+const monthStart = (d) => `${d.slice(0, 7)}-01`;
+
+export const PERIODS = ['today', 'yesterday', 'week', 'month', 'quarter', 'year',
+  'last_week', 'last_month'];
+
+export function periodWindow(v, now = Date.now()) {
+  const name = String(first(v) || '');
+  if (!PERIODS.includes(name)) return null;
+  const today = dubaiDay(new Date(now));
+  switch (name) {
+    case 'today': return [today, today];
+    case 'yesterday': { const y = shift(today, -1); return [y, y]; }
+    case 'week': return [weekStart(today), today];
+    case 'month': return [monthStart(today), today];
+    case 'quarter': {
+      const m = Number(today.slice(5, 7));
+      const q = Math.floor((m - 1) / 3) * 3 + 1;
+      return [`${today.slice(0, 4)}-${String(q).padStart(2, '0')}-01`, today];
+    }
+    case 'year': return [`${today.slice(0, 4)}-01-01`, today];
+    /* A WHOLE previous period, not a to-date one: last week and last month are
+       finished, so there is nothing to truncate and truncating them would
+       throw away days that happened. */
+    case 'last_week': { const s2 = shift(weekStart(today), -7); return [s2, shift(s2, 6)]; }
+    case 'last_month': {
+      const s2 = shift(monthStart(today), -1);
+      return [monthStart(s2), s2];
+    }
+    default: return null;
+  }
+}
+
+/* The span to compare a window against: the same NUMBER OF DAYS immediately
+   before it. For a period-to-date that is the same slice of the period before
+   — 1–12 August against 1–12 July — which is the comparison a reader assumes
+   when a page says "+21%" and the one that is wrong most often when nobody
+   writes it down. */
+export function previousWindow([from, to]) {
+  const span = Math.round((parse(to) - parse(from)) / dayMs) + 1;
+  return [shift(from, -span), shift(from, -1)];
+}
+
+/* ── grain ────────────────────────────────────────────────────────────────
+   How a window is BUCKETED, which is a separate question from how long it is:
+   ninety days can be ninety bars, thirteen, or three, and each answers a
+   different question about the same data.
+
+   Left unsaid, it is chosen from the window's own length, because 365 daily
+   bars is not a chart and three monthly bars is not a trend. The thresholds
+   are where a bar stops being readable, not where the data changes. */
+export const GRAINS = ['day', 'week', 'month'];
+
+/* An ABSENT grain means `day`, and that is a compatibility decision rather
+   than a default worth arguing about: every caller written before this — the
+   product's own pages, a spreadsheet, a monitoring check — asks without a
+   grain and expects one row per day. Choosing from the span for them would
+   silently reshape a response they already parse, which is the kind of change
+   that breaks quietly and elsewhere.
+
+   `grain=auto` is how a caller opts IN to the span-based choice, and it is
+   what the dashboard's "Auto grouping" sends. The thresholds are where a bar
+   stops being readable, not where the data changes: 365 daily bars is not a
+   chart and three monthly bars is not a trend. */
+export function autoGrain(from, to) {
+  const span = Math.round((parse(to) - parse(from)) / dayMs) + 1;
+  if (span <= 45) return 'day';
+  if (span <= 300) return 'week';
+  return 'month';
+}
+
+export function grainOf(req, now = Date.now()) {
+  const g = String(first(req?.query?.grain) || '');
+  if (GRAINS.includes(g)) return g;
+  if (g !== 'auto') return 'day';
+  const [from, to] = winDays(req, now);
+  return autoGrain(from, to);
+}
+
+/* The SQL that buckets a date column at a grain. One expression, used by every
+   route that groups over time, so a week means the same thing everywhere it is
+   drawn. */
+export const bucketSql = (grain, col = 'local_day') => (
+  grain === 'month' ? `date_trunc('month', ${col})::date`
+    : grain === 'week' ? `date_trunc('week', ${col})::date`
+      : `${col}::date`);
+
 /* Calendar-day bounds: `[from, to]` as YYYY-MM-DD, for queries that compare
    against local_day (a date) or apply their own timezone conversion. */
 export function winDays(req, now = Date.now()) {
@@ -73,7 +181,11 @@ export function winDays(req, now = Date.now()) {
      trap `days` had, one letter apart, on the endpoint next to the one where
      the parameter works. Understood here, it works everywhere. */
   if (isDay(req.query?.day)) return [first(req.query.day), first(req.query.day)];
-  return daysWindow(req.query?.days, now) || ['2000-01-01', '2100-01-01'];
+  /* Before `days`, after explicit dates: a caller who names a period means it,
+     and a caller who names both dates and a period has been more specific. */
+  return periodWindow(req.query?.period, now)
+    || daysWindow(req.query?.days, now)
+    || ['2000-01-01', '2100-01-01'];
 }
 
 /* Timestamp bounds for tables keyed on a raw timestamptz. The upper bound is
@@ -83,4 +195,68 @@ const endOfDay = (d) => (isDay(d) ? `${d} 23:59:59.999` : d);
 export function win(req, now = Date.now()) {
   const [from, to] = winDays(req, now);
   return [from, endOfDay(to)];
+}
+
+/* Fold a complete day series into week or month buckets.
+   ─────────────────────────────────────────────────────────────────────────
+   Counts and money sum. Two things do not, and pretending otherwise is how a
+   weekly chart starts lying:
+
+     drivers   is a COUNT DISTINCT of people. Summing seven days counts a
+               five-day driver five times, which on this fleet turns 118
+               people into six hundred. The bucket reports the busiest single
+               day instead — a floor, not the answer — and says so in
+               `drivers_basis` so a page cannot print it as a headcount.
+
+     the edges are partial. A window ending on a Wednesday ends in a three-day
+               week, and drawn beside whole ones that is a collapse the fleet
+               did not have. Every bucket carries `days` and `partial`, and the
+               chart is expected to mark them.
+
+   `uncollected` is kept as a count rather than a flag: "two of the seven days
+   in this week collected nothing" is the fact, and it is the reason a low
+   bucket may not be a low week. */
+export function foldGrain(rows, grain) {
+  if (grain !== 'week' && grain !== 'month') return rows;
+  const keyOf = (d) => {
+    if (grain === 'month') return `${d.slice(0, 7)}-01`;
+    const x = new Date(`${d}T00:00:00Z`);
+    x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7));
+    return x.toISOString().slice(0, 10);
+  };
+  const SUM = ['trips', 'completed', 'cancelled', 'telematics_journeys', 'km', 'revenue',
+    'priced_trips'];
+  const out = new Map();
+  for (const r of rows) {
+    const k = keyOf(r.d);
+    let b = out.get(k);
+    if (!b) {
+      b = { d: k, grain, days: 0, partial: false, drivers: 0,
+        drivers_basis: 'the busiest single day in this bucket — a floor, because a person works several days',
+        uncollected_days: 0, first_day: r.d, last_day: r.d };
+      for (const c of SUM) b[c] = null;
+      out.set(k, b);
+    }
+    b.days += 1;
+    b.last_day = r.d;
+    for (const c of SUM) {
+      const v = r[c];
+      /* null + 0 is 0, which would report "no fare was collected all week" as
+         "the week earned nothing". A bucket stays null until some day in it
+         carries a number. */
+      if (v == null) continue;
+      b[c] = (b[c] == null ? 0 : Number(b[c])) + Number(v);
+    }
+    b.drivers = Math.max(b.drivers, Number(r.drivers) || 0);
+    if (r.uncollected) b.uncollected_days += 1;
+  }
+  const buckets = [...out.values()];
+  for (const b of buckets) {
+    const whole = grain === 'week' ? 7
+      : new Date(Date.UTC(+b.d.slice(0, 4), +b.d.slice(5, 7), 0)).getUTCDate();
+    b.partial = b.days < whole;
+    b.of_days = whole;
+    b.uncollected = b.uncollected_days > 0 && b.uncollected_days === b.days;
+  }
+  return buckets;
 }

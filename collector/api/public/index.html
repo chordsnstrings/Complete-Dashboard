@@ -102,12 +102,39 @@
              the repo's own smoke list links to it. Without the option a
              ?days=180 address left the control with selectedIndex -1 — blank —
              while the page genuinely used six months. -->
+        <!-- Two kinds of window, and they answer different questions. A rolling
+             one ("last 30 days") is the right frame for a trend; a calendar
+             period is the right frame for "how is August going", which a
+             thirty-day window straddling two months cannot answer. Both are
+             here, grouped so the difference is visible rather than implied. -->
         <select id="fRange" title="Date range">
-          <option value="7">Last 7 days</option>
-          <option value="30" selected>Last 30 days</option>
-          <option value="90">Last 90 days</option>
-          <option value="180">Last 6 months</option>
-          <option value="365">Last 12 months</option>
+          <optgroup label="Calendar period">
+            <option value="p:today">Today</option>
+            <option value="p:yesterday">Yesterday</option>
+            <option value="p:week">This week</option>
+            <option value="p:month">This month</option>
+            <option value="p:last_week">Last week</option>
+            <option value="p:last_month">Last month</option>
+            <option value="p:quarter">This quarter</option>
+            <option value="p:year">This year</option>
+          </optgroup>
+          <optgroup label="Rolling window">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="180">Last 6 months</option>
+            <option value="365">Last 12 months</option>
+          </optgroup>
+        </select>
+        <!-- How the window is BUCKETED, which is not how long it is. Left on
+             Auto the server picks from the span, because 365 daily bars is not
+             a chart and three monthly bars is not a trend. -->
+        <select id="fGrain" title="Group by">
+          <option value="auto" selected>Auto grouping</option>
+          <option value="">Exactly as asked (by day)</option>
+          <option value="day">By day</option>
+          <option value="week">By week</option>
+          <option value="month">By month</option>
         </select>
         <select id="fPlatform" title="Platform">
           <option value="">All platforms</option>

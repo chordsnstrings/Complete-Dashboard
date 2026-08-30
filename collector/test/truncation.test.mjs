@@ -194,13 +194,32 @@ console.log(`\n  ${WIDE_PLATES} vehicles, ${WIDE_PEOPLE} people, ${trips} trips,
      has data on every day it covers, so counting empties would test the fixture
      rather than the endpoint. A series with a day missing from the middle is
      what the fill exists to prevent. */
+  /* At the DAY grain, which is what an absent `grain` means — deliberately, so
+     that every caller written before the grain existed keeps the shape it
+     already parses. A hundred-year window asked with `grain=auto` comes back
+     in months, and months are not one day apart. */
   const dayMs = 864e5;
   const gaps = rows.slice(1).filter((r, i) =>
     (Date.parse(String(r.d)) - Date.parse(String(rows[i].d))) !== dayMs);
   check('but the calendar is still filled, so the series has no missing day in it',
     rows.length > 1 && gaps.length === 0,
     `${rows.length} rows, ${gaps.length} discontinuities`);
-  /* Bounded by span, not clamped to the data. The trailing days of a window
+
+
+  /* And the same property one grain up: a bucketed series must be contiguous
+     in BUCKETS. A month missing from the middle of a monthly series is the
+     identical failure the daily fill exists to prevent, and nothing else in
+     the suite would have noticed it. */
+  const monthly = (await get('/api/trips/daily?from=2000-01-01&to=2100-01-01&grain=auto')).body;
+  const mrows = Array.isArray(monthly) ? monthly : (monthly?.rows || []);
+  check('a century asked with auto grouping comes back in months, not days',
+    mrows.length > 0 && mrows.every((r) => r.grain === 'month'), `${mrows.length} rows`);
+  const mgaps = mrows.slice(1).filter((r, i2) => {
+    const a = new Date(`${mrows[i2].d}T00:00:00Z`), b = new Date(`${r.d}T00:00:00Z`);
+    return (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth()) !== 1;
+  });
+  check('…and every month between the first and the last is present',
+    mgaps.length === 0, `${mrows.length} buckets, ${mgaps.length} discontinuities`);  /* Bounded by span, not clamped to the data. The trailing days of a window
      showing "nothing recorded" is how a collector that stopped three days ago
      becomes visible, so the fill must still run past the last day that has
      rows — clamping to the record was the first attempt and hid exactly that. */

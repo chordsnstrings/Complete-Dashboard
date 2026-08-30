@@ -545,9 +545,19 @@ V.overview = async (root) => {
   const vHost = el('div'); root.append(vHost);
   const kpiHost = el('div', 'kpis'); root.append(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
-  const trend = panel('Trips per day',
+  /* The title has to follow the grain. Left as "Trips per day" over weekly
+     bars it is not a stale label, it is a wrong one: a reader takes the bar
+     height for a daily figure and it is seven days of work. */
+  const GRAIN_WORD = { day: 'day', week: 'week', month: 'month' };
+  /* On `auto` the SERVER chooses, so the title cannot be written from the
+     client's state — it is filled in below from what the response actually
+     came back bucketed at. Anything else labels weekly bars "per day" on
+     exactly the setting most readers leave it on. */
+  let per = GRAIN_WORD[state.grain] || 'day';
+  const trend = panel(`Trips per ${per}`,
     'Bookings only. Telematics journeys are drawn behind them in grey — the same physical trips, seen '
-    + 'by the trackers. A day nobody collected is hatched, not zero. Click a bar to open that day.');
+    + `by the trackers. A ${per} nobody collected is hatched, not zero.`
+    + (per === 'day' ? ' Click a bar to open that day.' : ''));
   g1.append(trend.panel);
   const mix = panel('Platform share',
     'Bookings by channel. Telematics rows are excluded: they are the same journeys, and adding them '
@@ -565,9 +575,16 @@ V.overview = async (root) => {
   const lead = panel('Top drivers', 'Click for detail'); root.append(lead.panel);
   [kpiHost, trend.body, mix.body, prod.body, pay.body, out.body, lead.body].forEach(loading);
 
-  const [k, daily, byPlat, byProd, payDetail, byStatus, drivers] = await Promise.all([
+  const [k, daily, byPlat, byProd, payDetail, byStatus, drivers, cmp] = await Promise.all([
     q('/api/kpis'), q('/api/trips/daily'), q('/api/mix', { by: 'platform' }), q('/api/mix'),
     q('/api/mix/detail', { by: 'payment' }), q('/api/mix', { by: 'status' }), q('/api/drivers/leaderboard'),
+    /* Only when a calendar period is selected. A rolling window compared
+       against the rolling window before it is two overlapping spans and the
+       "change" is mostly the overlap — the comparison is meaningful for
+       "August against the same span of July" and misleading for "the last 30
+       days against the 30 before". So it is fetched where it means something
+       and absent where it does not. */
+    state.period ? q('/api/compare/period').catch(() => null) : Promise.resolve(null),
   ]);
 
   /* The tiles are addresses. "Money in" is the most misread number in this
@@ -651,6 +668,21 @@ V.overview = async (root) => {
           + 'name. Revenue by channel shows what each one actually reports.';
       }
     }
+    /* What changed, when there is a like-for-like span to compare against.
+       The server picks the same NUMBER of days immediately before the window,
+       so a month-to-date is measured against the same slice of the month
+       before rather than against a whole one. */
+    const move = (key, noun) => {
+      const d = cmp?.change_pct?.[key];
+      if (d == null || !Number.isFinite(+d)) return '';
+      const dir = +d >= 0 ? 'up' : 'down';
+      return `${noun} ${dir} ${Math.abs(+d).toFixed(1)}%`;
+    };
+    const shifts = [move('trips', 'bookings'), move('money', 'money')].filter(Boolean);
+    const compareLine = shifts.length && cmp?.previous
+      ? `Against ${cmp.previous.from} – ${cmp.previous.to}, the same span before this one: `
+        + `${shifts.join(', ')}.`
+      : '';
     const sub = [
       `${fmt(k.trips)} bookings over ${v.days} ${plural(v.days, 'day')}, `
       + `${money ? `AED ${fmt(money)} accounted for` : 'no money accounted for in this window'}.`,
@@ -658,13 +690,21 @@ V.overview = async (root) => {
       k.telematics_journeys
         ? `The trackers saw ${fmt(k.telematics_journeys)} journeys behind these bookings — the same cars, counted by a different feed.`
         : '',
+      compareLine,
     ].filter(Boolean).join(' ');
     verdict(vHost, { claim, figure, unit, sub, tone: v.tone, recommend, meta });
   }
 
+  /* What the response actually IS, which on `auto` the client did not choose.
+     A bucketed row carries its own grain; a daily one does not. */
+  per = GRAIN_WORD[daily[0]?.grain] || per;
+  trend.panel.querySelector('h3').textContent = `Trips per ${per}`;
   gapBars(trend.body, daily, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
-    // A day is an address now, not a modal containing a driver list.
-    onClick: (d) => { location.hash = href('day', dayKey(d.d)); } });
+    gapLabel: `nothing was collected in this ${per}`,
+    /* A day is an address; a week is not — #day takes one date, and handing it
+       the Monday of a bucket would open one seventh of what the bar showed.
+       So the drill-through is offered only at the grain it is true at. */
+    onClick: per === 'day' ? (d) => { location.hash = href('day', dayKey(d.d)); } : null });
   /* The slice carries which platform it is, and the click threw it away —
      every slice opened the same unfiltered #platforms. */
   /* Both of these charted the endpoint's raw label — a donut legend reading
@@ -791,21 +831,26 @@ V.demand = async (root) => {
      shape question, so the headline is WHEN rather than how much — the busiest
      hour is what a rota is built against. */
   if (bookings) {
-    const uncollected = d.filter((x) => x.uncollected).length;
+    /* Days, not rows — see fleetVerdict in verdicts.js. A bucketed series
+       carries `days` per row and this page divides by it to get a daily rate,
+       so counting rows would multiply that rate by the bucket size. */
+    const spanDays = d.reduce((a, x) => a + (Number.isFinite(+x.days) ? +x.days : 1), 0);
+    const uncollected = d.reduce((a, x) => a
+      + (Number.isFinite(+x.uncollected_days) ? +x.uncollected_days : (x.uncollected ? 1 : 0)), 0);
     const peak = (h || []).length ? [...h].sort((a, b) => (+b.trips || 0) - (+a.trips || 0))[0] : null;
     const peakPct = peak && h.length
       ? Math.round((peak.trips / h.reduce((a, x) => a + (+x.trips || 0), 0)) * 100) : 0;
-    const perDay = Math.round(bookings / Math.max(1, d.length - uncollected));
+    const perDay = Math.round(bookings / Math.max(1, spanDays - uncollected));
     verdict(vdHost, {
       claim: uncollected
-        ? `${uncollected} of these ${d.length} days were never collected`
+        ? `${uncollected} of these ${spanDays} days were never collected`
         : peak
           ? `The busiest hour is ${String(peak.h).padStart(2, '0')}:00 — ${peakPct}% of the day's work`
-          : `${fmt(bookings)} bookings over ${d.length} days`,
+          : `${fmt(bookings)} bookings over ${spanDays} days`,
       figure: fmt(perDay),
       unit: 'bookings a day',
       tone: uncollected ? 'bad' : null,
-      meta: uncollected ? `over the ${d.length - uncollected} days collected` : `over ${d.length} days`,
+      meta: uncollected ? `over the ${spanDays - uncollected} days collected` : `over ${spanDays} days`,
       sub: uncollected
         ? 'The hourly curve and the heatmap below are over the days that WERE collected — a missing '
           + 'day is drawn hatched rather than as zero.'
@@ -4521,7 +4566,17 @@ async function freshness() {
 /* A filter change rewrites the address rather than re-rendering in place, so
    the URL always describes what is on screen and the back button undoes it.
    `hashchange` does the render. */
-$('#fRange').onchange = (e) => setFilter({ days: +e.target.value });
+/* One control, two kinds of window. A calendar period is prefixed `p:` in the
+   option value so the two cannot be confused for one another — and choosing
+   either CLEARS the other, because a page showing "this month" over a rolling
+   thirty days would be labelled with a window it is not using. */
+$('#fRange').onchange = (e) => {
+  const v = String(e.target.value);
+  setFilter(v.startsWith('p:')
+    ? { period: v.slice(2) }
+    : { period: '', days: +v });
+};
+$('#fGrain').onchange = (e) => setFilter({ grain: e.target.value });
 $('#fPlatform').onchange = (e) => setFilter({ platform: e.target.value });
 $('#fFleet').onchange = (e) => setFilter({ fleet: e.target.value });
 $('#refreshBtn').onclick = (e) => {
@@ -4582,9 +4637,11 @@ function applyRoute() {
   // clicking a plain link would silently carry a 365-day window into a page
   // whose caption claims 30.
   state.days = r.days ?? 30;
+  state.period = r.period ?? '';
+  state.grain = r.grain ?? 'auto';
   state.platform = r.platform ?? '';
   state.fleet = r.fleet ?? '';
-  const rng = $('#fRange'), plt = $('#fPlatform'), flt = $('#fFleet');
+  const rng = $('#fRange'), plt = $('#fPlatform'), flt = $('#fFleet'), grn = $('#fGrain');
   /* A value the control does not offer must be VISIBLE, not blank. `?days=180`
      is accepted by the router and linked from the repo's own smoke list, and
      the select had no 180 option — so `rng.value = '180'` left selectedIndex at
@@ -4592,12 +4649,16 @@ function applyRoute() {
      180 now has an option; anything else that ever slips through gets one made
      for it rather than silently showing nothing. */
   if (rng) {
-    rng.value = String(state.days);
+    /* A period wins the control when one is set, because it is what the page
+       is actually showing. The `p:` prefix is what keeps "this week" and a
+       seven-day window from sharing a value. */
+    rng.value = state.period ? `p:${state.period}` : String(state.days);
     if (rng.selectedIndex < 0) {
-      rng.append(new Option(`Last ${state.days} days`, String(state.days)));
-      rng.value = String(state.days);
+      rng.append(new Option(state.period ? state.period : `Last ${state.days} days`, rng.value));
+      rng.value = state.period ? `p:${state.period}` : String(state.days);
     }
   }
+  if (grn) grn.value = state.grain;
   if (plt) plt.value = state.platform;
   if (flt) flt.value = state.fleet;
 }

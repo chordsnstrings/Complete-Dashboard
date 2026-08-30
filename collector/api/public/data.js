@@ -20,9 +20,29 @@ export const store = {
 
 export const state = {
   view: 'unit', param: null, sub: null,
-  days: 30, platform: '', fleet: '',
+  /* Two independent things, and keeping them apart is the point.
+       `days`   a ROLLING window — how far back.
+       `period` a CALENDAR span — today, this week, this month. When set it
+                REPLACES `days`, because "this month" is not a number of days
+                and computing one would put the label on the wrong window the
+                moment the month is not 30 days long.
+       `grain`  how the window is BUCKETED. Empty means the server chooses from
+                the span, which is right almost always and wrong only when a
+                reader wants to see the noise a weekly bar is hiding. */
+  days: 30, period: '', grain: 'auto', platform: '', fleet: '',
   admin: store.get('adminToken'),
 };
+
+/* The periods the control offers, mirrored from api/window.js. A value not on
+   this list is dropped rather than sent — the server would ignore it and fall
+   through to a rolling window, and the page would then be labelled with a
+   period it is not showing. */
+export const PERIODS = ['today', 'yesterday', 'week', 'month', 'quarter', 'year',
+  'last_week', 'last_month'];
+/* `auto` is a real value the server understands, not the absence of one:
+   absent means `day`, so that every caller written before the grain existed
+   keeps getting the shape it already parses. */
+export const GRAINS = ['auto', 'day', 'week', 'month'];
 
 /* Which render is the current one.
    ─────────────────────────────────────────────────────────────────────────
@@ -144,6 +164,22 @@ export function windowDates() {
   const now = Date.now();
   return [dubaiDay(new Date(now - (state.days - 1) * 864e5)), dubaiDay(new Date(now))];
 }
+
+/* The window a request should carry.
+   ─────────────────────────────────────────────────────────────────────────
+   With a calendar period selected the client does NOT compute the dates. It
+   sends `period=month` and lets api/window.js resolve it, for the same reason
+   the Dubai-day helper above exists: the boundaries of "this month" depend on
+   a calendar, and two implementations of a calendar drift. The server already
+   has one, it is tested, and it is the one the reconciliation uses.
+
+   Without a period this is unchanged — explicit from/to, as every call site
+   has always sent. */
+function windowParams() {
+  if (state.period) return { period: state.period };
+  const [from, to] = windowDates();
+  return { from, to };
+}
 /* An absent value must be ABSENT, not the four-letter word "undefined".
    ─────────────────────────────────────────────────────────────────────────
    URLSearchParams stringifies everything it is handed, so `{ fleet: undefined }`
@@ -162,8 +198,8 @@ const clean = (o = {}) => Object.fromEntries(
   Object.entries(o).filter(([, v]) => v != null && v !== ''));
 
 export function params(extra = {}) {
-  const [from, to] = windowDates();
-  const p = new URLSearchParams({ from, to, ...clean(extra) });
+  const p = new URLSearchParams({ ...windowParams(), ...clean(extra) });
+  if (state.grain) p.set('grain', state.grain);
   if (state.platform) p.set('platform', state.platform);
   if (state.fleet) p.set('fleet', state.fleet);
   return p.toString();
@@ -174,8 +210,9 @@ export const q = (path, extra) => api(`${path}?${params(extra)}`);
 // "everything about this person", and silently hiding half their work because
 // a platform filter is set elsewhere would be a lie.
 export function unfiltered(extra = {}) {
-  const [from, to] = windowDates();
-  return new URLSearchParams({ from, to, ...clean(extra) }).toString();
+  const p = new URLSearchParams({ ...windowParams(), ...clean(extra) });
+  if (state.grain) p.set('grain', state.grain);
+  return p.toString();
 }
 export const qAll = (path, extra) => api(`${path}?${unfiltered(extra)}`);
 
@@ -210,7 +247,7 @@ export const qChan = (path, extra) => {
    person opening it saw all platforms over 30 days and no reason to think
    otherwise. A filter that changes what a page says has to be part of the
    page's address. */
-const DEFAULTS = { days: 30, platform: '', fleet: '' };
+const DEFAULTS = { days: 30, period: '', grain: 'auto', platform: '', fleet: '' };
 
 /* Which controls a view actually offers. Declared here rather than in the
    shell, because href() has to agree with it: an address that carries a filter
@@ -264,9 +301,17 @@ export const hidesChannel = (v) => NO_FILTER.includes(v) || NO_PLATFORM_FLEET.in
    one key `days` whose value is "365?day=2026-08-25", so the window silently
    reset to 30 and the day was never seen at all. */
 export function filterQuery(view = state.view, extra = null, over = null) {
-  const s = { days: state.days, platform: state.platform, fleet: state.fleet, ...(over || {}) };
+  const s = { days: state.days, period: state.period, grain: state.grain,
+    platform: state.platform, fleet: state.fleet, ...(over || {}) };
   const p = new URLSearchParams();
-  if (!hidesRange(view) && s.days !== DEFAULTS.days) p.set('days', String(s.days));
+  /* A period and a rolling window are alternatives, never both: sending both
+     would leave which one won up to the server's precedence rules, and a link
+     is supposed to say exactly what the reader was looking at. */
+  if (!hidesRange(view)) {
+    if (s.period) p.set('period', s.period);
+    else if (s.days !== DEFAULTS.days) p.set('days', String(s.days));
+    if (s.grain && s.grain !== DEFAULTS.grain) p.set('grain', s.grain);
+  }
   if (!hidesChannel(view)) {
     if (s.platform) p.set('platform', s.platform);
     if (s.fleet) p.set('fleet', s.fleet);
@@ -300,6 +345,11 @@ export function parseHash(h = location.hash.slice(1)) {
     // Only values the app actually offers. A hand-edited `days=9999` would
     // otherwise widen every query on the page silently.
     days: [7, 30, 90, 180, 365].includes(+search.get('days')) ? +search.get('days') : null,
+    /* Same rule as `days`: only values the app offers. A hand-edited period or
+       grain the server does not know would be ignored there and leave the
+       control showing something the page is not doing. */
+    period: PERIODS.includes(search.get('period') || '') ? search.get('period') : null,
+    grain: GRAINS.includes(search.get('grain') || '') ? search.get('grain') : null,
     platform: search.get('platform') || null,
     fleet: search.get('fleet') || null,
     /* A single day, validated the same way: every trip row deep-links to the

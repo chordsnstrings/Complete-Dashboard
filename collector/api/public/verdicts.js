@@ -23,10 +23,25 @@ export const shareOf = (r) => +(r?.n ?? r?.value ?? r?.trips ?? 0) || 0;
  * @returns {{branch, tone, perDay, days, uncollected, partial, leadPct, lead, others}}
  */
 export function fleetVerdict({ kpis = {}, daily = [], byPlatform = [] } = {}) {
-  const days = daily.length || 0;
+  /* A ROW is not a day once the series can be bucketed.
+     ─────────────────────────────────────────────────────────────────────────
+     This counted rows, which was the same thing while the series was always
+     daily. At a week grain a ninety-day window arrives as five rows, and the
+     page then read "2,043 bookings over 5 days" and divided by five to get a
+     daily rate — a figure seven times too large, printed as a headline, with
+     nothing on screen to suggest it was wrong.
+
+     A bucketed row carries `days`; a daily row does not and is worth one. */
+  const daysIn = (d) => (Number.isFinite(+d?.days) ? +d.days : 1);
+  const days = daily.reduce((a, d) => a + daysIn(d), 0);
   const perDay = days ? Math.round((+kpis.trips || 0) / days) : 0;
-  const uncollected = daily.filter((d) => d.uncollected).length;
-  const partial = daily.filter((d) => !d.uncollected && (+d.sources_silent || 0) > 0).length;
+  /* Also days rather than rows: a week bucket carrying `uncollected_days: 2`
+     is two lost days, and counting it as one understates the hole — which is
+     the one number on this verdict that exists to be alarming. */
+  const lost = (d) => (Number.isFinite(+d?.uncollected_days) ? +d.uncollected_days : (d?.uncollected ? 1 : 0));
+  const uncollected = daily.reduce((a, d) => a + lost(d), 0);
+  const partial = daily.filter((d) => !d.uncollected && (+d.sources_silent || 0) > 0)
+    .reduce((a, d) => a + daysIn(d), 0);
 
   const charted = byPlatform.reduce((a, r) => a + shareOf(r), 0);
   const lead = [...byPlatform].sort((a, b) => shareOf(b) - shareOf(a))[0] || null;

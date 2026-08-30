@@ -15,7 +15,7 @@
    listed; a module nobody adds to a list is a module nothing executes. */
 import express from 'express';
 import { readFileSync, readdirSync } from 'node:fs';
-import { win, winDays } from '../api/window.js';
+import { win, winDays, grainOf, previousWindow, foldGrain, GRAINS, PERIODS } from '../api/window.js';
 import { rollupGrainSql } from '../src/rollup.js';
 /* The real redaction, not a stub: GET /api/settings now answers a
    non-administrator a shape with every credential value blanked, and a stub
@@ -82,6 +82,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const src = readFileSync('api/server.js', 'utf8');
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
+    grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
     isAdmin, redactSettings, RAW_ALIASES, spanGaps,
     FIX_FRESH: "interval '30 minutes'",
     rollupGrainSql, rollupState: async () => [],

@@ -249,8 +249,18 @@ console.log('\nrollup: the planner is told what changed');
    eventually; eventually is an hour of slow pages after a deploy. */
 {
   const src = (await import('node:fs')).readFileSync('src/rollup.js', 'utf8');
-  check('the refresh analyzes the tables it just rewrote, and trip with them',
-    /ANALYZE trip, rollup_day, rollup_month, rollup_person_month/.test(src));
+  /* Each table by name, not the exact sentence: pinning the literal string
+     meant adding a grain to the refresh failed this check for spelling rather
+     than for anything being wrong, and the fix was to edit the assertion —
+     which is how a check stops being one. */
+  /* The QUERY, not the word: `ANALYZE` also appears in the comment explaining
+     why the call is cheap, and matching that found a sentence rather than a
+     table list. */
+  const analyzed = (src.match(/db\.query\('ANALYZE ([^']+)'\)/) || [])[1] || '';
+  for (const t of ['trip', 'rollup_day', 'rollup_week', 'rollup_month', 'rollup_person_month',
+    'driver_day', 'driver_payout_day']) {
+    check(`the refresh analyzes ${t} after rewriting it`, analyzed.includes(t), analyzed);
+  }
   check('and a failed analyze is a warning, not a failed rollup — stale plans are slow, not wrong',
     /analyze failed — plans may be stale/.test(src));
   // It must actually run, not merely be present in a string.
@@ -298,12 +308,23 @@ console.log('\nrollup: two refreshes do not race');
 console.log('\nrollup: it says how old it is');
 
 const state = await rollupState(db);
-/* Seven passes: the three trip grains, the payout-day materialisation, the
-   on-trip statement derivation, the driver lifetime, and the per-driver-day
-   record (sql/schema_v38.sql). The count is asserted rather than the names,
-   because a pass that stops recording its state is one nobody can tell has
-   stopped running. */
-check('every rollup records a state row', state.length === 7, JSON.stringify(state.map((s) => s.name)));
+/* The passes, by name: the three trip grains (day, week, month), the
+   per-person month, the payout-day materialisation, the on-trip statement
+   derivation, the per-driver-day record and the driver lifetime.
+
+   Named rather than counted. A count catches a pass that stopped recording its
+   state — which is the point, since nobody can tell such a pass has stopped
+   running — but it also passes when one pass disappears and another is added
+   in the same change, and it says nothing about WHICH one went missing. */
+const PASSES = ['driver_day', 'driver_lifetime', 'driver_payout_day', 'driver_statement_day',
+  'rollup_day', 'rollup_month', 'rollup_person_month', 'rollup_week'];
+const seen = state.map((s) => s.name).sort();
+check('every rollup pass records a state row',
+  JSON.stringify(seen) === JSON.stringify(PASSES), JSON.stringify(seen));
+/* The week grain is new, and it is the one most likely to be added to the
+   schema and forgotten in the refresh — the table would then exist, stay
+   empty, and every weekly view would quietly answer nothing. */
+check('…the week grain among them', seen.includes('rollup_week'));
 check('the payout pass is one of them', state.some((r) => r.name === 'driver_payout_day'));
 check('and the statement pass beside it', state.some((r) => r.name === 'driver_statement_day'));
 check('and the lifetime pass', state.some((r) => r.name === 'driver_lifetime'));

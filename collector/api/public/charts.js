@@ -209,14 +209,26 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     const h = ih * (+d[y]) / max, cx = bx + (step - bw) / 2, by = pt + ih - h;
     /* Hollow, not hatched: hatching already means "nobody collected this day",
        and a day in progress is the opposite — it is being collected right now. */
-    const live = inProgress && i === data.length - 1 && isToday(d[x]);
+    /* Two different kinds of incomplete bar, drawn the same way because they
+       mean the same thing to a reader: this bar covers less time than the ones
+       beside it, so its height is not comparable.
+
+         live     the last DAY, still being collected.
+         partial  a week or month bucket clipped by the window edge — three
+                  days of a week drawn next to whole ones, which reads as a
+                  collapse the fleet did not have. The server flags it; before
+                  this the chart drew it at full weight.  */
+    const clipped = d.partial === true && +d.days > 0 && +d.days < +d.of_days;
+    const live = (inProgress && i === data.length - 1 && isToday(d[x])) || clipped;
     const r = mk('rect', { x: cx, y: by, width: bw, height: Math.max(h, 1), rx: 3,
       fill: live ? 'var(--surface-2)' : `var(${color})`,
       ...(live ? { stroke: `var(${color})`, 'stroke-width': 1.5, 'stroke-dasharray': '3 2' } : {}),
       'data-rise': '' });
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}${
-      live ? ` <b>so far</b>, at ${esc(nowHHMM())} Dubai — this day is still being collected`
-        : ''}${
+      clipped ? ` over <b>${esc(String(d.days))} of ${esc(String(d.of_days))} days</b> — this bucket `
+        + 'is cut short by the window, so its height is not comparable'
+        : live ? ` <b>so far</b>, at ${esc(nowHHMM())} Dubai — this day is still being collected`
+          : ''}${
       secondary && +d[secondary] ? `<br>${fmt(d[secondary])} ${esc(secondaryLabel)}` : ''}`,
     onClick && (() => onClick(d)));
     svg.append(r);
@@ -229,6 +241,17 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
 
   /* The sentence for the hollow bar, first, because it is about the bar a
      reader is looking at right now rather than about the window as a whole. */
+  const clippedBars = data.filter((d) => d.partial === true && +d.days < +d.of_days);
+  if (clippedBars.length) {
+    const c = document.createElement('p'); c.className = 'cap';
+    const which = clippedBars.length === 1 ? 'One bucket is' : `${clippedBars.length} buckets are`;
+    c.innerHTML = `${which} cut short by the window — `
+      + `${clippedBars.map((d) => `<b>${esc(shortLabel(d[x]))}</b> covers ${esc(String(d.days))} of `
+        + `${esc(String(d.of_days))} days`).join(', ')}. Drawn hollow, because a part-week is `
+      + 'shorter than a whole one for a reason that is the calendar, not the fleet.';
+    host.append(c);
+  }
+
   const last = data[data.length - 1];
   if (inProgress && last && !last[gapKey] && isToday(last[x])) {
     const c = document.createElement('p'); c.className = 'cap';

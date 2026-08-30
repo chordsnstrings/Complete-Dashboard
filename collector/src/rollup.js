@@ -99,9 +99,17 @@ const grainSql = (bucketExpr, bucketName, sinceParam = '') => `
    different answers to the same question, and only one of them ever gets
    fixed. One definition, two ways to execute it.
 
-   `bucket` is 'day' or 'month'. */
-export const rollupGrainSql = (bucket) => grainSql(
-  bucket === 'month' ? "date_trunc('month', n.local_day)::date" : 'n.local_day', bucket);
+   `bucket` is 'day', 'week' or 'month'. Week is ISO — Postgres date_trunc
+   starts it on Monday — and is keyed on that Monday, so a bucket is either a
+   whole week or the partial one at the edge of the window, never a silent
+   mixture of the two. */
+const BUCKET_EXPR = {
+  day: 'n.local_day',
+  week: "date_trunc('week', n.local_day)::date",
+  month: "date_trunc('month', n.local_day)::date",
+};
+export const BUCKETS = Object.keys(BUCKET_EXPR);
+export const rollupGrainSql = (bucket) => grainSql(BUCKET_EXPR[bucket] || BUCKET_EXPR.day, bucket);
 
 const COLS = ['trips', 'bookings', 'telematics', 'drivers', 'vehicles', 'earning_vehicles',
   'attributed_trips', 'revenue', 'priced_trips', 'km', 'measured_trips',
@@ -117,8 +125,18 @@ const COLS = ['trips', 'bookings', 'telematics', 'drivers', 'vehicles', 'earning
    So the cutoff is snapped back to the start of the bucket that contains it.
    The pass then reads a few more days than asked and every bucket it writes is
    whole. */
-const snapToBucket = (since, bucket) =>
-  (bucket === 'month' ? `${since.slice(0, 7)}-01` : since);
+const snapToBucket = (since, bucket) => {
+  if (bucket === 'month') return `${since.slice(0, 7)}-01`;
+  /* A week is snapped back to its own Monday for the same reason a month is
+     snapped to the 1st: a window opening on a Wednesday would otherwise
+     rebuild that whole week from its last five days. */
+  if (bucket === 'week') {
+    const d = new Date(`${since}T00:00:00Z`);
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+    return d.toISOString().slice(0, 10);
+  }
+  return since;
+};
 
 async function refreshGrain(db, { table, bucket, expr, since }) {
   const set = COLS.map((c) => `${c} = EXCLUDED.${c}`).join(', ');
@@ -291,14 +309,24 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
     await refreshMonthExtras(db, since);
     return n;
   }));
+  out.push(await runOne(db, 'rollup_week', () =>
+    refreshGrain(db, {
+      table: 'rollup_week', bucket: 'week', expr: "date_trunc('week', n.local_day)::date", since })));
   out.push(await runOne(db, 'rollup_person_month', () => refreshPersonMonth(db, since)));
+
+  /* ── order matters here, and it did not use to ─────────────────────────
+     driver_day now folds the platform statement and the bank payout in beside
+     the work they paid for, so it READS driver_statement_day and
+     driver_payout_day. Both must therefore be written first.
+
+     Before the money moved onto the day row, driver_day read only trip_norm
+     and driver_timeline_event and could sit anywhere in this list — and it sat
+     above refreshStatements. Left there, every refresh would have written a
+     day row carrying the PREVIOUS pass's money: correct-looking, one cycle
+     stale, and wrong in exactly the way nothing alerts on. */
   out.push(await runOne(db, 'driver_payout_day', () => refreshPayouts(db)));
-  /* After the payouts, before the lifetime fold: driver_day reads trip_norm and
-     driver_timeline_event and nothing either of those two writes, so its only
-     ordering requirement is that the collection that produced them has
-     finished — which is what being in this list at all means. */
-  out.push(await runOne(db, 'driver_day', () => refreshDriverDays(db, { since }))); 
   out.push(await runOne(db, 'driver_statement_day', () => refreshStatements(db)));
+  out.push(await runOne(db, 'driver_day', () => refreshDriverDays(db, { since })));
   out.push(await runOne(db, 'driver_lifetime', () => refreshLifetime(db)));
   /* Refresh the planner's statistics on the tables this just rewrote, and on
      trip itself. A generated column arrives with NO statistics — Postgres has
@@ -311,7 +339,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
      cheap next to the rollup that just ran. Failure is not fatal: stale
      statistics are a slow query, not a wrong one. */
   try {
-    await db.query('ANALYZE trip, rollup_day, rollup_month, rollup_person_month, driver_payout_day, driver_lifetime');
+    await db.query('ANALYZE trip, rollup_day, rollup_week, rollup_month, rollup_person_month, driver_payout_day, driver_day, driver_lifetime');
   } catch (e) { log.warn(SRC, 'analyze failed — plans may be stale', { err: String(e).slice(0, 120) }); }
 
   const failed = out.filter((o) => o.error);
@@ -542,6 +570,9 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
                         ELSE greatest(${MIN_OF('n.ended_at')}, ${MIN_OF('n.requested_at')}) END`;
   const p = since ? [since] : [];
   const bound = since ? 'AND n.local_day >= $1::date' : '';
+  /* The money tables key on their own `day`, not on trip_norm's local_day, so
+     the narrow-refresh bound has to be spelled against each of them. */
+  const dayBound = since ? 'AND day >= $1::date' : '';
 
   await db.query(
     `WITH jobs AS (
@@ -586,6 +617,63 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
      spans AS (
        SELECT driver_ext_id, at AS s, next_at AS e FROM ev
         WHERE next_at IS NOT NULL AND status = 'ONLINE'),
+     /* ── the money, combined PER PLATFORM ──────────────────────────────
+        Statement net and per-trip fares are complementary, not alternatives:
+        Uber publishes a daily statement and no fare, the hotel channel
+        publishes a fare and no statement. A driver working both on one day
+        earns the sum of the two.
+
+        But they are only complementary per PLATFORM. Yango publishes both —
+        a statement AND a price on the trip — so adding the two totals would
+        count that channel twice. So each platform contributes its statement
+        where it filed one and its fares where it did not, and only then are
+        the platforms added together.
+
+        source <> 'ledger' throughout: the operator's imported workbook is
+        reference data that taught the reconciliation, and folding it in here
+        would have the fleet's own daily record quoting itself back. */
+     fare_pf AS (
+       SELECT driver_ext_id, day, platform,
+              round(sum(price) FILTER (WHERE has_fare)::numeric, 2) AS fares
+         FROM jobs GROUP BY 1, 2, 3),
+     stmt_pf AS (
+       SELECT driver_ext_id, day, platform,
+              round(sum(gross)::numeric, 2) AS gross,
+              round(sum(fees)::numeric, 2)  AS fees,
+              round(sum(net)::numeric, 2)   AS net,
+              round(sum(tips)::numeric, 2)  AS tips,
+              round(sum(salik)::numeric, 2) AS salik,
+              round(sum(cash)::numeric, 2)  AS cash,
+              sum(trips)::int               AS trips
+         FROM driver_statement_day
+        WHERE source <> 'ledger' AND coalesce(btrim(driver_ext_id), '') <> '' ${dayBound}
+        GROUP BY 1, 2, 3),
+     money AS (
+       SELECT coalesce(f.driver_ext_id, s2.driver_ext_id) AS driver_ext_id,
+              coalesce(f.day, s2.day) AS day,
+              round(sum(s2.gross)::numeric, 2) AS stmt_gross,
+              round(sum(s2.fees)::numeric, 2)  AS stmt_fees,
+              round(sum(s2.net)::numeric, 2)   AS stmt_net,
+              round(sum(s2.tips)::numeric, 2)  AS stmt_tips,
+              round(sum(s2.salik)::numeric, 2) AS stmt_salik,
+              round(sum(s2.cash)::numeric, 2)  AS stmt_cash,
+              sum(s2.trips)::int               AS stmt_trips,
+              /* One term per platform, then summed. NULL only when no platform
+                 on the day reported either kind of money. */
+              round(sum(coalesce(s2.net, f.fares))::numeric, 2) AS money,
+              count(*) FILTER (WHERE s2.net IS NOT NULL)::int AS pf_statement,
+              count(*) FILTER (WHERE s2.net IS NULL AND f.fares IS NOT NULL)::int AS pf_fares
+         FROM fare_pf f
+         FULL OUTER JOIN stmt_pf s2
+           ON s2.driver_ext_id = f.driver_ext_id AND s2.day = f.day AND s2.platform = f.platform
+        GROUP BY 1, 2),
+     pay AS (
+       SELECT driver_ext_id, day,
+              round(sum(earnings)::numeric, 2)      AS payout,
+              round(sum(cash_earnings)::numeric, 2) AS payout_cash
+         FROM driver_payout_day
+        WHERE coalesce(btrim(driver_ext_id), '') <> '' ${dayBound}
+        GROUP BY 1, 2),
      online AS (
        SELECT driver_ext_id, d AS day,
               sum(greatest(0, extract(epoch FROM (
@@ -594,16 +682,28 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
          FROM spans,
               LATERAL generate_series((s AT TIME ZONE 'Asia/Dubai')::date,
                                       (e AT TIME ZONE 'Asia/Dubai')::date, interval '1 day') AS g(d)
-        GROUP BY 1, 2)
+        GROUP BY 1, 2),
+     /* Every driver-day ANY source knows about, not only the ones with trips.
+        A statement or a payout that lands on a day the trip feed missed is
+        exactly the kind of day worth having a row for — it says the money
+        arrived and the work did not reach us — and building the insert from
+        the trip aggregate alone would silently drop it. */
+     days AS (
+       SELECT driver_ext_id, day FROM agg
+       UNION SELECT driver_ext_id, day FROM money
+       UNION SELECT driver_ext_id, day FROM pay)
      INSERT INTO driver_day (driver_ext_id, day, fleet_id, platforms, plates, trips, completed,
                              cancelled, km, fares, unknown_end, first_min, last_min, span_min,
                              on_job_min, wait_min, longest_wait_min, online_min, idle_online_min,
+                             stmt_gross, stmt_fees, stmt_net, stmt_tips, stmt_salik, stmt_cash,
+                             stmt_trips, payout, payout_cash, money, money_source,
                              computed_at)
-     SELECT a.driver_ext_id, a.day, a.fleet_id, a.platforms, a.plates, a.trips, a.completed,
-            a.cancelled, a.km, a.fares, a.unknown_end, a.first_min, a.last_min,
+     SELECT d.driver_ext_id, d.day, a.fleet_id, a.platforms, a.plates,
+            coalesce(a.trips, 0), coalesce(a.completed, 0), coalesce(a.cancelled, 0),
+            a.km, a.fares, coalesce(a.unknown_end, 0), a.first_min, a.last_min,
             CASE WHEN a.first_min IS NULL OR a.last_min IS NULL THEN NULL
                  ELSE greatest(0, a.last_min - a.first_min) END,
-            a.on_job_min, a.wait_min, a.longest_wait_min,
+            coalesce(a.on_job_min, 0), coalesce(a.wait_min, 0), coalesce(a.longest_wait_min, 0),
             o.online_min,
             /* NULL, not zero, where availability was never collected — a day
                nobody asked about is not a day the driver was offline. Floored
@@ -611,10 +711,23 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
                providers' clocks and a job can overhang its own online span by
                seconds, which must not be stored as negative idle time. */
             CASE WHEN o.online_min IS NULL THEN NULL
-                 ELSE greatest(0, o.online_min - a.on_job_min) END,
+                 ELSE greatest(0, o.online_min - coalesce(a.on_job_min, 0)) END,
+            m.stmt_gross, m.stmt_fees, m.stmt_net, m.stmt_tips, m.stmt_salik, m.stmt_cash,
+            m.stmt_trips, py.payout, py.payout_cash, m.money,
+            /* Named for what the money column was actually built from, so a
+               page can show its own coverage instead of the reader assuming
+               it. A mixed day is real and common here — one driver, one day,
+               an Uber statement and a hotel fare. */
+            CASE WHEN m.money IS NULL THEN 'none'
+                 WHEN m.pf_statement > 0 AND m.pf_fares > 0 THEN 'mixed'
+                 WHEN m.pf_statement > 0 THEN 'statement'
+                 ELSE 'fares' END,
             now()
-       FROM agg a
-       LEFT JOIN online o ON o.driver_ext_id = a.driver_ext_id AND o.day = a.day
+       FROM days d
+       LEFT JOIN agg a    ON a.driver_ext_id  = d.driver_ext_id AND a.day  = d.day
+       LEFT JOIN money m  ON m.driver_ext_id  = d.driver_ext_id AND m.day  = d.day
+       LEFT JOIN pay py   ON py.driver_ext_id = d.driver_ext_id AND py.day = d.day
+       LEFT JOIN online o ON o.driver_ext_id  = d.driver_ext_id AND o.day  = d.day
      ON CONFLICT (driver_ext_id, day) DO UPDATE SET
        fleet_id = EXCLUDED.fleet_id, platforms = EXCLUDED.platforms, plates = EXCLUDED.plates,
        trips = EXCLUDED.trips, completed = EXCLUDED.completed, cancelled = EXCLUDED.cancelled,
@@ -623,6 +736,12 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
        on_job_min = EXCLUDED.on_job_min, wait_min = EXCLUDED.wait_min,
        longest_wait_min = EXCLUDED.longest_wait_min,
        online_min = EXCLUDED.online_min, idle_online_min = EXCLUDED.idle_online_min,
+       stmt_gross = EXCLUDED.stmt_gross, stmt_fees = EXCLUDED.stmt_fees,
+       stmt_net = EXCLUDED.stmt_net, stmt_tips = EXCLUDED.stmt_tips,
+       stmt_salik = EXCLUDED.stmt_salik, stmt_cash = EXCLUDED.stmt_cash,
+       stmt_trips = EXCLUDED.stmt_trips, payout = EXCLUDED.payout,
+       payout_cash = EXCLUDED.payout_cash, money = EXCLUDED.money,
+       money_source = EXCLUDED.money_source,
        computed_at = now()`, p);
 
   const { rows } = await db.query('SELECT count(*)::int n FROM driver_day');

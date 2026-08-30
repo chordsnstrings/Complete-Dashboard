@@ -10,7 +10,7 @@ import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
 import { proposeKeys } from '../src/credmodel.js';
 import { SETTING_DEFS } from '../src/settings.js';
-import { win, winDays } from './window.js';
+import { win, winDays, grainOf, previousWindow, foldGrain, GRAINS, PERIODS } from './window.js';
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
 import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, platformStatements, fleetIncome } from './income_sql.js';
@@ -443,6 +443,94 @@ app.get('/api/kpis', wrap(async (req, res) => {
       workedDays || windowDays),
     priced_pct: share(t.priced_trips, t.trips),
     attributed_pct: share(t.attributed_trips, t.trips),
+    /* The window the answer is FOR, echoed back.
+       ─────────────────────────────────────────────────────────────────────
+       A caller asking `?period=month` gets month-to-date, and until this was
+       returned there was nothing in the response to say so — a figure labelled
+       August that is really 1–29 August is the same class of mistake as a
+       thirty-day figure labelled "this month". `days` is the span actually
+       measured, `period` is what was asked for when a period was named, and
+       `partial` says the period is still running. */
+    window: { from: p[0], to: p[1], days: windowDays,
+      period: PERIODS.includes(String(req.query.period || '')) ? String(req.query.period) : null,
+      grain: grainOf(req),
+      partial: ['today', 'week', 'month', 'quarter', 'year']
+        .includes(String(req.query.period || '')) },
+  });
+}));
+
+/* ── this period against the one before it ────────────────────────────────
+   A period view is only worth having if it compares. "August: 12,347" is a
+   number; "12,347, up 21% on the same span of July" is a finding, and the
+   difference is one query.
+
+   The comparison span is the same NUMBER OF DAYS immediately before the
+   window, never the whole previous period: on the 12th of the month, August
+   month-to-date against the WHOLE of July would report a 60% collapse that is
+   entirely the calendar. That mistake is easy to make, invisible once made,
+   and it is the reason this endpoint exists rather than the two windows being
+   fetched separately and divided in a page.
+
+   Everything is summed from driver_day, which since schema_v41 carries the
+   money beside the work — so trips and revenue come from ONE row per driver
+   per day and cannot disagree about which days they cover. */
+app.get('/api/compare/period', wrap(async (req, res) => {
+  const [from, to, platform, fleet] = range(req);
+  const [pFrom, pTo] = previousWindow([from, to]);
+
+  const SUMS = `count(DISTINCT driver_ext_id)::int AS drivers,
+                coalesce(sum(trips), 0)::int        AS trips,
+                coalesce(sum(completed), 0)::int    AS completed,
+                coalesce(sum(cancelled), 0)::int    AS cancelled,
+                round(sum(km)::numeric, 0)          AS km,
+                round(sum(money)::numeric, 2)       AS money,
+                round(sum(stmt_net)::numeric, 2)    AS stmt_net,
+                round(sum(fares)::numeric, 2)       AS fares,
+                round(sum(stmt_tips)::numeric, 2)   AS tips,
+                round(sum(stmt_cash)::numeric, 2)   AS cash,
+                round(sum(payout)::numeric, 2)      AS payout,
+                coalesce(sum(online_min), 0)::int   AS online_min,
+                coalesce(sum(on_job_min), 0)::int   AS on_job_min,
+                count(*) FILTER (WHERE money IS NOT NULL)::int AS money_days,
+                count(*)::int                       AS driver_days`;
+  /* driver_day carries no platform column — a day is one row per PERSON, and a
+     person works several platforms in it. So a platform filter cannot be
+     answered from this table without splitting the day, which would defeat the
+     point of having one row. Asked for a platform, the endpoint says so rather
+     than quietly answering for the whole fleet. */
+  if (platform) {
+    return res.status(400).json({
+      error: 'this comparison is per driver-day, and a driver-day spans platforms',
+      hint: 'drop ?platform= — /api/kpis answers a platform-filtered window',
+    });
+  }
+  const span = async (a, b) => (await q(
+    `SELECT ${SUMS} FROM driver_day
+      WHERE day BETWEEN $1::date AND $2::date
+        AND ($3::text IS NULL OR fleet_id = $3)`, [a, b, fleet]))[0];
+
+  const [now, before] = await Promise.all([span(from, to), span(pFrom, pTo)]);
+  /* A change is only reportable when BOTH sides carry the measure. Against a
+     zero or a null it is not "+100%", it is "there is nothing to compare
+     against", and printing infinity as a percentage is how a page claims a
+     collector outage was growth. */
+  const delta = (k) => {
+    const a = Number(now?.[k]), b = Number(before?.[k]);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b === 0) return null;
+    return Math.round(((a - b) / b) * 1000) / 10;
+  };
+  const KEYS = ['drivers', 'trips', 'completed', 'cancelled', 'km', 'money', 'stmt_net',
+    'fares', 'tips', 'cash', 'payout', 'online_min', 'on_job_min'];
+  res.json({
+    window: { from, to, grain: grainOf(req),
+      period: PERIODS.includes(String(req.query.period || '')) ? String(req.query.period) : null },
+    previous: { from: pFrom, to: pTo },
+    now, before,
+    change_pct: Object.fromEntries(KEYS.map((k) => [k, delta(k)])),
+    basis: 'Summed from driver_day — one row per driver per day carrying both the work and the '
+      + 'money — so every measure here covers exactly the same days. The comparison span is the '
+      + 'same number of days immediately before the window, not the whole previous calendar '
+      + 'period, so a month-to-date is compared against the same slice of the month before it.',
   });
 }));
 
@@ -564,7 +652,19 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
      LEFT JOIN agg ON agg.d = cal.d
      LEFT JOIN silent ON silent.d = cal.d
      ORDER BY cal.d`, p);
-  res.json(rows);
+  /* Bucketed at the END, not by grouping the query differently.
+     ─────────────────────────────────────────────────────────────────────────
+     The rows above are a COMPLETE calendar: every day in the window, with the
+     collector-silence facts that separate "nobody drove" from "nobody
+     collected". Re-grouping the SQL at a week or month grain would either
+     throw that away or need a second copy of it, and the two copies would
+     answer differently the first time one was edited.
+
+     Folding the finished days instead means a week is the sum of its own seven
+     rows by construction, so the three grains cannot disagree — which is the
+     property a reader is implicitly relying on when they switch the control
+     and expect the total to hold. */
+  res.json(foldGrain(rows, grainOf(req)));
 }));
 
 app.get('/api/trips/hourly', wrap(async (req, res) => res.json(await q(

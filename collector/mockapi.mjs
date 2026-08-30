@@ -1,6 +1,7 @@
 // Local stand-in API so the UI can be reviewed without the production database.
 // Not shipped — used only to render and screenshot the dashboard during development.
 import express from 'express';
+import { foldGrain, grainOf, previousWindow, PERIODS } from './api/window.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -130,7 +131,7 @@ app.get('/api/status', (_, r) => r.json([
     window_start: '2026-08-14', window_end: '2026-08-21',
     error: 'bolt: refresh token rejected (401) — re-paste from the fleet portal' },
 ]));
-app.get('/api/kpis', (_, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, completion_pct: 89,
+app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, completion_pct: 89,
   cancel_pct: 10.7, drivers: 56, vehicles: 52, revenue: 41188, live_vehicles: 48, fresh: 44,
   /* Liveness is measured on the FIX, so a fleet always has trackers listed
      that have stopped answering — the mock carries some, or a page that
@@ -156,7 +157,27 @@ app.get('/api/kpis', (_, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, c
   accounted: 237366, accounted_fares: 41188, accounted_payouts: 196178,
     statement_net: 96480, statement_platforms: ['bolt', 'hotel', 'uber', 'yango'],
   accounted_bookings: 2043, accounted_platforms: ['hotel', 'uber', 'yango'],
-  dark_bookings: 0, dark_pct: 0 }));
+  dark_bookings: 0, dark_pct: 0,
+  window: { from: '2026-07-31', to: '2026-08-29', days: 30,
+    period: PERIODS.includes(String(req.query.period || '')) ? String(req.query.period) : null,
+    grain: grainOf(req),
+    partial: ['today', 'week', 'month', 'quarter', 'year'].includes(String(req.query.period || '')) },
+}));
+app.get('/api/compare/period', (req, r) => {
+  const from = req.query.from || '2026-07-31', to = req.query.to || '2026-08-29';
+  const [pf, pt] = previousWindow([from, to]);
+  const now = { drivers: 56, trips: 2043, completed: 1824, cancelled: 219, km: 23120,
+    money: 237366, stmt_net: 96480, fares: 41188, tips: 1204, cash: 8930, payout: 196178,
+    online_min: 331200, on_job_min: 66600, money_days: 1580, driver_days: 1640 };
+  const before = { drivers: 48, trips: 1688, completed: 1502, cancelled: 186, km: 19040,
+    money: 196020, stmt_net: 79700, fares: 34010, tips: 990, cash: 7420, payout: 162100,
+    online_min: 287400, on_job_min: 55100, money_days: 1310, driver_days: 1370 };
+  const pct = (k) => (before[k] ? Math.round(((now[k] - before[k]) / before[k]) * 1000) / 10 : null);
+  r.json({ window: { from, to, grain: grainOf(req), period: req.query.period || null },
+    previous: { from: pf, to: pt }, now, before,
+    change_pct: Object.fromEntries(Object.keys(now).map((k) => [k, pct(k)])),
+    basis: 'Summed from driver_day — one row per driver per day carrying both the work and the money.' });
+});
 app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact: '19800' },
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
   by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }],
@@ -1421,7 +1442,7 @@ app.get('/api/context', (_, r) => {
   r.json(out);
 });
 
-app.get('/api/trips/daily', (_, r) => {
+app.get('/api/trips/daily', (req, r) => {
   /* Deliberately includes a collection hole and a partially-silent stretch:
      the whole point of this series is that a day nobody collected must not be
      drawn as a day nobody drove. */
@@ -1442,7 +1463,7 @@ app.get('/api/trips/daily', (_, r) => {
       silent_sources: uncollected ? ['uber', 'fms', 'hotel', 'yango'] : partial ? ['uber'] : null,
       uncollected });
   }
-  r.json(out);
+  r.json(foldGrain(out, grainOf(req)));
 });
 
 /* The CSV export, fixtured so the header row can be compared against the real
