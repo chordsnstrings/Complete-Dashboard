@@ -601,7 +601,8 @@ V.overview = async (root) => {
     Completion: href('platforms'), Vehicles: href('vehicles'), 'Safety alerts': href('safety'),
   };
   kpiHost.innerHTML = [
-    ['Trips', fmt(k.trips), `${fmt(k.drivers)} drivers · ${fmt(k.telematics_journeys || 0)} telematics journeys`],
+    ['Trips', fmt(k.trips),
+      `${fmt(k.drivers)} drivers · ${fmt(k.telematics_journeys || 0)} telematics journeys`],
     /* avg_km divides by the trips that REPORT a distance, not by every trip,
        and that count was nowhere on the tile: 146,249 over 11,758 is 12.44,
        and the tile said 14.02. Over the 10,434 that carry a distance it is
@@ -627,7 +628,17 @@ V.overview = async (root) => {
           + (k.statement_net ? ` · on-trip net AED ${fmt(k.statement_net)}` : '')
         : 'no fare and no payout statement in this range'],
     ['Completion', k.completion_pct != null ? k.completion_pct + '%' : '—', `${k.cancel_pct ?? 0}% cancelled`],
-    ['Vehicles', fmt(k.vehicles), 'with a trip in this range'],
+    /* Booking-scoped, and the tracker-only cars named rather than absorbed.
+       This tile read "102 · with a trip in this range" while the Vehicles page
+       read "97 took a booking" — the same window, the same fleet, two numbers
+       and no way to tell which was the fleet's. The five between them moved
+       with nothing paying for it, which is worth a clause of its own. */
+    ['Vehicles', fmt(k.vehicles), (() => {
+      const extra = (k.vehicles_seen ?? k.vehicles) - k.vehicles;
+      return extra > 0
+        ? `took a booking · ${fmt(extra)} more moved with nothing paying for it`
+        : 'took a booking in this range';
+    })()],
     /* Harsh-driving events come from the telematics box on the car, not from a
        booking channel, so the platform chip at the top of the page cannot
        narrow them. The tile used to print the same figure under every platform

@@ -132,7 +132,7 @@ app.get('/api/status', (_, r) => r.json([
     error: 'bolt: refresh token rejected (401) — re-paste from the fleet portal' },
 ]));
 app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, completion_pct: 89,
-  cancel_pct: 10.7, drivers: 56, vehicles: 52, revenue: 41188, live_vehicles: 48, fresh: 44,
+  cancel_pct: 10.7, drivers: 56, drivers_seen: 58, vehicles: 52, vehicles_seen: 55, revenue: 41188, live_vehicles: 48, fresh: 44,
   /* Liveness is measured on the FIX, so a fleet always has trackers listed
      that have stopped answering — the mock carries some, or a page that
      renders them would never be exercised. */

@@ -329,10 +329,25 @@ app.get('/api/kpis', wrap(async (req, res) => {
        round((sum(n.price) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance)
               / nullif(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_fare AND n.has_distance),0))::numeric,2) revenue_per_km,
 
-       -- who and what
-       ${peopleCountStored()}::int drivers,
+       /* Who and what — over the BOOKINGS, because that is what the figures
+          beside them count.
+          ─────────────────────────────────────────────────────────────────
+          These two counted every trip row, telematics included, and were then
+          printed under a bookings headline: "12,668 bookings — 119 drivers ·
+          102 vehicles". The Vehicles page said 97 vehicles took a booking and
+          the Drivers page said 118 people drove, and both were right. The
+          gap is the five cars and the one person the trackers saw move with
+          no channel reporting a job for them — a real and interesting fact,
+          and not one that belongs inside a booking count.
+
+          So the headline pair is booking-scoped, and what the trackers saw
+          beyond it is returned beside them rather than folded into them. */
+       ${peopleCountStored()} FILTER (WHERE n.is_booking)::int drivers,
+       ${peopleCountStored()}::int drivers_seen,
        count(*) FILTER (WHERE n.driver_ext_id IS NOT NULL)::int attributed_trips,
-       count(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL AND n.plate <> '')::int vehicles,
+       count(DISTINCT n.plate) FILTER (WHERE n.is_booking
+         AND n.plate IS NOT NULL AND n.plate <> '')::int vehicles,
+       count(DISTINCT n.plate) FILTER (WHERE n.plate IS NOT NULL AND n.plate <> '')::int vehicles_seen,
        /* Bookings with no vehicle recorded against them. They appear on no
           vehicle page and in no per-vehicle total, so the vehicle directory
           sums to fifteen fewer trips than the fleet does — a difference that
@@ -657,11 +672,36 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
      from the SAME SQL the rollup is built from, rather than a second copy that
      would drift.
 
-     One measure genuinely changes, and for the better: the rollup counts
+     One measure genuinely changed, and for the better: the rollup counts
      distinct PEOPLE, folding a person's several platform accounts into one,
-     while this counted distinct driver_name. Every other page in the product
-     counts people, so the overview chart and the monthly trend could report
-     different driver counts for the same day. They now agree. */
+     where the hand-written fallback this replaced counted distinct
+     driver_name. Every other page in the product counts people, so the
+     overview chart and the monthly trend could report different driver counts
+     for the same day. They now agree, on both paths. */
+  /* Today is computed live; the finished days come from the rollup.
+     ─────────────────────────────────────────────────────────────────────────
+     The rollup is rebuilt after each collection run, so between runs its row
+     for TODAY is a few minutes behind trip_norm — and /api/kpis, /api/platforms
+     and the trip list all read trip_norm directly. Live, that showed as the
+     overview's chart summing to 12,667 bookings under a headline of 12,668:
+     one trip that had landed since the last refresh. A one-trip gap is small
+     and the damage is not, because a reader who finds the pages disagreeing by
+     one stops trusting them by thousands.
+
+     Only the current day can move, so only the current day is recomputed —
+     one day of aggregation, against a rollup that still carries the other
+     three hundred and sixty-four. Both halves are the SAME SQL the rollup is
+     built from, so the fast half and the live half cannot answer differently.
+
+     `to` in the past means the live half matches nothing and costs nothing. */
+  const TODAY = "(now() AT TIME ZONE 'Asia/Dubai')::date";
+  const pick = (src) => `SELECT g.day AS d, g.bookings AS trips, g.completed,
+              g.not_completed AS cancelled, g.telematics AS telematics_journeys,
+              round(g.km, 0) AS km, round(g.revenue, 0) AS revenue, g.priced_trips, g.drivers
+         FROM (${src}) g
+        WHERE g.day BETWEEN $1::date AND $2::date
+          AND g.platform = coalesce($3, '*') AND g.fleet_id = coalesce($4, '*')`;
+  const live = pick(rollupGrainSql('day', `AND n.local_day >= ${TODAY}`));
   const rollupReady = (await q(
     `SELECT 1 FROM rollup_day
       WHERE day BETWEEN $1::date AND $2::date
@@ -671,18 +711,14 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
               telematics AS telematics_journeys, round(km, 0) AS km,
               round(revenue, 0) AS revenue, priced_trips, drivers
          FROM rollup_day
-        WHERE day BETWEEN $1::date AND $2::date
-          AND platform = coalesce($3, '*') AND fleet_id = coalesce($4, '*')`
-    : `SELECT local_day AS d,
-              count(*) FILTER (WHERE is_booking)::int trips,
-              count(*) FILTER (WHERE outcome = 'completed')::int completed,
-              count(*) FILTER (WHERE outcome = 'not_completed')::int cancelled,
-              count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
-              round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
-              round(sum(price) FILTER (WHERE has_fare)::numeric,0) revenue,
-              count(*) FILTER (WHERE has_fare)::int priced_trips,
-              count(DISTINCT driver_name) FILTER (WHERE driver_name IS NOT NULL)::int drivers
-       FROM trip_norm WHERE ${F} GROUP BY 1`;
+        WHERE day BETWEEN $1::date AND $2::date AND day < ${TODAY}
+          AND platform = coalesce($3, '*') AND fleet_id = coalesce($4, '*')
+       UNION ALL ${live}`
+    /* No rollup yet — a fresh database, or a deploy landing before the first
+       collection. The whole window is computed from that same definition
+       rather than from a second copy of these aggregates living here, which is
+       how a fast path and a slow path quietly stop agreeing. */
+    : pick(rollupGrainSql('day', 'AND n.local_day BETWEEN $1::date AND $2::date'));
 
   const rows = await q(
     /* The calendar is filled across the window, and the window is bounded.

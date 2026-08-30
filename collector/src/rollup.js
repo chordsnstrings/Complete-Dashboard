@@ -110,7 +110,8 @@ const BUCKET_EXPR = {
   month: "date_trunc('month', n.local_day)::date",
 };
 export const BUCKETS = Object.keys(BUCKET_EXPR);
-export const rollupGrainSql = (bucket) => grainSql(BUCKET_EXPR[bucket] || BUCKET_EXPR.day, bucket);
+export const rollupGrainSql = (bucket, where = '') =>
+  grainSql(BUCKET_EXPR[bucket] || BUCKET_EXPR.day, bucket, where);
 
 const COLS = ['trips', 'bookings', 'telematics', 'drivers', 'vehicles', 'earning_vehicles',
   'attributed_trips', 'revenue', 'priced_trips', 'km', 'measured_trips',

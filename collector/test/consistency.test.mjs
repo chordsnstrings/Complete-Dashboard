@@ -59,6 +59,12 @@ await trip({ platform: 'bolt', plate: 'L100', drv: 'b1', name: 'Ann Ahmed',
   at: `${D(6)}T21:00:00+04:00`, status: 'client_did_not_show', price: null, pay: 'cash' });
 // A telematics twin of a journey a platform already reported.
 await trip({ platform: 'fms', plate: 'L100', at: `${D(7)}T09:05:00+04:00`, km: 193027 });
+/* A car and a person the trackers saw move with no channel reporting a job
+   for them. They are the difference between "worked" and "was seen", and
+   without one in the fixture the checks that separate those two prove
+   nothing. */
+await trip({ platform: 'fms', plate: 'L800', drv: 'u9', name: 'Sam Silent',
+  at: `${D(9)}T07:00:00+04:00`, km: 61 });
 // A 01:00 Dubai booking — 21:00 UTC the previous day.
 await trip({ platform: 'uber', plate: 'L300', drv: 'u3', name: 'Cara Chen',
   at: `${D(15)}T01:00:00+04:00`, km: 30 });
@@ -473,6 +479,90 @@ const get = async (p) => {
   check('the headline payout is the deduplicated one, not the raw sum',
     Math.abs(num(k.payouts) - num(resolved)) <= 1,
     `kpi ${k.payouts} vs resolved ${resolved} (raw ${naive})`);
+}
+
+/* ── 12. does the list of trips agree with the count of them? ──────────── */
+/* A browsable list is the page a reader uses to CHECK the others — "the
+   overview says 12,641, show me them" — so it is the one page whose total
+   disagreeing would discredit every number above it. It has three chances to
+   be wrong: counting the page instead of the window, counting telematics
+   twins as bookings, and applying the channel chip to the rows but not to the
+   count. */
+{
+  const k = await get(`/api/kpis?${WIN}`);
+  const all = await get(`/api/trips/list?${WIN}&limit=1`);
+  check('the trip list counts the same bookings the overview does',
+    all.total === k.trips, `list ${all.total} vs kpis ${k.trips}`);
+  check('and it is the window that is counted, not the page',
+    all.shown === 1 && all.total > 1, `${all.shown}/${all.total}`);
+
+  const daily = await get(`/api/trips/daily?${WIN}`);
+  const dailySum = daily.reduce((a, r) => a + (r.trips || 0), 0);
+  check('and the daily series sums to the same list',
+    dailySum === all.total, `${dailySum} vs ${all.total}`);
+
+  /* The telematics twin is on the same car on the same day and is not a
+     booking. Every count above must exclude it, and asking for it explicitly
+     must find it — a list that cannot show a journey at all is not a fix. */
+  const tele = await get(`/api/trips/list?${WIN}&kind=telematics&limit=1`);
+  const both = await get(`/api/trips/list?${WIN}&kind=all&limit=1`);
+  check('journeys are counted apart from bookings', tele.total > 0, String(tele.total));
+  check('and never inside them', both.total === all.total + tele.total,
+    `${both.total} vs ${all.total} + ${tele.total}`);
+  const teleDaily = daily.reduce((a, r) => a + (r.telematics || 0), 0);
+  check('the daily series separates them the same way',
+    teleDaily === tele.total || teleDaily === 0, `${teleDaily} vs ${tele.total}`);
+
+  /* The channel chip narrows the rows AND the count, or the page reads as a
+     filtered list under an unfiltered total. */
+  const chans = [...new Set((await get(`/api/trips/list?${WIN}&limit=500`)).rows.map((r) => r.platform))];
+  let summed = 0;
+  for (const c of chans) summed += (await get(`/api/trips/list?${WIN}&platform=${c}&limit=1`)).total;
+  check('the channels sum to the whole, so the chip narrows the count too',
+    summed === all.total, `${summed} vs ${all.total} over ${chans.join(',')}`);
+
+  /* A vehicle's own page and the fleet-wide list are two routes over one
+     table, and the plate search is how a reader crosses between them. */
+  const vk = await get(`/api/vehicle/kpis?plate=L100&${WIN}`);
+  const byPlate = await get(`/api/trips/list?${WIN}&q=L100&limit=1`);
+  check('searching a plate finds exactly that vehicle’s bookings',
+    byPlate.total === vk.trips, `list ${byPlate.total} vs vehicle page ${vk.trips}`);
+}
+
+/* ── 13. how many drove, and how many cars carried them? ───────────────── */
+/* The overview printed "12,668 bookings — 119 drivers · 102 vehicles" while
+   the Drivers page said 118 people drove and the Vehicles page said 97 cars
+   took a booking. All three were computed correctly and none of them was the
+   same question: the overview counted every trip ROW, telematics included, so
+   the cars and the one person the trackers saw move with nothing paying for
+   it were inside a booking count. A reader has no way to see that, and the
+   pages simply disagreed. */
+{
+  const k = await get(`/api/kpis?${WIN}`);
+  const vdir = await get(`/api/vehicles/directory?${WIN}`);
+  const ddir = await get(`/api/drivers/directory?${WIN}`);
+  const drove = (Array.isArray(ddir) ? ddir : ddir.rows).filter((r) => (r.trips || 0) > 0).length;
+  const carried = vdir.filter((r) => (r.trips || 0) > 0).length;
+
+  check('the overview and the vehicle directory agree on how many cars worked',
+    k.vehicles === carried, `kpis ${k.vehicles} vs directory ${carried}`);
+  check('the overview and the driver directory agree on how many people drove',
+    k.drivers === drove, `kpis ${k.drivers} vs directory ${drove}`);
+
+  /* The tracker-only movement is not lost — it is reported beside the booking
+     count rather than inside it, which is the whole of the fix. */
+  check('a car the trackers saw move without a booking is still reported',
+    k.vehicles_seen >= k.vehicles, `${k.vehicles_seen} seen vs ${k.vehicles} booked`);
+  check('and so is a person', k.drivers_seen >= k.drivers, `${k.drivers_seen} vs ${k.drivers}`);
+  check('the fixture actually has some, or this check proves nothing',
+    k.vehicles_seen > k.vehicles, `${k.vehicles_seen} vs ${k.vehicles}`);
+  /* And the whole fleet is a third number again — every car on the books,
+     including those that did nothing at all. It is the Vehicles page's own
+     headline and it must not be confused with either of the two above. */
+  const pb = await get(`/api/playbook?${WIN}`);
+  check('the fleet on the books is larger than the fleet that worked',
+    pb.fleet.vehicles_seen === vdir.length && vdir.length >= k.vehicles_seen,
+    `books ${vdir.length}, seen ${k.vehicles_seen}, booked ${k.vehicles}`);
 }
 
 server.close(); await db.close();
