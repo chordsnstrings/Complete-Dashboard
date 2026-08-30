@@ -181,6 +181,55 @@ check('…named as statement-only', dd[1].money_source === 'statement');
    a different question — and is now impossible to mistake for this one. */
 check('fares still reports only what the trip rows priced', Number(dd[0].fares) === 150);
 
+/* ── the statement that carries no id ───────────────────────────────────────
+   The failure that reached production. The first version of this join matched
+   the statement to the day on driver_ext_id, which found nothing at all: 2,375
+   driver-days, zero with money, against AED 330,343 of statements in the same
+   window. The statements are not keyed the way the trips are — one human holds
+   several platform account ids, which is why this codebase folds on the NAME
+   and falls back to the id, and why every other money surface here already
+   resolves them that way.
+
+   Ann below files her statement with no driver_ext_id at all, and it still has
+   to land on her day. */
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+  requested_at, ended_at, pickup_addr, dropoff_addr, distance_km, status, price, raw)
+ VALUES ('uber','n1','ecosine','L2','d9','Nora  Said','2026-08-11T06:00:00Z','2026-08-11T06:20:00Z','a','b',10,'completed',NULL,'{}')`);
+await q(`INSERT INTO driver_statement_day (platform, fleet_id, driver_ext_id, driver_name, day,
+  gross, fees, net, tips, salik, cash, trips, currency, source)
+ VALUES ('uber','ecosine', NULL, 'Nora Said','2026-08-11', 500, 100, 400, 0, 0, 0, 1,'AED','report')`);
+await q(`INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, driver_name, day,
+  period_start, period_end, period_days, period_earnings, earnings, cash_earnings, currency)
+ VALUES ('uber','ecosine', 'uber-acct-77', 'Nora Said','2026-08-11','2026-08-11','2026-08-11',1,390,390,0,'AED')`);
+await refreshDriverDays(db);
+const nora = (await q(`SELECT driver_ext_id, stmt_net, payout, money, money_source
+                         FROM driver_day WHERE day = '2026-08-11' AND driver_ext_id = 'd9'`))[0];
+check('a statement with no driver id still lands on the right person’s day',
+  nora && Number(nora.stmt_net) === 400, JSON.stringify(nora));
+/* The payout DOES carry an id — the column is NOT NULL — but it is the
+   platform account's, not the one the trips are filed under. Same person, two
+   ids, and the fold is what joins them. */
+check('…and the payout with it, filed under a different account id',
+  nora && Number(nora.payout) === 390, JSON.stringify(nora));
+check('…matched on the folded name, spacing and all',
+  nora && Number(nora.money) === 400 && nora.money_source === 'statement', JSON.stringify(nora));
+
+/* And it must land ONCE. A person working two platform accounts in a day has
+   two driver_day rows; attributing the statement to both would double the
+   fleet's revenue at every grain above the day, which is worse than the bug it
+   would be fixing. */
+await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+  requested_at, ended_at, pickup_addr, dropoff_addr, distance_km, status, price, raw)
+ VALUES ('uber','n2','ecosine','L2','d9b','Nora Said','2026-08-11T09:00:00Z','2026-08-11T09:20:00Z','a','b',10,'completed',NULL,'{}')`);
+await refreshDriverDays(db);
+const both = await q(`SELECT driver_ext_id, stmt_net FROM driver_day
+                       WHERE day = '2026-08-11' AND driver_ext_id IN ('d9','d9b') ORDER BY driver_ext_id`);
+const paid = both.filter((r) => r.stmt_net != null);
+check('one person’s statement lands on exactly one of their two day rows',
+  both.length === 2 && paid.length === 1, JSON.stringify(both));
+check('…and is not split or duplicated between them',
+  paid.length === 1 && Number(paid[0].stmt_net) === 400, JSON.stringify(paid));
+
 /* ── the three grains over the real routes ──────────────────────────────── */
 let n = 0;
 for (let i = 0; i < 21; i++) {
@@ -214,8 +263,15 @@ check('the comparison names the span it compared against',
   cmp.previous.from === '2026-07-13' && cmp.previous.to === '2026-08-02',
   JSON.stringify(cmp.previous));
 check('…and reports the window it was asked for', cmp.window.from === '2026-08-03');
-check('it counts people once, however many days they worked',
-  cmp.now.drivers === 3, String(cmp.now.drivers));
+/* Ann, Bee, Cee and Nora. Nora holds TWO platform accounts and worked one day
+   under both, so a count of driver_ext_id answers five — which is why the day
+   row stores the folded person and this counts that instead. The two figures
+   are returned side by side, because "five accounts, four people" is a fact
+   about the fleet and not a discrepancy to hide. */
+check('it counts people once, however many accounts they hold',
+  cmp.now.drivers === 4, String(cmp.now.drivers));
+check('…and reports the account count beside it, unfolded',
+  cmp.now.driver_accounts === 5, String(cmp.now.driver_accounts));
 /* No prior data at all. "+100%" against nothing is not growth, it is a
    division that should not have happened. */
 check('a change against an empty span is null, not infinity',

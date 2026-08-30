@@ -478,7 +478,12 @@ app.get('/api/compare/period', wrap(async (req, res) => {
   const [from, to, platform, fleet] = range(req);
   const [pFrom, pTo] = previousWindow([from, to]);
 
-  const SUMS = `count(DISTINCT driver_ext_id)::int AS drivers,
+  /* PEOPLE, not platform accounts. driver_day is keyed on driver_ext_id, and
+     one human holds several of those — counting distinct ids reported more
+     drivers than the fleet employs, which reads as growth. person_key is the
+     stored fold (sql/schema_v41.sql), so this is a count and not a join. */
+  const SUMS = `count(DISTINCT coalesce(person_key, driver_ext_id))::int AS drivers,
+                count(DISTINCT driver_ext_id)::int  AS driver_accounts,
                 coalesce(sum(trips), 0)::int        AS trips,
                 coalesce(sum(completed), 0)::int    AS completed,
                 coalesce(sum(cancelled), 0)::int    AS cancelled,

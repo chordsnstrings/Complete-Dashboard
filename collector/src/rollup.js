@@ -26,6 +26,7 @@
    3. It must say how old it is. rollup_state records every run, and the API
       exposes it, so a page reading a cached answer can date it.  */
 import { pool } from './db.js';
+import { personKey } from '../api/custody_sql.js';
 import { log } from './log.js';
 
 const SRC = 'rollup';
@@ -559,6 +560,11 @@ export async function refreshStatements(db = pool) {
    Written as a fold in JS first — that version needed a second query, a
    200-row chunked upsert and its own ordering, which is three more things that
    can disagree with the endpoint than one statement has. */
+/* The same person fold every money surface in this product resolves by. Not a
+   copy of the string: imported, so a change to the rule cannot leave the daily
+   record disagreeing with the reconciliation about who a person is. */
+const PERSON = (nameCol, idCol) => personKey(idCol, nameCol);
+
 export async function refreshDriverDays(db = pool, { since = null } = {}) {
   const MIN_OF = (c) => `(extract(hour FROM ${c} AT TIME ZONE 'Asia/Dubai') * 60`
     + ` + extract(minute FROM ${c} AT TIME ZONE 'Asia/Dubai'))::int`;
@@ -576,7 +582,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
 
   await db.query(
     `WITH jobs AS (
-       SELECT n.driver_ext_id, n.local_day AS day, n.fleet_id, n.platform, n.plate,
+       SELECT n.driver_ext_id, n.driver_name, n.local_day AS day, n.fleet_id, n.platform, n.plate,
               n.outcome, n.distance_km, n.has_distance, n.price, n.has_fare, n.ended_at,
               ${MIN_OF('n.requested_at')} AS s,
               ${END_MIN} AS e
@@ -594,6 +600,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
      agg AS (
        SELECT driver_ext_id, day,
               min(fleet_id) AS fleet_id,
+              min(driver_name) AS driver_name,
               array_agg(DISTINCT platform) FILTER (WHERE platform IS NOT NULL) AS platforms,
               array_agg(DISTINCT plate) FILTER (WHERE plate IS NOT NULL) AS plates,
               count(*)::int AS trips,
@@ -632,12 +639,38 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
         source <> 'ledger' throughout: the operator's imported workbook is
         reference data that taught the reconciliation, and folding it in here
         would have the fleet's own daily record quoting itself back. */
+     /* Matched on the PERSON, not on driver_ext_id.
+        ─────────────────────────────────────────────────────────────────
+        The first version of this joined the statement to the day on
+        driver_ext_id and found nothing on production: 2,375 driver-days, zero
+        with money on them, while the same window's statements totalled
+        AED 330,343. The statements are not keyed the way the trips are, which
+        is exactly why this codebase has a person fold at all — one human holds
+        several platform account ids, and personKey is the rule every other
+        money surface here already resolves them by: the folded NAME where
+        there is one, the id where there is not.
+
+        So the fold is used here too. Anything else would have this table
+        disagreeing with the reconciliation about who earned what. */
      fare_pf AS (
-       SELECT driver_ext_id, day, platform,
+       SELECT ${PERSON('driver_name', 'driver_ext_id')} AS person, day, platform,
               round(sum(price) FILTER (WHERE has_fare)::numeric, 2) AS fares
-         FROM jobs GROUP BY 1, 2, 3),
+         FROM jobs GROUP BY person, day, platform),
+     /* Which ext_id a person's day belongs to. driver_day is keyed on
+        driver_ext_id, so a person working two platform accounts in one day has
+        two rows and the money must land on ONE of them — the busiest, chosen
+        deterministically — rather than being duplicated onto both, which would
+        double the fleet's revenue at every grain above the day. */
+     owner AS (
+       SELECT DISTINCT ON (person, day) ${PERSON('driver_name', 'driver_ext_id')} AS person,
+              day, driver_ext_id, count(*) AS n
+         FROM jobs GROUP BY person, day, driver_ext_id
+        ORDER BY person, day, count(*) DESC, driver_ext_id),
      stmt_pf AS (
-       SELECT driver_ext_id, day, platform,
+       SELECT ${PERSON('driver_name', 'driver_ext_id')} AS person,
+              max(driver_ext_id) FILTER (WHERE coalesce(btrim(driver_ext_id), '') <> '') AS own_id,
+              max(driver_name) AS driver_name,
+              day, platform,
               round(sum(gross)::numeric, 2) AS gross,
               round(sum(fees)::numeric, 2)  AS fees,
               round(sum(net)::numeric, 2)   AS net,
@@ -646,10 +679,12 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
               round(sum(cash)::numeric, 2)  AS cash,
               sum(trips)::int               AS trips
          FROM driver_statement_day
-        WHERE source <> 'ledger' AND coalesce(btrim(driver_ext_id), '') <> '' ${dayBound}
-        GROUP BY 1, 2, 3),
+        WHERE source <> 'ledger' ${dayBound}
+        /* Named, not positional. This was GROUP BY 1, 3, 4 and adding a column
+           in the middle silently shifted an ordinal onto an aggregate. */
+        GROUP BY person, day, platform),
      money AS (
-       SELECT coalesce(f.driver_ext_id, s2.driver_ext_id) AS driver_ext_id,
+       SELECT coalesce(o.driver_ext_id, max(s2.own_id), coalesce(f.person, s2.person)) AS driver_ext_id,
               coalesce(f.day, s2.day) AS day,
               round(sum(s2.gross)::numeric, 2) AS stmt_gross,
               round(sum(s2.fees)::numeric, 2)  AS stmt_fees,
@@ -661,19 +696,29 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
               /* One term per platform, then summed. NULL only when no platform
                  on the day reported either kind of money. */
               round(sum(coalesce(s2.net, f.fares))::numeric, 2) AS money,
+              /* The name the STATEMENT filed under, kept so a day with money
+                 and no trips can still be attributed to a person. Without it
+                 the fold falls back to the account id on exactly those days,
+                 and one human becomes two the moment they are paid for a day
+                 the trip feed missed. */
+              max(s2.driver_name) AS driver_name,
               count(*) FILTER (WHERE s2.net IS NOT NULL)::int AS pf_statement,
               count(*) FILTER (WHERE s2.net IS NULL AND f.fares IS NOT NULL)::int AS pf_fares
          FROM fare_pf f
          FULL OUTER JOIN stmt_pf s2
-           ON s2.driver_ext_id = f.driver_ext_id AND s2.day = f.day AND s2.platform = f.platform
-        GROUP BY 1, 2),
+           ON s2.person = f.person AND s2.day = f.day AND s2.platform = f.platform
+         LEFT JOIN owner o
+           ON o.person = coalesce(f.person, s2.person) AND o.day = coalesce(f.day, s2.day)
+        GROUP BY o.driver_ext_id, coalesce(f.day, s2.day), coalesce(f.person, s2.person)),
      pay AS (
-       SELECT driver_ext_id, day,
-              round(sum(earnings)::numeric, 2)      AS payout,
-              round(sum(cash_earnings)::numeric, 2) AS payout_cash
-         FROM driver_payout_day
-        WHERE coalesce(btrim(driver_ext_id), '') <> '' ${dayBound}
-        GROUP BY 1, 2),
+       SELECT coalesce(o.driver_ext_id, max(p2.driver_ext_id), p2.person) AS driver_ext_id, p2.day,
+              round(sum(p2.earnings)::numeric, 2)      AS payout,
+              round(sum(p2.cash_earnings)::numeric, 2) AS payout_cash
+         FROM (SELECT ${PERSON('driver_name', 'driver_ext_id')} AS person, driver_ext_id, day,
+                      earnings, cash_earnings
+                 FROM driver_payout_day WHERE TRUE ${dayBound}) p2
+         LEFT JOIN owner o ON o.person = p2.person AND o.day = p2.day
+        GROUP BY o.driver_ext_id, p2.day, p2.person),
      online AS (
        SELECT driver_ext_id, d AS day,
               sum(greatest(0, extract(epoch FROM (
@@ -696,7 +741,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
                              cancelled, km, fares, unknown_end, first_min, last_min, span_min,
                              on_job_min, wait_min, longest_wait_min, online_min, idle_online_min,
                              stmt_gross, stmt_fees, stmt_net, stmt_tips, stmt_salik, stmt_cash,
-                             stmt_trips, payout, payout_cash, money, money_source,
+                             stmt_trips, payout, payout_cash, money, money_source, person_key,
                              computed_at)
      SELECT d.driver_ext_id, d.day, a.fleet_id, a.platforms, a.plates,
             coalesce(a.trips, 0), coalesce(a.completed, 0), coalesce(a.cancelled, 0),
@@ -722,6 +767,9 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
                  WHEN m.pf_statement > 0 AND m.pf_fares > 0 THEN 'mixed'
                  WHEN m.pf_statement > 0 THEN 'statement'
                  ELSE 'fares' END,
+            /* The same fold the money was matched on, stored so a reader can
+               count people at any grain without joining back to the trips. */
+            ${PERSON("coalesce(a.driver_name, m.driver_name)", 'd.driver_ext_id')},
             now()
        FROM days d
        LEFT JOIN agg a    ON a.driver_ext_id  = d.driver_ext_id AND a.day  = d.day
@@ -741,7 +789,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
        stmt_salik = EXCLUDED.stmt_salik, stmt_cash = EXCLUDED.stmt_cash,
        stmt_trips = EXCLUDED.stmt_trips, payout = EXCLUDED.payout,
        payout_cash = EXCLUDED.payout_cash, money = EXCLUDED.money,
-       money_source = EXCLUDED.money_source,
+       money_source = EXCLUDED.money_source, person_key = EXCLUDED.person_key,
        computed_at = now()`, p);
 
   const { rows } = await db.query('SELECT count(*)::int n FROM driver_day');

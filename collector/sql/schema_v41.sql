@@ -54,7 +54,17 @@ ALTER TABLE driver_day
      exactly as it was — it is still the honest answer to "what did the trip
      rows price" — but it is no longer the only money on the row, so it can no
      longer be mistaken for the answer to "what did this driver earn". */
-  ADD COLUMN IF NOT EXISTS money        NUMERIC;
+  ADD COLUMN IF NOT EXISTS money        NUMERIC,
+
+  /* WHO this day belongs to, folded.
+     ─────────────────────────────────────────────────────────────────────
+     The row is keyed on driver_ext_id, which is a PLATFORM ACCOUNT and not a
+     person: one human holds several, and counting distinct ids over a month
+     turned 118 people into a larger number that looked like growth. Every
+     other surface in this product resolves that with the person fold, and a
+     day row that cannot answer "how many people" without joining back to the
+     trips is not the complete daily record this table is meant to be. */
+  ADD COLUMN IF NOT EXISTS person_key   TEXT;
 
 COMMENT ON COLUMN driver_day.money IS
   'The fleet''s receipts for this driver-day: stmt_net where a platform statement covers it, else the summed per-trip fares, else NULL. Sum THIS at any grain — never `fares`, which is sum(trip.price) and is NULL for every Uber trip.';
@@ -63,9 +73,13 @@ COMMENT ON COLUMN driver_day.money_source IS
 COMMENT ON COLUMN driver_day.fares IS
   'sum(trip.price) over trips that carry one. NULL for Uber, which publishes no per-trip fare. Not the driver''s earnings — see `money`.';
 
+COMMENT ON COLUMN driver_day.person_key IS
+  'The folded person this account belongs to — the same rule api/custody_sql.js personKey applies everywhere else. Count DISTINCT this, never driver_ext_id, which is a platform account.';
+
 /* Grouping a driver-day by week or month is now the common read, and both
    start by filtering a date range. */
 CREATE INDEX IF NOT EXISTS driver_day_day_idx ON driver_day (day);
+CREATE INDEX IF NOT EXISTS driver_day_person_idx ON driver_day (person_key, day);
 
 /* ── the week grain ───────────────────────────────────────────────────────
    rollup_day and rollup_month existed; a week did not, so "how did last week
