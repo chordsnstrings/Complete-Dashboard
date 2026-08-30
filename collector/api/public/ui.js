@@ -634,6 +634,75 @@ export const sentence = (v) => {
 
 export const sourceLabel = (s) => SOURCE_LABEL[String(s || '').toLowerCase()] || String(s || '—');
 
+/* ── what a page was built from ───────────────────────────────────────────
+   Audited across production, several pages showed money and counts with
+   nothing on them naming which feeds those numbers came from. On a fleet that
+   is 93% one channel, that matters in both directions: a reader assumes a
+   figure covers everything when it covers Uber alone, and assumes a thin
+   number is a bad week when it is a channel that stopped reporting.
+
+   So a page can state its own provenance, from the same /api/platforms the
+   Data sources page reads — the bookings each channel actually contributed to
+   THIS window, and any channel that contributed none. A channel that is
+   configured and silent is the important half: it is the difference between
+   "Yango is tiny" and "Yango has not answered since the 26th".
+
+   `only` narrows it to the channels a page genuinely draws on — the safety
+   page is telematics and nothing else, and listing Uber under it would be a
+   worse lie than saying nothing. */
+export function sourceLine(platforms = [], { only = null, note = null } = {}) {
+  const rows = (Array.isArray(platforms) ? platforms : [])
+    .filter((r) => !only || only.includes(String(r.platform || '').toLowerCase()));
+  if (!rows.length) return null;
+
+  /* One entry per CHANNEL, with the fleets folded in: two Uber rows are two
+     businesses on one provider, and a reader counting sources should see one
+     Uber, not two. */
+  const byPlatform = new Map();
+  for (const r of rows) {
+    const key = String(r.platform || '').toLowerCase();
+    const cur = byPlatform.get(key) || { n: 0, bad: [], fleets: 0 };
+    cur.n += Number(r.window_bookings || 0);
+    cur.fleets += 1;
+    if (r.collection_status && r.collection_status !== 'ok') {
+      /* Bolt carries no fleet_id, and the placeholder rendered as the literal
+         word — "Bolt (fleet: partial)". A provider with one row says only what
+         is wrong with it. */
+      cur.bad.push(r.fleet_id ? `${sourceLabel(r.fleet_id)}: ${r.collection_status}`
+        : String(r.collection_status));
+    }
+    byPlatform.set(key, cur);
+  }
+  const live = [...byPlatform.entries()].filter(([, v]) => v.n > 0)
+    .sort((a, b) => b[1].n - a[1].n);
+  const silent = [...byPlatform.entries()].filter(([, v]) => v.n === 0);
+
+  const el2 = el('p', 'cap srcline');
+  const parts = [];
+  if (live.length) {
+    parts.push('Built from ' + live
+      .map(([k, v]) => `${esc(sourceLabel(k))} ${fmtInt(v.n)}`).join(' · '));
+  }
+  if (silent.length) {
+    /* Named, not omitted. A channel with nothing in the window is either a
+       market this fleet does not work or a collector that has stopped, and the
+       page cannot tell which — but leaving it out lets the reader assume the
+       first. */
+    parts.push(`${silent.map(([k]) => esc(sourceLabel(k))).join(' and ')} `
+      + `contributed nothing to this window`);
+  }
+  const broken = [...byPlatform.entries()].filter(([, v]) => v.bad.length);
+  if (broken.length) {
+    parts.push(`${broken.map(([k, v]) => `${esc(sourceLabel(k))} (${esc(v.bad.join(', '))})`).join('; ')}`);
+  }
+  el2.innerHTML = parts.join('. ') + (note ? `. ${esc(note)}` : '') + '.';
+  return el2;
+}
+
+/* Digits with separators, without importing charts.js into ui.js — sourceLine
+   is the only thing here that needs one. */
+const fmtInt = (v) => (Number.isFinite(+v) ? (+v).toLocaleString('en-US') : '—');
+
 /* A product tier as a person reads it.
    ─────────────────────────────────────────────────────────────────────────
    These are column HEADINGS built from whatever the channels call their

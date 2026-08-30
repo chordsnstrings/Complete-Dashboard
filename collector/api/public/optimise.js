@@ -24,7 +24,8 @@
    The AI layer proposes the reading; the numbers stay the numbers. Nothing on
    this page is generated — the sentences are composed from the same figures
    the tables show, so a reader can check any claim against the row under it. */
-import { el, esc, panel, loading, tableFrom, kpiRow, note, verdict, pill, plural, countOf } from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, note, verdict, pill, plural, countOf,
+  sourceLine } from './ui.js';
 import { fmt, empty, heatmap } from './charts.js';
 import { q, href } from './data.js';
 
@@ -47,9 +48,10 @@ const median = (xs) => {
 export async function renderOptimise(root) {
   root.innerHTML = '';
   loading(root);
-  const [opt, bal] = await Promise.all([
+  const [opt, bal, plats] = await Promise.all([
     q('/api/optimise').catch((e) => ({ error: e.message })),
     q('/api/supply/balance').catch(() => null),
+    q('/api/platforms').catch(() => []),
   ]);
   root.innerHTML = '';
   if (opt?.error) { root.append(note(`Could not compute this: ${opt.error}`, 'err')); return; }
@@ -258,4 +260,13 @@ export async function renderOptimise(root) {
   root.append(el('p', 'cap',
     'Every figure on this page is over the window and channels selected above. '
     + `${countOf(opt.areas_seen || 0, 'area')} and ${countOf(opt.slots_seen || 0, 'place-hour')} were read.`));
+  /* Which feeds these numbers came from. An audit of production found this
+     page naming no source at all — and on a fleet that is 93% one channel,
+     a reader has no way to tell whether an area ranking covers the business
+     or covers Uber. */
+  const src = sourceLine(plats, {
+    note: 'Availability is the driver timeline; the waits follow each vehicle through its own '
+      + 'bookings, so a channel that reports no trips contributes no waits either',
+  });
+  if (src) root.append(src);
 }

@@ -411,6 +411,11 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 
 .plate{font-family:"IBM Plex Mono",monospace;font-size:.79rem;color:var(--ink-2);letter-spacing:.02em}
 .dim{color:var(--ink-3)}
+/* What a page was built from. Set apart from the ordinary caption below a
+   chart: this one is about the whole page, so it carries a rule above it and
+   sits at the foot rather than under any one panel. */
+.srcline{margin:18px 0 0;padding-top:10px;border-top:1px solid var(--rule);
+  color:var(--ink-3);font-size:.78rem;line-height:1.5}
 
 /* ── bars, legends, chips ──────────────────────────────────────────────── */
 /* charts.js emits .k / .track / .fill / .v — these selectors must match that

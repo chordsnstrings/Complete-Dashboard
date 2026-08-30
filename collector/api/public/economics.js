@@ -315,8 +315,14 @@ async function moneyTab(root) {
       sub: `${fmt(t.earning_vehicle_days)} vehicle-days actually earned` },
     { label: 'Per km', value: money(t.aed_per_km, 'AED', 2),
       sub: `over ${fmt(t.km)} booked km` },
+    /* The bookings PLACED ON AN ASSET, which is fewer than the fleet's — a
+       booking whose driver held no vehicle that day cannot be attributed to
+       one. Audited against production: 12,512 here against 12,526 on every
+       other money page, exactly the 14 the fleet reports without a vehicle.
+       The gap is legitimate and was invisible, so the tile now names its own
+       base rather than letting a reader read it as the fleet's total. */
     { label: 'Per booking', value: money(t.aed_per_booking, 'AED', 2),
-      sub: `over ${fmt(t.bookings)} bookings` },
+      sub: `over ${fmt(t.bookings)} bookings that a vehicle can be named for` },
     { label: 'Assets earning', value: `${fmt(t.earning)} / ${fmt(t.vehicles)}`,
       tone: t.earning === t.vehicles ? 'good'
         : t.vehicles - t.earning > t.vehicles / 4 ? 'critical' : 'warn',

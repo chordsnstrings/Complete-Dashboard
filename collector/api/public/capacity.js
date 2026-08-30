@@ -14,7 +14,7 @@
 
 import { empty, fmt, heatmap } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, countOf, plural,
-  signed, foldRows, verdict } from './ui.js';
+  signed, foldRows, verdict, sourceLine } from './ui.js';
 import { q, href } from './data.js';
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -29,7 +29,10 @@ const hhmm = (h) => `${String(h).padStart(2, '0')}:00`;
 export async function renderCapacity(root) {
   root.innerHTML = '';
   loading(root);
-  const d = await q('/api/capacity');
+  const [d, plats] = await Promise.all([
+    q('/api/capacity'),
+    q('/api/platforms').catch(() => []),
+  ]);
   root.innerHTML = '';
 
   if (!d.ok) {
@@ -220,6 +223,15 @@ export async function renderCapacity(root) {
     `<a href="${href('forecast')}">Where the monthly total comes from</a> · `
     + `<a href="${href('playbook')}">What else to do about it</a> · `
     + `<a href="${href('retention')}">Whether the people to fill these hours are still here</a>`));
+  /* The rota is planned against demand from every channel the fleet works, and
+     an audit of production found this page naming none of them. A projection
+     built on a window in which one channel was silent is a projection of a
+     smaller fleet, and the reader has to be able to see that. */
+  const src = sourceLine(plats, {
+    note: 'The projection is built on the demand these channels reported in the window it was '
+      + 'fitted over, so a channel that stopped collecting lowers it',
+  });
+  if (src) root.append(src);
 }
 
 function gapTable(rows, id) {
