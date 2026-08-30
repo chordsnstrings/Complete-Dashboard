@@ -190,5 +190,21 @@ check('…the jobs total agrees with the same reconstruction',
   Math.abs(bal.cells.reduce((a, c) => a + Number(c.jobs || 0) * Number(c.occurrences), 0)
     - Number(bal.totals.jobs)) <= Math.max(2, Number(bal.totals.jobs) * 0.01));
 
+/* ── an average fare of zero ──────────────────────────────────────────────
+   A place-hour of Uber work carries no price on any row, and averaging across
+   the priced and the unpriced answered "AED 0" — which a reader takes as "this
+   place earns nothing" rather than "nothing here reported a price". Averaged
+   over the bookings that carry a fare, with the count beside it, so the rate
+   cannot be read without its base. */
+const withFare = d.moves.find((m) => m.avg_fare != null);
+check('an average fare names how many bookings it is over',
+  withFare && Number.isFinite(+withFare.priced_pickups),
+  JSON.stringify(withFare && { f: withFare.avg_fare, n: withFare.priced_pickups, p: withFare.pickups }));
+check('…and that count never exceeds the bookings it is drawn from',
+  d.moves.every((m) => m.priced_pickups == null || m.priced_pickups <= m.pickups));
+check('…while a place-hour where nothing carries a price reports no fare at all',
+  d.moves.every((m) => m.avg_fare == null || m.priced_pickups > 0),
+  JSON.stringify(d.moves.filter((m) => m.avg_fare != null && !(m.priced_pickups > 0)).slice(0, 2)));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

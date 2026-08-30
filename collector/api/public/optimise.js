@@ -235,9 +235,16 @@ export async function renderOptimise(root) {
       { label: 'Cars already there', key: 'arrivals', num: true, render: (r) => fmt(r.arrivals) },
       { label: 'Short by, each time', key: 'gap_per_occurrence', num: true,
         render: (r) => fmt(r.gap_per_occurrence) },
+      /* The base, not just the rate. "AED 0" over a place-hour where two of
+         fifteen bookings carry a price is a different statement from "AED 0"
+         over fifteen that all do, and the column cannot be read without it. */
       { label: 'Average fare', key: 'avg_fare', num: true,
         absent: 'no booking in any of these areas reports a fare',
-        render: (r) => (r.avg_fare == null ? '—' : `AED ${fmt(r.avg_fare)}`) },
+        render: (r) => (r.avg_fare == null
+          ? '<span class="dim">no price reported</span>'
+          : `AED ${fmt(r.avg_fare)}`
+            + (Number.isFinite(+r.priced_pickups)
+              ? `<span class="dim"> · ${fmt(r.priced_pickups)} of ${fmt(r.pickups)}</span>` : '')) },
     ], { compact: true }));
     m.body.append(el('p', 'cap',
       `${fmt(opt.empty_arrivals)} of ${fmt(opt.placed_bookings)} placeable bookings `

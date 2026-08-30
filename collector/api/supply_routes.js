@@ -231,13 +231,19 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
                 ended_at AT TIME ZONE 'Asia/Dubai' AS e,
                 ${areaOf('pickup_addr')} AS from_area,
                 ${areaOf('dropoff_addr')} AS to_area,
-                price
+                price, has_fare
            FROM trip_norm
           WHERE ${FB} AND is_booking),
        pick AS (
          SELECT from_area AS area, extract(dow FROM s)::int AS dow,
                 extract(hour FROM s)::int AS h, count(*)::int AS pickups,
-                round(avg(price)::numeric, 1) AS avg_fare
+                /* Over the bookings that CARRY a fare, and the count beside
+                   it. A place-hour of Uber work has no price on any row, and
+                   averaging across the priced and the unpriced answered
+                   "AED 0" — which reads as "this place earns nothing" rather
+                   than "nothing here reported a price". */
+                round(avg(price) FILTER (WHERE has_fare)::numeric, 1) AS avg_fare,
+                count(*) FILTER (WHERE has_fare)::int AS priced_pickups
            FROM t WHERE from_area IS NOT NULL GROUP BY 1, 2, 3),
        /* Shifted an hour forward: a car that arrives at 16:00 is the car
           available to a 17:00 booking, and comparing the two hours as if they
@@ -259,7 +265,7 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
               coalesce(p.dow, a.dow) AS dow, coalesce(p.h, a.h) AS h,
               coalesce(p.pickups, 0) AS pickups,
               coalesce(a.arrivals, 0) AS arrivals,
-              p.avg_fare,
+              p.avg_fare, p.priced_pickups,
               o.occurrences
          FROM pick p
          FULL OUTER JOIN arrive a ON a.area = p.area AND a.dow = p.dow AND a.h = p.h
@@ -279,6 +285,7 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
         gap: pickups - arrivals,
         per_occurrence: Math.round((pickups / occ) * 100) / 100,
         avg_fare: num(r.avg_fare),
+        priced_pickups: num(r.priced_pickups),
       };
     });
 

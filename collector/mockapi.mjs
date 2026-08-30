@@ -1504,9 +1504,15 @@ app.get('/api/optimise', (req, r) => {
         const pickups = Math.max(0, Math.round(6 + Math.sin((h + i) / 2) * 5 + (h > 16 ? 6 : 0)));
         const arrivals = Math.max(0, Math.round(pickups * (i === 0 ? 1.8 : i === 1 ? 0.1 : 0.7)));
         if (pickups + arrivals < 3) continue;
+        /* Most bookings carry no price — Uber publishes none — so the
+           average is over a MINORITY of the pickups, and one area in the
+           fixture has none at all. That is the shape the page has to render
+           without printing "AED 0" as though the place earned nothing. */
+        const pricedPickups = i === 3 ? 0 : Math.max(1, Math.round(pickups * 0.12));
         slots.push({ area, dow, h, occurrences: 4, pickups, arrivals,
           gap: pickups - arrivals, per_occurrence: Math.round((pickups / 4) * 100) / 100,
-          avg_fare: 40 + i * 9 });
+          priced_pickups: pricedPickups,
+          avg_fare: pricedPickups ? 40 + i * 9 : null });
       }
     }
   }

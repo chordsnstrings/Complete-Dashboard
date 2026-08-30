@@ -9,9 +9,30 @@
    row instead of a table, a sheet instead of a dropdown, a segmented control
    instead of a select, and a sparkline small enough to sit inside a stat. */
 import { el, esc, money, pct, dayStr } from '../ui.js';
-import { fmt } from '../charts.js';
+import { fmt, isToday } from '../charts.js';
 
-export { el, esc, money, pct, dayStr, fmt };
+export { el, esc, money, pct, dayStr, fmt, isToday };
+
+/* Today is not a day yet.
+   ─────────────────────────────────────────────────────────────────────────
+   /api/trips/daily fills the window to its last day, and the last day is
+   TODAY — six hours old at breakfast. Averaged in, it drags every per-day
+   figure down; compared against yesterday, it reads as a collapse. The phone
+   did both: its headline said "the last full day ran down 81% on the one
+   before it" every single morning, and the day it was measuring was the one
+   still being collected.
+
+   The desktop already separates them — gapBars draws today hollow and says
+   so. This is the same separation for a screen with no chart to hang it on:
+   the complete days for anything averaged or compared, and today handed back
+   on its own so a screen can mention it as what it is. */
+export const splitToday = (rows = []) => {
+  const list = Array.isArray(rows) ? rows : [];
+  const last = list[list.length - 1];
+  return isToday(last?.d)
+    ? { complete: list.slice(0, -1), today: last }
+    : { complete: list, today: null };
+};
 
 /* Most list endpoints answer with an envelope — {rows, shown, truncated} —
    and a few answer with a bare array. Reading `.rows` off an array yields

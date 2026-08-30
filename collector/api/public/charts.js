@@ -138,7 +138,9 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
    by different callers, so both are reduced to ten characters before
    comparing. Dubai's day, never the viewer's: this fleet's calendar is
    Dubai's and a reader in London opening it at 21:00 is looking at tomorrow. */
-const isToday = (v) => String(v ?? '').slice(0, 10) === dubaiDay();
+/* Exported: the phone application needs the same answer, and a second copy of
+   "is this today in Dubai" is exactly the kind of duplicate that drifts. */
+export const isToday = (v) => String(v ?? '').slice(0, 10) === dubaiDay();
 const nowHHMM = () => new Intl.DateTimeFormat('en-GB', {
   timeZone: TZ, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date());
 

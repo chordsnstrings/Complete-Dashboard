@@ -12,7 +12,7 @@
 */
 import { state, q, qAll, api, href } from '../data.js';
 import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
-  skeleton, empty, failed, spark, bars, unwrap, cut } from './ui.js';
+  skeleton, empty, failed, spark, bars, unwrap, cut, splitToday } from './ui.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -61,6 +61,7 @@ export function titleFor(view, param) {
    "100733", and "100733" + 0 is a bug waiting for a total. */
 const n = (v) => (v == null || v === '' ? null : Number(v));
 const D3M = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const countOfDays = (nDays) => `${fmt(nDays)} ${nDays === 1 ? 'day' : 'days'}`;
 
 /* ── Today ──────────────────────────────────────────────────────────────── */
 async function today(deck, ctx) {
@@ -75,8 +76,13 @@ async function today(deck, ctx) {
   deck.innerHTML = '';
   if (!k) { failed(deck, new Error('The overview could not be fetched.')); return; }
 
-  const series = (daily || []).map((d) => n(d.trips) || 0);
-  const days = (daily || []).length;
+  /* Today is still being collected, so it is neither averaged into the daily
+     rate nor used as the "last full day" it was being compared as. On
+     production that comparison read "down 81%" every morning — 103 bookings
+     so far against yesterday's 543. */
+  const { complete, today: partial } = splitToday(daily);
+  const series = complete.map((d) => n(d.trips) || 0);
+  const days = complete.length;
   const perDay = days ? Math.round(series.reduce((a, b) => a + b, 0) / days) : 0;
   const last = series[series.length - 1] ?? 0;
   const prev = series[series.length - 2] ?? 0;
@@ -84,24 +90,42 @@ async function today(deck, ctx) {
 
   lede(deck, {
     claim: `${fmt(perDay)} bookings a day`,
-    sub: `${fmt(k.trips)} over ${days || state.days} days, across ${fmt(k.drivers)} drivers and `
-      + `${fmt(k.vehicles)} vehicles. The last full day ran ${drift >= 0 ? 'up' : 'down'} `
-      + `${Math.abs(drift)}% on the one before it.`,
+    /* The TOTAL covers the whole window, today included; the RATE covers the
+       complete days only. Pairing the two in one clause — "12,410 over 29
+       days" — reads as a division that does not come out, so they are stated
+       as the two different spans they are. */
+    sub: `${fmt(k.trips)} across ${fmt(k.drivers)} drivers and ${fmt(k.vehicles)} vehicles. `
+      + `${fmt(perDay)} a day over the ${countOfDays(days)} that are complete. `
+      + (days >= 2
+        ? `${dayStr(complete[days - 1].d)} ran ${drift >= 0 ? 'up' : 'down'} `
+          + `${Math.abs(drift)}% on the day before it.`
+        : '')
+      + (partial ? ` Today has ${fmt(n(partial.trips) || 0)} so far and is still being collected.` : ''),
     tone: drift < -25 ? 'warn' : null,
   });
 
-  const trend = card('Bookings a day', `${days} days in this window`);
+  const trend = card('Bookings a day', `${days} complete ${days === 1 ? 'day' : 'days'}`
+    + (partial ? ', today excluded — it is still filling' : ' in this window'));
   trend.body.append(spark(series, { h: 46 }));
   const foot = el('p', 'm-cap');
   foot.style.cssText = 'margin:8px 0 0;display:flex;justify-content:space-between';
-  foot.append(el('span', null, dayStr((daily?.[0] || {}).d) || ''),
-    el('span', null, dayStr((daily?.[days - 1] || {}).d) || ''));
+  foot.append(el('span', null, dayStr((complete[0] || {}).d) || ''),
+    el('span', null, dayStr((complete[days - 1] || {}).d) || ''));
   trend.body.append(foot);
   deck.append(trend.card);
 
   stats(deck, [
     { label: 'Bookings', value: fmt(k.trips), sub: `${fmt(perDay)} a day` },
-    { label: 'Revenue', value: money(n(k.revenue)), sub: k.revenue ? 'fares on record' : 'none priced' },
+    /* MONEY IN, not fares.
+       ─────────────────────────────────────────────────────────────────────
+       `revenue` is sum(trip.price) and the Uber export carries no fare
+       column, so on this fleet it describes 875 of 12,410 bookings — the
+       hotel channel and Yango. This tile said AED 65,367 under the word
+       Revenue while the fleet had taken AED 469,438. The desktop's Finance
+       page leads with `accounted` for exactly this reason and names the two
+       halves it is made of; the phone now agrees with it. */
+    { label: 'Money in', value: money(n(k.accounted) ?? n(k.revenue)),
+      sub: n(k.accounted) ? 'fares plus platform payouts' : 'fares on record' },
     { label: 'Completed', value: `${n(k.completion_pct) ?? '—'}%`,
       sub: `${n(k.cancel_pct) ?? 0}% cancelled`,
       tone: n(k.completion_pct) >= 90 ? 'good' : n(k.completion_pct) >= 80 ? null : 'warn' },
@@ -159,7 +183,10 @@ async function moneyScreen(deck, ctx) {
   deck.innerHTML = '';
   if (!k) { failed(deck, new Error('The money view could not be fetched.')); return; }
 
-  const rev = (daily || []).map((d) => n(d.revenue) || 0);
+  /* Today drops the last point to a fraction of a day's fares and the spark
+     draws it as a cliff. Same separation as the Today screen. */
+  const { complete: fullDays, today: partialDay } = splitToday(daily);
+  const rev = fullDays.map((d) => n(d.revenue) || 0);
   const total = n(k.revenue) || 0;
   const priced = (daily || []).reduce((a, d) => a + (n(d.priced_trips) || 0), 0);
 
@@ -171,30 +198,50 @@ async function moneyScreen(deck, ctx) {
     .reduce((a, c) => a + (n(c.trips) || 0), 0);
   const routed = cls.reduce((a, c) => a + (n(c.trips) || 0), 0);
 
+  /* What the fleet actually took, and the two kinds of money it is made of.
+     `accounted` is fares PLUS platform payouts; `revenue` is the fares alone,
+     which on this fleet is one channel in three and 7% of the bookings. */
+  const inAll = n(k.accounted);
   lede(deck, {
     claim: owed && routed
       ? `${Math.round((owed / routed) * 100)}% of bookings are still to be collected`
-      : `${money(total)} on record`,
-    sub: owed && routed
+      : `${money(inAll ?? total)} in`,
+    sub: (owed && routed
       ? `${fmt(owed)} of ${fmt(routed)} bookings settled into a driver's hand, onto a room, or `
-        + `against salary. ${money(total)} is what the priced bookings came to.`
-      : `Over ${fmt(k.trips)} bookings — ${total && priced ? money(Math.round(total / priced))
-        : '\u2014'} a priced booking. Only the channels that report a fare are in this figure.`,
+        + 'against salary. '
+      : `Over ${fmt(k.trips)} bookings. `)
+      + (inAll
+        ? `${money(inAll)} in altogether: ${money(total)} of fares the trips carry a price for, `
+          + `and ${money(n(k.accounted_payouts))} of platform payouts. Uber publishes no per-trip `
+          + 'fare, so most of the work is in the second figure.'
+        : `${money(total)} is what the priced bookings came to.`),
     tone: routed && owed / routed >= 0.3 ? 'warn' : null,
   });
 
-  const c = card('Fares a day', priced
-    ? `${fmt(priced)} of ${fmt(k.trips)} bookings carry a fare` : 'no booking carries a fare');
+  const c = card('Fares a day', (priced
+    ? `${fmt(priced)} of ${fmt(k.trips)} bookings carry a fare` : 'no booking carries a fare')
+    + (partialDay ? ' · today excluded, it is still filling' : ''));
   c.body.append(spark(rev, { h: 46, tone: 'var(--s3)' }));
   deck.append(c.card);
 
   stats(deck, [
-    { label: 'Fares on record', value: money(total) },
+    { label: 'Money in', value: money(inAll ?? total),
+      sub: inAll ? 'fares + payouts' : 'fares only', long: true },
+    { label: 'Fares on record', value: money(total),
+      sub: priced ? `${fmt(priced)} of ${fmt(k.trips)} priced` : 'none priced' },
     { label: 'Per priced booking',
-      value: total && priced ? money(Math.round(total / priced)) : '\u2014',
+      value: total && priced ? money(total / priced, 'AED', 0) : '\u2014',
       sub: priced ? `${fmt(priced)} priced` : 'none priced' },
-    { label: 'Per km', value: total && n(k.km) ? money(Math.round(total / n(k.km))) : '\u2014' },
-    { label: 'Bookings', value: fmt(k.trips), sub: `${fmt(k.drivers)} drivers` },
+    /* From the server, over the trips reporting BOTH a fare and a distance.
+       This divided the priced fares by EVERY trip's distance — 65,367 over
+       154,746 km — got 0.42, and then Math.round made it "AED 0". Two
+       different populations and a rounding that destroys any rate below one. */
+    { label: 'Per km', value: money(n(k.revenue_per_km), 'AED', 2),
+      sub: n(k.priced_measured_trips)
+        ? `over ${fmt(k.priced_measured_trips)} priced trips with a distance` : 'no priced distance' },
+    /* Four, not five. The grid is two across, so an odd tile sits alone in a
+       row of its own — and the one that was orphaned here was Bookings, which
+       is the Today screen's headline and says nothing about money. */
   ]);
 
   if (cls.length) {

@@ -161,5 +161,63 @@ check('the manifest is linked', /rel="manifest"/.test(html));
 check('iOS is told it is an app', /apple-mobile-web-app-capable/.test(html));
 check('the notch is accounted for', /viewport-fit=cover/.test(html));
 
+/* ── today is not a day yet ───────────────────────────────────────────────
+   /api/trips/daily fills the window to its last day, and that day is TODAY —
+   a few hours old when somebody opens this at breakfast. The phone averaged it
+   into the daily rate and compared it against yesterday, so its headline read
+   "the last full day ran down 81% on the one before it" every morning: 103
+   bookings so far against yesterday's 543. Measured on production.
+
+   The desktop already separates the two — gapBars draws today hollow and says
+   it is still being collected. This is the same separation for a screen with
+   no chart to hang it on. */
+const scr = readFileSync(`${PUB}/m/screens.js`, 'utf8');
+const mui = readFileSync(`${PUB}/m/ui.js`, 'utf8');
+
+check('the phone has one place that separates today from the complete days',
+  /export const splitToday/.test(mui));
+check('…and it reuses the desktop’s answer to "is this today in Dubai"',
+  /isToday/.test(mui) && /export const isToday/.test(readFileSync(`${PUB}/charts.js`, 'utf8')));
+check('the Today screen averages over the complete days only',
+  /const \{ complete, today: partial \} = splitToday\(daily\)/.test(scr));
+/* The rendered sentence, not the word: the comment above the fix quotes the
+   old wording to explain what went wrong, and a bare substring match on it
+   fails for the explanation rather than for the code. */
+check('…and no longer renders "The last full day ran …"',
+  !/The last full day ran/.test(scr));
+check('…naming the day it actually compared instead',
+  /dayStr\(complete\[days - 1\]\.d\)/.test(scr));
+check('…and reporting today separately, as still filling',
+  /still being collected/.test(scr));
+check('the Money screen drops today from its fares spark too',
+  /const \{ complete: fullDays, today: partialDay \} = splitToday\(daily\)/.test(scr));
+
+/* ── the money a phone shows ──────────────────────────────────────────────
+   `revenue` is sum(trip.price), and the Uber export carries no fare column —
+   on this fleet it describes 875 of 12,410 bookings. The phone printed
+   AED 65,367 under the word Revenue while the fleet had taken AED 469,438.
+   The desktop's Finance page leads with `accounted` for exactly this reason;
+   the phone now agrees with it rather than contradicting it. */
+check('the phone leads with money in, not with fares',
+  /label: 'Money in'/.test(scr));
+check('…sourced from accounted, which is fares PLUS payouts',
+  /k\.accounted/.test(scr));
+check('…and no tile is labelled Revenue over the fares figure',
+  !/label: 'Revenue', value: money\(n\(k\.revenue\)\)/.test(scr));
+check('…while the fares figure is still shown, named as fares',
+  /label: 'Fares on record'/.test(scr));
+
+/* Per km read AED 0 on production. Two faults compounding: it divided the
+   PRICED fares by EVERY trip's distance — two different populations, 65,367
+   over 154,746 km — and then Math.round turned the 0.42 into 0. The server
+   already computes the rate over the trips reporting both, and names its
+   base. */
+check('per km comes from the server’s own rate, not a client division',
+  /label: 'Per km', value: money\(n\(k\.revenue_per_km\)/.test(scr));
+check('…to two decimals, because a rate under one dirham rounds to nothing',
+  /revenue_per_km\), 'AED', 2\)/.test(scr));
+check('…and no money figure on this screen is Math.round-ed into a whole',
+  !/money\(Math\.round\(/.test(scr));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
