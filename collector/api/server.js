@@ -556,6 +556,68 @@ app.get('/api/compare/period', wrap(async (req, res) => {
   });
 }));
 
+/* ── every trip, fleet-wide ───────────────────────────────────────────────
+   The record existed and was not browsable. Trips could be reached only
+   THROUGH something else — a driver's page, a vehicle's page, a single day —
+   or downloaded as a CSV nobody opens to answer a question. There was no
+   "show me the work" in a product whose whole subject is the work.
+
+   One row per booking, newest first, with the channel it came from on the row
+   rather than inferred from a filter chip. Paged rather than capped: an
+   operator scrolling for the trip they remember needs to reach it, and a
+   thirty-day window is twelve thousand rows.
+
+   `is_booking` is the population, as everywhere else here: an FMS telematics
+   row is the same physical car moving and adding it would double every trip
+   it shadows. The telematics view is its own filter rather than a silent
+   inclusion. */
+app.get('/api/trips/list', wrap(async (req, res) => {
+  const p = range(req);
+  const limit = Math.min(Math.max(+req.query.limit || 100, 1), 500);
+  const offset = Math.max(0, +req.query.offset || 0);
+
+  /* What a reader actually searches by: a plate, a person, or a place. One
+     box, matched against all four, because asking which field they mean is a
+     question the product can answer itself. */
+  const term = String(req.query.q || '').trim().toLowerCase();
+  const search = term
+    ? `AND (lower(plate) LIKE $5 OR lower(driver_name) LIKE $5
+            OR lower(pickup_addr) LIKE $5 OR lower(dropoff_addr) LIKE $5
+            OR lower(external_id) LIKE $5)` : '';
+  const args = term ? [...p, `%${term}%`] : p;
+
+  /* Telematics is a different population and gets asked for explicitly. */
+  const kind = req.query.kind === 'telematics' ? 'NOT is_booking'
+    : req.query.kind === 'all' ? 'TRUE' : 'is_booking';
+  const outcome = ['completed', 'not_completed'].includes(req.query.outcome)
+    ? `AND outcome = '${req.query.outcome}'` : '';
+
+  const where = `${F} AND ${kind} ${outcome} ${search}`;
+  const [rows, [t]] = await Promise.all([
+    q(`SELECT platform, fleet_id, external_id, requested_at, ended_at, local_day,
+              driver_name, driver_ext_id, plate, pickup_addr, dropoff_addr,
+              distance_km, duration_s, status, outcome, product, payment_type,
+              price, currency, has_fare, is_booking
+         FROM trip_norm WHERE ${where}
+        ORDER BY requested_at DESC
+        LIMIT ${limit} OFFSET ${offset}`, args),
+    q(`SELECT count(*)::int n FROM trip_norm WHERE ${where}`, args),
+  ]);
+  const total = t?.n ?? rows.length;
+  res.json({
+    rows, total, shown: rows.length, offset, limit,
+    truncated: offset + rows.length < total,
+    window: { from: p[0], to: p[1] },
+    /* The fare column is empty for most of this fleet and the reason is not
+       the fleet's: Uber publishes no per-trip price. Said here so a page
+       rendering a column of dashes can explain itself. */
+    priced: rows.filter((r) => r.has_fare).length,
+    note: 'One row per booking. A price appears only where the channel publishes one — the Uber '
+      + 'trip export carries no fare column at all, so most rows here show none and that is the '
+      + 'provider, not a gap in collection.',
+  });
+}));
+
 /* Volume series. All three group in Dubai time and count BOOKINGS only.
    Previously they grouped in UTC, which put the 19:00 Dubai peak at 15:00 and
    pushed every trip between midnight and 04:00 onto the previous day; and they

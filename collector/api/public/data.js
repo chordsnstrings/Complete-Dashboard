@@ -29,7 +29,18 @@ export const state = {
        `grain`  how the window is BUCKETED. Empty means the server chooses from
                 the span, which is right almost always and wrong only when a
                 reader wants to see the noise a weekly bar is hiding. */
-  days: 30, period: '', grain: 'auto', platform: '', fleet: '',
+  /* THIS MONTH, not the last thirty days.
+     ─────────────────────────────────────────────────────────────────────
+     A rolling window moves continuously, so two pages opened four minutes
+     apart genuinely answer about two different spans — and the operator
+     reading 12,526 on one page and 12,560 on the next has no way to know
+     that is the collector working rather than the pages disagreeing. It was
+     the single biggest source of "why don't these match".
+
+     A calendar month is stable: only its last day moves, and the business
+     already thinks in months. The rolling windows stay on the control for
+     anyone who wants a trailing view. */
+  days: 30, period: 'month', grain: 'auto', platform: '', fleet: '',
   admin: store.get('adminToken'),
 };
 
@@ -39,6 +50,24 @@ export const state = {
    period it is not showing. */
 export const PERIODS = ['today', 'yesterday', 'week', 'month', 'quarter', 'year',
   'last_week', 'last_month'];
+/* How each period is written for a reader. One list rather than three: the
+   desktop range control, the phone's calendar sheet and every header note
+   that says which window is on screen were each carrying their own copy, and
+   three copies of a label list is three chances for a page to name a window
+   it is not showing. */
+/* Insertion order is display order — near to far, each "this" beside its
+   "last" — and it is the order the desktop control has always listed. */
+export const PERIOD_LABEL = {
+  today: 'Today', yesterday: 'Yesterday',
+  week: 'This week', last_week: 'Last week',
+  month: 'This month', last_month: 'Last month',
+  quarter: 'This quarter', year: 'This year',
+};
+/* The window on screen, named. A period is called by its name; a rolling
+   window says how long it is. */
+export const windowLabel = () => (state.period
+  ? (PERIOD_LABEL[state.period] || state.period)
+  : `Last ${state.days} days`);
 /* `auto` is a real value the server understands, not the absence of one:
    absent means `day`, so that every caller written before the grain existed
    keeps getting the shape it already parses. */
@@ -247,7 +276,7 @@ export const qChan = (path, extra) => {
    person opening it saw all platforms over 30 days and no reason to think
    otherwise. A filter that changes what a page says has to be part of the
    page's address. */
-const DEFAULTS = { days: 30, period: '', grain: 'auto', platform: '', fleet: '' };
+const DEFAULTS = { days: 30, period: 'month', grain: 'auto', platform: '', fleet: '' };
 
 /* Which controls a view actually offers. Declared here rather than in the
    shell, because href() has to agree with it: an address that carries a filter
@@ -348,7 +377,11 @@ export function parseHash(h = location.hash.slice(1)) {
     /* Same rule as `days`: only values the app offers. A hand-edited period or
        grain the server does not know would be ignored there and leave the
        control showing something the page is not doing. */
-    period: PERIODS.includes(search.get('period') || '') ? search.get('period') : null,
+    /* Three states, not two: a period named in the address, an explicit
+       rolling window (`days=` with no period, which the control writes when a
+       reader picks one), and neither — which means the default. */
+    period: PERIODS.includes(search.get('period') || '') ? search.get('period')
+      : (search.get('days') ? '' : null),
     grain: GRAINS.includes(search.get('grain') || '') ? search.get('grain') : null,
     platform: search.get('platform') || null,
     fleet: search.get('fleet') || null,

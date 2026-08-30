@@ -9,7 +9,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   verdict, dominantBar, foldRows, foldChildren, sourceLine } from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
-  windowDates, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
+  windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
 import { volatilePath } from './swr.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
@@ -17,6 +17,7 @@ import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.j
 import { renderCohort } from './cohort.js';
 import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
+import { renderTrips } from './trips.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
 import { renderTrip } from './trip.js';
 import { renderSettlement, SETTLE_TABS } from './settlement.js';
@@ -268,6 +269,10 @@ const VIEWS = [
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Money', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
   { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Work', sub: 'Volume, mix and quality across every platform — the work behind the money' },
   { id: 'demand', label: 'Demand', ic: '◷', grp: 'Work', sub: 'When trips happen — by day, hour and weekday' },
+  /* The record itself, browsable. Every other page here aggregates it; this
+     one lists it, which is what an operator wants when they remember a job
+     and not a statistic. */
+  { id: 'trips', label: 'Every trip', ic: '≣', grp: 'Work', sub: 'One row per booking, searchable' },
   /* The other half of the market, and the only page in the product that
      measures supply. It sits beside Demand because it is the same axes with
      the other series on them. */
@@ -1374,6 +1379,7 @@ V.forecast = async (root) => renderForecast(root);
 V.retention = async (root) => renderRetention(root);
 V.optimise = async (root) => renderOptimise(root);
 V.capacity = async (root) => renderCapacity(root);
+V.trips = async (root) => renderTrips(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */
 V.unit = async (root) => renderEconomics(root);
 V['top-performers'] = async (root) => renderPerformers(root, 'top');
@@ -4360,7 +4366,7 @@ function animateView(root) {
    failure — its errors belong to a page the reader has already left. */
 async function render() {
   const gen = newRender();
-  renderNav(); setHeader();
+  renderNav(); setHeader(); tzNote();
   const root = $('#view'); root.innerHTML = '';
   root.scrollIntoView?.({ block: 'start' });
   try {
@@ -4653,9 +4659,15 @@ $('#refreshBtn').onclick = (e) => {
 function tzNote() {
   const host = $('#tzNote');
   if (!host) return;
-  const [from, to] = windowDates();
   const local = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  host.title = `${from} → ${to}, Dubai days`;
+  /* Under a calendar period the client does not compute the boundaries — the
+     server's calendar does, so that "this month" is the same month here, in
+     the export and in the reconciliation. Naming the period is therefore the
+     honest tooltip; printing a rolling window's dates under it would state a
+     window the page is not using. */
+  host.title = state.period
+    ? `${windowLabel()}, Dubai days`
+    : `${windowDates().join(' → ')}, Dubai days`;
   host.textContent = local === TZ ? '' : 'Dubai time';
 }
 tzNote();
@@ -4698,7 +4710,7 @@ function applyRoute() {
   // clicking a plain link would silently carry a 365-day window into a page
   // whose caption claims 30.
   state.days = r.days ?? 30;
-  state.period = r.period ?? '';
+  state.period = r.period ?? 'month';
   state.grain = r.grain ?? 'auto';
   state.platform = r.platform ?? '';
   state.fleet = r.fleet ?? '';

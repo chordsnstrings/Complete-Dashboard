@@ -17,7 +17,8 @@
                    because a service worker that caches the phone shell for a
                    desktop reader would be caching an app they never see.
 */
-import { state, api, parseHash, href, q, qAll, hidesRange, hidesChannel } from '../data.js';
+import { state, api, parseHash, href, q, qAll, hidesRange, hidesChannel,
+  PERIOD_LABEL } from '../data.js';
 import { el, esc, sourceLine } from '../ui.js';
 import { SCREENS, TABS, titleFor } from './screens.js';
 
@@ -66,7 +67,21 @@ const currentTab = () => {
 };
 
 /* ── the window / channel sheet ─────────────────────────────────────────── */
-const RANGES = [[7, '7 days'], [30, '30 days'], [90, '90 days'], [365, '12 months']];
+/* Calendar periods first, because the business thinks in them and because a
+   rolling window moves under the reader: two screens opened four minutes apart
+   answer about two different spans, and the operator has no way to tell that
+   from the pages disagreeing. A period is stable — only its last day moves.
+
+   Prefixed `p:` so a period and a day-count cannot be confused for one
+   another, matching the desktop's control. */
+/* The same eight calendar periods the desktop offers, named from the same
+   list — a phone that offered only rolling windows was answering "how is
+   August going" with thirty days straddling two months. Rolling windows keep
+   their place below, said as rolling so the two kinds cannot be confused. */
+const RANGES = [
+  ...Object.entries(PERIOD_LABEL).map(([k, t]) => [`p:${k}`, t]),
+  [7, 'Rolling 7 days'], [30, 'Rolling 30 days'], [90, 'Rolling 90 days'], [365, 'Rolling 12 months'],
+];
 const PLATFORMS = [['', 'All channels'], ['uber', 'Uber'], ['yango', 'Yango'],
   ['bolt', 'Bolt'], ['hotel', 'Hotel'], ['fms', 'FMS telematics']];
 const FLEETS = [['', 'Both fleets'], ['ecosine', 'Ecosine'], ['egari', 'Egari']];
@@ -90,7 +105,12 @@ function openSheet() {
       sheet.append(b);
     });
   };
-  group('Window', RANGES, state.days, (v) => { state.days = Number(v); });
+  group('Window', RANGES, state.period ? `p:${state.period}` : state.days, (v) => {
+    /* One or the other, never both — a screen showing "this month" over a
+       rolling thirty days would be labelled with a window it is not using. */
+    if (String(v).startsWith('p:')) { state.period = String(v).slice(2); }
+    else { state.period = ''; state.days = Number(v); }
+  });
   group('Channel', PLATFORMS, state.platform, (v) => { state.platform = v; });
   group('Fleet', FLEETS, state.fleet, (v) => { state.fleet = v; });
   scrim.onclick = close;

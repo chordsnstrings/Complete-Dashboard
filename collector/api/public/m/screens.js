@@ -10,7 +10,7 @@
    connection a reader taps twice, and the second screen must not be painted
    over by the first one's response arriving late.
 */
-import { state, q, qAll, api, href } from '../data.js';
+import { state, q, qAll, api, href, windowLabel } from '../data.js';
 import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
   skeleton, empty, failed, spark, bars, unwrap, cut, splitToday } from './ui.js';
 
@@ -25,7 +25,10 @@ export const TABS = [
       'optimise'] },
 ];
 
-const WINDOW_NOTE = () => `Last ${state.days} days`
+/* The header names the window the screen is ACTUALLY showing. It said
+   "Last N days" unconditionally, which under a calendar period is a label for
+   a window the screen is not using. */
+const WINDOW_NOTE = () => windowLabel()
   + (state.platform ? ` · ${state.platform}` : '') + (state.fleet ? ` · ${state.fleet}` : '');
 
 export function titleFor(view, param) {

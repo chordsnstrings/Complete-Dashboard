@@ -53,7 +53,7 @@ console.log('\ntripTime: the replay link takes what an API row actually carries'
 {
   const ok = tripTime('L45235', '2026-08-24T02:14:11.000Z');
   check('a string timestamp renders a link, not a throw',
-    /href=.*vehicle.*movement\?day=2026-08-24/.test(ok), ok.slice(0, 90));
+    /href=.*vehicle.*movement\?[^"]*day=2026-08-24/.test(ok), ok.slice(0, 90));
   check('the day in the link is the DUBAI day of the instant',
     ok.includes('day=2026-08-24'), '02:14 UTC is 06:14 in Dubai — same date here, but computed via TZ');
   const night = tripTime('L45235', '2026-08-23T21:30:00.000Z');

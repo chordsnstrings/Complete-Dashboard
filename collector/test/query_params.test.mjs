@@ -56,10 +56,26 @@ check('a legitimate zero survives — offset=0 is the first page, not "no offset
 check('and so does another zero', /days=0/.test(p2), p2);
 check('a string that merely looks falsy survives', /term=false/.test(p2), p2);
 
+/* A window is carried on every request, and there are two legal shapes of
+   one. A calendar period — the default — names the span and lets the server's
+   own calendar resolve it, so that "this month" means the same days to the
+   page, the export and the reconciliation. A rolling window sends the dates
+   the client computed. What must never happen is neither, or both: neither
+   silently widens a query to every trip the fleet has taken, and both leaves
+   the server to pick a winner the page cannot predict. */
 const p3 = await call((d) => d.params({}));
-check('the window is always carried', /from=\d{4}-\d{2}-\d{2}/.test(p3) && /to=\d{4}-\d{2}-\d{2}/.test(p3), p3);
-check('and it is a Dubai date, not a UTC one — dubaiDay(), not toISOString()',
-  /from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}/.test(p3), p3);
+check('the window is always carried',
+  /(^|&)period=[a-z_]+/.test(p3) || (/from=\d{4}-\d{2}-\d{2}/.test(p3) && /to=\d{4}-\d{2}-\d{2}/.test(p3)), p3);
+check('a period and a rolling window are never both sent',
+  !(/period=/.test(p3) && /from=/.test(p3)), p3);
+
+const p4 = await call((d) => { d.state.period = ''; d.state.days = 30; return d.params({}); });
+check('with no period the dates are sent, and they are Dubai dates — dubaiDay(), not toISOString()',
+  /from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}/.test(p4), p4);
+const p5 = await call((d) => { d.state.period = 'week'; return d.params({}); });
+check('and with one, the span is named rather than computed twice',
+  /period=week/.test(p5) && !/from=/.test(p5), p5);
+await call((d) => { d.state.period = 'month'; return ''; });
 
 console.log('\nquery params: no caller may pass an undefined through');
 

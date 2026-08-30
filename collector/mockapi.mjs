@@ -2936,6 +2936,61 @@ app.get('/api/drivers/performance', (_, r) => {
    production while the smoke run reported 76/76. A fixture that does not exist
    is not a neutral omission; it is a fixture with the wrong shape. */
 
+app.get('/api/trips/list', (req, r) => {
+  /* Three channels on purpose: an Uber row with no price, a hotel row with
+     one, and a telematics journey that is not a booking — the three shapes
+     the page has to render without pretending they are the same. */
+  const kind = req.query.kind || 'bookings';
+  const limit = Math.min(+req.query.limit || 100, 500);
+  const offset = Math.max(0, +req.query.offset || 0);
+  const term = String(req.query.q || '').toLowerCase();
+  const AREAS = ['Al Garhoud', 'Downtown Dubai', 'Dubai Marina', 'Business Bay', 'Deira'];
+  const all = [];
+  for (let i = 0; i < 640; i++) {
+    const booking = i % 7 !== 6;
+    const hotel = booking && i % 11 === 0;
+    all.push({
+      platform: hotel ? 'hotel' : booking ? 'uber' : 'fms',
+      fleet_id: i % 3 ? 'ecosine' : 'egari',
+      external_id: `t-${1000 + i}`,
+      requested_at: new Date(Date.now() - i * 37 * 60000).toISOString(),
+      ended_at: new Date(Date.now() - i * 37 * 60000 + 19 * 60000).toISOString(),
+      local_day: dayISO(Math.floor(i / 30)).slice(0, 10),
+      driver_name: ['Ahmed Tariq', 'Nora Said', 'Roy Ocdol', 'Khalid Gul'][i % 4],
+      driver_ext_id: `drv-${i % 4}`,
+      plate: `L${36000 + (i % 9)}`,
+      pickup_addr: `Shop ${i} - ${AREAS[i % 5]} - Dubai - UAE`,
+      dropoff_addr: `Villa ${i} - ${AREAS[(i + 2) % 5]} - Dubai - UAE`,
+      distance_km: Math.round((4 + (i % 23)) * 10) / 10,
+      duration_s: 900 + (i % 40) * 30,
+      status: booking ? (i % 9 === 4 ? 'rider_cancelled' : 'completed') : 'completed',
+      outcome: booking && i % 9 === 4 ? 'not_completed' : 'completed',
+      product: hotel ? 'pick_and_drop' : 'UberX',
+      payment_type: hotel ? 'on_account' : 'card',
+      price: hotel ? 60 + (i % 90) : null,
+      currency: 'AED',
+      has_fare: hotel,
+      is_booking: booking,
+    });
+  }
+  let rows = all.filter((x) => (kind === 'telematics' ? !x.is_booking
+    : kind === 'all' ? true : x.is_booking));
+  if (req.query.outcome) rows = rows.filter((x) => x.outcome === req.query.outcome);
+  if (term) {
+    rows = rows.filter((x) => [x.plate, x.driver_name, x.pickup_addr, x.dropoff_addr, x.external_id]
+      .some((v) => String(v).toLowerCase().includes(term)));
+  }
+  const page = rows.slice(offset, offset + limit);
+  r.json({
+    rows: page, total: rows.length, shown: page.length, offset, limit,
+    truncated: offset + page.length < rows.length,
+    window: { from: dayISO(30).slice(0, 10), to: dayISO(0).slice(0, 10) },
+    priced: page.filter((x) => x.has_fare).length,
+    note: 'One row per booking. A price appears only where the channel publishes one — the Uber '
+      + 'trip export carries no fare column at all.',
+  });
+});
+
 app.get('/api/trips/hourly', (_, r) => r.json(
   Array.from({ length: 24 }, (_, h) => ({
     h, trips: Math.round(20 + 60 * Math.exp(-((h - 19) ** 2) / 18) + 25 * Math.exp(-((h - 8) ** 2) / 8)),
