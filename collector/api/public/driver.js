@@ -1640,6 +1640,44 @@ export async function renderDriverDirectory(root) {
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
         : '<span class="ent-off" title="Uber publishes no fare per trip, and Uber is most of this fleet’s work — the money is in Paid">—</span>') },
+    /* The one money column that answers for everybody, and the reason the two
+       beside it are not enough on their own.
+       ─────────────────────────────────────────────────────────────────────
+       Measured on the live roster: of 119 active drivers, 44 have a fare and
+       96 have a payout. Between them nobody is missing — and they are not the
+       same 44 and 96, and a fare and a payout are not the same quantity. So a
+       reader sorting this table by money was comparing what a rider paid for
+       one person against what the platform paid us for the next.
+
+       driver_day.money is the resolution this fleet already makes everywhere
+       else: per platform, the statement's net where a channel filed one and
+       its fares where it did not. The tag says which, and whether the figure
+       is a measurement or a share of a longer statement — Uber files this
+       fleet weekly, so most of it is a week divided across its days, right at
+       the week and allocated at the day. */
+    { label: 'Money', key: 'money', num: true,
+      absent: 'no channel reported either a statement or a fare for anybody in this window',
+      render: (r) => {
+        if (r.money == null) {
+          return r.trips
+            ? '<span class="ent-off" title="this person drove in this window and no channel has reported money for it \u2014 see Reconciliation">\u2014</span>'
+            : '<span class="ent-off" title="no trips in this window">\u2014</span>';
+        }
+        const n = r.money_period_days;
+        const tag = n == null ? 'grain?' : n > 1 ? `1/${n}` : (r.money_source || 'day');
+        const why = n == null
+          ? 'part of this comes from a statement that does not record the period it covered'
+          : n > 1
+            ? `mostly ${n}-day statements divided across their days \u2014 right for the period, `
+              + 'not measured on any one day inside it'
+            : r.money_source === 'fares'
+              ? 'the channels priced these bookings'
+              : r.money_source === 'mixed'
+                ? 'one channel filed statements and another reported only fares'
+                : 'filed per day by the channel';
+        return money(r.money)
+          + `<span class="dim" title="${esc(why)}"> \u00b7 ${esc(tag)}</span>`;
+      } },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
     /* Measured on the live fleet: rating is null for all 360 people, because
        nothing in the collector writes it — Uber's roster endpoint returns

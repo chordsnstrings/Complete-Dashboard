@@ -564,6 +564,15 @@ app.get('/api/drivers/directory', (_, r) => r.json([
        three distinct empty states are all reachable from the mock. */
     payout: i === 1 || i === 4 ? null : 11800 - i * 700,
     payout_days: i === 1 || i === 4 ? 0 : Math.max(1, 26 - i),
+    /* The one column that answers for everybody: the statement's net where a
+       channel filed one and its fares where it did not, resolved per platform.
+       Its grain travels with it — most of this fleet's money is a weekly Uber
+       statement divided across seven days, so a fixture where every row looked
+       measured would let a page stating an allocation as a fact still pass. */
+    money: i === 7 ? null : 12400 - i * 780,
+    money_days: i === 7 ? 0 : Math.max(1, 26 - i),
+    money_period_days: i % 5 === 0 ? 1 : i === 6 ? null : 7,
+    money_source: i % 5 === 0 ? 'fares' : i === 2 ? 'mixed' : 'statement',
     last_trip: new Date(Date.now() - i * 36e5).toISOString(),
     last_ever: new Date(Date.now() - i * 36e5).toISOString(), lifetime_trips: 900 - i * 60,
     first_trip: dayISO(DAYS), completion_pct: 97 - i, platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],

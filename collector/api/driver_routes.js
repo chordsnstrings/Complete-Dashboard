@@ -390,6 +390,39 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
             AND ($3::text IS NULL OR platform = $3)
             AND ($4::text IS NULL OR fleet_id = $4)
           GROUP BY 1
+       ),
+       /* One money column that answers for everybody.
+          ─────────────────────────────────────────────────────────────────────
+          The two columns beside it each answer for about half the roster and
+          for different halves: revenue is the fares on the trips, which 44 of
+          119 active drivers have, because Uber's export carries no fare at all;
+          payout is what the platform paid, which 96 have. Between them nobody
+          is missing — and a reader ranking drivers is reading one column for
+          one person and a different, incomparable one for the next.
+
+          driver_day.money is the resolution this fleet already made: per
+          platform, the statement's net where a channel filed one and its fares
+          where it did not, then summed (src/rollup.js). money_period_days
+          travels with it because most of it is a weekly statement divided
+          across its days, and the coarsest window on a person's days is what
+          limits what can be said about their total.
+
+          Keyed on the account and summed: the money lands on ONE account per
+          person-day by design (the owner CTE in src/rollup.js), so a person
+          holding two accounts is added, not doubled. */
+       dmoney AS (
+         SELECT driver_ext_id,
+                round(sum(money)::numeric, 0) AS money,
+                count(*) FILTER (WHERE money IS NOT NULL)::int AS money_days,
+                CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
+                     ELSE max(money_period_days) END AS money_period_days,
+                CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
+                     THEN 'mixed'
+                     ELSE max(money_source) FILTER (WHERE money_source <> 'none') END AS money_source
+           FROM driver_day
+          WHERE day BETWEEN $1::date AND $2::date
+            AND ($4::text IS NULL OR fleet_id = $4)
+          GROUP BY 1
        )
        /* The lifetime figures come from the CTE at the top of this statement:
           the last trip EVER, so "has not driven in this window" and "has never
@@ -402,6 +435,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               coalesce(w.bookable, 0) AS bookable, coalesce(w.days, 0) AS days,
               w.km, w.revenue, coalesce(w.priced_trips, 0) AS priced_trips,
               pay.payout, coalesce(pay.payout_days, 0) AS payout_days,
+              dm.money, coalesce(dm.money_days, 0) AS money_days,
+              dm.money_period_days, dm.money_source,
               w.last_trip, w.first_trip,
               /* Window first, whole history second. The window answer is the
                  one that describes THIS range; the lifetime answer exists so
@@ -439,6 +474,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        FROM who
        LEFT JOIN work w ON w.driver_ext_id = who.driver_ext_id
        LEFT JOIN pay ON pay.driver_ext_id = who.driver_ext_id
+       LEFT JOIN dmoney dm ON dm.driver_ext_id = who.driver_ext_id
        LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
@@ -474,6 +510,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       const cur = byName.get(k);
       if (!cur) {
         byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],
+          /* An unknown window on the SEEDING row counts the same as on any
+             other: money_period_days is null both when nothing reported money
+             and when what reported it could not say over what period, and only
+             the second makes the person's total unstatable. */
+          _grainUnknown: r.money != null && r.money_period_days == null,
           _days: new Set() });
         continue;
       }
@@ -488,6 +529,21 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          separate statements for the same human, and both reached the fleet. */
       if (r.payout != null) cur.payout = +(cur.payout || 0) + +r.payout;
       cur.payout_days = Math.max(cur.payout_days || 0, r.payout_days || 0);
+      /* Summed across the person's accounts, like the payout beside it — the
+         money is on one account per person-day by construction, so this adds
+         rather than doubles. The GRAIN takes the coarsest of the accounts, and
+         an account that cannot state its window makes the person's total
+         unstated too: a figure that is partly a measurement and partly a share
+         of a week is not a measurement. */
+      if (r.money != null) cur.money = +(cur.money || 0) + +r.money;
+      cur.money_days = (cur.money_days || 0) + (r.money_days || 0);
+      if (r.money_period_days == null && r.money != null) cur._grainUnknown = true;
+      else if (r.money_period_days != null) {
+        cur.money_period_days = Math.max(cur.money_period_days || 0, r.money_period_days);
+      }
+      if (r.money_source && r.money_source !== cur.money_source) {
+        cur.money_source = cur.money_source ? 'mixed' : r.money_source;
+      }
       cur.platforms = [...new Set([...cur.platforms, ...(r.platforms || [])])];
       if ((r.driver_name || '').length > (cur.driver_name || '').length) cur.driver_name = r.driver_name;
       if (r.last_trip > cur.last_trip) cur.last_trip = r.last_trip;
@@ -532,7 +588,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     }
 
     res.json([...byName.values()].map((p) => {
-      delete p._days; delete p._multiAccountDays;
+      /* One unstatable account makes the person's grain unstatable. Resolved
+         here rather than in the fold so the flag cannot survive into the
+         payload as a private field somebody starts reading. */
+      if (p._grainUnknown) p.money_period_days = null;
+      delete p._days; delete p._multiAccountDays; delete p._grainUnknown;
       return {
         ...p,
         // Computed once, over the whole person.

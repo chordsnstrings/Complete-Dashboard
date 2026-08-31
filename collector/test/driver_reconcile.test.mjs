@@ -250,6 +250,26 @@ await trip('t-odo', '2026-08-02T21:00:00+04:00', '2026-08-02T21:10:00+04:00', { 
 }
 
 
+console.log('\none money column the whole roster can be ranked by');
+
+/* The two money columns beside it each answer for about half the roster, and
+   not the same half: on production, 44 of 119 active drivers have a fare and
+   96 have a payout. A reader sorting by money was comparing what a rider paid
+   for one person against what the platform paid us for the next. */
+{
+  const dir = await get(`/api/drivers/directory?${W}`);
+  const me = dir.find((r) => (r.ids || []).includes(ID) || r.driver_ext_id === ID);
+  check('the roster carries a money figure for a driver with no fare at all',
+    me && me.revenue == null && me.money > 0, JSON.stringify(me && { revenue: me.revenue, money: me.money }));
+  check('…and states the coarsest window behind it, not the finest',
+    me?.money_period_days === 7,
+    'one day here is a seventh of a week and one was filed daily; the week is what limits the claim');
+  const withMoney = dir.filter((r) => r.money != null);
+  const withFare = dir.filter((r) => r.revenue != null);
+  check('…so it answers for at least as many people as the fares column',
+    withMoney.length >= withFare.length, `${withMoney.length} vs ${withFare.length}`);
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
