@@ -38,7 +38,7 @@ export const ROUTES = [
   'corporate/leakage', 'corporate/leakage/complimentary',
   'corporate/approach', 'corporate/approach/daypart',
   'property/h-palm', 'property/h-palm/guests', 'property/h-palm/drivers',
-  'causes', 'forecast', 'trips', 'retention', 'playbook', 'capacity', 'optimise', 'revenue',
+  'causes', 'forecast', 'trips', 'provenance', 'retention', 'playbook', 'capacity', 'optimise', 'revenue',
   'reconcile', 'reconcile/2026-08',
   'insights', 'action/idle_vehicle/L45235', 'action/nope/-',
   'analyst', 'analyst/refuted', 'analyst/immaterial', 'analyst/unsupported', 'analyst/rules',

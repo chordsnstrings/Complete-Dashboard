@@ -310,14 +310,15 @@ console.log('\nrollup: it says how old it is');
 const state = await rollupState(db);
 /* The passes, by name: the three trip grains (day, week, month), the
    per-person month, the payout-day materialisation, the on-trip statement
-   derivation, the per-driver-day record and the driver lifetime.
+   derivation, the per-driver-day record, the driver lifetime, and the
+   provenance record of every figure a provider sent.
 
    Named rather than counted. A count catches a pass that stopped recording its
    state — which is the point, since nobody can tell such a pass has stopped
    running — but it also passes when one pass disappears and another is added
    in the same change, and it says nothing about WHICH one went missing. */
 const PASSES = ['driver_day', 'driver_lifetime', 'driver_payout_day', 'driver_statement_day',
-  'rollup_day', 'rollup_month', 'rollup_person_month', 'rollup_week'];
+  'money_event', 'rollup_day', 'rollup_month', 'rollup_person_month', 'rollup_week'];
 const seen = state.map((s) => s.name).sort();
 check('every rollup pass records a state row',
   JSON.stringify(seen) === JSON.stringify(PASSES), JSON.stringify(seen));

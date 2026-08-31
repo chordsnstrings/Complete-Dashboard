@@ -23,5 +23,5 @@ export const SCHEMA_FILES = [
   'schema_v30.sql', 'schema_v31.sql', 'schema_v32.sql', 'schema_v33.sql',
   'schema_v34.sql', 'schema_v35.sql', 'schema_v36.sql', 'schema_v37.sql',
   'schema_v38.sql', 'schema_v39.sql', 'schema_v40.sql',
-  'schema_v41.sql',
+  'schema_v41.sql', 'schema_v42.sql',
 ];

@@ -297,6 +297,137 @@ export async function refreshRollups(opts = {}) {
   return inFlight;
 }
 
+
+/* ── money_event: every provider figure, in one shape, keeping its source ──
+   Appended from the tables the collectors already write. This makes no API
+   call and invents no value — it is the same numbers, in one place, with the
+   call that produced each one still attached to it.
+
+   Which is the point. A fleet total meant knowing which of five tables to
+   trust for which channel over which window, and the answer lived in one
+   function that picks a winner per platform and discards the rest. That is
+   the right rule for a total and the wrong place for it to be the only
+   record: a figure nobody can trace back to the call that produced it is a
+   figure nobody can check.
+
+   Two rules hold this table honest:
+
+   DERIVED TABLES ARE NOT SOURCES. driver_statement_day and driver_payout_day
+   are computed FROM driver_earnings_component and driver_performance, so
+   appending them too would count the same money twice under two names. Only
+   the tables a collector writes directly are read here.
+
+   A PERIOD IS NOT A DAY. `day` is set only where the provider reported a
+   single day. A weekly statement lands as one row spanning seven days with a
+   NULL day, because it is one measurement of seven days and not seven
+   measurements. Spreading it is a modelling choice, and modelling choices
+   belong somewhere a reader can see them. */
+const MONEY_SOURCES = [
+  /* Every trip that carries a price. Uber's export has no price column at all,
+     so this is Yango, the hotel channel and Bolt — and the row keys on the
+     provider's own trip id, so a re-collection updates rather than doubles. */
+  { name: 'trip_price', sql: `
+    INSERT INTO money_event (source, platform, fleet_id, kind, category, driver_ext_id,
+      driver_name, plate, period_start, period_end, day, amount, currency, external_ref)
+    SELECT CASE platform WHEN 'yango' THEN 'yango_orders'
+                         WHEN 'hotel' THEN 'hotel_trip_report'
+                         WHEN 'bolt'  THEN 'bolt_order_history'
+                         ELSE platform || '_trips' END,
+           platform, fleet_id, 'fare', '', coalesce(driver_ext_id, ''),
+           driver_name, plate,
+           local_day, local_day, local_day,
+           price, coalesce(currency, 'AED'), external_id
+      FROM trip_norm
+     WHERE price IS NOT NULL AND is_booking AND local_day IS NOT NULL
+       AND has_fare` },
+
+  /* What the platform says it PAID, at the grain it said it — Uber's weekly
+     (and daily, where the breakdown serves one) netOutstanding, and Yango's
+     weekly driver summary. Nothing is spread: a weekly row keeps its week. */
+  { name: 'payout', sql: `
+    INSERT INTO money_event (source, platform, fleet_id, kind, category, driver_ext_id,
+      driver_name, plate, period_start, period_end, day, amount, currency, external_ref)
+    SELECT CASE platform WHEN 'uber' THEN 'uber_graphql_breakdown'
+                         WHEN 'yango' THEN 'yango_driver_summary'
+                         ELSE platform || '_performance' END,
+           platform, fleet_id, 'payout', 'net_outstanding', driver_ext_id,
+           driver_name, plate, period_start, period_end,
+           CASE WHEN period_start = period_end THEN period_start END,
+           earnings, coalesce(currency, 'AED'), ''
+      FROM driver_performance
+     WHERE earnings IS NOT NULL` },
+
+  /* The named lines inside a payout, in the provider's own words. Two APIs
+     write this table with two vocabularies — the GraphQL breakdown says
+     `your_earnings`, the OAuth REST endpoint says `net_fare` — and the source
+     column is what lets a reader tell which call a line came from. */
+  { name: 'component', sql: `
+    INSERT INTO money_event (source, platform, fleet_id, kind, category, driver_ext_id,
+      driver_name, plate, period_start, period_end, day, amount, currency, external_ref)
+    SELECT CASE WHEN c.platform = 'uber' AND c.category IN ('net_fare','reimbursements','expenses')
+                  THEN 'uber_rest_payments' ELSE c.platform || '_components' END,
+           c.platform, c.fleet_id, 'component', c.category, c.driver_ext_id,
+           c.driver_name, NULL, c.period_start, c.period_end,
+           CASE WHEN c.period_start = c.period_end THEN c.period_start END,
+           c.amount, coalesce(c.currency, 'AED'), coalesce(c.parent, '')
+      FROM driver_earnings_component c
+     WHERE c.amount IS NOT NULL` },
+
+  /* Yango's park ledger — commissions, penalties, top-ups. Real money moving
+     between the fleet and the platform, collected on every run since the
+     collector was written, and reaching no figure in the product. It is not a
+     fare and not a payout, so it is neither added to nor hidden from them: it
+     is its own kind, and the page that shows it says what it is. */
+  { name: 'ledger', sql: `
+    INSERT INTO money_event (source, platform, fleet_id, kind, category, driver_ext_id,
+      driver_name, plate, period_start, period_end, day, amount, currency, external_ref)
+    SELECT 'yango_park_ledger', platform, fleet_id, 'ledger', coalesce(category, ''),
+           coalesce(driver_ext_id, ''), driver_name, NULL,
+           (event_at AT TIME ZONE 'Asia/Dubai')::date,
+           (event_at AT TIME ZONE 'Asia/Dubai')::date,
+           (event_at AT TIME ZONE 'Asia/Dubai')::date,
+           amount, coalesce(currency, 'AED'), external_id
+      FROM ledger_entry
+     WHERE amount IS NOT NULL AND event_at IS NOT NULL` },
+
+  /* The operator's own statement import — the months the APIs no longer
+     serve. Uber's earnings endpoint keeps roughly the last six, so before
+     that date the imported ledger is the ONLY record there is. Every read in
+     the product filters it out (`source <> 'ledger'`), which is right for a
+     figure that must not double-count an API that also covers the day, and
+     wrong as a reason for the money to be invisible. Here it is a source like
+     any other, marked as what it is. */
+  { name: 'import', sql: `
+    INSERT INTO money_event (source, platform, fleet_id, kind, category, driver_ext_id,
+      driver_name, plate, period_start, period_end, day, amount, currency, external_ref)
+    SELECT 'statement_import', platform, fleet_id, 'statement', 'net',
+           coalesce(driver_ext_id, ''), driver_name, NULL, day, day, day,
+           net, coalesce(currency, 'AED'), name_key
+      FROM driver_statement_day
+     WHERE source = 'ledger' AND net IS NOT NULL` },
+];
+
+/* Rebuilt whole rather than merged. Every row is derived from a table this
+   pass has just refreshed, so a partial write would leave the two disagreeing
+   in a way no reader could see — and the table is small enough that whole is
+   also the simplest thing that is correct. */
+async function refreshMoneyEvents(db) {
+  await db.query('DELETE FROM money_event');
+  let n = 0;
+  for (const s of MONEY_SOURCES) {
+    try {
+      const r = await db.query(s.sql);
+      n += r.rowCount || 0;
+    } catch (e) {
+      /* One provider's table missing or malformed must not cost the other
+         four their rows: this is a provenance record, and a partial one that
+         says which part is missing beats none. */
+      log.warn(SRC, `money_event ${s.name} failed`, { err: String(e).slice(0, 160) });
+    }
+  }
+  return n;
+}
+
 async function refreshRollupsInner({ db = pool, days = null } = {}) {
   const t0 = Date.now();
   const since = days
@@ -330,6 +461,11 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
   out.push(await runOne(db, 'driver_statement_day', () => refreshStatements(db)));
   out.push(await runOne(db, 'driver_day', () => refreshDriverDays(db, { since })));
   out.push(await runOne(db, 'driver_lifetime', () => refreshLifetime(db)));
+  /* Last, and deliberately: it reads the collector-written tables, not the
+     rollups, so it does not depend on this order — but running it here means
+     a pass that fails halfway leaves the provenance record describing the
+     same collection the totals above describe. */
+  out.push(await runOne(db, 'money_event', () => refreshMoneyEvents(db)));
   /* Refresh the planner's statistics on the tables this just rewrote, and on
      trip itself. A generated column arrives with NO statistics — Postgres has
      never seen its distribution — so every plan touching person_key was being

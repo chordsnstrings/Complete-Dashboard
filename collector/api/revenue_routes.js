@@ -34,6 +34,76 @@ import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
 
 export function revenueRoutes(app, { q, wrap, range }) {
+  /* ── where every figure came from ──────────────────────────────────────
+     One row per API surface, per channel, per kind of money — what that call
+     actually returned for this window, at the grain it returned it, and
+     whether the headline uses it.
+
+     This page exists because the headline is a CHOICE. api/income_sql.js picks
+     one figure per channel — a fare total or a payout total, never both, since
+     a payout is what is left of those same fares after commission — and
+     discards the loser. That is the right rule and it was invisible: a reader
+     had no way to see that Yango's AED 5,612 payout was excluded because its
+     fares won, or that a channel showing nothing was a credential rather than
+     a quiet week.
+
+     Nothing here is derived, allocated or spread. Every row is a sum of
+     amounts the provider itself sent, over rows that carry the call that sent
+     them; `reported_days` counts the rows the provider reported as a single
+     day, and `period_rows` counts the ones it reported as a span. A weekly
+     statement shows as one period row, never as seven daily ones. */
+  app.get('/api/money/sources', wrap(async (req, res) => {
+    const p = range(req);
+    /* Overlap, not containment: a weekly statement covering the window's first
+       day is money that touches this window, and dropping it because its
+       period starts earlier would understate every window that is not a whole
+       number of the provider's own periods. `overlap_days` says how much of
+       the row's period the window actually covers, so a reader can see that a
+       week counted here is a week that only half belongs to them. */
+    const rows = await q(
+      `SELECT source, platform, fleet_id, kind,
+              count(*)::int rows_seen,
+              count(*) FILTER (WHERE day IS NOT NULL)::int reported_days,
+              count(*) FILTER (WHERE day IS NULL)::int period_rows,
+              count(DISTINCT category) FILTER (WHERE category <> '')::int categories,
+              round(sum(amount)::numeric, 2) AS amount,
+              min(period_start) AS first_period, max(period_end) AS last_period,
+              min(least(period_end, $2::date) - greatest(period_start, $1::date) + 1)::int AS min_overlap_days,
+              max(period_end - period_start + 1)::int AS max_period_days,
+              count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id <> '')::int drivers,
+              max(ingested_at) AS last_seen
+         FROM money_event
+        WHERE period_start <= $2::date AND period_end >= $1::date
+          AND ($3::text IS NULL OR platform = $3)
+          AND ($4::text IS NULL OR fleet_id = $4)
+        GROUP BY source, platform, fleet_id, kind
+        ORDER BY sum(amount) DESC NULLS LAST`, p);
+
+    /* And the categories inside the components, because "AED 406,893 of Uber
+       payout" is not an answer to what the fleet was paid FOR. These are the
+       provider's own words, unrenamed. */
+    const categories = await q(
+      `SELECT source, platform, category, count(*)::int rows_seen,
+              round(sum(amount)::numeric, 2) AS amount
+         FROM money_event
+        WHERE period_start <= $2::date AND period_end >= $1::date
+          AND kind IN ('component', 'ledger') AND category <> ''
+          AND ($3::text IS NULL OR platform = $3)
+          AND ($4::text IS NULL OR fleet_id = $4)
+        GROUP BY source, platform, category
+        ORDER BY sum(abs(amount)) DESC NULLS LAST
+        LIMIT 60`, p);
+
+    res.json({
+      window: { from: p[0], to: p[1] },
+      rows,
+      categories,
+      note: 'Every row is a sum of amounts a provider sent, grouped by the API call that '
+        + 'sent them. Nothing here is allocated, spread or estimated: a weekly statement '
+        + 'appears as one period row covering seven days, not as seven daily figures.',
+    });
+  }));
+
   app.get('/api/revenue', wrap(async (req, res) => {
     const p = range(req);
     const [from, to] = p;

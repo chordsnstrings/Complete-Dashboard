@@ -19,6 +19,7 @@ import { renderCohort } from './cohort.js';
 import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
 import { renderTrips } from './trips.js';
+import { renderProvenance } from './provenance.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
 import { renderTrip } from './trip.js';
 import { renderSettlement, SETTLE_TABS } from './settlement.js';
@@ -264,6 +265,8 @@ function componentTree(components) {
 const VIEWS = [
   { id: 'unit', label: 'Unit economics', ic: '◆', grp: 'Money', sub: 'What every vehicle and every driver earned per day worked, per km and per booking — and which of them earned nothing' },
   { id: 'revenue', label: 'Revenue by channel', ic: '◇', grp: 'Money', sub: 'What each platform actually tells us about money — and which ones tell us nothing' },
+  { id: 'provenance', label: 'Where the money came from', ic: '⑆', grp: 'Money',
+    sub: 'Every API call that returned money, what it returned, and whether the headline uses it' },
   { id: 'reconcile', label: 'Reconciliation', ic: '⇌', grp: 'Money', sub: 'Every month on record: what the platforms wired against what their own statements say they owed' },
   { id: 'finance', label: 'Finance', ic: '◈', grp: 'Money', sub: 'Revenue, payment mix and the transaction ledger' },
   { id: 'settlement', label: 'Settlement', ic: '◫', grp: 'Money', sub: 'Who settles the fare and when — cash in hand, and what is outstanding' },
@@ -1392,6 +1395,7 @@ V.retention = async (root) => renderRetention(root);
 V.optimise = async (root) => renderOptimise(root);
 V.capacity = async (root) => renderCapacity(root);
 V.trips = async (root) => renderTrips(root);
+V.provenance = async (root) => renderProvenance(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */
 V.unit = async (root) => renderEconomics(root);
 V['top-performers'] = async (root) => renderPerformers(root, 'top');

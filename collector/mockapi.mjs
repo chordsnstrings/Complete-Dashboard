@@ -473,6 +473,55 @@ app.get('/api/compare', (req, r) => {
   });
 });
 
+/* The provenance record: one row per API surface, per channel, per kind.
+   Deliberately shaped like production — a channel whose fares win and whose
+   payout is therefore held out, a weekly payout beside a daily one, the park
+   ledger nothing has ever counted, and an operator import. */
+app.get('/api/money/sources', (_, r) => r.json({
+  window: { from: dayISO(DAYS), to: dayISO(0) },
+  rows: [
+    { source: 'uber_graphql_breakdown', platform: 'uber', fleet_id: 'ecosine', kind: 'payout',
+      rows_seen: 412, reported_days: 96, period_rows: 316, categories: 0, amount: 196178,
+      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 7,
+      drivers: 88, last_seen: new Date().toISOString() },
+    { source: 'hotel_trip_report', platform: 'hotel', fleet_id: 'egari', kind: 'fare',
+      rows_seen: 867, reported_days: 867, period_rows: 0, categories: 0, amount: 39892,
+      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 1,
+      drivers: 21, last_seen: new Date().toISOString() },
+    { source: 'yango_orders', platform: 'yango', fleet_id: 'ecosine', kind: 'fare',
+      rows_seen: 19, reported_days: 19, period_rows: 0, categories: 0, amount: 1296,
+      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 1,
+      drivers: 4, last_seen: new Date().toISOString() },
+    { source: 'yango_driver_summary', platform: 'yango', fleet_id: 'ecosine', kind: 'payout',
+      rows_seen: 6, reported_days: 0, period_rows: 6, categories: 0, amount: 5612,
+      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 2, max_period_days: 7,
+      drivers: 4, last_seen: new Date().toISOString() },
+    { source: 'uber_rest_payments', platform: 'uber', fleet_id: 'ecosine', kind: 'component',
+      rows_seen: 1204, reported_days: 0, period_rows: 1204, categories: 6, amount: 188422,
+      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 7,
+      drivers: 88, last_seen: new Date().toISOString() },
+    { source: 'yango_park_ledger', platform: 'yango', fleet_id: 'ecosine', kind: 'ledger',
+      rows_seen: 143, reported_days: 143, period_rows: 0, categories: 4, amount: -2260,
+      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 1,
+      drivers: 4, last_seen: new Date().toISOString() },
+    { source: 'statement_import', platform: 'uber', fleet_id: 'ecosine', kind: 'statement',
+      rows_seen: 58, reported_days: 58, period_rows: 0, categories: 0, amount: 41207,
+      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 1,
+      drivers: 31, last_seen: new Date().toISOString() },
+  ],
+  categories: [
+    { source: 'uber_rest_payments', platform: 'uber', category: 'net_fare', rows_seen: 402, amount: 171204 },
+    { source: 'uber_rest_payments', platform: 'uber', category: 'tip', rows_seen: 288, amount: 3958 },
+    { source: 'uber_rest_payments', platform: 'uber', category: 'toll', rows_seen: 396, amount: 11290 },
+    { source: 'uber_rest_payments', platform: 'uber', category: 'cash_collected', rows_seen: 118, amount: 1970 },
+    { source: 'yango_park_ledger', platform: 'yango', category: 'commission', rows_seen: 96, amount: -3110 },
+    { source: 'yango_park_ledger', platform: 'yango', category: 'top_up', rows_seen: 47, amount: 850 },
+  ],
+  note: 'Every row is a sum of amounts a provider sent, grouped by the API call that sent them. '
+    + 'Nothing here is allocated, spread or estimated: a weekly statement appears as one period '
+    + 'row covering seven days, not as seven daily figures.',
+}));
+
 app.get('/api/drivers/directory', (_, r) => r.json([
   ...drivers.map((name, i) => ({
     driver_ext_id: `drv-${i}`, ids: [`drv-${i}`], driver_name: name,
