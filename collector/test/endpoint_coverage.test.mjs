@@ -46,6 +46,9 @@ const EXEMPT = {
   '/api/probe/uber/report-types': 'operator tool: asks the provider which reports this org can generate',
   '/api/probe/uber/report-columns': 'operator tool: reports one provider report’s column shape',
   '/api/probe/uber/rest': 'operator tool: reports the shape of the provider REST surfaces',
+  '/api/probe/uber/driver': 'operator tool: asks Uber for one driver’s profile, to settle whether the '
+    + 'provider publishes a rating at all. The roster has shown a column of dashes under a sentence '
+    + 'saying no channel reports one; GetDriver returns recognitionRating and nothing here had asked',
   '/api/probe/uber/window': 'operator tool: asks the provider what it still holds for one window, '
     + 'to settle whether a gap in our history is recoverable or gone',
   '/api/probe/fms/window': 'operator tool: the same question of FMS, whose history has a 152-day hole. '

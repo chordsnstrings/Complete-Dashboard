@@ -19,6 +19,7 @@
 
 import { config } from '../src/config.js';
 import { http, qs } from '../src/http.js';
+import { pool } from '../src/db.js';
 import { uberOAuthToken, uberWebHeaders } from '../src/auth/uber.js';
 import { probeEarnerWindow } from '../src/sources/uber.js';
 import { loadSettings } from '../src/settings.js';
@@ -148,6 +149,84 @@ export function probeRoutes(app, { wrap }) {
         const vals = new Set(cells.map((c) => (c[i] || '').replace(/^"|"$/g, '')).filter(Boolean));
         return { column: h, distinct_seen: vals.size, values: vals.size <= 12 ? [...vals] : null };
       }),
+    });
+  }));
+
+  /* Does Uber report a driver rating? It does, and nothing here asked.
+     ──────────────────────────────────────────────────────────────────────
+     The roster page has carried a Rating column of dashes for every driver
+     since it was built, under a sentence saying nothing reaching this fleet
+     reports one. That sentence was written from the surfaces the collector
+     happens to call: the roster endpoint returns onboarding status and a
+     vehicle, and the earnings breakdown returns trips, distance and money.
+
+     The supplier portal has a third surface neither of those is on. GetDriver
+     returns driver.member.user.driverInfo.recognitionRating alongside
+     completedTripsCount and isBanned — one driver per call, by uuid. It was
+     captured from the portal with a working session months ago and sat
+     unread in the reconnaissance folder.
+
+     Probed rather than asserted, because "the capture shows a field" and "the
+     field has a value for our drivers" are different claims and only the
+     second is worth changing a page for. `driver` takes a uuid so a caller
+     can check a specific person; without one it asks about the first driver
+     the roster knows, which is enough to answer whether the surface works. */
+  app.get('/api/probe/uber/driver', wrap(async (req, res) => {
+    await loadSettings();
+    const org = uberOrg();
+    let uuid = String(req.query.uuid || '').trim();
+    if (!uuid) {
+      const { rows } = await pool.query(
+        `SELECT driver_ext_id FROM driver_platform_state
+          WHERE platform = 'uber' AND coalesce(btrim(driver_ext_id), '') <> ''
+          ORDER BY updated_at DESC NULLS LAST LIMIT 1`);
+      uuid = rows[0]?.driver_ext_id || '';
+    }
+    if (!uuid) return res.json({ error: 'no uber driver uuid to ask about' });
+
+    const query = `query GetDriver($orgUUID: ID!, $driverUUID: ID!) {
+      getDriver(orgUUID: $orgUUID, driverUUID: $driverUUID) {
+        orgUUID
+        driver {
+          uuid
+          member { user {
+            uuid
+            driverInfo { completedTripsCount recognitionRating }
+            isBanned
+          } }
+          associatedVehicles { uuid licensePlate make model year }
+          complianceInfo { status }
+        }
+      }
+    }`;
+    const { data } = await http('https://supplier.uber.com/graphql', {
+      method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(org),
+      body: JSON.stringify({ operationName: 'GetDriver',
+        variables: { orgUUID: org.orgUuid, driverUUID: uuid }, query }),
+    });
+    if (data?.errors?.length) {
+      return res.json({ error: String(data.errors[0]?.message || data.errors[0]).slice(0, 300) });
+    }
+    const d = data?.data?.getDriver?.driver;
+    if (!d) return res.json({ error: 'no driver in the response', keys: Object.keys(data || {}) });
+    const info = d.member?.user?.driverInfo || {};
+    /* Shape and the rating itself. A rating is a number about a person, not
+       personal data in the sense this module guards against — and the whole
+       question is whether it has a value, which a shape summary cannot say. */
+    res.json({
+      fleet: org.fleet, driver_uuid_asked: uuid,
+      recognitionRating: info.recognitionRating ?? null,
+      completedTripsCount: info.completedTripsCount ?? null,
+      isBanned: d.member?.user?.isBanned ?? null,
+      compliance_status: d.complianceInfo?.status ?? null,
+      vehicles: (d.associatedVehicles || []).length,
+      /* So a reader can see what else this surface carries without another
+         round trip. */
+      fields_present: {
+        driverInfo: Object.keys(info),
+        driver: Object.keys(d),
+        vehicle: Object.keys((d.associatedVehicles || [])[0] || {}),
+      },
     });
   }));
 
