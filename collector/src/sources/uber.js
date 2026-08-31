@@ -98,7 +98,7 @@ function csvToTrips(csv) {
 // Pull historical trips one month at a time. Sequential is necessary but not
 // sufficient: a report abandoned mid-generation keeps its slot, so pacing and a
 // realistic poll budget are what actually keep us under the three-report cap.
-async function pullTrips(from, to, onStep) {
+async function pullTrips(from, to, onStep, checkpoint = null) {
   let total = 0;
   const windows = [...dateChunks(from, to, config.uber.reportRangeDays)];
   // Newest first. A backfill that starts twelve months ago spends its first
@@ -111,6 +111,15 @@ async function pullTrips(from, to, onStep) {
   let consecutiveFailures = 0;
   for (const [s, e] of windows) {
     const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
+    /* Already collected by this job, on an attempt the worker did not survive.
+       A monthly Uber report costs minutes at the provider, so redoing six of
+       them is the difference between a backfill that finishes across restarts
+       and one that dies at the same place every time. */
+    if (checkpoint?.has(`trips ${iso(s)}..${iso(e)}`)) {
+      chunk.skipped = true;
+      chunks.push(chunk);
+      continue;
+    }
     /* A monthly Uber report takes minutes and a year is twelve of them, so a
        whole backfill can spend hours inside this one loop. Reporting only when
        the SOURCE finishes makes a working run indistinguishable from a wedged
@@ -144,6 +153,13 @@ async function pullTrips(from, to, onStep) {
       if (!expected) consecutiveFailures++;
     }
     chunks.push(chunk);
+    /* Marked after the rows are written and only when the window did not fail:
+       a window recorded as done because it errored is a hole this job would
+       then skip for ever. An expected refusal — a date past Uber's retention —
+       IS done, because asking again can only be refused again. */
+    if (!chunk.error || chunk.expected) {
+      await checkpoint?.mark(`trips ${iso(s)}..${iso(e)}`, chunk.rows);
+    }
     // Pause between chunks so the previous report's slot is released before the
     // next GenerateReport, rather than racing the three-in-flight cap.
     await sleep(consecutiveFailures ? 20000 : 4000);
@@ -322,7 +338,7 @@ const EARNER_BATCH = 10;
    never be re-fetched. */
 const EARNER_DAY_HORIZON = 200;
 
-async function pullEarnerBreakdowns(from, to, onStep) {
+async function pullEarnerBreakdowns(from, to, onStep, checkpoint = null) {
   let total = 0;
   const chunks = [];
   const drivers = await uberDriverIds();
@@ -451,6 +467,12 @@ async function pullEarnerBreakdowns(from, to, onStep) {
   };
 
   for (const { start: s, end: e, until, ps, pe, daily: isDay } of windows) {
+    /* Already collected by this job. The earnings grid is fifty-three weekly
+       windows plus two hundred daily ones — around eight hundred provider
+       calls — so redoing it after every restart is most of why a backfill
+       never reached the sources behind it. */
+    const unit = `earnings ${isDay ? ps : `${ps}..${pe}`}`;
+    if (checkpoint?.has(unit)) { done += 1; continue; }
     let got = 0, err = null, seen = 0;
 
     /* A day is asked for in page mode, a week in driver-list mode.
@@ -547,6 +569,10 @@ async function pullEarnerBreakdowns(from, to, onStep) {
        time — so a watcher could not tell this phase from a wedged one. That is
        the exact condition onStep was added for. */
     done += 1;
+    /* Marked only where the window answered. A window that errored is a hole,
+       and recording it as finished would make every later attempt skip the one
+       thing that needs retrying. */
+    if (!err) await checkpoint?.mark(unit, got);
     onStep?.({ window: isDay ? ps : `${ps}..${pe}`, index: done - 1, of: windows.length,
       rows_so_far: total, phase: 'earnings' });
   }
@@ -669,7 +695,7 @@ async function pullLiveOrg(o) {
   return rows.length ? upsertMany('telemetry_snapshot', rows, ['source', 'plate', 'captured_at']) : 0;
 }
 
-export async function collect({ from, to, mode, onStep, fleet = null }) {
+export async function collect({ from, to, mode, onStep, fleet = null, checkpoint = null }) {
   /* One full pass per configured org, sequentially, each under its own run
      row — so the Sources page shows uber/ecosine and uber/egari separately
      and a dead cookie on one fleet reads as that fleet's failure, not as half
@@ -679,8 +705,15 @@ export async function collect({ from, to, mode, onStep, fleet = null }) {
   for (const o of uberOrgs(fleet)) {
     cur = o;
     try {
-      const trips = await pullTrips(from, to, onStep);
-      const perf = await pullEarnerBreakdowns(from, to, onStep);
+      /* The checkpoint is per ORG as well as per window: the two fleets walk
+         the same calendar, so a bare window name would let Egari's run be
+         skipped because Ecosine had already done that month. */
+      const ck = checkpoint && {
+        has: (u) => checkpoint.has(`${o.fleet}:${u}`),
+        mark: (u, n) => checkpoint.mark(`${o.fleet}:${u}`, n),
+      };
+      const trips = await pullTrips(from, to, onStep, ck);
+      const perf = await pullEarnerBreakdowns(from, to, onStep, ck);
       // Both sub-sources' windows, so a run that fetched every trip and no
       // earnings reads as partial rather than as ok.
       const chunks = [...trips.chunks, ...perf.chunks];

@@ -10,6 +10,7 @@ import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility } from './settings.js';
 import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick } from './run.js';
+import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
 
@@ -140,7 +141,10 @@ async function main() {
              with separate credentials on the same providers, and the reason to
              run one alone is that its credential was just replaced. The
              analyst and probe passes are fleet-agnostic and ignore it. */
-          if (job.mode === 'backfill') await backfill(progress, job.fleet || null);
+          /* The job's id, so a run interrupted by a restart resumes instead of
+             beginning again. A backfill is hours long and this worker restarts
+             on every deploy, so being interrupted is the normal case. */
+          if (job.mode === 'backfill') await backfill(progress, job.fleet || null, job.id);
           else if (job.mode === 'analyst') await analystPass();
           else if (job.mode === 'probe') await probePass();
           /* `timeline` runs the availability pull on demand. It has its own
@@ -151,9 +155,13 @@ async function main() {
              sweeps the whole roster rather than the drivers who drove. */
           else if (job.mode === 'timeline') await uberTimelineTick();
           else if (job.mode === 'timeline-roster') await uberTimelineTick({ roster: true, days: 30 });
-          else await incremental(progress, job.fleet || null);
+          else await incremental(progress, job.fleet || null, job.id);
           await pool.query(
             `UPDATE collector_job SET status='done', finished_at=now() WHERE id=$1`, [job.id]);
+          /* The job is over, so its memory of what it finished is no longer
+             about anything. Left behind it would be a row per window per
+             backfill, for ever. */
+          await clearCheckpoint(job.id);
           log.info('scheduler', `on-demand ${job.mode} finished`, { job: job.id });
         } catch (e) {
           // A job that failed must say so rather than sitting in 'running'
@@ -161,6 +169,10 @@ async function main() {
           await pool.query(
             `UPDATE collector_job SET status='failed', finished_at=now(), error=$2 WHERE id=$1`,
             [job.id, String(e).slice(0, 500)]);
+          /* A FAILED job keeps its checkpoints deliberately: the operator's
+             next move is usually to re-queue it, and the point of this table
+             is that the re-queue continues rather than starting over. They are
+             cleared when it finally finishes. */
           log.error('scheduler', `on-demand ${job.mode} failed`, { job: job.id, err: String(e) });
         } finally { jobRunning = false; }
       } catch (e) { log.error('scheduler', 'job poll', { err: String(e) }); jobRunning = false; }

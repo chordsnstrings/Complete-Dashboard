@@ -88,7 +88,7 @@ check('and each window records how many of the fleet actually answered',
    tell the phase from a wedged run, which is the exact condition onStep exists
    for. */
 check('the earnings phase reports its own progress, not only the trip phase',
-  /pullEarnerBreakdowns\(from, to, onStep\)/.test(uber) && /phase: 'earnings'/.test(uber));
+  /pullEarnerBreakdowns\(from, to, onStep\b/.test(uber) && /phase: 'earnings'/.test(uber));
 
 /* ── a default page size is not a fleet size ──────────────────────────────
    The driver roster was fetched once with no limit and no cursor, so it took
@@ -238,8 +238,8 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
   check('progress names what is still to come, so a truncated run is visible',
     /remaining: names\.slice/.test(run));
   check('backfill and incremental both accept the progress callback',
-    /export const backfill = \(onProgress(, fleet = null)?\)/.test(run)
-    && /export const incremental = \(onProgress(, fleet = null)?\)/.test(run));
+    /export const backfill = \(onProgress\b/.test(run)
+    && /export const incremental = \(onProgress\b/.test(run));
 
   const idx = (await import('node:fs')).readFileSync('src/index.js', 'utf8');
   check('the scheduler persists that progress against the job row',
@@ -272,7 +272,7 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
     /onStep\?\.\(\{ window:/.test((await import('node:fs')).readFileSync('src/sources/uber.js', 'utf8'))
     && /onStep\?\.\(\{ window:/.test((await import('node:fs')).readFileSync('src/sources/fms.js', 'utf8')));
   check('the runner passes a step callback down to every source',
-    /mod\.collect\(\{ from, to, mode, onStep(, fleet)? \}\)/.test(run));
+    /mod\.collect\(\{ from, to, mode, onStep\b[^}]*\}\)/.test(run));
   check('a completed window counts as progress for the requeue',
     /steps_at_last_attempt/.test(idx));
   check('the two progress measures are defined once, so they cannot disagree',
@@ -616,16 +616,16 @@ console.log('\nthe two fleets are collected separately, and fail separately');
 
   const run = readFileSync('src/run.js', 'utf8');
   check('the fleet reaches the sources through the run',
-    /collect\(\{ from, to, mode, onStep, fleet \}\)/.test(run));
+    /collect\(\{ from, to, mode, onStep, fleet\b[^}]*\}\)/.test(run));
   check('and every entry point can carry it',
-    /export const backfill = \(onProgress, fleet = null\)/.test(run)
-    && /export const incremental = \(onProgress, fleet = null\)/.test(run)
-    && /export const catchUp = \(days = 30, onProgress, fleet = null\)/.test(run));
+    /export const backfill = \(onProgress, fleet = null\b/.test(run)
+    && /export const incremental = \(onProgress, fleet = null\b/.test(run)
+    && /export const catchUp = \(days = 30, onProgress, fleet = null\b/.test(run));
 
   const idx = readFileSync('src/index.js', 'utf8');
   check('the worker claims the job\'s fleet and honours it',
     /RETURNING id, mode, fleet, attempts/.test(idx)
-    && /backfill\(progress, job\.fleet \|\| null\)/.test(idx));
+    && /backfill\(progress, job\.fleet \|\| null\b/.test(idx));
 
   const server = readFileSync('api/server.js', 'utf8');
   check('the trigger accepts a fleet from the operator',

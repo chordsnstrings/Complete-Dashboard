@@ -19,6 +19,7 @@ import { config, loadSettings } from './config.js';
 import { monthsAgo, daysAgo } from './util.js';
 import { setState, pool } from './db.js';
 import { log } from './log.js';
+import { loadCheckpoint, NO_CHECKPOINT } from './checkpoint.js';
 
 /* Order matters, and it took a live diagnosis to see why.
    ──────────────────────────────────────────────────────────────────────────
@@ -48,23 +49,40 @@ const HISTORICAL = { uber, uberFleet, yango, bolt, hotel, external, events, fms 
    A queued run waits rather than being dropped: skipping it silently is how a
    collection gap opens without anything saying so. */
 let inFlight = null;
-export async function runWindow(mode, from, to, onProgress, fleet = null) {
+export async function runWindow(mode, from, to, onProgress, fleet = null, jobId = null) {
   if (inFlight) {
     log.info('run', `${mode} waiting — another collection is in flight`);
     await inFlight.catch(() => {});
   }
   let release;
   inFlight = new Promise((r) => { release = r; });
-  try { return await runWindowInner(mode, from, to, onProgress, fleet); }
+  try { return await runWindowInner(mode, from, to, onProgress, fleet, jobId); }
   finally { release(); inFlight = null; }
 }
 
-async function runWindowInner(mode, from, to, onProgress, fleet = null) {
+async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = null) {
   await loadSettings(true);   // pick up Settings-page credential changes without a redeploy
   log.info('run', `${mode} ${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}`);
   const names = Object.keys(HISTORICAL);
+  /* What this job already finished, if it is a job that has run before.
+     ─────────────────────────────────────────────────────────────────────────
+     The worker restarts on every deploy and a backfill takes hours, so a run
+     being interrupted is the normal case rather than the exception. Until this
+     was read, every attempt began at the first source and the first window —
+     so the run died at the same elapsed point each time and the boot requeue,
+     comparing one attempt against the last, correctly concluded that it was
+     not advancing. Five attempts, window 7 of 12 every time, abandoned. */
+  const ckpt = jobId ? await loadCheckpoint(jobId) : NO_CHECKPOINT;
   let done = 0;
   for (const [name, mod] of Object.entries(HISTORICAL)) {
+    /* A source this job has already finished is skipped whole. `done` still
+       counts it, because it IS done — the number a reader sees is how much of
+       the run is behind it, not how much this attempt did. */
+    if (ckpt.has(name)) {
+      done++;
+      log.info('run', `${mode} ${name} already finished by this job — skipping`, { job: jobId });
+      continue;
+    }
     /* Say which source is in flight BEFORE running it. A four-hour step that
        reports only on completion is indistinguishable from a hung process, and
        that ambiguity is exactly what hid this bug: the job sat at 'running' for
@@ -77,19 +95,37 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null) {
        the same number across three restarts of a run that was landing tens of
        thousands of rows. Sources that do not walk windows simply ignore the
        extra key. */
-    let steps = 0;
+    /* `steps` counts the units this JOB has finished, across every attempt —
+       not the units this attempt walked past. The boot requeue abandons a job
+       whose steps did not grow, and a resumed run that skips six windows and
+       does two new ones would otherwise report 2 against the 7 it reported
+       last time, and read as a job going backwards. */
+    let steps = ckpt.count();
     const onStep = (st) => {
-      steps++;
+      steps = ckpt.count() + 1;
       return onProgress?.({ current: name, done, total: names.length,
         remaining: names.slice(done + 1), step: st, steps });
+    };
+    /* Handed to the source so it can skip a window it has already collected
+       and record one it has just finished. A source that walks no windows
+       ignores it, exactly as it ignores onStep. */
+    const checkpoint = {
+      has: (unit) => ckpt.has(name, unit),
+      mark: (unit, rows) => ckpt.mark(name, unit, rows),
     };
     /* `fleet` reaches the sources that serve more than one business — Uber is
        two separate Uber orgs with separate credentials — so a run can be
        narrowed to the fleet whose credential was just replaced instead of
        re-pulling both. A source that serves one fleet ignores the key. */
-    try { await mod.collect({ from, to, mode, onStep, fleet }); }
-    catch (e) { log.error('run', `${name} threw`, { err: String(e) }); }
+    let threw = false;
+    try { await mod.collect({ from, to, mode, onStep, fleet, checkpoint }); }
+    catch (e) { threw = true; log.error('run', `${name} threw`, { err: String(e) }); }
     done++;
+    /* Marked only when the source ran to completion. A source that threw may
+       have left windows uncollected, and recording it as finished would make
+       the next attempt skip the very thing that failed. Its individual windows
+       keep their own marks, so the retry still resumes rather than restarting. */
+    if (!threw) await ckpt.mark(name);
     log.info('run', `${mode} ${name} finished`, { done, of: names.length });
   }
   await onProgress?.({ current: null, done, total: names.length, remaining: [] });
@@ -173,10 +209,10 @@ export async function probePass() {
    alone is almost always the same: a credential was just replaced and the
    operator wants to know whether it works, without waiting out a full pass
    over the fleet that was already fine. */
-export const backfill = (onProgress, fleet = null) =>
-  runWindow('backfill', monthsAgo(config.backfillMonths), new Date(), onProgress, fleet);
-export const incremental = (onProgress, fleet = null) =>
-  runWindow('incremental', daysAgo(config.incrementalDays), new Date(), onProgress, fleet);
+export const backfill = (onProgress, fleet = null, jobId = null) =>
+  runWindow('backfill', monthsAgo(config.backfillMonths), new Date(), onProgress, fleet, jobId);
+export const incremental = (onProgress, fleet = null, jobId = null) =>
+  runWindow('incremental', daysAgo(config.incrementalDays), new Date(), onProgress, fleet, jobId);
 
 /* ── the catch-up ──────────────────────────────────────────────────────────
    The incremental window is three days and it runs every half hour. Nothing
@@ -197,8 +233,8 @@ export const incremental = (onProgress, fleet = null) =>
    Every write is an upsert keyed on the provider's own id, so re-collecting a
    day that is already correct changes nothing — which is what makes running
    this on a timer safe rather than merely convenient. */
-export const catchUp = (days = 30, onProgress, fleet = null) =>
-  runWindow('catchup', daysAgo(days), new Date(), onProgress, fleet);
+export const catchUp = (days = 30, onProgress, fleet = null, jobId = null) =>
+  runWindow('catchup', daysAgo(days), new Date(), onProgress, fleet, jobId);
 
 // CABMAN realtime GPS — fixed 5-minute refresh, persisted to telemetry_snapshot (via cabman.collect,
 // which upserts snapshots and writes a collection_run row). This is the owner of CABMAN data.
