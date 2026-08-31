@@ -65,6 +65,48 @@ check('and the sun columns are omitted rather than nulled when unknown',
   /if \(s\) \{ row\.sunrise = s\.sunrise; row\.sunset = s\.sunset; \}/.test(code),
   'upsertMany updates the columns it is given — writing null would erase a value already stored');
 
+console.log('\nthe window arrives as a Date, not a string');
+
+/* Caught in production, four hours after shipping. src/run.js:228-252 calls
+   runWindow with daysAgo(...) and new Date(), and hands both to every source
+   verbatim -- so collect() receives Date objects. This file read them as
+   strings, and every incremental run failed with "from.slice is not a
+   function", one minute past every half hour, while the page it feeds showed
+   nothing wrong: the collector records the error against the source and
+   carries on. Only /api/status said so.
+
+   Both shapes are real: the scheduler sends a Date, a CLI invocation or a test
+   sends a string. Accepting one and throwing on the other was never going to
+   hold, so the coercion is asserted here rather than assumed. */
+check('the range is coerced before it is sliced',
+  /const dayOf = \(v\) =>/.test(code) && /v instanceof Date \? dubaiDay\(v\)/.test(code),
+  'runWindow passes a Date; a bare .slice(0, 4) on it throws');
+check('...and a string window still passes through untouched',
+  /\/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\/\.test\(v\) \? v\.slice\(0, 10\)/.test(code));
+/* Asserted at the BOUNDARY, not by banning .slice everywhere: monthsBetween
+   legitimately slices, and it is legitimate precisely because pullCalendar
+   coerces before calling it. A rule that forbade the slice would forbid the
+   correct code along with the incorrect. */
+check('pullCalendar coerces its own arguments rather than trusting the caller',
+  /async function pullCalendar\(rawFrom, rawTo\)/.test(code)
+  && /const from = dayOf\(rawFrom\);/.test(code) && /const to = dayOf\(rawTo\);/.test(code),
+  'the coercion has to sit where the string is needed, or the next caller reintroduces the bug');
+check('...and refuses rather than throwing when it cannot get a day at all',
+  /if \(!from \|\| !to\) return 0;/.test(code));
+{
+  /* The behaviour itself, not just its shape: the same expression, run. */
+  const dubaiDay = (d = new Date()) => new Date(d.getTime() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+  const dayOf = (v) => (v == null ? null
+    : (v instanceof Date ? dubaiDay(v)
+      : (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10)
+        : dubaiDay(new Date(v)))));
+  check('21:00 UTC on the 31st is already the 1st in Dubai',
+    dayOf(new Date('2026-08-31T21:00:00Z')) === '2026-09-01');
+  check('a plain YYYY-MM-DD is returned as itself', dayOf('2026-07-01') === '2026-07-01');
+  check('and null stays null, so the caller falls back to its own default',
+    dayOf(null) === null);
+}
+
 console.log('\nwhat the page must NOT do with the columns nobody writes');
 
 const drv = readFileSync('api/public/driver.js', 'utf8');

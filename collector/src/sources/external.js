@@ -57,6 +57,25 @@ async function pullWeather() {
 const DUBAI_OFFSET_MS = 4 * 60 * 60 * 1000;
 const dubaiDay = (d = new Date()) => new Date(d.getTime() + DUBAI_OFFSET_MS).toISOString().slice(0, 10);
 
+/* The window, whatever shape the caller had it in.
+   ─────────────────────────────────────────────────────────────────────────
+   runWindow hands every source a DATE, not a string: src/run.js:228-252 calls
+   it with daysAgo(...)/monthsAgo(...) and new Date(), and passes both straight
+   through to collect(). This file read them as strings — from.slice(0, 4) —
+   and every incremental run after the range fill shipped failed with
+   "from.slice is not a function", one minute past every half hour, in silence:
+   the collector records the error against the source and carries on, so the
+   pages it feeds looked unchanged and only /api/status said anything.
+
+   Both shapes are real — a Date from the scheduler, a string from a CLI
+   invocation or a test — so this takes either rather than picking one and
+   throwing on the other. Placed at the boundary of the function that needs a
+   string, not at its call site, so a future caller cannot reintroduce it. */
+const dayOf = (v) => (v == null ? null
+  : v instanceof Date ? dubaiDay(v)
+    : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10)
+      : dubaiDay(new Date(v)));
+
 // Every YYYY-MM that the window touches, oldest first.
 function monthsBetween(from, to) {
   const out = [];
@@ -100,7 +119,10 @@ async function pullSun(from, to) {
   return out;
 }
 
-async function pullCalendar(from, to) {
+async function pullCalendar(rawFrom, rawTo) {
+  const from = dayOf(rawFrom);
+  const to = dayOf(rawTo);
+  if (!from || !to) return 0;
   const today = dubaiDay();
   // Nothing ahead of today: a Hijri date for a day that has not happened is
   // real, but a calendar row for it would join to trips that cannot exist.

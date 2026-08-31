@@ -154,5 +154,37 @@ check('the note says the flag is an address match, not a plug event',
 check('…and that the two are mixed together in those rows',
   /mixes waiting with refuelling/.test(d.note || ''), d.note);
 
+import { readFileSync } from 'node:fs';
+
+/* The guardrail the analyst prompt is supposed to carry.
+   ─────────────────────────────────────────────────────────────────────────
+   The paragraph in src/analyst.js's SYSTEM tells the model not to recommend
+   moving cars out of a charging area, because dwell time there mixes waiting
+   with refuelling and the data cannot separate them. It names the areas
+   through {CHARGING_SITES} — and config.chargingSites returns objects, so
+   joining them handed the model the literal "[object Object], [object
+   Object]". The rule has been shipping with no place in it.
+
+   It is load-bearing rather than cosmetic: a claim that those areas are
+   over-supplied would MEASURE as true, because the cars really are sitting
+   there. The one guard against a confirmed-and-wrong finding was blank. */
+{
+  const { config } = await import('../src/config.js');
+  const sites = config.chargingSites;
+  const rendered = sites.length
+    ? sites.map((x) => x.label).filter(Boolean).join(', ') : 'none recorded';
+  check('the charging sites reach the model as place names',
+    !/\[object Object\]/.test(rendered) && /Al Garhoud/.test(rendered), rendered);
+  const src = readFileSync('src/analyst.js', 'utf8');
+  check('…because the prompt substitutes the label, not the site object',
+    /sites\.map\(\(x\) => x\.label\)/.test(src),
+    'sites.join() on { label, names } objects is the bug this pins');
+  check('…and an operator with no chargers configured still gets a sentence',
+    (() => {
+      const empty = [];
+      return (empty.length ? empty.map((x) => x.label).join(', ') : 'none recorded') === 'none recorded';
+    })());
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

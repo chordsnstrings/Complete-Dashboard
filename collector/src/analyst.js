@@ -580,7 +580,17 @@ export async function propose(brief) {
   const prompt = SYSTEM
     .replace('{METRICS}', Object.keys(METRICS).join(', '))
     .replace('{DIMENSIONS}', Object.keys(DIMENSIONS).join(', '))
-    .replace('{CHARGING_SITES}', sites.length ? sites.join(', ') : 'none recorded');
+    /* .label, not the object. config.chargingSites returns
+       { label, names } per site (src/config.js:26) so that one place written
+       two ways in an address is one place here — and joining those objects
+       gave the model the literal string "[object Object], [object Object]".
+       The paragraph above it tells the model not to recommend moving cars out
+       of a charging area; it has been naming no area at all. A guardrail that
+       does not say what it is guarding is not a guardrail, and this one is
+       load-bearing: dwell time at a charger is real, so a claim that those
+       areas are over-supplied would MEASURE as true. */
+    .replace('{CHARGING_SITES}', sites.length
+      ? sites.map((x) => x.label).filter(Boolean).join(', ') : 'none recorded');
   /* The call is allowed to fail, and saying so is the whole point.
      ─────────────────────────────────────────────────────────────────────────
      This threw, analystPass caught it, logged it and returned null, and the
