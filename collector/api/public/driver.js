@@ -629,7 +629,15 @@ async function tabActivity(root, id) {
     'From whichever feed measured the day — the platform\u2019s own daily figure where it publishes one, '
     + 'the availability record where it does not'); g0.append(hrs.panel);
   const dist = panel('Distance per day', 'Kilometres covered'); g0.append(dist.panel);
-  const tbl = panel('Day by day', 'Every working day, with the weather and calendar context for that date'); root.append(tbl.panel);
+  /* "every day any feed reached", not "every working day". The spine is the
+     union of the trip days, the days a statement paid for and the days
+     availability was collected — so a day online with no job, and a day paid
+     for work the trip feed missed, both appear, with zero trips on them. Those
+     are two of the most informative rows here and the old subtitle promised
+     they would not be. */
+  const tbl = panel('Day by day',
+    'Every day any feed reached in this window \u2014 including days with no trip on them \u2014 '
+    + 'with the weather and calendar context for that date'); root.append(tbl.panel);
   const cust = panel('Vehicle custody', 'Which car, which day — handovers included'); root.append(cust.panel);
   [sh.body, hrs.body, dist.body, tbl.body, cust.body].forEach(loading);
 
