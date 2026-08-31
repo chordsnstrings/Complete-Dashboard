@@ -25,7 +25,7 @@ export const TABS = [
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
     owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance',
       'sources', 'settings', 'corporate', 'analyst', 'property', 'credentials',
-      'optimise', 'trips'] },
+      'optimise', 'trips', 'provenance'] },
 ];
 
 /* The header names the window the screen is ACTUALLY showing. It said
@@ -621,9 +621,9 @@ async function more(deck) {
     row({ title: 'Paste a credential', sub: 'read, tested, then stored', value: '›', to: href('credentials') }),
   ]);
   deck.append(el('p', 'm-sec', 'On the desktop'));
-  rows(deck, ['insights', 'compliance', 'demand', 'map', 'settings'].map((v) => row({
-    title: { insights: 'Action list', compliance: 'Compliance', demand: 'Demand',
-      map: 'Map & replay', settings: 'Settings' }[v],
+  rows(deck, ['provenance', 'insights', 'compliance', 'demand', 'map', 'settings'].map((v) => row({
+    title: { provenance: 'Where the money came from', insights: 'Action list',
+      compliance: 'Compliance', demand: 'Demand', map: 'Map & replay', settings: 'Settings' }[v],
     sub: 'built for a bigger screen', value: '›', to: href(v),
   })));
 

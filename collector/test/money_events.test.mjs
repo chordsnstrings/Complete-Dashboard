@@ -163,6 +163,37 @@ check('the categories come back in the provider’s own words',
 check('and the note says what the page is and is not',
   /allocated, spread or estimated/i.test(r.note || ''));
 
+console.log('\na provider that says the same thing twice is shown saying it twice');
+/* Uber's breakdown serves the same driver-week as a weekly figure AND, for
+   recent days, as daily ones. Both are true and they are the same money.
+   Added up, the fleet's August payout came to AED 1.41m against the AED 415k
+   it was actually paid — three and a half times over, from an endpoint that
+   lied about nothing. The fixture above has exactly that shape: a week of
+   3–9 August and a day of the 4th, for one driver. */
+{
+  const pay = r.rows.find((x) => x.kind === 'payout');
+  check('the overlapping pair is flagged rather than dropped',
+    pay.rows_seen === 2 && pay.restated_rows === 2, JSON.stringify(pay));
+  check('the amount returned is everything the call sent',
+    +pay.amount === 1610, String(pay.amount));
+  check('and the amount that may be added is only what nothing restates',
+    +pay.amount_once === 0, String(pay.amount_once));
+  /* A fare row is one TRIP and a ledger row is one transaction. Two of them on
+     one day are two events, not one restated — flagging them would turn every
+     busy day into a warning. */
+  const fares = r.rows.filter((x) => x.kind === 'fare');
+  check('trips on the same day are not restatements of each other',
+    fares.every((x) => x.restated_rows === 0), JSON.stringify(fares.map((x) => [x.source, x.restated_rows])));
+  check('and neither are two ledger transactions',
+    r.rows.find((x) => x.kind === 'ledger').restated_rows === 0);
+  check('a call that restates nothing reports both amounts the same',
+    fares.every((x) => +x.amount === +x.amount_once));
+  check('the response warns a JSON reader too, not only the page',
+    /restates/i.test(r.caveats?.restatements || ''), JSON.stringify(r.caveats));
+  check('and says the categories are a tree rather than a total',
+    /tree/i.test(r.caveats?.categories || ''), JSON.stringify(r.caveats?.categories));
+}
+
 console.log('\nthe window is an OVERLAP, because a week is not a month');
 /* A weekly statement covering the window's first day is money that touches
    this window. Dropping it because its period starts earlier would understate

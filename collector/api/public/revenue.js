@@ -157,6 +157,16 @@ export async function renderRevenue(root) {
 
   if (d.caveat) host.append(el('div', 'note err', esc(d.caveat)));
 
+  /* The door to the audit trail. This page states which basis each channel is
+     on and why; the provenance page states which API CALL each figure came
+     from, and what was held out of the total. They answer the two halves of
+     the same question and neither was reachable from the other. */
+  const trail = el('p', 'cap');
+  trail.innerHTML = `<a class="lnk" href="${href('provenance')}">Where the money came from</a>`
+    + ' lists every API call behind these figures — what each one returned, at what grain, and '
+    + 'which of them this page counted.';
+  host.append(trail);
+
   /* ── per channel ─────────────────────────────────────────────────────── */
   const p = panel('What each channel tells us',
     'Two kinds of money, kept apart. "Basis" is which one this row is, and how far it can be trusted.');

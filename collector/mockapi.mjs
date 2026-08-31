@@ -480,33 +480,37 @@ app.get('/api/compare', (req, r) => {
 app.get('/api/money/sources', (_, r) => r.json({
   window: { from: dayISO(DAYS), to: dayISO(0) },
   rows: [
+    /* The shape production actually has: a provider serving the same
+       driver-week weekly AND daily, so most of what it returned restates days
+       another figure already covers. */
     { source: 'uber_graphql_breakdown', platform: 'uber', fleet_id: 'ecosine', kind: 'payout',
-      rows_seen: 412, reported_days: 96, period_rows: 316, categories: 0, amount: 196178,
-      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 7,
+      rows_seen: 412, reported_days: 96, period_rows: 316, restated_rows: 188, categories: 0,
+      amount: 196178, amount_once: 121440,
+      first_period: dayISO(DAYS), last_period: dayISO(0), max_period_days: 7,
       drivers: 88, last_seen: new Date().toISOString() },
     { source: 'hotel_trip_report', platform: 'hotel', fleet_id: 'egari', kind: 'fare',
-      rows_seen: 867, reported_days: 867, period_rows: 0, categories: 0, amount: 39892,
-      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 1,
+      rows_seen: 867, reported_days: 867, period_rows: 0, restated_rows: 0, categories: 0, amount: 39892, amount_once: 39892,
+      first_period: dayISO(DAYS), last_period: dayISO(0), max_period_days: 1,
       drivers: 21, last_seen: new Date().toISOString() },
     { source: 'yango_orders', platform: 'yango', fleet_id: 'ecosine', kind: 'fare',
-      rows_seen: 19, reported_days: 19, period_rows: 0, categories: 0, amount: 1296,
-      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 1,
+      rows_seen: 19, reported_days: 19, period_rows: 0, restated_rows: 0, categories: 0, amount: 1296, amount_once: 1296,
+      first_period: dayISO(DAYS), last_period: dayISO(0), max_period_days: 1,
       drivers: 4, last_seen: new Date().toISOString() },
     { source: 'yango_driver_summary', platform: 'yango', fleet_id: 'ecosine', kind: 'payout',
-      rows_seen: 6, reported_days: 0, period_rows: 6, categories: 0, amount: 5612,
+      rows_seen: 6, reported_days: 0, period_rows: 6, restated_rows: 0, categories: 0, amount: 5612, amount_once: 5612,
       first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 2, max_period_days: 7,
       drivers: 4, last_seen: new Date().toISOString() },
     { source: 'uber_rest_payments', platform: 'uber', fleet_id: 'ecosine', kind: 'component',
-      rows_seen: 1204, reported_days: 0, period_rows: 1204, categories: 6, amount: 188422,
-      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 7,
+      rows_seen: 1204, reported_days: 0, period_rows: 1204, restated_rows: 0, categories: 6, amount: 188422, amount_once: 188422,
+      first_period: dayISO(DAYS), last_period: dayISO(0), max_period_days: 7,
       drivers: 88, last_seen: new Date().toISOString() },
     { source: 'yango_park_ledger', platform: 'yango', fleet_id: 'ecosine', kind: 'ledger',
-      rows_seen: 143, reported_days: 143, period_rows: 0, categories: 4, amount: -2260,
-      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 1,
+      rows_seen: 143, reported_days: 143, period_rows: 0, restated_rows: 0, categories: 4, amount: -2260, amount_once: -2260,
+      first_period: dayISO(DAYS), last_period: dayISO(0), max_period_days: 1,
       drivers: 4, last_seen: new Date().toISOString() },
     { source: 'statement_import', platform: 'uber', fleet_id: 'ecosine', kind: 'statement',
-      rows_seen: 58, reported_days: 58, period_rows: 0, categories: 0, amount: 41207,
-      first_period: dayISO(DAYS), last_period: dayISO(0), min_overlap_days: 1, max_period_days: 1,
+      rows_seen: 58, reported_days: 58, period_rows: 0, restated_rows: 0, categories: 0, amount: 41207, amount_once: 41207,
+      first_period: dayISO(DAYS), last_period: dayISO(0), max_period_days: 1,
       drivers: 31, last_seen: new Date().toISOString() },
   ],
   categories: [
@@ -517,9 +521,15 @@ app.get('/api/money/sources', (_, r) => r.json({
     { source: 'yango_park_ledger', platform: 'yango', category: 'commission', rows_seen: 96, amount: -3110 },
     { source: 'yango_park_ledger', platform: 'yango', category: 'top_up', rows_seen: 47, amount: 850 },
   ],
-  note: 'Every row is a sum of amounts a provider sent, grouped by the API call that sent them. '
-    + 'Nothing here is allocated, spread or estimated: a weekly statement appears as one period '
-    + 'row covering seven days, not as seven daily figures.',
+  note: 'Every figure here is a sum of amounts a provider itself sent, grouped by the API call '
+    + 'that sent them. Nothing is allocated, spread or estimated: a weekly statement appears as '
+    + 'one period row covering seven days, never as seven daily figures.',
+  caveats: {
+    restatements: 'A provider may report the same days more than once. `amount` is everything '
+      + 'the call returned; `amount_once` is the part nothing else in that call restates.',
+    categories: 'The categories are a TREE in the provider\'s own shape, so their sum is not a '
+      + 'total of anything.',
+  },
 }));
 
 app.get('/api/drivers/directory', (_, r) => r.json([

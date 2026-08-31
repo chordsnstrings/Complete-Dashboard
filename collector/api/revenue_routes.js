@@ -60,24 +60,66 @@ export function revenueRoutes(app, { q, wrap, range }) {
        number of the provider's own periods. `overlap_days` says how much of
        the row's period the window actually covers, so a reader can see that a
        week counted here is a week that only half belongs to them. */
+    /* Restatements, marked rather than removed.
+       ─────────────────────────────────────────────────────────────────────
+       A provider does not send each figure once. Uber's breakdown serves the
+       same driver-week as a weekly row AND, for recent days, as daily rows —
+       both true, both the same money. Summed, the fleet's August payout comes
+       to AED 1,411,620 against the AED 414,709 it was actually paid: three and
+       a half times over, from an endpoint that lied about nothing.
+
+       So a row is flagged where another row from the same call, for the same
+       driver and the same category, covers days it also covers. Flagged, not
+       dropped: this is the provenance record, and a restatement is a thing the
+       provider did, which the page should be able to show. What the page must
+       never do is add them up and call it a total.
+
+       Detected with window functions rather than a self-join: over a year this
+       CTE holds two hundred thousand rows, and a correlated EXISTS against a
+       materialised CTE is quadratic.
+
+       Only the kinds that REPORT A PERIOD are eligible. A fare row is one
+       trip and a ledger row is one transaction: two of them on one day are two
+       events, not one restated. */
     const rows = await q(
-      `SELECT source, platform, fleet_id, kind,
+      `WITH w AS (
+         SELECT * FROM money_event
+          WHERE period_start <= $2::date AND period_end >= $1::date
+            AND ($3::text IS NULL OR platform = $3)
+            AND ($4::text IS NULL OR fleet_id = $4)
+       ),
+       marked AS (
+         SELECT w.*,
+                kind IN ('payout', 'component', 'statement') AND (
+                  coalesce(max(period_end) OVER g_prev >= period_start, false)
+                  OR coalesce(min(period_start) OVER g_next <= period_end, false)
+                ) AS restated
+           FROM w
+         WINDOW g_prev AS (PARTITION BY source, platform, kind, category, driver_ext_id, external_ref
+                           ORDER BY period_start
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),
+                g_next AS (PARTITION BY source, platform, kind, category, driver_ext_id, external_ref
+                           ORDER BY period_start
+                           ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING)
+       )
+       SELECT source, platform, fleet_id, kind,
               count(*)::int rows_seen,
               count(*) FILTER (WHERE day IS NOT NULL)::int reported_days,
               count(*) FILTER (WHERE day IS NULL)::int period_rows,
+              count(*) FILTER (WHERE restated)::int restated_rows,
               count(DISTINCT category) FILTER (WHERE category <> '')::int categories,
               round(sum(amount)::numeric, 2) AS amount,
+              /* The part that is safe to add: rows nothing else in this call
+                 restates. Where a call restates nothing the two are equal, and
+                 where it restates a lot the difference is the story. */
+              round(sum(amount) FILTER (WHERE NOT restated)::numeric, 2) AS amount_once,
               min(period_start) AS first_period, max(period_end) AS last_period,
-              min(least(period_end, $2::date) - greatest(period_start, $1::date) + 1)::int AS min_overlap_days,
               max(period_end - period_start + 1)::int AS max_period_days,
               count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id <> '')::int drivers,
               max(ingested_at) AS last_seen
-         FROM money_event
-        WHERE period_start <= $2::date AND period_end >= $1::date
-          AND ($3::text IS NULL OR platform = $3)
-          AND ($4::text IS NULL OR fleet_id = $4)
+         FROM marked
         GROUP BY source, platform, fleet_id, kind
-        ORDER BY sum(amount) DESC NULLS LAST`, p);
+        ORDER BY sum(abs(amount)) DESC NULLS LAST`, p);
 
     /* And the categories inside the components, because "AED 406,893 of Uber
        payout" is not an answer to what the fleet was paid FOR. These are the
@@ -98,9 +140,22 @@ export function revenueRoutes(app, { q, wrap, range }) {
       window: { from: p[0], to: p[1] },
       rows,
       categories,
-      note: 'Every row is a sum of amounts a provider sent, grouped by the API call that '
-        + 'sent them. Nothing here is allocated, spread or estimated: a weekly statement '
-        + 'appears as one period row covering seven days, not as seven daily figures.',
+      note: 'Every figure here is a sum of amounts a provider itself sent, grouped by the API '
+        + 'call that sent them. Nothing is allocated, spread or estimated: a weekly statement '
+        + 'appears as one period row covering seven days, never as seven daily figures.',
+      /* Said in the response rather than only on the page, because the two
+         ways this data can be misread are not obvious from its shape, and a
+         caller reading the JSON deserves the same warning a reader gets. */
+      caveats: {
+        restatements: 'A provider may report the same days more than once — Uber serves a '
+          + 'driver-week as a weekly figure and, for recent days, as daily ones. Both are true '
+          + 'and they are the same money. `amount` is everything the call returned; `amount_once` '
+          + 'is the part nothing else in that call restates, and is the only one of the two that '
+          + 'may be added up.',
+        categories: 'The categories are a TREE in the provider\'s own shape — `your_earnings` '
+          + 'contains `fare`, `tip` and the rest — so they are listed to show what the money was '
+          + 'called, and their sum is not a total of anything.',
+      },
     });
   }));
 

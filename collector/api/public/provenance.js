@@ -79,28 +79,34 @@ export async function renderProvenance(root) {
   const held = d.rows.filter((r) => !inHeadline(r));
   const sum = (rows) => rows.reduce((a, r) => a + (+r.amount || 0), 0);
 
-  /* The headline's OWN number, not a re-derivation of it. Recomputing it here
-     would give this page a second opinion about the fleet's income, which is
-     the disease it was built to diagnose. The gap between the two is reported
-     rather than hidden: it is the one number on this page worth an alarm. */
+  /* The headline's OWN number, never a re-derivation of it. Recomputing it
+     here would give this page a second opinion about the fleet's income,
+     which is the disease it was built to diagnose — and it CANNOT be
+     recomputed from this table anyway, which is the more important half.
+
+     A provider does not send each figure once. Uber's breakdown serves the
+     same driver-week as a weekly row and, for recent days, as daily rows —
+     both true, both the same money. Added up, August's payout comes to AED
+     1.41m against the AED 415k the fleet was actually paid. So the number
+     from Finance is shown as Finance's, and this page says what it is for
+     rather than pretending to reconcile to it. */
   const headline = rev?.totals?.accounted;
-  const mine = sum(counted);
-  const gap = headline == null ? null : Math.round((mine - +headline) * 100) / 100;
+  const restated = d.rows.reduce((a, r) => a + (r.restated_rows || 0), 0);
 
   root.append(kpiRow([
-    { label: 'API surfaces reporting', value: fmt(new Set(d.rows.map((r) => r.source)).size),
+    { label: 'API calls reporting money', value: fmt(new Set(d.rows.map((r) => r.source)).size),
       sub: `${fmt(d.rows.length)} channel-and-kind combinations` },
     { label: 'Figures the providers sent', value: fmt(d.rows.reduce((a, r) => a + r.rows_seen, 0)),
       sub: `${fmt(d.rows.reduce((a, r) => a + r.reported_days, 0))} for a single day · `
-        + `${fmt(d.rows.reduce((a, r) => a + r.period_rows, 0))} for a span of days` },
+        + `${fmt(d.rows.reduce((a, r) => a + r.period_rows, 0))} for a span of days`
+        + (restated ? ` · ${fmt(restated)} restating days another figure already covers` : '') },
     headline != null
-      ? { label: 'In the headline', value: `AED ${fmt(headline)}`,
-        sub: Math.abs(gap) < 1
-          ? `the ${fmt(counted.length)} calls marked counted below add up to exactly this`
-          : `the calls marked counted below add up to AED ${fmt(mine)} — AED ${fmt(Math.abs(gap))} `
-            + `${gap > 0 ? 'more' : 'less'} than Finance reports, because a window can cut a `
-            + 'provider’s own reporting period in half' }
-      : { label: 'In the headline', value: '—',
+      ? { label: 'What Finance counts', value: `AED ${fmt(headline)}`,
+        sub: knowsBasis
+          ? `one figure per channel — ${counted.map((r) => sourceLabel(r.platform))
+            .filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'none'} — chosen from the calls below`
+          : 'Revenue by channel did not answer, so this page cannot say which calls it used' }
+      : { label: 'What Finance counts', value: '—',
         sub: 'Revenue by channel did not answer, so this page cannot say which calls it used' },
   ]));
 
@@ -119,11 +125,25 @@ export async function renderProvenance(root) {
         ? `<span class="tag ok">per day</span>`
         : `<span class="tag">${fmt(r.max_period_days)}-day periods</span>`
           + (r.reported_days ? `<span class="dim"> and ${fmt(r.reported_days)} single days</span>` : '')) },
-    { label: 'Figures', key: 'rows_seen', num: true, render: (r) => fmt(r.rows_seen) },
+    { label: 'Figures', key: 'rows_seen', num: true,
+      render: (r) => fmt(r.rows_seen)
+        + (r.restated_rows
+          ? `<br><span class="dim">${fmt(r.restated_rows)} restate the same days</span>` : '') },
     { label: 'Drivers', key: 'drivers', num: true,
       render: (r) => (r.drivers ? fmt(r.drivers) : '<span class="dim">—</span>') },
-    { label: 'Amount', key: 'amount', num: true,
+    /* Two amounts, and the difference between them is the whole warning. The
+       first is everything the call returned. The second is the part nothing
+       else in that call restates — the only one of the two that may be added
+       to anything. Where a call restates nothing they are equal and only one
+       is shown, because two identical numbers under two headings is its own
+       kind of noise. */
+    { label: 'Returned', key: 'amount', num: true,
       render: (r) => `AED ${fmt(r.amount)}` },
+    { label: 'Of that, said once', key: 'amount_once', num: true,
+      absent: 'every call reported each day exactly once',
+      render: (r) => (r.restated_rows
+        ? `AED ${fmt(r.amount_once)}`
+        : '<span class="dim">all of it</span>') },
     { label: 'In the headline', key: '_used', num: false,
       render: (r) => (inHeadline(r)
         ? '<span class="tag ok">counted</span>'
@@ -131,8 +151,9 @@ export async function renderProvenance(root) {
   ];
 
   const p1 = panel('Every call that returned money in this window',
-    'One row per API surface, per channel, per kind of money. The amount is the sum of what '
-    + 'that call itself returned — nothing here is allocated, spread or estimated.');
+    'One row per API call, per channel, per kind of money. The amounts are sums of what that '
+    + 'call itself returned — nothing here is allocated, spread or estimated. A provider that '
+    + 'reports the same days twice, once weekly and once daily, is shown reporting them twice.');
   root.append(p1.panel);
   p1.body.append(tableFrom(d.rows, cols, { compact: true }));
 
@@ -171,8 +192,10 @@ export async function renderProvenance(root) {
      answer to what the fleet was paid FOR. */
   if (d.categories?.length) {
     const p3 = panel('What the money was called, in the provider’s own words',
-      'The named lines inside the payouts and the ledger. Two of Uber’s APIs describe the same '
-      + 'payout with different words — net fare and your earnings — and neither is renamed here.');
+      'The named lines inside the payouts and the ledger. These are a TREE in the provider’s own '
+      + 'shape — your earnings contains fare, tip and the rest — so this says what the money was '
+      + 'called and their sum is not a total of anything. Two of Uber’s APIs describe the same '
+      + 'payout with different words, net fare and your earnings, and neither is renamed here.');
     root.append(p3.panel);
     p3.body.append(tableFrom(d.categories, [
       { label: 'Category', key: 'category', render: (r) => esc(words(r.category)) },
