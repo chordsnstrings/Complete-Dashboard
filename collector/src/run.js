@@ -3,6 +3,7 @@ import * as fms from './sources/fms.js';
 import * as uber from './sources/uber.js';
 import * as uberFleet from './sources/uber_fleet.js';
 import * as uberTimeline from './sources/uber_timeline.js';
+import * as uberProfile from './sources/uber_profile.js';
 import * as yango from './sources/yango.js';
 import * as bolt from './sources/bolt.js';
 import * as cabman from './sources/cabman.js';
@@ -280,6 +281,30 @@ export async function uberTimelineTick({ roster = false, days = 2 } = {}) {
     return n;
   } catch (e) {
     log.error('uber', 'timeline tick failed', { err: String(e) });
+    return 0;
+  }
+}
+
+/* Uber's own word on each driver: rating, lifetime trips, banned, compliance,
+   and the car they are attached to.
+   ─────────────────────────────────────────────────────────────────────────
+   Its own tick, not folded into a collection pass, because it is one call per
+   driver — ~320 across both fleets — and everything else in this file asks a
+   handful of questions about a window. Daily is the right cadence: a rating
+   moves over months and a ban is caught within a day, which is faster than a
+   ban currently reaches anyone here at all.
+
+   Given a job id it checkpoints per driver, so a container replaced mid-pass
+   resumes at the driver it had reached rather than at the top. */
+export async function uberProfileTick({ fleet = null, jobId = null } = {}) {
+  await loadSettings();
+  try {
+    const ckpt = await loadCheckpoint(jobId);
+    const n = await uberProfile.collect({ mode: 'profile', fleet, checkpoint: ckpt });
+    log.info('uber', 'profile tick', { drivers: n, fleet });
+    return n;
+  } catch (e) {
+    log.error('uber', 'profile tick failed', { err: String(e).slice(0, 200) });
     return 0;
   }
 }

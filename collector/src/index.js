@@ -9,7 +9,7 @@ import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility } from './settings.js';
-import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick } from './run.js';
+import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -29,6 +29,11 @@ async function main() {
      command rather than something nobody can run. */
   if (cmd === 'timeline') return uberTimelineTick();
   if (cmd === 'timeline-roster') return uberTimelineTick({ roster: true, days: 30 });
+  /* `profile`: Uber's own rating, lifetime trips, banned flag, compliance
+     status and vehicle attachment, one call per driver. A command as well as a
+     cron because the first thing anyone wants after wiring a new surface is to
+     run it once and look. */
+  if (cmd === 'profile') return uberProfileTick();
 
   if (cmd === 'schedule') {
     log.info('scheduler', 'starting', {
@@ -99,6 +104,17 @@ async function main() {
        Once a day, at 03:10 Dubai (23:10 UTC), after the overnight incremental
        has landed the previous day in full. */
     cron.schedule('10 23 * * *', () => analystPass().catch((e) => log.error('scheduler', 'analyst', { err: String(e) })));
+    /* Uber's own word on each driver: weekly, Monday 04:20 Dubai (00:20 UTC).
+       One call per driver and ~320 of them, placed where nothing else runs —
+       after the overnight incremental and the analyst, before the morning.
+
+       Weekly rather than daily because the rating is a trailing average over
+       hundreds of trips: it moves by hundredths in a week, so a daily pull
+       would write seven identical history rows for every real movement, and
+       cost seven times the calls to do it. Monday so a week-over-week change
+       lines up with the operating week the rest of the product reports on. */
+    cron.schedule('20 0 * * 1', () => uberProfileTick()
+      .catch((e) => log.error('scheduler', 'uber profile', { err: String(e) })));
     /* A provider changes what it sends without telling anyone, and an expired
        credential looks like a quiet week. Describe every surface daily. */
     /* 22:20, not 22:40: that was the same minute as the nightly full rollup,
@@ -170,6 +186,9 @@ async function main() {
              cost history that cannot be recovered later. `timeline-roster`
              sweeps the whole roster rather than the drivers who drove. */
           else if (job.mode === 'timeline') await uberTimelineTick();
+          /* One call per driver, so it takes the job id and checkpoints per
+             driver: a deploy landing mid-sweep resumes where it stopped. */
+          else if (job.mode === 'profile') await uberProfileTick({ fleet: job.fleet || null, jobId: job.id });
           else if (job.mode === 'timeline-roster') await uberTimelineTick({ roster: true, days: 30 });
           else await incremental(progress, job.fleet || null, job.id);
           await pool.query(

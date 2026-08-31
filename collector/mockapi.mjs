@@ -590,6 +590,14 @@ app.get('/api/drivers/directory', (_, r) => r.json([
     state_plate: plates[i % plates.length],
     plate: plates[i % plates.length], state: i === 3 ? 'suspended' : 'active',
     licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9, rating: 4.9 - i * 0.06,
+    /* What the PLATFORM says about the person, from Uber's GetDriver. The
+       column used to read driver_compliance.rating, which never carries one,
+       so it was dashes on the whole roster. One driver is left unrated and one
+       barred, so both empty states and the Barred column are reachable. */
+    platform_rating: i === 6 ? null : +(4.97 - i * 0.07).toFixed(2),
+    platform_lifetime_trips: i === 6 ? null : 9000 - i * 640,
+    is_banned: i === 3 ? true : false,
+    platform_compliance: i === 3 ? 'SUSPENDED' : 'ACTIVE',
     active_in_window: true, ever_driven: true,
     // The window measured these, so they are not history-derived.
     identity_from_history: false,
@@ -652,7 +660,28 @@ app.get('/api/driver/profile', (req, r) => {
       state: i === 3 ? 'suspended' : 'active', state_raw: i === 3 ? 'BLOCKED' : 'ONBOARDING_STATUS_ACTIVE',
       state_reason: i === 3 ? 'documents under review' : null,
       plate: plates[i % plates.length], vehicle_ext_id: `veh-${i}`,
-      score: i === 3 ? null : 88 - i, can_earn: i !== 3, observed_at: new Date().toISOString() }],
+      score: i === 3 ? null : 88 - i, can_earn: i !== 3, observed_at: new Date().toISOString(),
+      /* Uber's own word on the person, from GetDriver. Deliberately beside
+         `score` rather than in it: Bolt writes a standing score there, a
+         different quantity on a different scale. */
+      rating: +(4.97 - i * 0.07).toFixed(2), lifetime_trips: 9000 - i * 640,
+      is_banned: i === 3, compliance_status: i === 3 ? 'SUSPENDED' : 'ACTIVE',
+      profile_at: new Date(Date.now() - 6 * 36e5).toISOString() }],
+    /* Resolved for the header, so it does not have to fold `standing` itself.
+       Not averaged across platforms — see api/driver_routes.js. */
+    rating: +(4.97 - i * 0.07).toFixed(2), rating_platform: 'uber',
+    rating_at: new Date(Date.now() - 6 * 36e5).toISOString(), rating_platforms: 1,
+    platform_lifetime_trips: 9000 - i * 640,
+    banned_on: i === 3 ? ['uber'] : [],
+    platform_compliance: [{ platform: 'uber', status: i === 3 ? 'SUSPENDED' : 'ACTIVE' }],
+    /* Two readings for most drivers so the direction renders, and ONE for a
+       couple so the "first reading" state is reachable — a single reading must
+       show that, not a change of zero. */
+    rating_readings: i % 5 === 0 ? 1 : 4,
+    rating_change: i % 5 === 0 ? null : {
+      change: +(((i % 3) - 1) * 0.04).toFixed(3), over_days: 7,
+      over_trips: 120 - i * 6,
+      from: +(4.97 - i * 0.07 - ((i % 3) - 1) * 0.04).toFixed(2), to: +(4.97 - i * 0.07).toFixed(2) },
   });
 });
 
@@ -687,7 +716,23 @@ app.get('/api/driver/kpis', (req, r) => {
     hours_idle_online: +d.reduce((a, x) => a + x.hours_idle_online, 0).toFixed(1),
     hours_basis: 'availability',
     hours_days: d.length,
-    acceptance_rate: 0.91 - i * 0.02, cancellation_rate: 0.04, rating: 4.9 - i * 0.06,
+    acceptance_rate: 0.91 - i * 0.02, cancellation_rate: 0.04,
+    /* Uber's own rating, with the platform and the count behind it: the tile
+       names whose opinion it is, because two platforms rating one human are
+       two opinions on two scales. */
+    rating: +(4.97 - i * 0.07).toFixed(2), rating_platform: 'uber',
+    rating_at: new Date(Date.now() - 6 * 36e5).toISOString(),
+    platform_lifetime_trips: 9000 - i * 640,
+    banned_on: i === 3 ? ['uber'] : [],
+    platform_compliance: [{ platform: 'uber', status: i === 3 ? 'SUSPENDED' : 'ACTIVE' }],
+    /* Two readings for most drivers so the direction renders, and ONE for a
+       couple so the "first reading" state is reachable — a single reading must
+       show that, not a change of zero. */
+    rating_readings: i % 5 === 0 ? 1 : 4,
+    rating_change: i % 5 === 0 ? null : {
+      change: +(((i % 3) - 1) * 0.04).toFixed(3), over_days: 7,
+      over_trips: 120 - i * 6,
+      from: +(4.97 - i * 0.07 - ((i % 3) - 1) * 0.04).toFixed(2), to: +(4.97 - i * 0.07).toFixed(2) },
     reported_earnings: 9800 - i * 500, cash_earnings: 1200,
     /* Money in, and the two halves it is made of. Deliberately dominated by the
        payout: on this fleet a driver's fares are the few hotel bookings they

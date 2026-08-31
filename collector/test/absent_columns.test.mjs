@@ -189,8 +189,18 @@ const { readFileSync } = await import('node:fs');
 const drv = readFileSync('api/public/driver.js', 'utf8');
 check('the drivers directory says why a rating is missing rather than showing '
   + '360 dashes', /label: 'Rating'[\s\S]{0,300}absent:/.test(drv));
+/* The property, not one wording of it. This pinned the phrase "roster returns
+   onboarding status", which was the true explanation while the column read
+   driver_compliance.rating and nothing had asked Uber for a rating. Uber does
+   publish one — GetDriver, recognitionRating, probed live at 4.97 — so that
+   sentence became false the moment the collector started asking, and a test
+   that pins a sentence rather than its property fails the fix instead of the
+   bug. What must hold is that the reason names a CHANNEL and what that channel
+   does, rather than saying no data. */
 check('and the reason names what was actually checked, not just "no data"',
-  /roster returns onboarding status/.test(drv));
+  /label: 'Rating'[\s\S]{0,700}absent:[\s\S]{0,600}Uber publishes a rating/.test(drv)
+  && /label: 'Rating'[\s\S]{0,700}absent:[\s\S]{0,900}Bolt publishes one/.test(drv),
+  'the sentence has to name the channels and what each of them does');
 
 await browser.close();
 server.close();

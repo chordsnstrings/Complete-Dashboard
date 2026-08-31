@@ -17,7 +17,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
-  sourceLabel, plural, countOf, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows } from './ui.js';
+  sourceLabel, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
@@ -475,7 +475,19 @@ function identityCard(p) {
   p.span.vehicles ? ` in ${fmt(p.span.vehicles)} car${p.span.vehicles === 1 ? '' : 's'}` : ''}</span>` : ''}
         <span><b>Accounts</b> ${fmt(accounts)}${accN !== accounts
     ? `<span class="dim" title="${accN} of them have taken a trip we hold"> · ${accN} with trips</span>` : ''}</span>
+        ${p.rating != null ? `<span><b>Rating</b> ${fmt(p.rating, 2)}<span class="dim" title="${
+  esc(sourceLabel(p.rating_platform))}'s own rating, read ${p.rating_at ? dateStr(p.rating_at) : 'daily'}"> ${
+  esc(sourceLabel(p.rating_platform))}</span></span>` : ''}
+        ${p.platform_lifetime_trips ? `<span><b>${esc(sourceLabel(p.rating_platform || 'uber'))} count</b> ${
+  fmt(p.platform_lifetime_trips)}<span class="dim" title="trips the platform has ever recorded for this driver. Ours covers what we collected; theirs covers the whole relationship, so the two are shown side by side rather than merged."> ever</span></span>` : ''}
       </div>
+      ${(p.banned_on || []).length || (p.platform_compliance || []).length ? `<div class="idsub">${
+  (p.banned_on || []).map((x) => `<span class="pill bad" title="${esc(sourceLabel(x))} has barred this driver from taking work">${esc(sourceLabel(x))}: barred</span>`).join('')
+}${(p.platform_compliance || []).map((c2) => {
+    const ok = /active|valid|compliant/i.test(c2.status || '');
+    return `<span class="pill ${ok ? 'ok' : 'warn'}" title="the platform's own view of whether this driver's papers are in order, which is separate from the document register on the Compliance page">${
+      esc(sourceLabel(c2.platform))} papers: ${esc(String(c2.status).toLowerCase())}</span>`;
+  }).join('')}</div>` : ''}
       ${(p.standing || []).length ? `<div class="idsub">${(p.standing || []).map((s) => {
     const tone = /suspend|deact|block/i.test(s.state || '') ? 'bad' : s.state === 'active' ? 'ok' : 'warn';
     return `<span class="pill ${tone}" title="${esc([s.platform, s.reason, s.plate ? `holds ${s.plate}` : null]
@@ -555,7 +567,9 @@ async function tabOverview(root, id, prof) {
         : 'no fare and no payout statement covers this window' },
     { label: 'Fares', value: money(k.accounted_fares),
       sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' },
-    k.rating ? { label: 'Rating', value: fmt(k.rating, 2), sub: 'platform-reported', tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' } : null,
+    k.rating != null ? { label: 'Rating', value: fmt(k.rating, 2),
+      sub: `${sourceLabel(k.rating_platform)}\u2019s own rating`,
+      tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' } : null,
   ]));
 
   /* The revenue bar ranks a driver against a fleet whose median fare is zero,
@@ -1264,8 +1278,40 @@ async function tabQuality(root, id) {
     { label: 'Did not complete', value: pct(k.cancel_pct, 1),
       sub: 'cancelled, rejected, no-show — normalised across platforms',
       tone: k.cancel_pct == null ? null : k.cancel_pct <= 5 ? 'good' : k.cancel_pct <= 12 ? 'warn' : 'critical' },
-    { label: 'Acceptance', value: k.acceptance_rate != null ? pct(k.acceptance_rate * 100) : '—', sub: 'platform-reported' },
-    { label: 'Rating', value: k.rating ? fmt(k.rating, 2) : '—', sub: 'platform-reported' },
+    { label: 'Acceptance', value: k.acceptance_rate != null ? pct(k.acceptance_rate * 100) : '\u2014',
+      sub: k.acceptance_rate != null ? 'platform-reported'
+        : 'no channel here publishes an acceptance rate' },
+    /* Uber's own rating, and it says whose and when.
+       ─────────────────────────────────────────────────────────────────────
+       This tile read a column of driver_performance that nothing writes, so it
+       has been a dash on every driver since the page was built. Uber answers
+       recognitionRating on GetDriver; the collector now asks (src/sources/
+       uber_profile.js). A rating is the platform's standing view of a person,
+       not a measurement over the window on the toolbar, so the sub-label names
+       the platform rather than the dates. */
+    (() => {
+      if (k.rating == null) {
+        return { label: 'Rating', value: '\u2014', sub: 'not yet collected for this driver' };
+      }
+      const c = k.rating_change;
+      /* The direction, where there are two readings to compare. A single
+         reading gets "first reading" rather than a change of zero: zero is a
+         measurement and this is the absence of one. The gap is stated in days
+         because the pull is weekly and a missed week must not read as a week
+         of no movement — and the trips behind it are stated because 0.02 over
+         40 trips and 0.02 over 900 are different events. */
+      /* signed(), not a hand-rolled sign. ui.js:895 renders a real minus sign
+         rather than a hyphen and formats the magnitude the same way every
+         other delta on the product does; test/signed.test.mjs exists because
+         two views once disagreed about what a negative change looks like. */
+      const arrow = c == null ? null : c.change > 0 ? '\u25b2' : c.change < 0 ? '\u25bc' : '\u2013';
+      return { label: 'Rating', value: fmt(k.rating, 2),
+        sub: c == null
+          ? `${sourceLabel(k.rating_platform)}\u2019s own rating \u00b7 first reading`
+          : `${arrow} ${signed(c.change, { d: 2 })} over ${countOf(c.over_days, 'day')}`
+            + (c.over_trips ? ` and ${fmt(c.over_trips)} trips` : ''),
+        tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' };
+    })(),
     { label: 'Harsh events', value: fmt(totalAlerts), sub: qy.alert_km ? `over ${fmt(qy.alert_km)} km` : 'no matched distance' },
     /* Against the FLEET, where the fleet figure exists, rather than against a
        hardcoded 5/15 scale. 29.5 per 100 km was painted critical under a
@@ -1725,20 +1771,33 @@ export async function renderDriverDirectory(root) {
        em-dashes wide, and `absent` turns it into one sentence under the table
        instead. On a database where some channel DOES report one, the column
        comes back on its own. */
-    /* Not "no channel reports one" — that was false and it mattered which.
-       Bolt's fleet API does report a driver rating (src/sources/bolt.js:74);
-       the roster call it arrives on is being refused for both fleets
-       (src/sources/bolt.js:57), so the column is empty because a credential is
-       dead, not because the fact does not exist. Those two want different
-       actions from whoever reads this, and only one of them is a job for an
-       operator. */
-    { label: 'Rating', key: 'rating', num: true,
-      absent: 'nothing reaching this fleet reports a driver rating right now. '
-        + 'Uber\u2019s roster returns onboarding status and a vehicle, and its earnings breakdown '
-        + 'trips, distance and money. Bolt does publish one, and its fleet roster call is currently '
-        + 'being refused \u2014 Collection gaps says which credential',
-      render: (r) => (r.rating != null ? fmt(r.rating, 2)
-        : '<span class="ent-off" title="no platform of theirs publishes a rating we can currently read">\u2014</span>') },
+    /* Uber's own rating, which this column was always meant to show.
+       ─────────────────────────────────────────────────────────────────────
+       It read driver_compliance.rating — the hotel channel's document
+       register, which has never carried one — so the column was 365 dashes
+       under a sentence blaming the channels. Uber answers recognitionRating on
+       GetDriver and the collector now asks. The tag names whose rating it is,
+       because two platforms rating the same human are two opinions on two
+       scales and this column shows one of them. */
+    { label: 'Rating', key: 'platform_rating', num: true,
+      absent: 'no platform has answered for anybody yet. Uber publishes a rating and is asked for one '
+        + 'every Monday; Bolt publishes one too and its roster call is currently refused \u2014 '
+        + 'Collection gaps says which credential. This column read the hotel channel\u2019s document '
+        + 'register until today, which has never carried a rating at all',
+      render: (r) => (r.platform_rating != null
+        ? `${fmt(r.platform_rating, 2)}`
+          + (r.platform_lifetime_trips
+            ? `<span class="dim" title="trips the platform has ever recorded for them"> \u00b7 ${fmt(r.platform_lifetime_trips)}</span>`
+            : '')
+        : '<span class="ent-off" title="not yet collected for this driver">\u2014</span>') },
+    /* A ban is a harder constraint than a state of inactive, and it is the one
+       fact here that changes what an operator does today. Shown only where it
+       is true: a column of "no" on 360 people is not information. */
+    { label: 'Barred', key: 'is_banned', num: false,
+      absent: 'no platform has barred anybody in this window',
+      render: (r) => (r.is_banned === true
+        ? '<span class="tag bad" title="the platform has barred this driver">barred</span>'
+        : '\u2014') },
     { label: 'First trip', key: 'first_trip',
       render: (r) => (r.first_trip ? dateStr(r.first_trip)
         : '<span class="ent-off">never</span>') },

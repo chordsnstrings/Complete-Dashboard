@@ -470,7 +470,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                  not tell them apart, or say which one it was showing. */
               dc.platform AS compliance_platform,
               dps.state AS platform_state, dps.can_earn,
-              dps.platform AS state_platform, dps.plate AS state_plate
+              dps.platform AS state_platform, dps.plate AS state_plate,
+              /* The platform's own rating, which is what this column was always
+                 meant to show. It read driver_compliance.rating — the hotel
+                 channel's document register, which has never carried one — so
+                 the column was empty on all 365 people and the sentence under
+                 it blamed the channels. coalesce, not replace: if a channel
+                 ever files one through compliance it still counts. */
+              coalesce(dps.rating, dc.rating) AS platform_rating,
+              dps.lifetime_trips AS platform_lifetime_trips,
+              dps.is_banned, dps.compliance_status AS platform_compliance
        FROM who
        LEFT JOIN work w ON w.driver_ext_id = who.driver_ext_id
        LEFT JOIN pay ON pay.driver_ext_id = who.driver_ext_id
@@ -515,6 +524,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
              and when what reported it could not say over what period, and only
              the second makes the person's total unstatable. */
           _grainUnknown: r.money != null && r.money_period_days == null,
+          _ratingTrips: r.platform_rating != null ? (r.platform_lifetime_trips || 0) : -1,
           _days: new Set() });
         continue;
       }
@@ -544,6 +554,23 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       if (r.money_source && r.money_source !== cur.money_source) {
         cur.money_source = cur.money_source ? 'mixed' : r.money_source;
       }
+      /* The platform's own opinion of the person, folded across their
+         accounts. NOT averaged: two platforms rating the same human are two
+         opinions on two scales and a mean of them is a number neither provider
+         would recognise. The best-attested one wins — most lifetime trips
+         behind it — and a ban on any account bans the person, because a
+         constraint that holds anywhere holds. */
+      if (r.platform_rating != null
+          && (cur.platform_rating == null
+              || (r.platform_lifetime_trips || 0) > (cur._ratingTrips || 0))) {
+        cur.platform_rating = r.platform_rating;
+        cur._ratingTrips = r.platform_lifetime_trips || 0;
+      }
+      if (r.platform_lifetime_trips != null) {
+        cur.platform_lifetime_trips = Math.max(cur.platform_lifetime_trips || 0, r.platform_lifetime_trips);
+      }
+      if (r.is_banned === true) cur.is_banned = true;
+      cur.platform_compliance = cur.platform_compliance || r.platform_compliance;
       cur.platforms = [...new Set([...cur.platforms, ...(r.platforms || [])])];
       if ((r.driver_name || '').length > (cur.driver_name || '').length) cur.driver_name = r.driver_name;
       if (r.last_trip > cur.last_trip) cur.last_trip = r.last_trip;
@@ -592,7 +619,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          here rather than in the fold so the flag cannot survive into the
          payload as a private field somebody starts reading. */
       if (p._grainUnknown) p.money_period_days = null;
-      delete p._days; delete p._multiAccountDays; delete p._grainUnknown;
+      delete p._days; delete p._multiAccountDays; delete p._grainUnknown; delete p._ratingTrips;
       return {
         ...p,
         // Computed once, over the whole person.
@@ -638,10 +665,40 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        nothing about the fact the other exists to report. */
     const standing = await q(
       `SELECT platform, fleet_id, state, state_raw, state_reason, plate, vehicle_ext_id,
-              score, can_earn, observed_at
+              score, can_earn, observed_at,
+              /* What the PLATFORM says about the person, as opposed to about
+                 their work. Uber answers all four on GetDriver and nothing
+                 here asked until sql/schema_v45.sql; the roster has shown a
+                 column of dashes under a sentence saying no channel reports a
+                 rating, which was a fact about our questions and not about the
+                 channels. profile_at is separate from observed_at because the
+                 roster is read every half hour and this once a day. */
+              rating, lifetime_trips, is_banned, compliance_status, profile_at
        FROM driver_platform_state WHERE driver_ext_id = ANY($1)
        ORDER BY platform`, [d.keys]);
-    res.json({ ...d, span, compliance, standing, vehicles, accounts });
+    /* One person, several platform rows. The rating is the platform's, so it
+       is NOT averaged across them — two platforms rating the same human are
+       two opinions on two scales, and a mean of them is a number neither
+       provider would recognise. The best-attested one leads and the rest are
+       in `standing` for a reader who wants them. */
+    const rated = standing.filter((r) => r.rating != null)
+      .sort((a, b) => (b.lifetime_trips || 0) - (a.lifetime_trips || 0));
+    const banned = standing.filter((r) => r.is_banned === true);
+    res.json({ ...d,
+      span, compliance, standing, vehicles, accounts,
+      rating: rated[0]?.rating ?? null,
+      rating_platform: rated[0]?.platform ?? null,
+      rating_at: rated[0]?.profile_at ?? null,
+      rating_platforms: rated.length,
+      /* Uber's own lifetime count, which is a cross-check on ours rather than a
+         replacement: theirs covers the whole relationship, ours covers what we
+         collected. Shown side by side, never merged. */
+      platform_lifetime_trips: rated[0]?.lifetime_trips
+        ?? standing.find((r) => r.lifetime_trips != null)?.lifetime_trips ?? null,
+      banned_on: banned.map((r) => r.platform),
+      platform_compliance: standing.filter((r) => r.compliance_status)
+        .map((r) => ({ platform: r.platform, status: r.compliance_status })),
+    });
   }));
 
   /* ── headline numbers, plus the shift shape the mockup asks for ────── */
@@ -738,9 +795,14 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          the weekly figures are still shown where their grain is visible: the
          periods table on the Earnings tab prints them against the real period
          bounds, which is the one place a week-long number can be read as one. */
+      /* No rating here either, and for the same reason as the hours above it.
+         This averaged driver_payout_day.rating — a column that traces back to
+         driver_performance, which no collector has ever written a rating into.
+         It produced a null on every driver, and being spread into the response
+         it could shadow a real one. The rating now comes from the platform
+         that actually publishes it, below. */
       `SELECT round(avg(acceptance_rate)::numeric,3) acceptance_rate,
               round(avg(cancellation_rate)::numeric,3) cancellation_rate,
-              round(avg(rating)::numeric,2) rating,
               round(sum(earnings)::numeric,2) reported_earnings,
               round(sum(cash_earnings)::numeric,2) cash_earnings
        /* Day grain, and the window applied to the day. Summed over
@@ -844,6 +906,65 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
     const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
 
+    /* What the platforms say about the PERSON, not about the window.
+       ─────────────────────────────────────────────────────────────────────
+       Both tile strips on the driver page read k.rating, and it has always
+       been null: it came from avg(driver_performance.rating), a column no
+       collector writes. Uber answers a rating on GetDriver and now lands it on
+       driver_platform_state (sql/schema_v45.sql), so the tiles read it here
+       rather than each page fetching a second endpoint.
+
+       Window-independent on purpose. A rating is the platform's standing view
+       of a human; slicing it by the dates on the toolbar would imply it was
+       measured over them. */
+    /* Bound on $1 with the keys alone, not on the shared p triple. Postgres
+       infers a parameter's type from where it is USED, and a query that binds
+       three but references only the third answers "could not determine data
+       type of parameter $1" — which is what every driver endpoint returned for
+       a few minutes here. The window is deliberately absent: a rating is the
+       platform's standing view of a human, and slicing it by the dates on the
+       toolbar would imply it was measured over them. */
+    const standing = await q(
+      `SELECT platform, rating, lifetime_trips, is_banned, compliance_status, profile_at
+       FROM driver_platform_state
+       WHERE driver_ext_id = ANY($1) AND (rating IS NOT NULL OR is_banned IS NOT NULL
+             OR lifetime_trips IS NOT NULL OR compliance_status IS NOT NULL)
+       ORDER BY lifetime_trips DESC NULLS LAST`, [p[2]]);
+    const rated = standing.filter((r) => r.rating != null);
+    /* Is it going up? — which is the question a rating is actually asked.
+       ─────────────────────────────────────────────────────────────────────
+       Two readings, the newest and the one before it, from the kept history
+       (sql/schema_v46.sql). Deliberately NOT a fixed "last week": the pull is
+       weekly but a missed week must not be reported as a week of no change, so
+       the comparison is against the previous READING and the gap in days is
+       returned with it. A driver read once has no change — `first reading`,
+       not zero, because zero is a measurement and this is an absence.
+
+       lifetime_trips comes too, because it is the denominator: 0.02 over 40
+       trips and 0.02 over 900 are different events and only the second is
+       signal. */
+    const [trend] = await q(
+      `WITH h AS (
+         SELECT platform, rating, lifetime_trips, observed_on,
+                row_number() OVER (PARTITION BY platform ORDER BY observed_on DESC) AS rn
+           FROM driver_rating_history
+          WHERE driver_ext_id = ANY($1) AND rating IS NOT NULL)
+       SELECT max(rating) FILTER (WHERE rn = 1)         AS latest,
+              max(rating) FILTER (WHERE rn = 2)         AS previous,
+              max(observed_on) FILTER (WHERE rn = 1)    AS latest_on,
+              max(observed_on) FILTER (WHERE rn = 2)    AS previous_on,
+              max(lifetime_trips) FILTER (WHERE rn = 1) AS latest_trips,
+              max(lifetime_trips) FILTER (WHERE rn = 2) AS previous_trips,
+              count(*)::int                             AS readings
+         FROM h`, [p[2]]);
+    const chg = (trend?.latest != null && trend?.previous != null)
+      ? { change: +(Number(trend.latest) - Number(trend.previous)).toFixed(3),
+        over_days: Math.round(
+          (Date.parse(trend.latest_on) - Date.parse(trend.previous_on)) / 86400000) || null,
+        over_trips: (trend.latest_trips != null && trend.previous_trips != null)
+          ? trend.latest_trips - trend.previous_trips : null,
+        from: Number(trend.previous), to: Number(trend.latest) }
+      : null;
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
     const hoursOnJob = num(kept?.on_job_h);
@@ -874,7 +995,22 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           : kept.platform_days ? 'platform' : 'availability',
       hours_days: kept?.online_days ?? 0,
       trips_per_day: t.days_worked ? +(t.trips / t.days_worked).toFixed(1) : null,
-      utilisation_pct: utilisation });
+      utilisation_pct: utilisation,
+      /* After the ...perf spread, deliberately: perf carries a rating column
+         from driver_performance that nothing writes, and letting it win would
+         put the null back over a real number. */
+      rating: rated[0]?.rating ?? null,
+      rating_platform: rated[0]?.platform ?? null,
+      rating_at: rated[0]?.profile_at ?? null,
+      /* null when there is only one reading — "first reading", never a change
+         of zero. A zero is a measurement; this is the absence of a second
+         observation to measure against. */
+      rating_change: chg,
+      rating_readings: trend?.readings ?? 0,
+      platform_lifetime_trips: standing.find((r) => r.lifetime_trips != null)?.lifetime_trips ?? null,
+      banned_on: standing.filter((r) => r.is_banned === true).map((r) => r.platform),
+      platform_compliance: standing.filter((r) => r.compliance_status)
+        .map((r) => ({ platform: r.platform, status: r.compliance_status })) });
   }));
 
   /* ── day by day: the spine every chart on the detail page hangs off ── */
