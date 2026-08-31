@@ -125,25 +125,22 @@ export async function renderProvenance(root) {
         ? `<span class="tag ok">per day</span>`
         : `<span class="tag">${fmt(r.max_period_days)}-day periods</span>`
           + (r.reported_days ? `<span class="dim"> and ${fmt(r.reported_days)} single days</span>` : '')) },
-    { label: 'Figures', key: 'rows_seen', num: true,
-      render: (r) => fmt(r.rows_seen)
-        + (r.restated_rows
-          ? `<br><span class="dim">${fmt(r.restated_rows)} restate the same days</span>` : '') },
+    { label: 'Figures', key: 'rows_seen', num: true, render: (r) => fmt(r.rows_seen) },
     { label: 'Drivers', key: 'drivers', num: true,
       render: (r) => (r.drivers ? fmt(r.drivers) : '<span class="dim">—</span>') },
-    /* Two amounts, and the difference between them is the whole warning. The
-       first is everything the call returned. The second is the part nothing
-       else in that call restates — the only one of the two that may be added
-       to anything. Where a call restates nothing they are equal and only one
-       is shown, because two identical numbers under two headings is its own
-       kind of noise. */
     { label: 'Returned', key: 'amount', num: true,
       render: (r) => `AED ${fmt(r.amount)}` },
-    { label: 'Of that, said once', key: 'amount_once', num: true,
-      absent: 'every call reported each day exactly once',
+    /* A verdict, not a second number. The obvious column here — "of that, the
+       part said once" — is a subset sum, and the components carry negative
+       lines, so on the live data that subset came out LARGER than the total it
+       was a subset of. True, and unreadable. What a person needs from this
+       column is whether the figure beside it can be added to anything, which
+       is a yes or a no. */
+    { label: 'Can it be added?', key: 'restated_rows', num: false,
       render: (r) => (r.restated_rows
-        ? `AED ${fmt(r.amount_once)}`
-        : '<span class="dim">all of it</span>') },
+        ? `<span class="tag bad">no</span><span class="dim"> — ${fmt(r.restated_rows)} of `
+          + `${fmt(r.rows_seen)} figures restate days another already covers</span>`
+        : '<span class="tag ok">yes</span><span class="dim"> — each day reported once</span>') },
     { label: 'In the headline', key: '_used', num: false,
       render: (r) => (inHeadline(r)
         ? '<span class="tag ok">counted</span>'
@@ -153,7 +150,8 @@ export async function renderProvenance(root) {
   const p1 = panel('Every call that returned money in this window',
     'One row per API call, per channel, per kind of money. The amounts are sums of what that '
     + 'call itself returned — nothing here is allocated, spread or estimated. A provider that '
-    + 'reports the same days twice, once weekly and once daily, is shown reporting them twice.');
+    + 'reports the same days twice, once weekly and once daily, is shown reporting them twice, '
+    + 'which is why most of these amounts cannot be added to anything.');
   root.append(p1.panel);
   p1.body.append(tableFrom(d.rows, cols, { compact: true }));
 
@@ -183,8 +181,9 @@ export async function renderProvenance(root) {
     root.append(p2.panel);
     p2.body.append(tableFrom(held.map((r) => ({ ...r, _why: why(r) })), [
       cols[0], cols[1],
-      { label: 'Amount', key: 'amount', num: true, render: (r) => `AED ${fmt(r.amount)}` },
-      { label: 'Why it is not in the headline', key: '_why', render: (r) => esc(r._why) },
+      { label: 'Returned', key: 'amount', num: true, render: (r) => `AED ${fmt(r.amount)}` },
+      { label: 'Why it is not in the headline', key: '_why',
+        render: (r) => `<span class="wrap">${esc(r._why)}</span>` },
     ], { compact: true }));
   }
 

@@ -176,8 +176,9 @@ console.log('\na provider that says the same thing twice is shown saying it twic
     pay.rows_seen === 2 && pay.restated_rows === 2, JSON.stringify(pay));
   check('the amount returned is everything the call sent',
     +pay.amount === 1610, String(pay.amount));
-  check('and the amount that may be added is only what nothing restates',
-    +pay.amount_once === 0, String(pay.amount_once));
+  check('the restated part is reported as its own figure, not as a remainder',
+    +pay.restated_amount === 1610 && +pay.amount_not_restated === 0,
+    `${pay.restated_amount} / ${pay.amount_not_restated}`);
   /* A fare row is one TRIP and a ledger row is one transaction. Two of them on
      one day are two events, not one restated — flagging them would turn every
      busy day into a warning. */
@@ -186,10 +187,16 @@ console.log('\na provider that says the same thing twice is shown saying it twic
     fares.every((x) => x.restated_rows === 0), JSON.stringify(fares.map((x) => [x.source, x.restated_rows])));
   check('and neither are two ledger transactions',
     r.rows.find((x) => x.kind === 'ledger').restated_rows === 0);
-  check('a call that restates nothing reports both amounts the same',
-    fares.every((x) => +x.amount === +x.amount_once));
+  check('a call that restates nothing has nothing restated to report',
+    fares.every((x) => +x.restated_amount === 0 && +x.amount_not_restated === +x.amount));
   check('the response warns a JSON reader too, not only the page',
-    /restates/i.test(r.caveats?.restatements || ''), JSON.stringify(r.caveats));
+    /restate/i.test(r.caveats?.restatements || ''), JSON.stringify(r.caveats));
+  /* The subset sum this replaced went out of its way to mislead: the
+     components carry negative lines, so on the live data "the part said once"
+     came out LARGER than the total it was a subset of. */
+  check('and points at the resolution rather than implying the sum is one',
+    /driver_payout_day|\/api\/revenue/.test(r.caveats?.restatements || ''),
+    r.caveats?.restatements || '');
   check('and says the categories are a tree rather than a total',
     /tree/i.test(r.caveats?.categories || ''), JSON.stringify(r.caveats?.categories));
 }

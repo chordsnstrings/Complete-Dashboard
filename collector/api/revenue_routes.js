@@ -109,10 +109,14 @@ export function revenueRoutes(app, { q, wrap, range }) {
               count(*) FILTER (WHERE restated)::int restated_rows,
               count(DISTINCT category) FILTER (WHERE category <> '')::int categories,
               round(sum(amount)::numeric, 2) AS amount,
-              /* The part that is safe to add: rows nothing else in this call
-                 restates. Where a call restates nothing the two are equal, and
-                 where it restates a lot the difference is the story. */
-              round(sum(amount) FILTER (WHERE NOT restated)::numeric, 2) AS amount_once,
+              /* How much of that total sits on rows that restate days another
+                 row already covers. Reported as its own figure rather than as
+                 a remainder: the components carry negative lines (fees,
+                 commission), so the non-restated part can exceed the total,
+                 and a column headed "of that, said once" showing more than the
+                 whole reads as a bug however true it is. */
+              round(sum(amount) FILTER (WHERE restated)::numeric, 2) AS restated_amount,
+              round(sum(amount) FILTER (WHERE NOT restated)::numeric, 2) AS amount_not_restated,
               min(period_start) AS first_period, max(period_end) AS last_period,
               max(period_end - period_start + 1)::int AS max_period_days,
               count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id <> '')::int drivers,
@@ -149,9 +153,11 @@ export function revenueRoutes(app, { q, wrap, range }) {
       caveats: {
         restatements: 'A provider may report the same days more than once — Uber serves a '
           + 'driver-week as a weekly figure and, for recent days, as daily ones. Both are true '
-          + 'and they are the same money. `amount` is everything the call returned; `amount_once` '
-          + 'is the part nothing else in that call restates, and is the only one of the two that '
-          + 'may be added up.',
+          + 'and they are the same money, so `amount` is what the call RETURNED and is not a '
+          + 'total of anything. `restated_rows` counts the figures that restate days another '
+          + 'figure already covers; where it is zero the call reported each day once and its '
+          + 'amount may be added. Where it is not, resolving the overlap is what '
+          + 'driver_payout_day does, and /api/revenue reports the result.',
         categories: 'The categories are a TREE in the provider\'s own shape — `your_earnings` '
           + 'contains `fare`, `tip` and the rest — so they are listed to show what the money was '
           + 'called, and their sum is not a total of anything.',
