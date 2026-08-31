@@ -50,7 +50,7 @@ check('it writes nothing',
 console.log('\nthe three answers a single "no" would merge');
 
 check('a field that does not exist is told apart from one that is null',
-  /exists: !\/Cannot query field\|Unknown field\|FieldUndefined\/i\.test\(err\)/.test(body)
+  /named_absent: NAMED\.test\(err\)/.test(body)
   && /value: value === undefined \? null : value/.test(body),
   'no such field and no tier for this driver lead to completely different next moves');
 check('an operation that is DENIED is reported as existing',
@@ -72,8 +72,8 @@ check('introspection is tried first',
   'a server that describes itself answers every guess below in one call');
 check('and a schema that answers skips the forty guesses entirely',
   /const described = Array\.isArray\(introspection\.DriverInfo\)/.test(body)
-  && /\(described \? \[\] : TIER_FIELDS\)/.test(body)
-  && /\(described \? \[\] : TIER_OPS\)/.test(body));
+  && /described \|\| !sessionWorks \? \[\] : TIER_FIELDS/.test(body)
+  && /described \|\| !sessionWorks \? \[\] : TIER_OPS/.test(body));
 check('the probe paces itself',
   /setTimeout\(r, 80\)/.test(body));
 check('a GraphQL error is read as a message, never stringified as an object',
@@ -83,10 +83,75 @@ check('a GraphQL error is read as a message, never stringified as an object',
 console.log('\nwhat the caller is told');
 
 check('the verdict names which of the outcomes happened',
-  /nothing on this surface names a driver tier/.test(src)
-  && /fields exist but answered null for this driver/.test(src)
-  && /no field, but an operation exists and is denied/.test(src),
-  'a bare list of nulls reads as all three at once');
+  /nothing on this surface names a driver tier, and the control proves the server would have said so/.test(src)
+  && /fields the server would not name/.test(src)
+  && /no tier field on GetDriver, but an operation is there/.test(src),
+  'a bare list of nulls reads as all of them at once');
+
+console.log('\nthe control, without which a refusal proves nothing');
+
+check('an impossible field name is probed on every parent, before any candidate',
+  /const CONTROL_FIELDS = \[/.test(bare) && /zzNotARealFieldQx/.test(bare)
+  && /of \(described \|\| !sessionWorks \? \[\] : CONTROL_FIELDS\)\)/.test(body),
+  'twenty-nine of thirty-one candidates were NAMED as absent and two were not; without a control, '
+  + '"the server would not name this one" is a Rorschach blot');
+check('an impossible operation name is probed too',
+  /const CONTROL_OP = /.test(bare) && /await probeOp\(CONTROL_OP, true\)/.test(body));
+check('and every verdict is read against it rather than asserted',
+  /const namesItsAbsences = controls\.length > 0 && controls\.every\(\(c\) => c\.named_absent\)/.test(body)
+  && /exists: namesItsAbsences \? !r\.named_absent : null/.test(body));
+check('a server that names nothing yields "inconclusive", not "found"',
+  /inconclusive: this server does not name the fields it lacks, so a refusal proves nothing/.test(src));
+check('the control is returned to the caller, not just used internally',
+  /control: \{/.test(body) && /names_its_absent_fields: namesItsAbsences/.test(body),
+  'a reader must be able to check the reasoning, not only the conclusion');
+check('a field the server would not name is asked again with a sub-selection',
+  /retry_with_selection = await probeField\(parent, field, ' \{ __typename \}'\)/.test(body),
+  'the likeliest reason a server declines to name a field is an object type asked for as a scalar');
+check('and an operation is asked again without arguments, for the same reason',
+  /const bare = withArg\.named \? null : await probeOp\(name, false\)/.test(body),
+  'getPerformanceReport exists and answers "Unknown argument" — the argument-free shape separates '
+  + 'a wrong call from a missing operation');
+
+console.log('\nthe positive control, without which every negative is worthless');
+
+check('a field known to be real is asked first, and gates the whole run',
+  /const POSITIVE_CONTROL = \['driverInfo', 'recognitionRating'\]/.test(bare)
+  && /const sessionWorks = !!positive && positive\.value != null/.test(body)
+  && /described \|\| !sessionWorks \? \[\] : TIER_FIELDS/.test(body),
+  'an expired supplier cookie refuses everything, and thirty refusals read exactly like '
+  + '"Uber does not publish a tier" when they mean "we did not ask anybody"');
+check('and a run against a dead session says VOID rather than "no tier"',
+  /VOID: the known-real field recognitionRating did not answer/.test(src));
+check('the recognition family is probed, because that is what the real field is called',
+  /'recognitionTier'/.test(bare) && /'recognitionStatus'/.test(bare) && /'recognitionLevel'/.test(bare),
+  'GetDriver returns recognitionRating; a tier beside a rating is named by the same family');
+check('including a deliberate near miss, to farm the server\u2019s own suggestion',
+  /'recognitionTie'/.test(bare),
+  'Did you mean "recognitionRating"? — and nothing else — says there is no other recognition* sibling');
+check('and the recognition operations are probed at the query root',
+  /'getDriverRecognition', 'getEarnerRecognition'/.test(bare));
+
+check('a bare known-real OBJECT is probed, to prove the retry branch means anything',
+  /const OBJECT_CONTROL = \['driver', 'complianceInfo'\]/.test(bare)
+  && /must have a selection of subfields/.test(body),
+  'the retry-with-sub-selection branch assumes the server announces bare objects, and nothing else proves it');
+check('and the retry only runs when that signature is known to fire',
+  /namesItsAbsences && objectSignatureFires/.test(body));
+check('otherwise the refusals are reported inconclusive, not positive',
+  /it also does not announce bare objects/.test(src));
+
+console.log('\nthe probe that answered the wrong question confidently');
+
+check('the driver probe asks the org that owns the driver it picked',
+  /WHERE platform = 'uber' AND fleet_id = \$1\n\s+AND coalesce\(btrim\(driver_ext_id\), ''\) <> ''/.test(src),
+  'unscoped it took either fleet’s newest roster row and asked Ecosine about it — and an Egari driver '
+  + 'asked of Ecosine returns an empty-message 500, which reads exactly like a dead cookie');
+check('an unknown report type is refused rather than silently swapped for another',
+  /if \(req\.query\.type && !CANDIDATE_REPORTS\.includes\(String\(req\.query\.type\)\)\)/.test(src),
+  'it fell through to REPORT_TYPE_TRIP_ACTIVITY, answering a question about drivers with trip columns');
+check('and the reports that carry a tier\u2019s own inputs are candidates now',
+  /'REPORT_TYPE_DRIVER_QUALITY'/.test(src) && /'REPORT_TYPE_DRIVER_PERFORMANCE'/.test(src));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

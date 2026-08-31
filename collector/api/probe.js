@@ -39,6 +39,13 @@ const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
 const CANDIDATE_REPORTS = [
   'REPORT_TYPE_TRIP_ACTIVITY',
   'REPORT_TYPE_DRIVER_ACTIVITY',
+  /* The two the fleet actually wants if no tier exists: they are the INPUTS
+     Uber computes a tier from — confirmation, cancellation and completion
+     rates, ratings over the last 500 trips, earnings and trips per hour — and
+     unlike a tier they are per-driver, numeric, and not gated on a driver's
+     personal opt-in, so their coverage would be the whole roster. */
+  'REPORT_TYPE_DRIVER_QUALITY',
+  'REPORT_TYPE_DRIVER_PERFORMANCE',
   'REPORT_TYPE_PAYMENT_DETAILS',
   'REPORT_TYPE_PAYMENTS',
   'REPORT_TYPE_EARNINGS',
@@ -116,6 +123,19 @@ function describe(records, { maxValues = 12 } = {}) {
    part of a query, so this cannot be turned into an open GraphQL proxy onto
    the fleet's session. Read-only; writes nothing. */
 const TIER_FIELDS = [
+  /* The recognition family first, because recognitionRating is the one field
+     on this type we KNOW is real — GetDriver returns 4.97 from it — and Uber
+     names things by family. A tier living beside a rating would be called
+     recognitionSomething long before it would be called proTier.
+
+     recognitionTie is a deliberate near-miss on that known-real prefix. It
+     cannot exist, and that is the point: a server that answers it with
+     'Did you mean "recognitionRating"?' and NOTHING ELSE has just told us
+     there is no other recognition* field on DriverInfo, which is worth more
+     than twenty blind guesses. */
+  ['driverInfo', 'recognitionTier'], ['driverInfo', 'recognition'],
+  ['driverInfo', 'recognitionStatus'], ['driverInfo', 'recognitionLevel'],
+  ['driverInfo', 'recognitionTie'],
   /* On the type that already carries completedTripsCount and
      recognitionRating — the likeliest home for a status the same surface
      computes. */
@@ -133,8 +153,56 @@ const TIER_FIELDS = [
   ['driver', 'driverStatus'], ['driver', 'tierInfo'], ['driver', 'rewards'],
 ];
 
+/* A name that cannot exist, on each parent and at the query root.
+   ─────────────────────────────────────────────────────────────────────────
+   The first run of this probe was nearly fooled. Twenty-nine of thirty-one
+   candidates came back with an explicit `Cannot query field "proTier" on type
+   "DriverInfo"` — the schema naming the type, which is a clean no. Two came
+   back with a bare "Invalid GraphQL query" instead, and the naive reading is
+   that a field the server declines to name is a field that exists.
+
+   That reading is worth nothing without a control. If a name that certainly
+   does not exist ALSO draws the bare error, the bare error is noise and those
+   two are no different from the other twenty-nine. If the control is named
+   and refused like the rest, then the two the server would not name are
+   hiding something, and that is the finding.
+
+   One request per parent, and it settles the whole run. */
+const CONTROL_FIELDS = [
+  ['driverInfo', 'zzNotARealFieldQx'], ['user', 'zzNotARealFieldQx'], ['driver', 'zzNotARealFieldQx'],
+];
+const CONTROL_OP = 'zzNotARealOperationQx';
+
+/* And the control in the other direction, which matters more.
+   ─────────────────────────────────────────────────────────────────────────
+   Every negative result below is worthless if the session is simply not
+   working: an expired supplier cookie refuses everything, and a run of thirty
+   refusals would read as "Uber does not publish a tier" when it means "we did
+   not ask anybody". recognitionRating is known-real on this exact type — it
+   is where the roster's 4.97 comes from — so if it does not come back with a
+   number, nothing else in the run may be believed. */
+const POSITIVE_CONTROL = ['driverInfo', 'recognitionRating'];
+
+/* And one more, for a signature the run leans on and nothing else proves.
+   ─────────────────────────────────────────────────────────────────────────
+   When a candidate is refused WITHOUT being named, the probe asks again with
+   a sub-selection, on the theory that the field exists and is an object we
+   asked for as a scalar. That whole branch assumes this server answers a bare
+   object with "must have a selection of subfields". If it does not — if it
+   folds that into the same generic refusal — the retry proves nothing and
+   must be reported as inconclusive rather than as a negative.
+
+   complianceInfo is a known-real object on Driver and is not in the baseline
+   selection, so asking for it bare is a clean test of the signature. */
+const OBJECT_CONTROL = ['driver', 'complianceInfo'];
+
 /* Whole operations. A tier might not hang off GetDriver at all. */
 const TIER_OPS = [
+  /* Same family reasoning as the fields, and the same prize: at the query
+     root, PERMISSION_DENIED and "Cannot query field" are opposite answers.
+     The first says the operation is there and a higher-privilege login would
+     reach it — a question a person can act on. The second closes it for ever. */
+  'getDriverRecognition', 'getEarnerRecognition',
   'getEarnerProfile', 'getDriverRewards', 'getProTier', 'getDriverTier', 'getRewards',
   'getLoyalty', 'getDriverBadges', 'getEarnerTier', 'getDriverPerformanceTier',
   'getDriverIncentives', 'getPerformanceReport', 'getFleetDrivers',
@@ -188,7 +256,19 @@ export function probeRoutes(app, { wrap }) {
   /* The shape of one generated report's CSV header — column names only. */
   app.get('/api/probe/uber/report-columns', wrap(async (req, res) => {
     await loadSettings();
-    const reportType = CANDIDATE_REPORTS.includes(req.query.type) ? req.query.type : 'REPORT_TYPE_TRIP_ACTIVITY';
+    /* An unrecognised type used to fall through to REPORT_TYPE_TRIP_ACTIVITY,
+       which meant a caller asking about a report that does not exist got a
+       confident, detailed and completely wrong answer about a different one —
+       trip columns presented as the answer to a question about drivers. A
+       probe whose failure mode is a plausible wrong answer is worse than no
+       probe, so an unknown type is refused by name. */
+    if (req.query.type && !CANDIDATE_REPORTS.includes(String(req.query.type))) {
+      return res.status(400).json({
+        error: `unknown report type ${String(req.query.type).slice(0, 60)}`,
+        known: CANDIDATE_REPORTS,
+      });
+    }
+    const reportType = req.query.type ? String(req.query.type) : 'REPORT_TYPE_TRIP_ACTIVITY';
     const to = req.query.to || new Date().toISOString().slice(0, 10);
     const from = req.query.from || new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
     const { data: gen } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
@@ -253,9 +333,16 @@ export function probeRoutes(app, { wrap }) {
     let uuid = String(req.query.uuid || '').trim();
     if (!uuid) {
       const { rows } = await pool.query(
+        /* Scoped to the org we are about to ask AS. Unscoped, this took the
+           newest roster row of either fleet and asked Ecosine about it — and
+           an Egari driver asked of Ecosine returns INTERNAL_SERVER_ERROR with
+           an empty message, which reads exactly like a dead cookie. A probe
+           whose default arguments manufacture a scary error about a healthy
+           credential is worse than one that declines to guess. */
         `SELECT driver_ext_id FROM driver_platform_state
-          WHERE platform = 'uber' AND coalesce(btrim(driver_ext_id), '') <> ''
-          ORDER BY observed_at DESC NULLS LAST LIMIT 1`);
+          WHERE platform = 'uber' AND fleet_id = $1
+            AND coalesce(btrim(driver_ext_id), '') <> ''
+          ORDER BY observed_at DESC NULLS LAST LIMIT 1`, [uberOrg().fleet]);
       uuid = rows[0]?.driver_ext_id || '';
     }
     if (!uuid) return res.json({ error: 'no uber driver uuid to ask about' });
@@ -560,10 +647,11 @@ export function probeRoutes(app, { wrap }) {
        already and forty more requests would only confirm it more slowly. */
     const described = Array.isArray(introspection.DriverInfo) ? introspection : null;
 
-    /* 2. One field at a time, and the ERROR is the payload. */
-    const fields = [];
-    for (const [parent, field] of (described ? [] : TIER_FIELDS)) {
-      const d = await ask(driverQueryWith(parent, field),
+    /* Does this server NAME the fields it does not have? Run the impossible
+       names first, so every verdict below is read against a known no. */
+    const NAMED = /Cannot query field|Unknown field|FieldUndefined|Unknown argument/i;
+    const probeField = async (parent, field, selection = '') => {
+      const d = await ask(driverQueryWith(parent, field + selection),
         { orgUUID: org.orgUuid, driverUUID: uuid });
       const err = errText(d);
       const got = d?.data?.getDriver?.driver;
@@ -572,54 +660,134 @@ export function probeRoutes(app, { wrap }) {
           : parent === 'user' ? got.member?.user?.[field]
             : got.member?.user?.driverInfo?.[field])
         : undefined;
-      /* "Did you mean" is the schema telling us a real name we had not
-         guessed, which is worth more than the field we asked for. */
-      const suggests = /Did you mean ([^?]+)\?/i.exec(err)?.[1] || null;
-      fields.push({
-        parent, field,
-        exists: !/Cannot query field|Unknown field|FieldUndefined/i.test(err) && !d?.transportError,
+      return {
+        parent, field, selection: selection || null,
+        named_absent: NAMED.test(err),
+        answered: !err && !d?.transportError,
         value: value === undefined ? null : value,
-        suggests,
-        note: (d?.transportError || err || '').slice(0, 160) || null,
-      });
+        suggests: /Did you mean ([^?]+)\?/i.exec(err)?.[1] || null,
+        note: (d?.transportError || err || '').slice(0, 200) || null,
+      };
+    };
+
+    /* The positive control runs FIRST and gates everything. */
+    const positive = described ? null : await probeField(POSITIVE_CONTROL[0], POSITIVE_CONTROL[1]);
+    const sessionWorks = !!positive && positive.value != null;
+    await new Promise((r) => setTimeout(r, 80));
+
+    /* Does a bare object announce itself? The retry branch depends on it. */
+    const bareObject = described || !sessionWorks
+      ? null : await probeField(OBJECT_CONTROL[0], OBJECT_CONTROL[1]);
+    const objectSignatureFires = /must have a selection of subfields/i.test(bareObject?.note || '');
+    if (bareObject) await new Promise((r) => setTimeout(r, 80));
+
+    const controls = [];
+    for (const [parent, field] of (described || !sessionWorks ? [] : CONTROL_FIELDS)) {
+      controls.push(await probeField(parent, field));
       await new Promise((r) => setTimeout(r, 80));
     }
+    /* The whole run's interpretation, in one boolean. */
+    const namesItsAbsences = controls.length > 0 && controls.every((c) => c.named_absent);
 
-    /* 3. Whole operations. PERMISSION_DENIED is a YES about existence. */
-    const ops = [];
-    for (const name of (described ? [] : TIER_OPS)) {
-      const d = await ask(`query Probe($orgUUID: ID!) { ${name}(orgUUID: $orgUUID) { __typename } }`,
-        { orgUUID: org.orgUuid });
+    /* 2. One field at a time, and the ERROR is the payload. */
+    const fields = [];
+    for (const [parent, field] of (described || !sessionWorks ? [] : TIER_FIELDS)) {
+      const r = await probeField(parent, field);
+      await new Promise((r2) => setTimeout(r2, 80));
+      /* A field the server would not name, on a server that names its
+         absences, is the only interesting outcome on this surface — and the
+         likeliest reason for it is an object type asked for as a scalar. So
+         ask again WITH a sub-selection, which is the question that separates
+         "does not exist" from "exists and I asked wrongly". */
+      if (!r.named_absent && !r.answered && namesItsAbsences && objectSignatureFires) {
+        r.retry_with_selection = await probeField(parent, field, ' { __typename }');
+        await new Promise((r2) => setTimeout(r2, 80));
+      }
+      fields.push({ ...r, exists: namesItsAbsences ? !r.named_absent : null });
+    }
+
+    /* 3. Whole operations, against the same control. PERMISSION_DENIED is a
+       YES about existence; an unnamed refusal is only a YES if the server has
+       just demonstrated that it names the operations it does not have. */
+    const probeOp = async (name, args) => {
+      const d = args
+        ? await ask(`query Probe($orgUUID: ID!) { ${name}(orgUUID: $orgUUID) { __typename } }`,
+          { orgUUID: org.orgUuid })
+        : await ask(`query Probe { ${name} { __typename } }`, {});
       const err = errText(d);
-      const missing = /Cannot query field|Unknown field/i.test(err);
+      return { err, transport: d?.transportError || null, named: /Cannot query field|Unknown field/i.test(err) };
+    };
+    const control = described || !sessionWorks ? null : await probeOp(CONTROL_OP, true);
+    const namesItsMissingOps = !!control?.named;
+
+    const ops = [];
+    for (const name of (described || !sessionWorks ? [] : TIER_OPS)) {
+      const withArg = await probeOp(name, true);
+      await new Promise((r) => setTimeout(r, 80));
+      /* An operation that exists but takes different arguments answers the
+         argument-free form differently from one that does not exist at all,
+         so the second shape is what separates them. */
+      const bare = withArg.named ? null : await probeOp(name, false);
+      if (bare) await new Promise((r) => setTimeout(r, 80));
+      const denied = /PERMISSION_DENIED|UNAUTHENTICATED|FORBIDDEN/i.test(withArg.err + (bare?.err || ''));
       ops.push({
         operation: name,
-        /* Three answers, and only the first two are about us: absent means no
-           credential will ever help, denied means the right login would. */
-        verdict: d?.transportError ? 'transport'
-          : missing ? 'no such operation'
-            : /PERMISSION_DENIED|UNAUTHENTICATED|FORBIDDEN/i.test(err) ? 'exists — denied to this session'
-              : err ? 'exists — wrong arguments' : 'answered',
-        detail: (d?.transportError || err || '').slice(0, 200) || null,
+        /* Four answers, and they lead four different places: absent means no
+           credential will ever help; denied means the right login would;
+           wrong-arguments means it is there and we have not found its shape;
+           unnamed on a server that names things is the one worth chasing. */
+        verdict: withArg.transport ? 'transport'
+          : withArg.named && (!bare || bare.named) ? 'no such operation'
+            : denied ? 'exists — denied to this session'
+              : /Unknown argument|used in position expecting/i.test(withArg.err) ? 'exists — wrong arguments'
+                : !withArg.err ? 'answered'
+                  : namesItsMissingOps ? 'refused without naming it — worth chasing' : 'inconclusive',
+        detail: (withArg.transport || withArg.err || '').slice(0, 200) || null,
+        without_arguments: bare ? (bare.err || 'answered').slice(0, 160) : null,
       });
-      await new Promise((r) => setTimeout(r, 80));
     }
 
     const found = fields.filter((f) => f.exists);
     res.json({
       driver: uuid, org: org.fleet,
       introspection,
+      /* The control, stated before any verdict that depends on it. Without it
+         "the server would not name this field" is a Rorschach blot. */
+      control: {
+        /* Stated first and checked first: a run against a dead session
+           refuses everything, and thirty refusals read exactly like "Uber
+           does not publish a tier" when they mean "we did not ask anybody". */
+        positive: positive
+          ? { field: 'driverInfo.recognitionRating', value: positive.value,
+            session_works: sessionWorks, note: positive.note }
+          : null,
+        bare_object: bareObject
+          ? { field: 'driver.complianceInfo', signature_fires: objectSignatureFires, note: bareObject.note }
+          : null,
+        fields: controls, names_its_absent_fields: namesItsAbsences,
+        operation: control ? { probe: CONTROL_OP, named: control.named, detail: (control.err || '').slice(0, 160) } : null,
+        names_its_absent_operations: namesItsMissingOps,
+      },
       /* Said plainly, because the three outcomes lead to three different next
          moves and a bare list of nulls reads as all of them at once. */
       verdict: described ? 'the schema described itself — read introspection[], which is the whole answer'
-        : found.some((f) => f.value != null) ? 'a tier-like field answered — see fields[]'
-        : found.length ? 'fields exist but answered null for this driver'
-          : fields.some((f) => f.suggests) ? 'no candidate existed, but the schema suggested real names'
-            : ops.some((o) => o.verdict.startsWith('exists')) ? 'no field, but an operation exists and is denied'
-              : 'nothing on this surface names a driver tier',
+        : !sessionWorks
+          ? 'VOID: the known-real field recognitionRating did not answer, so this session is not working '
+            + 'and no refusal below would mean anything. Re-paste the supplier cookie and ask again.'
+          : !namesItsAbsences ? 'inconclusive: this server does not name the fields it lacks, so a refusal proves nothing'
+          : found.some((f) => f.value != null) ? 'a tier-like field answered — see fields[]'
+            : found.length ? (objectSignatureFires
+              ? 'fields the server would not name — see fields_that_exist[] and their retries'
+              : 'fields the server would not name, but it also does not announce bare objects, so those '
+                + 'refusals are inconclusive rather than positive')
+              : fields.some((f) => f.suggests) ? 'no candidate existed, but the schema suggested real names'
+                : ops.some((o) => o.verdict.startsWith('exists') || o.verdict.startsWith('refused'))
+                  ? 'no tier field on GetDriver, but an operation is there — see operations_that_exist[]'
+                  : 'nothing on this surface names a driver tier, and the control proves the server would have said so',
       fields_that_exist: found,
       suggestions: [...new Set(fields.map((f) => f.suggests).filter(Boolean))],
-      operations_that_exist: ops.filter((o) => o.verdict.startsWith('exists') || o.verdict === 'answered'),
+      operations_that_exist: ops.filter((o) => o.verdict.startsWith('exists') || o.verdict.startsWith('refused')
+        || o.verdict === 'answered'),
       fields, ops,
     });
   }));
