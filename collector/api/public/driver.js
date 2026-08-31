@@ -705,18 +705,41 @@ async function tabActivity(root, id) {
     /* What the day was actually worth, which the Fares column beside it cannot
        say. Fares are null on every Uber-only day \u2014 85 of this fleet's 119
        active drivers \u2014 because Uber's trip export carries no fare column;
-       the money is in the statement, at day grain, and driver_day resolves the
-       two into one comparable figure per platform. money_source ships with it
-       so the cell states its own basis rather than leaving a reader to assume
-       one. */
+       the money is in the statement, and driver_day resolves the two into one
+       comparable figure per platform.
+
+       Marked where it is an ALLOCATION rather than a measurement. Uber files
+       this fleet weekly, so a week's earnings are divided across seven days
+       and each of those days carries a seventh: real money, right at the week,
+       and a figure nobody took on any single day inside it. The first version
+       of this column shipped without the mark and production answered 309.88
+       for seven days running \u2014 which reads as seven measurements. The
+       grain travels with the number now (sql/schema_v44.sql), and a cell that
+       cannot say it was measured says what it is instead. */
     { label: 'Money', key: 'money', num: true,
       absent: 'no channel this driver worked reported either a statement or a fare for these days',
-      render: (r) => (r.money == null ? '\u2014'
-        : money(r.money) + (r.money_source && r.money_source !== 'statement'
-          ? `<span class="dim" title="${r.money_source === 'fares'
-            ? 'the channel priced the bookings but filed no statement'
-            : 'one channel filed a statement and another reported only fares'}"> \u00b7 ${esc(r.money_source)}</span>`
-          : '')) },
+      render: (r) => {
+        if (r.money == null) return '\u2014';
+        /* Three states, not two. A window of one day is a measurement; a
+           window of seven is a share of one; and NO window recorded is neither
+           — an operator import, or a row written before the grain was carried.
+           Collapsing the third into either of the others is how a figure
+           nobody measured comes to be printed as one. */
+        const n = r.money_period_days;
+        const tag = n == null ? 'grain?' : n > 1 ? `1/${n}` : (r.money_source || 'day');
+        const why = n == null
+          ? 'the statement behind this figure does not record the period it covered, so whether '
+            + 'it was measured on this day is not something we can say'
+          : n > 1
+            ? `a ${n}-day statement divided across its days \u2014 right for the period, not `
+              + 'measured on this day'
+            : r.money_source === 'fares'
+              ? 'the channel priced each booking on this day'
+              : r.money_source === 'mixed'
+                ? 'one channel filed a statement and another reported only fares'
+                : 'the channel filed this day';
+        return money(r.money) + `<span class="dim" title="${esc(why)}"> \u00b7 ${esc(tag)}</span>`;
+      } },
     /* Marked where the figure is our fold of the availability spans rather than
        a number the platform itself published \u2014 same column, two
        provenances, and a reader deserves to know which cell is which. */
@@ -750,6 +773,29 @@ async function tabActivity(root, id) {
       r.is_ramadan ? 'Ramadan' : null,
     ].filter(Boolean).join(' · ') || '—' },
   ]));
+  /* Said once under the table rather than left to the tags in the cells: the
+     three columns to the right of Trips are measured over three different
+     windows, and a reader adding them across a row deserves to know that
+     before they do it. */
+  {
+     const spread = daily.filter((r) => r.money_period_days > 1);
+     const unknown = daily.filter((r) => r.money != null && r.money_period_days == null);
+     if (spread.length || unknown.length) {
+       tbl.body.append(el('p', 'cap', esc(
+         (spread.length
+           ? `Money on ${fmt(spread.length)} of these days is a share of a longer statement \u2014 `
+             + `${[...new Set(spread.map((r) => r.money_period_days))].sort((a, b) => a - b)
+               .map((n) => `${n}-day`).join(' and ')} periods divided across the days they cover. `
+             + 'The total over a whole period is what the platform reported; the figure on any one '
+             + 'day inside it is not something anybody measured. Fares, where a channel prices its '
+             + 'bookings, are per booking and need no such caveat. '
+           : '')
+         + (unknown.length
+           ? `${fmt(unknown.length)} carry money from a statement that does not record the period `
+             + 'it covered, so whether those are daily figures is not something this page can say.'
+           : ''))));
+     }
+  }
 
   cust.body.innerHTML = '';
   const custRows = Array.isArray(custody) ? custody : (custody.rows || []);

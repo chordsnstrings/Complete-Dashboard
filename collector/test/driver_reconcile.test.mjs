@@ -82,10 +82,17 @@ await ev('2026-08-03T22:00:00+04:00', 'OFFLINE');
 
 /* The statement, filed under the NAME with no platform id — which is how this
    table actually arrives (sql/schema_v25.sql:25). */
-for (const [day, net, tips, cash] of [['2026-08-01', 420, 30, 110], ['2026-08-02', 380, 12, 90]]) {
-  await q(`INSERT INTO driver_statement_day (platform,fleet_id,driver_name,day,gross,fees,net,tips,cash,trips,source)
-           VALUES ('uber','ecosine',$1,$2,$3,-40,$4,$5,$6,4,'statement')`,
-    [NAME, day, net + 40, net, tips, cash]);
+/* Two grains on purpose. Uber files this fleet WEEKLY and src/rollup.js
+   divides each statement across its seven days, so most days on the real page
+   carry a seventh of one number — identical values seven in a row, which reads
+   as seven measurements unless the window travels with the money. One day here
+   is filed daily and one is a share of a week, so both render paths are
+   exercised. */
+for (const [day, net, tips, cash, periodDays] of [
+  ['2026-08-01', 420, 30, 110, 7], ['2026-08-02', 380, 12, 90, 1]]) {
+  await q(`INSERT INTO driver_statement_day (platform,fleet_id,driver_name,day,gross,fees,net,tips,cash,trips,period_days,source)
+           VALUES ('uber','ecosine',$1,$2,$3,-40,$4,$5,$6,4,$7,'statement')`,
+    [NAME, day, net + 40, net, tips, cash, periodDays]);
 }
 
 await refreshDriverDays(db);
@@ -168,6 +175,24 @@ console.log('\nmoney reaches the day from whichever feed measured it');
 check('the statement lands on the day even though it carries no platform id',
   d1?.money > 0, `driver_statement_day keys on the NAME — ${d1?.money}`);
 check('…and the day says which feed it came from', d1?.money_source === 'statement', String(d1?.money_source));
+/* The grain, which is the difference between a measurement and a share of one.
+   These fixture statements are filed per day, so period_days is 1 — but the
+   column has to travel, because Uber files this fleet WEEKLY and a seventh of
+   a week shown in a daily cell is a number nobody took. Production made the
+   point within an hour of the Money column shipping: 309.88 for seven
+   consecutive days, then 446.84 for the next seven. */
+check('the money carries the report window it was measured over',
+  d1?.money_period_days === 7, String(d1?.money_period_days));
+check('…and a day the channel actually filed says one',
+  daily.find((r) => String(r.day).startsWith('2026-08-02'))?.money_period_days === 1);
+{
+  const src = readFileSync('api/public/driver.js', 'utf8');
+  check('and the cell marks an allocated figure rather than printing it plain',
+    /const n = r\.money_period_days;/.test(src) && /divided across its days/.test(src)
+    && /n == null \? 'grain\?'/.test(src),
+    'a weekly total in a daily cell is indistinguishable from seven measurements, '
+    + 'and an unrecorded window is neither measured nor spread');
+}
 const earn = await get(`/api/driver/earnings?id=${ID}&${W}`);
 check('tips reach the earnings tab through the same name match',
   Number(earn.tips) === 42, String(earn.tips));
@@ -197,6 +222,33 @@ check('…and it carries the fleet the account belongs to',
     row?.person_key === 'mohammed selim',
     `${row?.person_key} — falling back to the raw id would split one human in two`);
 }
+
+/* Last, deliberately: these two rows are inserted AFTER the driver_day
+   comparison above, because that check is between a live fold and a stored
+   record and adding trips without re-running the rollup would make them
+   disagree for a reason that is not the one under test. */
+console.log('\nthe same two data-quality rules as everything else');
+
+/* A complimentary ride and an odometer-derived distance of 12,000 km are both
+   real rows and neither is a measurement of what the tile claims. trip_norm
+   marks them (sql/schema_v18.sql:83,88) and src/rollup.js applies both when it
+   writes driver_day — the driver page's own km and revenue did not, so the
+   page disagreed with the record beside it and with the settlement page. */
+await trip('t-foc', '2026-08-02T20:00:00+04:00', '2026-08-02T20:20:00+04:00', { price: 90 });
+await q(`UPDATE trip SET payment_type = 'foc-complimentary' WHERE external_id = 't-foc'`);
+await trip('t-odo', '2026-08-02T21:00:00+04:00', '2026-08-02T21:10:00+04:00', { km: 12000 });
+{
+  const k2 = await get(`/api/driver/kpis?id=${ID}&${W}`);
+  const dd = await get(`/api/driver/daily?id=${ID}&${W}`);
+  const d2 = dd.find((r) => String(r.day).startsWith('2026-08-02'));
+  check('a complimentary ride is not revenue',
+    !(+k2.revenue > 0) && !(+d2.revenue > 0), `${k2.revenue} / ${d2.revenue}`);
+  check('…and an implausible odometer reading is not distance',
+    +k2.km < 500 && +d2.km < 500, `${k2.km} / ${d2.km}`);
+  check('…but both trips are still counted as trips, because they happened',
+    k2.trips === 12, String(k2.trips));
+}
+
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

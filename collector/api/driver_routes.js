@@ -589,13 +589,26 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const [t] = await q(
       `SELECT count(*)::int trips,
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days_worked,
-              round(sum(distance_km)::numeric,0) km, round(avg(distance_km)::numeric,1) avg_km,
+              /* has_distance and has_fare, the same two rules the rest of the
+                 product applies and these two figures did not.
+                 ─────────────────────────────────────────────────────────
+                 sql/schema_v18.sql:83 excludes complimentary rides from
+                 has_fare because counting a ride given away as revenue made
+                 the fleet headline disagree with the settlement page by
+                 AED 320 over one window, and :88 excludes odometer-derived
+                 FMS distances outside a sane range. Both were being applied
+                 at the fleet grain, in src/rollup.js when it wrote
+                 driver_day, and on this endpoint's own priced_km — but not to
+                 the km and revenue on the tiles, so a driver's page answered
+                 a question differently from the page that links to it. */
+              round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
+              round(avg(distance_km) FILTER (WHERE has_distance)::numeric,1) avg_km,
               -- avg() skips NULLs, so avg_km is over the trips that REPORT a
               -- distance and km/trips does not reproduce it. Returned so the
               -- tile can print the denominator it actually used.
-              count(distance_km)::int trips_with_distance,
-              round(sum(price)::numeric,2) revenue,
-              round(avg(price)::numeric,2) avg_fare,
+              count(*) FILTER (WHERE has_distance)::int trips_with_distance,
+              round(sum(price) FILTER (WHERE has_fare)::numeric,2) revenue,
+              round(avg(price) FILTER (WHERE has_fare)::numeric,2) avg_fare,
               -- Normalised, because the four platforms do not share a status
               -- vocabulary: Bolt says 'finished' for a completed trip and
               -- 'client_did_not_show' / 'driver_did_not_respond' /
@@ -812,8 +825,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               count(*) FILTER (WHERE outcome='completed')::int completed,
               count(*) FILTER (WHERE outcome='not_completed')::int cancelled,
               count(*) FILTER (WHERE outcome IS NOT NULL)::int outcome_n,
-              round(sum(distance_km)::numeric,1) km,
-              round(sum(price)::numeric,2) revenue,
+              -- The same two rules as the tiles above and as driver_day: a
+              -- complimentary ride is not revenue, and an odometer-derived
+              -- distance outside a sane range is not a distance.
+              round(sum(distance_km) FILTER (WHERE has_distance)::numeric,1) km,
+              round(sum(price) FILTER (WHERE has_fare)::numeric,2) revenue,
               min(requested_at) first_trip_at, max(requested_at) last_trip_at,
               extract(epoch from (min(requested_at AT TIME ZONE 'Asia/Dubai')::time))/3600 first_hour,
               extract(epoch from (max(requested_at AT TIME ZONE 'Asia/Dubai')::time))/3600 last_hour,
@@ -861,6 +877,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        SELECT day, sum(online_min) online_min, sum(on_job_min) on_job_min,
               sum(idle_online_min) idle_online_min,
               round(sum(money)::numeric, 2) money,
+              /* The report window the money was measured over. Uber files this
+                 fleet's earnings WEEKLY and src/rollup.js divides each one
+                 across its seven days, so seven consecutive days carry a
+                 seventh of one number each — identical values, and none of
+                 them a measurement of its own day. Production made the point
+                 the moment this column shipped: 309.88 for seven days running,
+                 then 446.84 for the next seven. The figure is right at the
+                 week and allocated at the day, and the page has to be able to
+                 say which. See sql/schema_v44.sql. */
+              max(money_period_days) money_period_days,
               /* mixed the moment a person's day was reached two ways — one
                  platform filing a statement, another reporting only fares. */
               CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
@@ -911,6 +937,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                revenue beside it is fares only, which is null on every
                Uber-only day — 85 of this fleet's 119 active drivers. */
             round(k.money::numeric,2) AS money, k.money_source,
+            k.money_period_days,
             round(h.earnings::numeric,2) platform_earnings,
             w.temp_max, w.precipitation, c.is_ramadan
      FROM spine LEFT JOIN t USING (day)

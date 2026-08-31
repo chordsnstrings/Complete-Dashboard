@@ -360,6 +360,11 @@ const dailyFor = (id) => {
          page that shows fares alone still look populated. */
       money: +(km * rnd(2.4, 3.9)).toFixed(2),
       money_source: b % 4 === 0 ? 'mixed' : 'statement',
+      /* The window that money was measured over. Uber files this fleet weekly,
+         so most of these are a seventh of a week rather than a day somebody
+         measured — a fixture where every day looked measured would let a page
+         that states an allocation as a fact still look right. */
+      money_period_days: b % 4 === 0 ? 1 : 7,
       temp_max: +rnd(33, 44).toFixed(1), precipitation: 0, is_ramadan: false,
     });
   }

@@ -636,6 +636,12 @@ export async function refreshStatements(db = pool) {
                p.platform, p.fleet_id,
                coalesce(p.driver_name, p.driver_ext_id) AS driver_name,
                p.driver_ext_id, d.day::date AS day,
+               /* Divided by the days the report covered — and the divisor is
+                  kept beside the quotient. Uber files this fleet weekly, so
+                  seven consecutive rows carry a seventh of one number each,
+                  and without period_days a reader has no way to tell that from
+                  seven days that were each measured. See sql/schema_v44.sql. */
+               p.days::int AS period_days,
                p.net / p.days AS net, p.tips / p.days AS tips,
                p.salik / p.days AS salik, p.cash / p.days AS cash
         FROM per p
@@ -650,19 +656,23 @@ export async function refreshStatements(db = pool) {
       folded AS (
         SELECT platform, fleet_id, max(driver_name) AS driver_name,
                max(driver_ext_id) AS driver_ext_id, day,
+               -- The COARSEST window behind the folded figure: it is what
+               -- limits what can be claimed about the day.
+               max(period_days) AS period_days,
                sum(net) AS net, sum(tips) AS tips, sum(salik) AS salik, sum(cash) AS cash
         FROM resolved
         GROUP BY platform, fleet_id, lower(regexp_replace(driver_name, '\\s+', ' ', 'g')), day
       )
       INSERT INTO driver_statement_day
         (platform, fleet_id, driver_name, driver_ext_id, day,
-         net, tips, salik, cash, source, pseudo)
+         net, tips, salik, cash, period_days, source, pseudo)
       SELECT platform, fleet_id, driver_name, driver_ext_id, day,
-             net, tips, salik, cash, 'uber_rest', false
+             net, tips, salik, cash, period_days, 'uber_rest', false
       FROM folded
       ON CONFLICT (platform, fleet_id, name_key, day, source) DO UPDATE SET
         net = EXCLUDED.net, tips = EXCLUDED.tips, salik = EXCLUDED.salik,
-        cash = EXCLUDED.cash, driver_ext_id = EXCLUDED.driver_ext_id,
+        cash = EXCLUDED.cash, period_days = EXCLUDED.period_days,
+        driver_ext_id = EXCLUDED.driver_ext_id,
         ingested_at = now()`);
     await db.query('COMMIT');
     return r.rowCount ?? 0;
@@ -814,7 +824,12 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
               round(sum(tips)::numeric, 2)  AS tips,
               round(sum(salik)::numeric, 2) AS salik,
               round(sum(cash)::numeric, 2)  AS cash,
-              sum(trips)::int               AS trips
+              sum(trips)::int               AS trips,
+              /* The coarsest report window behind this platform's money for
+                 the day. A statement filed weekly is a seventh of a week on
+                 each of its days (sql/schema_v44.sql), and a page showing the
+                 figure has to be able to say so. */
+              max(period_days)              AS period_days
          FROM driver_statement_day
         WHERE source <> 'ledger' ${dayBound}
         /* Named, not positional. This was GROUP BY 1, 3, 4 and adding a column
@@ -833,6 +848,22 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
               /* One term per platform, then summed. NULL only when no platform
                  on the day reported either kind of money. */
               round(sum(coalesce(s2.net, f.fares))::numeric, 2) AS money,
+              /* And the grain that figure was measured at, taken the same way
+                 round: a fare is priced on the booking, so its window is the
+                 day itself; a statement carries whatever window it was filed
+                 on. The COARSEST term across the platforms on the day, since
+                 that is what limits the claim.
+
+                 NULL where any contributing statement does not record its
+                 window — an operator import, or a row written before
+                 sql/schema_v44.sql. Deliberately not defaulted to 7: guessing
+                 the grain is the same class of mistake as guessing the money,
+                 and max() alone would have silently dropped the unknown term
+                 and reported the day as measured. */
+              CASE WHEN bool_or(CASE WHEN s2.net IS NOT NULL THEN s2.period_days IS NULL
+                                     WHEN f.fares IS NOT NULL THEN false END) THEN NULL
+                   ELSE max(CASE WHEN s2.net IS NOT NULL THEN s2.period_days
+                                 WHEN f.fares IS NOT NULL THEN 1 END) END AS money_period_days,
               /* The name the STATEMENT filed under, kept so a day with money
                  and no trips can still be attributed to a person. Without it
                  the fold falls back to the account id on exactly those days,
@@ -919,8 +950,8 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
                              cancelled, km, fares, unknown_end, first_min, last_min, span_min,
                              on_job_min, wait_min, longest_wait_min, online_min, idle_online_min,
                              stmt_gross, stmt_fees, stmt_net, stmt_tips, stmt_salik, stmt_cash,
-                             stmt_trips, payout, payout_cash, money, money_source, person_key,
-                             computed_at)
+                             stmt_trips, payout, payout_cash, money, money_source,
+                             money_period_days, person_key, computed_at)
      SELECT d.driver_ext_id, d.day, coalesce(a.fleet_id, acc.fleet_id) AS fleet_id,
             a.platforms, a.plates,
             coalesce(a.trips, 0), coalesce(a.completed, 0), coalesce(a.cancelled, 0),
@@ -946,6 +977,7 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
                  WHEN m.pf_statement > 0 AND m.pf_fares > 0 THEN 'mixed'
                  WHEN m.pf_statement > 0 THEN 'statement'
                  ELSE 'fares' END,
+            m.money_period_days,
             /* The same fold the money was matched on, stored so a reader can
                count people at any grain without joining back to the trips. */
             ${PERSON("coalesce(a.driver_name, m.driver_name, acc.driver_name)", 'd.driver_ext_id')},
@@ -969,7 +1001,8 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
        stmt_salik = EXCLUDED.stmt_salik, stmt_cash = EXCLUDED.stmt_cash,
        stmt_trips = EXCLUDED.stmt_trips, payout = EXCLUDED.payout,
        payout_cash = EXCLUDED.payout_cash, money = EXCLUDED.money,
-       money_source = EXCLUDED.money_source, person_key = EXCLUDED.person_key,
+       money_source = EXCLUDED.money_source,
+       money_period_days = EXCLUDED.money_period_days, person_key = EXCLUDED.person_key,
        computed_at = now()`, p);
 
   const { rows } = await db.query('SELECT count(*)::int n FROM driver_day');
