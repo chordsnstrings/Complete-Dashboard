@@ -68,9 +68,16 @@ await q(`INSERT INTO driver_earnings_component (platform, driver_ext_id, period_
 await q(`INSERT INTO ledger_entry (platform, external_id, fleet_id, driver_ext_id, driver_name, event_at, category, amount, currency)
          VALUES ('yango','L-1','ecosine','d1','Ann Ahmed','2026-08-05T10:00:00+04','commission',-33,'AED'),
                 ('yango','L-2','ecosine','d1','Ann Ahmed','2026-08-06T10:00:00+04','top_up',500,'AED')`);
-/* And the operator's own import, for a month the APIs no longer serve. */
+/* And the operator's own import, for a month the APIs no longer serve.
+   TWO fleets, one person, one day — which is the ordinary case here, because
+   Ecosine and Egari share drivers. driver_statement_day keys on the fleet and
+   money_event did not, so these two rows collapsed onto one key and took the
+   ENTIRE statement import down with them, on every rollup, behind a warning
+   nobody read. Measured on production: seven sources present, statement_import
+   absent. See sql/schema_v49.sql. */
 await q(`INSERT INTO driver_statement_day (platform, fleet_id, driver_name, driver_ext_id, day, gross, fees, net, tips, cash, source)
-         VALUES ('uber','ecosine','Ann Ahmed','d1','2026-08-02', 900, 100, 800, 20, 40, 'ledger')`);
+         VALUES ('uber','ecosine','Ann Ahmed','d1','2026-08-02', 900, 100, 800, 20, 40, 'ledger'),
+                ('uber','egari','Ann Ahmed','d1','2026-08-02', 400, 50, 350, 10, 15, 'ledger')`);
 
 await refreshRollups({ db });
 
@@ -91,7 +98,7 @@ check('so are the named lines inside them',
 check('the park ledger reaches the record for the first time',
   by('yango_park_ledger').length === 2, String(by('yango_park_ledger').length));
 check('and so does the operator’s own import',
-  by('statement_import').length === 1, String(by('statement_import').length));
+  by('statement_import').length === 2, String(by('statement_import').length));
 check('every row names the API that sent it, not just the channel',
   ev.every((r) => r.source && r.source !== r.platform), '');
 check('and every row carries an amount a provider actually sent',
@@ -140,8 +147,16 @@ console.log('\n/api/money/sources — the provenance page’s data');
 const { get } = await mountAll(db, { serverRoutes: true });
 const r = (await get('/api/money/sources?from=2026-08-01&to=2026-08-31')).body;
 check('it answers rows', Array.isArray(r.rows) && r.rows.length > 0, JSON.stringify(r).slice(0, 120));
-check('one row per API surface, channel and kind',
-  r.rows.length === new Set(r.rows.map((x) => `${x.source}|${x.platform}|${x.kind}`)).size);
+/* Per FLEET as well. The handler groups by (source, platform, fleet_id, kind)
+   and this assertion omitted the fleet — which passed only for as long as the
+   fixture held one business. Two fleets sharing a driver is the ordinary case
+   here, and it is the same omission that took the statement import down. */
+check('one row per API surface, channel, fleet and kind',
+  r.rows.length === new Set(r.rows.map((x) => `${x.source}|${x.platform}|${x.fleet_id}|${x.kind}`)).size,
+  JSON.stringify(r.rows.map((x) => [x.source, x.fleet_id, x.kind])));
+check('and the same surface in two fleets is two rows, not one merged one',
+  r.rows.filter((x) => x.source === 'statement_import').length === 2,
+  'AED 350 of one business must not be summed into AED 800 of another');
 check('each says how many figures the provider sent',
   r.rows.every((x) => x.rows_seen > 0));
 check('and separates the ones reported as a day from the ones reported as a span',
@@ -222,6 +237,30 @@ check('a channel filter leaves only that channel',
   uberOnly.rows.every((x) => x.platform === 'uber') && uberOnly.rows.length > 0);
 check('and the fleet filter works too',
   (await get('/api/money/sources?from=2026-08-01&to=2026-08-31&fleet=ecosine')).body.rows.length > 0);
+
+console.log('\nthe fleet is part of what makes a money event distinct');
+
+{
+  const si = ev.filter((r) => r.source === 'statement_import');
+  check('one person, one day, two businesses, two events',
+    si.length === 2 && new Set(si.map((r) => r.fleet_id)).size === 2,
+    JSON.stringify(si.map((r) => [r.fleet_id, r.amount])));
+  check('and neither is silently the other',
+    Number(si.find((r) => r.fleet_id === 'ecosine')?.amount) === 800
+    && Number(si.find((r) => r.fleet_id === 'egari')?.amount) === 350,
+    'a key without the fleet collapsed AED 350 of one business into AED 800 of another');
+  check('no key column is null, because a key cannot hold one',
+    ev.every((r) => r.fleet_id != null && r.source && r.platform && r.kind
+      && r.category != null && r.driver_ext_id != null && r.external_ref != null),
+    'fleet_id joined the primary key in v49 and every source coalesces it now');
+}
+
+/* The check that would have caught this the day it started, rather than after
+   however many months of a page quietly missing a source. */
+check('every money source that was asked for actually landed',
+  new Set(ev.map((r) => r.source)).size >= 5,
+  'refreshMoneyEvents catches per source so one broken table cannot cost the others — '
+  + 'which is right, and is also why a source that fails every single pass is invisible');
 
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);

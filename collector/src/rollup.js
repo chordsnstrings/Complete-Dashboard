@@ -322,6 +322,12 @@ export async function refreshRollups(opts = {}) {
    NULL day, because it is one measurement of seven days and not seven
    measurements. Spreading it is a modelling choice, and modelling choices
    belong somewhere a reader can see them. */
+/* fleet_id is coalesced on every source below because it is part of the key
+   now, and a key cannot hold NULL. Two fleets' money is not the same money:
+   Ecosine and Egari share drivers, so one person on one day is two events, and
+   a key without the fleet collapsed them and killed the whole statement
+   import on every rollup — silently, because the refresh catches per source so
+   one broken table cannot cost the other seven. See sql/schema_v49.sql. */
 const MONEY_SOURCES = [
   /* Every trip that carries a price. Uber's export has no price column at all,
      so this is Yango, the hotel channel and Bolt — and the row keys on the
@@ -333,7 +339,7 @@ const MONEY_SOURCES = [
                          WHEN 'hotel' THEN 'hotel_trip_report'
                          WHEN 'bolt'  THEN 'bolt_order_history'
                          ELSE platform || '_trips' END,
-           platform, fleet_id, 'fare', '', coalesce(driver_ext_id, ''),
+           platform, coalesce(fleet_id, ''), 'fare', '', coalesce(driver_ext_id, ''),
            driver_name, plate,
            local_day, local_day, local_day,
            price, coalesce(currency, 'AED'), external_id
@@ -350,7 +356,7 @@ const MONEY_SOURCES = [
     SELECT CASE platform WHEN 'uber' THEN 'uber_graphql_breakdown'
                          WHEN 'yango' THEN 'yango_driver_summary'
                          ELSE platform || '_performance' END,
-           platform, fleet_id, 'payout', 'net_outstanding', driver_ext_id,
+           platform, coalesce(fleet_id, ''), 'payout', 'net_outstanding', driver_ext_id,
            driver_name, plate, period_start, period_end,
            CASE WHEN period_start = period_end THEN period_start END,
            earnings, coalesce(currency, 'AED'), ''
@@ -366,7 +372,7 @@ const MONEY_SOURCES = [
       driver_name, plate, period_start, period_end, day, amount, currency, external_ref)
     SELECT CASE WHEN c.platform = 'uber' AND c.category IN ('net_fare','reimbursements','expenses')
                   THEN 'uber_rest_payments' ELSE c.platform || '_components' END,
-           c.platform, c.fleet_id, 'component', c.category, c.driver_ext_id,
+           c.platform, coalesce(c.fleet_id, ''), 'component', c.category, c.driver_ext_id,
            c.driver_name, NULL, c.period_start, c.period_end,
            CASE WHEN c.period_start = c.period_end THEN c.period_start END,
            c.amount, coalesce(c.currency, 'AED'), coalesce(c.parent, '')
@@ -381,7 +387,7 @@ const MONEY_SOURCES = [
   { name: 'ledger', sql: `
     INSERT INTO money_event (source, platform, fleet_id, kind, category, driver_ext_id,
       driver_name, plate, period_start, period_end, day, amount, currency, external_ref)
-    SELECT 'yango_park_ledger', platform, fleet_id, 'ledger', coalesce(category, ''),
+    SELECT 'yango_park_ledger', platform, coalesce(fleet_id, ''), 'ledger', coalesce(category, ''),
            coalesce(driver_ext_id, ''), driver_name, NULL,
            (event_at AT TIME ZONE 'Asia/Dubai')::date,
            (event_at AT TIME ZONE 'Asia/Dubai')::date,
@@ -400,7 +406,7 @@ const MONEY_SOURCES = [
   { name: 'import', sql: `
     INSERT INTO money_event (source, platform, fleet_id, kind, category, driver_ext_id,
       driver_name, plate, period_start, period_end, day, amount, currency, external_ref)
-    SELECT 'statement_import', platform, fleet_id, 'statement', 'net',
+    SELECT 'statement_import', platform, coalesce(fleet_id, ''), 'statement', 'net',
            coalesce(driver_ext_id, ''), driver_name, NULL, day, day, day,
            net, coalesce(currency, 'AED'), name_key
       FROM driver_statement_day
