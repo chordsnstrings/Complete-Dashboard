@@ -173,7 +173,11 @@ export function periodPartial(v, now = Date.now()) {
       : yr ? `${yr[1]}-12-31` : null;
   if (!end) return false;
   const [from] = namedWindow(name, now) || [];
-  return end > today && from <= today;
+  /* CONTAINS today, not "ends after" it. On the 31st of August the span
+     2026-08 ends today — and today itself is a few hours old, so the figure
+     is still period-to-date. Written as `end > today` it disagreed with
+     `period=month` over the identical dates on exactly one day a month. */
+  return from <= today && end >= today;
 }
 
 export function periodWindow(v, now = Date.now()) {

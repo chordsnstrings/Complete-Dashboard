@@ -171,6 +171,17 @@ console.log('\na span still running says so');
     check(`${name} is ${want ? 'still running' : 'finished'}`,
       periodPartial(name, at) === want, String(periodPartial(name, at)));
   }
+  /* The last day of a span is the one that used to disagree with itself: on
+     the 31st of August, `month` and `2026-08` resolve to identical dates, and
+     one of them called itself whole. */
+  const last = new Date('2026-08-31T08:30:00+04:00');
+  check('a named month containing today is partial on its own last day too',
+    periodPartial('2026-08', last) === true && periodPartial('month', last) === true);
+  check('and is finished the moment the next one starts',
+    periodPartial('2026-08', new Date('2026-09-01T01:00:00+04:00')) === false);
+  check('the two ways of naming the same span agree about it',
+    JSON.stringify(periodWindow('2026-08', last)) === JSON.stringify(periodWindow('month', last)),
+    `${JSON.stringify(periodWindow('2026-08', last))} vs ${JSON.stringify(periodWindow('month', last))}`);
   check('and the echo names the span that was asked for, not null',
     isPeriod('2026-08') && isPeriod('2026-Q3') && isPeriod('2026'));
 }
