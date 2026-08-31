@@ -113,10 +113,18 @@ const bare = code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g
 const probe = readFileSync('api/probe.js', 'utf8');
 const bareProbe = probe.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
 
+/* generateReport takes a report type now, because three are collected. The
+   audit must still ask for the TRIP one — auditing a different surface would
+   prove nothing about the one the trip table is built from — so what is pinned
+   is that trips are the default AND that the audit takes the default rather
+   than naming a type of its own. */
 check('the audit reads the same report type the backfill writes from',
-  /reportType: 'REPORT_TYPE_TRIP_ACTIVITY'/.test(bare)
+  /reportType = 'REPORT_TYPE_TRIP_ACTIVITY'/.test(bare)
   && /const id = await generateReport\(from, to\);/.test(bare),
   'auditing a different surface would prove nothing about the one we collect');
+check('and the trip pull takes that default too, so the two cannot drift apart',
+  /const id = await generateReport\(s, e\);/.test(bare),
+  'if the backfill ever names a type the audit does not, the audit stops auditing the backfill');
 check('it compares against OUR rows for the same fleet, not the whole table',
   /WHERE platform = 'uber' AND fleet_id = \$1/.test(bare),
   'the two fleets are two orgs; one report can only answer for one of them');

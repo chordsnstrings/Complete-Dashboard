@@ -19,7 +19,14 @@ check('report poll budget is minutes, not one minute',
   uber.match(/budgetMs = (\d+)/)?.[1]);
 check('the poll backs off instead of a fixed interval', /wait = Math\.min\(wait \* /.test(uber));
 check('a server-side report failure stops the poll early', /failed server-side/.test(uber));
-check('the concurrency cap is waited out, not skipped', /CONCURRENCY_HINT/.test(uber) && /return generateReport\(start, end, attempt \+ 1\)/.test(uber));
+check('the concurrency cap is waited out, not skipped',
+  /CONCURRENCY_HINT/.test(uber) && /return generateReport\(start, end, attempt \+ 1/.test(uber));
+/* And the retry asks for the SAME report. generateReport takes a reportType
+   now — three report types are collected, not one — so a retry that dropped
+   the argument would wait out the busy slot and then quietly fetch trips where
+   the caller asked for driver quality, and upsert them as quality. */
+check('and a retry after a busy slot re-asks for the report it was asked for',
+  !/reportType/.test(uber) || /return generateReport\(start, end, attempt \+ 1, reportType\)/.test(uber));
 // A silent skip is what turned a broken backfill into a successful empty one.
 check('an unexpected chunk failure logs as an error, not a warning',
   /log\[expected \? 'info' : 'error'\]/.test(uber));
@@ -31,9 +38,26 @@ check('failed windows are named at the end of the run', /trip backfill left hole
    driver_performance for the period and driver_earnings_component for the
    tree, and a run that wrote 8,000 component rows and reported 0 is the same
    silence this check exists to break. */
+/* Pinned as a PROPERTY, not as a spelling. The union used to be written out
+   as `[...trips.chunks, ...perf.chunks]`, and asserting that literal meant the
+   check failed the moment a third sub-source was added — reporting a
+   regression for the one change that makes the invariant hold harder. What
+   matters is that EVERY sub-source pulled in collect() contributes its windows
+   to the run, so the count is derived from the pulls rather than written
+   twice. */
 check('the run records every window it attempted, not just a total',
-  (uber.match(/return \{ total(: total \+ comps)?, chunks \}/g) || []).length >= 2
-  && /const chunks = \[\.\.\.trips\.chunks, \.\.\.perf\.chunks\]/.test(uber));
+  (uber.match(/return \{ total(: total \+ comps)?, chunks \}/g) || []).length >= 2);
+{
+  const collect = uber.slice(uber.indexOf('export async function collect'));
+  const pulls = [...collect.matchAll(/const (\w+) = await pull\w+\(from, to, onStep, ck\)/g)].map((m) => m[1]);
+  const union = collect.match(/const chunks = \[([^\]]*)\]/)?.[1] || '';
+  check('and every sub-source in the pass contributes its windows, not just the first',
+    pulls.length >= 2 && pulls.every((v) => union.includes(`...${v}.chunks`)),
+    `pulls ${pulls.join(', ')} — union ${union.trim()}`);
+  check('and its rows reach the run total, so a sub-source cannot write silently',
+    pulls.every((v) => new RegExp(`${v}\\.total`).test(collect)),
+    'a run that wrote 8,000 rows and reported 0 is the silence this check exists to break');
+}
 /* BOTH sub-sources, not just the trip report. The earner-breakdown query asked
    for a field the response type does not have, so Uber rejected it on every
    window for the life of the collector — and because only the trip windows were

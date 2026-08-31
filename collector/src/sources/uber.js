@@ -31,10 +31,10 @@ const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
 // "succeeds" with zero rows. Wait the limit out rather than burning the run.
 const CONCURRENCY_HINT = /concurrent|too many|limit|in progress|rate/i;
 
-async function generateReport(start, end, attempt = 0) {
+async function generateReport(start, end, attempt = 0, reportType = 'REPORT_TYPE_TRIP_ACTIVITY') {
   const body = JSON.stringify({
     orgId: { uuid: { value: org().orgUuid } },
-    reportType: 'REPORT_TYPE_TRIP_ACTIVITY',
+    reportType,
     startDate: { value: iso(start) }, endDate: { value: iso(end) },
     childOrgUuids: [{ uuid: { value: org().orgUuid } }],
   });
@@ -46,7 +46,7 @@ async function generateReport(start, end, attempt = 0) {
       const wait = 60000 * (attempt + 1);
       log.warn(SRC, `report slot busy, waiting ${wait / 1000}s`, { attempt: attempt + 1 });
       await sleep(wait);
-      return generateReport(start, end, attempt + 1);
+      return generateReport(start, end, attempt + 1, reportType);
     }
     throw new Error('generate: ' + detail.slice(0, 300));
   }
@@ -167,6 +167,157 @@ async function pullTrips(from, to, onStep, checkpoint = null) {
   const failed = chunks.filter((c) => c.error && !c.expected).length;
   if (failed) log.error(SRC, 'trip backfill left holes', { failed, of: chunks.length,
     windows: chunks.filter((c) => c.error && !c.expected).map((c) => `${c.from}..${c.to}`).join(', ') });
+  return { total, chunks };
+}
+
+/* Quality, from the report nobody had asked for.
+   ─────────────────────────────────────────────────────────────────────────
+   driver_performance.acceptance_rate, cancellation_rate and completion_rate
+   have existed since the first schema and no collector has ever written one.
+   That is the whole reason the ACCEPTANCE tile on a driver's Quality tab is an
+   em-dash: not a missing column, a report never requested.
+
+   Two report types carry a Driver UUID, and only those are usable — the third,
+   REPORT_TYPE_DRIVER_PERFORMANCE, was probed the same day and identifies
+   drivers by name, email and phone with no uuid at all. Joining it would mean
+   folding names, which already merges seventeen of this fleet's hundred and
+   nineteen "drivers" into people who are the same person twice. It also
+   carries Hours on Job and Earnings/hr that nothing else has; when that is
+   worth the ambiguity it is a separate decision, taken openly.
+
+     REPORT_TYPE_DRIVER_QUALITY   uuid, confirmation / cancellation /
+                                  completion rates, ratings over four weeks and
+                                  over five hundred trips, and the disposition
+                                  of every dispatch
+     REPORT_TYPE_DRIVER_ACTIVITY  uuid, trips completed, time online, time on
+                                  trip — the platform's OWN hours, which for
+                                  Uber nothing has ever collected
+
+   Merged on the uuid into one row per driver per week, because they are two
+   views of the same driver-week and two rows would make every average in the
+   product double-count. */
+const QUALITY_REPORTS = ['REPORT_TYPE_DRIVER_QUALITY', 'REPORT_TYPE_DRIVER_ACTIVITY'];
+
+/* "0.87", "87%", "87 %" and "" all arrive in these columns depending on the
+   locale the report was generated under. A rate stored sometimes as a fraction
+   and sometimes as a percentage is worse than no rate, because every average
+   over the mixture is wrong and nothing looks broken. */
+export function rate(v) {
+  if (v == null || v === '') return null;
+  const s = String(v).trim();
+  const n = parseFloat(s.replace('%', ''));
+  if (!Number.isFinite(n)) return null;
+  return /%/.test(s) || n > 1.5 ? n / 100 : n;
+}
+export const num = (v) => {
+  const n = parseFloat(String(v ?? '').replace(/,/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+/* "1 : 06 : 30" — days, hours, minutes, and the report spaces it differently
+   in the two headers that carry it. */
+export function spanHours(v) {
+  if (!v) return null;
+  const p = String(v).split(':').map((x) => parseInt(x.trim(), 10));
+  if (p.some((x) => !Number.isFinite(x))) return null;
+  const [d, h, m] = p.length === 3 ? p : [0, p[0], p[1]];
+  return d * 24 + h + m / 60;
+}
+
+/* One driver-week, from whichever of the two reports is speaking. */
+export function qualityRow(r, ps, pe) {
+  const g = (...names) => { for (const n of names) if (r[n] != null && r[n] !== '') return r[n]; return null; };
+  const uuid = g('Driver UUID');
+  if (!uuid) return null;
+  const online = spanHours(g('Time online (days : hours: minutes)', 'Time online (days : hours : minutes)'));
+  const onTrip = spanHours(g('Time on trip (days : hours : minutes)', 'Time on trip (days : hours: minutes)'));
+  return {
+    platform: SRC, fleet_id: org().fleet, driver_ext_id: uuid,
+    driver_name: [g('Driver first name'), g('Driver surname')].filter(Boolean).join(' ') || null,
+    period_start: ps, period_end: pe,
+    trips: num(g('Trips completed')),
+    hours_online: online, hours_on_trip: onTrip,
+    /* Confirmation rate is the PERIOD measure of accepting dispatched work,
+       which is what a dated row should carry. The driver-app figures below are
+       rolling and current; writing one of those here would state something
+       true about today as though it were true about the week. */
+    acceptance_rate: rate(g('Confirmation rate')),
+    confirmation_rate: rate(g('Confirmation rate')),
+    cancellation_rate: rate(g('Cancellation rate')),
+    completion_rate: rate(g('Completion rate')),
+    acceptance_rate_app: rate(g("Driver's current acceptance rate as seen in driver app")),
+    cancellation_rate_app: rate(g("Driver's current cancellation rate as seen in driver app")),
+    rating: num(g('Driver ratings (last 4 weeks)')),
+    rating_500: num(g('Driver ratings (previous 500 trips)')),
+    trips_accepted: num(g('Trips accepted (excluding Trip Radar or similar)', 'Trips accepted')),
+    trips_rejected: num(g('Trips rejected')),
+    trips_cancelled: num(g('Trips cancelled')),
+    trips_cancelled_driver: num(g('Trips cancelled – Driver at fault', 'Trips cancelled - Driver at fault')),
+    trips_failed: num(g('Trips failed')),
+    trip_assignments: num(g('Total trips assignments')),
+    source_report: 'uber-report', raw: r,
+  };
+}
+
+/* Two reports become one row per driver, with the later one only FILLING what
+   the earlier left null. Overwriting would let DRIVER_ACTIVITY's trip count
+   silently replace DRIVER_QUALITY's, and the two count slightly different
+   things. */
+export function mergeQuality(into, row) {
+  const at = into.get(row.driver_ext_id);
+  if (!at) { into.set(row.driver_ext_id, row); return; }
+  for (const [k, v] of Object.entries(row)) {
+    if (v != null && (at[k] == null || at[k] === '')) at[k] = v;
+  }
+}
+
+async function pullDriverQuality(from, to, onStep, checkpoint = null) {
+  let total = 0;
+  const chunks = [];
+  /* Whole provider weeks. The report aggregates over whatever window it is
+     given, so the window IS the grain, and driver_performance is keyed on
+     (period_start, period_end) — an arbitrary seven days from whenever a run
+     began would key a second row against the same week's work. */
+  const weeks = [...weekChunks(from, to)].reverse();
+  for (const w of weeks) {
+    const ps = iso(w.start), pe = iso(w.end);
+    const chunk = { from: ps, to: pe, rows: 0, error: null };
+    if (checkpoint?.has(`quality ${ps}..${pe}`)) {
+      chunk.skipped = true; chunks.push(chunk); continue;
+    }
+    await onStep?.({ window: `quality ${ps}..${pe}`, index: chunks.length, of: weeks.length, rows_so_far: total });
+    const merged = new Map();
+    try {
+      for (const type of QUALITY_REPORTS) {
+        const id = await generateReport(w.start, w.end, 0, type);
+        const url = await downloadReport(id);
+        const { data: csv } = await http(url, { expect: 'text', timeoutMs: 180000 });
+        for (const r of parse(csv, { columns: true, skip_empty_lines: true, bom: true })) {
+          const row = qualityRow(r, ps, pe);
+          if (row) mergeQuality(merged, row);
+        }
+        await sleep(4000);
+      }
+      const rows = [...merged.values()];
+      if (rows.length) {
+        total += await upsertMany('driver_performance', rows,
+          ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+      }
+      chunk.rows = rows.length;
+      log.info(SRC, `quality ${ps}..${pe}`, { drivers: rows.length,
+        rated: rows.filter((r) => r.rating != null).length,
+        with_acceptance: rows.filter((r) => r.acceptance_rate != null).length });
+    } catch (err) {
+      const msg = String(err?.message || err);
+      const expected = /invalid date range|retention|out of range/i.test(msg);
+      chunk.error = expected ? `outside retention: ${msg.slice(0, 160)}` : msg.slice(0, 300);
+      chunk.expected = expected;
+      log[expected ? 'info' : 'error'](SRC, `quality ${ps}..${pe} ${expected ? 'outside retention' : 'FAILED'}`,
+        { err: msg.slice(0, 240) });
+    }
+    chunks.push(chunk);
+    if (!chunk.error || chunk.expected) await checkpoint?.mark(`quality ${ps}..${pe}`, chunk.rows);
+    await sleep(4000);
+  }
   return { total, chunks };
 }
 
@@ -912,16 +1063,21 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
       };
       const trips = await pullTrips(from, to, onStep, ck);
       const perf = await pullEarnerBreakdowns(from, to, onStep, ck);
-      // Both sub-sources' windows, so a run that fetched every trip and no
+      /* Quality LAST, and it is the cheap one to lose. Trips and earnings are
+         the product; acceptance and ratings make it rankable. A run that runs
+         out of time or report slots should end having collected the money. */
+      const qual = await pullDriverQuality(from, to, onStep, ck);
+      // Every sub-source's windows, so a run that fetched every trip and no
       // earnings reads as partial rather than as ok.
-      const chunks = [...trips.chunks, ...perf.chunks];
+      const chunks = [...trips.chunks, ...perf.chunks, ...qual.chunks];
       // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
       // are still missing", and it is the difference between a hole that is
       // visible and one that is not.
       await logRun({ source: SRC, fleet_id: o.fleet, mode,
-        window_start: from, window_end: to, rows_written: trips.total + perf.total,
+        window_start: from, window_end: to,
+        rows_written: trips.total + perf.total + qual.total,
         chunks });
-      log.info(SRC, `done (${o.fleet})`, { trips: trips.total, perf,
+      log.info(SRC, `done (${o.fleet})`, { trips: trips.total, perf, quality: qual.total,
         windows_failed: trips.chunks.filter((c) => c.error).length, of: trips.chunks.length });
     } catch (e) {
       await logRun({ source: SRC, fleet_id: o.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
