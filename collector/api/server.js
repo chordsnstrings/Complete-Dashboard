@@ -2318,7 +2318,11 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
    request it was about to throw away. A row per request, and a duplicate of
    something already pending is REFUSED rather than merged, because "queued"
    for a job that will never run is the same lie in a different shape. */
-const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster'];
+/* `profile` is the weekly per-driver pull — Uber's rating, lifetime count,
+   ban and papers. On the list because the first thing anyone wants after
+   wiring a new surface is to run it once and look, and because a rating that
+   only ever arrives on a Monday cron is a rating nobody can check today. */
+const JOB_MODES = ['backfill', 'incremental', 'analyst', 'probe', 'timeline', 'timeline-roster', 'profile'];
 /* The fleets a run can be narrowed to. Taken from the configured Uber orgs
    rather than written down twice: a third fleet is a credential the operator
    pastes, not a code change, and a list that has to be edited alongside is a

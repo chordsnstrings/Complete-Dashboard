@@ -678,8 +678,17 @@ app.get('/api/driver/profile', (req, r) => {
        couple so the "first reading" state is reachable — a single reading must
        show that, not a change of zero. */
     rating_readings: i % 5 === 0 ? 1 : 4,
+    /* The readings behind the sparkline, oldest first. One driver gets a single
+       reading so the "first reading" state — which must NOT draw a flat line —
+       is reachable from the mock. */
+    rating_series: i % 5 === 0
+      ? [{ on: dayISO(0), rating: +(4.97 - i * 0.07).toFixed(2), trips: 9000 - i * 640 }]
+      : [0, 1, 2, 3].map((w) => ({
+        on: dayISO(21 - w * 7),
+        rating: +(4.97 - i * 0.07 - (i % 2 ? 1 : -1) * (0.02 + (i % 3) * 0.02) * (3 - w) / 3).toFixed(3),
+        trips: 9000 - i * 640 - (3 - w) * 40 })),
     rating_change: i % 5 === 0 ? null : {
-      change: +(((i % 3) - 1) * 0.04).toFixed(3), over_days: 7,
+      change: +((i % 2 ? 1 : -1) * (0.02 + (i % 3) * 0.02)).toFixed(3), over_days: 7,
       over_trips: 120 - i * 6,
       from: +(4.97 - i * 0.07 - ((i % 3) - 1) * 0.04).toFixed(2), to: +(4.97 - i * 0.07).toFixed(2) },
   });
@@ -729,8 +738,17 @@ app.get('/api/driver/kpis', (req, r) => {
        couple so the "first reading" state is reachable — a single reading must
        show that, not a change of zero. */
     rating_readings: i % 5 === 0 ? 1 : 4,
+    /* The readings behind the sparkline, oldest first. One driver gets a single
+       reading so the "first reading" state — which must NOT draw a flat line —
+       is reachable from the mock. */
+    rating_series: i % 5 === 0
+      ? [{ on: dayISO(0), rating: +(4.97 - i * 0.07).toFixed(2), trips: 9000 - i * 640 }]
+      : [0, 1, 2, 3].map((w) => ({
+        on: dayISO(21 - w * 7),
+        rating: +(4.97 - i * 0.07 - (i % 2 ? 1 : -1) * (0.02 + (i % 3) * 0.02) * (3 - w) / 3).toFixed(3),
+        trips: 9000 - i * 640 - (3 - w) * 40 })),
     rating_change: i % 5 === 0 ? null : {
-      change: +(((i % 3) - 1) * 0.04).toFixed(3), over_days: 7,
+      change: +((i % 2 ? 1 : -1) * (0.02 + (i % 3) * 0.02)).toFixed(3), over_days: 7,
       over_trips: 120 - i * 6,
       from: +(4.97 - i * 0.07 - ((i % 3) - 1) * 0.04).toFixed(2), to: +(4.97 - i * 0.07).toFixed(2) },
     reported_earnings: 9800 - i * 500, cash_earnings: 1200,

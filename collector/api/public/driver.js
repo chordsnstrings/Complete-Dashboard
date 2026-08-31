@@ -350,6 +350,86 @@ function tripMinutes(r) {
   return Math.round(ms / 60000);
 }
 
+/* A rating, its direction, and the readings behind it.
+   ─────────────────────────────────────────────────────────────────────────
+   A rating on its own is a fact nobody can act on. 4.71 tells an operator
+   nothing; 4.71 down from 4.86 over five weeks tells them to have a
+   conversation, and 4.71 up from 4.55 tells them to have the opposite one with
+   the same person. So the tile carries the number, the direction, and the
+   readings it is drawn from.
+
+   Three rules the house style already sets and this obeys:
+
+     COLOUR IS NEVER THE ONLY CARRIER. app.css says so where severity chips are
+     defined, and it is right: the direction is in the arrow and in the signed
+     number before it is in the hue. A reader who cannot see the green still
+     reads "up 0.04 over 7 days".
+
+     MOTION IS DECORATION. The line draws and the chip rises because a change
+     that appears fully formed is easy to miss on a page of twelve tiles — but
+     the whole thing is legible with animation off, and app.css:630 turns it
+     off globally for anyone who asks.
+
+     A SINGLE READING IS NOT A FLAT LINE. One point draws no sparkline and says
+     "first reading". Flat and unmeasured must not look the same. */
+function ratingTrend(k) {
+  const v = Number(k.rating);
+  if (!Number.isFinite(v)) return null;
+  const c = k.rating_change;
+  const pts = (k.rating_series || []).filter((r) => Number.isFinite(+r.rating));
+  const dir = c == null ? 'flat' : c.change > 0 ? 'up' : c.change < 0 ? 'down' : 'flat';
+
+  /* The sparkline, scaled to the readings and not to 0–5: a rating lives in
+     the top few hundredths of its range and drawn against the full scale every
+     driver is a straight line at the ceiling. Padded so a flat run sits in the
+     middle rather than on an edge. */
+  let spark = '';
+  if (pts.length >= 2) {
+    const W = 180, H = 14, P = 2;
+    const ys = pts.map((r) => +r.rating);
+    const lo = Math.min(...ys), hi = Math.max(...ys);
+    const pad = (hi - lo) < 0.02 ? 0.01 : (hi - lo) * 0.15;
+    const y0 = lo - pad, y1 = hi + pad;
+    const X = (i) => P + (i / (pts.length - 1)) * (W - P * 2);
+    const Y = (y) => H - P - ((y - y0) / Math.max(1e-9, y1 - y0)) * (H - P * 2);
+    const d = pts.map((r, i) => `${X(i).toFixed(1)},${Y(+r.rating).toFixed(1)}`).join(' L ');
+    const last = pts[pts.length - 1];
+    spark = `<svg class="rt-spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img"`
+      + ` aria-label="${esc(`${pts.length} readings, ${(+pts[0].rating).toFixed(2)} to ${(+last.rating).toFixed(2)}`)}">`
+      + `<path d="M ${d}" fill="none" stroke="currentColor" stroke-width="1.5"`
+      + ` stroke-linecap="round" stroke-linejoin="round" class="rt-line"/>`
+      + `<circle class="rt-dot" cx="${X(pts.length - 1).toFixed(1)}" cy="${Y(+last.rating).toFixed(1)}" r="2.1" fill="currentColor"/>`
+      + '</svg>';
+  }
+
+  const arrow = dir === 'up' ? '\u25b2' : dir === 'down' ? '\u25bc' : '\u2013';
+  const chip = c == null
+    ? `<span class="rt-chip rt-first">first reading</span>`
+    : `<span class="rt-chip rt-${dir}" title="${esc(`${(+c.from).toFixed(2)} on the previous reading, `
+      + `${(+c.to).toFixed(2)} now`)}">${arrow} ${signed(c.change, { d: 2 })}</span>`;
+
+  return {
+    label: 'Rating',
+    /* Two rows, not one line. Value and chip first, the readings beneath as a
+       full-width line: a tile is ~200px and a number, a 68px sparkline and a
+       chip do not fit across it — the first version clipped the chip at the
+       tile's right edge, which is the one part a reader most needs. Stacked,
+       the line also gets the full width to say something with. */
+    html: `<span class="rt" data-dir="${dir}"><span class="rt-top">`
+      /* toFixed, not fmt: a rating is always two decimals. fmt trims a trailing
+         zero, so 4.90 rendered as "4.9" beside 4.83 and the two looked like
+         different precisions of the same scale. */
+      + `<span class="rt-v" data-count>${v.toFixed(2)}</span>${chip}</span>${spark}</span>`,
+    sub: c == null
+      ? `${sourceLabel(k.rating_platform)}\u2019s own rating`
+        + (k.platform_lifetime_trips ? ` over ${fmt(k.platform_lifetime_trips)} trips` : '')
+      : `over ${countOf(c.over_days, 'day')}`
+        + (c.over_trips ? ` and ${fmt(c.over_trips)} trips` : '')
+        + ` \u00b7 ${sourceLabel(k.rating_platform)}\u2019s own`,
+    tone: v >= 4.8 ? 'good' : v >= 4.5 ? 'warn' : 'critical',
+  };
+}
+
 /* ── online vs on-trip, one chart ─────────────────────────────────────────
    Two areas on the same axis: total hours logged in, and the part of that with
    a passenger aboard. The gap between them is the idle time being paid for. */
@@ -567,9 +647,9 @@ async function tabOverview(root, id, prof) {
         : 'no fare and no payout statement covers this window' },
     { label: 'Fares', value: money(k.accounted_fares),
       sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' },
-    k.rating != null ? { label: 'Rating', value: fmt(k.rating, 2),
-      sub: `${sourceLabel(k.rating_platform)}\u2019s own rating`,
-      tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' } : null,
+    /* The same renderer as the Quality tab, so the two tiles cannot drift into
+       showing one driver two different ratings. */
+    ratingTrend(k),
   ]));
 
   /* The revenue bar ranks a driver against a fleet whose median fare is zero,
@@ -1289,29 +1369,8 @@ async function tabQuality(root, id) {
        uber_profile.js). A rating is the platform's standing view of a person,
        not a measurement over the window on the toolbar, so the sub-label names
        the platform rather than the dates. */
-    (() => {
-      if (k.rating == null) {
-        return { label: 'Rating', value: '\u2014', sub: 'not yet collected for this driver' };
-      }
-      const c = k.rating_change;
-      /* The direction, where there are two readings to compare. A single
-         reading gets "first reading" rather than a change of zero: zero is a
-         measurement and this is the absence of one. The gap is stated in days
-         because the pull is weekly and a missed week must not read as a week
-         of no movement — and the trips behind it are stated because 0.02 over
-         40 trips and 0.02 over 900 are different events. */
-      /* signed(), not a hand-rolled sign. ui.js:895 renders a real minus sign
-         rather than a hyphen and formats the magnitude the same way every
-         other delta on the product does; test/signed.test.mjs exists because
-         two views once disagreed about what a negative change looks like. */
-      const arrow = c == null ? null : c.change > 0 ? '\u25b2' : c.change < 0 ? '\u25bc' : '\u2013';
-      return { label: 'Rating', value: fmt(k.rating, 2),
-        sub: c == null
-          ? `${sourceLabel(k.rating_platform)}\u2019s own rating \u00b7 first reading`
-          : `${arrow} ${signed(c.change, { d: 2 })} over ${countOf(c.over_days, 'day')}`
-            + (c.over_trips ? ` and ${fmt(c.over_trips)} trips` : ''),
-        tone: k.rating >= 4.8 ? 'good' : k.rating >= 4.5 ? 'warn' : 'critical' };
-    })(),
+    ratingTrend(k) || { label: 'Rating', value: '\u2014',
+      sub: 'not yet collected for this driver' },
     { label: 'Harsh events', value: fmt(totalAlerts), sub: qy.alert_km ? `over ${fmt(qy.alert_km)} km` : 'no matched distance' },
     /* Against the FLEET, where the fleet figure exists, rather than against a
        hardcoded 5/15 scale. 29.5 per 100 km was painted critical under a

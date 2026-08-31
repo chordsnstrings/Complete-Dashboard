@@ -4326,6 +4326,24 @@ const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
    this product on a screen recording are the ones who set that preference. */
 function countUp(node) {
   if (REDUCED) return;
+  /* A tile's value is not always a bare number, and this used to assume it was.
+     ─────────────────────────────────────────────────────────────────────────
+     The animation lands by assigning node.textContent, which replaces
+     everything inside the element — so a KPI whose value carries markup lost
+     it the moment the count-up ran. The rating tile is the case that found
+     this: it renders the number, a sparkline of the readings behind it and a
+     coloured delta chip, and all three were parsed into the DOM and then
+     silently flattened to text a frame later. Nothing threw; the tile simply
+     rendered as "4.83▼ −0.06" with no line and no colour.
+
+     So a composed value is animated at the one element that holds its number,
+     marked data-count, and left alone entirely when there is nothing marked.
+     A bare number is unaffected, which is every other tile in the product. */
+  if (node.firstElementChild) {
+    const inner = node.querySelector('[data-count]');
+    if (inner) countUp(inner);
+    return;
+  }
   const raw = node.textContent.trim();
   const m = raw.match(/^([^\d-]*)(-?[\d,]*\.?\d+)(.*)$/);   // prefix, number, suffix
   if (!m) return;

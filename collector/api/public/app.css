@@ -626,6 +626,49 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
 
+/* ── a rating, and which way it is going ───────────────────────────────────
+   A rating alone is a fact nobody acts on. The tile carries the number, the
+   direction and the readings behind it, and the direction is stated three
+   ways so that no one of them is load-bearing: an arrow, a signed number, and
+   last a colour. Anyone who cannot see the hue still reads "▲ +0.04".
+
+   The line and the chip animate on arrival because a change that appears fully
+   formed is easy to miss on a page of twelve tiles. Both are decoration: the
+   global reduced-motion rule below turns them off and nothing is lost. */
+.rt{display:flex;flex-direction:column;align-items:flex-start;gap:.18em;min-width:0}
+.rt-top{display:flex;align-items:baseline;gap:.42em;min-width:0}
+.rt-v{font-variant-numeric:tabular-nums}
+/* Full width of the tile and flat, because it annotates the number above it
+   rather than competing with it. A rating line is a few hundredths tall; given
+   more height it reads as volatility the fleet does not have. */
+.rt-spark{display:block;width:100%;max-width:180px;height:14px;opacity:.55;
+  color:var(--ink-3)}
+.rt[data-dir="up"] .rt-spark{color:var(--good);opacity:.8}
+.rt[data-dir="down"] .rt-spark{color:var(--critical);opacity:.8}
+/* Drawn left to right. The dash array is a length in user units and the path
+   is at most ~90 of them, so 200 covers any line this tile can hold. */
+.rt-line{stroke-dasharray:200;stroke-dashoffset:200;animation:rt-draw .9s ease-out forwards}
+.rt-dot{opacity:0;animation:rt-pop .3s ease-out .8s forwards}
+@keyframes rt-draw{to{stroke-dashoffset:0}}
+@keyframes rt-pop{from{opacity:0;transform:scale(.4)}to{opacity:1;transform:scale(1)}}
+.rt-chip{font-size:.62em;font-weight:600;letter-spacing:.01em;padding:.16em .45em;
+  border-radius:999px;align-self:center;font-variant-numeric:tabular-nums;
+  animation:rt-rise .45s cubic-bezier(.2,.8,.3,1) both}
+/* The chip enters FROM the direction it reports: a rise for an improving
+   rating, a fall for a declining one. Two-tenths of a second of corroboration,
+   and the arrow says it anyway. */
+.rt-up{background:var(--good-bg);color:var(--good);--rt-from:6px}
+.rt-down{background:var(--critical-bg);color:var(--critical);--rt-from:-6px}
+.rt-flat{background:var(--rule);color:var(--ink-3);--rt-from:0px}
+.rt-first{background:var(--rule);color:var(--ink-3);font-weight:500;--rt-from:0px}
+@keyframes rt-rise{from{opacity:0;transform:translateY(var(--rt-from,4px))}to{opacity:1;transform:none}}
+/* A tile is small; the sparkline goes when there is no room for it rather than
+   squeezing the number it exists to annotate. */
+@media (max-width:860px){ .rt-spark{display:none} }
+/* The chip must never be the thing that gets cut: it is the half of this tile
+   an operator acts on. */
+.rt-chip{flex:0 0 auto}
+
 /* Motion is decoration here — never the only carrier of meaning. */
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.001ms !important;animation-iteration-count:1 !important;transition-duration:.001ms !important}

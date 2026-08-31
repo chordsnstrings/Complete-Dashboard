@@ -108,6 +108,33 @@ check('one reading gives null, never a change of zero',
 check('…and the tile says "first reading" rather than showing no movement',
   /first reading/.test(ui));
 
+console.log('\nthe tile can carry markup, and the direction is not colour alone');
+
+const appjs = readFileSync('api/public/app.js', 'utf8');
+const css = readFileSync('api/public/app.css', 'utf8');
+check('the count-up animation no longer flattens a composed KPI value',
+  /if \(node\.firstElementChild\)/.test(appjs) && /querySelector\('\[data-count\]'\)/.test(appjs),
+  'countUp assigns node.textContent, which destroyed the sparkline and the chip a frame after they rendered');
+check('…and the rating number is still animated, by naming it',
+  /class="rt-v" data-count/.test(ui));
+check('the direction is stated in an arrow and a signed number, not only a hue',
+  /\\u25b2/.test(ui) && /\\u25bc/.test(ui) && /signed\(c\.change/.test(ui),
+  'app.css states the rule where severity chips are defined: never colour alone');
+check('the sparkline is scaled to the readings, not to the 0-5 range',
+  /const lo = Math\.min\(\.\.\.ys\), hi = Math\.max\(\.\.\.ys\);/.test(ui),
+  'a rating lives in the top hundredths of its scale; drawn against 0-5 every driver is a flat line');
+check('a single reading draws no line at all',
+  /if \(pts\.length >= 2\)/.test(ui),
+  'flat and unmeasured must not look the same');
+check('the chip cannot be the part that gets clipped',
+  /\.rt-chip\{flex:0 0 auto\}/.test(css));
+check('motion is decoration, and the global reduced-motion rule covers it',
+  /@media \(prefers-reduced-motion: reduce\)/.test(css)
+  && /animation-duration:\.001ms !important/.test(css));
+check('a rating always shows two decimals',
+  /v\.toFixed\(2\)/.test(ui),
+  '4.9 beside 4.83 reads as two different precisions');
+
 console.log('\nnull means unasked, never unrated');
 
 check('the schema says so',

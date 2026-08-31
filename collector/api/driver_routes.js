@@ -957,6 +957,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               max(lifetime_trips) FILTER (WHERE rn = 2) AS previous_trips,
               count(*)::int                             AS readings
          FROM h`, [p[2]]);
+    /* The readings themselves, newest last, for a sparkline. Capped at twelve
+       — a quarter of weekly pulls — because a rating line longer than the eye
+       can read in a 90-pixel tile is decoration, and because the question the
+       tile answers is "which way lately", not "the whole history". */
+    const series = await q(
+      `SELECT to_char(observed_on, 'YYYY-MM-DD') AS on, max(rating) AS rating,
+              max(lifetime_trips) AS trips
+         FROM driver_rating_history
+        WHERE driver_ext_id = ANY($1) AND rating IS NOT NULL
+        GROUP BY observed_on ORDER BY observed_on DESC LIMIT 12`, [p[2]]);
+    series.reverse();
     const chg = (trend?.latest != null && trend?.previous != null)
       ? { change: +(Number(trend.latest) - Number(trend.previous)).toFixed(3),
         over_days: Math.round(
@@ -1007,6 +1018,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          observation to measure against. */
       rating_change: chg,
       rating_readings: trend?.readings ?? 0,
+      rating_series: series.map((r) => ({ on: r.on, rating: Number(r.rating),
+        trips: r.trips == null ? null : Number(r.trips) })),
       platform_lifetime_trips: standing.find((r) => r.lifetime_trips != null)?.lifetime_trips ?? null,
       banned_on: standing.filter((r) => r.is_banned === true).map((r) => r.platform),
       platform_compliance: standing.filter((r) => r.compliance_status)
