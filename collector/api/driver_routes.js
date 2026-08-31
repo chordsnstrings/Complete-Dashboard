@@ -157,9 +157,34 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      directory row that linked there says they drove. */
   const PKEY = `coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')})`;
 
+  /* The window, as Dubai calendar days — the same expression trip_norm.local_day
+     is built from (sql/schema_v18.sql:67) and driver_day is keyed on.
+
+     This was `requested_at BETWEEN $1 AND $2`, a raw timestamptz bound in a UTC
+     session, and it cost this page the first four hours of every window. Dubai
+     is UTC+4, so the calendar day 2026-08-01 begins at 2026-07-31T20:00Z; a
+     bound starting at 2026-08-01T00:00Z drops 00:00–04:00 Dubai on the window's
+     first day and picks up the same slice of the day AFTER the last one.
+
+     It was not a rounding error. Reconciled day by day against the trip record
+     for one driver's August, /api/driver/daily reported 283 trips where the
+     trip list and driver_day both reported 285 — every day agreeing except the
+     first, which showed 4 against 6. The same page therefore disagreed with the
+     stored per-day record it is drawn beside, and with the fleet totals, which
+     have used local_day all along.
+
+     api/server.js carries the same note for the window's END (DAYWIN), and the
+     driver directory below fixed its own copy of this bug; the detail page kept
+     it because `win()` widens the upper bound to 23:59:59.999 and so LOOKS
+     right. The lower bound is the half nothing widened.
+
+     `$2::date` truncates that widened upper bound back to its day, which is
+     what a day-grain comparison wants. */
+  const DAYWIN = (col) => `(${col} AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`;
+
   // Shared trip predicate: any of this person's keys, over the window.
   // `$1..$2` window, `$3` key array — keep this argument order in every query.
-  const TW = `${PKEY} = ANY($3) AND requested_at BETWEEN $1 AND $2`;
+  const TW = `${PKEY} = ANY($3) AND ${DAYWIN('requested_at')}`;
 
   // Wrap a handler so it resolves the driver first and 404s cleanly when unknown.
   const withDriver = (fn) => wrap(async (req, res) => {
@@ -622,9 +647,25 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               round(stddev_samp(extract(epoch from first_local::time)/3600)::numeric,2) start_consistency_h
        FROM d`, p);
     const [perf] = await q(
-      `SELECT round(sum(hours_online)::numeric,1) hours_online,
-              round(sum(hours_on_trip)::numeric,1) hours_on_trip,
-              round(avg(acceptance_rate)::numeric,3) acceptance_rate,
+      /* No hours here any more, and that is the fix rather than an omission.
+         ─────────────────────────────────────────────────────────────────────
+         This selected sum(hours_online) from driver_payout_day, whose view
+         divides a platform PERIOD's hours evenly across the days it covers
+         (sql/schema_v23.sql:64). Yango is the only channel that files hours and
+         it files seven-day windows, so every figure this produced was a week
+         divided by seven and printed as if somebody had measured the day.
+
+         What it printed: Khalil Aliyan, twelve trips and four hours of work in
+         the whole of August, tile reading 428.8 hours online — 14.3 hours a
+         day, every day, including the twenty-four days they did not drive. And
+         Fahad Ali, 485.7 hours against the 255.7 the availability feed actually
+         recorded for the same month on the same page.
+
+         The hours now come from driver_day below, which is a measurement, and
+         the weekly figures are still shown where their grain is visible: the
+         periods table on the Earnings tab prints them against the real period
+         bounds, which is the one place a week-long number can be read as one. */
+      `SELECT round(avg(acceptance_rate)::numeric,3) acceptance_rate,
               round(avg(cancellation_rate)::numeric,3) cancellation_rate,
               round(avg(rating)::numeric,2) rating,
               round(sum(earnings)::numeric,2) reported_earnings,
@@ -640,6 +681,61 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           earnings jumped whenever the window moved past a Monday. */
        FROM driver_payout_day
        WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date`, p);
+    /* Hours, from the two feeds that measure them, with the same per-day
+       precedence /api/driver/daily uses — so the tile and the chart under it
+       cannot disagree.
+       ─────────────────────────────────────────────────────────────────────
+       The platform's OWN daily figure first, where a channel files one.
+       Otherwise driver_day.online_min: Uber's ONLINE spans, folded into Dubai
+       days and stored.
+
+       What is deliberately absent is driver_payout_day.hours_online, which
+       this used to sum. That view divides a platform PERIOD's hours evenly
+       across the days it covers (sql/schema_v23.sql:64), and the only channel
+       filing hours files seven-day windows — so every figure it produced was a
+       week divided by seven and printed as a measurement. On production it put
+       428.8 hours against a driver with twelve trips and four hours of work,
+       and 485.7 against a month the availability feed measured at 255.7, on
+       this same page. The weekly figures are still shown where their grain is
+       visible: the periods table on the Earnings tab prints them against the
+       real period bounds.
+
+       FULL OUTER JOIN, because a day can be known to either feed alone: a
+       platform that reports hours for a day with no availability, and — far
+       more common here — availability for a day no platform reported. */
+    const [kept] = await q(
+      `WITH ph AS (
+         SELECT period_start AS day, sum(hours_online) hours_online,
+                sum(hours_on_trip) hours_on_trip
+           FROM driver_performance
+          WHERE driver_ext_id = ANY($3) AND period_start = period_end
+            AND period_start BETWEEN $1::date AND $2::date
+          GROUP BY 1),
+       av AS (
+         SELECT day, sum(online_min) online_min, sum(on_job_min) on_job_min,
+                sum(idle_online_min) idle_online_min
+           FROM driver_day
+          WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date
+          GROUP BY 1),
+       d AS (
+         SELECT CASE WHEN ph.hours_online IS NOT NULL THEN ph.hours_online
+                     ELSE av.online_min / 60.0 END AS online_h,
+                CASE WHEN ph.hours_online IS NOT NULL THEN ph.hours_on_trip
+                     ELSE av.on_job_min / 60.0 END AS on_job_h,
+                /* Always the stored one: idle-online is online minus on-job
+                   measured against the same clock, and no platform here
+                   publishes it at all. */
+                av.idle_online_min / 60.0 AS idle_h,
+                CASE WHEN ph.hours_online IS NOT NULL THEN 'platform'
+                     WHEN av.online_min IS NOT NULL THEN 'availability' END AS basis
+           FROM ph FULL OUTER JOIN av USING (day))
+       SELECT round(sum(online_h)::numeric,1) online_h,
+              round(sum(on_job_h)::numeric,1) on_job_h,
+              round(sum(idle_h)::numeric,1) idle_online_h,
+              count(*) FILTER (WHERE basis IS NOT NULL)::int online_days,
+              count(*) FILTER (WHERE basis = 'platform')::int platform_days,
+              count(*) FILTER (WHERE basis = 'availability')::int availability_days
+         FROM d`, p);
     /* What this person's work brought in, both channels, per platform.
        `revenue` above is the fares on their trips, and the Uber export has no
        fare column — so a driver working Uber and one hotel booking led with the
@@ -675,9 +771,37 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
     const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
 
+    const num = (v) => (v == null ? null : Number(v));
+    const hoursOnline = num(kept?.online_h);
+    const hoursOnJob = num(kept?.on_job_h);
+    /* Both operands checked, and that is not pedantry.
+       ─────────────────────────────────────────────────────────────────────
+       This read `perf?.hours_online ? (perf.hours_on_trip / perf.hours_online)`
+       and hours_on_trip is null for every driver on this fleet, because nothing
+       writes it. In JavaScript null/428.8 is 0 — not NaN, not null — so the
+       guard passed on the denominator and the tile printed a confident 0%, in
+       the critical tone, for the seven drivers who had a denominator at all.
+       An invented figure accusing a named person of never carrying a passenger.
+
+       A ratio needs both halves measured, from the same record, over the same
+       days. Where either is missing the answer is that we do not know. */
+    const utilisation = hoursOnline && hoursOnJob != null
+      ? +((hoursOnJob / hoursOnline) * 100).toFixed(1) : null;
     res.json({ ...t, ...shift, ...perf, ...fleetIncome([...byPlat.values()], windowDays),
+      hours_online: hoursOnline,
+      /* on_job, not on_trip: request to dropoff, which contains the approach
+         and the rider's wait. No feed here separates them. */
+      hours_on_job: hoursOnJob,
+      hours_idle_online: num(kept?.idle_online_h),
+      /* Which feed answered, and mixed where the window contains both — a
+         platform's on-trip figure and our request-to-dropoff fold are not the
+         same measure, and a total drawn from both should say so. */
+      hours_basis: hoursOnline == null ? null
+        : (kept.platform_days && kept.availability_days) ? 'mixed'
+          : kept.platform_days ? 'platform' : 'availability',
+      hours_days: kept?.online_days ?? 0,
       trips_per_day: t.days_worked ? +(t.trips / t.days_worked).toFixed(1) : null,
-      utilisation_pct: perf?.hours_online ? +((perf.hours_on_trip / perf.hours_online) * 100).toFixed(1) : null });
+      utilisation_pct: utilisation });
   }));
 
   /* ── day by day: the spine every chart on the detail page hangs off ── */
@@ -703,15 +827,98 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        FROM driver_performance
        WHERE driver_ext_id = ANY($3) AND period_start = period_end
          AND period_start BETWEEN $1::date AND $2::date
-       GROUP BY 1)
-     SELECT t.*, round(h.hours_online::numeric,2) hours_online,
-            round(h.hours_on_trip::numeric,2) hours_on_trip,
+       GROUP BY 1),
+     /* The kept per-day record, and the reason this panel was blank.
+        ─────────────────────────────────────────────────────────────────────
+        h above is the platform's OWN daily figure, and it fires for nobody.
+        driver_performance.hours_online has exactly one writer in this codebase
+        — src/sources/yango.js:86 — and it files SEVEN-DAY windows, which the
+        period_start = period_end predicate directly above then discards.
+        hours_on_trip has no writer at all. So the panel rendered "No
+        platform-reported hours in this window" directly beneath a shift
+        timeline reading 405 h online, and beside a stored per-day record
+        holding the same 405 h. The fact was collected, derived and kept; only
+        this query did not ask for it. h is left in place because a channel
+        that starts filing daily rows should still win — it is the provider's
+        own arithmetic rather than ours — but it answers nothing today.
+
+        driver_day is the record: ONLINE spans from driver_timeline_event (the
+        availability feed), clamped to Dubai days by src/rollup.js and stored.
+        Two things it is NOT:
+
+          it is not driver_payout_day.hours_online, which divides a Yango WEEK
+          by seven (sql/schema_v23.sql:64). That column is why the KPI tile on
+          this same page reported 428.8 hours for a driver with four hours of
+          work — a weekly total stated as a daily measurement. It is read
+          nowhere on this page now.
+
+          and on_job_min is not "on trip". Uber's export carries a request time
+          and a dropoff time and nothing between them, so this span contains
+          the approach and the rider's wait as well as the ride. It is emitted
+          as hours_on_job and labelled request-to-dropoff wherever it is drawn;
+          calling it time with a passenger would be a claim no feed supports. */
+     k AS (
+       SELECT day, sum(online_min) online_min, sum(on_job_min) on_job_min,
+              sum(idle_online_min) idle_online_min,
+              round(sum(money)::numeric, 2) money,
+              /* mixed the moment a person's day was reached two ways — one
+                 platform filing a statement, another reporting only fares. */
+              CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
+                   THEN 'mixed' ELSE max(money_source) FILTER (WHERE money_source <> 'none') END money_source
+       FROM driver_day
+       WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date
+       GROUP BY 1),
+     /* The spine is every day ANY feed knows about, not only the days with
+        trips.
+        ─────────────────────────────────────────────────────────────────────
+        This selected FROM t — the trip aggregate — so a day the driver was
+        online for and never dispatched had no row at all, and neither did a
+        day a statement paid them for that the trip feed missed. Those are two
+        of the most informative days a driver has: one is availability that
+        earned nothing, which is the question the panel above this table exists
+        to answer, and the other is money arriving for work we cannot see.
+
+        It also made the page disagree with itself. The KPI tile sums the
+        stored record and the chart sums this endpoint, so a driver with an
+        online day and no jobs had a tile reading 28 hours over a chart drawing
+        24 — the same shape of contradiction as the window bug, from the other
+        direction.
+
+        A day arriving only through k lands with trips 0 and null hours of
+        work, which is exactly what it was. */
+     spine AS (
+       SELECT day FROM t UNION SELECT day FROM k UNION SELECT day FROM h)
+     SELECT to_char(spine.day, 'YYYY-MM-DD') AS day,
+            coalesce(t.trips, 0) AS trips,
+            coalesce(t.completed, 0) AS completed,
+            coalesce(t.cancelled, 0) AS cancelled,
+            coalesce(t.outcome_n, 0) AS outcome_n,
+            t.km, t.revenue, t.first_trip_at, t.last_trip_at,
+            t.first_hour, t.last_hour, t.span_h, t.plates, t.platforms,
+            CASE WHEN h.hours_online IS NOT NULL THEN round(h.hours_online::numeric,2)
+                 ELSE round(k.online_min::numeric/60,2) END AS hours_online,
+            /* NULL, never 0, where availability was never collected: Uber is
+               the only channel here that publishes it, so the hotel and Yango
+               drivers have none — and zeroing them would report people who
+               worked all month as never having logged in. */
+            CASE WHEN h.hours_online IS NOT NULL THEN 'platform'
+                 WHEN k.online_min IS NOT NULL THEN 'availability' END AS hours_online_basis,
+            round(k.on_job_min::numeric/60,2) AS hours_on_job,
+            round(k.idle_online_min::numeric/60,2) AS hours_idle_online,
+            /* What the day was worth, from whichever feed measured it: the
+               statement's net where a platform filed one, its fares where it
+               did not, per platform and then summed (src/rollup.js:823).
+               revenue beside it is fares only, which is null on every
+               Uber-only day — 85 of this fleet's 119 active drivers. */
+            round(k.money::numeric,2) AS money, k.money_source,
             round(h.earnings::numeric,2) platform_earnings,
-            w.temp_max, w.precipitation, c.is_holiday, c.holiday_name, c.is_ramadan
-     FROM t LEFT JOIN h USING (day)
-            LEFT JOIN weather_daily w ON w.day = t.day
-            LEFT JOIN calendar_day c ON c.day = t.day
-     ORDER BY t.day`, p))));
+            w.temp_max, w.precipitation, c.is_ramadan
+     FROM spine LEFT JOIN t USING (day)
+                LEFT JOIN h USING (day)
+                LEFT JOIN k USING (day)
+                LEFT JOIN weather_daily w ON w.day = spine.day
+                LEFT JOIN calendar_day c ON c.day = spine.day
+     ORDER BY spine.day`, p))));
 
   /* ── the day as it was actually spent ──────────────────────────────────
      The shift panel drew one solid bar per day, first trip to last trip, and
@@ -780,9 +987,24 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const out = [...byDay.entries()].map(([day, list]) => {
       const jobs = list.map((r) => {
         const s = r.s;
-        /* Clamped, not wrapped. A dropoff after midnight is minute 20 of the
-           NEXT day, which as a raw number sits before its own request. */
-        const e = r.e == null ? null : (r.past_midnight || r.e < s ? 1440 : r.e);
+        /* Clamped, not wrapped — but only for the case that means what the
+           clamp says.
+           ─────────────────────────────────────────────────────────────────
+           A dropoff after midnight is minute 20 of the NEXT day, which as a
+           raw number sits before its own request; running it to 1440 is right.
+
+           A dropoff before its own request on the SAME Dubai day is not that.
+           It is a bad timestamp, and this line ran it to 1440 as well — a
+           twenty-four hour job. On the operator's own driver, eleven such rows
+           contributed 40.4 hours of the 125.8 this endpoint reported for
+           August, against 87.7 in the stored record: a page telling somebody
+           they were on job for five days straight. src/rollup.js:711 already
+           makes the right call for the same rows — greatest(end, start), a
+           job of zero known length — and the two are now the same rule, which
+           is the only way the panel and the record it is drawn beside can
+           agree. `over` still marks the row either way; a bad timestamp is
+           worth seeing. */
+        const e = r.e == null ? null : (r.past_midnight ? 1440 : Math.max(r.e, s));
         return { s, e, over: Boolean(r.past_midnight) || (r.e != null && r.e < s),
           platform: r.platform, plate: r.plate, outcome: r.outcome };
       });
@@ -832,7 +1054,23 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
            FROM driver_timeline_event
           WHERE driver_ext_id = ANY($3) AND kind = 'status' AND status <> ''
-            AND at >= $1::timestamptz AND at <= $2::timestamptz),
+            /* Dubai day bounds, widened by a day at each end.
+               ─────────────────────────────────────────────────────────────
+               Two separate faults, one line. at >= $1::timestamptz bound
+               the FIRST day at UTC midnight, which is 04:00 Dubai, so the
+               window's opening four hours had no events and the day drew as
+               offline. And a span is opened by one event and closed by the
+               NEXT: an ONLINE at 23:40 on the day before the window is what
+               makes the window's first morning online at all, and clipping
+               the fetch to the window threw that event away along with the
+               lead() that needed it.
+
+               So the fetch reaches a day either side — exactly as
+               /api/driver/day does below — and the days CTE clamps each span
+               to the Dubai days it actually covers. Days outside the window
+               fall out at the join, which reads only the days already drawn. */
+            AND at >= (($1::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+            AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai')),
        /* span_start/span_end, not s/e. These are CTE values, and
           test/indexes.test.mjs reads every Dubai-day cast in api/ as a column
           that needs an index — rightly, since an unindexed one scans the
@@ -1032,8 +1270,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       trips: trips.map((t) => ({
         ...t,
         /* Clamped, not wrapped: a dropoff after midnight is minute 20 of the
-           NEXT day, which as a raw number sits before its own request. */
-        e: t.e == null ? null : (t.past_midnight || t.e < t.s ? 1440 : t.e),
+           NEXT day, which as a raw number sits before its own request. A
+           dropoff before its own request on the SAME day is a bad timestamp,
+           not a day-long job — the same rule as the shift fold above and as
+           src/rollup.js:711. */
+        e: t.e == null ? null : (t.past_midnight ? 1440 : Math.max(t.e, t.s)),
       })),
       online,
       fixes,
@@ -1068,7 +1309,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               100.0*count(*) FILTER (WHERE outcome='not_completed')
                    /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0) cancel
        FROM trip_norm
-       WHERE requested_at BETWEEN $1 AND $2
+       -- The SAME window rule as TW above, and it has to be: this ranks the
+       -- driver against the cohort, and a cohort measured over a window four
+       -- hours longer than the driver's own is a comparison between two
+       -- different Augusts.
+       WHERE ${DAYWIN('requested_at')}
          -- keyed on the person, so a named driver with no id is a peer like
          -- anyone else instead of being quietly left out of the cohort they
          -- are being ranked against
@@ -1302,10 +1547,40 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        predicate is a day range rather than a period range, which is the other
        half of the fix: a week whose Monday fell outside the window used to
        drag all seven of its days in. */
+    /* Matched on the NAME as well as the id, which is this table's own rule.
+       ─────────────────────────────────────────────────────────────────────
+       sql/schema_v25.sql:25 says it outright: "the name is the key — the ledger
+       predates our ids and its people must not vanish for want of a match."
+       driver_ext_id is nullable here and mostly null. Joined on the id alone
+       this returned nothing, on every driver, while the same statements
+       reconciled fine on the money pages — src/rollup.js:781 records the
+       identical mistake being made and fixed against 2,375 driver-days and
+       AED 330,343 of statements that the id join could not see.
+
+       An OR rather than the coalesce PKEY uses, because either half is
+       sufficient evidence: a row carrying one of this person's platform ids is
+       theirs, and so is a row filed under their name with no id at all. Each
+       row can only be counted once whichever arm matches it.
+
+       btrim on name_key: the generated column collapses runs of whitespace but
+       does not trim the ends (sql/schema_v25.sql:33), so a name filed with a
+       leading space folds to " ali khan" and would miss a key built by
+       canonSql, which trims. Cheap here — the day range bounds the scan. */
+    const DSD_PERSON = `(driver_ext_id = ANY($3) OR 'name:' || btrim(name_key) = ANY($3))`;
     const [tips] = await q(
-      `SELECT round(sum(tips)::numeric,2) tips, round(sum(net)::numeric,2) fare
+      `SELECT round(sum(tips)::numeric,2) tips, round(sum(net)::numeric,2) fare,
+              /* The Cash column on this page carried a note saying no statement
+                 separates the cash a driver already took from the net figure.
+                 driver_statement_day.cash is sql/schema_v25.sql:41, and this
+                 very query reads that table. Selected now, so the column can
+                 stop apologising for a value that was there all along. */
+              round(sum(cash)::numeric,2) cash,
+              round(sum(gross)::numeric,2) gross,
+              round(sum(fees)::numeric,2) fees,
+              round(sum(salik)::numeric,2) salik,
+              count(DISTINCT day)::int statement_days
        FROM driver_statement_day
-       WHERE source <> 'ledger' AND driver_ext_id = ANY($3)
+       WHERE source <> 'ledger' AND NOT pseudo AND ${DSD_PERSON}
          AND day BETWEEN $1::date AND $2::date`, p);
     res.json({ components, periods,
       /* The sum the caption prints, computed here rather than left to the page
@@ -1315,6 +1590,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       counted_periods: periods.length,
       counted_clipped: periods.filter((r) => r.clipped).length,
       tips: tips?.tips ?? null, fare: tips?.fare ?? null,
+      statement_cash: tips?.cash ?? null,
+      statement_gross: tips?.gross ?? null,
+      statement_fees: tips?.fees ?? null,
+      statement_salik: tips?.salik ?? null,
+      statement_days: tips?.statement_days ?? 0,
       tip_pct: tips?.fare > 0 ? +((tips.tips / tips.fare) * 100).toFixed(2) : null });
   }));
 

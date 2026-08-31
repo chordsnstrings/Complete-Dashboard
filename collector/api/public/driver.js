@@ -322,6 +322,19 @@ function hhmm(min) {
   return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
 }
 
+/* Minutes a job ran, from whichever pair of timestamps the row has.
+   duration_s first because it is the provider's own figure where one exists;
+   nothing writes it today, but a channel that starts to should win over our
+   subtraction. Null rather than zero when the trip has no dropoff: "we do not
+   know how long this took" is not "it took no time". */
+function tripMinutes(r) {
+  if (r.duration_s) return Math.round(r.duration_s / 60);
+  if (!r.requested_at || !r.ended_at) return null;
+  const ms = Date.parse(r.ended_at) - Date.parse(r.requested_at);
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  return Math.round(ms / 60000);
+}
+
 /* ── online vs on-trip, one chart ─────────────────────────────────────────
    Two areas on the same axis: total hours logged in, and the part of that with
    a passenger aboard. The gap between them is the idle time being paid for. */
@@ -344,20 +357,26 @@ function dualSeries(host, days) {
   }
   svg.push(`<path d="${area('hours_online')}" fill="var(--s1)" fill-opacity=".16" data-fade/>`);
   svg.push(`<path d="${line('hours_online')}" fill="none" stroke="var(--s1)" stroke-width="2" data-draw/>`);
-  svg.push(`<path d="${area('hours_on_trip')}" fill="var(--s3)" fill-opacity=".26" data-fade/>`);
-  svg.push(`<path d="${line('hours_on_trip')}" fill="none" stroke="var(--s3)" stroke-width="2" data-draw/>`);
+  svg.push(`<path d="${area('hours_on_job')}" fill="var(--s3)" fill-opacity=".26" data-fade/>`);
+  svg.push(`<path d="${line('hours_on_job')}" fill="none" stroke="var(--s3)" stroke-width="2" data-draw/>`);
   days.forEach((d, i) => {
     svg.push(`<circle cx="${X(i).toFixed(1)}" cy="${Y(+d.hours_online || 0).toFixed(1)}" r="7" fill="transparent">` +
-      `<title>${dayStr(d.day)} · ${fmt(d.hours_online, 1)}h online, ${fmt(d.hours_on_trip, 1)}h on trip</title></circle>`);
+      `<title>${dayStr(d.day)} · ${fmt(d.hours_online, 1)}h online, ${fmt(d.hours_on_job, 1)}h on job</title></circle>`);
   });
   svg.push('</svg>');
   host.innerHTML = svg.join('');
   const online = days.reduce((a, d) => a + (+d.hours_online || 0), 0);
-  const onTrip = days.reduce((a, d) => a + (+d.hours_on_trip || 0), 0);
+  const onTrip = days.reduce((a, d) => a + (+d.hours_on_job || 0), 0);
+  /* "on job", not "with a passenger". The series is request-to-dropoff, which
+     contains the drive to the rider and the wait for them — Uber's export has
+     two timestamps and no pickup time, so the ride itself cannot be separated
+     out of it. The old label made a claim about passengers that no feed here
+     supports, and the gap below it was described as earning nothing when part
+     of it was the approach to a job that did. */
   host.append(el('div', 'legend', `
     <span><i style="background:var(--s1)"></i>online ${fmt(online, 0)}h</span>
-    <span><i style="background:var(--s3)"></i>with a passenger ${fmt(onTrip, 0)}h</span>
-    <span>the gap is ${fmt(online - onTrip, 0)}h of paid-for availability that earned nothing</span>`));
+    <span><i style="background:var(--s3)"></i>on job, request to dropoff ${fmt(onTrip, 0)}h</span>
+    <span>the gap is ${fmt(online - onTrip, 0)}h logged in with no job running</span>`));
 }
 
 /* ── identity header, shown above every tab ──────────────────────────────── */
@@ -477,8 +496,24 @@ async function tabOverview(root, id, prof) {
   kpiHost.replaceWith(kpiRow([
     { label: 'Typical start', value: hourStr(k.median_start_h), sub: k.start_consistency_h != null ? `±${(+k.start_consistency_h).toFixed(1)}h day to day` : null },
     { label: 'Days worked', value: fmt(k.days_worked), sub: `${fmt(k.trips_per_day, 1)} trips per day` },
-    { label: 'Hours online', value: k.hours_online != null ? fmt(k.hours_online, 1) : '—', sub: k.hours_on_trip != null ? `${fmt(k.hours_on_trip, 1)}h with a passenger` : 'platform-reported' },
-    { label: 'Utilisation', value: k.utilisation_pct != null ? pct(k.utilisation_pct) : '—', sub: 'on-trip ÷ online', tone: k.utilisation_pct == null ? null : k.utilisation_pct >= 55 ? 'good' : k.utilisation_pct >= 35 ? 'warn' : 'critical' },
+    /* Both tiles say where the figure came from and over how much of the
+       window, because neither is a whole-window fact. Availability is Uber's
+       and Uber's only — 31 days of it — so a hotel or Yango driver has none,
+       and a total with no day count under it reads as a month when it may be
+       a fortnight. */
+    { label: 'Hours online',
+      value: k.hours_online != null ? fmt(k.hours_online, 1) : '—',
+      sub: k.hours_online == null
+        ? 'no channel this driver works publishes availability'
+        : `${fmt(k.hours_on_job, 1)}h on job · ${countOf(k.hours_days, 'day')} with availability` },
+    /* on-job ÷ online, and both halves from the stored record so the ratio is
+       between two things measured the same way. It used to divide the
+       platform's hours_on_trip — which nothing writes — by the platform's
+       hours_online, and null/n is 0 in JavaScript, so this tile printed a
+       confident critical 0% for every driver that had a denominator. */
+    { label: 'Utilisation', value: k.utilisation_pct != null ? pct(k.utilisation_pct) : '—',
+      sub: k.utilisation_pct == null ? 'needs both online and on-job time' : 'on-job ÷ online',
+      tone: k.utilisation_pct == null ? null : k.utilisation_pct >= 55 ? 'good' : k.utilisation_pct >= 35 ? 'warn' : 'critical' },
     /* 3,381 km over 269 trips is 12.6, and this said 14.8 — avg_km is over
        the trips that report a distance, which was not on the tile. */
     { label: 'Trips', value: fmt(k.trips),
@@ -571,7 +606,9 @@ async function tabActivity(root, id) {
   const sh = panel('How the day was spent',
     'Each job at its real position, and the waiting between them'); root.append(sh.panel);
   const g0 = el('div', 'grid g2'); root.append(g0);
-  const hrs = panel('Hours online vs on-trip', 'Only for days the platform reported hours'); g0.append(hrs.panel);
+  const hrs = panel('Hours online vs on-trip',
+    'From whichever feed measured the day — the platform\u2019s own daily figure where it publishes one, '
+    + 'the availability record where it does not'); g0.append(hrs.panel);
   const dist = panel('Distance per day', 'Kilometres covered'); g0.append(dist.panel);
   const tbl = panel('Day by day', 'Every working day, with the weather and calendar context for that date'); root.append(tbl.panel);
   const cust = panel('Vehicle custody', 'Which car, which day — handovers included'); root.append(cust.panel);
@@ -606,10 +643,48 @@ async function tabActivity(root, id) {
         : 'None of them carry availability yet.'))));
   }
 
+  /* Two feeds answer this question and the panel used to ask only one.
+     ─────────────────────────────────────────────────────────────────────────
+     It read driver_performance's single-day rows, which Uber publishes for
+     nine people out of 241, and said "No platform-reported hours in this
+     window" — sitting directly under a shift timeline that had just drawn 405 h
+     of this driver's August from the availability feed, and beside a stored
+     per-day record holding the same figure. The number was collected. Only
+     this panel did not ask for it.
+
+     /api/driver/daily now answers from the platform where the platform speaks
+     and from the availability record where it does not, and says which per day
+     in hours_online_basis. The caption below reports that split rather than
+     leaving a reader to assume one source — because the two are not
+     interchangeable: one is the platform's own daily total, the other is our
+     fold of the ONLINE spans it emitted. */
   const withHours = daily.filter((d) => d.hours_online != null);
+  const nBasis = (b) => withHours.filter((d) => d.hours_online_basis === b).length;
   hrs.body.innerHTML = '';
-  if (!withHours.length) hrs.body.append(note('No platform-reported hours in this window. Uber and Yango only publish these for recent periods, so this fills in as the collector runs.'));
-  else dualSeries(hrs.body, withHours);
+  if (!withHours.length) {
+    hrs.body.append(note('Neither feed answered for any day in this window: no channel published a '
+      + 'daily hours figure, and no availability was collected. Uber is the only channel here that '
+      + 'publishes availability at all, and only for the last 31 days, so this fills in as the '
+      + 'collector runs and stays empty for a driver who works the other channels.'));
+  } else {
+    dualSeries(hrs.body, withHours);
+    const plat = nBasis('platform');
+    const avail = nBasis('availability');
+    hrs.body.append(el('p', 'cap', esc(
+      (plat && avail
+        ? `${fmt(plat)} of these days are the platform\u2019s own hours figure and ${fmt(avail)} are `
+          + 'derived from its ONLINE spans, so the two are measured differently.'
+        : plat
+          ? `All ${fmt(plat)} days are the platform\u2019s own reported hours.`
+          : `The platform published no daily hours for this window, so all ${fmt(avail)} days are `
+            + 'the ONLINE spans it emitted, folded into Dubai days and stored after each collection.')
+      + ' The lower series is request to dropoff, which contains the drive to the rider \u2014 '
+      + 'no channel here reports a pickup time, so the ride itself cannot be separated out of it.'
+      + (withHours.length < daily.length
+        ? ` ${fmt(daily.length - withHours.length)} of the ${fmt(daily.length)} days in this window `
+          + 'have neither.'
+        : ''))));
+  }
 
   dist.body.innerHTML = '';
   barChart(dist.body, daily.map((d) => ({ label: dayStr(d.day), km: +d.km || 0 })), { x: 'label', y: 'km', color: '--b300', valueFmt: (v) => `${fmt(v)} km` });
@@ -626,18 +701,52 @@ async function tabActivity(root, id) {
     { label: 'Cancelled', key: 'cancelled', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
-      render: (r) => (r.revenue ? money(r.revenue) : '—') },
-    { label: 'Online', key: 'hours_online', num: true, absent: UBER_HOURS,
-      render: (r) => (r.hours_online ? `${fmt(r.hours_online, 1)} h` : '—') },
-    /* A day may span two vehicles — a handover — so this is a comma-joined
-       list, and each plate in it is its own page. */
+      render: (r) => (r.revenue ? money(r.revenue) : '\u2014') },
+    /* What the day was actually worth, which the Fares column beside it cannot
+       say. Fares are null on every Uber-only day \u2014 85 of this fleet's 119
+       active drivers \u2014 because Uber's trip export carries no fare column;
+       the money is in the statement, at day grain, and driver_day resolves the
+       two into one comparable figure per platform. money_source ships with it
+       so the cell states its own basis rather than leaving a reader to assume
+       one. */
+    { label: 'Money', key: 'money', num: true,
+      absent: 'no channel this driver worked reported either a statement or a fare for these days',
+      render: (r) => (r.money == null ? '\u2014'
+        : money(r.money) + (r.money_source && r.money_source !== 'statement'
+          ? `<span class="dim" title="${r.money_source === 'fares'
+            ? 'the channel priced the bookings but filed no statement'
+            : 'one channel filed a statement and another reported only fares'}"> \u00b7 ${esc(r.money_source)}</span>`
+          : '')) },
+    /* Marked where the figure is our fold of the availability spans rather than
+       a number the platform itself published \u2014 same column, two
+       provenances, and a reader deserves to know which cell is which. */
+    { label: 'Online', key: 'hours_online', num: true,
+      absent: 'availability reaches this fleet from Uber only, and only for the last 31 days \u2014 '
+        + 'a driver who works the hotel channel or Yango has none, which is not the same as a '
+        + 'driver who was never online',
+      render: (r) => (r.hours_online
+        ? `${fmt(r.hours_online, 1)} h` + (r.hours_online_basis === 'availability'
+          ? '<span class="dim" title="from the availability feed\u2019s ONLINE spans, not a figure the platform published"> \u00b7 spans</span>' : '')
+        : '\u2014') },
+    { label: 'On job', key: 'hours_on_job', num: true,
+      absent: 'no job on these days carries both a request and a dropoff time',
+      render: (r) => (r.hours_on_job ? `${fmt(r.hours_on_job, 1)} h` : '\u2014') },
+    /* A day may span two vehicles \u2014 a handover \u2014 so this is a
+       comma-joined list, and each plate in it is its own page. */
     { label: 'Vehicle', key: 'plates', render: (r) => (r.plates
       ? String(r.plates).split(',').map((pl) => entity('vehicle', pl.trim(), pl.trim())).join(', ')
-      : '—') },
+      : '\u2014') },
+    /* No holiday here, and its absence is the honest reading.
+       ─────────────────────────────────────────────────────────────────────
+       calendar_day.is_holiday and holiday_name have never had a writer: only
+       the DDL default at sql/schema_v2.sql:85, which is false. Rendered, that
+       default said "not a public holiday" on every day of the record when what
+       it meant was that nobody was ever asked. A column that cannot be
+       anything but one value is not information, and printing it as one is the
+       same mistake as filling a gap by inference. */
     { label: 'Context', key: '_c', render: (r) => [
-      r.temp_max != null ? `${Math.round(r.temp_max)}°C` : null,
+      r.temp_max != null ? `${Math.round(r.temp_max)}\u00b0C` : null,
       r.precipitation > 0 ? 'rain' : null,
-      r.is_holiday ? esc(r.holiday_name || 'holiday') : null,
       r.is_ramadan ? 'Ramadan' : null,
     ].filter(Boolean).join(' · ') || '—' },
   ]));
@@ -962,9 +1071,16 @@ async function tabEarnings(root, id, prof) {
       render: (r) => (r.acceptance_rate != null ? pct(r.acceptance_rate * 100) : '—') }] : []),
     { label: 'Statement', key: 'earnings', num: true, render: (r) => money(r.earnings) },
     { label: 'Counted', key: 'counted', num: true, render: (r) => money(r.counted ?? r.earnings) },
+    /* The sentence under this column used to say no statement separates the
+       cash a driver already took from the net figure. driver_statement_day.cash
+       is sql/schema_v25.sql:41 and this endpoint reads that very table — the
+       column was there, unselected, forty lines below the note denying it.
+       This column stays the PAYOUT's cash, which is a different measure on a
+       different period; the statement's own figure is stated under the table,
+       where its grain can be named. */
     { label: 'Cash', key: 'cash_earnings', num: true,
-      absent: 'no statement in this window separates the cash the driver already took from the '
-        + 'net figure — where a channel does report it, the column comes back',
+      absent: 'this platform\u2019s payout feed does not split out the cash the driver already '
+        + 'took \u2014 where the channel files a statement, that figure is stated under this table',
       render: (r) => money(r.cash_earnings) },
     ...(hasRating ? [{ label: 'Rating', key: 'rating', num: true,
       render: (r) => (r.rating ? fmt(r.rating, 2) : '—') }] : []),
@@ -1008,6 +1124,35 @@ async function tabEarnings(root, id, prof) {
         + 'statements as published, and this is the part of them that falls inside the window — a '
         + 'statement straddling the edge contributes only its days inside it.'
       : '')));
+  /* The statement's own split, at the grain it was filed at.
+     ─────────────────────────────────────────────────────────────────────────
+     driver_statement_day is one row per driver per day with the overlapping
+     periods already resolved, and it carries the four figures a driver
+     actually asks about: what the fare came to, what was tipped, what Salik
+     cost, and how much of it they already hold in cash. The endpoint was
+     reading that table for tips alone and joining it on driver_ext_id — a
+     column this table leaves null, since its identity is the NAME. So the join
+     matched nothing, tips read as a dash for everyone, and the Cash column
+     carried a note saying no statement separates cash from net.
+
+     Stated as its own sentence rather than folded into the table above,
+     because it is a different measurement of the same money: the table is
+     per PERIOD as the platform published it, and this is per DAY as the
+     statement filed it. They are not columns of one thing. */
+  if (e.statement_days) {
+    const bits = [
+      e.fare != null ? `${money(e.fare)} net` : null,
+      e.tips ? `${money(e.tips)} in tips` : null,
+      e.statement_salik ? `${money(e.statement_salik)} of Salik` : null,
+      e.statement_cash != null ? `${money(e.statement_cash)} already taken in cash` : null,
+    ].filter(Boolean);
+    if (bits.length) {
+      per.body.append(el('p', 'cap',
+        `The day-level statements covering ${countOf(e.statement_days, 'day')} of this window `
+        + `report ${bits.join(', ')}. That is the same money as the table above, filed per day `
+        + 'rather than per payout period, so the two are two readings and not two amounts.'));
+    }
+  }
 }
 
 /* ── tab: quality ────────────────────────────────────────────────────────── */
@@ -1106,7 +1251,13 @@ async function tabTrips(root, id) {
      ask for the next 500 instead of being told the rest is unreachable. */
   const PAGE = 500;
   const res0 = await qAll('/api/driver/trips', { id, limit: PAGE });
-  const rows = res0.rows || [];
+  /* Minutes computed onto the row rather than in the renderer, and that is
+     not a style choice: tableFrom prunes a column whose declared key is blank
+     on every row (api/public/ui.js:186), so a Minutes column keyed on
+     duration_s is dropped before its renderer ever runs — which is how the
+     column disappeared instead of showing the span both timestamps describe.
+     Keyed on a real field, it also sorts by duration rather than by end time. */
+  const rows = (res0.rows || []).map((r) => ({ ...r, minutes: tripMinutes(r) }));
   let total = res0.total ?? rows.length;
   p.body.innerHTML = '';
   if (!rows.length) {
@@ -1125,8 +1276,17 @@ async function tabTrips(root, id) {
     { label: 'From', key: 'pickup_addr' },
     { label: 'To', key: 'dropoff_addr' },
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
-    { label: 'Minutes', key: 'duration_s', num: true, absent: NO_DURATION,
-      render: (r) => (r.duration_s ? fmt(r.duration_s / 60) : '—') },
+    /* Read from the two timestamps the row already carries.
+       ─────────────────────────────────────────────────────────────────────
+       This keyed on duration_s, which nothing writes, so the column was a
+       dash on every trip of every driver — under a caption saying no channel
+       reports a trip's duration. The endpoint has selected ended_at all along
+       (api/driver_routes.js), and requested-to-dropoff is present on 85% of
+       these rows; api/public/trip.js and api/public/driverday.js both already
+       derive it this way. It is not the same measure as duration_s — it
+       contains the drive to the rider — and NO_DURATION now says so. */
+    { label: 'Minutes', key: 'minutes', num: true, absent: NO_DURATION,
+      render: (r) => (r.minutes == null ? '\u2014' : fmt(r.minutes)) },
     { label: 'Product', key: 'product' },
     { label: 'Pay', key: 'payment_type' },
     /* The pill used to be green unless the word "cancel" appeared, so Bolt's
@@ -1442,12 +1602,20 @@ export async function renderDriverDirectory(root) {
        em-dashes wide, and `absent` turns it into one sentence under the table
        instead. On a database where some channel DOES report one, the column
        comes back on its own. */
+    /* Not "no channel reports one" — that was false and it mattered which.
+       Bolt's fleet API does report a driver rating (src/sources/bolt.js:74);
+       the roster call it arrives on is being refused for both fleets
+       (src/sources/bolt.js:57), so the column is empty because a credential is
+       dead, not because the fact does not exist. Those two want different
+       actions from whoever reads this, and only one of them is a job for an
+       operator. */
     { label: 'Rating', key: 'rating', num: true,
-      absent: 'no channel this fleet is connected to reports a driver rating — '
-        + 'Uber\'s roster returns onboarding status and a vehicle, and its earnings '
-        + 'breakdown returns trips, distance and money',
+      absent: 'nothing reaching this fleet reports a driver rating right now. '
+        + 'Uber\u2019s roster returns onboarding status and a vehicle, and its earnings breakdown '
+        + 'trips, distance and money. Bolt does publish one, and its fleet roster call is currently '
+        + 'being refused \u2014 Collection gaps says which credential',
       render: (r) => (r.rating != null ? fmt(r.rating, 2)
-        : '<span class="ent-off" title="no platform of theirs publishes a rating">—</span>') },
+        : '<span class="ent-off" title="no platform of theirs publishes a rating we can currently read">\u2014</span>') },
     { label: 'First trip', key: 'first_trip',
       render: (r) => (r.first_trip ? dateStr(r.first_trip)
         : '<span class="ent-off">never</span>') },

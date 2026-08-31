@@ -822,12 +822,33 @@ export const hourStr = (h) => {
 export const UBER_FARE = 'Uber\'s trip export carries no fare column at all, and Uber is most of '
   + 'this fleet\'s work — the money for these trips is in the weekly payout statement, not on the '
   + 'trip, so a fare exists only on the hotel and Yango rows';
-export const UBER_HOURS = 'no channel reports hours to this fleet: Uber publishes hours_online for '
-  + '9 of 241 people and none for the rest, and driver_performance is written from the earnings '
-  + 'breakdown, which carries trips, distance and money only';
-export const NO_DURATION = 'no source fills trip.duration_s — Uber\'s export carries a request time '
-  + 'and a dropoff time and nothing between them, and the hotel channel the same, so a trip\'s own '
-  + 'duration is not something any channel reports';
+/* Rewritten, because the old sentence outlived the thing it described.
+   ─────────────────────────────────────────────────────────────────────────
+   It read "no channel reports hours to this fleet", and that was true when it
+   was written and false the day sql/schema_v37.sql landed: Uber's availability
+   feed reports ONLINE spans, src/rollup.js folds them into Dubai days, and
+   driver_day.online_min has carried them ever since. A page that prints a
+   sentence the codebase has withdrawn teaches the reader to distrust the
+   sentences that are still true.
+
+   What IS still true is narrower and worth saying exactly: the hours come from
+   the availability feed rather than from a figure a platform published, that
+   feed is Uber's alone, and it reaches back 31 days. */
+export const UBER_HOURS = 'hours here come from Uber\u2019s availability feed \u2014 the ONLINE spans it '
+  + 'emits, folded into days \u2014 and not from a total any platform published: driver_performance is '
+  + 'written from the earnings breakdown, which carries trips, distance and money only. Uber is the '
+  + 'only channel this fleet works that publishes availability at all, and only for the last 31 days';
+/* The first clause is right and the last one was wrong.
+   ─────────────────────────────────────────────────────────────────────────
+   Nothing fills trip.duration_s — that part holds. But "a trip's own duration
+   is not something any channel reports" is contradicted by the same payload:
+   ended_at is present on 85% of these rows, and requested-to-dropoff is a
+   duration, just not the one the column was named for. Saying no channel
+   reports it, while the page holds two timestamps that bracket it, is the
+   product refusing to answer a question it can answer. */
+export const NO_DURATION = 'no source fills trip.duration_s, so this is the request-to-dropoff span '
+  + 'instead \u2014 which contains the drive to the rider, because neither Uber\u2019s export nor the '
+  + 'hotel channel reports a pickup time. A dash means that trip carries no dropoff time either';
 
 // `d` is decimals: whole dirhams for totals, two for rates like revenue-per-km
 // where rounding to the nearest dirham destroys the number.

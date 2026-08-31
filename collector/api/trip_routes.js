@@ -17,6 +17,16 @@
    booking. A page that showed only `price` would be blank for 90% of the work
    this fleet does, so the payout day is here beside the fare and the page says
    which one is a measurement of THIS trip and which is not. */
+/* The fold driver_statement_day's stored name_key uses: whitespace runs
+   collapsed and lowercased (sql/schema_v25.sql:33), plus the trim the generated
+   column omits. Deliberately NOT the person fold used for identity elsewhere —
+   that one also collapses a repeated surname, and matching a stored key means
+   matching the rule the key was built with, not a stricter one. */
+const stmtName = (v) => {
+  const n = String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+  return n || null;
+};
+
 export function tripRoutes(app, { q, wrap }) {
   /* The key is (platform, external_id) — the provider's own id, which is the
      only thing about a trip that is stable across a re-collection. */
@@ -116,15 +126,24 @@ export function tripRoutes(app, { q, wrap }) {
          day split into what the driver earned, was tipped, was reimbursed for
          Salik and already holds — which is the whole of Uber's own statement
          for that day, against the trip that is part of it. */
-      t.driver_ext_id && day ? q(
+      /* Matched on the name as well as the id. driver_statement_day's own
+         identity rule is the NAME (sql/schema_v25.sql:25) and its
+         driver_ext_id is nullable and mostly null, so an id-only predicate
+         returned nothing here — the same dead join api/driver_routes.js
+         carried, and the same one src/rollup.js:781 records finding against
+         2,375 driver-days of real statements. $3 is the name folded the way
+         the stored name_key is folded, or null where the trip names nobody. */
+      (t.driver_ext_id || t.driver_name) && day ? q(
         `SELECT round(sum(net)::numeric,2)   AS net,
                 round(sum(tips)::numeric,2)  AS tips,
                 round(sum(salik)::numeric,2) AS salik,
                 round(sum(cash)::numeric,2)  AS cash,
                 min(source) AS source
          FROM driver_statement_day
-         WHERE source <> 'ledger' AND driver_ext_id = $1 AND day = $2::date`,
-        [t.driver_ext_id, day]) : [],
+         WHERE source <> 'ledger' AND NOT pseudo AND day = $2::date
+           AND (($1::text IS NOT NULL AND driver_ext_id = $1)
+                OR ($3::text IS NOT NULL AND btrim(name_key) = $3))`,
+        [t.driver_ext_id || null, day, stmtName(t.driver_name)]) : [],
     ]);
 
     res.json({

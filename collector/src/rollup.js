@@ -870,17 +870,59 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
         exactly the kind of day worth having a row for — it says the money
         arrived and the work did not reach us — and building the insert from
         the trip aggregate alone would silently drop it. */
+     /* What we know about the ACCOUNT rather than about one of its days.
+        ─────────────────────────────────────────────────────────────────────
+        Two columns were read from the trip aggregate alone, so a day reached
+        only through a statement, a payout or (now) an availability span
+        carried neither:
+
+          fleet_id  NULL, and every fleet-filtered reader of this table drops
+                    a NULL fleet silently (api/server.js, api/economics_routes.js)
+                    — a day with money on it vanishing from the fleet that
+                    earned it. Not an approximation to fill it in: driver_ext_id
+                    is a platform account and an account belongs to one fleet.
+
+          driver_name  NULL, so person_key fell back to the raw account id and
+                    the same human keyed two different ways depending on which
+                    feed reached the day. That is the exact split the person
+                    fold exists to prevent. */
+     account AS (
+       SELECT driver_ext_id,
+              min(fleet_id)    FILTER (WHERE fleet_id IS NOT NULL)    AS fleet_id,
+              min(driver_name) FILTER (WHERE driver_name IS NOT NULL) AS driver_name
+         FROM agg GROUP BY 1),
      days AS (
        SELECT driver_ext_id, day FROM agg
        UNION SELECT driver_ext_id, day FROM money
-       UNION SELECT driver_ext_id, day FROM pay)
+       UNION SELECT driver_ext_id, day FROM pay
+       /* And the days that only availability knows about.
+          ─────────────────────────────────────────────────────────────────
+          A driver logged in all evening who was never dispatched, filed no
+          statement and drew no payout produced NO ROW AT ALL — the one shape
+          of day this table is best placed to record, and the only source that
+          can prove somebody was working when nothing came of it. Every panel
+          that asks "how much availability earned nothing" was answering over
+          a population that excluded the clearest cases.
+
+          The other three unions are left-joined to below, so a day arriving
+          only through this one lands with trips 0 and money NULL, which is
+          exactly what it was: online, and nothing happened.
+
+          Bounded by the same since as the other three, and that bound is not
+          cosmetic: the online CTE has no time bound of its own, so an unbounded
+          union here would add a row for every day of availability history on
+          every incremental refresh — and because agg, money and pay ARE bounded,
+          each of those older days would then be rewritten with trips 0 and no
+          money at all. The insert would erase the record it exists to keep. */
+       UNION SELECT driver_ext_id, day FROM online WHERE TRUE ${dayBound})
      INSERT INTO driver_day (driver_ext_id, day, fleet_id, platforms, plates, trips, completed,
                              cancelled, km, fares, unknown_end, first_min, last_min, span_min,
                              on_job_min, wait_min, longest_wait_min, online_min, idle_online_min,
                              stmt_gross, stmt_fees, stmt_net, stmt_tips, stmt_salik, stmt_cash,
                              stmt_trips, payout, payout_cash, money, money_source, person_key,
                              computed_at)
-     SELECT d.driver_ext_id, d.day, a.fleet_id, a.platforms, a.plates,
+     SELECT d.driver_ext_id, d.day, coalesce(a.fleet_id, acc.fleet_id) AS fleet_id,
+            a.platforms, a.plates,
             coalesce(a.trips, 0), coalesce(a.completed, 0), coalesce(a.cancelled, 0),
             a.km, a.fares, coalesce(a.unknown_end, 0), a.first_min, a.last_min,
             CASE WHEN a.first_min IS NULL OR a.last_min IS NULL THEN NULL
@@ -906,13 +948,14 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
                  ELSE 'fares' END,
             /* The same fold the money was matched on, stored so a reader can
                count people at any grain without joining back to the trips. */
-            ${PERSON("coalesce(a.driver_name, m.driver_name)", 'd.driver_ext_id')},
+            ${PERSON("coalesce(a.driver_name, m.driver_name, acc.driver_name)", 'd.driver_ext_id')},
             now()
        FROM days d
        LEFT JOIN agg a    ON a.driver_ext_id  = d.driver_ext_id AND a.day  = d.day
        LEFT JOIN money m  ON m.driver_ext_id  = d.driver_ext_id AND m.day  = d.day
        LEFT JOIN pay py   ON py.driver_ext_id = d.driver_ext_id AND py.day = d.day
        LEFT JOIN online o ON o.driver_ext_id  = d.driver_ext_id AND o.day  = d.day
+       LEFT JOIN account acc ON acc.driver_ext_id = d.driver_ext_id
      ON CONFLICT (driver_ext_id, day) DO UPDATE SET
        fleet_id = EXCLUDED.fleet_id, platforms = EXCLUDED.platforms, plates = EXCLUDED.plates,
        trips = EXCLUDED.trips, completed = EXCLUDED.completed, cancelled = EXCLUDED.cancelled,

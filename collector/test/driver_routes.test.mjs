@@ -292,7 +292,21 @@ check('licence state surfaced in the directory', amina.state === 'active' || ami
 /* ── window filtering actually filters ──────────────────────────────────── */
 const narrow = (await get(`/api/driver/kpis?id=${UBER}&from=2026-08-15&to=2026-08-15`)).body;
 
-check('a one-day window returns only that day', narrow.trips === 5, String(narrow.trips));
+/* Six, and it used to be five.
+   ─────────────────────────────────────────────────────────────────────────
+   The block above inserts a trip at 01:00 Dubai on the 15th to prove the
+   directory counts it. /api/driver/kpis did NOT: its window predicate bound
+   requested_at as a raw timestamp in a UTC session, so a one-day window over
+   the 15th began at 04:00 Dubai and the 01:00 trip fell outside it. Two panels
+   on one screen, over one window, disagreeing about how many trips a person
+   took — which is what this expectation of 5 recorded.
+
+   Both bound the Dubai calendar day now. The trip is in the window because it
+   happened in the window. */
+check('a one-day window returns only that day', narrow.trips === 6, String(narrow.trips));
+check('…and the 01:00 Dubai trip is in it, as it is in the directory',
+  narrow.trips === (await get('/api/driver/kpis?id=' + UBER + '&day=2026-08-15')).body.trips,
+  'a `day` and a one-day from/to must be the same window');
 check('date-only `to` includes the whole day', narrow.days_worked === 1, String(narrow.days_worked));
 
 server.close();

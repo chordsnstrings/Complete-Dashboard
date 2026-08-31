@@ -345,9 +345,22 @@ const dailyFor = (id) => {
       first_hour: +first.toFixed(2), last_hour: +(first + rnd(8, 12)).toFixed(2),
       span_h: +rnd(8, 12).toFixed(2), plates: plates[seed % plates.length],
       platforms: 'uber', hours_online: +rnd(8, 12).toFixed(2),
-      hours_on_trip: +rnd(4, 8).toFixed(2), platform_earnings: +rnd(250, 620).toFixed(2),
-      temp_max: +rnd(33, 44).toFixed(1), precipitation: 0,
-      is_holiday: b === 12, holiday_name: b === 12 ? 'Public holiday' : null, is_ramadan: false,
+      /* The basis, because the endpoint reports one per day: the platform's own
+         daily figure where a channel files one, and the availability feed's
+         ONLINE spans where it does not. On this fleet it is availability for
+         every day, so the fixture makes that the common case and keeps one
+         platform day so a page cannot assume a single basis. */
+      hours_online_basis: b % 11 === 0 ? 'platform' : 'availability',
+      hours_on_job: +rnd(4, 8).toFixed(2),
+      hours_idle_online: +rnd(1, 4).toFixed(2),
+      platform_earnings: b % 11 === 0 ? +rnd(250, 620).toFixed(2) : null,
+      /* What the day was worth from whichever feed measured it, and what that
+         feed was. Fares are null on an Uber day — the export carries no fare
+         column — so a fixture whose money came only from `revenue` would let a
+         page that shows fares alone still look populated. */
+      money: +(km * rnd(2.4, 3.9)).toFixed(2),
+      money_source: b % 4 === 0 ? 'mixed' : 'statement',
+      temp_max: +rnd(33, 44).toFixed(1), precipitation: 0, is_ramadan: false,
     });
   }
   return out;
@@ -653,7 +666,13 @@ app.get('/api/driver/kpis', (req, r) => {
     vehicles: 2, platforms: i % 3 === 0 ? 2 : 1,
     median_start_h: 6.5 + (i % 3), median_end_h: 18.4, avg_span_h: 10.6, start_consistency_h: 0.8 + i * 0.15,
     hours_online: +d.reduce((a, x) => a + x.hours_online, 0).toFixed(1),
-    hours_on_trip: +d.reduce((a, x) => a + x.hours_on_trip, 0).toFixed(1),
+    /* on_job, not on_trip: request to dropoff, which contains the approach and
+       the rider's wait. Nothing this fleet collects separates the ride out of
+       it, and the tile no longer claims otherwise. */
+    hours_on_job: +d.reduce((a, x) => a + x.hours_on_job, 0).toFixed(1),
+    hours_idle_online: +d.reduce((a, x) => a + x.hours_idle_online, 0).toFixed(1),
+    hours_basis: 'availability',
+    hours_days: d.length,
     acceptance_rate: 0.91 - i * 0.02, cancellation_rate: 0.04, rating: 4.9 - i * 0.06,
     reported_earnings: 9800 - i * 500, cash_earnings: 1200,
     /* Money in, and the two halves it is made of. Deliberately dominated by the
@@ -812,6 +831,12 @@ app.get('/api/driver/earnings', (req, r) => {
     counted_total: [0, 1, 2, 3].reduce((a, w) => a + (2350 - w * 120), 0),
     counted_periods: 4, counted_clipped: 0,
     tips: 286 - i * 20, fare: 8420 - i * 400, tip_pct: +(((286 - i * 20) / (8420 - i * 400)) * 100).toFixed(2),
+    /* The statement's own split, per day rather than per payout period. The
+       endpoint read this table for tips alone and joined it on driver_ext_id,
+       which the table leaves null — its identity is the name — so every one of
+       these came back empty on the real API until the join was fixed. */
+    statement_days: 24, statement_cash: 1840 - i * 60, statement_gross: 9600 - i * 420,
+    statement_fees: -1180 + i * 40, statement_salik: 214 - i * 8,
   });
 });
 
