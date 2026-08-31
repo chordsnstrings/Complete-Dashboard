@@ -173,7 +173,17 @@ function startScatter(host, days) {
    those into the gaps would invent waiting that nobody can verify. */
 function shiftBars(host, days, meta = {}, shiftId = null) {
   host.innerHTML = '';
-  const rows = (days || []).filter((d) => d.first_min != null).slice(-28);
+  const all = (days || []).filter((d) => d.first_min != null);
+  /* Twenty-eight bars, because a 24-hour axis in half a page gives each hour
+     about eight pixels and a month of them is a smear. The cap is fine; the
+     cap being SILENT was not. Since the window predicate was fixed, "this
+     month" is 31 days, so this drew 28 of them and totalled 405 h online in
+     its caption — directly above a chart totalling 449 h over all 31, and a
+     line saying 31 days are held as a stored record. Three numbers for one
+     driver's August, none of them wrong, and nothing on the page explaining
+     why they differ. `dropped` says so now. */
+  const rows = all.slice(-28);
+  const dropped = all.length - rows.length;
   if (!rows.length) return empty(host);
 
   /* A header row, because five numeric columns with no labels is a puzzle.
@@ -273,6 +283,11 @@ function shiftBars(host, days, meta = {}, shiftId = null) {
     `Across these ${rows.length} days: ${fmt(onJob / 60, 1)} h on job, ${fmt(waited / 60, 1)} h `
     + `waiting between jobs — ${span ? Math.round((waited / span) * 100) : 0}% of the time between `
     + 'the first request and the last dropoff. '
+    + (dropped
+      ? `The ${countOf(dropped, 'earlier day')} in this window ${plural(dropped, 'is', 'are')} not `
+        + 'drawn — a 24-hour axis needs the width — so every total in this panel is over the 28 '
+        + 'days above and the charts below are over the whole window. '
+      : '')
     + (meta.basis || ''))));
 
   /* The split, over the days that HAVE availability — not over all of them.
@@ -606,7 +621,11 @@ async function tabActivity(root, id) {
   const sh = panel('How the day was spent',
     'Each job at its real position, and the waiting between them'); root.append(sh.panel);
   const g0 = el('div', 'grid g2'); root.append(g0);
-  const hrs = panel('Hours online vs on-trip',
+  /* "on job", not "on-trip". The lower series is request-to-dropoff and the
+     legend, the table column and the API field all say so; a title still
+     promising time with a passenger is the one place left claiming a split no
+     feed here reports. */
+  const hrs = panel('Hours online vs on job',
     'From whichever feed measured the day — the platform\u2019s own daily figure where it publishes one, '
     + 'the availability record where it does not'); g0.append(hrs.panel);
   const dist = panel('Distance per day', 'Kilometres covered'); g0.append(dist.panel);
@@ -1619,27 +1638,6 @@ export async function renderDriverDirectory(root) {
         : fmt(r.completed)) },
     { label: 'Days', key: 'days', num: true },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
-    /* PAID, not FARED. This column was sum(trip.price) and Uber's export has no
-       fare column, so on a seven-day window 101 people drove and 21 had a
-       number here — eighty rows of dashes in the only money column a table
-       whose whole job is ranking people had. The money was never missing; it
-       is a payout, not a fare, and it lives in driver_payout_day.
-
-       Fares stay, as a second line, because on the hotel channel they are what
-       the property was charged and that is a different and real quantity. When
-       a driver has both, both are shown; the dash now means what it says. */
-    { label: 'Paid', key: 'payout', num: true,
-      render: (r) => (r.payout
-        ? `${money(r.payout)}${r.payout_days
-          ? `<span class="dim" title="days inside this window that a payout statement covers"> · ${fmt(r.payout_days)}d</span>` : ''}`
-        : (r.trips
-          ? '<span class="ent-off" title="this person drove in this window but no payout statement reaches them — see Reconciliation">—</span>'
-          : '<span class="ent-off" title="no trips in this window">—</span>')) },
-    { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
-      render: (r) => (r.revenue
-        ? `${money(r.revenue)}${r.priced_trips != null
-          ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
-        : '<span class="ent-off" title="Uber publishes no fare per trip, and Uber is most of this fleet’s work — the money is in Paid">—</span>') },
     /* The one money column that answers for everybody, and the reason the two
        beside it are not enough on their own.
        ─────────────────────────────────────────────────────────────────────
@@ -1678,6 +1676,27 @@ export async function renderDriverDirectory(root) {
         return money(r.money)
           + `<span class="dim" title="${esc(why)}"> \u00b7 ${esc(tag)}</span>`;
       } },
+    /* PAID, not FARED. This column was sum(trip.price) and Uber's export has no
+       fare column, so on a seven-day window 101 people drove and 21 had a
+       number here — eighty rows of dashes in the only money column a table
+       whose whole job is ranking people had. The money was never missing; it
+       is a payout, not a fare, and it lives in driver_payout_day.
+
+       Fares stay, as a second line, because on the hotel channel they are what
+       the property was charged and that is a different and real quantity. When
+       a driver has both, both are shown; the dash now means what it says. */
+    { label: 'Paid', key: 'payout', num: true,
+      render: (r) => (r.payout
+        ? `${money(r.payout)}${r.payout_days
+          ? `<span class="dim" title="days inside this window that a payout statement covers"> · ${fmt(r.payout_days)}d</span>` : ''}`
+        : (r.trips
+          ? '<span class="ent-off" title="this person drove in this window but no payout statement reaches them — see Reconciliation">—</span>'
+          : '<span class="ent-off" title="no trips in this window">—</span>')) },
+    { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
+      render: (r) => (r.revenue
+        ? `${money(r.revenue)}${r.priced_trips != null
+          ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
+        : '<span class="ent-off" title="Uber publishes no fare per trip, and Uber is most of this fleet’s work — the money is in Paid">—</span>') },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
     /* Measured on the live fleet: rating is null for all 360 people, because
        nothing in the collector writes it — Uber's roster endpoint returns
