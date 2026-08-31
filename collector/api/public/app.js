@@ -3878,7 +3878,7 @@ V.sources = async (root) => {
 
 /* Paste whatever the provider gave you.
    ─────────────────────────────────────────────────────────────────────────
-   The twenty-four boxes below this panel are the right thing to HAVE and the
+   The thirty-four boxes below this panel are the right thing to HAVE and the
    wrong thing to use: the operator arrives holding a cookie jar copied out of
    devtools, and matching it to a key by hand is a step that adds nothing and
    goes wrong quietly — this fleet is two businesses on the same providers, and
@@ -3898,7 +3898,13 @@ function pastePanel(root) {
   const ta = el('textarea');
   ta.placeholder = 'Paste here. A browser\u2019s "Copy as cURL" works as-is, Windows form included — '
     + 'the command is read and only the credential inside it is kept. Several at once is fine; '
-    + 'separate them with a blank line.';
+    + 'separate them with a blank line.\n\n'
+    /* Named because it is the one credential that is not a session and does
+       not look like one: two opaque strings that mean nothing apart, which an
+       operator has no reason to think this page would understand. */
+    + 'An Uber OAuth application goes in as its two lines — the application id and the '
+    + 'client secret, in either order. The grant is performed here, and the organisation it '
+    + 'reaches is what names the fleet.';
   ta.rows = 6;
   ta.style.cssText = 'width:100%;background:var(--paper);border:1px solid var(--rule-strong);'
     + "border-radius:var(--r-sm);padding:10px 12px;font-family:'IBM Plex Mono',monospace;"
@@ -3960,13 +3966,27 @@ function pastePanel(root) {
     }
     out.append(tableFrom(d.proposals, [
       { label: 'Provider', key: 'provider' },
+      /* One credential usually means one key. An Uber OAuth application means
+         three — the client id, its secret, and the organisation the grant
+         revealed it is registered under — and showing only the first would
+         hide the two that make it work. */
       { label: 'Goes to', key: 'key',
-        render: (r) => (r.key ? `<code>${esc(r.key)}</code>` : '<span class="ent-off">could not be named</span>') },
-      { label: 'Fleet', key: 'fleet', render: (r) => esc(r.fleet || '—') },
+        render: (r) => (r.keys?.length
+          ? r.keys.map((k) => `<code>${esc(k)}</code>`).join('<br>')
+          : r.key ? `<code>${esc(r.key)}</code>`
+            : '<span class="ent-off">could not be named</span>') },
+      { label: 'Fleet', key: 'fleet',
+        render: (r) => esc(r.fleet || '—')
+          + (r.account ? `<span class="dim"> · ${esc(r.account)}</span>` : '') },
       { label: 'Read from', key: 'source',
-        render: (r) => (r.source === 'recognised'
-          ? 'the credential itself'
-          : `<span title="a model's guess, tested like any other">the model · ${esc(r.confidence || '')}</span>`) },
+        render: (r) => (r.source !== 'recognised'
+          ? `<span title="a model's guess, tested like any other">the model · ${esc(r.confidence || '')}</span>`
+          /* An OAuth pair is the one credential that carries no identity of
+             its own: the provider is asked which organisation it reaches, and
+             THAT names the fleet. Worth distinguishing from a credential that
+             said so itself. */
+          : r.keys?.length ? 'the provider, when asked'
+            : 'the credential itself') },
       { label: 'Provider says', key: 'verdict',
         render: (r) => pill(r.verdict === 'pass' ? 'accepted'
           : r.verdict === 'unknown' ? 'could not ask' : 'refused', TONE[r.verdict] || null) },

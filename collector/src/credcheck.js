@@ -26,6 +26,8 @@
    failure would tell an operator to re-capture a cookie that is fine. */
 import { config } from './config.js';
 import { http } from './http.js';
+import { get, SETTING_DEFAULTS } from './settings.js';
+import { keyFor } from './credkit.js';
 
 const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
 const day = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
@@ -125,10 +127,161 @@ async function checkYango({ value }) {
   }
 }
 
+/* ── Uber: does this OAuth application work, and whose is it? ────────────
+   The only check here that ANSWERS a question rather than confirming one.
+
+   Every other credential arrives already named: a Bolt token carries its
+   fleet owner id, an Uber cookie carries its org uuid, so the recogniser
+   decides the key and the check merely proves the credential still works. An
+   OAuth application carries nothing — two opaque strings — so the recogniser
+   deliberately refuses to guess, and this does the asking:
+
+     1. grant a token, trying the labelled order and then the other one,
+        because "client id" and "client secret" are not reliably told apart by
+        looking at them;
+     2. ask /v1/vehicle-suppliers/orgs, the one REST surface that takes no
+        org_id and therefore the only one that can say what a valid org_id is;
+     3. name the fleet from what came back, and hand up THREE keys — the id,
+        the secret, and the organisation.
+
+   Step 3 is why this exists in this shape. An application is registered under
+   one organisation, so the org that comes back IS the fleet, and the encrypted
+   id in that answer is exactly the string UBER_ORG_ENCRYPTED wants. This
+   fleet's Egari half was 403ing on every REST call with a correct new client
+   installed, because the org id stored beside it still belonged to the old
+   one. A paste that sets two of the three leaves that trap armed. */
+const UBER_SCOPE = 'solutions.suppliers.metrics.read solutions.suppliers.drivers.status.read '
+  + 'supplier.partner.payments vehicle_suppliers.organizations.read '
+  + 'vehicle_suppliers.vehicles.read solutions.suppliers.reports';
+
+async function grant(clientId, clientSecret) {
+  const { data, status } = await http(config.uber.oauth.tokenUrl, {
+    method: 'POST', timeoutMs: 30000, retries: 0,
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: clientId, client_secret: clientSecret,
+      grant_type: 'client_credentials', scope: UBER_SCOPE,
+    }).toString(),
+  });
+  return { token: data?.access_token || null, status,
+    error: String(data?.error_description || data?.error || '').slice(0, 160) };
+}
+
+/* Which fleet an organisation belongs to, in descending order of how much it
+   is being trusted to a guess. */
+function fleetOfOrg(org) {
+  const id = String(org?.id || '');
+  const name = String(org?.name || '');
+  /* Exact: the encrypted id already configured for a fleet. Costs nothing and
+     is the only branch with no judgement in it. */
+  if (id && id === String(get('UBER_ORG_ENCRYPTED') || '')) return { fleet: 'ecosine', how: 'its org id is the one already stored for ecosine' };
+  if (id && id === String(get('UBER_ORG_ENCRYPTED_EGARI') || '')) return { fleet: 'egari', how: 'its org id is the one already stored for egari' };
+  /* The business's own name. "Egari Luxury Cars Transport LLC" and "ECOSINE
+     TRANSPORTS" are what Uber calls these two, and a fleet id that appears in
+     the name it is registered under is not a coincidence. */
+  for (const fleet of ['ecosine', 'egari']) {
+    if (name.toLowerCase().includes(fleet)) return { fleet, how: `Uber calls this organisation “${name}”` };
+  }
+  return { fleet: null, how: null };
+}
+
+async function checkUberOAuth({ value, secret, said_fleet: said }) {
+  try {
+    /* The labelled order first, then the other one. A pair that grants either
+       way round is still one working application. */
+    let id = value, sec = secret, g = await grant(id, sec);
+    if (!g.token) {
+      const swapped = await grant(secret, value);
+      if (swapped.token) { [id, sec] = [secret, value]; g = swapped; }
+      else {
+        return verdict(false, `Uber refused this application either way round${
+          g.error ? ` — ${g.error}` : ` (${g.status})`}`);
+      }
+    }
+
+    const { data, status } = await http(get('UBER_ORGS_URL', SETTING_DEFAULTS.UBER_ORGS_URL), {
+      headers: { authorization: `Bearer ${g.token}` }, timeoutMs: 20000, retries: 0,
+    });
+    const orgs = data?.organizations || data?.orgs || [];
+    if (!Array.isArray(orgs) || !orgs.length) {
+      /* A token that grants but reaches no organisation is an application
+         nobody has given access to yet — a real state, and a different errand
+         from a wrong secret. */
+      return verdict(false, `the application authenticates but reaches no organisation (${status})`
+        + ' — it has not been granted access to a supplier org yet');
+    }
+    if (orgs.length > 1) {
+      return { verdict: 'fail',
+        detail: `this application reaches ${orgs.length} organisations (${
+          orgs.map((o) => o.name).filter(Boolean).join(', ')}), so it cannot be filed against one fleet` };
+    }
+
+    const org = orgs[0];
+    const { fleet, how } = fleetOfOrg(org);
+    if (!fleet) {
+      return { verdict: 'fail',
+        detail: `this application works, and reaches “${org.name || org.id}” — an organisation `
+          + 'that matches neither configured fleet, so nothing has been written' };
+    }
+    if (said && said !== fleet) {
+      /* The paste said one thing and Uber said another. Uber wins, and the
+         disagreement is reported rather than quietly resolved: a label that
+         is wrong about which business a credential belongs to is worth an
+         operator's attention even when the outcome is right. */
+      return { verdict: 'fail',
+        detail: `this paste is labelled ${said}, but the application reaches “${org.name}” `
+          + `(${fleet}). Nothing has been written — relabel the paste, or check you copied the right application.` };
+    }
+
+    /* Resolved through the catalogue, NOT by appending the fleet.
+       ─────────────────────────────────────────────────────────────────────
+       The per-fleet suffix is not one convention, and inventing it here got
+       it wrong exactly the way credkit's own note says it always does:
+       Egari's keys are UBER_CLIENT_ID_EGARI and friends, and Ecosine's are
+       the BARE names — there is no UBER_CLIENT_ID_ECOSINE, src/config.js
+       never reads one, and setSetting throws on a key the catalogue does not
+       declare. So an Ecosine application would have passed its grant, told
+       the operator the provider accepted it, and then 500'd on write. */
+    const keys = {
+      [keyFor('UBER_CLIENT_ID', fleet)]: id,
+      [keyFor('UBER_CLIENT_SECRET', fleet)]: sec,
+      [keyFor('UBER_ORG_ENCRYPTED', fleet)]: org.id,
+    };
+    /* keyFor returns null for a base the catalogue does not know at all. A
+       credential that cannot be filed is refused here rather than half-written
+       three lines later. */
+    if (Object.keys(keys).some((k) => k === 'null' || !k)) {
+      return { verdict: 'fail',
+        detail: `this application belongs to ${fleet}, and this dashboard has no settings to file `
+          + 'an Uber OAuth application for that fleet' };
+    }
+    return {
+      verdict: 'pass',
+      fleet,
+      /* Three keys from one credential, because an application without the
+         organisation it is registered under is two thirds of a working
+         configuration and 403s exactly like a broken one. */
+      keys,
+      account: org.name || null,
+      detail: `Uber granted a token and this application reaches one organisation, “${org.name}” — ${how}`,
+    };
+  } catch (e) {
+    if (unreachable(e)) return { verdict: 'unknown', detail: `Uber could not be reached: ${String(e.message).slice(0, 120)}` };
+    return verdict(false, String(e.message || e).slice(0, 200));
+  }
+}
+
 const CHECKS = { Uber: checkUber, Bolt: checkBolt, Yango: checkYango };
 
 /** Test one recognised candidate. Never stores, never mutates. */
 export async function checkCandidate(cand) {
+  /* An OAuth application is the one credential that arrives WITHOUT a key,
+     on purpose: which key it belongs in is the question the check answers.
+     Routed on kind before the key test below, which every other candidate
+     must still pass. */
+  if (cand?.ok && cand.kind === 'oauth' && cand.provider === 'Uber') {
+    return { ...cand, ...(await checkUberOAuth(cand)) };
+  }
   if (!cand?.ok || !cand.key) {
     return { ...cand, verdict: 'fail', detail: cand?.why || 'this credential could not be named' };
   }

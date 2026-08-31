@@ -890,7 +890,8 @@ async function credentials(deck, ctx) {
 
   const ta = el('textarea');
   ta.rows = 6;
-  ta.placeholder = 'Paste here — several at once is fine, separated by a blank line.';
+  ta.placeholder = 'Paste here — several at once is fine, separated by a blank line. '
+    + 'An Uber OAuth application goes in as its two lines, id and secret, in either order.';
   ta.style.cssText = 'width:100%;background:var(--surface-2);border:1px solid var(--rule);'
     + "border-radius:11px;padding:11px 12px;font-family:'IBM Plex Mono',monospace;font-size:.76rem;"
     + 'line-height:1.5;resize:vertical;color:var(--ink);-webkit-appearance:none';
@@ -914,7 +915,13 @@ async function credentials(deck, ctx) {
     let d;
     try {
       d = await api('/api/settings/paste', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
+        method: 'POST',
+        /* The token the desktop sends. The write gate is held open while
+           ADMIN_TOKEN is unset, so this changed nothing today — and the day it
+           is set, the phone was the one surface that would start refusing
+           every paste, with no manual credential grid to fall back to. */
+        headers: { 'content-type': 'application/json',
+          ...(state.admin ? { 'x-admin-token': state.admin } : {}) },
         body: JSON.stringify({ text, apply }),
       });
     } catch (e) {
@@ -930,7 +937,9 @@ async function credentials(deck, ctx) {
       return;
     }
     rows(out, d.proposals.map((r) => row({
-      title: r.key || 'could not be named',
+      /* Three keys where an OAuth application resolved to three. Showing the
+         first alone would hide the two that make it work. */
+      title: r.keys?.length ? r.keys.join(', ') : (r.key || 'could not be named'),
       sub: `${r.provider}${r.fleet ? ` \u00b7 ${r.fleet}` : ''} \u00b7 ${r.detail || r.why || ''}`,
       value: r.verdict === 'pass' ? 'accepted' : r.verdict === 'unknown' ? 'no answer' : 'refused',
       tone: r.verdict === 'pass' ? 'good' : r.verdict === 'unknown' ? 'warn' : 'critical',

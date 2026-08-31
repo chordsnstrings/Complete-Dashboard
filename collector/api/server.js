@@ -2253,7 +2253,33 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
   const applied = [];
   if (apply) {
     for (const t of tested) {
-      if (t.verdict !== 'pass' || !t.key) continue;
+      if (t.verdict !== 'pass') continue;
+      /* One credential, one key — except an OAuth application, which is a
+         client id, its secret, and the organisation it turned out to be
+         registered under. Writing two of those three leaves the third
+         pointing at the previous application, and every REST call answers
+         403 exactly as if the paste had not happened. */
+      if (t.keys && typeof t.keys === 'object') {
+        /* All three, or none. setSetting throws on a key the catalogue does
+           not declare, and a throw halfway through leaves an application
+           whose id has been replaced and whose secret has not — which
+           authenticates as nothing and looks exactly like the credential
+           having been wrong. Checked before the first write rather than
+           recovered from after it. */
+        const bad = Object.keys(t.keys).filter((k) => !SETTING_DEFS.some((d) => d.key === k));
+        if (bad.length) {
+          t.verdict = 'fail';
+          t.detail = `${t.detail || ''} — but this dashboard has no setting called ${bad.join(', ')}, `
+            + 'so nothing was written';
+          continue;
+        }
+        for (const [k, v] of Object.entries(t.keys)) {
+          await setSetting(k, v);
+          applied.push(k);
+        }
+        continue;
+      }
+      if (!t.key) continue;
       await setSetting(t.key, t.value);
       applied.push(t.key);
     }
@@ -2269,12 +2295,17 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
     unread: leftovers.length - guessed.length,
     proposals: tested.map((t) => ({
       provider: t.provider, key: t.key, fleet: t.fleet || null,
+      /* The keys a candidate resolved to, where it resolved to more than one.
+         The page lists them; the value of none of them comes back. */
+      keys: t.keys ? Object.keys(t.keys) : null,
       source: t.source, confidence: t.confidence || null,
       verdict: t.verdict, detail: t.detail, why: t.why,
       expires_at: t.expires_at || null,
       account: t.account || null, org_uuid: t.org_uuid || null,
       chars: t.value ? String(t.value).length : 0,
-      applied: applied.includes(t.key),
+      applied: t.keys
+        ? Object.keys(t.keys).every((k) => applied.includes(k))
+        : applied.includes(t.key),
     })),
   });
 }));

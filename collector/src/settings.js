@@ -59,6 +59,13 @@ export const SETTING_DEFAULTS = {
      Test application can be pointed at the environment it was registered in
      rather than looking broken. */
   UBER_TOKEN_URL: 'https://login.uber.com/oauth/v2/token',
+  /* The one REST surface that takes no org_id, and therefore the only one that
+     can say what a valid org_id IS. Two callers need it — the diagnosis that
+     turns a 403 into a sentence (src/auth_state.js) and the check that reads a
+     pasted OAuth application (src/credcheck.js) — so it is named once here
+     rather than spelled twice, and overridable for the same reason
+     UBER_TOKEN_URL is: a Test-environment application lives on another host. */
+  UBER_ORGS_URL: 'https://api.uber.com/v1/vehicle-suppliers/orgs',
   YANGO_BASE: 'https://fleet.yango.com',
   HOTEL_BASE: 'https://whale-app-iofbt.ondigitalocean.app',
   HOTEL_DOMAIN: 'hotel.ecosine.ae',
@@ -103,6 +110,9 @@ export const SETTING_DEFS = [
      these existed. */
   { key: 'UBER_TOKEN_URL', group: 'Uber', label: 'OAuth token endpoint', secret: false,
     hint: 'Leave as-is for production apps; sandbox-login.uber.com for a Test-environment app' },
+  { key: 'UBER_ORGS_URL', group: 'Uber', label: 'Organisation list endpoint', secret: false,
+    hint: 'The one REST surface that takes no org id, so it is what a pasted OAuth application '
+      + 'is asked to name its own fleet. Moves with UBER_TOKEN_URL for a Test-environment app' },
   { key: 'UBER_CLIENT_ID_EGARI', group: 'Uber', label: 'OAuth client id — Egari', secret: false,
     hint: 'Only if Egari has its own Uber application; otherwise the shared client is used' },
   { key: 'UBER_CLIENT_SECRET_EGARI', group: 'Uber', label: 'OAuth client secret — Egari', secret: true,

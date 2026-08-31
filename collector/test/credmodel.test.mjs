@@ -51,8 +51,26 @@ check('the model is only asked about what was NOT recognised',
   /proposeKeys\(leftovers\)/.test(readFileSync('api/server.js', 'utf8')));
 check('a model proposal is still tested against the provider before it is stored',
   /const tested = await checkAll\(candidates\)/.test(readFileSync('api/server.js', 'utf8')));
-check('nothing is stored unless the provider accepted it',
-  /if \(t\.verdict !== 'pass' \|\| !t\.key\) continue;/.test(readFileSync('api/server.js', 'utf8')));
+/* The gate, asserted on ORDER rather than on one line of source.
+   ─────────────────────────────────────────────────────────────────────────
+   This used to pin the exact line `if (t.verdict !== 'pass' || !t.key)`, and
+   broke the moment a credential arrived that resolves to more than one key —
+   an Uber OAuth application writes its id, its secret and the organisation the
+   grant revealed. The property that matters is not the shape of the condition:
+   it is that no setSetting in this route is reachable without the verdict
+   having been checked first. */
+{
+  const server = readFileSync('api/server.js', 'utf8');
+  const start = server.indexOf("app.post('/api/settings/paste'");
+  const body = server.slice(start, server.indexOf('\napp.', start + 10));
+  const gate = body.indexOf("t.verdict !== 'pass'");
+  const writes = [...body.matchAll(/await setSetting\(/g)].map((m) => m.index);
+  check('nothing is stored unless the provider accepted it',
+    gate > 0 && writes.length > 0 && writes.every((i) => i > gate),
+    `gate at ${gate}, writes at ${writes.join(',')}`);
+  check('…and the gate is a `continue`, so a refused candidate is skipped rather than caught later',
+    /t\.verdict !== 'pass'\) continue;/.test(body));
+}
 check('the paste route never echoes a value back',
   !/value: t\.value/.test(readFileSync('api/server.js', 'utf8')));
 check('a dry run is the default', /const apply = req\.body\?\.apply === true;/.test(readFileSync('api/server.js', 'utf8')));

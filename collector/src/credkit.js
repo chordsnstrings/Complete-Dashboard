@@ -4,7 +4,7 @@
    operator gets it the same way every time: open the provider's dashboard,
    open devtools, copy. What comes back is a cookie jar, or a bare JWT, or a
    curl command with both inside it. Today that has to be read by a person,
-   matched to one of twenty-four keys, and pasted into the right box — and the
+   matched to one of thirty-four keys, and pasted into the right box — and the
    fleet has two businesses on the same providers, so half those keys come in
    pairs that differ by a suffix and are indistinguishable by eye.
 
@@ -133,7 +133,7 @@ function fleetOfUberOrg(uuid) {
    suffixed name if the catalogue declares one, the bare name otherwise, and
    nothing at all if neither exists. */
 const KNOWN = new Set(SETTING_DEFS.map((d) => d.key));
-const keyFor = (base, fleet) => {
+export const keyFor = (base, fleet) => {
   const suffixed = `${base}_${String(fleet || '').toUpperCase()}`;
   if (fleet && KNOWN.has(suffixed)) return suffixed;
   return KNOWN.has(base) ? base : null;
@@ -178,6 +178,101 @@ const RECOGNISERS = [
     };
   },
 
+  /* Uber: an OAuth application — a client id and a client secret, together.
+     ─────────────────────────────────────────────────────────────────────────
+     This is the one credential here that is not a session and not a token: it
+     is a registered application, and an application is registered UNDER one
+     organisation. That is why the Egari half of this fleet spent months
+     answering 403 to every REST call — one client pair was shared by both
+     businesses, and `/v1/vehicle-suppliers/orgs` on it returned exactly one
+     org. Not a credential that expired; a client that was never scoped to the
+     second business. The fix is a second application, and this is what the
+     operator has in their hand when they get one.
+
+     Two properties make this different from every recogniser above, and both
+     shape what it returns:
+
+     IT IS A PAIR, IN ONE BLOCK. The other credentials are one opaque string
+     each, so a block holds one of them. An application is two strings that
+     mean nothing apart, and they arrive on adjacent lines with no blank line
+     between — one block, two values, three settings keys once the org is
+     known.
+
+     IT CANNOT BE READ. A Bolt token carries its fleet owner id and an Uber
+     cookie carries its org uuid, so those recognisers DECODE the credential
+     and name it exactly. An OAuth pair carries nothing: two opaque
+     base64-ish strings, and the id and the secret are not reliably told apart
+     by length — this fleet's own two clients have 32/115 and 32/40. So this
+     recogniser deliberately does NOT decide which is which, and does not
+     decide the fleet. It hands both strings to the live check, which performs
+     the grant, asks Uber which organisation the client can reach, and comes
+     back with the answer. Guessing and being wrong would write an Ecosine
+     client into Egari's slot, which is the exact failure this module exists
+     to prevent.
+
+     The labels are read where they exist, as a HINT for which order to try
+     first — not as the answer. */
+  (raw) => {
+    const s = deCmd(raw);
+    /* Not inside a cookie jar, a JWT or a URL: those are other recognisers'
+       credentials, and a `sid=` value is 32 opaque characters too. */
+    if (/\beyJ[A-Za-z0-9_-]+\./.test(s)) return null;
+    if (/(?:^|[\s;])(?:sid|Session_id|sp-jwt-session)=/.test(s)) return null;
+
+    /* Uber writes both halves in the URL-safe base64 alphabet. 28 is the
+       floor because this fleet's shortest real half is 32 and a shorter
+       opaque string is far more likely to be something else. */
+    const OPAQUE = /[A-Za-z0-9_-]{28,200}/g;
+    const lines = s.split(/\r?\n/);
+    const seen = new Map();          // value → the label on its own line
+    for (const line of lines) {
+      /* Everything before the first colon or equals is the label, when there
+         is one. "uber egari client secret : <the secret>" is how it arrives. */
+      const at = line.search(/[:=]/);
+      const label = (at > 0 ? line.slice(0, at) : '').toLowerCase();
+      const rest = at > 0 ? line.slice(at + 1) : line;
+      for (const m of rest.match(OPAQUE) || []) {
+        if (!seen.has(m)) seen.set(m, label);
+      }
+    }
+    const tokens = [...seen.keys()];
+    if (tokens.length !== 2) return null;
+
+    const labelOf = (t) => seen.get(t) || '';
+    const isSecret = (t) => /secret|client[_ -]?secret/.test(labelOf(t));
+    const isId = (t) => /\b(?:client|application|app)[_ -]?id\b|\bclient[_ -]?id\b/.test(labelOf(t));
+
+    /* The order to try first. A label decides it where there is one;
+       otherwise Uber's client id is 32 characters and its secret is longer,
+       which is true of both of this fleet's clients and is only ever a
+       preference — the check tries the other way round if this fails. */
+    let [id, secret] = tokens;
+    if (isSecret(id) || isId(secret)) [id, secret] = [secret, id];
+    else if (!isSecret(secret) && !isId(id) && id.length > secret.length) [id, secret] = [secret, id];
+
+    /* A fleet NAMED in the paste is a hint for the message, never the answer:
+       the grant is what decides, and it can contradict this. */
+    const said = /\begari\b/i.test(s) ? 'egari' : /\becosine\b/i.test(s) ? 'ecosine' : null;
+
+    return {
+      provider: 'Uber',
+      kind: 'oauth',
+      /* No key yet, and that is deliberate — the key depends on which fleet
+         the grant turns out to be for. checkUberOAuth fills `keys` in. */
+      key: null,
+      fleet: said,
+      value: id,
+      secret,
+      said_fleet: said,
+      /* `ok` is what stops a candidate before the check. A pair reaches the
+         check precisely BECAUSE it cannot be named without one. */
+      ok: true,
+      why: said
+        ? `an Uber OAuth application, labelled ${said} — the grant will confirm which org it reaches`
+        : 'an Uber OAuth application — the grant will say which org it reaches, and that names the fleet',
+    };
+  },
+
   /* Yango: a Yandex session. */
   (raw) => {
     const jar = cookieMap(cookieText(raw));
@@ -212,8 +307,37 @@ export function recognise(text) {
       let hit = null;
       try { hit = fn(block); } catch { hit = null; }
       if (!hit) continue;
-      found.push({ ...hit, ok: Boolean(hit.key) });
+      /* A recogniser that already knows whether its find is usable says so.
+         Every credential above is named or it is nothing, so `ok` follows
+         from having a key — but an OAuth pair reaches the live check
+         PRECISELY because it cannot be named without one, and deriving `ok`
+         from a key it does not have yet would drop it before it was tried. */
+      found.push({ ...hit, ok: hit.ok !== undefined ? hit.ok : Boolean(hit.key) });
       break;                       // one credential per block
+    }
+  }
+  /* A pair split across blocks.
+     ─────────────────────────────────────────────────────────────────────────
+     Every other credential here is one string, so a blank line between two of
+     them separates two credentials. An OAuth application is two strings that
+     mean nothing apart, and an operator who pastes them with a blank line
+     between — or who copies them out of two fields — has still pasted one
+     credential. So if no block yielded a pair, the whole text is offered to
+     that one recogniser as a single block. It still needs to find exactly two
+     opaque strings in it, so a paste holding a pair AND something else does
+     not become a pair by accident. */
+  if (!found.some((f) => f.kind === 'oauth')) {
+    const whole = String(text || '').trim();
+    for (const fn of RECOGNISERS) {
+      let hit = null;
+      try { hit = fn(whole); } catch { hit = null; }
+      if (hit?.kind !== 'oauth') continue;
+      /* …and only if neither half is already spoken for by a credential a
+         block-level recogniser named outright. */
+      const claimed = found.some((f) => String(f.value || '').includes(hit.value)
+        || String(f.value || '').includes(hit.secret));
+      if (!claimed) found.push({ ...hit, ok: true });
+      break;
     }
   }
   /* The same key twice in one paste is a mistake worth refusing rather than
@@ -221,13 +345,22 @@ export function recognise(text) {
      and this cannot tell which. */
   const seen = new Map();
   for (const f of found) {
-    if (!f.key) continue;
-    if (seen.has(f.key)) {
+    /* A pair has no key yet — the check answers which one — so it is deduped
+       on what it IS instead. Two Uber applications in one paste are two claims
+       on the same three settings, and letting both through means two grants,
+       two writes, and the second one winning for no reason anybody chose.
+
+       On its own field, not on `key`: `key` is what the page prints in the
+       "goes to" column, and a synthetic one would be rendered to an operator
+       as the name of a setting that does not exist. */
+    const id = f.key || (f.kind ? `${f.provider}:${f.kind}:${f.fleet || '?'}` : null);
+    if (!id) continue;
+    if (seen.has(id)) {
       f.ok = false;
       f.why += ' — and another block in this paste claims the same key, so neither is applied';
-      seen.get(f.key).ok = false;
-      seen.get(f.key).why += ' — and another block in this paste claims the same key, so neither is applied';
-    } else seen.set(f.key, f);
+      seen.get(id).ok = false;
+      seen.get(id).why += ' — and another block in this paste claims the same key, so neither is applied';
+    } else seen.set(id, f);
   }
   return found;
 }
@@ -235,7 +368,14 @@ export function recognise(text) {
 /** What a paste did NOT explain: blocks nothing recognised. These are what a
     model is asked about, and what a person is shown when it cannot help. */
 export function unrecognised(text) {
-  const named = new Set(recognise(text).map((f) => f.value));
+  /* BOTH halves of a pair, not just the one in `value`.
+     ─────────────────────────────────────────────────────────────────────────
+     Every other credential is one string, so `value` is the whole of it. An
+     OAuth application is two, and filtering on `value` alone left the secret's
+     block looking like something nothing understood — which sent a live client
+     secret to the model to be identified, and drew a second, red row on the
+     page for a credential that had just been accepted. */
+  const named = new Set(recognise(text).flatMap((f) => [f.value, f.secret]).filter(Boolean));
   /* Compared against the DE-ESCAPED block. A Windows curl's jar is read
      through deCmd, so its value never appears literally in the raw text, and
      an already-recognised paste would otherwise be handed to the model a

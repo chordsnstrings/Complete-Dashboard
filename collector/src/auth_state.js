@@ -30,6 +30,7 @@
    asked for, is an authentication failure and not an empty window. */
 
 import { http } from './http.js';
+import { get, SETTING_DEFAULTS } from './settings.js';
 
 /** Hosts a provider redirects to when it wants a human to log in again. */
 const LOGIN_HOST = /(^|\.)(auth|login|accounts|signin|sso)\./i;
@@ -170,7 +171,7 @@ const orgLists = new Map();
 async function knownOrgs(token, key = 'shared') {
   if (orgLists.has(key)) return orgLists.get(key);
   try {
-    const { data } = await http('https://api.uber.com/v1/vehicle-suppliers/orgs',
+    const { data } = await http(get('UBER_ORGS_URL', SETTING_DEFAULTS.UBER_ORGS_URL),
       { headers: { authorization: `Bearer ${token}` }, timeoutMs: 20000, retries: 0 });
     const rows = data?.organizations || data?.orgs || [];
     if (Array.isArray(rows) && rows.length) {

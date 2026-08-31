@@ -192,5 +192,70 @@ check('two curls in one paste land on two different keys',
 check('…mixing the two curl dialects freely',
   both.map((f) => f.key).sort().join(',') === 'UBER_WEB_COOKIE,UBER_WEB_COOKIE_EGARI');
 
+/* ── an OAuth application: two strings that mean nothing apart ─────────── */
+/* The one credential here that carries no identity of its own.
+   ─────────────────────────────────────────────────────────────────────────
+   A Bolt token declares its fleet owner and an Uber cookie declares its org,
+   so those are recognised exactly and this file can assert the key. An OAuth
+   application declares nothing: two opaque base64-ish strings whose id and
+   secret are not reliably told apart by length — this fleet's own two clients
+   are 32/115 and 32/40 characters.
+
+   So the assertion that matters here is the opposite of the one above: that
+   the recogniser REFUSES to name the key, and hands both strings to the live
+   check, which performs the grant and asks Uber which organisation the
+   application reaches. The alternative — guessing — writes an Ecosine client
+   into Egari's slot, which is the failure this whole module exists to
+   prevent, arriving through the one door that had no lock on it. */
+const APP_ID = 'Xq7bT2mKp9RvZ4nLc6HdWs1YgJf3AeUo';                     // 32, the shape Uber issues
+const APP_SECRET = 'Nb4tG8yQ_wR2zP7mVc5XkD3sLj9HfAeU6TnQ1oZi';  // 40, longer than its id
+const oauthOf = (text) => recognise(text).filter((f) => f.kind === 'oauth');
+
+{
+  const labelled = oauthOf(`uber egari client secret : ${APP_SECRET}\nuber egari application id : ${APP_ID}`);
+  check('an application id and its secret are read as ONE credential, not two',
+    labelled.length === 1, String(labelled.length));
+  check('and the labels decide which string is which',
+    labelled[0]?.value === APP_ID && labelled[0]?.secret === APP_SECRET,
+    `${labelled[0]?.value} / ${labelled[0]?.secret}`);
+  check('it reaches the live check without a key, because the key is what the check answers',
+    labelled[0]?.key === null && labelled[0]?.ok === true,
+    JSON.stringify([labelled[0]?.key, labelled[0]?.ok]));
+  check('a fleet named in the paste is carried as a claim, not as the answer',
+    labelled[0]?.said_fleet === 'egari' && labelled[0]?.fleet === 'egari');
+}
+
+{
+  /* No labels at all. The recogniser prefers the shorter string as the id
+     because Uber's is 32 characters, and the check tries the other way round
+     if that grant fails — so being wrong here costs one refused request. */
+  const bare = oauthOf(`${APP_SECRET}\n${APP_ID}`);
+  check('an unlabelled pair is still read as one credential', bare.length === 1);
+  check('…with the 32-character half preferred as the id',
+    bare[0]?.value === APP_ID && bare[0]?.secret === APP_SECRET);
+  check('…and no fleet claimed, because nothing in the paste said one',
+    bare[0]?.fleet === null && bare[0]?.said_fleet === null);
+}
+
+check('a pair separated by a blank line is one credential, not two blocks of nothing',
+  oauthOf(`${APP_ID}\n\n${APP_SECRET}`).length === 1);
+check('prose around it does not stop it being read',
+  oauthOf(`Hi — Uber creds for Egari.\napplication id : ${APP_ID}\nclient secret : ${APP_SECRET}\nThanks!`).length === 1);
+
+/* Declining is the important half, and these are the ways it must decline. */
+check('one opaque string on its own is not an application',
+  oauthOf(APP_ID).length === 0);
+check('three of them are not an application either — a pair is exactly two',
+  oauthOf(`${APP_ID}\n${APP_SECRET}\nTz5xW8qN2mB6vC4kR7jH9gF1dS3aL0pE`).length === 0);
+check('a cookie jar is not an application, however many opaque values it holds',
+  oauthOf(ecoJar).length === 0);
+check('and neither is a Bolt JWT',
+  oauthOf(jwt({ fleet_owner_id: 173999, exp: EXP })).length === 0);
+/* A supplier jar is recognised as a cookie by the recogniser above it, and
+   the loop breaks at the first hit — so the pair recogniser must not claim it
+   through the whole-text fallback either. */
+check('a paste that IS a supplier cookie stays a supplier cookie',
+  recognise(posix(ecoJar)).every((f) => f.kind !== 'oauth'));
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
