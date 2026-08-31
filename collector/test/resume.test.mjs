@@ -167,6 +167,77 @@ console.log('\nthe runner is plugged into it');
     !/clearCheckpoint/.test(failBlock));
 }
 
+/* ── the three things that decide whether any of it fires ─────────────────
+   The checkpoint makes a run continue. These make the SCHEDULER let it. */
+console.log('\nthe abandon rule can actually see the progress');
+{
+  const { readFileSync } = await import('node:fs');
+  const idx = readFileSync('src/index.js', 'utf8');
+  /* The requeue writes done_at_last_attempt / steps_at_last_attempt into the
+     progress document as the baseline for the NEXT attempt. The progress
+     writer was a whole-document replace, so the first write of that attempt
+     erased them — and coalesce(absent, -1) is -1, which everything beats. So
+     a job that truly wedged the container could never be abandoned, while one
+     killed before its first progress write kept the stale baselines, compared
+     equal, and was abandoned for it. Both failed rows on production are the
+     second case. */
+  check('the progress write merges rather than replacing',
+    /SET progress = coalesce\(progress, '\{\}'::jsonb\) \|\| \$2::jsonb/.test(idx),
+    'a whole-document write erases the baselines the abandon rule compares against');
+  check('and the requeue still writes those baselines',
+    /done_at_last_attempt/.test(idx) && /steps_at_last_attempt/.test(idx));
+  /* attempts was incremented on claim AND on requeue, so one interruption
+     read as two and a job restarted twice was accused of three. */
+  check('a restart is counted once, not twice',
+    /attempts = coalesce\(attempts, 0\) \+ 1/.test(idx)
+    && !/attempts = CASE WHEN \$\{ADVANCED\} THEN 1 ELSE coalesce\(attempts, 0\) \+ 1 END/.test(idx),
+    'the claim counts it; the requeue must not count it again');
+  check('and a job that advanced starts its count again',
+    /attempts = CASE WHEN \$\{ADVANCED\} THEN 0 ELSE coalesce\(attempts, 0\) END/.test(idx));
+}
+
+console.log('\ntwo collections waiting do not both wake');
+{
+  /* The barrier was one promise every waiter awaited, so N waiters woke
+     together and ran concurrently — into the provider's three-report cap,
+     which is the starvation the barrier exists to prevent. */
+  let running = 0, maxConcurrent = 0;
+  const order = [];
+  const tailTest = (() => {
+    let queuedN = 0;
+    let t = Promise.resolve();
+    return (name, ms) => {
+      queuedN++;
+      const run = async () => {
+        running++; maxConcurrent = Math.max(maxConcurrent, running);
+        order.push(name);
+        await new Promise((r) => setTimeout(r, ms));
+        running--; queuedN--;
+      };
+      const mine = t.then(run, run);
+      t = mine.then(() => {}, () => {});
+      return mine;
+    };
+  })();
+  /* The shape of the bug: a long run, then three short ones queued behind it
+     while it is still going. */
+  const a = tailTest('backfill', 60);
+  const b = tailTest('incremental-1', 5);
+  const c = tailTest('incremental-2', 5);
+  const d2 = tailTest('incremental-3', 5);
+  await Promise.all([a, b, c, d2]);
+  check('only one collection runs at a time', maxConcurrent === 1, `peak ${maxConcurrent}`);
+  check('and they run in the order they were asked for',
+    order.join(',') === 'backfill,incremental-1,incremental-2,incremental-3', order.join(','));
+
+  const { readFileSync } = await import('node:fs');
+  const run = readFileSync('src/run.js', 'utf8');
+  check('the runner chains rather than sharing one gate',
+    /const mine = tail\.then\(run, run\)/.test(run) && !/inFlight = new Promise/.test(run));
+  check('and a failed run does not poison the queue behind it',
+    /tail = mine\.then\(\(\) => \{\}, \(\) => \{\}\)/.test(run));
+}
+
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

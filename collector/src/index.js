@@ -133,8 +133,24 @@ async function main() {
            sequence and one of them takes four and a half hours; without this
            the job row says 'running' for the whole afternoon and a wedged
            process is indistinguishable from a working one. */
+        /* MERGED into what is there, not written over it.
+           ─────────────────────────────────────────────────────────────────
+           This was `SET progress = $2`, a whole-document replace — and the
+           requeue below writes `done_at_last_attempt` / `steps_at_last_attempt`
+           into the same document as the baseline it compares the NEXT attempt
+           against. The first progress write of that attempt erased them.
+
+           So the guard that was built to tell an advancing job from a stuck
+           one was comparing against a baseline that no longer existed:
+           coalesce(absent, -1) is -1, everything beats -1, and a job that
+           truly wedges the container every pass could never be abandoned —
+           while a job killed BEFORE its first progress write kept the stale
+           baselines, compared equal, and was abandoned for it. Both of the
+           failed rows on production are the second case. */
         const progress = (p2) => pool.query(
-          `UPDATE collector_job SET progress = $2 WHERE id = $1`, [job.id, JSON.stringify(p2)])
+          `UPDATE collector_job
+              SET progress = coalesce(progress, '{}'::jsonb) || $2::jsonb
+            WHERE id = $1`, [job.id, JSON.stringify(p2)])
           .catch((e) => log.warn('scheduler', 'progress write failed', { err: String(e).slice(0, 80) }));
         try {
           /* A job can name one fleet. The two fleets are separate businesses
@@ -212,7 +228,13 @@ async function main() {
        SET status = CASE WHEN coalesce(attempts, 0) >= 3 AND NOT ${ADVANCED}
                          THEN 'failed' ELSE 'queued' END,
            started_at = NULL,
-           attempts = CASE WHEN ${ADVANCED} THEN 1 ELSE coalesce(attempts, 0) + 1 END,
+           -- Reset to zero, not one, and NOT incremented here: the claim above
+           -- already counts a restart when it picks the job up again. Counting
+           -- it in both places meant one interruption read as two, so a job
+           -- restarted twice was accused of having restarted three times --
+           -- and the column's own comment says attempts is how many times the
+           -- job has been CLAIMED.
+           attempts = CASE WHEN ${ADVANCED} THEN 0 ELSE coalesce(attempts, 0) END,
            -- Remember how far it had got, so the next restart can tell whether
            -- this one advanced.
            progress = coalesce(progress, '{}'::jsonb)

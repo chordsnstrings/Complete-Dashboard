@@ -207,11 +207,17 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
    windows to it, which is how a hole opens while both runs report ok. */
 {
   const run = (await import('node:fs')).readFileSync('src/run.js', 'utf8');
+  /* A QUEUE, not a single gate. It was one promise every waiter awaited, so
+     two waiters woke together and ran concurrently — into the provider's
+     three-report cap, which is the starvation the barrier exists to prevent.
+     test/resume.test.mjs drives the shape and asserts the peak is one. */
   check('a second collection waits for the first rather than running beside it',
-    /let inFlight = null;/.test(run) && /await inFlight\.catch/.test(run));
+    /let tail = Promise\.resolve\(\);/.test(run) && /const mine = tail\.then\(run, run\)/.test(run));
   check('and it waits rather than being silently dropped',
-    !/if \(inFlight\) return;/.test(run) && /waiting — another collection is in flight/.test(run));
-  check('the lock is released even when the run throws', /finally \{ release\(\); inFlight = null; \}/.test(run));
+    !/if \(inFlight\) return;/.test(run) && /waiting — \$\{queued\} collection/.test(run));
+  check('the lock is released even when the run throws', /finally \{ queued--; \}/.test(run));
+  check('and one failed run does not poison the queue behind it',
+    /tail = mine\.then\(\(\) => \{\}, \(\) => \{\}\)/.test(run));
 
   /* ── the order the sources run in ─────────────────────────────────────────
      This is not style. An FMS year backfill takes four and a half hours; the
@@ -242,8 +248,11 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
     && /export const incremental = \(onProgress\b/.test(run));
 
   const idx = (await import('node:fs')).readFileSync('src/index.js', 'utf8');
+  /* MERGED, not replaced. The requeue writes the baselines the abandon rule
+     compares the next attempt against into this same document; a whole-document
+     write erased them on that attempt's first progress report. */
   check('the scheduler persists that progress against the job row',
-    /UPDATE collector_job SET progress/.test(idx));
+    /UPDATE collector_job\s*\n?\s*SET progress = coalesce\(progress, '\{\}'::jsonb\) \|\| \$2::jsonb/.test(idx));
   check('a failed progress write cannot fail the collection it is describing',
     /progress write failed/.test(idx) && /\.catch\(\(e\) => log\.warn\('scheduler', 'progress write failed'/.test(idx));
 
@@ -256,8 +265,13 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
      no source at all is a candidate for being the cause. */
   check('the requeue distinguishes a job that advanced from one that did not',
     /done_at_last_attempt/.test(idx));
+  /* Reset to zero and not incremented here: the claim already counts a
+     restart when it picks the job up again, and counting it in both places
+     meant one interruption read as two. */
   check('an advancing job has its attempt counter reset rather than incremented',
-    /attempts = CASE WHEN \$\{ADVANCED\} THEN 1 ELSE coalesce\(attempts, 0\) \+ 1 END/.test(idx));
+    /attempts = CASE WHEN \$\{ADVANCED\} THEN 0 ELSE coalesce\(attempts, 0\) END/.test(idx));
+  check('and a restart is counted once, by the claim',
+    /attempts = coalesce\(attempts, 0\) \+ 1/.test(idx));
   check('the abandonment message says what was actually observed',
     /restarted three times without completing a single source/.test(idx));
   check('the log names which source the stranded job was on',

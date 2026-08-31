@@ -48,16 +48,31 @@ const HISTORICAL = { uber, uberFleet, yango, bolt, hotel, external, events, fms 
 
    A queued run waits rather than being dropped: skipping it silently is how a
    collection gap opens without anything saying so. */
-let inFlight = null;
+/* A QUEUE, not a one-shot gate.
+   ─────────────────────────────────────────────────────────────────────────
+   This was a single `inFlight` promise that every waiter awaited. Two of them
+   waiting therefore woke TOGETHER when it resolved, each overwrote `inFlight`
+   with its own, and each ran — concurrently, which is the one thing this
+   barrier exists to prevent. A backfill wedged for hours collects one waiting
+   incremental every thirty minutes, so the release did not admit one run: it
+   admitted all of them at once, into the provider's three-report cap, which is
+   the starvation described above arriving through the mechanism written to
+   stop it.
+
+   Chaining instead means each run waits for the one actually before it. The
+   tail never rejects, so a failed run does not poison the queue behind it. */
+let queued = 0;
+let tail = Promise.resolve();
 export async function runWindow(mode, from, to, onProgress, fleet = null, jobId = null) {
-  if (inFlight) {
-    log.info('run', `${mode} waiting — another collection is in flight`);
-    await inFlight.catch(() => {});
-  }
-  let release;
-  inFlight = new Promise((r) => { release = r; });
-  try { return await runWindowInner(mode, from, to, onProgress, fleet, jobId); }
-  finally { release(); inFlight = null; }
+  if (queued) log.info('run', `${mode} waiting — ${queued} collection(s) ahead of it`);
+  queued++;
+  const run = async () => {
+    try { return await runWindowInner(mode, from, to, onProgress, fleet, jobId); }
+    finally { queued--; }
+  };
+  const mine = tail.then(run, run);
+  tail = mine.then(() => {}, () => {});
+  return mine;
 }
 
 async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = null) {
