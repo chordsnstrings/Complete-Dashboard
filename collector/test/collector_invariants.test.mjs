@@ -695,10 +695,21 @@ console.log('\na silent vehicle is not a broken clock');
    that is visible in the source. */
 {
   const cab = src('cabman.js');
-  check('the median is taken over the vehicles still reporting',
+  check('the statistic is taken over the vehicles still reporting',
     /const talking = lags\.filter\(\(m\) => m < DORMANT_MIN\)/.test(cab)
-    && /talking\[Math\.floor\(talking\.length \/ 2\)\]/.test(cab),
+    && /talking\[Math\.min\(talking\.length - 1,/.test(cab),
     'a dormant tracker still drags the median past the threshold');
+  /* And the threshold is on the FLOOR now, not the middle. Excluding the
+     dormant trackers was necessary and was not sufficient: measured on
+     production, median 24 minutes over 34 reporting vehicles, an ERROR every
+     five minutes, while the freshest fix in the fleet was 1.2 minutes old.
+     These trackers report on movement rather than on a timer, so a car parked
+     twenty minutes ago is twenty minutes stale and entirely healthy — and
+     half a fleet is parked at any moment. A clock error is the thing that
+     moves EVERY vehicle at once, the just-reported one included. */
+  check('and the alarm tests the freshest fix, which is what a clock error moves',
+    /const floor = at\(0\.1\)/.test(cab) && /if \(floor > 20\)/.test(cab),
+    'a high median over a low floor is a fleet with cars parked, not a clock that is wrong');
   check('and dormant vehicles are counted, not counted AS a clock error',
     /vehicles listed but not reporting/.test(cab) && /log\.info\(SRC, 'vehicles listed/.test(cab),
     'silence is worth reporting and is not an error in the collector');

@@ -74,23 +74,45 @@ export async function pullLive() {
        somebody must act on. The tell was in the number: the lag hovered around
        forty-five minutes, and no timezone is forty-five minutes from Dubai.
 
-       So the median is taken over the vehicles that are actually TALKING —
-       anything inside a day — which is the population a clock error would move
-       all at once. A whole-hour median is what a timezone change looks like;
-       the dormant trackers are counted and reported separately, because
-       "sixteen vehicles have stopped reporting" is worth knowing and is not an
-       error in the collector. */
+       So the dormant trackers are excluded — anything outside a day — and
+       counted separately, because "sixteen vehicles have stopped reporting" is
+       worth knowing and is not an error in the collector.
+
+       That much was right and it was still firing. Measured on production:
+       median 24 minutes over 34 reporting vehicles, an ERROR every five
+       minutes, 288 a day. And the distribution says there is nothing wrong:
+       the FRESHEST fix is 1.2 minutes old.
+
+       Which is the whole discriminator, and the median is the wrong statistic
+       for it. These trackers report on movement, not on a timer, so a car
+       parked twenty minutes ago is twenty minutes stale and perfectly healthy
+       — half the fleet is parked at any moment, and that is what the median
+       measures. A clock or timezone error does something the median cannot
+       distinguish from that: it moves EVERY vehicle at once, including the
+       ones that just reported. An hour added to the provider's gmt field puts
+       the freshest fix at sixty-one minutes, not at one.
+
+       So the floor is the test. If the newest fix in the whole fleet is
+       stale, the feed is behind; if any vehicle reported a minute ago, no
+       clock is wrong however many cars are parked. The tenth percentile
+       rather than the bare minimum, so one freak-fresh row cannot silence a
+       real skew, and the median still travels in the message as context. */
     const DORMANT_MIN = 24 * 60;
     const lags = rows.map((r) => (Date.parse(now) - Date.parse(r.captured_at)) / 60000)
       .filter(Number.isFinite).sort((a, b) => a - b);
     const talking = lags.filter((m) => m < DORMANT_MIN);
     const dormant = lags.length - talking.length;
-    const median = talking.length ? talking[Math.floor(talking.length / 2)] : 0;
-    if (median > 20) {
-      log.error(SRC, 'telemetry clock skew — reporting vehicles are far behind the poll', {
-        median_lag_min: Math.round(median), reporting: talking.length, fleet: f.fleet,
+    const at = (p) => (talking.length ? talking[Math.min(talking.length - 1,
+      Math.floor(talking.length * p))] : 0);
+    const median = at(0.5);
+    const floor = at(0.1);
+    if (floor > 20) {
+      log.error(SRC, 'telemetry clock skew — even the freshest fix is behind the poll', {
+        freshest_decile_min: Math.round(floor), median_lag_min: Math.round(median),
+        reporting: talking.length, fleet: f.fleet,
         hint: 'a whole-hour offset means the provider changed the timezone of its gmt field; '
-          + 'minutes mean the feed itself is lagging',
+          + 'minutes mean the feed itself is lagging. A high median with a low floor is not '
+          + 'skew — it is a fleet with cars parked, which is what a fleet looks like',
       });
     }
     if (dormant) {

@@ -177,6 +177,24 @@ check('a journey ends on a run of empty fixes, not a single blink',
   const cab = cabRaw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
   check('the CABMAN gmt field is no longer stamped as Dubai time', !/\+04:00/.test(cab));
   check('a clock-skew alarm exists in the collector', /clock skew/i.test(cabRaw));
+  /* And it alarms on the FLOOR, not the median.
+     ─────────────────────────────────────────────────────────────────────
+     Measured on production: median 24 minutes over 34 reporting vehicles,
+     firing an ERROR every five minutes — 288 a day — while the freshest fix
+     in the fleet was 1.2 minutes old. These trackers report on movement, not
+     on a timer, so a car parked twenty minutes ago is twenty minutes stale
+     and perfectly healthy, and half a fleet is parked at any moment. That is
+     what the median measures. A clock error moves EVERY vehicle at once,
+     including the one that just reported: an hour on the provider's gmt field
+     puts the freshest fix at sixty-one minutes, not at one. */
+  check('and it tests the freshest fix, not the middle one',
+    /const floor = at\(0\.1\)/.test(cab) && /if \(floor > 20\)/.test(cab),
+    'a high median with a low floor is a fleet with cars parked, not a clock that is wrong');
+  check('a single freak-fresh row cannot silence a real skew',
+    /at\(0\.1\)/.test(cab) && !/Math\.min\(\.\.\.talking\)/.test(cab),
+    'the tenth percentile rather than the bare minimum');
+  check('and the median still travels in the message, as context',
+    /median_lag_min: Math\.round\(median\)/.test(cab));
   check('flag fields are coerced rather than double-negated',
     !/!!v\.state/.test(cab) && !/!!v\.SeatSensorValue/.test(cab));
 }
