@@ -83,6 +83,82 @@ function describe(records, { maxValues = 12 } = {}) {
   })).sort((a, b) => b.fill_pct - a.fill_pct || a.key.localeCompare(b.key));
 }
 
+
+/* Does Uber tell a fleet what tier its drivers are?
+   ─────────────────────────────────────────────────────────────────────────
+   Uber Pro ranks a driver Blue, Gold, Platinum or Diamond, and nothing in
+   this product has ever asked whether that reaches a supplier account. The
+   report pipeline does not carry it — REPORT_TYPE_DRIVER_ACTIVITY was probed
+   and has exactly six columns, none of them a tier — so if it exists at all
+   it is on the GraphQL surface, which we call for exactly one thing.
+
+   Asking is not as simple as guessing a field name, and this endpoint exists
+   because there are three ways to ask and they answer differently:
+
+   1. INTROSPECTION. If the server will describe its own schema, that is the
+      whole answer in one call and every guess below is unnecessary. Usually
+      disabled in production; costs one request to find out.
+
+   2. FIELD PROBING. A GraphQL server answers an unknown field with
+      "Cannot query field X on type T" — and very often with
+      "Did you mean Y?", which names a REAL field we did not know existed.
+      So a wrong guess is not a wasted call: the error is the schema leaking
+      one field at a time, and a near-miss is more informative than a hit.
+
+   3. OPERATION PROBING. PERMISSION_DENIED and "Cannot query field" mean
+      opposite things at the query root. The first says the operation EXISTS
+      and this session may not have it — a credential question, answerable by
+      a human with the right login. The second says it does not exist at all,
+      and no credential will ever change that. Reporting them as one failure
+      would waste somebody's week.
+
+   Every candidate is fixed in this file. Nothing the caller sends becomes
+   part of a query, so this cannot be turned into an open GraphQL proxy onto
+   the fleet's session. Read-only; writes nothing. */
+const TIER_FIELDS = [
+  /* On the type that already carries completedTripsCount and
+     recognitionRating — the likeliest home for a status the same surface
+     computes. */
+  ['driverInfo', 'proTier'], ['driverInfo', 'tier'], ['driverInfo', 'driverTier'],
+  ['driverInfo', 'loyaltyTier'], ['driverInfo', 'rewardsTier'], ['driverInfo', 'uberProTier'],
+  ['driverInfo', 'proStatus'], ['driverInfo', 'uberProStatus'], ['driverInfo', 'tierName'],
+  ['driverInfo', 'currentTier'], ['driverInfo', 'level'], ['driverInfo', 'driverLevel'],
+  ['driverInfo', 'status'], ['driverInfo', 'partnerTier'], ['driverInfo', 'performanceTier'],
+  ['driverInfo', 'badge'], ['driverInfo', 'acceptanceRate'], ['driverInfo', 'cancellationRate'],
+  ['driverInfo', 'lifetimeTrips'], ['driverInfo', 'rating'],
+  /* One level up, on the user rather than the driving record. */
+  ['user', 'proTier'], ['user', 'tier'], ['user', 'loyaltyStatus'], ['user', 'driverTier'],
+  /* And on the driver itself, beside complianceInfo and associatedVehicles. */
+  ['driver', 'proTier'], ['driver', 'tier'], ['driver', 'performanceTier'],
+  ['driver', 'driverStatus'], ['driver', 'tierInfo'], ['driver', 'rewards'],
+];
+
+/* Whole operations. A tier might not hang off GetDriver at all. */
+const TIER_OPS = [
+  'getEarnerProfile', 'getDriverRewards', 'getProTier', 'getDriverTier', 'getRewards',
+  'getLoyalty', 'getDriverBadges', 'getEarnerTier', 'getDriverPerformanceTier',
+  'getDriverIncentives', 'getPerformanceReport', 'getFleetDrivers',
+];
+
+/* GetDriver with one extra field spliced into one of its three selections.
+   The rest of the query is the shape already known to work, so a failure is
+   about the field and not about the request. */
+function driverQueryWith(parent, field) {
+  const extra = { driverInfo: '', user: '', driver: '' };
+  extra[parent] = field;
+  return `query GetDriver($orgUUID: ID!, $driverUUID: ID!) {
+    getDriver(orgUUID: $orgUUID, driverUUID: $driverUUID) {
+      driver {
+        uuid ${extra.driver}
+        member { user {
+          uuid ${extra.user}
+          driverInfo { completedTripsCount ${extra.driverInfo} }
+        } }
+      }
+    }
+  }`;
+}
+
 export function probeRoutes(app, { wrap }) {
   /* Which report types this org can actually generate. */
   app.get('/api/probe/uber/report-types', wrap(async (req, res) => {
@@ -439,6 +515,115 @@ export function probeRoutes(app, { wrap }) {
       verifies: 'trips only, for this window, for the fleets listed',
     });
   }));
+
+  app.get('/api/probe/uber/tier', wrap(async (req, res) => {
+    await loadSettings();
+    const org = uberOrg();
+    if (!org.orgUuid) return res.status(400).json({ error: 'no Uber org configured' });
+
+    let uuid = String(req.query.uuid || '').trim();
+    if (!uuid) {
+      const { rows } = await pool.query(
+        `SELECT driver_ext_id FROM driver_platform_state
+          WHERE platform = 'uber' AND fleet_id = $1
+            AND coalesce(btrim(driver_ext_id), '') <> ''
+          ORDER BY observed_at DESC NULLS LAST LIMIT 1`, [org.fleet]);
+      uuid = rows[0]?.driver_ext_id || '';
+    }
+    if (!uuid) return res.json({ error: 'no uber driver uuid to ask about' });
+
+    const GQL = 'https://supplier.uber.com/graphql';
+    const ask = async (query, variables) => {
+      try {
+        const { data } = await http(GQL, {
+          method: 'POST', timeoutMs: 20000, retries: 0, headers: uberWebHeaders(org),
+          body: JSON.stringify({ query, variables }),
+        });
+        return data;
+      } catch (e) { return { transportError: String(e?.message || e).slice(0, 200) }; }
+    };
+    /* GraphQL puts the interesting part in `errors`, and an error object
+       stringifies to [object Object] — the trap this codebase has already
+       been caught by three times. */
+    const errText = (d) => (d?.errors || []).map((e) => e?.message || JSON.stringify(e)).join(' | ');
+
+    /* 1. Introspection. If it answers, nothing below is needed. */
+    const introspection = {};
+    for (const t of ['DriverInfo', 'Driver', 'User']) {
+      const d = await ask(`query I($n: String!) { __type(name: $n) { name fields { name } } }`, { n: t });
+      const fields = d?.data?.__type?.fields;
+      introspection[t] = fields ? fields.map((f) => f.name)
+        : { refused: errText(d).slice(0, 160) || 'no such type' };
+    }
+
+    /* If the server described DriverInfo, every guess below is answered
+       already and forty more requests would only confirm it more slowly. */
+    const described = Array.isArray(introspection.DriverInfo) ? introspection : null;
+
+    /* 2. One field at a time, and the ERROR is the payload. */
+    const fields = [];
+    for (const [parent, field] of (described ? [] : TIER_FIELDS)) {
+      const d = await ask(driverQueryWith(parent, field),
+        { orgUUID: org.orgUuid, driverUUID: uuid });
+      const err = errText(d);
+      const got = d?.data?.getDriver?.driver;
+      const value = got
+        ? (parent === 'driver' ? got[field]
+          : parent === 'user' ? got.member?.user?.[field]
+            : got.member?.user?.driverInfo?.[field])
+        : undefined;
+      /* "Did you mean" is the schema telling us a real name we had not
+         guessed, which is worth more than the field we asked for. */
+      const suggests = /Did you mean ([^?]+)\?/i.exec(err)?.[1] || null;
+      fields.push({
+        parent, field,
+        exists: !/Cannot query field|Unknown field|FieldUndefined/i.test(err) && !d?.transportError,
+        value: value === undefined ? null : value,
+        suggests,
+        note: (d?.transportError || err || '').slice(0, 160) || null,
+      });
+      await new Promise((r) => setTimeout(r, 80));
+    }
+
+    /* 3. Whole operations. PERMISSION_DENIED is a YES about existence. */
+    const ops = [];
+    for (const name of (described ? [] : TIER_OPS)) {
+      const d = await ask(`query Probe($orgUUID: ID!) { ${name}(orgUUID: $orgUUID) { __typename } }`,
+        { orgUUID: org.orgUuid });
+      const err = errText(d);
+      const missing = /Cannot query field|Unknown field/i.test(err);
+      ops.push({
+        operation: name,
+        /* Three answers, and only the first two are about us: absent means no
+           credential will ever help, denied means the right login would. */
+        verdict: d?.transportError ? 'transport'
+          : missing ? 'no such operation'
+            : /PERMISSION_DENIED|UNAUTHENTICATED|FORBIDDEN/i.test(err) ? 'exists — denied to this session'
+              : err ? 'exists — wrong arguments' : 'answered',
+        detail: (d?.transportError || err || '').slice(0, 200) || null,
+      });
+      await new Promise((r) => setTimeout(r, 80));
+    }
+
+    const found = fields.filter((f) => f.exists);
+    res.json({
+      driver: uuid, org: org.fleet,
+      introspection,
+      /* Said plainly, because the three outcomes lead to three different next
+         moves and a bare list of nulls reads as all of them at once. */
+      verdict: described ? 'the schema described itself — read introspection[], which is the whole answer'
+        : found.some((f) => f.value != null) ? 'a tier-like field answered — see fields[]'
+        : found.length ? 'fields exist but answered null for this driver'
+          : fields.some((f) => f.suggests) ? 'no candidate existed, but the schema suggested real names'
+            : ops.some((o) => o.verdict.startsWith('exists')) ? 'no field, but an operation exists and is denied'
+              : 'nothing on this surface names a driver tier',
+      fields_that_exist: found,
+      suggestions: [...new Set(fields.map((f) => f.suggests).filter(Boolean))],
+      operations_that_exist: ops.filter((o) => o.verdict.startsWith('exists') || o.verdict === 'answered'),
+      fields, ops,
+    });
+  }));
+
 
   /* Is the FMS history actually gone, or did we ask for it wrongly?
      ─────────────────────────────────────────────────────────────────────────

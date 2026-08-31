@@ -51,6 +51,10 @@ const EXEMPT = {
     + 'saying no channel reports one; GetDriver returns recognitionRating and nothing here had asked',
   '/api/probe/uber/window': 'operator tool: asks the provider what it still holds for one window, '
     + 'to settle whether a gap in our history is recoverable or gone',
+  '/api/probe/uber/tier': 'operator tool: asks the Uber GraphQL surface whether it names a driver reward '
+    + 'tier — Blue, Gold, Platinum, Diamond — by trying introspection, then a fixed list of candidate fields '
+    + 'on GetDriver, then a fixed list of candidate operations. Every candidate is written in the file; nothing '
+    + 'the caller sends becomes part of a query. Not a page: it answers whether a page COULD exist',
   '/api/probe/uber/audit': 'operator tool: re-asks Uber for a window we already hold and compares its '
     + 'Trip UUIDs against ours, by hand and for a week at a time. The PAGE reads /api/coverage/verified, '
     + 'which is where the nightly audit job stores the same comparison for whole months — a report costs '

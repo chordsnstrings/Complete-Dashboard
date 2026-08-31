@@ -40,9 +40,19 @@ const MAX_BYTES = Number(process.env.CACHE_MAX_BYTES || 64 * 1024 * 1024);
 /* Never cached, by prefix. /api/live and /api/track are realtime positions, and
    a minute old is simply wrong. /api/settings reads credential state.
    /api/rollups and /api/status are how a reader checks whether the data is
-   fresh, which cannot itself be answered from a cache. */
+   fresh, which cannot itself be answered from a cache.
+
+   /api/coverage/verified joins them for the same reason and one of its own.
+   The cache invalidates on a version key bumped by a collection run or a
+   rollup, and the nightly audit writes uber_trip_audit and neither — so the
+   first time it ever produces a verdict, the panel keeps serving the cached
+   "nothing has been verified yet" until some unrelated collector happens to
+   run. Measured: the audit landed six months at 100% agreement and the
+   endpoint went on reporting zero windows. It is a 26-row read, so there was
+   never anything to save. */
 const NEVER = ['/api/live', '/api/track', '/api/settings', '/api/rollups',
-  '/api/status', '/api/health', '/api/ready', '/api/probe', '/api/cache-stats'];
+  '/api/status', '/api/health', '/api/ready', '/api/probe', '/api/cache-stats',
+  '/api/coverage/verified'];
 
 export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
   maxBytes = MAX_BYTES } = {}) {

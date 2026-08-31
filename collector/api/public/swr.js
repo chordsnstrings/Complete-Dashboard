@@ -33,7 +33,7 @@ const MAX_AGE_MS = 36 * 3600 * 1000;    // beyond a day and a half, wait for the
 /* Endpoints whose whole point is being current. Matched on the path, before the
    query string, because ?days= never changes whether something is realtime. */
 const NEVER = ['/api/live', '/api/track', '/api/status', '/api/rollups',
-  '/api/cache-stats', '/api/settings', '/api/probe', '/api/health', '/api/ready'];
+  '/api/cache-stats', '/api/settings', '/api/probe', '/api/health', '/api/ready', '/api/coverage/verified'];
 
 const cacheable = (url) => {
   const path = String(url).split('?')[0];

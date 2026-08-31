@@ -302,5 +302,11 @@ check('the audit keeps two fields per trip, not the whole CSV record',
   'csvToTrips keeps raw: r on every row, and twenty thousand of those is the shape '
   + 'that has already OOM-killed this 512MB box once');
 
+check('the verified endpoint is never served from the cache',
+  /'\/api\/coverage\/verified'/.test(readFileSync('api/cache.js', 'utf8'))
+  && /'\/api\/coverage\/verified'/.test(readFileSync('api/public/swr.js', 'utf8')),
+  'the cache invalidates on a collection run and the audit is neither — measured on production, '
+  + 'six months landed at 100% agreement and the endpoint went on reporting zero windows');
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
