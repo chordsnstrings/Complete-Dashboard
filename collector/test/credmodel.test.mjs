@@ -71,6 +71,26 @@ check('a model proposal is still tested against the provider before it is stored
   check('…and the gate is a `continue`, so a refused candidate is skipped rather than caught later',
     /t\.verdict !== 'pass'\) continue;/.test(body));
 }
+/* The page must be able to SAY things.
+   ─────────────────────────────────────────────────────────────────────────
+   pastePanel declared `const note = el('span', 'note')`, which shadowed the
+   imported note() helper for the whole function — so every message the paste
+   page gives threw "note is not a function" rather than rendering, including
+   the confirmation after a credential was successfully stored. Caught by
+   driving the real page against production, not by any test here, so here is
+   the test. */
+{
+  const ui = readFileSync('api/public/app.js', 'utf8');
+  const start = ui.indexOf('function pastePanel(root) {');
+  /* Comments stripped first — this one quotes the very declaration it is
+     checking for, and a test that matches its own explanation is a test that
+     can never pass. */
+  const body = ui.slice(start, ui.indexOf('V.settings = async (root) => {'))
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  check('the paste panel does not shadow the note() helper it calls',
+    !/\bconst note\s*=/.test(body) && /out\.append\(note\(/.test(body),
+    'a local `note` would make every message on this page throw');
+}
 check('the paste route never echoes a value back',
   !/value: t\.value/.test(readFileSync('api/server.js', 'utf8')));
 check('a dry run is the default', /const apply = req\.body\?\.apply === true;/.test(readFileSync('api/server.js', 'utf8')));

@@ -3928,8 +3928,17 @@ function pastePanel(root) {
   fileBtn.append(file);
   const readBtn = el('button', 'btn');
   readBtn.textContent = 'Read and test';
-  const note = el('span', 'note');
-  bar.append(fileBtn, readBtn, note);
+  /* `status`, not `note`.
+     ─────────────────────────────────────────────────────────────────────────
+     This was `const note = el('span', 'note')`, which shadowed the imported
+     note() helper for the whole of this function — so every message the paste
+     page has to give threw "note is not a function" instead of rendering.
+     Including the one that matters most: the confirmation after applying a
+     credential. An operator pasting a working session saw the row go green,
+     clicked Apply, and got a blank panel and a console error over a write that
+     had actually succeeded. */
+  const status = el('span', 'note');
+  bar.append(fileBtn, readBtn, status);
   p.body.append(bar);
 
   const out = el('div');
@@ -3939,9 +3948,9 @@ function pastePanel(root) {
   const TONE = { pass: 'good', fail: 'critical', unknown: 'warn' };
   const post = async (apply) => {
     const text = ta.value.trim();
-    if (text.length < 20) { note.textContent = 'Nothing to read yet.'; return; }
+    if (text.length < 20) { status.textContent = 'Nothing to read yet.'; return; }
     readBtn.disabled = true;
-    note.textContent = apply ? 'Applying…' : 'Reading, and asking each provider…';
+    status.textContent = apply ? 'Applying…' : 'Reading, and asking each provider…';
     out.innerHTML = '';
     let d;
     try {
@@ -3951,13 +3960,13 @@ function pastePanel(root) {
         body: JSON.stringify({ text, apply }),
       });
     } catch (e) {
-      note.textContent = '';
+      status.textContent = '';
       out.append(note(`Could not read that: ${e.message}`, 'err'));
       readBtn.disabled = false;
       return;
     }
     readBtn.disabled = false;
-    note.textContent = '';
+    status.textContent = '';
     out.innerHTML = '';
 
     if (!d.proposals.length) {
