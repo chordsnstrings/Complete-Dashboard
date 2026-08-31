@@ -2310,6 +2310,75 @@ app.get('/api/tiers/mix', (_, r) => r.json(
     ['UberX', 'Electric', 'Comfort', 'Black'].map((tier, j) => ({
       label, tier, n: Math.round(300 / (j + 1) - i * 12), avg_km: 11 + j * 3 })))
     .filter((x) => x.n > 0)));
+/* The nightly verification's verdicts, as the coverage page reads them.
+   ─────────────────────────────────────────────────────────────────────────
+   Three shapes, because the panel renders three differently and a fixture with
+   only the happy one proves nothing: a window that agrees exactly, a window
+   Uber serves more of than we hold (the March 2026 shape this whole feature
+   exists for), and a window past Uber's retention that cannot be asked at all
+   and must NOT read as a failure of ours. */
+app.get('/api/coverage/verified', (_, r) => {
+  const w = (fleet, from, to, uber, ours, err, kind = 'month') => ({
+    fleet_id: fleet, kind, window_from: from, window_to: to,
+    verified_at: dayISO(1),
+    uber_rows: err ? null : uber, our_rows: err ? null : ours,
+    in_both: err ? null : ours, uber_only: err ? null : uber - ours, ours_only: 0,
+    agreement_pct: err || !uber ? null : Math.round((ours / uber) * 1000) / 10,
+    outside_window: err ? null : 3, error: err || null, past_retention: !!err,
+    /* Trips this fleet's report lists that we hold under the OTHER fleet's
+       name. Not loss — the trip upsert overwrites fleet_id, so a trip both
+       orgs can see is filed under whichever collected it last. */
+    misfiled: err ? null : Math.max(0, Math.round((uber - ours) * 0.02)),
+    took_ms: err ? 900 : 41000, sample_missing: err ? [] : [],
+    /* Only the days that disagreed, which is what the collector stores: a
+       verified month is 31 rows of "uber 512, ours 512" and would make this
+       the largest column in the table for the windows it says least about. */
+    days: err || uber === ours ? [] : (() => {
+      const out = [];
+      for (let d = 1; d <= 31; d++) {
+        const day = `${from.slice(0, 8)}${String(d).padStart(2, '0')}`;
+        if (day > to) break;
+        const u = Math.round(uber / 31), o = d <= 7 ? 0 : Math.round(ours / 24);
+        out.push({ day, uber: u, ours: o, missing: u - o });
+      }
+      return out;
+    })(),
+  });
+  const windows = [
+    w('ecosine', '2026-07-01', '2026-07-31', 6703, 6703),
+    w('egari', '2026-07-01', '2026-07-31', 2952, 2952),
+    w('ecosine', '2026-03-01', '2026-03-31', 17102, 4203),
+    w('egari', '2026-03-01', '2026-03-31', 7788, 1862),
+    w('ecosine', '2025-08-01', '2025-08-31', 0, 0, 'generate: invalid date range'),
+    /* A week window, which sits INSIDE the July month rows above. It must be
+       listed and must never be added to the totals — the fixture exists to
+       make a regression on that visible rather than plausible. */
+    w('ecosine', '2026-07-06', '2026-07-12', 1544, 1544, null, 'week'),
+  ];
+  const ok = windows.filter((x) => !x.error);
+  const months = ok.filter((x) => x.kind !== 'week');
+  const sum = (k) => months.reduce((a, x) => a + (Number(x[k]) || 0), 0);
+  r.json({
+    windows,
+    verified_windows: windows.length, measured_windows: ok.length, measured_months: months.length,
+    totals_over: 'whole calendar months only; week windows are listed but never added',
+    past_retention_windows: windows.filter((x) => x.past_retention).length,
+    errored_windows: 0,
+    disagreeing_windows: ok.filter((x) => x.uber_only > 0).length,
+    uber_rows: sum('uber_rows'), our_rows: sum('our_rows'),
+    trips_uber_has_that_we_never_stored: sum('uber_only'),
+    trips_filed_under_the_other_fleet: sum('misfiled'),
+    agreement_pct: Math.round(((sum('uber_rows') - sum('uber_only')) / sum('uber_rows')) * 1000) / 10,
+    last_verified_at: dayISO(1),
+    verifies: 'trips only. Uber money is a rolling 192-day window and a rating has no history to check.',
+    horizons: {
+      money: { from_day: '2026-02-09', to_day: dayISO(1), rows: 4210,
+        note: 'rolling window of about 192 days' },
+      rating: { from_day: dayISO(0), to_day: dayISO(0), rows: 93,
+        note: 'one current number, no history' },
+    },
+  });
+});
 app.get('/api/coverage/calendar', (_, r) => {
   const src = (source, holeFrom, holeDays, perDay) => {
     const days = [];

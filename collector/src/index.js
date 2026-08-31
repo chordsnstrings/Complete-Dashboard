@@ -9,7 +9,7 @@ import cron from 'node-cron';
 import { migrate, pool } from './db.js';
 import { refreshRollups } from './rollup.js';
 import { recordCredentialVisibility } from './settings.js';
-import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick } from './run.js';
+import { backfill, incremental, catchUp, cabmanTick, liveStatusTick, analystPass, probePass, uberTimelineTick, uberProfileTick, uberAuditTick } from './run.js';
 import { clearCheckpoint } from './checkpoint.js';
 import { config } from './config.js';
 import { log } from './log.js';
@@ -34,6 +34,7 @@ async function main() {
      cron because the first thing anyone wants after wiring a new surface is to
      run it once and look. */
   if (cmd === 'profile') return uberProfileTick();
+  if (cmd === 'audit') return uberAuditTick();
 
   if (cmd === 'schedule') {
     log.info('scheduler', 'starting', {
@@ -115,6 +116,18 @@ async function main() {
        lines up with the operating week the rest of the product reports on. */
     cron.schedule('20 0 * * 1', () => uberProfileTick()
       .catch((e) => log.error('scheduler', 'uber profile', { err: String(e) })));
+    /* Ask Uber whether the past we hold is the past it has. 05:45 Dubai —
+       after the overnight incremental, the analyst and the profile pull, and
+       before the morning, because it spends real Uber report slots and the
+       collection passes have first claim on them.
+
+       Daily rather than weekly, and only three windows per fleet a night: at
+       that rate the whole twelve-month retention window is verified inside a
+       week and then continuously re-verified, which is what turns this from a
+       one-off reassurance into a standing check. Weekly would take two months
+       to say anything about March. */
+    cron.schedule('45 1 * * *', () => uberAuditTick()
+      .catch((e) => log.error('scheduler', 'uber audit', { err: String(e) })));
     /* A provider changes what it sends without telling anyone, and an expired
        credential looks like a quiet week. Describe every surface daily. */
     /* 22:20, not 22:40: that was the same minute as the nightly full rollup,
@@ -189,6 +202,11 @@ async function main() {
           /* One call per driver, so it takes the job id and checkpoints per
              driver: a deploy landing mid-sweep resumes where it stopped. */
           else if (job.mode === 'profile') await uberProfileTick({ fleet: job.fleet || null, jobId: job.id });
+          /* One Uber report per window and minutes each, so it takes the job
+             id and checkpoints per window: a deploy landing mid-audit resumes
+             at the window it had reached rather than spending the slots
+             again. */
+          else if (job.mode === 'audit') await uberAuditTick({ fleet: job.fleet || null, jobId: job.id });
           else if (job.mode === 'timeline-roster') await uberTimelineTick({ roster: true, days: 30 });
           else await incremental(progress, job.fleet || null, job.id);
           await pool.query(

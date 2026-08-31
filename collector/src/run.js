@@ -17,7 +17,7 @@ import { probeAll } from './probe.js';
 import { rebuildCustody } from './custody.js';
 import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
-import { monthsAgo, daysAgo } from './util.js';
+import { monthsAgo, daysAgo, iso } from './util.js';
 import { setState, pool } from './db.js';
 import { log } from './log.js';
 import { loadCheckpoint, NO_CHECKPOINT } from './checkpoint.js';
@@ -307,6 +307,167 @@ export async function uberProfileTick({ fleet = null, jobId = null } = {}) {
     log.error('uber', 'profile tick failed', { err: String(e).slice(0, 200) });
     return 0;
   }
+}
+
+/* Verify a slice of the past against Uber itself, a few windows per run.
+   ─────────────────────────────────────────────────────────────────────────
+   Everything else in this file COLLECTS. This one checks the collecting, and
+   it is here rather than in an endpoint for a plain reason: an Uber report
+   takes minutes at the provider and the gateway in front of the API waits
+   seventy-five seconds. A verification that cannot finish inside a page load
+   either lives in the worker or does not exist.
+
+   Windows, not a sweep. Thirteen whole calendar months reach Uber's retention
+   edge, and four whole Mon-Sun weeks give the recent past a check that does
+   not wait for a month to end. Both are FIXED dates, which is what lets a
+   re-verification update its row instead of growing one per attempt — a
+   window ending "yesterday" would leave a new row every day and a history of
+   nothing.
+
+   Never-verified windows first and newest first among them, so the first runs
+   answer for the past anyone is actually looking at; then the ones verified
+   longest ago, so a month that agreed in September and stops agreeing in
+   November is caught rather than assumed. At three windows per fleet per
+   daily run the whole retention window is covered inside a week and then
+   re-covered continuously.
+
+   It writes only to uber_trip_audit — never to `trip`. A verification that
+   repairs what it measures can never report a failure, and the value of this
+   table is entirely in its ability to say no. */
+const AUDIT_SETTLE_DAYS = 2;
+
+export function auditWindows(now = new Date(), months = 13, weeks = 4) {
+  const out = [];
+  for (let i = 1; i <= months; i++) {
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
+    // Day 0 of the next month is the last day of this one, leap years included.
+    const to = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth() + 1, 0));
+    out.push({ kind: 'month', from, to });
+  }
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  // Monday = 0, because a week that starts on Sunday is not a week anyone here
+  // works to.
+  const monday = new Date(today);
+  monday.setUTCDate(today.getUTCDate() - ((today.getUTCDay() + 6) % 7));
+  for (let i = 1; i <= weeks; i++) {
+    const from = new Date(monday); from.setUTCDate(monday.getUTCDate() - 7 * i);
+    const to = new Date(from); to.setUTCDate(from.getUTCDate() + 6);
+    out.push({ kind: 'week', from, to });
+  }
+  /* Nothing that ended in the last two days. A window still settling would
+     have Uber listing trips the incremental has not reached yet, and this
+     would report that as trips we never stored — lag printed with the
+     confidence of a loss, which is the one failure mode that would make the
+     whole panel worth ignoring. Whole months are already old enough; the last
+     complete week usually is not. */
+  const cutoff = new Date(today); cutoff.setUTCDate(today.getUTCDate() - AUDIT_SETTLE_DAYS);
+  return out.filter((w) => w.to <= cutoff);
+}
+
+const auditKey = (w) => `${iso(w.from)}..${iso(w.to)}`;
+
+/** The windows this fleet should verify next, worst-known first. */
+export function nextAuditWindows(candidates, verifiedAt, limit) {
+  const fresh = candidates.filter((w) => !verifiedAt.has(auditKey(w)));
+  const stale = candidates.filter((w) => verifiedAt.has(auditKey(w)))
+    .sort((a, b) => verifiedAt.get(auditKey(a)) - verifiedAt.get(auditKey(b)));
+  return [...fresh, ...stale].slice(0, limit);
+}
+
+export async function uberAuditTick({ fleet = null, jobId = null, limit = 3 } = {}) {
+  await loadSettings();
+  const ckpt = await loadCheckpoint(jobId);
+  const candidates = auditWindows();
+  let checked = 0, disagreed = 0;
+
+  for (const o of uber.uberOrgs(fleet)) {
+    let verifiedAt = new Map();
+    try {
+      /* to_char, not the DATE. The driver hands a DATE back as a JS Date at
+         local midnight, so on any container not running in UTC iso() would
+         shift the key by a day — every window would read as never verified,
+         the job would re-verify the same three windows every night, and the
+         other ten would never be asked about at all. A silent one-day skew is
+         the difference between a standing check and a loop. */
+      const { rows } = await pool.query(
+        `SELECT to_char(window_from, 'YYYY-MM-DD') AS window_from,
+                to_char(window_to, 'YYYY-MM-DD') AS window_to, verified_at
+           FROM uber_trip_audit WHERE fleet_id = $1`, [o.fleet]);
+      verifiedAt = new Map(rows.map((r) => [
+        `${r.window_from}..${r.window_to}`, new Date(r.verified_at).getTime()]));
+    } catch (e) {
+      log.warn('uber', 'could not read past audits — this run will re-verify from the top',
+        { fleet: o.fleet, err: String(e).slice(0, 160) });
+    }
+
+    /* A week that has rolled out of the four-week grid is never offered again,
+       and nothing else would ever remove it: its row would sit in the table
+       for ever showing a "Checked" date that stops moving, which reads as a
+       week still being watched when it is not. The month containing it is
+       audited on its own rotation, so the week row has no information left in
+       it once it ages out. */
+    const live = new Set(candidates.map(auditKey));
+    try {
+      const { rowCount } = await pool.query(
+        `DELETE FROM uber_trip_audit
+          WHERE fleet_id = $1 AND kind = 'week'
+            AND to_char(window_from, 'YYYY-MM-DD') || '..' || to_char(window_to, 'YYYY-MM-DD') <> ALL($2)`,
+        [o.fleet, [...live]]);
+      if (rowCount) log.info('uber', 'retired audited weeks that left the grid',
+        { fleet: o.fleet, rows: rowCount });
+    } catch (e) {
+      log.warn('uber', 'could not retire old audited weeks', { fleet: o.fleet, err: String(e).slice(0, 120) });
+    }
+
+    for (const w of nextAuditWindows(candidates, verifiedAt, limit)) {
+      const unit = `audit ${o.fleet} ${auditKey(w)}`;
+      if (ckpt.has(unit)) continue;
+      const [r] = await uber.auditTripWindow({ from: w.from, to: w.to, fleet: o.fleet });
+      if (!r) continue;
+      try {
+        await pool.query(
+          `INSERT INTO uber_trip_audit (fleet_id, window_from, window_to, kind, verified_at,
+             uber_rows, our_rows, in_both, uber_only, ours_only, agreement_pct,
+             outside_window, error, past_retention, took_ms, sample_missing, days, misfiled)
+           VALUES ($1, $2, $3, $16, now(), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, $17)
+           ON CONFLICT (fleet_id, window_from, window_to) DO UPDATE SET
+             kind = EXCLUDED.kind,
+             verified_at = now(), uber_rows = EXCLUDED.uber_rows, our_rows = EXCLUDED.our_rows,
+             in_both = EXCLUDED.in_both, uber_only = EXCLUDED.uber_only,
+             ours_only = EXCLUDED.ours_only, agreement_pct = EXCLUDED.agreement_pct,
+             outside_window = EXCLUDED.outside_window, error = EXCLUDED.error,
+             past_retention = EXCLUDED.past_retention, took_ms = EXCLUDED.took_ms,
+             sample_missing = EXCLUDED.sample_missing, days = EXCLUDED.days,
+             misfiled = EXCLUDED.misfiled`,
+          [o.fleet, iso(w.from), iso(w.to),
+            r.uber_rows_in_window ?? null, r.ours ?? null, r.in_both ?? null,
+            r.uber_only ?? null, r.ours_only ?? null, r.agreement_pct ?? null,
+            r.uber_rows_outside_window ?? null, r.error || null, !!r.past_retention,
+            r.took_ms ?? null, JSON.stringify(r.sample_missing || []),
+            /* Only the days that disagreed. A verified month is 31 rows of
+               "uber 512, ours 512", which is 31 rows of nothing and would make
+               this column the largest thing in the table for the windows it
+               says least about. */
+            JSON.stringify((r.days || []).filter((d) => d.missing > 0 || d.uber !== d.ours)),
+            w.kind, r.misfiled ?? null]);
+      } catch (e) {
+        log.error('uber', 'could not record an audit', { fleet: o.fleet, window: auditKey(w),
+          err: String(e).slice(0, 200) });
+      }
+      /* Marked after the verdict is stored, and marked even when the verdict
+         is an error: a window Uber refuses will be refused again, and retrying
+         it inside the same job spends the run on a question already answered. */
+      await ckpt.mark(unit, r.uber_only ?? null);
+      checked++;
+      if ((r.uber_only || 0) > 0) disagreed++;
+      log[(r.uber_only || 0) > 0 ? 'warn' : 'info']('uber', `audit ${o.fleet} ${auditKey(w)}`, {
+        uber: r.uber_rows_in_window, ours: r.ours, missing: r.uber_only,
+        misfiled: r.misfiled || undefined,
+        agreement: r.agreement_pct, err: r.error || undefined });
+    }
+  }
+  log.info('uber', 'audit tick', { windows: checked, disagreeing: disagreed, fleet });
+  return checked;
 }
 
 // Other live pollers (Uber online/on-trip status, FMS live telemetry).

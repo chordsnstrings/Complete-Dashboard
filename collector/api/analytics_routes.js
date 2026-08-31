@@ -1140,6 +1140,107 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         .map(({ key, ...g }) => g),
     });
   }));
+  /* The only completeness figure here that is not computed from our own rows.
+     ─────────────────────────────────────────────────────────────────────────
+     /api/coverage/calendar above counts the trip table and reports gaps in it.
+     It is honest and it is self-referential: it can see a day that went
+     missing entirely and it cannot see a day we collected a tenth of, because
+     that day has rows on it and therefore is not a gap.
+
+     The March 2026 measurement is what that blind spot looks like in practice.
+     Trips per active driver per day fall from 10.0 in February to 3.4 in
+     March, in the SAME month, by the same three quarters, in both fleets —
+     Ecosine 17,385 to 4,203, Egari 8,052 to 1,862 — across two separate
+     businesses holding two separate Uber orgs. The calendar called that year
+     complete, with gaps: [] and missing_days: 0, because every day had rows.
+
+     So this reads uber_trip_audit, where a nightly job records what Uber
+     itself said when asked again for a window we already hold. It computes
+     nothing: an Uber report costs minutes at the provider, so the answer is
+     read, not produced.
+
+     Anything this returns is a statement about TRIPS. Money has a rolling
+     192-day horizon and ratings have no history at all, and a reader who sees
+     one green tick must not conclude three. */
+  app.get('/api/coverage/verified', wrap(async (req, res) => {
+    const fleet = ['ecosine', 'egari'].includes(String(req.query.fleet)) ? String(req.query.fleet) : null;
+    /* The other two horizons, beside the one being verified.
+       ─────────────────────────────────────────────────────────────────────
+       A reader who sees a month of trips confirmed against Uber will read it
+       as "that month is verified", and for money and ratings that is false in
+       two different ways. Uber serves earnings on a rolling window of roughly
+       192 days — a probe on 2026-08-31 was answered for 2026-02-20 and not for
+       2026-02-01 — so the money horizon walks forward daily and everything
+       behind it is permanently unpriced. A rating has no time dimension at
+       all: GetDriver returns one current number, so the history starts the day
+       we first asked and can never reach back. Stated here, from the tables
+       themselves, so the page says it with dates rather than adjectives. */
+    const [money] = await q(
+      `SELECT to_char(min(day), 'YYYY-MM-DD') AS from_day,
+              to_char(max(day), 'YYYY-MM-DD') AS to_day, count(*)::int AS rows
+         FROM driver_payout_day WHERE platform = 'uber'`);
+    const [rating] = await q(
+      `SELECT to_char(min(observed_on), 'YYYY-MM-DD') AS from_day,
+              to_char(max(observed_on), 'YYYY-MM-DD') AS to_day, count(*)::int AS rows
+         FROM driver_rating_history WHERE platform = 'uber'`);
+    const rows = await q(
+      `SELECT fleet_id, kind, to_char(window_from, 'YYYY-MM-DD') AS window_from,
+              to_char(window_to, 'YYYY-MM-DD') AS window_to, verified_at,
+              uber_rows, our_rows, in_both, uber_only, ours_only,
+              agreement_pct::float8 AS agreement_pct, outside_window,
+              error, past_retention, took_ms, sample_missing, days, misfiled
+         FROM uber_trip_audit
+        WHERE ($1::text IS NULL OR fleet_id = $1)
+        ORDER BY window_from DESC, kind, fleet_id`, [fleet]);
+    /* Totalled over MONTHS alone. The table also holds four rolling Mon-Sun
+       weeks per fleet, and a week sits inside a month — summing both counts
+       every trip in that week twice and divides an agreement percentage by a
+       doubled denominator, which would inflate the one number this whole
+       panel asks to be trusted on. The weeks are listed, never added. */
+    const measured = rows.filter((r) => !r.error);
+    const months = measured.filter((r) => r.kind !== 'week');
+    const sum = (k) => months.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+    /* Counts of WINDOWS are over every row, including the weeks: a week that
+       disagrees is a finding and dropping it would hide the most recent one
+       there is. Sums of TRIPS are over months alone, for the overlap reason
+       above. The two populations differ on purpose and are named separately
+       so nothing has to guess which it is looking at. */
+    const disagreeing = measured.filter((r) => (r.uber_only || 0) > 0);
+    res.json({
+      windows: rows,
+      verified_windows: rows.length,
+      measured_windows: measured.length,
+      measured_months: months.length,
+      /* Named so a reader of the JSON knows the totals below are not over
+         every row it just received. */
+      totals_over: 'whole calendar months only; week windows are listed but never added',
+      /* A window Uber will not serve any more is not a failure of ours, and
+         counting it as one would put a permanent red mark on every month past
+         retention. */
+      past_retention_windows: rows.filter((r) => r.past_retention).length,
+      errored_windows: rows.filter((r) => r.error && !r.past_retention).length,
+      disagreeing_windows: disagreeing.length,
+      uber_rows: sum('uber_rows'), our_rows: sum('our_rows'),
+      trips_uber_has_that_we_never_stored: sum('uber_only'),
+      /* Trips Uber served for one fleet that we hold under the other. A
+         reconciliation defect, not loss — kept out of the number above and
+         reported beside it, because moving it into the headline would be the
+         one overstatement that discredits the whole panel. */
+      trips_filed_under_the_other_fleet: sum('misfiled'),
+      agreement_pct: sum('uber_rows')
+        ? Math.round(((sum('uber_rows') - sum('uber_only')) / sum('uber_rows')) * 1000) / 10 : null,
+      last_verified_at: rows.reduce((a, r) => (!a || r.verified_at > a ? r.verified_at : a), null),
+      verifies: 'trips only. Uber money is a rolling 192-day window and a rating has no history to check.',
+      horizons: {
+        money: { ...money, note: 'Uber serves earnings on a rolling window of about 192 days. Trips '
+          + 'older than that are on record with no money against them, permanently — asking again '
+          + 'returns nothing.' },
+        rating: { ...rating, note: 'Uber reports a rating as one current number with no history. This '
+          + 'record starts the day we first asked and grows one reading per driver per week; it can '
+          + 'never be backfilled.' },
+      },
+    });
+  }));
 
   /* ───────────────────────── corridors ─────────────────────────
      Where the work starts and ends. Every channel returns a formatted address

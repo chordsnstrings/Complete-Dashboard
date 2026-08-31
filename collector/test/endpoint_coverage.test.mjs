@@ -51,6 +51,10 @@ const EXEMPT = {
     + 'saying no channel reports one; GetDriver returns recognitionRating and nothing here had asked',
   '/api/probe/uber/window': 'operator tool: asks the provider what it still holds for one window, '
     + 'to settle whether a gap in our history is recoverable or gone',
+  '/api/probe/uber/audit': 'operator tool: re-asks Uber for a window we already hold and compares its '
+    + 'Trip UUIDs against ours, by hand and for a week at a time. The PAGE reads /api/coverage/verified, '
+    + 'which is where the nightly audit job stores the same comparison for whole months — a report costs '
+    + 'minutes at the provider and cannot be produced inside a page load',
   '/api/probe/fms/window': 'operator tool: the same question of FMS, whose history has a 152-day hole. '
     + 'Our records say those windows were asked and answered empty, and an empty list is '
     + 'indistinguishable from a malformed request in a row count — this asks again and reports the shape',

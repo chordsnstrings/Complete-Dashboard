@@ -31,9 +31,14 @@ export async function renderCoverage(root) {
      and #sources links here with the words "152 days", landing on the version
      that denies it. Every figure below is over the record; the selected window
      is stated separately beside it. */
-  const [all, win] = await Promise.all([
+  const [all, win, ver] = await Promise.all([
     api('/api/coverage/calendar?from=2000-01-01&to=' + encodeURIComponent(dubaiDay())),
     q('/api/coverage/calendar').catch(() => null),
+    /* Fetched here rather than beside its panel so the verdict at the top can
+       use it. "Every source has a row for every day" is a true sentence and a
+       misleading one on its own, and the qualification has to travel with the
+       claim rather than sit four screens below it. */
+    q('/api/coverage/verified').catch(() => null),
   ]);
   if (!alive(gen)) return;
   const c = all;
@@ -53,6 +58,7 @@ export async function renderCoverage(root) {
   {
     const missing = c.sources.reduce((a, x) => a + (+x.missing_days || 0), 0);
     const worst = [...holed].sort((a, b) => b.missing_days - a.missing_days)[0];
+    const missingFromUber = (ver && ver.trips_uber_has_that_we_never_stored) || 0;
     verdict(root, {
       claim: missing
         ? `${fmt(missing)} ${plural(missing, 'day')} ${missing === 1 ? 'is' : 'are'} missing from the record`
@@ -60,12 +66,21 @@ export async function renderCoverage(root) {
       figure: fmt(holed.length), unit: 'sources with a hole',
       tone: missing ? (holed.length > 1 ? 'bad' : 'warn') : null,
       meta: `${fmt(c.sources.length)} sources`,
-      sub: worst
+      sub: (worst
         ? `The worst is ${sourceLabel(worst.source)}, missing ${fmt(worst.missing_days)} of the days `
           + `between ${String(worst.first_day).slice(0, 10)} and ${String(worst.last_day).slice(0, 10)}. `
           + 'Every figure counted inside a source’s own span is only over the days it actually has.'
         : 'Counted inside each source’s own collecting span — a source that started in July is not '
-          + 'missing June.',
+          + 'missing June.')
+        /* The sentence this claim needs in order not to mislead. A day is a
+           gap here only when it has NO rows, so a day we collected a tenth of
+           passes silently — and that is the failure actually on record: March
+           2026 fell by three quarters in both fleets at once and this verdict
+           called the year complete. */
+        + ' This counts our own rows: a day with no rows is a hole, a day with a tenth of its rows is not.'
+        + (missingFromUber
+          ? ` Uber itself reports ${fmt(missingFromUber)} trips we never stored — see below.`
+          : ' Uber’s own answer for the windows checked against it is below.'),
       recommend: missing
         ? 'Any rate on any page that crosses one of these gaps is an average over the days that '
           + 'were collected, not over the days that happened.'
@@ -92,6 +107,160 @@ export async function renderCoverage(root) {
         sub: 'the windowed calendar could not be read' },
     { label: 'Rows on record', value: fmt(c.sources.reduce((a, s) => a + s.total_rows, 0)) },
   ]));
+
+  /* ── the only figure on this page that is not our own opinion of ourselves ──
+     Everything above counts rows in our tables. It is a real check — it found
+     the eighteen-day Uber hole this page was built for — and it has one blind
+     spot it can never see past: a day we collected a TENTH of has rows on it,
+     so it is not a gap, so the calendar calls it collected.
+
+     That blind spot is not hypothetical. Trips per active driver per day fall
+     from 10.0 in February 2026 to 3.4 in March, and the fall lands in the same
+     month, at the same three quarters, in BOTH fleets — Ecosine 17,385 to
+     4,203, Egari 8,052 to 1,862 — two separate businesses on two separate Uber
+     orgs. Two unrelated companies do not lose three quarters of their work on
+     the same Sunday. The calendar above reported that year complete.
+
+     So this panel is Uber's answer, not ours: a nightly job regenerates the
+     same trip report the backfill collects from, for a window we already hold,
+     and compares Uber's Trip UUIDs against the ones we stored. */
+  {
+    const rows = (ver && ver.windows) || [];
+    const { panel: vp, body: vb } = panel('Checked against Uber, not against ourselves',
+      'Uber’s own trip report for a window we already hold, matched booking by booking on Uber’s '
+      + 'own trip id');
+    root.append(vp);
+    if (!rows.length) {
+      vb.append(note('Nothing has been verified yet. Every figure above this panel counts our own rows, '
+        + 'which can tell you a day collected nothing and cannot tell you a day collected a tenth of what '
+        + 'happened. The nightly check verifies three windows per fleet and covers the full twelve months '
+        + 'Uber retains inside a week; until it has run, treat the calendar above as evidence that the '
+        + 'collector ran, not as evidence that it collected everything.'));
+    } else {
+      const miss = ver.trips_uber_has_that_we_never_stored || 0;
+
+      /* The two horizons this panel does NOT cover, with their real dates.
+         A reader who sees a month of trips confirmed will read it as "that
+         month is verified", and for money and for ratings that is false in two
+         different ways — one rolls forward and strands the past, the other has
+         no past at all. Adjectives would not carry that; dates do.
+
+         Placed ABOVE the numbers rather than under the table, because a green
+         agreement figure read first sets the conclusion, and a qualification
+         arriving four hundred pixels later does not undo it. */
+      const h = ver.horizons || {};
+      vb.append(el('p', 'cap',
+        'Trips only, and the other two records do not reach as far back. '
+        + (h.money && h.money.from_day
+          ? `Uber money on record from ${dateStr(h.money.from_day)}; it is served on a rolling window of `
+            + 'about 192 days, so everything before that is bookings with no money against them, '
+            + 'permanently. '
+          : 'No Uber money is on record. ')
+        + (h.rating && h.rating.from_day
+          ? `Ratings on record from ${dateStr(h.rating.from_day)} — Uber reports a rating as one current `
+            + 'number with no history, so that record starts the day we first asked and can never be '
+            + 'backfilled.'
+          : 'No rating readings are on record yet; Uber reports a rating as one current number with no '
+            + 'history, so this record can only start when the first reading is taken.')));
+
+      /* What a hundred percent does and does not mean. The comparison is on
+         Uber's trip id: it establishes that every booking Uber still lists
+         for a window is a row in our table. It does not establish that the
+         row is right — the collector upserts on (platform, external_id) and
+         replaces every other column, so plate, driver, status and payment
+         type can have moved under a month that matches perfectly by count.
+         Said here rather than left to the word "checked", which a reader
+         will hear as "correct". */
+      vb.append(el('p', 'cap',
+        'Matched on Uber\u2019s trip id: agreement means every booking Uber still lists for the window '
+        + 'is a row in our table. It does not mean the rest of that row is right \u2014 a re-collection '
+        + 'replaces everything but the id.'));
+      vb.append(kpiRow([
+        { label: 'Windows checked with Uber', value: fmt(ver.measured_windows),
+          sub: ver.past_retention_windows
+            ? `${fmt(ver.past_retention_windows)} more are past Uber’s retention and cannot be checked`
+            : 'each one a separate Uber report' },
+        { label: 'Trips Uber has that we never stored', value: fmt(miss),
+          sub: miss ? 'these are real bookings missing from every figure in this product'
+            : 'across every window checked so far',
+          tone: miss ? 'critical' : 'good' },
+        { label: 'Agreement', value: ver.agreement_pct == null ? '—' : `${ver.agreement_pct}%`,
+          sub: `${fmt(ver.uber_rows)} on Uber’s side, ${fmt(ver.our_rows)} on ours, `
+            + `over ${countOf(ver.measured_months, 'whole month')}`,
+          tone: ver.agreement_pct == null ? null
+            : ver.agreement_pct >= 99.5 ? 'good' : ver.agreement_pct >= 90 ? 'warn' : 'critical' },
+        { label: 'Windows that disagree', value: fmt(ver.disagreeing_windows),
+          sub: ver.errored_windows ? `${fmt(ver.errored_windows)} could not be asked` : 'of those checked',
+          tone: ver.disagreeing_windows ? 'critical' : 'good' },
+      ]));
+      vb.append(tableFrom(rows, [
+        { label: 'Window', key: 'window_from',
+          /* Weeks are tagged, because a week window sits INSIDE a month
+             window: a reader seeing two rows for overlapping ranges and no
+             mark would read them as two independent checks and add them. */
+          render: (r) => `${dateStr(r.window_from)} → ${dateStr(r.window_to)}`
+            + (r.kind === 'week' ? ' <span class="tag dim">week</span>' : '') },
+        { label: 'Fleet', key: 'fleet_id', render: (r) => esc(sourceLabel(r.fleet_id)) },
+        { label: 'Uber says', key: 'uber_rows', num: true, render: (r) => fmt(r.uber_rows) },
+        { label: 'We hold', key: 'our_rows', num: true, render: (r) => fmt(r.our_rows) },
+        /* The number the panel exists for, so it is not buried between two
+           counts that will usually look the same. */
+        { label: 'Never stored', key: 'uber_only', num: true,
+          render: (r) => (r.error ? '—'
+            : `<span class="cov-miss${r.uber_only ? ' cov-miss-bad' : ''}">${fmt(r.uber_only)}</span>`) },
+        /* Beside the loss column, never inside it. A trip we hold under the
+           other fleet's name is a reconciliation defect and not a booking we
+           lost, and merging the two would put the panel's worst possible
+           overstatement in its headline column. */
+        { label: 'Under other fleet', key: 'misfiled', num: true,
+          render: (r) => (r.error || r.misfiled == null ? '—' : fmt(r.misfiled)) },
+        { label: 'Agreement', key: 'agreement_pct', num: true,
+          render: (r) => (r.agreement_pct == null ? '—' : `${r.agreement_pct}%`) },
+        { label: 'Checked', key: 'verified_at', render: (r) => dayStr(r.verified_at) },
+        { label: 'Uber’s answer', key: 'error',
+          render: (r) => (r.past_retention ? '<span class="cap">past retention</span>'
+            : r.error ? `<span class="cap">${esc(String(r.error).slice(0, 60))}</span>` : '') },
+      ]));
+      const mis = ver.trips_filed_under_the_other_fleet || 0;
+      if (mis) {
+        vb.append(el('p', 'cap',
+          `${fmt(mis)} further ${plural(mis, 'trip')} that Uber lists for one fleet `
+          + `${mis === 1 ? 'is' : 'are'} in our table under the other one, and ${mis === 1 ? 'it is' : 'they are'} `
+          + 'counted as held rather than as lost. The trip key is the platform and Uber’s id, and the fleet '
+          + 'is an ordinary column the collector overwrites, so a trip both orgs can see ends up filed under '
+          + 'whichever collected it last. Worth fixing for per-fleet reporting; nothing is missing.'));
+      }
+      const worst = rows.filter((r) => !r.error && (r.uber_only || 0) > 0)
+        .sort((a, b) => b.uber_only - a.uber_only)[0];
+      if (worst) {
+        vb.append(el('p', 'note',
+          `The worst is ${dateStr(worst.window_from)} → ${dateStr(worst.window_to)} for `
+          + `${esc(sourceLabel(worst.fleet_id))}: Uber still serves ${fmt(worst.uber_rows)} trips for it and we hold `
+          + `${fmt(worst.our_rows)}. Those ${fmt(worst.uber_only)} bookings are missing from every rate, `
+          + 'every driver page and every revenue figure that crosses that window — and unlike the money '
+          + 'below, they are recoverable: Uber is still serving them. Re-run the backfill for that range.'));
+        /* Which days, not just how many. Four dead days inside a month and
+           thirty-one thin ones are the same shortfall and completely different
+           causes — the first is a window the backfill never landed, the second
+           is a collection that was running and getting a fraction. Nothing
+           else on this page can tell them apart. */
+        const bad = (worst.days || []).filter((d) => (d.missing || 0) > 0)
+          .sort((a, b) => b.missing - a.missing);
+        if (bad.length) {
+          const dead = bad.filter((d) => !d.ours).length;
+          vb.append(el('p', 'cap',
+            `The shortfall lands on ${countOf(bad.length, 'day')}`
+            + (dead ? `, ${fmt(dead)} of which we hold nothing at all for` : ', every one of which we '
+              + 'collected something for')
+            + `. The worst is ${dateStr(bad[0].day)}: Uber ${fmt(bad[0].uber)}, we hold ${fmt(bad[0].ours)}. `
+            + (dead
+              ? 'Days with nothing at all are windows a backfill never landed; re-running it recovers them.'
+              : 'A month of days each short by a fraction is a collection that was running and getting '
+                + 'part of the answer, which is a different fault from a window nobody fetched.')));
+        }
+      }
+    }
+  }
 
   /* ── the hole that is not a collection failure ──────────────────────────
      Everything else on this page is a gap somebody can close by re-running a

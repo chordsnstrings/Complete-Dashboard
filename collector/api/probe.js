@@ -21,7 +21,7 @@ import { config } from '../src/config.js';
 import { http, qs } from '../src/http.js';
 import { pool } from '../src/db.js';
 import { uberOAuthToken, uberWebHeaders } from '../src/auth/uber.js';
-import { probeEarnerWindow } from '../src/sources/uber.js';
+import { probeEarnerWindow, auditTripWindow, uberOrgs } from '../src/sources/uber.js';
 import { loadSettings } from '../src/settings.js';
 import { log } from '../src/log.js';
 
@@ -375,6 +375,68 @@ export function probeRoutes(app, { wrap }) {
       // The one that answers the question; the REST pair is context.
       earner_breakdowns: graph,
       surfaces: out,
+    });
+  }));
+  /* Ask Uber whether the past we hold is the past it has.
+     ─────────────────────────────────────────────────────────────────────────
+     Every completeness figure in this product is computed from our own rows.
+     /api/coverage/calendar reports 376 Uber days with no gaps, and that is
+     true and useless for the question actually being asked, because a day we
+     collected a tenth of has rows on it too.
+
+     This settles it the only way it can be settled: regenerate the same
+     REPORT_TYPE_TRIP_ACTIVITY the backfill uses, for a window we already
+     stored, and compare Uber's Trip UUIDs against ours. Costs one Uber report
+     — minutes at the provider, one of an org's three in-flight slots — so it
+     takes an explicit window rather than sweeping the year.
+
+     Bounded to EIGHT days, which is not Uber's limit — Uber serves 31 — but
+     the gateway's. A monthly report for ninety vehicles takes minutes at the
+     provider and this platform cuts a request off at seventy-five seconds, so
+     a month asked for here would always die half-answered and read as a
+     provider failure. A week lands in seconds. A month is what the audit JOB
+     is for: it runs in the worker, where minutes are allowed, and keeps its
+     verdict in uber_trip_audit rather than in a response nobody kept. */
+  app.get('/api/probe/uber/audit', wrap(async (req, res) => {
+    await loadSettings();
+    const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+    if (!isDay(req.query.from) || !isDay(req.query.to)) {
+      return res.status(400).json({ error: 'from and to are required, as YYYY-MM-DD' });
+    }
+    const from = new Date(`${req.query.from}T00:00:00Z`);
+    const to = new Date(`${req.query.to}T00:00:00Z`);
+    if (!(to >= from)) return res.status(400).json({ error: 'window is not a range' });
+    const days = Math.round((to - from) / 864e5) + 1;
+    if (days > 8) {
+      return res.status(400).json({
+        error: `window is ${days} days; this endpoint serves at most 8`,
+        detail: 'a longer report outlives the gateway\'s 75s. Queue the audit job for whole months — it writes uber_trip_audit, which /api/coverage/verified reads.',
+      });
+    }
+    const fleet = ['ecosine', 'egari'].includes(String(req.query.fleet)) ? String(req.query.fleet) : null;
+    if (!uberOrgs(fleet).length) return res.status(400).json({ error: 'no Uber org configured' });
+
+    const fleets = await auditTripWindow({ from, to, fleet });
+    /* Totalled across fleets as well as reported per fleet, because the
+       question a reader arrives with is about the window, not about an org,
+       and a reader who has to add two numbers to get their answer will get it
+       wrong on the audit that matters. */
+    const num = (k) => fleets.reduce((a, f) => a + (Number(f[k]) || 0), 0);
+    const measured = fleets.filter((f) => !f.error);
+    res.json({
+      window: [req.query.from, req.query.to], days, fleets,
+      total: measured.length ? {
+        uber: num('uber_rows_in_window'), ours: num('ours'),
+        uber_only: num('uber_only'), ours_only: num('ours_only'),
+        agreement_pct: num('uber_rows_in_window')
+          ? Math.round(((num('uber_rows_in_window') - num('uber_only')) / num('uber_rows_in_window')) * 1000) / 10
+          : null,
+      } : null,
+      /* Said in the response rather than left for the reader to infer: this
+         verifies TRIPS, for ONE window. It says nothing about whether that
+         window has money against it, and nothing at all about ratings, which
+         Uber serves only as a current value with no history to check. */
+      verifies: 'trips only, for this window, for the fleets listed',
     });
   }));
 

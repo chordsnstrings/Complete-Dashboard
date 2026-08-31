@@ -170,6 +170,204 @@ async function pullTrips(from, to, onStep, checkpoint = null) {
   return { total, chunks };
 }
 
+/* The arithmetic of "do these two sets of trips agree", with no I/O in it.
+   ─────────────────────────────────────────────────────────────────────────
+   Separated from the call that fetches them so it can be tested against
+   handmade sets, because the two ways this comparison goes wrong are both
+   silent. A day computed in UTC on one side and in Dubai on the other reports
+   four hours of every day as missing and four as invented, and it reports it
+   with the confidence of a count. And a trip we date one side of a midnight
+   that Uber dates the other is a boundary disagreement, not a row we made up
+   — counted as an extra, it puts a false accusation in every audit that spans
+   a month end. */
+export function compareTripSets({ theirs, ourRows, lo, hi, sample = 10 }) {
+  /* Uber's CSV timestamps are Dubai wall-clock already — csvToTrips appends
+     +04:00 rather than converting — so the calendar day is the first ten
+     characters, and it is the same day the SQL above computes with
+     AT TIME ZONE 'Asia/Dubai'. */
+  const dayOf = (t) => (t.requested_at ? String(t.requested_at).slice(0, 10) : null);
+  const theirAll = new Set(theirs.map((t) => t.external_id));
+  const inWindow = theirs.filter((t) => { const d = dayOf(t); return d && d >= lo && d <= hi; });
+  const theirIds = new Set(inWindow.map((t) => t.external_id));
+  const ourIds = new Set(ourRows.map((r) => r.external_id));
+
+  const missing = [...theirIds].filter((x) => !ourIds.has(x));
+  const extra = [...ourIds].filter((x) => !theirAll.has(x));
+
+  const byDay = new Map();
+  const bump = (d, k) => {
+    if (!d) return;
+    const e = byDay.get(d) || { day: d, uber: 0, ours: 0, missing: 0 };
+    e[k]++; byDay.set(d, e);
+  };
+  const dayById = new Map(inWindow.map((t) => [t.external_id, dayOf(t)]));
+  for (const t of inWindow) bump(dayOf(t), 'uber');
+  for (const r of ourRows) bump(r.day, 'ours');
+  for (const x of missing) bump(dayById.get(x), 'missing');
+
+  return {
+    uber_rows: theirs.length,
+    uber_rows_in_window: inWindow.length,
+    /* A report returning rows dated outside the window it was asked for is
+       telling us the window means something other than we assumed —
+       completion date rather than request date, most likely — and that is
+       worth seeing rather than silently filtering away. */
+    uber_rows_outside_window: theirs.length - inWindow.length,
+    ours: ourRows.length,
+    in_both: theirIds.size - missing.length,
+    uber_only: missing.length,
+    ours_only: extra.length,
+    agreement_pct: theirIds.size
+      ? Math.round(((theirIds.size - missing.length) / theirIds.size) * 1000) / 10 : null,
+    sample_missing: missing.slice(0, sample),
+    days: [...byDay.values()].sort((a, b) => a.day.localeCompare(b.day)),
+    /* The whole list, for the caller to check before believing it. Never
+       stored and never returned to a page — see auditTripWindow, which uses it
+       to separate a trip we do not have from a trip we have under the other
+       fleet's name, and then drops it. */
+    missing_ids: missing,
+    day_of_missing: Object.fromEntries(missing.map((x) => [x, dayById.get(x)])),
+  };
+}
+
+/* Move the trips we DO hold, under another fleet's name, out of the loss
+   column — headline, per-day breakdown and sample alike, because a window
+   whose total is right and whose days point somewhere else is a finding
+   nobody can act on. Returns how many moved. */
+export function applyMisfiled(cmp, heldElsewhere) {
+  if (!heldElsewhere.size) return 0;
+  const moved = cmp.missing_ids.filter((x) => heldElsewhere.has(x));
+  if (!moved.length) return 0;
+  cmp.uber_only -= moved.length;
+  cmp.in_both += moved.length;
+  cmp.agreement_pct = cmp.uber_rows_in_window
+    ? Math.round(((cmp.uber_rows_in_window - cmp.uber_only) / cmp.uber_rows_in_window) * 1000) / 10
+    : null;
+  cmp.missing_ids = cmp.missing_ids.filter((x) => !heldElsewhere.has(x));
+  cmp.sample_missing = cmp.missing_ids.slice(0, cmp.sample_missing.length || 10);
+  const byDay = new Map((cmp.days || []).map((d) => [d.day, d]));
+  for (const d of byDay.values()) d.misfiled = 0;
+  for (const id of moved) {
+    const day = cmp.day_of_missing?.[id];
+    const e = day && byDay.get(day);
+    if (e) { e.missing--; e.misfiled++; }
+  }
+  return moved.length;
+}
+
+/* Is the past actually there, or do we only think it is?
+   ─────────────────────────────────────────────────────────────────────────
+   /api/coverage/calendar answers "did we collect on this day" by counting OUR
+   OWN rows, and it currently reports 239,236 Uber trips across 376 days with
+   gaps: [] and missing_days: 0. That is a real check and it catches a whole
+   day going missing — it found the 2026-07-16..08-02 hole — but it is
+   self-referential. It cannot tell a day we collected completely from a day we
+   collected a tenth of, because in both cases the day has rows.
+
+   That distinction is not hypothetical here. Trips per active driver per day
+   fall from 10.0 in February 2026 to 3.4 in March and only reach 5.5 by
+   August, and the fall happens in the SAME month, by the same three quarters,
+   in two separate fleets holding two separate Uber orgs. Two unrelated
+   businesses do not lose three quarters of their work on the same Sunday. That
+   is the shape of a collection that thinned, and no amount of counting our own
+   rows will ever say so.
+
+   The only thing that can is Uber. So this re-asks Uber for a window we
+   already hold, on the same report pipeline the backfill uses, and compares
+   the two sets of Trip UUIDs. What comes back is one of three answers, and
+   they mean different things:
+
+     uber_only = 0            we have everything Uber still serves for it
+     uber_only > 0            trips exist upstream that we never stored
+     the report itself errors Uber no longer serves the window at all
+
+   Read-only against our database and against Uber. It writes nothing, because
+   a verification that repairs what it measures can never report a failure. */
+export async function auditTripWindow({ from, to, fleet = null, sample = 10 }) {
+  const prev = cur;
+  const out = [];
+  try {
+    for (const o of uberOrgs(fleet)) {
+      cur = o;
+      const started = Date.now();
+      const entry = { fleet: o.fleet, window: [iso(from), iso(to)] };
+      try {
+        const id = await generateReport(from, to);
+        const url = await downloadReport(id);
+        const { data: csv } = await http(url, { expect: 'text', timeoutMs: 180000 });
+        /* Through csvToTrips, so the audit reads the report exactly the way
+           the collector does — a comparison against a differently-parsed copy
+           would be measuring the parser, not the collection — and then
+           immediately down to the two fields the comparison uses. csvToTrips
+           keeps `raw: r`, the whole CSV record, on every trip; on a monthly
+           report of twenty thousand rows that is the shape that has already
+           OOM-killed this 512MB box once (see api/export_routes.js). The full
+           array is garbage by the next line; only the pairs survive. */
+        const theirs = csvToTrips(csv)
+          .map((t) => ({ external_id: t.external_id, requested_at: t.requested_at }));
+        const { rows: ourRows } = await pool.query(
+          `SELECT external_id, to_char((requested_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS day
+             FROM trip
+            WHERE platform = 'uber' AND fleet_id = $1
+              AND (requested_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $2::date AND $3::date`,
+          [o.fleet, iso(from), iso(to)]);
+        const cmp = compareTripSets({ theirs, ourRows, lo: iso(from), hi: iso(to), sample });
+
+        /* "We never stored it" and "we stored it under the other fleet" are
+           different facts, and only the first is loss.
+           ─────────────────────────────────────────────────────────────────
+           trip's primary key is (platform, external_id) with fleet_id an
+           ordinary column, and the collector upserts on that key — so the LAST
+           org to collect a trip wins its fleet_id. A trip both orgs can see
+           therefore ends up filed under one of them, and the query above,
+           which filters fleet_id = this org, does not find it. Left
+           unchecked, that trip is reported as a booking Uber has and we do
+           not, on the panel whose entire claim is that its numbers are not
+           our own opinion of ourselves.
+
+           So the missing ids are asked again with no fleet filter. What is
+           genuinely absent stays in uber_only; what turns up under another
+           fleet becomes misfiled, which is a reconciliation defect worth
+           seeing and is emphatically not lost data. */
+        let misfiled = 0;
+        if (cmp.missing_ids.length) {
+          try {
+            const { rows: held } = await pool.query(
+              `SELECT external_id FROM trip
+                WHERE platform = 'uber' AND external_id = ANY($1) AND fleet_id IS DISTINCT FROM $2`,
+              [cmp.missing_ids, o.fleet]);
+            /* The ids, not a count, so the per-day breakdown can be corrected
+               too — otherwise a window whose headline is right still points at
+               the wrong days. */
+            misfiled = applyMisfiled(cmp, new Set(held.map((r) => r.external_id)));
+          } catch (e) {
+            /* Unknown, not zero. Reporting every missing id as lost because a
+               second query failed would be the exact overstatement this check
+               exists to prevent, so the window says it could not tell. */
+            misfiled = null;
+            log.warn(SRC, 'could not separate misfiled trips from missing ones',
+              { fleet: o.fleet, err: String(e).slice(0, 140) });
+          }
+        }
+        delete cmp.missing_ids;
+        delete cmp.day_of_missing;
+        Object.assign(entry, cmp, { misfiled, took_ms: Date.now() - started });
+      } catch (e) {
+        /* An error IS an answer, and a different one from zero rows: "Uber
+           will not serve this window any more" and "Uber served it and it was
+           empty" have opposite consequences for whether a backfill is worth
+           running. */
+        const msg = String(e?.message || e);
+        entry.error = msg.slice(0, 300);
+        entry.past_retention = /invalid date range|retention|out of range/i.test(msg);
+        entry.took_ms = Date.now() - started;
+      }
+      out.push(entry);
+    }
+  } finally { cur = prev; }
+  return out;
+}
+
 /* Every Uber driver this fleet has ever had, from the two places their ids
    land. The roster is written by pullLive on every incremental and covers
    people who have not driven yet; the trip table covers people who have driven
