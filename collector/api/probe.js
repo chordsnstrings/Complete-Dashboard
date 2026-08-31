@@ -196,6 +196,25 @@ const POSITIVE_CONTROL = ['driverInfo', 'recognitionRating'];
    selection, so asking for it bare is a clean test of the signature. */
 const OBJECT_CONTROL = ['driver', 'complianceInfo'];
 
+/* The control that explains the generic refusal, and on this server it is the
+   one that matters most.
+   ─────────────────────────────────────────────────────────────────────────
+   Measured live: zzNotARealFieldQx on DriverInfo is refused BY NAME —
+   'Cannot query field "zzNotARealFieldQx" on type "DriverInfo"' — while
+   recognitionTier, recognitionStatus, recognitionLevel and recognitionTie on
+   the same type are refused with a bare "Invalid GraphQL query". The naive
+   reading is that the four the server would not name are real. But
+   recognitionTie is a name this file invented; it cannot exist. So the
+   difference is not existence. The likeliest cause is that Apollo attaches a
+   "Did you mean recognitionRating?" suggestion to a near miss and Uber's
+   gateway scrubs any error carrying one, leaving the generic string behind.
+
+   recognitionRatingg is one letter off a field known to be real, and is
+   certainly not a field. If it draws the generic refusal too, then proximity
+   and not existence is what produces that error, and no generic refusal in
+   this run means anything on its own. */
+const NEAR_MISS_CONTROL = ['driverInfo', 'recognitionRatingg'];
+
 /* Whole operations. A tier might not hang off GetDriver at all. */
 const TIER_OPS = [
   /* Same family reasoning as the fields, and the same prize: at the query
@@ -681,6 +700,12 @@ export function probeRoutes(app, { wrap }) {
     const objectSignatureFires = /must have a selection of subfields/i.test(bareObject?.note || '');
     if (bareObject) await new Promise((r) => setTimeout(r, 80));
 
+    /* And is the generic refusal about proximity rather than existence? */
+    const nearMiss = described || !sessionWorks
+      ? null : await probeField(NEAR_MISS_CONTROL[0], NEAR_MISS_CONTROL[1]);
+    const genericMeansNearMiss = !!nearMiss && !nearMiss.named_absent;
+    if (nearMiss) await new Promise((r) => setTimeout(r, 80));
+
     const controls = [];
     for (const [parent, field] of (described || !sessionWorks ? [] : CONTROL_FIELDS)) {
       controls.push(await probeField(parent, field));
@@ -699,7 +724,11 @@ export function probeRoutes(app, { wrap }) {
          likeliest reason for it is an object type asked for as a scalar. So
          ask again WITH a sub-selection, which is the question that separates
          "does not exist" from "exists and I asked wrongly". */
-      if (!r.named_absent && !r.answered && namesItsAbsences && objectSignatureFires) {
+      /* Retried whenever the server would not name it, whatever the controls
+         say about why. The controls decide how to read a REFUSAL; they cannot
+         decide how to read an ANSWER, and a sub-selection that comes back with
+         a __typename has proved the field exists on its own authority. */
+      if (!r.named_absent && !r.answered && namesItsAbsences) {
         r.retry_with_selection = await probeField(parent, field, ' { __typename }');
         await new Promise((r2) => setTimeout(r2, 80));
       }
@@ -764,6 +793,14 @@ export function probeRoutes(app, { wrap }) {
         bare_object: bareObject
           ? { field: 'driver.complianceInfo', signature_fires: objectSignatureFires, note: bareObject.note }
           : null,
+        /* The one that decides whether a generic refusal is evidence at all. */
+        near_miss: nearMiss
+          ? { field: 'driverInfo.recognitionRatingg', invented: true,
+            refused_generically: genericMeansNearMiss, note: nearMiss.note }
+          : null,
+        generic_refusal_means: genericMeansNearMiss
+          ? 'a near miss on a real name, scrubbed of its suggestion — NOT evidence the field exists'
+          : 'unexplained; a generic refusal may be worth chasing',
         fields: controls, names_its_absent_fields: namesItsAbsences,
         operation: control ? { probe: CONTROL_OP, named: control.named, detail: (control.err || '').slice(0, 160) } : null,
         names_its_absent_operations: namesItsMissingOps,
@@ -776,10 +813,12 @@ export function probeRoutes(app, { wrap }) {
             + 'and no refusal below would mean anything. Re-paste the supplier cookie and ask again.'
           : !namesItsAbsences ? 'inconclusive: this server does not name the fields it lacks, so a refusal proves nothing'
           : found.some((f) => f.value != null) ? 'a tier-like field answered — see fields[]'
-            : found.length ? (objectSignatureFires
-              ? 'fields the server would not name — see fields_that_exist[] and their retries'
-              : 'fields the server would not name, but it also does not announce bare objects, so those '
-                + 'refusals are inconclusive rather than positive')
+            : found.some((f) => f.retry_with_selection?.answered)
+              ? 'a field answered once asked with a sub-selection — see fields_that_exist[]'
+              : found.length ? (genericMeansNearMiss
+                ? 'no tier field. The ones the server would not name are near misses on real names, and '
+                  + 'an invented control name got the same refusal — proximity, not existence'
+                : 'fields the server would not name and no control explains why — worth chasing')
               : fields.some((f) => f.suggests) ? 'no candidate existed, but the schema suggested real names'
                 : ops.some((o) => o.verdict.startsWith('exists') || o.verdict.startsWith('refused'))
                   ? 'no tier field on GetDriver, but an operation is there — see operations_that_exist[]'

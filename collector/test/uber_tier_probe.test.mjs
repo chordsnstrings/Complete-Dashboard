@@ -132,14 +132,25 @@ check('including a deliberate near miss, to farm the server\u2019s own suggestio
 check('and the recognition operations are probed at the query root',
   /'getDriverRecognition', 'getEarnerRecognition'/.test(bare));
 
+check('an invented name CLOSE to a real one is probed, to explain the generic refusal',
+  /const NEAR_MISS_CONTROL = \['driverInfo', 'recognitionRatingg'\]/.test(bare)
+  && /const genericMeansNearMiss = !!nearMiss && !nearMiss\.named_absent/.test(body),
+  'measured live: zzNotARealFieldQx is refused BY NAME while recognitionTie — a name this file '
+  + 'invented — is refused generically, so the generic refusal is about proximity, not existence');
+check('and the caller is told what a generic refusal means before reading any',
+  /generic_refusal_means: genericMeansNearMiss/.test(body)
+  && /proximity, not existence/.test(src));
+check('a candidate the server would not name is retried whatever the controls say',
+  /if \(!r\.named_absent && !r\.answered && namesItsAbsences\) \{/.test(body),
+  'the controls decide how to read a refusal; they cannot decide how to read an answer');
+check('and an answered retry is the verdict, on its own authority',
+  /found\.some\(\(f\) => f\.retry_with_selection\?\.answered\)/.test(body));
 check('a bare known-real OBJECT is probed, to prove the retry branch means anything',
   /const OBJECT_CONTROL = \['driver', 'complianceInfo'\]/.test(bare)
   && /must have a selection of subfields/.test(body),
   'the retry-with-sub-selection branch assumes the server announces bare objects, and nothing else proves it');
-check('and the retry only runs when that signature is known to fire',
-  /namesItsAbsences && objectSignatureFires/.test(body));
-check('otherwise the refusals are reported inconclusive, not positive',
-  /it also does not announce bare objects/.test(src));
+check('and the object control is reported rather than only used',
+  /signature_fires: objectSignatureFires/.test(body));
 
 console.log('\nthe probe that answered the wrong question confidently');
 
