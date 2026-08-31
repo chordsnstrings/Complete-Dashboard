@@ -186,8 +186,14 @@ console.log('\nrule 4: a trip leads to its telemetry');
   check('the movement page honours the day the link asked for',
     /parseHash\(\)\.day/.test(veh) && /sel\.value = asked/.test(veh));
   const data = readFileSync('api/public/data.js', 'utf8');
+  /* Shape AND validity, and the same check for every date the router reads —
+     the two ends of an explicit range as well as `day`. Shape alone accepts
+     2026-13-99, which the server rejects by falling back to its OPEN window:
+     every trip ever collected, under a title naming two days in August. */
   check('and the router validates it like every other filter',
-    /day: \/\^\\d\{4\}-\\d\{2\}-\\d\{2\}\$\/\.test/.test(data));
+    /day: isDay\(search\.get\('day'\)\)/.test(data)
+    && /from: isDay\(/.test(data) && /to: isDay\(/.test(data)
+    && /const isDay = /.test(data), 'the router no longer validates dates in one place');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

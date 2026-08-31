@@ -306,3 +306,27 @@ a.m-stat:active{ transform:scale(.985) }
    scrolling deck — quiet, rule above it, and never competing with the cards. */
 .m-src{ margin:6px 2px 4px; padding-top:12px; border-top:1px solid var(--rule);
   color:var(--ink-3); font-size:.74rem; line-height:1.5 }
+
+/* ── the shared range panel, inside the filter sheet ──────────────────────
+   The same element the desktop opens in a popover. It is placed here rather
+   than restyled: a phone that answers "how did August go" with a different
+   control from the desktop is another pair of pages disagreeing. */
+.m-sheet .rangepanel{
+  position:static;width:auto;max-width:none;max-height:none;overflow:visible;
+  background:transparent;border:0;box-shadow:none;padding:0 0 4px;animation:none;
+}
+.m-sheet .rp-sec{margin:14px 0 7px;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600}
+.m-sheet .rp-sec:first-child{margin-top:2px}
+.m-sheet .rp-chips{gap:6px}
+/* Every target at least 40px: a chip that is comfortable with a mouse is a
+   miss with a thumb, and this sheet is only ever used with a thumb. */
+.m-sheet .rp-chip{padding:10px 13px;font-size:.86rem;min-height:40px}
+.m-sheet .rp-m{padding:11px 0;font-size:.86rem;min-height:42px}
+.m-sheet .rp-months{gap:6px}
+.m-sheet .rp-step{width:40px;height:40px;font-size:1.05rem}
+.m-sheet .rp-year b{font-size:1rem}
+.m-sheet .rp-dates{gap:8px}
+.m-sheet .rp-dates input{padding:10px;font-size:.9rem;min-height:42px}
+.m-sheet .rp-apply{min-height:44px;font-size:.9rem}
+.m-sheet .rp-now{margin-top:14px}

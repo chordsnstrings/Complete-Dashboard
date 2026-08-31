@@ -98,34 +98,20 @@
         <p id="viewSub" class="sub">What every vehicle and every driver earned per day worked, per km and per booking</p>
       </div>
       <div class="filters" id="filters">
-        <!-- 180 is here because the router accepts it (api/public/data.js) and
-             the repo's own smoke list links to it. Without the option a
-             ?days=180 address left the control with selectedIndex -1 — blank —
-             while the page genuinely used six months. -->
-        <!-- Two kinds of window, and they answer different questions. A rolling
-             one ("last 30 days") is the right frame for a trend; a calendar
-             period is the right frame for "how is August going", which a
-             thirty-day window straddling two months cannot answer. Both are
-             here, grouped so the difference is visible rather than implied. -->
-        <select id="fRange" title="Date range">
-          <optgroup label="Calendar period">
-            <option value="p:today">Today</option>
-            <option value="p:yesterday">Yesterday</option>
-            <option value="p:week">This week</option>
-            <option value="p:month" selected>This month</option>
-            <option value="p:last_week">Last week</option>
-            <option value="p:last_month">Last month</option>
-            <option value="p:quarter">This quarter</option>
-            <option value="p:year">This year</option>
-          </optgroup>
-          <optgroup label="Rolling window">
-            <option value="7">Last 7 days</option>
-            <option value="30">Last 30 days</option>
-            <option value="90">Last 90 days</option>
-            <option value="180">Last 6 months</option>
-            <option value="365">Last 12 months</option>
-          </optgroup>
-        </select>
+        <!-- One control, three ways to answer it: a relative period, a month
+             named outright ("August 2026"), or two dates off a calendar. It
+             was a <select> of thirteen fixed choices, which could name neither
+             a month with its year on it nor an arbitrary span — so the
+             commonest real question, "the 3rd to the 19th", had no answer.
+             The panel is built in api/public/daterange.js and shared with the
+             phone, where it opens as a sheet rather than a popover.
+
+             A caret rather than a calendar icon, and text rather than SVG: it
+             is the same affordance the selects beside it carry, and an inline
+             <svg> inside this button laid out 39px tall whatever it was told
+             its height was, standing the whole toolbar 20px taller. -->
+        <button id="fRange" type="button" title="Date range"
+                aria-haspopup="dialog" aria-expanded="false"><span id="fRangeLabel">This month</span><span class="caret" aria-hidden="true">▾</span></button>
         <!-- How the window is BUCKETED, which is not how long it is. Left on
              Auto the server picks from the span, because 365 daily bars is not
              a chart and three monthly bars is not a trend. -->

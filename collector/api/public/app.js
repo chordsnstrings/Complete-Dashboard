@@ -11,6 +11,7 @@ import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
 import { volatilePath } from './swr.js';
+import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
 import { renderDriver, renderDriverDirectory, DRIVER_TABS } from './driver.js';
 import { renderVehicle, renderVehicleDirectory, VEHICLE_TABS } from './vehicle.js';
@@ -4648,11 +4649,53 @@ async function freshness() {
    option value so the two cannot be confused for one another — and choosing
    either CLEARS the other, because a page showing "this month" over a rolling
    thirty days would be labelled with a window it is not using. */
-$('#fRange').onchange = (e) => {
-  const v = String(e.target.value);
-  setFilter(v.startsWith('p:')
-    ? { period: v.slice(2) }
-    : { period: '', days: +v });
+/* The range control opens a calendar rather than dropping a list.
+   ─────────────────────────────────────────────────────────────────────────
+   Three kinds of window, and picking any one of them CLEARS the other two —
+   a page headed "August 2026" while showing the 3rd to the 19th is the whole
+   class of bug this product exists to have removed. The clearing happens here,
+   once, rather than inside the panel: the phone commits the same choice a
+   different way, and a picker that knew which host it was in would be two
+   pickers. */
+let rangeOpen = null;
+function closeRange() {
+  if (!rangeOpen) return;
+  rangeOpen.remove(); rangeOpen = null;
+  $('#fRange').setAttribute('aria-expanded', 'false');
+  document.removeEventListener('keydown', onRangeKey);
+}
+const onRangeKey = (e) => { if (e.key === 'Escape') closeRange(); };
+$('#fRange').onclick = () => {
+  if (rangeOpen) { closeRange(); return; }
+  const btn = $('#fRange');
+  const scrim = el('div', 'rp-scrim');
+  const panel = rangePanel({
+    onPick: (pick) => setFilter({
+      period: pick.period || '',
+      days: pick.days || state.days,
+      from: pick.from || '', to: pick.to || '',
+    }),
+    close: () => closeRange(),
+  });
+  scrim.onclick = (e) => { if (e.target === scrim) closeRange(); };
+  scrim.append(panel);
+  document.body.append(scrim);
+  rangeOpen = scrim;
+  /* Anchored under the button and kept on screen: near the right edge of a
+     narrow window the panel would otherwise open off it.
+
+     Viewport coordinates, with no scroll offset added: the scrim is
+     position:fixed, so it is the containing block for the panel inside it and
+     `top` is already measured from the viewport. Adding scrollY put the panel
+     one page-scroll below the button on any page that had been scrolled. */
+  const r = btn.getBoundingClientRect();
+  panel.style.top = `${Math.round(Math.min(r.bottom + 6, window.innerHeight - 40))}px`;
+  const w = panel.offsetWidth;
+  panel.style.left = `${Math.round(Math.max(12,
+    Math.min(r.left, window.innerWidth - w - 12)))}px`;
+  btn.setAttribute('aria-expanded', 'true');
+  document.addEventListener('keydown', onRangeKey);
+  panel.querySelector('button, input')?.focus();
 };
 $('#fGrain').onchange = (e) => setFilter({ grain: e.target.value });
 $('#fPlatform').onchange = (e) => setFilter({ platform: e.target.value });
@@ -4722,6 +4765,11 @@ function applyRoute() {
   // whose caption claims 30.
   state.days = r.days ?? 30;
   state.period = r.period ?? 'month';
+  /* Both ends or neither: half a range is not a window, and leaving one set
+     would silently pair a picked date with today. */
+  state.from = (r.from && r.to) ? r.from : '';
+  state.to = (r.from && r.to) ? r.to : '';
+  if (state.from) state.period = '';
   state.grain = r.grain ?? 'auto';
   state.platform = r.platform ?? '';
   state.fleet = r.fleet ?? '';
@@ -4732,16 +4780,10 @@ function applyRoute() {
      -1 and the control rendered empty above a page genuinely using six months.
      180 now has an option; anything else that ever slips through gets one made
      for it rather than silently showing nothing. */
-  if (rng) {
-    /* A period wins the control when one is set, because it is what the page
-       is actually showing. The `p:` prefix is what keeps "this week" and a
-       seven-day window from sharing a value. */
-    rng.value = state.period ? `p:${state.period}` : String(state.days);
-    if (rng.selectedIndex < 0) {
-      rng.append(new Option(state.period ? state.period : `Last ${state.days} days`, rng.value));
-      rng.value = state.period ? `p:${state.period}` : String(state.days);
-    }
-  }
+  /* The control says what the page is showing, in the same words the header
+     uses for it — a named month with its year, two dates, or a day count. */
+  const rlab = $('#fRangeLabel');
+  if (rlab) { rlab.textContent = windowLabel(); rng.title = `Date range — ${windowLabel()}`; }
   if (grn) grn.value = state.grain;
   if (plt) plt.value = state.platform;
   if (flt) flt.value = state.fleet;

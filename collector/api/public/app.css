@@ -220,6 +220,51 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .filters select:focus-visible,.filters button:focus-visible{
   outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);
 }
+/* ── the range picker ─────────────────────────────────────────────────────
+   A popover on a pointer, a bottom sheet on a phone (m.css places it). The
+   panel itself is the same element in both, because where a control appears is
+   a placement decision and not a different control. */
+#fRange{max-width:26ch;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#fRange .caret{color:var(--ink-3);margin-left:7px;font-size:.9em}
+#fRange[aria-expanded="true"]{border-color:var(--accent);background:var(--surface-2)}
+.rp-scrim{position:fixed;inset:0;z-index:60;background:transparent}
+.rangepanel{
+  position:absolute;z-index:61;width:min(340px,calc(100vw - 24px));
+  background:var(--surface);border:1px solid var(--rule-strong);border-radius:var(--r);
+  box-shadow:0 2px 6px rgba(0,0,0,.06),0 18px 44px -22px rgba(0,0,0,.5);
+  padding:12px 13px 13px;max-height:min(78vh,640px);overflow:auto;
+  animation:fadeUp .16s var(--ease-out);
+}
+.rp-sec{margin:12px 0 6px;font-size:.66rem;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:600}
+.rp-sec:first-child{margin-top:0}
+.rp-chips{display:flex;flex-wrap:wrap;gap:5px}
+.rangepanel button{font:inherit;cursor:pointer;border-radius:var(--r-sm);
+  border:1px solid var(--rule);background:var(--surface-2);color:var(--ink);
+  transition:border-color .15s var(--ease),background .15s var(--ease),color .15s var(--ease)}
+.rangepanel button:hover:not(:disabled){border-color:var(--rule-strong);background:var(--surface-3)}
+.rangepanel button:disabled{opacity:.38;cursor:default}
+.rangepanel button:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.rp-chip{padding:5px 9px;font-size:.78rem}
+.rp-chip.on,.rp-m.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.rp-year{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.rp-year b{font-size:.92rem;font-variant-numeric:tabular-nums}
+.rp-step{width:28px;height:26px;display:grid;place-items:center;font-size:.95rem}
+.rp-months{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin-bottom:6px}
+.rp-m{padding:6px 0;font-size:.78rem;font-variant-numeric:tabular-nums}
+/* A month before the first row this fleet holds is offered and marked, because
+   "we have nothing for March" is an answer and hiding the month is not. */
+.rp-m.empty:not(.on){color:var(--ink-3);border-style:dashed}
+.rp-dates{display:flex;align-items:center;gap:7px}
+.rp-dates input{flex:1;min-width:0;font:inherit;font-size:.8rem;padding:6px 8px;
+  background:var(--surface-2);border:1px solid var(--rule);border-radius:var(--r-sm);color:var(--ink)}
+.rp-dates input:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.rp-to{color:var(--ink-3);font-size:.78rem;flex:none}
+.rp-apply{width:100%;margin-top:7px;padding:7px 0;font-size:.8rem}
+.rp-err{margin:6px 0 0;font-size:.74rem;color:var(--warn)}
+.rp-now{margin:13px 0 0;padding-top:10px;border-top:1px solid var(--rule);
+  font-size:.75rem;color:var(--ink-2)}
+
 #refreshBtn{width:34px;display:grid;place-items:center;font-size:.95rem}
 #refreshBtn.spin{animation:spin .7s linear}
 @keyframes spin{to{transform:rotate(360deg)}}
@@ -1319,7 +1364,7 @@ a.insight-row:hover{border-color:var(--accent)}
 .vdct{
   display:flex;gap:34px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;
   background:var(--surface);border:1px solid var(--rule);border-left:3px solid var(--accent);
-  border-radius:var(--r-md,10px);padding:22px 26px;margin:0 0 20px;
+  border-radius:var(--r);padding:22px 26px;margin:0 0 20px;
 }
 .vdct.warn{border-left-color:var(--warn)}
 .vdct.bad{border-left-color:var(--critical)}

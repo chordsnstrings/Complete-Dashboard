@@ -85,9 +85,74 @@ const monthStart = (d) => `${d.slice(0, 7)}-01`;
 export const PERIODS = ['today', 'yesterday', 'week', 'month', 'quarter', 'year',
   'last_week', 'last_month'];
 
+/* ── a NAMED span, beside the relative ones ───────────────────────────────
+   "This month" is the right frame while the month is running and the wrong
+   one the moment somebody wants to talk about August. A relative name also
+   cannot be sent to anybody: a link saying `period=month` opens on whatever
+   month the reader opens it in, so two people reading the same address read
+   different data — the same trap the rolling window had, one level up.
+
+   So a span can also be named outright, on the Dubai calendar:
+
+     2026-08     August 2026
+     2026-Q3     July to September 2026
+     2026        the whole of 2026
+
+   A span that has finished is WHOLE. A span containing today runs to today,
+   because a month cannot report days it has not had — the same rule the
+   relative names already follow, and the reason `last_month` is whole while
+   `month` is to-date.
+
+   Nothing here is clamped to the data: a month before the fleet existed
+   returns its own dates and the pages report honestly that they hold nothing
+   for it. Clamping would answer a question nobody asked, under a title
+   naming the one they did. */
+const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const QUARTER_RE = /^(\d{4})-[Qq]([1-4])$/;
+const YEAR_RE = /^(\d{4})$/;
+
+/* The last day of a month, found by stepping into the next month and back one
+   day rather than by a table of lengths — which is the same trick that gets
+   February right in a leap year without knowing it is one. */
+const monthEnd = (y, m) => {
+  const d = new Date(Date.UTC(Number(y), Number(m), 1));
+  d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+};
+
+/* Every named span this understands, in one place so the parser and the
+   validator cannot disagree about what is nameable. */
+export function namedWindow(v, now = Date.now()) {
+  const name = String(first(v) || '');
+  const today = dubaiDay(new Date(now));
+  /* A span is truncated only where it CONTAINS today — never where it is
+     already over, and never where it has not started. */
+  const cap = (from, to) => (to > today ? (from > today ? [from, to] : [from, today]) : [from, to]);
+
+  const mo = MONTH_RE.exec(name);
+  if (mo) return cap(`${name}-01`, monthEnd(mo[1], mo[2]));
+
+  const qu = QUARTER_RE.exec(name);
+  if (qu) {
+    const m0 = (Number(qu[2]) - 1) * 3 + 1;
+    return cap(`${qu[1]}-${String(m0).padStart(2, '0')}-01`, monthEnd(qu[1], m0 + 2));
+  }
+
+  const yr = YEAR_RE.exec(name);
+  if (yr) return cap(`${yr[1]}-01-01`, `${yr[1]}-12-31`);
+
+  return null;
+}
+
+/* True for anything `periodWindow` will resolve — a relative name or a named
+   span. The front end validates against this rule rather than against the
+   relative list alone, so a month in an address survives the round trip. */
+export const isPeriod = (v) => PERIODS.includes(String(first(v) || ''))
+  || namedWindow(v, Date.now()) != null;
+
 export function periodWindow(v, now = Date.now()) {
   const name = String(first(v) || '');
-  if (!PERIODS.includes(name)) return null;
+  if (!PERIODS.includes(name)) return namedWindow(name, now);
   const today = dubaiDay(new Date(now));
   switch (name) {
     case 'today': return [today, today];

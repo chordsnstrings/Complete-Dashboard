@@ -40,7 +40,11 @@ export const state = {
      A calendar month is stable: only its last day moves, and the business
      already thinks in months. The rolling windows stay on the control for
      anyone who wants a trailing view. */
-  days: 30, period: 'month', grain: 'auto', platform: '', fleet: '',
+  /* And a third: `from`/`to`, an explicit range a person picked off a
+     calendar. It outranks both — somebody who named two dates meant those two
+     dates — and setting it clears the period, because a page cannot be headed
+     "This month" while showing the 3rd to the 19th. */
+  days: 30, period: 'month', from: '', to: '', grain: 'auto', platform: '', fleet: '',
   admin: store.get('adminToken'),
 };
 
@@ -50,6 +54,22 @@ export const state = {
    period it is not showing. */
 export const PERIODS = ['today', 'yesterday', 'week', 'month', 'quarter', 'year',
   'last_week', 'last_month'];
+
+/* A span named outright — `2026-08`, `2026-Q3`, `2026` — beside the relative
+   ones, mirrored from api/window.js and pinned by test/calendar_window.test.mjs.
+   "This month" is the right frame while the month is running and the wrong one
+   the moment somebody wants to talk about August; and a relative name cannot
+   be sent to anybody, because `period=month` opens on whatever month the
+   reader opens it in. */
+const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
+const QUARTER_RE = /^(\d{4})-Q([1-4])$/;
+const YEAR_RE = /^(\d{4})$/;
+export const isPeriod = (v) => PERIODS.includes(v)
+  || MONTH_RE.test(v || '') || QUARTER_RE.test(v || '') || YEAR_RE.test(v || '');
+
+const MONTH_NAME = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+export const MONTH_SHORT = MONTH_NAME.map((m) => m.slice(0, 3));
 /* How each period is written for a reader. One list rather than three: the
    desktop range control, the phone's calendar sheet and every header note
    that says which window is on screen were each carrying their own copy, and
@@ -63,11 +83,35 @@ export const PERIOD_LABEL = {
   month: 'This month', last_month: 'Last month',
   quarter: 'This quarter', year: 'This year',
 };
-/* The window on screen, named. A period is called by its name; a rolling
-   window says how long it is. */
-export const windowLabel = () => (state.period
-  ? (PERIOD_LABEL[state.period] || state.period)
-  : `Last ${state.days} days`);
+/* A named span, written the way a person says it: "August 2026", not
+   "2026-08". The reader asked for months with their years on them. */
+export function periodLabel(p) {
+  if (PERIOD_LABEL[p]) return PERIOD_LABEL[p];
+  const m = MONTH_RE.exec(p || '');
+  if (m) return `${MONTH_NAME[Number(m[2]) - 1]} ${m[1]}`;
+  const q = QUARTER_RE.exec(p || '');
+  if (q) return `Q${q[2]} ${q[1]}`;
+  if (YEAR_RE.test(p || '')) return p;
+  return p || '';
+}
+
+/* A date as a person reads it. Used for the ends of an explicit range, where
+   the year matters as much as the day — a report headed "3 Aug – 19 Aug" is
+   ambiguous the moment there is more than a year of data behind it. */
+export const dayLabel = (d) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || ''));
+  return m ? `${Number(m[3])} ${MONTH_SHORT[Number(m[2]) - 1]} ${m[1]}` : String(d || '');
+};
+
+/* The window on screen, named. An explicit range gives its two ends, a period
+   is called by its name, and a rolling window says how long it is. */
+export const windowLabel = () => {
+  if (state.from && state.to) {
+    return state.from === state.to ? dayLabel(state.from)
+      : `${dayLabel(state.from)} – ${dayLabel(state.to)}`;
+  }
+  return state.period ? periodLabel(state.period) : `Last ${state.days} days`;
+};
 /* `auto` is a real value the server understands, not the absence of one:
    absent means `day`, so that every caller written before the grain existed
    keeps getting the shape it already parses. */
@@ -205,6 +249,11 @@ export function windowDates() {
    Without a period this is unchanged — explicit from/to, as every call site
    has always sent. */
 function windowParams() {
+  /* Three kinds of window, in order of how specific the reader was being.
+     Two dates off a calendar beat a named span, and a named span beats a
+     rolling count — and exactly one of them is ever sent, so a route never has
+     to apply a precedence rule the page cannot see. */
+  if (state.from && state.to) return { from: state.from, to: state.to };
   if (state.period) return { period: state.period };
   const [from, to] = windowDates();
   return { from, to };
@@ -276,7 +325,7 @@ export const qChan = (path, extra) => {
    person opening it saw all platforms over 30 days and no reason to think
    otherwise. A filter that changes what a page says has to be part of the
    page's address. */
-const DEFAULTS = { days: 30, period: 'month', grain: 'auto', platform: '', fleet: '' };
+const DEFAULTS = { days: 30, period: 'month', from: '', to: '', grain: 'auto', platform: '', fleet: '' };
 
 /* Which controls a view actually offers. Declared here rather than in the
    shell, because href() has to agree with it: an address that carries a filter
@@ -330,14 +379,15 @@ export const hidesChannel = (v) => NO_FILTER.includes(v) || NO_PLATFORM_FLEET.in
    one key `days` whose value is "365?day=2026-08-25", so the window silently
    reset to 30 and the day was never seen at all. */
 export function filterQuery(view = state.view, extra = null, over = null) {
-  const s = { days: state.days, period: state.period, grain: state.grain,
-    platform: state.platform, fleet: state.fleet, ...(over || {}) };
+  const s = { days: state.days, period: state.period, from: state.from, to: state.to,
+    grain: state.grain, platform: state.platform, fleet: state.fleet, ...(over || {}) };
   const p = new URLSearchParams();
   /* A period and a rolling window are alternatives, never both: sending both
      would leave which one won up to the server's precedence rules, and a link
      is supposed to say exactly what the reader was looking at. */
   if (!hidesRange(view)) {
-    if (s.period) p.set('period', s.period);
+    if (s.from && s.to) { p.set('from', s.from); p.set('to', s.to); }
+    else if (s.period) p.set('period', s.period);
     else if (s.days !== DEFAULTS.days) p.set('days', String(s.days));
     if (s.grain && s.grain !== DEFAULTS.grain) p.set('grain', s.grain);
   }
@@ -364,6 +414,24 @@ export const hrefFilter = (view, patch = {}, param = null, sub = null) =>
   '#' + [view, param, sub].filter(Boolean).map(encodeURIComponent).join('/')
   + filterQuery(view, null, patch);
 
+/* A calendar day — shape AND validity, the same round trip through Date that
+   api/window.js does on the way in. Shape alone accepts `2026-13-99`, which is
+   month thirteen and day ninety-nine: the server rejects it and falls back to
+   its open window, so the page would quietly show every trip ever collected
+   under a title naming two days in August. Shared by the range ends and by
+   `day=`, which used to spell the shape check twice between them. */
+const isDay = (v) => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''));
+  if (!m) return false;
+  const [y, mo, d] = m.slice(1).map(Number);
+  if (mo < 1 || mo > 12 || d < 1) return false;
+  /* Day zero of the NEXT month is the last day of this one, which gets
+     February right in a leap year without a table of lengths. Checked by
+     arithmetic rather than by round-tripping through toISOString, so no clock
+     and no timezone are involved in deciding whether a date is a date. */
+  return d <= new Date(Date.UTC(y, mo, 0)).getUTCDate();
+};
+
 export function parseHash(h = location.hash.slice(1)) {
   const qi = h.indexOf('?');
   const path = qi >= 0 ? h.slice(0, qi) : h;
@@ -377,11 +445,15 @@ export function parseHash(h = location.hash.slice(1)) {
     /* Same rule as `days`: only values the app offers. A hand-edited period or
        grain the server does not know would be ignored there and leave the
        control showing something the page is not doing. */
-    /* Three states, not two: a period named in the address, an explicit
-       rolling window (`days=` with no period, which the control writes when a
-       reader picks one), and neither — which means the default. */
-    period: PERIODS.includes(search.get('period') || '') ? search.get('period')
-      : (search.get('days') ? '' : null),
+    /* Four states, not two: an explicit range (`from`+`to`), a period named
+       in the address — relative (`month`) or outright (`2026-08`) — a rolling
+       window (`days=` with neither), and none of them, which means the
+       default. Each of the three that ARE named clears the other two, so a
+       link says exactly one thing about which days it shows. */
+    from: isDay(search.get('from')) ? search.get('from') : null,
+    to: isDay(search.get('to')) ? search.get('to') : null,
+    period: isPeriod(search.get('period') || '') ? search.get('period')
+      : ((search.get('days') || search.get('from')) ? '' : null),
     grain: GRAINS.includes(search.get('grain') || '') ? search.get('grain') : null,
     platform: search.get('platform') || null,
     fleet: search.get('fleet') || null,
@@ -389,7 +461,7 @@ export function parseHash(h = location.hash.slice(1)) {
        vehicle's replay OF THAT DAY, and the movement page reads this to
        preselect it. A malformed value is null, and the page falls back to the
        newest replayable day exactly as if no day had been asked for. */
-    day: /^\d{4}-\d{2}-\d{2}$/.test(search.get('day') || '') ? search.get('day') : null,
+    day: isDay(search.get('day')) ? search.get('day') : null,
     /* Where #compare cuts both days. 'full' is the reader deliberately asking
        for a partial today against a whole yesterday; anything else means the
        like-for-like default, which is the current Dubai minute. */
