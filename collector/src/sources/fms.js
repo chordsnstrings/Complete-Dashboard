@@ -30,13 +30,135 @@ async function call(op, params) {
 }
 
 // ---- historical trips ----
+/* One journey row, from FMS's own shape. Extracted so the window loop below
+   can call it from two places — a window that answered, and a half of a window
+   that answered after the whole was refused. */
+function fmsTripRows(data, fleet) {
+  return (data?.Data || []).map((t) => {
+    const plate = normPlate(t['Plate No']);
+    const start = parseFmsTime(t['Start Time']);
+    return {
+      /* `plate ?? ''` and not `plate`: normPlate returns null now, and this
+         key identifies rows already in the table. Interpolating null would
+         rewrite it as "null|…" where it used to be "|…" and re-insert every
+         such journey as a new row on the next collection. */
+      platform: SRC, external_id: `${plate ?? ''}|${start}`, fleet_id: fleet.fleet, plate,
+      requested_at: start, ended_at: parseFmsTime(t['End Time']),
+      pickup_addr: t['Start Location'], pickup_lat: t.StartLat, pickup_lng: t.StartLon,
+      dropoff_addr: t['End Location'], dropoff_lat: t.EndLat, dropoff_lng: t.EndLon,
+      distance_km: t['Total Travel Distance'], seat_count: t['Seat Count'],
+      status: 'completed', raw: t,
+    };
+  }).filter((r) => r.requested_at);
+}
+
+/* Below this, a refusal is the provider's answer rather than the window's size.
+   Two days of one fleet's telematics is a few hundred rows; if that is refused,
+   splitting it again only spends requests to be told the same thing. */
+const FMS_MIN_SPLIT_DAYS = 2;
+
+/* Ask for a window, and if it is refused for being too big, ask for its halves.
+   ─────────────────────────────────────────────────────────────────────────
+   The record said Ecosine simply could not reach its own history: monthly
+   windows came back 400, "deterministically, on every retry", and the
+   conclusion written here was that the two fleets have different reach.
+
+   That conclusion was wrong, and the measurement that disproves it is cheap.
+   Asked on 2026-08-31 for October 2025 — inside a 63-day hole this source has
+   carried since — FMS answers:
+
+     31 days   ecosine 400          egari 400
+     25 days   ecosine 400          egari 200, 4,631 rows
+     21 days   ecosine 400          egari 200, 3,836 rows
+     14 days   ecosine 200, 3,476   egari 200, 2,412 rows
+      7 days   ecosine 200, 1,724   egari 200, 1,158 rows
+
+   Egari succeeds at 25 days with 4,631 rows where Ecosine fails at 21 with an
+   estimated 5,200. That is not two fleets with different reach; it is one
+   response-size ceiling around five thousand records, and Ecosine hits it
+   sooner only because Ecosine is the busier fleet. The history is there for
+   both, and it has been reported as missing for ninety-three days.
+
+   So a refusal is retried in halves rather than recorded as a hole. A quiet
+   month still costs one request; only a month that is actually too large pays
+   for more, which is why this is a split and not simply a smaller window —
+   a fixed fortnight would triple the request count on every quiet month and
+   still break on a busy one. */
+async function collectTripWindow(fleet, s, e, chunks, depth = 0) {
+  const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
+  chunks.push(chunk);
+  if (depth) chunk.split_from_refusal = true;
+  let data;
+  try {
+    /* A refusal is not an empty month.
+       ─────────────────────────────────────────────────────────────────
+       http() resolves for any status — it returns { status, ok, data } and
+       only throws on a transport failure — so a 400 arrived here with no
+       Data key, fell through `data?.Data || []`, and was recorded as a
+       window that was asked and answered with nothing. Six consecutive
+       months of 2025 read that way, and the Collection gaps page dutifully
+       reported five months of telematics as the provider having none.
+
+       Status is checked before the body is read now, and a refusal is a
+       chunk error: the page can then say "asked and refused" rather than
+       "asked and answered empty", which are opposite instructions to whoever
+       reads it. */
+    const r = await call('GetTripPassenger', {
+      username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
+      fromdate: dotDate(s), todate: dotDate(e),
+    });
+    if (!r.ok) {
+      const days = Math.round((e - s) / 864e5) + 1;
+      if (days > FMS_MIN_SPLIT_DAYS) {
+        /* The window was too big, not the history missing. Halve it, and
+           record the halves as the windows actually asked for — a coverage
+           page that says a month was refused when its two halves answered
+           would be describing a request nobody made. */
+        chunks.pop();
+        /* Halved in whole DAYS, not milliseconds. (e - s) / 2 on a window with
+           an odd number of days lands mid on a half-day, and every date this
+           source sends is a bare date — so the two halves would then be
+           computed from timestamps that do not name the boundary they are
+           supposed to fall on. Counted in days, day `half` ends the first
+           window and day `half + 1` opens the second, exactly once each. */
+        const half = Math.floor(days / 2);
+        const mid = new Date(s.getTime() + (half - 1) * 864e5);
+        const next = new Date(s.getTime() + half * 864e5);
+        log.info(SRC, `trip window ${dotDate(s)}..${dotDate(e)} refused — splitting`,
+          { fleet: fleet.fleet, status: r.status, days });
+        return (await collectTripWindow(fleet, s, mid, chunks, depth + 1))
+          + (await collectTripWindow(fleet, next, e, chunks, depth + 1));
+      }
+      chunk.error = `HTTP ${r.status}${r.data?.Message ? `: ${String(r.data.Message).slice(0, 120)}` : ''}`;
+      log.warn(SRC, `trip window ${dotDate(s)}..${dotDate(e)} refused`,
+        { fleet: fleet.fleet, status: r.status, days });
+      return 0;
+    }
+    data = r.data;
+  } catch (err) {
+    chunk.error = String(err).slice(0, 300);
+    log.error(SRC, `trip window ${dotDate(s)}..${dotDate(e)} FAILED`,
+      { fleet: fleet.fleet, err: chunk.error });
+    return 0;
+  }
+  const rows = fmsTripRows(data, fleet);
+  const written = rows.length ? await upsertMany('trip', rows, ['platform', 'external_id']) : 0;
+  chunk.rows = rows.length;
+  log.info(SRC, `trips ${fleet.fleet} ${dotDate(s)}..${dotDate(e)}`, { rows: rows.length });
+  return written;
+}
+
 /* This loop had no per-window error handling at all: a throw on window 3
    abandoned windows 4 through 12 and surfaced as ONE error against the whole
    fleet, with no record of which months were never attempted. That is the
    exact shape that hid a 299-day hole in the Uber history for months, and FMS
-   currently has a 155-day hole of its own — over a period Uber, now fully
-   collected, shows as busy. So the fleet was working and this source has been
-   quietly failing, and nothing recorded where.
+   carried a 93-day one of its own — over a period Uber, now fully collected,
+   shows as busy. So the fleet was working and this source was quietly failing,
+   and nothing recorded where.
+
+   Those 93 days are recoverable, and were the whole time: the windows were
+   refused for being too large, not because the history is gone. See
+   collectTripWindow above for the measurement.
 
    Newest first, for the same reason Uber is: a backfill that dies partway
    should have landed the months anybody is actually looking at. */
@@ -52,66 +174,7 @@ async function pullTrips(fleet, from, to, onStep) {
   for (const [s, e] of windows) {
     await onStep?.({ window: `${dotDate(s)}..${dotDate(e)}`, index: wi++, of: windows.length,
       rows_so_far: total, fleet: fleet.fleet });
-    const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
-    chunks.push(chunk);
-    let data;
-    try {
-      /* A refusal is not an empty month.
-         ─────────────────────────────────────────────────────────────────
-         http() resolves for any status — it returns { status, ok, data } and
-         only throws on a transport failure — so a 400 arrived here with no
-         Data key, fell through `data?.Data || []`, and was recorded as a
-         window that was asked and answered with nothing. Six consecutive
-         months of 2025 read that way, and the Collection gaps page dutifully
-         reported five months of telematics as the provider having none.
-
-         FMS is still serving those months. Asked again today it returns 4,500
-         trips for Egari in December 2025 and 4,351 in February 2026 — the same
-         windows our own record calls empty — while refusing Ecosine's with a
-         400, deterministically, on every retry. So the two fleets have
-         different reach into the history, which is a fact worth having, and
-         none of it is what was recorded.
-
-         Status is checked before the body is read now, and a refusal is a
-         chunk error: the page can then say "asked and refused" rather than
-         "asked and answered empty", which are opposite instructions to whoever
-         reads it. */
-      const r = await call('GetTripPassenger', {
-        username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
-        fromdate: dotDate(s), todate: dotDate(e),
-      });
-      if (!r.ok) {
-        chunk.error = `HTTP ${r.status}${r.data?.Message ? `: ${String(r.data.Message).slice(0, 120)}` : ''}`;
-        log.warn(SRC, `trip window ${dotDate(s)}..${dotDate(e)} refused`,
-          { fleet: fleet.fleet, status: r.status });
-        continue;
-      }
-      data = r.data;
-    } catch (err) {
-      chunk.error = String(err).slice(0, 300);
-      log.error(SRC, `trip window ${dotDate(s)}..${dotDate(e)} FAILED`,
-        { fleet: fleet.fleet, err: chunk.error });
-      continue;
-    }
-    const rows = (data?.Data || []).map((t) => {
-      const plate = normPlate(t['Plate No']);
-      const start = parseFmsTime(t['Start Time']);
-      return {
-        /* `plate ?? ''` and not `plate`: normPlate returns null now, and this
-           key identifies rows already in the table. Interpolating null would
-           rewrite it as "null|…" where it used to be "|…" and re-insert every
-           such journey as a new row on the next collection. */
-        platform: SRC, external_id: `${plate ?? ''}|${start}`, fleet_id: fleet.fleet, plate,
-        requested_at: start, ended_at: parseFmsTime(t['End Time']),
-        pickup_addr: t['Start Location'], pickup_lat: t.StartLat, pickup_lng: t.StartLon,
-        dropoff_addr: t['End Location'], dropoff_lat: t.EndLat, dropoff_lng: t.EndLon,
-        distance_km: t['Total Travel Distance'], seat_count: t['Seat Count'],
-        status: 'completed', raw: t,
-      };
-    }).filter((r) => r.requested_at);
-    if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
-    chunk.rows = rows.length;
-    log.info(SRC, `trips ${fleet.fleet} ${dotDate(s)}..${dotDate(e)}`, { rows: rows.length });
+    total += await collectTripWindow(fleet, s, e, chunks);
   }
   const failed = chunks.filter((c) => c.error).length;
   if (failed) {
