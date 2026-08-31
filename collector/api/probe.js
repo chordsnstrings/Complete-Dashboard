@@ -204,11 +204,22 @@ export function probeRoutes(app, { wrap }) {
       body: JSON.stringify({ operationName: 'GetDriver',
         variables: { orgUUID: org.orgUuid, driverUUID: uuid }, query }),
     });
+    /* JSON, not String(). A GraphQL error is an object and half of them carry
+       no `message` — String() on one yields "[object Object]", which is a
+       diagnostic that diagnoses nothing. The same slip is why the analyst's
+       charging-site rule shipped naming no place. */
+    const say = (e) => (typeof e === 'string' ? e
+      : (e?.message || JSON.stringify(e))).slice(0, 400);
     if (data?.errors?.length) {
-      return res.json({ error: String(data.errors[0]?.message || data.errors[0]).slice(0, 300) });
+      return res.json({ error: say(data.errors[0]), errors: data.errors.length });
     }
     const d = data?.data?.getDriver?.driver;
-    if (!d) return res.json({ error: 'no driver in the response', keys: Object.keys(data || {}) });
+    if (!d) {
+      return res.json({ error: 'no driver in the response',
+        keys: Object.keys(data || {}),
+        data_keys: Object.keys(data?.data || {}),
+        body: JSON.stringify(data).slice(0, 600) });
+    }
     const info = d.member?.user?.driverInfo || {};
     /* Shape and the rating itself. A rating is a number about a person, not
        personal data in the sense this module guards against — and the whole
