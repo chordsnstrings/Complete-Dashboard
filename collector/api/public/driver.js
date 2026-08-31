@@ -1739,6 +1739,41 @@ export async function renderDriverDirectory(root) {
        driver with 2,393 trips on record. `identity_from_history` marks those,
        so the page can show the fact and still be honest that it is not a
        measurement of the range on screen. */
+    /* Uber's own rating, which this column was always meant to show.
+       ─────────────────────────────────────────────────────────────────────
+       It read driver_compliance.rating — the hotel channel's document
+       register, which has never carried one — so the column was 365 dashes
+       under a sentence blaming the channels. Uber answers recognitionRating on
+       GetDriver and the collector now asks. The tag names whose rating it is,
+       because two platforms rating the same human are two opinions on two
+       scales and this column shows one of them.
+
+       Placed beside Standing rather than after the money, and that is not
+       cosmetic: this table is twenty columns wide and scrolls, so a column's
+       position decides whether it is read. Rating and Barred are facts about
+       the PERSON, like Standing and Fleet; the money columns are facts about
+       the window. Shipped after the money, both sat off-screen at 1500px —
+       found on production, which is the only place a twenty-column table tells
+       the truth about itself. */
+    { label: 'Rating', key: 'platform_rating', num: true,
+      absent: 'no platform has answered for anybody yet. Uber publishes a rating and is asked for one '
+        + 'every Monday; Bolt publishes one too and its roster call is currently refused \u2014 '
+        + 'Collection gaps says which credential. This column read the hotel channel\u2019s document '
+        + 'register until today, which has never carried a rating at all',
+      render: (r) => (r.platform_rating != null
+        ? `${fmt(r.platform_rating, 2)}`
+          + (r.platform_lifetime_trips
+            ? `<span class="dim" title="trips the platform has ever recorded for them"> \u00b7 ${fmt(r.platform_lifetime_trips)}</span>`
+            : '')
+        : '<span class="ent-off" title="not yet collected for this driver">\u2014</span>') },
+    /* A ban is a harder constraint than a state of inactive, and it is the one
+       fact here that changes what an operator does today. Shown only where it
+       is true: a column of "no" on 360 people is not information. */
+    { label: 'Barred', key: 'is_banned', num: false,
+      absent: 'no platform has barred anybody in this window',
+      render: (r) => (r.is_banned === true
+        ? '<span class="tag bad" title="the platform has barred this driver">barred</span>'
+        : '\u2014') },
     ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',
       render: (r) => (r.fleet_id
         ? pill(sourceLabel(r.fleet_id), r.identity_from_history ? 'dim' : 'plat')
@@ -1830,33 +1865,6 @@ export async function renderDriverDirectory(root) {
        em-dashes wide, and `absent` turns it into one sentence under the table
        instead. On a database where some channel DOES report one, the column
        comes back on its own. */
-    /* Uber's own rating, which this column was always meant to show.
-       ─────────────────────────────────────────────────────────────────────
-       It read driver_compliance.rating — the hotel channel's document
-       register, which has never carried one — so the column was 365 dashes
-       under a sentence blaming the channels. Uber answers recognitionRating on
-       GetDriver and the collector now asks. The tag names whose rating it is,
-       because two platforms rating the same human are two opinions on two
-       scales and this column shows one of them. */
-    { label: 'Rating', key: 'platform_rating', num: true,
-      absent: 'no platform has answered for anybody yet. Uber publishes a rating and is asked for one '
-        + 'every Monday; Bolt publishes one too and its roster call is currently refused \u2014 '
-        + 'Collection gaps says which credential. This column read the hotel channel\u2019s document '
-        + 'register until today, which has never carried a rating at all',
-      render: (r) => (r.platform_rating != null
-        ? `${fmt(r.platform_rating, 2)}`
-          + (r.platform_lifetime_trips
-            ? `<span class="dim" title="trips the platform has ever recorded for them"> \u00b7 ${fmt(r.platform_lifetime_trips)}</span>`
-            : '')
-        : '<span class="ent-off" title="not yet collected for this driver">\u2014</span>') },
-    /* A ban is a harder constraint than a state of inactive, and it is the one
-       fact here that changes what an operator does today. Shown only where it
-       is true: a column of "no" on 360 people is not information. */
-    { label: 'Barred', key: 'is_banned', num: false,
-      absent: 'no platform has barred anybody in this window',
-      render: (r) => (r.is_banned === true
-        ? '<span class="tag bad" title="the platform has barred this driver">barred</span>'
-        : '\u2014') },
     { label: 'First trip', key: 'first_trip',
       render: (r) => (r.first_trip ? dateStr(r.first_trip)
         : '<span class="ent-off">never</span>') },
