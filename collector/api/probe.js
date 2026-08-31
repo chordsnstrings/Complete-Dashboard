@@ -179,7 +179,7 @@ export function probeRoutes(app, { wrap }) {
       const { rows } = await pool.query(
         `SELECT driver_ext_id FROM driver_platform_state
           WHERE platform = 'uber' AND coalesce(btrim(driver_ext_id), '') <> ''
-          ORDER BY updated_at DESC NULLS LAST LIMIT 1`);
+          ORDER BY observed_at DESC NULLS LAST LIMIT 1`);
       uuid = rows[0]?.driver_ext_id || '';
     }
     if (!uuid) return res.json({ error: 'no uber driver uuid to ask about' });
