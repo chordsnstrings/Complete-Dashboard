@@ -150,6 +150,32 @@ export function namedWindow(v, now = Date.now()) {
 export const isPeriod = (v) => PERIODS.includes(String(first(v) || ''))
   || namedWindow(v, Date.now()) != null;
 
+/* Is this period still running, so the figure is period-to-date?
+   ─────────────────────────────────────────────────────────────────────────
+   Five relative names mean "so far" by construction. A NAMED span is exactly
+   as partial when it contains today — August asked for on the 30th is not
+   August — and the answer used to be a list of those five words, so
+   `period=2026-08` came back claiming to be a whole month while it was two
+   thirds of one. Asked here, where the span's own end is known before it is
+   capped to today. */
+const TO_DATE = ['today', 'week', 'month', 'quarter', 'year'];
+export function periodPartial(v, now = Date.now()) {
+  const name = String(first(v) || '');
+  if (TO_DATE.includes(name)) return true;
+  if (PERIODS.includes(name)) return false;      // last_week, last_month, yesterday: finished
+  const mo = MONTH_RE.exec(name);
+  const qu = QUARTER_RE.exec(name);
+  const yr = YEAR_RE.exec(name);
+  const today = dubaiDay(new Date(now));
+  /* The span's own end, uncapped — the one namedWindow truncates. */
+  const end = mo ? monthEnd(mo[1], mo[2])
+    : qu ? monthEnd(qu[1], (Number(qu[2]) - 1) * 3 + 3)
+      : yr ? `${yr[1]}-12-31` : null;
+  if (!end) return false;
+  const [from] = namedWindow(name, now) || [];
+  return end > today && from <= today;
+}
+
 export function periodWindow(v, now = Date.now()) {
   const name = String(first(v) || '');
   if (!PERIODS.includes(name)) return namedWindow(name, now);

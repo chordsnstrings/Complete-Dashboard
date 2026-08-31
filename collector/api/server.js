@@ -10,7 +10,8 @@ import { recognise, unrecognised } from '../src/credkit.js';
 import { checkAll } from '../src/credcheck.js';
 import { proposeKeys } from '../src/credmodel.js';
 import { SETTING_DEFS } from '../src/settings.js';
-import { win, winDays, grainOf, previousWindow, foldGrain, GRAINS, PERIODS } from './window.js';
+import { win, winDays, grainOf, previousWindow, foldGrain, GRAINS, PERIODS,
+  isPeriod, periodPartial } from './window.js';
 import { rollupGrainSql, rollupState, refreshRollups } from '../src/rollup.js';
 import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, platformStatements, fleetIncome } from './income_sql.js';
@@ -467,10 +468,13 @@ app.get('/api/kpis', wrap(async (req, res) => {
        measured, `period` is what was asked for when a period was named, and
        `partial` says the period is still running. */
     window: { from: p[0], to: p[1], days: windowDays,
-      period: PERIODS.includes(String(req.query.period || '')) ? String(req.query.period) : null,
+      period: isPeriod(req.query.period) ? String(req.query.period) : null,
       grain: grainOf(req),
-      partial: ['today', 'week', 'month', 'quarter', 'year']
-        .includes(String(req.query.period || '')) },
+      /* Still running, so the figure is period-to-date — decided in
+         api/window.js, where the span's own end is known before it is capped
+         to today. It used to be a list of five relative names, so
+         `period=2026-08` came back claiming to be a whole month on the 30th. */
+      partial: periodPartial(req.query.period) },
   });
 }));
 
@@ -557,7 +561,7 @@ app.get('/api/compare/period', wrap(async (req, res) => {
     'fares', 'tips', 'cash', 'payout', 'online_min', 'on_job_min'];
   res.json({
     window: { from, to, grain: grainOf(req),
-      period: PERIODS.includes(String(req.query.period || '')) ? String(req.query.period) : null },
+      period: isPeriod(req.query.period) ? String(req.query.period) : null },
     previous: { from: pFrom, to: pTo },
     now, before,
     change_pct: Object.fromEntries(KEYS.map((k) => [k, delta(k)])),

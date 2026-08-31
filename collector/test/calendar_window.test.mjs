@@ -18,7 +18,7 @@
 import express from 'express';
 import { readFileSync } from 'node:fs';
 import { launchChromium } from './browser.mjs';
-import { PERIODS as SERVER_PERIODS, periodWindow, isPeriod } from '../api/window.js';
+import { PERIODS as SERVER_PERIODS, periodWindow, isPeriod, periodPartial } from '../api/window.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -156,6 +156,23 @@ console.log('\nAugust 2026, not "this month"');
   check('and the validator agrees with the parser on every one of them',
     ['2026-08', '2026-Q3', '2026', 'month'].every((v) => isPeriod(v))
     && !['2026-13', '2026-Q5', 'august'].some((v) => isPeriod(v)));
+}
+
+console.log('\na span still running says so');
+/* A page headed "August 2026" over two thirds of August is the same mistake
+   as a thirty-day figure headed "this month". `partial` used to be tested
+   against a list of five relative words, so a named month never carried it. */
+{
+  const at = new Date('2026-08-30T12:00:00+04:00');
+  const cases = [['2026-08', true], ['2026-07', false], ['2026-Q3', true], ['2026-Q2', false],
+    ['2026', true], ['2025', false], ['month', true], ['last_month', false],
+    ['today', true], ['yesterday', false], ['2026-11', false]];
+  for (const [name, want] of cases) {
+    check(`${name} is ${want ? 'still running' : 'finished'}`,
+      periodPartial(name, at) === want, String(periodPartial(name, at)));
+  }
+  check('and the echo names the span that was asked for, not null',
+    isPeriod('2026-08') && isPeriod('2026-Q3') && isPeriod('2026'));
 }
 
 console.log('\nthe client names the same spans, in words');
