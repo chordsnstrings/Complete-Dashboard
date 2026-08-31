@@ -46,11 +46,11 @@ const app = express();
    to Amsterdam". A non-2xx is passed straight through — that IS the answer —
    and only a thrown fetch is retried. */
 const RETRIES = 3;
-const upstream = async (url) => {
+const upstream = async (url, init = { headers: { accept: 'application/json' } }) => {
   let last;
   for (let i = 0; i <= RETRIES; i += 1) {
     try {
-      return await fetch(url, { headers: { accept: 'application/json' } });
+      return await fetch(url, init);
     } catch (e) {
       last = e;
       if (i === RETRIES) break;
@@ -59,6 +59,46 @@ const upstream = async (url) => {
   }
   throw last;
 };
+
+/* Writes too, not only reads.
+   ─────────────────────────────────────────────────────────────────────────
+   This bridged GET and nothing else, so every write the product does — pasting
+   a credential, triggering a collection, saving a setting — 404'd against a
+   bridge whose whole purpose is "this working tree, against the live API".
+   The failure was quiet in the worst way: the page renders its own error box,
+   which reads exactly like the endpoint being broken in production.
+
+   A write is only forwarded when the caller opts in with ALLOW_WRITES=1, and
+   the reason is the upstream: this points at production by default, and a
+   harness that silently forwards a POST to a live fleet is a harness nobody
+   should leave running. The paste endpoint is a dry run unless the body says
+   otherwise, which is what makes it the useful thing to check here. */
+const WRITES = process.env.ALLOW_WRITES === '1';
+app.use('/api/*', express.json({ limit: '2mb' }), async (req, res, next) => {
+  if (req.method === 'GET') return next();
+  if (!WRITES) {
+    console.log(`  ⃠ ${req.method} ${req.path} — set ALLOW_WRITES=1 to forward writes to ${UP}`);
+    return res.status(405).json({ error: 'this bridge forwards reads only',
+      detail: `re-run with ALLOW_WRITES=1 to send ${req.method} through to ${UP}` });
+  }
+  try {
+    console.log(`  → ${req.method} ${req.path} → ${UP}`);
+    const r = await upstream(`${UP}${req.originalUrl}`, {
+      method: req.method,
+      headers: {
+        accept: 'application/json',
+        'content-type': req.get('content-type') || 'application/json',
+        ...(req.get('x-admin-token') ? { 'x-admin-token': req.get('x-admin-token') } : {}),
+      },
+      body: req.body == null ? undefined : JSON.stringify(req.body),
+    });
+    const body = await r.text();
+    res.status(r.status).type(r.headers.get('content-type') || 'application/json').send(body);
+  } catch (e) {
+    console.log(`  ✗ ${req.method} ${req.path} — upstream unreachable: ${String(e).slice(0, 90)}`);
+    res.status(502).json({ error: String(e).slice(0, 200) });
+  }
+});
 
 app.get('/api/*', async (req, res) => {
   try {
