@@ -270,6 +270,20 @@ export function mergeQuality(into, row) {
   }
 }
 
+/* How far back a quality pass will walk, in whole weeks.
+   ─────────────────────────────────────────────────────────────────────────
+   Each week costs TWO Uber reports per fleet, and a report takes minutes at
+   the provider against a cap of three in flight per org. A year would be 208
+   reports and the better part of a day, spent mostly re-fetching weeks that
+   have not changed since the last pass — while the trip and earnings pulls
+   queue behind it for the same three slots.
+
+   Twenty-six weeks is half a year: long enough that a rating over four weeks
+   has somewhere to trend against, short enough that a backfill still finishes,
+   and it sits inside the ~192-day earnings horizon so a quality week almost
+   always has money beside it. */
+const QUALITY_WEEK_HORIZON = 26;
+
 async function pullDriverQuality(from, to, onStep, checkpoint = null) {
   let total = 0;
   const chunks = [];
@@ -277,7 +291,7 @@ async function pullDriverQuality(from, to, onStep, checkpoint = null) {
      given, so the window IS the grain, and driver_performance is keyed on
      (period_start, period_end) — an arbitrary seven days from whenever a run
      began would key a second row against the same week's work. */
-  const weeks = [...weekChunks(from, to)].reverse();
+  const weeks = [...weekChunks(from, to)].reverse().slice(0, QUALITY_WEEK_HORIZON);
   for (const w of weeks) {
     const ps = iso(w.start), pe = iso(w.end);
     const chunk = { from: ps, to: pe, rows: 0, error: null };
@@ -1063,10 +1077,22 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
       };
       const trips = await pullTrips(from, to, onStep, ck);
       const perf = await pullEarnerBreakdowns(from, to, onStep, ck);
-      /* Quality LAST, and it is the cheap one to lose. Trips and earnings are
-         the product; acceptance and ratings make it rankable. A run that runs
-         out of time or report slots should end having collected the money. */
-      const qual = await pullDriverQuality(from, to, onStep, ck);
+      /* Quality LAST, and never on the half-hourly incremental.
+         ─────────────────────────────────────────────────────────────────────
+         Two reports per week per fleet, minutes each, against a cap of three
+         in flight per org. On the incremental — a three-day window, every
+         thirty minutes — that is four reports an hour of the day, for a week
+         that has not changed since the last pass, taken from the same three
+         slots the trip and earnings pulls need. The nightly catch-up walks
+         thirty days and the weekly backfill walks the horizon, which is where
+         a report this expensive belongs.
+
+         Last in the pass for the same reason: trips and earnings are the
+         product, acceptance and ratings make it rankable, and a run that runs
+         out of slots should end having collected the money. */
+      const qual = mode === 'incremental'
+        ? { total: 0, chunks: [] }
+        : await pullDriverQuality(from, to, onStep, ck);
       // Every sub-source's windows, so a run that fetched every trip and no
       // earnings reads as partial rather than as ok.
       const chunks = [...trips.chunks, ...perf.chunks, ...qual.chunks];

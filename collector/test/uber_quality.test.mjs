@@ -126,7 +126,7 @@ check('it checkpoints per window',
 check('a window past Uber’s retention is expected, not an error',
   /const expected = \/invalid date range\|retention\|out of range\/i\.test\(msg\)/.test(body));
 check('and it runs after trips and earnings, which are the ones worth keeping',
-  /const qual = await pullDriverQuality\(from, to, onStep, ck\)/.test(bare)
+  bare.indexOf('pullEarnerBreakdowns(from, to, onStep, ck)') > 0
   && bare.indexOf('pullEarnerBreakdowns(from, to, onStep, ck)') < bare.indexOf('pullDriverQuality(from, to, onStep, ck)'),
   'a run that runs out of report slots should end having collected the money');
 check('the report type is a parameter now, and its old value is still the default',
@@ -141,6 +141,15 @@ check('the new columns are added, never assumed',
   (sql.match(/ADD COLUMN IF NOT EXISTS/g) || []).length >= 11);
 check('and the rolling driver-app figures are stored apart from the period ones',
   /acceptance_rate_app/.test(sql) && /cancellation_rate_app/.test(sql));
+
+check('the half-hourly incremental never spends a report on it',
+  /mode === 'incremental'\s*\n?\s*\? \{ total: 0, chunks: \[\] \}/.test(bare),
+  'two reports per week per fleet, every thirty minutes, out of a cap of three in flight — '
+  + 'taken from the slots the trip and earnings pulls need');
+check('and the walk is bounded, so a backfill still finishes',
+  /const QUALITY_WEEK_HORIZON = 26/.test(bare)
+  && /\.slice\(0, QUALITY_WEEK_HORIZON\)/.test(body),
+  'a year is 208 reports and the better part of a day, mostly re-fetching weeks that have not changed');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
