@@ -1731,11 +1731,19 @@ app.get('/api/driver/days', (req, r) => {
     };
   });
   const covered = days.filter((d) => d.online_min != null);
+  /* When the record was written. The live figures beside it come from the trip
+     feed, which moves between collections, so today can differ by a trip or
+     two — and a page that cannot date the record cannot tell a lag from a
+     discrepancy. */
+  const computedAt = days.reduce(
+    (a, d) => (d.computed_at && (a == null || d.computed_at > a) ? d.computed_at : a), null);
   r.json({
     days,
+    computed_at: computedAt,
     basis: 'One row per day, written after every collection and kept.',
     online_days: covered.length,
     totals: {
+      computed_at: computedAt,
       days: days.length,
       trips: days.reduce((a, d) => a + d.trips, 0),
       on_job_min: days.reduce((a, d) => a + d.on_job_min, 0),

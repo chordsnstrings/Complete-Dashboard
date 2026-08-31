@@ -1258,12 +1258,32 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         GROUP BY day
         ORDER BY day`, p);
     const covered = rows.filter((r) => r.online_min != null);
+    /* When this record was last written, which is the difference between two
+       numbers disagreeing and one of them being older.
+       ─────────────────────────────────────────────────────────────────────
+       Swept across all 119 active drivers after the window fix, /api/driver/kpis
+       and this endpoint agree on 115 of them exactly. The other four differ by
+       one trip, all on TODAY, because the rollup runs after a collection and
+       the trip feed has moved since. That is the table working as designed —
+       and indistinguishable, on the page, from the arithmetic being wrong.
+       A reader comparing 285 against 284 needs to know one of them is as of
+       09:13. */
+    /* `a == null ||` first, and it is not defensive noise: `'2026-…' > null`
+       coerces the string to NaN and is false, so a reduce seeded with null
+       over string timestamps returns null for ever. It happens to work here
+       because pg hands back Date objects, and it silently did not in the mock
+       beside it, which is the kind of difference that makes a fixture stop
+       testing anything. */
+    const computed = rows.reduce(
+      (a, r) => (r.computed_at && (a == null || r.computed_at > a) ? r.computed_at : a), null);
     res.json({
       days: rows,
+      computed_at: computed,
       basis: 'One row per day, written after every collection and kept. Uber serves 31 days of '
         + 'availability and about 192 of earnings; these rows outlive both.',
       online_days: covered.length,
       totals: {
+        computed_at: computed,
         days: rows.length,
         trips: rows.reduce((a, r) => a + (+r.trips || 0), 0),
         on_job_min: rows.reduce((a, r) => a + (+r.on_job_min || 0), 0),

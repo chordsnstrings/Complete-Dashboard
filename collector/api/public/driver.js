@@ -658,8 +658,20 @@ async function tabActivity(root, id) {
       + `${fmt(Math.round(t.on_job_min / 60))} h on job and ${fmt(Math.round(t.wait_min / 60))} h waiting, `
       + `written after each collection rather than recomputed. `
       + (kept.online_days
-        ? `${fmt(kept.online_days)} of them carry availability, which Uber itself only serves for 31 days.`
-        : 'None of them carry availability yet.'))));
+        ? `${fmt(kept.online_days)} of them carry availability, which Uber itself only serves for 31 days. `
+        : 'None of them carry availability yet. ')
+      /* Dated, because "after each collection" is not a time.
+         ─────────────────────────────────────────────────────────────────
+         Swept over all 119 active drivers, this record and the live figures
+         above it agree exactly on 115. The other four differ by one trip,
+         every one of them on today, because the rollup ran and then the trip
+         feed moved. Correct, and on the page indistinguishable from the
+         arithmetic being wrong — so the record says when it was taken and the
+         reader can tell a lag from a discrepancy. */
+      + (t.computed_at
+        ? `Written at ${dtStr(t.computed_at)}; anything collected since then is in the figures `
+          + 'above and not yet in this record, so today can differ by a trip or two.'
+        : ''))));
   }
 
   /* Two feeds answer this question and the panel used to ask only one.

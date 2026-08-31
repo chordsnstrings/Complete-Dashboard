@@ -250,6 +250,28 @@ await trip('t-odo', '2026-08-02T21:00:00+04:00', '2026-08-02T21:10:00+04:00', { 
 }
 
 
+console.log('\na lag is not a discrepancy, and the page can tell them apart');
+
+/* Swept over all 119 active drivers on production, /api/driver/kpis and
+   /api/driver/days agree exactly on 115. The other four differ by one trip,
+   every one of them on today, because the rollup ran and then the trip feed
+   moved. Correct behaviour — and on the page indistinguishable from the
+   arithmetic being wrong, until the record says when it was taken. */
+{
+  const kept = await get(`/api/driver/days?id=${ID}&${W}`);
+  check('the stored record says when it was written',
+    !!kept.computed_at && !!kept.totals.computed_at, JSON.stringify(kept.computed_at));
+  /* Seeded with null and compared as a string, `x > null` is false for ever —
+     which returned null here for as long as pg happened to hand back Dates and
+     the mock happened to hand back strings. */
+  check('…and the reduce that finds it survives a string timestamp',
+    !/\(a, r\) => \(r\.computed_at > a \?/.test(readFileSync('api/driver_routes.js', 'utf8')),
+    'a null-seeded > comparison against a string is false, so the answer is always null');
+  const ui = readFileSync('api/public/driver.js', 'utf8');
+  check('and the page prints it beside the live figures it can disagree with',
+    /Written at \$\{dtStr\(t\.computed_at\)\}/.test(ui));
+}
+
 console.log('\none money column the whole roster can be ranked by');
 
 /* The two money columns beside it each answer for about half the roster, and
