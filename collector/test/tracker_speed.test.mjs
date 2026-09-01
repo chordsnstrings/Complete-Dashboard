@@ -86,6 +86,52 @@ check('the sentence still counts, and claims no words it does not have',
   /Speed is empty on 2 of these 3 fixes/.test(noState.note) && !/those fixes are/.test(noState.note),
   String(noState.note));
 
+/* ── a skeleton that told the reader its own array index ──────────────────
+   loading() takes an optional message for a panel that KNOWS it is slow —
+   #sources' field inventory is a scan over every stored record and says so
+   rather than showing an identical grey box for four seconds. Twenty-four
+   places in this product write `[a.body, b.body, c.body].forEach(loading)`,
+   and Array.forEach hands its callback (element, INDEX, array): every panel
+   after the first was asked to declare itself slow with the message "1", "2",
+   "3". On a cold #unit at a wide window, seven skeletons replaced "Loading…"
+   with a bare index a second after the page opened.
+
+   bin/render-audit.mjs could not see it — a skeleton is a skeleton — which is
+   why the guard is asserted here instead. */
+console.log('\nthe loading skeleton says "Loading…", or a sentence, and never a number');
+const skel = (arg) => page.evaluate(async (a) => {
+  const ui = await import('/ui.js');
+  document.querySelector('#skelhost')?.remove();
+  const host = document.createElement('div');
+  host.id = 'skelhost';
+  document.body.append(host);
+  if (a === '__forEach') [host].forEach(ui.loading);
+  else if (a === undefined) ui.loading(host);
+  else ui.loading(host, a);
+  await new Promise((r) => setTimeout(r, 1500));
+  const s = host.querySelector('.skel');
+  return { text: s?.textContent.trim() || null, says: !!s?.classList.contains('says') };
+}, arg);
+
+check('a plain call stays "Loading…"', (await skel(undefined)).text === 'Loading…');
+check('a real message replaces it after a beat',
+  (await skel('Reading the whole record — this one takes a while')).says === true);
+/* The index, exactly as forEach sends it. 0 was already harmless by being
+   falsy, which is why this went unnoticed on the first panel of every page. */
+for (const i of [0, 1, 7]) {
+  const r = await skel(i);
+  check(`an index of ${i} is not a message`, r.text === 'Loading…' && !r.says, JSON.stringify(r));
+}
+/* And through forEach itself, which is the shape the call sites actually use
+   — a guard that only holds for a hand-written number would not have caught
+   this one. */
+const viaForEach = await skel('__forEach');
+check('…and neither is anything forEach passes a callback',
+  viaForEach.text === 'Loading…' && !viaForEach.says, JSON.stringify(viaForEach));
+/* An empty string is not a sentence either: a panel declaring itself slow with
+   nothing to say would blank the word the reader is waiting on. */
+check('an empty message leaves the word alone', (await skel('')).text === 'Loading…');
+
 await browser.close();
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

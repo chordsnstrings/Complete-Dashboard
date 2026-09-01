@@ -40,7 +40,16 @@ export function panel(title, cap) {
    with no message this is the same one-line skeleton it has always been. */
 export const loading = (host, slow) => {
   host.innerHTML = '<div class="skel">Loading…</div>';
-  if (!slow) return;
+  /* A STRING, or nothing. Twenty-four call sites in this product write
+     `[a.body, b.body, c.body].forEach(loading)`, and Array.forEach hands its
+     callback (element, INDEX, array) — so every panel after the first was
+     asked to declare itself slow with the message "1", "2", "3". On
+     #unit?days=90&fleet=ecosine seven skeletons replaced "Loading…" with a
+     bare index a second after the page opened, and bin/render-audit.mjs saw
+     only that they were still skeletons. Guarding the type here rather than
+     rewriting the twenty-four sites: forEach(fn) is the idiom, and a helper
+     that cannot survive it is the thing that is wrong. */
+  if (typeof slow !== 'string' || !slow) return;
   /* Said only if it turns out to BE slow.
      ─────────────────────────────────────────────────────────────────────
      Rendering the sentence immediately would flash a paragraph on every warm

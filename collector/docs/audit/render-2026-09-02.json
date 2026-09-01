@@ -1,0 +1,33 @@
+{
+  "base": "http://localhost:8100",
+  "at": "2026-09-01T20:42:26.703Z",
+  "widths": [
+    1500,
+    1180,
+    820
+  ],
+  "routes": 3,
+  "findings": [
+    {
+      "route": "vehicle/L36397/movement",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":47,\"explained\":true,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":2}"
+    },
+    {
+      "route": "segment/L75125/2026-09-01T20:09:13.130Z",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":6,\"empty_panels\":2,\"rows\":17,\"explained\":true,\"title\":\"L75125\",\"kpis\":4,\"tables\":3,\"charts\":1}"
+    },
+    {
+      "route": "trip",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"explained\":true,\"title\":\"One booking\",\"kpis\":0,\"tables\":0,\"charts\":0}"
+    }
+  ]
+}
