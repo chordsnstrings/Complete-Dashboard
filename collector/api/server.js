@@ -2582,7 +2582,18 @@ app.get('/api/insights', wrap(async (req, res) => {
        closing that needs a per-rule run marker rather than an inference from
        the rows. */
     `WITH run AS (
-       SELECT code, max(computed_at) AS last_run FROM insight GROUP BY 1
+       /* When each rule last EVALUATED. insight_run is stamped by
+          src/insights.js after a job succeeds, which is the only way to know a
+          rule ran and found nothing — the rows alone cannot say it, and a rule
+          that ran clean left its whole previous set standing as live work.
+          The greatest() keeps the inference as a floor for any code with no
+          marker yet (a database that has not run the new collector), so this
+          can never show LESS than it did before the marker existed. */
+       SELECT i.code,
+              greatest(max(i.computed_at), max(r.ran_at)) AS last_run
+       FROM insight i
+       LEFT JOIN insight_run r ON r.code = i.code
+       GROUP BY 1
      ),
      scoped AS (
        SELECT i.code, i.severity, i.category, i.entity_type, i.entity_id, i.title, i.detail,
@@ -2657,7 +2668,9 @@ app.get('/api/insights/summary', wrap(async (req, res) => {
      counted over the same set. Without it the summary said 200 findings over a
      list that now shows 37. */
   const base = `WITH run AS (
-      SELECT code, max(computed_at) AS last_run FROM insight GROUP BY 1),
+      SELECT i.code, greatest(max(i.computed_at), max(r.ran_at)) AS last_run
+        FROM insight i LEFT JOIN insight_run r ON r.code = i.code
+       GROUP BY 1),
     latest AS MATERIALIZED (
       SELECT DISTINCT ON (i.code, i.entity_type, i.entity_id) i.*
       FROM insight i

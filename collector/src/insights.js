@@ -645,26 +645,54 @@ async function tipSignal() {
 export async function computeInsights({ from, to } = {}) {
   const end = to || new Date().toISOString().slice(0, 10);
   const start = from || new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  /* Each job WITH THE CODES IT OWNS.
+     ─────────────────────────────────────────────────────────────────────────
+     A finding is resolved when the rule that emits it ran and did not emit it
+     again — and the readers could only infer "ran" from the rows themselves,
+     so a rule that ran and found NOTHING left its whole last set standing.
+     That is not hypothetical: on production, 35 vehicle_doc_expiring findings
+     were frozen at 2026-08-25 while other rules wrote that morning, and their
+     titles are relative ("expires in 1 days"), so the list was telling an
+     operator to act on a document that had lapsed six days earlier.
+
+     The ownership is written here, beside the job, rather than inferred from a
+     grep of the file: a code nobody owns can never be cleared, so the list
+     below is the thing that has to be right, and test/insight_freshness
+     .test.mjs checks it against the codes the module actually emits. */
   const jobs = [
-    ['idle_vehicle', () => idleVehicles()],
-    ['vehicle_dormant', () => dormantVehicles()],
-    ['low_utilisation', () => lowUtilisation(start, end)],
-    ['licence', () => licenceRisk()],
-    ['unsafe_driving', () => unsafeDriving(start, end)],
-    ['deadhead', () => deadhead(start, end)],
-    ['volume_trend', () => volumeTrend()],
-    ['stale_tracker', () => staleTelemetry()],
-    ['cancellations', () => cancellations(start, end)],
-    ['weather', () => weatherOutlook()],
-    ['partner_mix', () => partnerMix(start, end)],
-    ['vehicle_documents', () => vehicleDocuments()],
-    ['platform_flags', () => platformFlags()],
-    ['tip_signal', () => tipSignal()],
+    ['idle_vehicle', ['idle_vehicle'], () => idleVehicles()],
+    ['vehicle_dormant', ['vehicle_dormant'], () => dormantVehicles()],
+    ['low_utilisation', ['low_utilisation'], () => lowUtilisation(start, end)],
+    ['licence', ['licence_data_unreliable', 'licence_expiring', 'licence_expired'],
+      () => licenceRisk()],
+    ['unsafe_driving', ['unsafe_driving'], () => unsafeDriving(start, end)],
+    ['deadhead', ['deadhead_waste'], () => deadhead(start, end)],
+    ['volume_trend', ['volume_trend'], () => volumeTrend()],
+    ['stale_tracker', ['stale_tracker'], () => staleTelemetry()],
+    ['cancellations', ['cancellation_rate'], () => cancellations(start, end)],
+    ['weather', ['weather_rain', 'weather_heat'], () => weatherOutlook()],
+    ['partner_mix', ['partner_concentration'], () => partnerMix(start, end)],
+    ['vehicle_documents', ['vehicle_doc_expiring', 'vehicle_doc_expired'], () => vehicleDocuments()],
+    ['platform_flags', ['drivers_online_no_trips', 'below_target_acceptance',
+      'above_target_cancellation'], () => platformFlags()],
+    ['tip_signal', ['low_tip_rate'], () => tipSignal()],
   ];
   const out = {};
-  for (const [name, fn] of jobs) {
-    try { out[name] = await fn(); }
-    catch (e) { out[name] = `err: ${String(e).slice(0, 80)}`; log.error('insights', name, { err: String(e) }); }
+  for (const [name, codes, fn] of jobs) {
+    try {
+      out[name] = await fn();
+      /* Stamped only on success, and only for the codes this job owns. A job
+         that threw has evaluated nothing, so its findings must stand rather
+         than vanish the moment a rule starts failing. */
+      for (const code of codes) {
+        await pool.query(
+          `INSERT INTO insight_run (code, ran_at) VALUES ($1, now())
+           ON CONFLICT (code) DO UPDATE SET ran_at = EXCLUDED.ran_at`, [code]);
+      }
+    } catch (e) {
+      out[name] = `err: ${String(e).slice(0, 80)}`;
+      log.error('insights', name, { err: String(e) });
+    }
   }
   /* Prune the copies this run has just made obsolete.
      ─────────────────────────────────────────────────────────────────────────

@@ -19,6 +19,7 @@
      it must not drop findings from a rule that has not re-run at all, and
      the summary tiles must be counted over the same set as the list, or the
        page says 200 above a list of 37. */
+import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
@@ -53,6 +54,15 @@ await put('idle_vehicle', 'L-STILL-2', '2026-09-01T11:00:41Z');
 await put('stale_tracker', 'L-OLD-A', OLD, 'warning', 'reliability');
 await put('stale_tracker', 'L-OLD-B', '2026-08-21T09:00:12Z', 'warning', 'reliability');
 
+/* vehicle_doc_expiring: the rule RAN this morning and found nothing. The rows
+   alone cannot say that — they look exactly like a rule that never re-ran —
+   which is why insight_run exists. On production 35 of these were frozen at
+   Aug 25 while other rules wrote that same morning, under titles written in
+   relative time: "expires in 1 days", six days after the document lapsed. */
+await put('vehicle_doc_expiring', 'L-DOC-1', OLD, 'warning', 'compliance');
+await put('vehicle_doc_expiring', 'L-DOC-2', OLD, 'warning', 'compliance');
+await q(`INSERT INTO insight_run (code, ran_at) VALUES ('vehicle_doc_expiring', $1)`, [NOW]);
+
 const { get, server } = await mountAll(db, { serverRoutes: true });
 const body = async (p) => (await get(p)).body;
 
@@ -66,7 +76,9 @@ check('…and so is the one written seconds later in the same pass',
 /* The whole point: eleven-day-old findings the rule has stopped emitting. */
 check('the three it no longer emits are gone',
   !ids.some((x) => x.startsWith('L-GONE')), ids.join(','));
-check('…and the response says how many it cleared', d.cleared === 3, String(d.cleared));
+/* Three idle_vehicle rows the rule stopped emitting, plus the two
+   vehicle_doc_expiring rows its rule cleared by running and finding none. */
+check('…and the response says how many it cleared', d.cleared === 5, String(d.cleared));
 
 /* The other direction, and the reason this is an inference rather than a
    cutoff: a rule that has not re-run has not cleared anything, however old its
@@ -74,6 +86,12 @@ check('…and the response says how many it cleared', d.cleared === 3, String(d.
    started failing. */
 check('a rule that has NOT re-run keeps every finding it wrote',
   ids.includes('L-OLD-A') && ids.includes('L-OLD-B'), ids.join(','));
+
+/* The case the rows cannot express, and the reason for insight_run: the rule
+   ran, cleanly, and found nothing. Without the marker these two are
+   indistinguishable from L-OLD-A above and stay on the list forever. */
+check('a rule that ran and found NOTHING clears its whole previous set',
+  !ids.some((x) => x.startsWith('L-DOC')), ids.join(','));
 
 /* One row per (code, entity) reaches the reader — the dedup the prune relies
    on has to survive the freshness join. */
@@ -97,6 +115,24 @@ check('filtering by rule still hides what that rule has stopped finding',
   (one.insights || []).length === 2
   && !(one.insights || []).some((r) => String(r.entity_id).startsWith('L-GONE')),
   JSON.stringify((one.insights || []).map((r) => r.entity_id)));
+
+/* ── the ownership table is the thing that has to be right ──────────────
+   A code no job claims can never be cleared, because nothing ever stamps a
+   run for it — so the map in src/insights.js is checked against the codes the
+   module actually emits rather than trusted. */
+{
+  const src = readFileSync('src/insights.js', 'utf8');
+  const emitted = new Set([...src.matchAll(/code:\s*'([a-z_]+)'/g)].map((m) => m[1]));
+  /* The ternary form, which the single-line regex above cannot see. */
+  for (const m of src.matchAll(/code:\s*[^,\n]*\?\s*'([a-z_]+)'\s*:\s*'([a-z_]+)'/g)) {
+    emitted.add(m[1]); emitted.add(m[2]);
+  }
+  const jobsBlock = src.slice(src.indexOf('const jobs = ['), src.indexOf('const out = {}'));
+  const owned = new Set([...jobsBlock.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]));
+  const orphans = [...emitted].filter((c) => !owned.has(c));
+  check('every code a rule emits is owned by a job that stamps its run',
+    orphans.length === 0, `no job owns: ${orphans.join(', ')}`);
+}
 
 server.close();
 await db.close();
