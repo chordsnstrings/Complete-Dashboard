@@ -299,7 +299,8 @@ export async function renderCompare(root, aParam, bParam) {
      gives it something to sort on. */
   const pls = (p.platforms || []).map((r) => ({
     ...r,
-    paid_shown: r.a?.paid ?? r.a?.statement_net ?? r.b?.paid ?? r.b?.statement_net ?? null,
+    money_shown: r.a?.fares ?? r.a?.paid ?? r.a?.statement_net
+      ?? r.b?.fares ?? r.b?.paid ?? r.b?.statement_net ?? null,
   }));
   if (!pls.length) empty(platP.body, 'No booking on either day.');
   else {
@@ -312,32 +313,39 @@ export async function renderCompare(root, aParam, bParam) {
       /* No kilometres column here. This panel is half a page wide, and distance
          per channel is what #platforms is for — carrying it as a fifth column
          pushed FARES, the one column this panel exists to show, off the edge. */
-      { label: 'Fares', key: 'fares', num: true,
-        render: (r) => (r.a.fares || r.b.fares
-          ? `${money(r.a.fares)} <span class="dim">vs ${money(r.b.fares)}</span>`
-          : '<span class="dim">no fare per trip</span>') },
-      /* The column this panel was missing. Fares alone left Uber — 89% of the
-         bookings on a typical day — reading "no fare reported" on the one panel
-         whose job is to say which channel moved, because its export carries no
-         price column. The payout is the day's share of the weekly statement,
-         which is an estimate and is captioned as one; where no statement
-         reaches the day, the operator's own ledger import is shown instead and
-         the cell says which of the two it is. */
-      { label: 'Paid', key: 'paid_shown', num: true,
-        absent: 'no statement and no ledger import reaches either of these days for any channel '
-          + '— the platform payout feeds reach back about 192 days',
+      /* ONE money column, three bases, each cell saying which it used.
+         ─────────────────────────────────────────────────────────────────
+         This was Fares alone — sum(trip.price) — and Uber's export carries no
+         price column, so on a day that is 89% Uber the only money column on
+         the panel whose job is to say which channel moved read "no fare
+         reported" against every row that mattered.
+
+         Not a fifth column: the note above about kilometres applies with equal
+         force here, and a Paid column beside Fares put the table into
+         horizontal scroll on a half-width panel — which is the same failure
+         the kilometres column was removed to avoid. A channel has ONE money
+         basis on a given day, so the two belong in one column with the basis
+         marked, exactly as #roster marks its statement figures. */
+      { label: 'Money', key: 'money_shown', num: true,
         render: (r) => {
-          const cell = (x) => (x.paid != null ? money(x.paid)
-            : x.statement_net != null ? `${money(x.statement_net)}<span class="dim"> ldg</span>` : '—');
-          return (r.a.paid ?? r.a.statement_net ?? r.b.paid ?? r.b.statement_net) != null
-            ? `${cell(r.a)} <span class="dim">vs ${cell(r.b)}</span>` : '—';
+          const cell = (x) => {
+            if (x.fares != null) return money(x.fares);
+            if (x.paid != null) return `${money(x.paid)}<span class="dim" title="the day's share of the weekly platform statement — an estimate"> stmt</span>`;
+            if (x.statement_net != null) return `${money(x.statement_net)}<span class="dim" title="the operator's own ledger import for this day"> ldg</span>`;
+            return '—';
+          };
+          const any = (x) => x.fares != null || x.paid != null || x.statement_net != null;
+          return any(r.a) || any(r.b)
+            ? `${cell(r.a)} <span class="dim">vs ${cell(r.b)}</span>`
+            : '<span class="dim">no money reported</span>';
         } },
     ]));
     platP.body.append(el('p', 'cap',
-      'A fare is what the rider was charged, and only two of these channels publish one per trip. '
-      + 'Paid is the day’s share of the weekly platform statement — an estimate, because nobody '
-      + 'earns a seventh of their week each day — or, marked “ldg”, the operator’s own ledger '
-      + 'import for days the platform feeds no longer reach. The two are never added.'));
+      'Where a channel prices its trips, this is the fare the rider was charged. Where it does '
+      + 'not — Uber publishes none — it is the day’s share of the weekly platform statement, '
+      + 'marked “stmt” and an estimate, because nobody earns a seventh of their week each day; '
+      + 'or, marked “ldg”, the operator’s own ledger import for days the platform feeds no '
+      + 'longer reach. One basis per channel per day, never two added together.'));
   }
 
   rosterP.body.innerHTML = '';

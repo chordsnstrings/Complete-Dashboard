@@ -284,12 +284,21 @@ const panel = await page.evaluate(() => {
   };
 });
 check('the By channel panel rendered', !!panel, String(panel));
-check('…with a Paid column, not just Fares',
-  (panel?.cols || []).some((c) => /^Paid$/i.test(c)), (panel?.cols || []).join(' | '));
+/* One money column, not two: this panel is half a page wide and a fifth
+   column puts it into horizontal scroll, which is the reason the kilometres
+   column is not here either. */
+check('…with one money column carrying every basis',
+  (panel?.cols || []).some((c) => /^Money$/i.test(c))
+  && !(panel?.cols || []).some((c) => /^Fares$/i.test(c)),
+  (panel?.cols || []).join(' | '));
+check('…and no fifth column pushing the table sideways',
+  (panel?.cols || []).length <= 4, (panel?.cols || []).join(' | '));
 check('…carrying the statement share for the day inside the horizon',
   /780/.test(panel?.body || ''), (panel?.body || '').slice(0, 200));
 check('…and the ledger import for the day outside it, marked as one',
   /615/.test(panel?.body || '') && /ldg/.test(panel?.body || ''), (panel?.body || '').slice(0, 200));
+check('…and the channel that DOES price its trips still shows its fare',
+  /240/.test(panel?.body || '') && /300/.test(panel?.body || ''), (panel?.body || '').slice(0, 300));
 
 await browser.close();
 web.close();
