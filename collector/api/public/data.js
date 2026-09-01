@@ -468,6 +468,40 @@ export function parseHash(h = location.hash.slice(1)) {
     cut: search.get('cut') === 'full' ? 'full' : null,
   };
 }
+/* The address is the authority — on every shell, not just the desktop one.
+   ─────────────────────────────────────────────────────────────────────────
+   The desktop router has always read the window and the channel filters out
+   of the hash and written them into state. The phone router read `view`,
+   `param` and `sub` and stopped, so every window and filter in a URL was
+   silently dropped on a phone: `#trips?days=7` opened the DEFAULT month.
+
+   Measured on the same address, same build, one browser:
+     desktop  /api/trips/list?from=2026-08-26&to=2026-09-01&limit=100
+     phone    /api/trips/list?period=month&limit=40
+
+   So a seven-day link shared with somebody who opened it on their phone
+   showed them the month, with nothing on screen saying so — the two shells
+   disagreeing about what the same URL means, which is the failure this
+   codebase spends its life removing.
+
+   One function, called by both, so they cannot drift again. */
+export function applyWindow(r = parseHash()) {
+  /* A link with no filter in it means the DEFAULTS, not "whatever the last
+     page happened to be showing" — otherwise a plain link silently carries a
+     365-day window into a page whose caption claims 30. */
+  state.days = r.days ?? DEFAULTS.days;
+  state.period = r.period ?? DEFAULTS.period;
+  /* Both ends or neither: half a range is not a window, and leaving one set
+     would silently pair a picked date with today. */
+  state.from = (r.from && r.to) ? r.from : '';
+  state.to = (r.from && r.to) ? r.to : '';
+  if (state.from) state.period = '';
+  state.grain = r.grain ?? DEFAULTS.grain;
+  state.platform = r.platform ?? '';
+  state.fleet = r.fleet ?? '';
+  return r;
+}
+
 export function navigate(view, param, sub) {
   const next = href(view, param, sub);
   if (location.hash === next) return false;

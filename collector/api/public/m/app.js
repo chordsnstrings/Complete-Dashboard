@@ -17,7 +17,8 @@
                    because a service worker that caches the phone shell for a
                    desktop reader would be caching an app they never see.
 */
-import { state, api, parseHash, href, q, qAll, hidesRange, hidesChannel } from '../data.js';
+import { state, api, parseHash, href, q, qAll, hidesRange, hidesChannel,
+  applyWindow, setFilter } from '../data.js';
 import { rangePanel } from '../daterange.js';
 import { el, esc, sourceLine } from '../ui.js';
 import { SCREENS, TABS, titleFor } from './screens.js';
@@ -111,15 +112,22 @@ function openSheet() {
       /* Exactly one kind survives a pick. A screen headed "August 2026" while
          showing a rolling thirty days is the class of bug this product spends
          its life removing. */
-      state.period = pick.period || '';
-      state.days = pick.days || state.days;
-      state.from = pick.from || '';
-      state.to = pick.to || '';
+      /* Through the ADDRESS, not straight into state. render() reads the hash
+         now, so a pick written only to state would be overwritten by the very
+         re-render it triggers — and a filter that changes what a page says has
+         to be part of the page's address anyway, or the URL describes a screen
+         nobody is looking at and the back button undoes nothing. */
+      setFilter({
+        period: pick.period || '',
+        days: pick.days || state.days,
+        from: pick.from || '',
+        to: pick.to || '',
+      });
     },
     close: () => { close(); render(); },
   }));
-  group('Channel', PLATFORMS, state.platform, (v) => { state.platform = v; });
-  group('Fleet', FLEETS, state.fleet, (v) => { state.fleet = v; });
+  group('Channel', PLATFORMS, state.platform, (v) => setFilter({ platform: v }));
+  group('Fleet', FLEETS, state.fleet, (v) => setFilter({ fleet: v }));
   scrim.onclick = close;
   document.body.append(scrim, sheet);
   requestAnimationFrame(() => { scrim.classList.add('in'); sheet.classList.add('in'); });
@@ -171,7 +179,12 @@ let gen = 0;
 let lastDepth = 0;
 async function render() {
   const g = ++gen;
-  const { view, param, sub } = parseHash();
+  /* The window and the channel filters come out of the address too, not just
+     the route. Without this the phone dropped every `?days=`, `?period=`,
+     `?from=`, `?platform=` and `?fleet=` a link carried and rendered the
+     defaults — so the same URL showed one window on a desktop and another on
+     a phone. */
+  const { view, param, sub } = applyWindow(parseHash());
   const id = view || 'today';
   state.view = id; state.param = param; state.sub = sub;
 

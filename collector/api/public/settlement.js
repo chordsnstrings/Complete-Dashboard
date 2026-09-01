@@ -299,10 +299,11 @@ async function settleReceivables(host) {
           ? `, ${fmt(r.total_trips - r.priced_trips)} of which carry no fare` : '') },
     { label: 'Counterparties', value: fmt(r.counterparties ?? r.rows.length),
       sub: r.truncated ? `${fmt(r.rows.length)} shown below` : 'every one of them listed below' },
-    /* The ageing is computed INSIDE the window, so it can never exceed it: at
-       days=7 the oldest debt on the fleet is at most seven days old, and the
-       >60-day warn tone is unreachable below a 60-day range. Said out loud
-       until the endpoint ages over all unsettled bookings. */
+    /* The ageing used to be computed INSIDE the window, so the oldest debt at
+       days=7 was at most seven days old and the >60-day warn tone was
+       unreachable below a 60-day range. RECV_TO_DATE binds only the upper end
+       now, and the response says so in ages_over_all_time, so the tile can
+       finally mean what it has always said. */
     { label: 'Oldest debt', value: r.oldest_days != null ? countOf(r.oldest_days, 'day') : '—',
       sub: r.ages_over_all_time
         ? 'since the earliest unsettled booking on record'
@@ -328,6 +329,15 @@ async function settleReceivables(host) {
       { label: 'Bookings', key: 'trips', num: true },
       { label: 'Amount', key: 'amount', num: true, render: (x) => money(x.amount) },
     ], { compact: true }));
+    /* Which population, said beside the numbers rather than left to be
+       inferred. The tiles above are the window — AED 570 across 7 bookings on
+       production today — and this table is every unsettled booking up to the
+       end of it: AED 70,954 across 571. Both are right and they are not the
+       same question, and a reader who meets them stacked without a sentence
+       between them is entitled to conclude one of them is broken. */
+    host.append(el('p', 'cap',
+      `${esc(r.ageing.note || '')} The tiles above cover the selected window; this table covers `
+      + `every unsettled booking up to ${dateStr(r.ageing.as_at)}, which is why its total is larger.`));
   }
   if (!r.rows.length) return empty(host, 'Nothing outstanding in this window');
   const rp = panel(`Who owes it — ${countOf(r.rows.length, 'counterparty', 'counterparties')}`,

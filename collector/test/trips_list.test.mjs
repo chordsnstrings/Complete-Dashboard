@@ -24,6 +24,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import express from 'express';
 import { applySchema } from './schema.mjs';
+import { readFileSync } from 'node:fs';
 import { mountAll } from './mount.mjs';
 import { launchChromium } from './browser.mjs';
 
@@ -277,6 +278,24 @@ check('the phone screen rendered without throwing', phErrs.length === 0, phErrs.
 check('it drew a card per trip', m.cards >= 40, String(m.cards));
 check('and leads with the same total the desktop does',
   m.text.includes(fmtNum(api.total)), `looking for ${api.total}`);
+/* The two shells have to mean the same thing by the same address.
+   ─────────────────────────────────────────────────────────────────────────
+   The phone router read view/param/sub out of the hash and stopped, so every
+   window and channel filter a link carried was dropped. Measured on one
+   build, one browser, the same URL #trips?days=7:
+     desktop  /api/trips/list?from=2026-08-26&to=2026-09-01&limit=100
+     phone    /api/trips/list?period=month&limit=40
+   A seven-day link opened on a phone showed the month, silently. */
+check('the phone honours the window in the address, as the desktop does',
+  /applyWindow\(parseHash\(\)\)/.test(readFileSync('api/public/m/app.js', 'utf8')),
+  'the address is the authority on every shell, not just the desktop one');
+check('and both shells apply it through the same function',
+  /export function applyWindow/.test(readFileSync('api/public/data.js', 'utf8'))
+  && /applyWindow\(r\);/.test(readFileSync('api/public/app.js', 'utf8')),
+  'two copies of a precedence rule are two rules that will drift');
+check('a phone filter pick goes through the address, not straight into state',
+  /setFilter\(\{/.test(readFileSync('api/public/m/app.js', 'utf8')),
+  'render() reads the hash now, so a pick written only to state is overwritten by its own re-render');
 check('nothing pushes the phone sideways', !m.wide);
 check('the channel is on every card, not in a filter above',
   /Uber/.test(m.text) && /Hotel/.test(m.text), '');

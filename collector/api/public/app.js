@@ -9,7 +9,8 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   verdict, dominantBar, foldRows, foldChildren, sourceLine } from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
-  windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter } from './data.js';
+  windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
+  applyWindow } from './data.js';
 import { volatilePath } from './swr.js';
 import { rangePanel } from './daterange.js';
 import { fleetVerdict, shareOf } from './verdicts.js';
@@ -4814,16 +4815,7 @@ function applyRoute() {
   // defaults, not "whatever the last page happened to be showing" — otherwise
   // clicking a plain link would silently carry a 365-day window into a page
   // whose caption claims 30.
-  state.days = r.days ?? 30;
-  state.period = r.period ?? 'month';
-  /* Both ends or neither: half a range is not a window, and leaving one set
-     would silently pair a picked date with today. */
-  state.from = (r.from && r.to) ? r.from : '';
-  state.to = (r.from && r.to) ? r.to : '';
-  if (state.from) state.period = '';
-  state.grain = r.grain ?? 'auto';
-  state.platform = r.platform ?? '';
-  state.fleet = r.fleet ?? '';
+  applyWindow(r);
   const rng = $('#fRange'), plt = $('#fPlatform'), flt = $('#fFleet'), grn = $('#fGrain');
   /* A value the control does not offer must be VISIBLE, not blank. `?days=180`
      is accepted by the router and linked from the repo's own smoke list, and
