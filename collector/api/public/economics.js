@@ -166,8 +166,25 @@ async function moneyTab(root) {
   g1.append(chan.panel);
 
   const g2 = el('div', 'grid g2'); root.append(g2);
+  /* ENOUGH OF THE WINDOW TO CARRY A RATE — AND THE WINDOW IS NOT ALWAYS A MONTH.
+     ─────────────────────────────────────────────────────────────────────────
+     The gate was a flat ten days. That is right for a month and IMPOSSIBLE for
+     any window shorter than ten, and this product's DEFAULT window is the
+     calendar month — so on the 1st of every month it emptied four of this
+     page's eight panels, and again on the 2nd, and every day to the 10th.
+
+     Measured on production on 2026-09-01: 84 vehicles and 94 drivers cleared
+     it at days=30, and ZERO at period=month, which is what the page opens on.
+     The render audit called it "4 of 8 panels have no data".
+
+     A third of the window, capped at ten and floored at one: a month still
+     asks for ten days, a week asks for three, and a one-day window ranks on
+     the day itself rather than showing four empty panels. Every caption and
+     every empty state below prints the gate it actually used, because "at
+     least 10" over a three-day window was a sentence about a different page. */
   const best = panel('Assets earning most per day worked',
-    'At least 10 earning days, so a car that worked once for a good fare does not lead the fleet.');
+    'Enough earning days to carry a rate, so a car that worked once for a good fare does not lead '
+    + 'the fleet.');
   g2.append(best.panel);
   const worst = panel('Assets earning least per day worked',
     'The same threshold. These held a driver and produced almost nothing — the row above the ones '
@@ -188,10 +205,10 @@ async function moneyTab(root) {
   root.append(mapP.panel);
 
   const g3 = el('div', 'grid g2'); root.append(g3);
-  const pbest = panel('People earning most per day worked', 'At least 10 days driven');
+  const pbest = panel('People earning most per day worked', 'Enough days driven to carry a rate');
   g3.append(pbest.panel);
   const pworst = panel('People earning least per day worked',
-    'At least 10 days driven — a full month of shifts is not the problem here, the yield is');
+    'The same threshold — the shifts are not the problem here, the yield is');
   g3.append(pworst.panel);
 
   [conc.body, chan.body, best.body, worst.body, dead.body, mapP.body, pbest.body, pworst.body]
@@ -440,12 +457,46 @@ async function moneyTab(root) {
       render: (r) => (r.aed_per_km == null ? absent('no booking on this vehicle carries a distance')
         : money(r.aed_per_km, 'AED', 2)) },
   ];
-  const rated = A.rows.filter((r) => r.days_earning >= 10 && r.aed_per_earning_day != null)
+  /* ENOUGH OF THE WINDOW TO CARRY A RATE — AND THE WINDOW IS NOT ALWAYS A MONTH.
+     ─────────────────────────────────────────────────────────────────────────
+     The gate was a flat ten days. That is right for a month and IMPOSSIBLE for
+     any window shorter than ten — and this product's DEFAULT window is the
+     calendar month, so on the 1st of every month it emptied four of this
+     page's eight panels, and again on the 2nd, and every day to the 10th.
+
+     Measured on production on 2026-09-01: 84 vehicles and 94 drivers cleared
+     it at days=30, and ZERO at period=month, which is what the page opens on.
+     bin/render-audit.mjs called it "4 of 8 panels have no data".
+
+     A third of the window, capped at ten and floored at one: a month still
+     asks for ten days, a week asks for three, and a one-day window ranks on
+     the day itself rather than showing four empty panels. The captions are
+     rewritten below rather than written at construction time, because the
+     panels are built before the fetch so the skeleton can render — and a
+     caption saying "at least 10" over a three-day window describes a
+     threshold this page is not applying. */
+  const days = A.window_days || 30;
+  const gate = Math.max(1, Math.min(10, Math.ceil(days / 3)));
+  const nDays = (n, noun) => `${n === 1 ? 'one' : n} ${noun}${n === 1 ? '' : 's'}`;
+  const capOf = (el2, text) => { const c = el2.querySelector('p.cap'); if (c) c.textContent = text; };
+  const short = gate < 10 ? ` The window is ${fmt(days)} days, so the usual ten would rank nobody.` : '';
+  capOf(best.panel, `At least ${nDays(gate, 'earning day')}, so a car that worked once for a good `
+    + `fare does not lead the fleet.${short}`);
+  capOf(worst.panel, `The same threshold. These held a driver and produced almost nothing — the row `
+    + 'above the ones that produced nothing at all.');
+  capOf(pbest.panel, `At least ${nDays(gate, 'day')} driven.${short}`);
+  capOf(pworst.panel, `At least ${nDays(gate, 'day')} driven — the shifts are not the problem here, `
+    + 'the yield is.');
+
+  const rated = A.rows.filter((r) => r.days_earning >= gate && r.aed_per_earning_day != null)
     .sort((a, b) => b.aed_per_earning_day - a.aed_per_earning_day);
   const open = (r) => { location.hash = href('vehicle', r.plate); };
   if (!rated.length) {
-    empty(best.body, 'No vehicle has ten earning days in this range');
-    empty(worst.body, 'No vehicle has ten earning days in this range');
+    /* Naming the gate it actually used. "ten earning days" over a three-day
+       window described a threshold this page was not applying. */
+    const why = `No vehicle has ${nDays(gate, 'earning day')} in this range of ${fmt(days)} days`;
+    empty(best.body, why);
+    empty(worst.body, why);
   } else {
     ledger(best.body, rated.slice(0, 10), rateCols,
       { initial: 'aed_per_earning_day', onRow: open });
@@ -541,12 +592,13 @@ async function moneyTab(root) {
     { label: 'Per booking', key: 'aed_per_booking', num: true,
       render: (r) => money(r.aed_per_booking, 'AED', 2) },
   ];
-  const pRated = D.rows.filter((r) => r.days_worked >= 10 && r.aed_per_day_worked != null)
+  const pRated = D.rows.filter((r) => r.days_worked >= gate && r.aed_per_day_worked != null)
     .sort((a, b) => b.aed_per_day_worked - a.aed_per_day_worked);
   const openP = (r) => { location.hash = href('driver', r.driver_ext_id); };
   if (!pRated.length) {
-    empty(pbest.body, 'Nobody has ten days driven and a payout in this range');
-    empty(pworst.body, 'Nobody has ten days driven and a payout in this range');
+    const pwhy = `Nobody has ${nDays(gate, 'day')} driven and a payout in this range of ${fmt(days)} days`;
+    empty(pbest.body, pwhy);
+    empty(pworst.body, pwhy);
   } else {
     ledger(pbest.body, pRated.slice(0, 10), pCols, { initial: 'aed_per_day_worked', onRow: openP });
     ledger(pworst.body, pRated.slice(-10).reverse(), pCols,
