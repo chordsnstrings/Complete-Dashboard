@@ -342,6 +342,22 @@ export async function reconcile({ from, to }) {
         duration_min: seg.duration_min, distance_km: seg.distance_km,
         top_speed: seg.top_speed, fixes: seg.fixes, max_gap_min: seg.max_gap_min,
         ignition_ratio: +seg.ignition_ratio.toFixed(2),
+        /* HOW FAR THE OBSERVED RECORD REACHES EITHER SIDE.
+           ──────────────────────────────────────────────────────────────
+           segmentise() computes this (reconcile.js:112) and it was dropped
+           right here on the way to the database, so occupancy_segment.
+           boundary_gap_min — declared in sql/schema_v8.sql, selected by
+           api/segment_routes.js, and rendered by api/public/segments.js as
+           "Nearest telemetry boundary" — was null on all 300 segments in every
+           window. Three layers reading a field nothing wrote.
+
+           It is the evidence for the condition schema_v8's own comment puts on
+           an accusation: `unauthorized` may only be issued when "the journey is
+           bounded on both sides by observed fixes". The classifier above tests
+           exactly that, on gapBefore/gapAfter, and then discarded the number a
+           reader would need to check it — on the one page in this product that
+           accuses a named driver of taking a car out unbooked. */
+        boundary_gap_min: seg.boundary_gap_min,
         start_lat: seg.start_lat, start_lng: seg.start_lng, end_lat: seg.end_lat, end_lng: seg.end_lng,
         verdict,
         matched_platform: found.match?.platform || null,

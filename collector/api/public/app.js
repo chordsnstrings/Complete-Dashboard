@@ -1867,7 +1867,12 @@ async function platformFunnel(root) {
        as "we asked and nobody is suspended". */
     { label: 'State', key: 'state', render: (r) => (r.state
       ? pill(r.state, r.state === 'active' ? 'ok' : 'warn')
-      : '<span class="ent-off" title="this report carries counts, not standing — the roster page holds the state">not in this report</span>') },
+      /* Named for the measured reason. This said "the roster page holds the
+         state", and for the only channel on this page it does not: Yango
+         publishes no standing at all for its drivers — /api/roster/states
+         reports them under no_state_reported, 11 of 11 — so the sentence sent
+         a reader to a page with nothing on it either. */
+      : '<span class="ent-off" title="this channel publishes no standing for its drivers, so neither this report nor the roster holds one">no standing published</span>') },
   ], { sortable: true, sortId: 'funnel', defaultSort: { key: 'offered', dir: 'desc' },
     capped: total && total > rows.length ? `all ${fmt(total)} rows` : null }));
   if (total && total > rows.length) {
