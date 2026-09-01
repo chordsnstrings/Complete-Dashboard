@@ -116,6 +116,50 @@ check('filtering by rule still hides what that rule has stopped finding',
   && !(one.insights || []).some((r) => String(r.entity_id).startsWith('L-GONE')),
   JSON.stringify((one.insights || []).map((r) => r.entity_id)));
 
+/* ── the rules have to survive being run twice ──────────────────────────
+   sql/schema_v15.sql adds two PARTIAL unique indexes on insight
+   (code, entity_type, entity_id) — one for rows with no window, one for
+   fleet-level verdicts — beside the five-column key that put() named in its
+   ON CONFLICT. Postgres arbitrates against the index you name and raises on a
+   collision with any other, and the five-column key can never catch a
+   windowless row anyway because NULLs are distinct in a unique index. So every
+   re-run INSERTED and the partial index rejected it.
+
+   Read out of the production collector log on 2026-09-01: SEVEN of the
+   fourteen rules failing on every run — idle_vehicle, vehicle_dormant,
+   licence, volume_trend, stale_tracker, vehicle_documents and platform_flags
+   — each caught by a per-job try/catch that logged and carried on. That is
+   why 163 of the 200 findings on the action list were frozen days in the past.
+
+   Run three times, because the first pass INSERTS and it is the second that
+   has to update. */
+{
+  const dbmod = await import('../src/db.js');
+  const realQuery = dbmod.pool.query;
+  dbmod.pool.query = (t, p) => db.query(t, p);
+  await q(`INSERT INTO vehicle_document (platform, vehicle_ext_id, plate, doc_type,
+             expires_at, status, fleet_id)
+           VALUES ('uber','vd-1','L-DOCTEST','Vehicle Registration Form',
+                   now() + interval '3 days','active','ecosine')`);
+  const { computeInsights } = await import('../src/insights.js');
+  const failures = [];
+  for (let pass = 1; pass <= 3; pass++) {
+    const out = await computeInsights({ from: '2026-08-01', to: '2026-08-31' });
+    for (const [job, v] of Object.entries(out)) {
+      if (String(v).startsWith('err')) failures.push(`pass ${pass}: ${job} — ${v}`);
+    }
+  }
+  check('no insight rule fails when it is run more than once',
+    failures.length === 0, failures.slice(0, 3).join(' | '));
+  /* And the re-run must UPDATE rather than accumulate: the same finding three
+     times is the duplicate storm sql/schema_v15.sql exists to have ended. */
+  const [{ n }] = await q(
+    `SELECT count(*)::int n FROM insight WHERE entity_id = 'L-DOCTEST'`);
+  check('…and running it again replaces the finding rather than duplicating it',
+    n === 1, `${n} rows for one document`);
+  dbmod.pool.query = realQuery;
+}
+
 /* ── the ownership table is the thing that has to be right ──────────────
    A code no job claims can never be cleared, because nothing ever stamps a
    run for it — so the map in src/insights.js is checked against the codes the

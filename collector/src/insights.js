@@ -2,7 +2,7 @@
 // Every insight answers three questions: what is true, what it costs, what to do.
 // Rules are deliberately conservative: we would rather miss a weak signal than
 // hand an operator a confident-sounding number we can't defend.
-import { pool, upsert } from './db.js';
+import { pool } from './db.js';
 import { log } from './log.js';
 
 const SRC = 'insights';
@@ -35,9 +35,52 @@ const n_ = (n, one, many) => `${n} ${s_(n, one, many)}`;
 // Used only to size the "idle capital" impact; tune in settings later.
 const VEHICLE_DAY_COST_AED = Number(process.env.VEHICLE_DAY_COST_AED || 120);
 
+/* THE ARBITER HAS TO BE THE INDEX THAT ACTUALLY CATCHES THE ROW.
+   ─────────────────────────────────────────────────────────────────────────
+   This was upsert('insight', row, [code, entity_type, entity_id, window_start,
+   window_end]) — the five-column key — and sql/schema_v15.sql adds two PARTIAL
+   unique indexes on (code, entity_type, entity_id) beside it: one for rows
+   with no window at all, one for fleet-level verdicts. Postgres arbitrates
+   ON CONFLICT against the index you name; a collision on any OTHER unique
+   index is an error, not an update.
+
+   And the five-column key can never catch a windowless row anyway: NULLs are
+   distinct in a unique index, so every re-run INSERTED, and the partial index
+   then rejected it.
+
+   The result, read out of the production collector log on 2026-09-01:
+
+     ERROR [insights] idle_vehicle      duplicate key … "insight_nullwindow_uniq"
+     ERROR [insights] vehicle_dormant   duplicate key … "insight_nullwindow_uniq"
+     ERROR [insights] licence           duplicate key … "insight_nullwindow_uniq"
+     ERROR [insights] volume_trend      duplicate key … "insight_nullwindow_uniq"
+     ERROR [insights] stale_tracker     duplicate key … "insight_nullwindow_uniq"
+     ERROR [insights] vehicle_documents duplicate key … "insight_nullwindow_uniq"
+     ERROR [insights] platform_flags    duplicate key … "insight_fleet_verdict_uniq"
+
+   Seven of the fourteen rules, failing on every run, caught by a per-job
+   try/catch that logged and carried on — so the action list simply stopped
+   changing for them. That is the whole reason 163 of its 200 findings were
+   frozen days in the past under titles written in relative time.
+
+   A row that satisfies BOTH partial indexes is arbitrated on either: they
+   share their key columns, so the row they collide with is the same row. */
 async function put(row) {
-  await upsert('insight', { ...row, computed_at: new Date().toISOString() },
-    ['code', 'entity_type', 'entity_id', 'window_start', 'window_end']);
+  const r = { ...row, computed_at: new Date().toISOString() };
+  const noWindow = r.window_start == null && r.window_end == null;
+  const arbiter = r.entity_type === 'fleet'
+    ? '(code, entity_type, entity_id) WHERE entity_type = \'fleet\''
+    : noWindow
+      ? '(code, entity_type, entity_id) WHERE window_start IS NULL AND window_end IS NULL'
+      : '(code, entity_type, entity_id, window_start, window_end)';
+  const KEY = new Set(['code', 'entity_type', 'entity_id', 'window_start', 'window_end']);
+  const cols = Object.keys(r);
+  const set = cols.filter((c) => !KEY.has(c)).map((c) => `${c}=EXCLUDED.${c}`);
+  await pool.query(
+    `INSERT INTO insight (${cols.join(',')})
+     VALUES (${cols.map((_, i) => `$${i + 1}`).join(',')})
+     ON CONFLICT ${arbiter} ${set.length ? `DO UPDATE SET ${set.join(', ')}` : 'DO NOTHING'}`,
+    cols.map((c) => r[c]));
 }
 
 /* ─────────────────── 1. Idle vehicles: capital earning nothing ───────────────────
