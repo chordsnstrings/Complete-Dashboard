@@ -69,11 +69,33 @@ export async function renderDay(root, day, onDetail) {
        of the weekly statements covering this day, which is an estimate, and the
        sub-line says so rather than letting an exact-looking number imply it was
        measured on the day. */
+    /* And the ledger, where neither a fare nor a payout reaches the day.
+       ─────────────────────────────────────────────────────────────────────
+       The payout series is built from the Uber earner breakdown, which reaches
+       back about 192 days; before that this tile said "no fare and no payout
+       statement reaches this day" over a day the operator had imported a
+       statement for. /api/day?day=2025-09-01 answered accounted null while
+       AED 31,510.86 sat in driver_statement_day for that date.
+
+       Shown as its own figure and named as one, never folded into "Money in":
+       a statement is the operator's own import and the tile above it is what
+       the platforms reported, and a reader who cannot tell which is which
+       cannot reconcile either. */
     { label: 'Money in', value: h.accounted ? money(h.accounted) : '—',
       sub: h.accounted
         ? `${money(h.accounted_fares || 0)} in fares · ${money(h.accounted_payouts || 0)} `
           + (h.payout_basis ? 'estimated from the weekly platform statements' : 'in payouts')
-        : 'no fare and no payout statement reaches this day' },
+        : h.statement_net
+          ? 'no fare and no platform payout reaches this day — see the imported statement beside this'
+          : 'no fare and no payout statement reaches this day' },
+    ...(h.statement_net ? [{
+      label: 'Imported statement',
+      value: money(h.statement_net),
+      sub: `the operator's own ledger for this day${(h.statement_platforms || []).length
+        ? ` · ${(h.statement_platforms || []).map(sourceLabel).join(', ')}` : ''}`
+        + (h.accounted ? ' — beside the platform figure, not added to it'
+          : ' — the only money that reaches this day'),
+    }] : []),
     { label: 'Fares', value: money(h.revenue),
       sub: h.priced ? `over ${fmt(h.priced)} priced bookings` : 'no booking that day reports a fare' },
     /* Both counts, with what they are a rate over. "84 drivers" and "80

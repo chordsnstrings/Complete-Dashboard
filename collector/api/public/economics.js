@@ -745,7 +745,19 @@ async function driversTab(root) {
       tone: t.idle ? 'warn' : 'good',
       sub: 'on the books, no booking and no payout',
       cohort: t.idle ? 'unit-earned-nothing' : null },
-    { label: 'Per hour online', value: '—',
+    /* The rate, not a dash. This tile has rendered a hardcoded em-dash under a
+       sub-line explaining WHY the number is missing, while the number sat in
+       the same response object the sub-line came from: production returns
+       aed_per_measured_hour 16.93 over the month and 71.22 over the record.
+       The overview verdict a few hundred lines up has been rendering the same
+       field correctly the whole time.
+
+       Still a dash when nothing is measured, because Uber sends no online
+       hours and a fleet with none of the other channels genuinely has no
+       hourly rate — and AED 0 per hour is a different claim from "nobody
+       reported an hour". */
+    { label: 'Per hour online',
+      value: t.aed_per_measured_hour != null ? money(t.aed_per_measured_hour) : '—',
       sub: t.hours_note },
   ]), bar);
 

@@ -14,6 +14,7 @@
      - a vehicle that earned nothing still has a row, because that row is the
        point of the page
      - a person with two accounts is one row carrying both */
+import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { seedFleet, PLATES } from './fixture.mjs';
@@ -250,6 +251,23 @@ check('people arrive ranked by money',
   check('every channel row names the basis its money was taken on',
     (A.by_platform || []).every((c) => typeof c.basis === 'string'),
     JSON.stringify((A.by_platform || []).map((c) => [c.platform, c.basis])));
+}
+
+/* A tile that explains why it has no number, beside the number.
+   ─────────────────────────────────────────────────────────────────────────
+   #unit/drivers rendered `value: '—'` as a literal under a sub-line saying
+   how many people have online hours — while aed_per_measured_hour sat in the
+   very response that sub-line was read from. Production: 16.93 over the
+   month, 71.22 over the record. The overview verdict on the same page has
+   been rendering the same field correctly the whole time. */
+{
+  const src = readFileSync('api/public/economics.js', 'utf8');
+  check('the per-hour tile renders the rate the response carries',
+    /value: t\.aed_per_measured_hour != null \? money\(t\.aed_per_measured_hour\) : '—'/.test(src),
+    'the figure was in the same object the sub-line came from');
+  check('and still says nothing when nothing was measured',
+    /t\.aed_per_measured_hour != null/.test(src),
+    'Uber reports no online hours, and AED 0 per hour is a different claim from "nobody reported one"');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

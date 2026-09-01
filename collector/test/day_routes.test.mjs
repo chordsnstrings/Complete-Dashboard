@@ -206,6 +206,38 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
   check('and does not invent a completion rate', q1.headline.completion_pct === null);
 }
 
+/* A day the platforms no longer answer for is not a day the fleet earned zero.
+   ─────────────────────────────────────────────────────────────────────────
+   driver_payout_day is built from the Uber earner breakdown, which reaches
+   back about 192 days. Before that this page reported "no fare and no payout
+   statement reaches this day" over days the operator had imported a statement
+   for: /api/day?day=2025-09-01 answered accounted null and revenue null on
+   production while driver_statement_day held AED 31,510.86 for that date
+   across 138 rows. */
+{
+  const D = '2025-09-01';
+  await q(`INSERT INTO driver_statement_day
+             (platform, fleet_id, driver_name, day, source, net)
+           VALUES ('uber','ecosine','Ann Ahmed','${D}','ledger', 500.25),
+                  ('hotel','ecosine','Ann Ahmed','${D}','ledger', 120.00)`);
+  const s = (await get(`/api/day?day=${D}`)).headline;
+  check('a day outside the payout horizon reports the imported statement',
+    Number(s.statement_net) === 620.25, JSON.stringify(s.statement_net));
+  check('and names the channels it came from',
+    Array.isArray(s.statement_platforms) && s.statement_platforms.length === 2,
+    JSON.stringify(s.statement_platforms));
+  /* The rule income_sql.js states and this obeys rather than widens: adding a
+     statement to a channel already counted on its fares or its payout would
+     count the same trips twice. */
+  check('but it is never folded into the platform figure',
+    s.accounted == null || Number(s.accounted) !== Number(s.statement_net),
+    `accounted ${s.accounted} vs statement ${s.statement_net}`);
+  const page = readFileSync('api/public/day.js', 'utf8');
+  check('and the page shows it as its own labelled figure',
+    /label: 'Imported statement'/.test(page),
+    'a reader who cannot tell an operator import from a platform payout cannot reconcile either');
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

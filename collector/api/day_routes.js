@@ -179,11 +179,32 @@ export function dayRoutes(app, { q, wrap }) {
       `SELECT platform, round(sum(earnings)::numeric,2) payouts,
               count(DISTINCT day)::int payout_days
        FROM driver_payout_day WHERE day = $1::date GROUP BY 1`, p);
+    /* And the operator's own import, which is the only money that exists for
+       the months the platform APIs no longer serve.
+       ─────────────────────────────────────────────────────────────────────
+       driver_payout_day is built from the Uber earner breakdown, which reaches
+       back about 192 days. Before that there is no payout row, so this page
+       reported a day the fleet worked as having brought in nothing at all:
+       /api/day?day=2025-09-01 answered accounted null and revenue null, while
+       driver_statement_day held AED 31,510.86 for that date across 138 rows.
+
+       Read into statement_net, which fleetIncome already defines and this
+       route simply never filled. It rides BESIDE the chosen basis and is never
+       added into `accounted` — adding a statement to a platform already
+       counted on its fares or its payout would count the same trips twice,
+       which is the rule income_sql.js states and this obeys rather than
+       widens. So a day inside the payout horizon is unchanged, and a day
+       outside it stops claiming the fleet earned nothing. */
+    const stmtByPlat = await q(
+      `SELECT platform, round(sum(net)::numeric,2) statement_net
+       FROM driver_statement_day
+       WHERE day = $1::date AND source = 'ledger' AND net IS NOT NULL
+       GROUP BY 1`, p);
     const byPlat = new Map();
     const plat = (name) => {
       if (!byPlat.has(name)) {
         byPlat.set(name, { platform: name, bookings: 0, booking_days: 0, priced_bookings: 0,
-          fares: null, payouts: null, payout_days: 0 });
+          fares: null, payouts: null, payout_days: 0, statement_net: null });
       }
       return byPlat.get(name);
     };
@@ -193,6 +214,8 @@ export function dayRoutes(app, { q, wrap }) {
     for (const y of payByPlat) Object.assign(plat(y.platform), {
       payouts: y.payouts == null ? null : Number(y.payouts),
       payout_days: y.payout_days ?? 0 });
+    for (const y of stmtByPlat) Object.assign(plat(y.platform), {
+      statement_net: y.statement_net == null ? null : Number(y.statement_net) });
     const income = fleetIncome([...byPlat.values()], 1);
 
     res.json({
