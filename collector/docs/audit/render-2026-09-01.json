@@ -1,40 +1,47 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-09-01T16:51:03.507Z",
+  "at": "2026-09-01T19:43:25.472Z",
   "widths": [
     1500,
     1180,
     820
   ],
-  "routes": 1,
+  "routes": 5,
   "findings": [
     {
-      "route": "settlement/cash",
-      "width": 1500,
-      "sev": "w",
-      "code": "sparse-column",
-      "detail": "\"Value known↓\" is empty in 42 of 46 rows"
-    },
-    {
-      "route": "settlement/cash",
+      "route": "unit/drivers",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":46,\"explained\":true,\"title\":\"Settlement\",\"kpis\":4,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":242,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":7,\"tables\":1,\"charts\":0}"
     },
     {
-      "route": "settlement/cash",
-      "width": 1180,
-      "sev": "w",
-      "code": "sparse-column",
-      "detail": "\"Value known↓\" is empty in 42 of 46 rows"
+      "route": "low-performers",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":67,\"explained\":true,\"title\":\"Low performers\",\"kpis\":4,\"tables\":3,\"charts\":0}"
     },
     {
-      "route": "settlement/cash",
-      "width": 820,
-      "sev": "w",
-      "code": "sparse-column",
-      "detail": "\"Value known↓\" is empty in 42 of 46 rows"
+      "route": "cohort/settlement-cash",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":48,\"empty_panels\":0,\"rows\":46,\"explained\":false,\"title\":\"Holding cash\",\"kpis\":303,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "trips",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":100,\"explained\":true,\"title\":\"Every trip\",\"kpis\":3,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "settings",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":37,\"explained\":true,\"title\":\"Settings\",\"kpis\":4,\"tables\":1,\"charts\":0}"
     }
   ]
 }

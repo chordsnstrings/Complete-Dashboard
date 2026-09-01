@@ -181,8 +181,17 @@ const PROBE = () => {
     const scopes = [t.closest('.tblock'), t.closest('.panel'), t.closest('.tscroll'), t.parentElement]
       .filter((x, i, a) => x && x.querySelectorAll && a.indexOf(x) === i);
     const EMPTINESS = /empty|carries no|carry no|records? none|publish(es)? no|not recorded|no rate|absent|blank|a dash/i;
-    const notes = scopes.flatMap((sc) => [...sc.querySelectorAll('.tabsent, p.cap')].map(txt))
-      .filter((x) => EMPTINESS.test(x));
+    /* A .tabsent line is BY CONSTRUCTION a sentence about an absent column —
+       tableFrom prints it for nothing else — so it counts whatever words it
+       chose. The emptiness test is for ordinary prose, where a caption
+       DEFINING a column would otherwise silence the rule; requiring it of
+       .tabsent as well reported five columns that were explaining themselves
+       in the product's own words. */
+    const notes = [
+      ...scopes.flatMap((sc) => [...sc.querySelectorAll('.tabsent')].map(txt)),
+      ...scopes.flatMap((sc) => [...sc.querySelectorAll('p.cap')].map(txt))
+        .filter((x) => EMPTINESS.test(x)),
+    ];
     /* Without the sort indicator a sortable header carries: the sentence names
        the column, and "Value known↓" is not a phrase anybody would write. */
     const bare = (h) => h.replace(/[↓↑▲▼]/g, '').trim();
