@@ -241,6 +241,24 @@ check('the weekday-hour heatmap sums to the trip count',
     `${sum(vdir, 'trips')} + ${k.trips_without_vehicle} vs ${k.trips}`);
 }
 
+/* An OPEN window has to land on the days that exist.
+   ─────────────────────────────────────────────────────────────────────────
+   api/window.js resolves "all time" to [2000-01-01, 2100-01-01], and the
+   800-day span cap subtracted its days from THAT upper bound — so the
+   calendar generated ran 2097-10-23 to 2100-01-01, the LEFT JOIN matched
+   nothing, and the #finance fares chart drew a flat empty series over a fleet
+   with 312,762 bookings. */
+{
+  const open = (await get('/api/trips/daily?from=2000-01-01&to=2100-01-01')).body;
+  const today = new Date().toISOString().slice(0, 10);
+  check('an open window generates a calendar that has already happened',
+    open.length > 0 && open.every((r) => String(r.d).slice(0, 10) <= today),
+    `${open.length} buckets, last ${open[open.length - 1]?.d}`);
+  check('and it reaches the fixture rather than a century of empty days',
+    open.reduce((a, r) => a + (r.trips || 0), 0) > 0,
+    'the cap bounds the SPAN; it must not move the window off the data');
+}
+
 console.log('\nthe daily chart agrees with itself, precomputed or not');
 
 /* /api/trips/daily reads rollup_day when it is populated and computes the

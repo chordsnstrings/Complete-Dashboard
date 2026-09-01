@@ -742,9 +742,29 @@ app.get('/api/trips/daily', wrap(async (req, res) => {
        of zeros, enough to stall the browser drawing it. So the SPAN is capped
        rather than the content: 800 days is more than twice the longest window
        the range picker offers, and the response says when it has been cut. */
+    /* Anchored at TODAY, not at the window's raw upper bound.
+       ─────────────────────────────────────────────────────────────────────
+       An open window is [2000-01-01, 2100-01-01] — api/window.js — and the
+       cap subtracted its 800 days from THAT end, so the calendar generated
+       ran 2097-10-23 to 2100-01-01. Every real row fell outside it, the LEFT
+       JOIN matched nothing, and all-time answered with 28 empty month buckets
+       dated seventy-one years from now.
+
+       Measured on production before the fix: from=2000-01-01&to=2100-01-01
+       returned 28 buckets, first 2097-10, last 2100-01, 0 trips and 0 with
+       revenue — over a fleet holding 312,762 bookings. The identical query
+       bounded at today returned 2024-06 to 2026-09 and all 312,762. Same
+       tables, same lower bound; only the calendar's upper anchor differed.
+
+       Today, and not the last day WITH DATA: the trailing empty days of a
+       window are how a collector that stopped three days ago becomes visible,
+       and clamping to the record was an earlier attempt that hid exactly
+       that. Today is always at or after the last day with data, so both
+       properties hold at once. */
     `WITH cal AS (
        SELECT generate_series(
-         greatest($1::date, $2::date - ${DAILY_MAX_DAYS}), $2::date, interval '1 day')::date AS d
+         greatest($1::date, least($2::date, ${TODAY}) - ${DAILY_MAX_DAYS}),
+         least($2::date, ${TODAY}), interval '1 day')::date AS d
      ),
      agg AS (${aggSql}),
      -- What each source normally does, so "nothing today" can be judged.

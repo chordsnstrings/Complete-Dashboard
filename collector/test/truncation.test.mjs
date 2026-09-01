@@ -219,13 +219,33 @@ console.log(`\n  ${WIDE_PLATES} vehicles, ${WIDE_PEOPLE} people, ${trips} trips,
     return (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth()) !== 1;
   });
   check('…and every month between the first and the last is present',
-    mgaps.length === 0, `${mrows.length} buckets, ${mgaps.length} discontinuities`);  /* Bounded by span, not clamped to the data. The trailing days of a window
+    mgaps.length === 0, `${mrows.length} buckets, ${mgaps.length} discontinuities`);
+
+  /* Bounded by span, not clamped to the DATA. The trailing days of a window
      showing "nothing recorded" is how a collector that stopped three days ago
      becomes visible, so the fill must still run past the last day that has
-     rows — clamping to the record was the first attempt and hid exactly that. */
-  check('the series still runs to the end of the window, not to the last day with data',
-    String(rows[rows.length - 1].d).slice(0, 10) === '2100-01-01',
-    String(rows[rows.length - 1]?.d));
+     rows — clamping to the record was the first attempt and hid exactly that.
+
+     This used to be pinned as `last === '2100-01-01'`, which is the property
+     restated as the literal it happened to produce — and that literal WAS the
+     bug. An open window is [2000-01-01, 2100-01-01], the 800-day cap
+     subtracted from its upper end, and the calendar generated ran 2097-10-23
+     to 2100-01-01: past the last day with data, technically satisfying the
+     assertion, and matching no row at all. Production answered all-time with
+     28 empty month buckets over a fleet holding 312,762 bookings.
+
+     Today is the honest upper anchor. It is always at or after the last day
+     with data, so a stopped collector still shows as a run of empty days, and
+     it never generates a decade that has not happened. */
+  const lastDay = String(rows[rows.length - 1].d).slice(0, 10);
+  const withData = rows.filter((r) => (r.trips || 0) > 0);
+  const lastWithData = String(withData[withData.length - 1]?.d || '').slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  check('the series still runs past the last day with data, so a stopped collector shows',
+    withData.length > 0 && lastDay > lastWithData,
+    `series ends ${lastDay}, data ends ${lastWithData}`);
+  check('and stops at today rather than a century that has not happened yet',
+    lastDay === today, `${lastDay} vs ${today}`);
   check('and is cut at the far end instead, where there was no fleet to report on',
     rows.length <= 801, `${rows.length} rows`);
 }
