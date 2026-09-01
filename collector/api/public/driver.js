@@ -645,8 +645,7 @@ async function tabOverview(root, id, prof) {
         ? `${money(k.accounted_fares || 0)} in fares · ${money(k.accounted_payouts || 0)} paid out `
           + `by ${(k.accounted_platforms || []).map(sourceLabel).join(', ')}`
         : 'no fare and no payout statement covers this window' },
-    { label: 'Fares', value: money(k.accounted_fares),
-      sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' },
+    faresTile(k),
     /* The same renderer as the Quality tab, so the two tiles cannot drift into
        showing one driver two different ratings. */
     ratingTrend(k),
@@ -1057,6 +1056,40 @@ async function tabTerritory(root, id) {
   }
 }
 
+/* THE FARE THE PLATFORM DOES REPORT.
+   ─────────────────────────────────────────────────────────────────────────
+   Uber's trip export carries no fare column, so sum(trip.price) is null for an
+   Uber-only driver and this tile read "—" under the sentence "where the
+   platform reports fares" — for people who had billed six figures. The
+   platform does report them: not per trip, but as the `fare` line of the
+   weekly statement, which this page already draws under Earnings.
+
+   Two rules, and the second is the important one.
+
+   1. The trip record wins where it has anything. A hotel driver's fares are
+      per-booking facts and this tile has always shown them.
+
+   2. The statement figure is NEVER added to anything, and says so. `fare` is
+      the gross the rider was charged; the payout on the tile beside it is what
+      reached the fleet out of exactly that money, after the platform's
+      commission. They are the same money seen twice, so the tile names the
+      figure as the platform's own and the sub-line says it already contains
+      the payout rather than sitting beside it. /api/driver/kpis returns it
+      under its own key for the same reason — fleetIncome() never sees it. */
+function faresTile(k) {
+  if (k.accounted_fares) {
+    return { label: 'Fares', value: money(k.accounted_fares),
+      sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' };
+  }
+  if (k.statement_fares) {
+    return { label: 'Fares', value: money(k.statement_fares),
+      sub: `the platform's own figure, over ${countOf(k.statement_fare_periods, 'weekly statement')}`
+        + ' — no trip here carries a fare, and the payout beside it came out of this' };
+  }
+  return { label: 'Fares', value: '—',
+    sub: 'no trip carries a fare and no statement reports one' };
+}
+
 /* ── tab: earnings ───────────────────────────────────────────────────────── */
 async function tabEarnings(root, id, prof) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
@@ -1090,11 +1123,18 @@ async function tabEarnings(root, id, prof) {
        trip export has no fare column at all. Presented against the trip count
        it reads as what they earned, which is the single most misread number in
        this product. */
-    { label: 'Booked revenue', value: k.priced_trips ? money(k.revenue) : '—',
-      sub: k.priced_trips
-        ? `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} trips that report a fare`
-        : 'no trip of theirs reports a fare',
-      tone: k.priced_trips && k.trips && k.priced_trips / k.trips < 0.5 ? 'warn' : null },
+    /* Same rule as the overview's Fares tile, and the same reason: the trips
+       report nothing, the statement reports the fare, and the two must not be
+       added. Where neither exists the tile still says which is missing. */
+    (k.priced_trips
+      ? { label: 'Booked revenue', value: money(k.revenue),
+          sub: `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} trips that report a fare`,
+          tone: k.trips && k.priced_trips / k.trips < 0.5 ? 'warn' : null }
+      : { label: 'Booked revenue', value: k.statement_fares ? money(k.statement_fares) : '—',
+          sub: k.statement_fares
+            ? `no trip of theirs reports a fare — this is the statement's own fare line, over `
+              + `${countOf(k.statement_fare_periods, 'period')}, and the payout below came out of it`
+            : 'no trip of theirs reports a fare, and no statement reports one either' }),
     { label: 'Average fare', value: money(k.avg_fare, 'AED', 2),
       sub: k.priced_trips ? `over the ${fmt(k.priced_trips)} priced trips` : null },
     { label: 'Platform earnings', value: money(k.reported_earnings), sub: 'as the platform reported it' },

@@ -976,6 +976,44 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           ? trend.latest_trips - trend.previous_trips : null,
         from: Number(trend.previous), to: Number(trend.latest) }
       : null;
+    /* WHAT THE PLATFORM SAYS THE FARES WERE.
+       ─────────────────────────────────────────────────────────────────────
+       Uber's trip export carries no fare column, so `revenue` above — which is
+       sum(trip.price) over has_fare — is null for every Uber-only driver. The
+       Fares tile on the overview and the Booked revenue tile under Earnings
+       therefore both read a dash for people who billed six figures, and the
+       page said "where the platform reports fares" as though the platform
+       reported none.
+
+       It reports them. Not per trip, but as the `fare` line of the weekly
+       statement's earnings breakdown — driver_earnings_component, which this
+       same page already draws three panels further down. AED 866,137 over one
+       year across the fourteen drivers sampled on production; the tiles above
+       it read "—".
+
+       Read here so the tiles can say it, and returned UNDER ITS OWN NAME
+       rather than folded into accounted_fares. That fold would be a double
+       count: `fare` is the gross the rider was charged and it is the PARENT of
+       the payout money in the same tree — your_earnings is fare minus the
+       service fee — so the payout already beside it on the tile contains it.
+       fleetIncome() therefore never sees this figure.
+
+       Only the top of the tree is summed. little_fare, surge, wait_time,
+       cancellation and the rest all carry parent 'fare' and are its
+       components; adding them would double the total. 'net_fare' is the same
+       line under the other platforms' vocabulary, a direct child of their
+       'earnings' root, and no child is named either thing. */
+    const [sfare] = await q(
+      `SELECT round(sum(amount)::numeric, 2)                       AS statement_fares,
+              count(DISTINCT (period_start, period_end))::int      AS statement_fare_periods,
+              min(period_start)                                    AS statement_fare_from,
+              max(period_end)                                      AS statement_fare_to,
+              array_agg(DISTINCT category)                         AS statement_fare_lines
+         FROM driver_earnings_component
+        WHERE driver_ext_id = ANY($3)
+          AND category IN ('fare', 'net_fare')
+          AND period_start >= $1::date AND period_end <= $2::date`, p);
+
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
     const hoursOnJob = num(kept?.on_job_h);
@@ -1020,6 +1058,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       rating_readings: trend?.readings ?? 0,
       rating_series: series.map((r) => ({ on: r.on, rating: Number(r.rating),
         trips: r.trips == null ? null : Number(r.trips) })),
+      /* Beside accounted_fares, never inside it — see the query above. */
+      statement_fares: num(sfare?.statement_fares),
+      statement_fare_periods: sfare?.statement_fare_periods || 0,
+      statement_fare_from: sfare?.statement_fare_from ?? null,
+      statement_fare_to: sfare?.statement_fare_to ?? null,
       platform_lifetime_trips: standing.find((r) => r.lifetime_trips != null)?.lifetime_trips ?? null,
       banned_on: standing.filter((r) => r.is_banned === true).map((r) => r.platform),
       platform_compliance: standing.filter((r) => r.compliance_status)

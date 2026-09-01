@@ -778,6 +778,13 @@ app.get('/api/driver/kpis', (req, r) => {
     accounted_fares: Math.round(d.reduce((a, x) => a + x.revenue, 0)),
     accounted_payouts: 9800 - i * 500,
     accounted_platforms: ['hotel', 'uber'], accounted_bookings: trips,
+    /* The statement's own fare line, beside the accounted money rather than
+       inside it — the gross the rider was charged, which already contains the
+       payout above. Present on every driver here so the Fares tile's
+       fall-back branch is reachable from the mock; a driver whose trips carry
+       fares still shows those, which is the branch that must not change. */
+    statement_fares: 4200 - i * 150, statement_fare_periods: 3 - (i % 2),
+    statement_fare_from: '2026-08-03', statement_fare_to: '2026-08-23',
     dark_bookings: 0, dark_pct: 0,
     trips_per_day: +(trips / d.length).toFixed(1), utilisation_pct: 58.2 - i * 2.4,
   });
