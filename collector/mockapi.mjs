@@ -227,7 +227,10 @@ app.get('/api/insights', (req, r) => {
      the whole 200-row list and search it in the browser, so the four findings
      the cap cut answered "no longer open" on their own pages while appearing
      in the category chips. */
-  r.json({ insights: rows, truncated: false, limit: 200,
+  /* Findings the rules have stopped emitting since they last wrote them. The
+     list only carries what the latest run of each rule still finds, so a to-do
+     list that shortens overnight can say why. */
+  r.json({ insights: rows, truncated: false, limit: 200, cleared: 6,
     filter: { severity: req.query.severity || null, category: req.query.category || null,
       code: req.query.code || null, entity_id: req.query.entity_id || null,
       fleet: req.query.fleet || null, from: null, to: null } });
