@@ -16,7 +16,8 @@
 import { barChart, gapBars, areaChart, donut, hbars, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
-  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, noneChosen, verdict, foldRows } from './ui.js';
+  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, noneChosen, verdict, foldRows,
+  trackerState, trackerSpeed, stillNote } from './ui.js';
 import { qAll, href, parseHash, currentGen, alive } from './data.js';
 import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
@@ -341,7 +342,10 @@ async function tabMovement(root, plate) {
       : `Last fix ${dtStr(recent[0].captured_at)}. This tracker is not currently reporting.`));
     now.body.append(tableFrom(recent, [
       { label: 'Time', key: 'captured_at', render: (r) => `${dateStr(r.captured_at)} ${timeStr(r.captured_at)}` },
-      { label: 'Speed', key: 'speed', num: true, render: (r) => (r.speed != null ? `${fmt(r.speed)} km/h` : '—') },
+      /* The tracker's own word for the fix, which the payload has always
+         carried and this table threw away. It is also the answer to the column
+         beside it — see trackerState in ui.js. */
+      trackerState, trackerSpeed,
       { label: 'Seat', key: 'seat_occupied', render: (r) => (r.seat_occupied == null
         ? '<span class="tag dim">not reported</span>'
         : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
@@ -355,6 +359,8 @@ async function tabMovement(root, plate) {
           : `<span class="plate">${(+r.lat).toFixed(6)}, ${(+r.lng).toFixed(6)}</span>`) },
       { label: 'Source', key: 'source', render: (r) => esc(sourceLabel(r.source)) },
     ], { compact: true, sortable: true, sortId: 'track', defaultSort: { key: 'captured_at', dir: 'desc' } }));
+    const sn = stillNote(recent);
+    if (sn) now.body.append(sn);
   }).catch(() => { now.body.innerHTML = ''; now.body.append(note('Telemetry could not be read.')); });
   let layer = null;
 

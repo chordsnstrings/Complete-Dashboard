@@ -14,7 +14,8 @@
    which, and neither is shown without the other's caveat. */
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, money,
-  dayStr, dtStr, timeStr, sourceLabel, tierLabel, countOf, plural, noneChosen } from './ui.js';
+  dayStr, dtStr, timeStr, sourceLabel, tierLabel, countOf, plural, noneChosen,
+  trackerState, trackerSpeed } from './ui.js';
 import { api, href } from './data.js';
 
 const OUTCOME_TONE = { completed: 'ok', not_completed: 'warn' };
@@ -216,8 +217,7 @@ export async function renderTrip(root, platform, id) {
   if (d.telemetry?.length) {
     tp.body.append(tableFrom(d.telemetry, [
       { label: 'At', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
-      { label: 'Speed', key: 'speed', num: true,
-        render: (r) => (r.speed == null ? '—' : `${fmt(r.speed)} km/h`) },
+      trackerState, trackerSpeed,
       { label: 'Seat', key: 'seat_occupied',
         absent: 'no tracker on this vehicle reports a seat sensor',
         render: (r) => (r.seat_occupied == null ? '—' : pill(r.seat_occupied ? 'occupied' : 'empty',

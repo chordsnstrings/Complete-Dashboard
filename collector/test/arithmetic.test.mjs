@@ -21,6 +21,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { seedFleet, PLATES } from './fixture.mjs';
+import { dubaiDay } from '../api/window.js';
 import { rebuildCustody } from '../src/custody.js';
 import { mountAll } from './mount.mjs';
 
@@ -250,7 +251,11 @@ check('the weekday-hour heatmap sums to the trip count',
    with 312,762 bookings. */
 {
   const open = (await get('/api/trips/daily?from=2000-01-01&to=2100-01-01')).body;
-  const today = new Date().toISOString().slice(0, 10);
+  /* The product's day, not the machine's. Every calendar in this API is
+     generated in Dubai time, so between 20:00 and midnight UTC "today" in
+     Dubai is already tomorrow in Z — and this assertion failed for four hours
+     a day against a series that was correct. */
+  const today = dubaiDay(new Date());
   check('an open window generates a calendar that has already happened',
     open.length > 0 && open.every((r) => String(r.d).slice(0, 10) <= today),
     `${open.length} buckets, last ${open[open.length - 1]?.d}`);

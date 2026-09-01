@@ -23,6 +23,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { seedFleet, WIDE_PLATES, WIDE_PEOPLE } from './fixture.mjs';
+import { dubaiDay } from '../api/window.js';
 import { rebuildCustody } from '../src/custody.js';
 import { mountAll, declaredRoutes } from './mount.mjs';
 
@@ -240,7 +241,10 @@ console.log(`\n  ${WIDE_PLATES} vehicles, ${WIDE_PEOPLE} people, ${trips} trips,
   const lastDay = String(rows[rows.length - 1].d).slice(0, 10);
   const withData = rows.filter((r) => (r.trips || 0) > 0);
   const lastWithData = String(withData[withData.length - 1]?.d || '').slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  /* Dubai's day, which is the day this API generates its calendars in. In Z
+     this assertion was wrong for the four hours a day when Dubai has already
+     turned over and UTC has not. */
+  const today = dubaiDay(new Date());
   check('the series still runs past the last day with data, so a stopped collector shows',
     withData.length > 0 && lastDay > lastWithData,
     `series ends ${lastDay}, data ends ${lastWithData}`);

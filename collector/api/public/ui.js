@@ -783,6 +783,42 @@ export const tierLabel = (t) => {
 export const plural = (n, one, many) => (Math.abs(Number(n)) === 1 ? one : (many ?? `${one}s`));
 export const countOf = (n, one, many) => `${fmt(n)} ${plural(n, one, many)}`;
 
+/* A tracker fix, and the two columns that only make sense together.
+   ─────────────────────────────────────────────────────────────────────────
+   bin/render-audit.mjs: "Speed is empty in 33 of 40 rows" on a vehicle's
+   movement tab. Measured over 2,633 fixes on one plate, FMS reports a speed
+   for every Moving fix and none for any Idle or Stopped one, without a single
+   exception — so the column is not sparse, it is a moving-only measurement on
+   a vehicle that spends most of its time still.
+
+   The word that says which has been in the payload all along and three of the
+   four fix tables threw it away. These are shared because those three tables
+   live in three modules, and a fourth copy of the sentence is a fourth chance
+   for one of them to say something different about the same feed. */
+export const trackerState = { label: 'State', key: 'status',
+  render: (r) => (r.status
+    ? `<span class="tag ${/mov/i.test(r.status) ? 'ok' : 'dim'}">${esc(r.status)}</span>`
+    : '<span class="ent-off" title="this feed sends no state word with a fix">—</span>') };
+
+export const trackerSpeed = { label: 'Speed', key: 'speed', num: true,
+  render: (r) => (r.speed != null ? `${fmt(r.speed)} km/h`
+    : `<span class="ent-off" title="this tracker reports a speed only while the vehicle is moving${
+      r.status ? `; this fix is ${esc(String(r.status).toLowerCase())}` : ''}">—</span>`) };
+
+/** The sentence under such a table, or null when there is nothing to explain —
+    every fix moving, or none of them. */
+export const stillNote = (rows) => {
+  const still = (rows || []).filter((r) => r.speed == null);
+  if (!still.length || still.length === rows.length) return null;
+  const words = [...new Set(still.map((r) => String(r.status || '').toLowerCase()).filter(Boolean))];
+  return el('p', 'cap',
+    `Speed is empty on ${fmt(still.length)} of these ${countOf(rows.length, 'fix', 'fixes')}: this `
+    + 'tracker reports a speed only while the vehicle is moving'
+    + (words.length ? `, and those fixes are ${words.join(' or ')}` : '')
+    + '. A dash there is a stationary car, not a reading that went missing — the State column '
+    + 'beside it says which.');
+};
+
 /* A list column that may arrive either way.
    Several endpoints return a set of names as a comma-joined STRING —
    `unavailable_sources: "bolt, yango"`, `channels_checked: "uber,yango,hotel"` —

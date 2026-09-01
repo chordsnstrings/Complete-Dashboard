@@ -17,7 +17,8 @@
 import { empty, fmt, areaChart, hbars, donut } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dtStr, timeStr, dayStr, dateStr, money, custody,
-         sourceLabel, countOf, plural, asList, noneChosen} from './ui.js';
+         sourceLabel, countOf, plural, asList, noneChosen,
+         trackerState, trackerSpeed, stillNote } from './ui.js';
 import { q, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -426,13 +427,15 @@ export async function renderSegment(root, plate, at) {
       { x: 't', y: 'speed', color: '--s8' });
     tp.body.append(tableFrom(d.track.slice(0, 60), [
       { label: 'Time', key: 'captured_at', render: (r) => timeStr(r.captured_at) },
-      { label: 'Speed', key: 'speed', num: true, render: (r) => (r.speed != null ? fmt(r.speed) + ' km/h' : '—') },
+      trackerState, trackerSpeed,
       { label: 'Seat', key: 'seat_occupied', render: (r) => (r.seat_occupied == null
         ? '<span class="tag dim">not reported</span>'
         : r.seat_occupied ? '<span class="tag ok">occupied</span>' : '<span class="tag">empty</span>') },
       { label: 'Ignition', key: 'ignition', render: (r) => (r.ignition == null ? '—' : r.ignition ? 'on' : 'off') },
       { label: 'Lat', key: 'lat', num: true }, { label: 'Lng', key: 'lng', num: true },
     ], { compact: true }));
+    const sn = stillNote(d.track.slice(0, 60));
+    if (sn) tp.body.append(sn);
     if (d.track.length > 60) tp.body.append(el('p', 'cap', `First 60 of ${fmt(d.track.length)} fixes.`));
   } else {
     empty(tp.body, 'No fixes are stored for this window — which means the segment itself was built from data we no longer hold');
