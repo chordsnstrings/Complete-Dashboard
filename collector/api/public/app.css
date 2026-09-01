@@ -415,6 +415,15 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
    value's plain text, so the nowrap rule above still protects every ordinary
    money figure, which is what it was written for. */
 .kpi .n.long{white-space:normal;font-size:clamp(1rem, 8.5cqi, 1.3rem);overflow-wrap:anywhere}
+/* …and the same protection when the value is a PILL, which the rule above
+   cannot reach. A pill is a badge and sets white-space:nowrap for good reason —
+   a two-line badge inside a table cell is noise — but as a KPI value that
+   nowrap is what fixes its shrink-to-fit width at the full string: on
+   #reconcile/2026-08 at 1180px the Gap tile's "+AED 228,060 · 114.5%" wanted
+   153px inside a 128px box and the tile, being overflow:hidden, simply cut it.
+   bin/render-audit.mjs saw the 8px it pushed past the kpi row. Only inside a
+   tile, so every pill elsewhere keeps the nowrap it was written for. */
+.kpi .n .pill{white-space:normal;text-align:center;border-radius:12px}
 .kpi .d{font-size:.75rem;color:var(--ink-2);margin-top:2px}
 .kpi .d b{font-weight:600;color:var(--ink)}
 .kpi.ok .n{color:var(--good)} .kpi.warn .n{color:var(--warn)} .kpi.err .n{color:var(--critical)}
