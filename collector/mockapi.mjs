@@ -2328,9 +2328,12 @@ app.get('/api/corporate/approach', (req, r) => {
 
 /* Which drop-off points leave a driver furthest from the next job. Not where
    work happens — where it costs the most to walk away from. */
-app.get('/api/corporate/stranding', (_, r) => r.json(
-  ['Jebel Ali Free Zone', 'Al Qudra Rd', 'Dubai Investment Park', 'Hatta Rd',
-   'Al Maktoum Airport', 'Dubai Marina', 'DXB T3', 'Deira']
+app.get('/api/corporate/stranding', (_, r) => {
+  /* Ranked and capped, and it says so — bin/cap-audit.mjs found the real
+     endpoint returning exactly its LIMIT with nothing said, and a mock that
+     answered in the old shape would let the page's own disclosure rot. */
+  const rows = ['Jebel Ali Free Zone', 'Al Qudra Rd', 'Dubai Investment Park', 'Hatta Rd',
+    'Al Maktoum Airport', 'Dubai Marina', 'DXB T3', 'Deira']
     .map((place, i) => ({
       place, drops: 40 - i * 4, measured: 34 - i * 3,
       avg_return_km: Math.round((28 - i * 3.4) * 100) / 100,
@@ -2338,7 +2341,9 @@ app.get('/api/corporate/stranding', (_, r) => r.json(
       worst_km: Math.round((46 - i * 4) * 10) / 10,
       over_15km: Math.max(0, 12 - i * 2),
       avg_paid_km: Math.round((9 + i * 1.6) * 10) / 10,
-    }))));
+    }));
+  r.json({ rows, total: rows.length + 5, shown: rows.length, truncated: true });
+});
 app.get('/api/tiers/by-vehicle', (_, r) => r.json({
   fleet_premium_pct: 12.1,
   /* The trip floor the two comparison columns rest on, and how many cars

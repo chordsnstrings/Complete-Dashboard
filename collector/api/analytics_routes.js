@@ -820,20 +820,33 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      limousine fleet's controllable waste lives here rather than in the fare. */
   app.get('/api/corporate/stranding', wrap(async (req, res) => {
     const p = range(req);
-    res.json(await q(
-      `SELECT coalesce(nullif(btrim(split_part(dropoff_addr, ',', 1)), ''), '(no address)') AS place,
-              count(*)::int drops,
-              count(*) FILTER (WHERE return_deadhead_km IS NOT NULL)::int measured,
-              round(avg(return_deadhead_km)::numeric, 2) avg_return_km,
-              round(sum(return_deadhead_km)::numeric, 1) return_km,
-              round(max(return_deadhead_km)::numeric, 1) worst_km,
-              count(*) FILTER (WHERE return_deadhead_km > 15)::int over_15km,
-              round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_paid_km
-       FROM trip_ext
-       WHERE ${F} AND platform = 'hotel' AND dropoff_addr IS NOT NULL
-       GROUP BY 1
-       HAVING count(*) FILTER (WHERE return_deadhead_km IS NOT NULL) >= 3
-       ORDER BY avg_return_km DESC NULLS LAST LIMIT 30`, p));
+    /* The thirty worst, and how many there are.
+       ─────────────────────────────────────────────────────────────────────
+       bin/cap-audit.mjs: "returns exactly 30 (LIMIT 30), silently". It is a
+       ranked slice of a longer list and it looked like the list. The count
+       rides on the rows through a window over the same grouping — a second
+       statement would scan trip_ext again for one number, and could drift
+       from the list it describes. */
+    const rows = await q(
+      `WITH place AS (
+         SELECT coalesce(nullif(btrim(split_part(dropoff_addr, ',', 1)), ''), '(no address)') AS place,
+                count(*)::int drops,
+                count(*) FILTER (WHERE return_deadhead_km IS NOT NULL)::int measured,
+                round(avg(return_deadhead_km)::numeric, 2) avg_return_km,
+                round(sum(return_deadhead_km)::numeric, 1) return_km,
+                round(max(return_deadhead_km)::numeric, 1) worst_km,
+                count(*) FILTER (WHERE return_deadhead_km > 15)::int over_15km,
+                round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_paid_km
+           FROM trip_ext
+          WHERE ${F} AND platform = 'hotel' AND dropoff_addr IS NOT NULL
+          GROUP BY 1
+         HAVING count(*) FILTER (WHERE return_deadhead_km IS NOT NULL) >= 3
+       )
+       SELECT *, count(*) OVER ()::int AS _total FROM place
+        ORDER BY avg_return_km DESC NULLS LAST LIMIT 30`, p);
+    const total = rows.length ? rows[0]._total : 0;
+    res.json({ rows: rows.map(({ _total, ...r }) => r), total,
+      shown: rows.length, truncated: total > rows.length });
   }));
 
   /* ───────────────────────── product tiers ─────────────────────────

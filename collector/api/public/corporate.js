@@ -501,10 +501,12 @@ async function corpApproach(host) {
   const by = APPROACH_BY.some((b) => b.id === state.sub) ? state.sub : 'property';
   host.append(tabBar(APPROACH_BY, by, (id) => href('corporate', 'approach', id)));
   const body = el('div', 'stack'); host.append(body); loading(body);
-  const [rows, stranding] = await Promise.all([
+  const [rows, strandRes] = await Promise.all([
     q('/api/corporate/approach', { by }),
     q('/api/corporate/stranding').catch(() => []),
   ]);
+  // {rows, total, shown, truncated} when the endpoint says so; a bare array before.
+  const stranding = strandRes.rows || strandRes;
   body.innerHTML = '';
   if (!rows.length) return empty(body, 'No booking in this range records where the driver set off from');
 
@@ -642,6 +644,14 @@ async function corpApproach(host) {
       'A short paid trip that ends somewhere with a long return is worse than a long one that ends '
       + `on a rank. Compare the last two columns: ${esc(stranding[0].place)} averages `
       + `${fmt(stranding[0].avg_paid_km, 1)} km paid and ${fmt(stranding[0].avg_return_km, 2)} km unpaid afterwards.`));
+    /* The ranked slice, said out loud. Thirty rows that are the worst thirty
+       read exactly like thirty rows that are all of them. */
+    if (strandRes.truncated) {
+      sb.append(el('p', 'cap',
+        `The ${fmt(stranding.length)} worst of ${countOf(strandRes.total, 'drop-off area')} with at `
+        + 'least three measured returns, by average return distance. Sorting re-orders those rows '
+        + 'and does not reach the rest.'));
+    }
   }
 }
 

@@ -759,7 +759,8 @@ const W = 'from=2026-08-01&to=2026-08-31';
   /* And the operational counterpart: which drop-off points cost the most to
      walk away from. A short paid trip ending somewhere remote is worse than a
      long one ending on a rank, and no per-property average can show it. */
-  const strand = await get(`/api/corporate/stranding?from=2026-08-01&to=2026-08-31`);
+  const strandRes = await get(`/api/corporate/stranding?from=2026-08-01&to=2026-08-31`);
+  const strand = strandRes.rows;
   check('drop-off points are ranked by how far the driver had to go afterwards',
     strand.length >= 1 && strand[0].place.startsWith('Gamma'),
     JSON.stringify(strand.map((x) => x.place)));
@@ -767,6 +768,18 @@ const W = 'from=2026-08-01&to=2026-08-31';
     Number(strand[0].worst_km) === 42, String(strand[0].worst_km));
   check('a drop-off area with too few measured returns is left out rather than ranked on one trip',
     !strand.some((x) => x.measured < 3), JSON.stringify(strand.map((x) => x.measured)));
+  /* bin/cap-audit.mjs found this endpoint returning exactly its LIMIT with
+     nothing said. Thirty rows that are the worst thirty read exactly like
+     thirty rows that are all of them. */
+  check('the ranked slice says how many areas it ranked',
+    strandRes.total === strand.length && strandRes.shown === strand.length,
+    JSON.stringify([strandRes.total, strandRes.shown]));
+  check('…and does not claim to be cut when it is not',
+    strandRes.truncated === false, String(strandRes.truncated));
+  /* The internal window column must not leak into the rows: a reader sorting
+     this table would find a column nobody named. */
+  check('the count rides on the payload, not on every row',
+    strand.every((r) => !('_total' in r)), JSON.stringify(Object.keys(strand[0])));
 }
 
 
