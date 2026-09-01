@@ -300,6 +300,23 @@ check('…and the ledger import for the day outside it, marked as one',
 check('…and the channel that DOES price its trips still shows its fare',
   /240/.test(panel?.body || '') && /300/.test(panel?.body || ''), (panel?.body || '').slice(0, 300));
 
+/* And it FITS. Measured on production at 1600px, the money cell needed 660px
+   of a 593px half — so the column the panel exists to show sat 67px off the
+   edge and the page told the reader to scroll for it. The panel takes the
+   wider half of the grid now and the currency is written once per cell. This
+   asserts the scroller, not the table: the table element is as wide as its
+   content by definition and always reports that it fits. */
+const cut = await page.evaluate(() => {
+  const h = [...document.querySelectorAll('h3')].find((x) => /By channel/i.test(x.textContent));
+  const w = h?.closest('.panel')?.querySelector('.tscroll');
+  return w ? w.scrollWidth - w.clientWidth : null;
+});
+check('the money column is on screen, not 67px past the edge',
+  cut != null && cut <= 2, `${cut}px of the table is cut off`);
+check('…and the page does not tell the reader to scroll for it',
+  !/Scroll the table sideways/.test(panel?.body || ''),
+  (panel?.body || '').match(/Scroll the table sideways[^.]*\./)?.[0] || '');
+
 await browser.close();
 web.close();
 server.close();

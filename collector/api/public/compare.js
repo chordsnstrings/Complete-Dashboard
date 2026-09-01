@@ -100,7 +100,13 @@ export async function renderCompare(root, aParam, bParam) {
     'Every person who drove on either day, ordered by how much their booking count changed');
   root.append(movedP.panel);
 
-  const g = el('div', 'grid g2'); root.append(g);
+  /* g23, not g2. By channel is a four-column table carrying two figures and a
+     basis marker in its money cell; measured on production at a 1600px
+     viewport it needs 660px and an even split gave it 593, so the column the
+     panel exists to show was 67px off the edge and the reader was told to
+     scroll for it. Started and stopped beside it is two short lists of names
+     and loses nothing to the narrower half. */
+  const g = el('div', 'grid g23'); root.append(g);
   const platP = panel('By channel', 'Where the change came from');
   g.append(platP.panel);
   const rosterP = panel('Started and stopped',
@@ -344,10 +350,15 @@ export async function renderCompare(root, aParam, bParam) {
           const mark = (k) => (k && BASIS[k][0]
             ? `<span class="dim" title="${esc(BASIS[k][1])}"> ${BASIS[k][0]}</span>` : '');
           const same = kA && kB && kA === kB;
+          /* The currency once per cell, on the left figure. The Trips column
+             beside this one already writes "426 vs 519" rather than repeating
+             its unit, and repeating AED here is what took the cell over the
+             width of its half of the grid. */
           const val = (x, k) => (k ? money(x[k]) : '—');
+          const bare = (x, k) => (k ? money(x[k]).replace(/^AED\s*/, '') : '—');
           return same
-            ? `${val(r.a, kA)} <span class="dim">vs ${val(r.b, kB)}</span>${mark(kA)}`
-            : `${val(r.a, kA)}${mark(kA)} <span class="dim">vs ${val(r.b, kB)}</span>${mark(kB)}`;
+            ? `${val(r.a, kA)} <span class="dim">vs ${bare(r.b, kB)}</span>${mark(kA)}`
+            : `${val(r.a, kA)}${mark(kA)} <span class="dim">vs ${bare(r.b, kB)}</span>${mark(kB)}`;
         } },
     ]));
     platP.body.append(el('p', 'cap',
