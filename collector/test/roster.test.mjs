@@ -296,6 +296,33 @@ check('somebody with no statement has none of it',
   d.people.filter((x) => !/Asad/.test(x.name || '')).every((x) => !x.statement_fares),
   JSON.stringify(d.people.filter((x) => x.statement_fares).map((x) => x.name)));
 
+/* ── zero where we looked, null where we could not ────────────────────────
+   The `ever` CTE only produces a row for somebody who HAS a trip, so Trips
+   ever, First drove and Last drove arrived null for everybody with none — and
+   the page printed "—" for 75 people it had just labelled NEVER DRIVEN, on the
+   strength of `lifetime === 0`. The category asserted the person had taken no
+   trip; the column beside it said we did not know. */
+const waiting = d.people.find((x) => /Waiting Person/.test(x.name || ''));
+const mystery = d.people.find((x) => /Mystery Person/.test(x.name || ''));
+check('somebody on a platform we DO collect, with no trip, reports zero',
+  waiting && waiting.lifetime_trips === 0, JSON.stringify([waiting?.name, waiting?.lifetime_trips]));
+check('…and the category that says so agrees with the column',
+  waiting?.category === 'in_pipeline' || waiting?.category === 'never_started',
+  String(waiting?.category));
+/* And the other direction, which is the reason this is not simply
+   `coalesce(count(*), 0)` in the SQL: Mystery Person is on Yango alone and
+   this fixture holds no Yango trip, so "no trips" would be a claim about a
+   feed we do not have rather than about the person. */
+check('somebody whose only platform we collect nothing for stays unknown',
+  mystery && mystery.lifetime_trips == null,
+  JSON.stringify([mystery?.name, mystery?.platforms, mystery?.lifetime_trips]));
+check('…and is categorised as unobserved rather than as never having driven',
+  mystery?.category === 'activity_unknown' || mystery?.category === 'unclassified',
+  String(mystery?.category));
+check('a person who HAS driven keeps their real count',
+  (d.people.find((x) => /Asad/.test(x.name || '')) || {}).lifetime_trips === 20,
+  String((d.people.find((x) => /Asad/.test(x.name || '')) || {}).lifetime_trips));
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

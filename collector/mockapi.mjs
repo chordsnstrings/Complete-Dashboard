@@ -2672,7 +2672,11 @@ app.get('/api/roster', (_, r) => {
       payout_days: category === 'working' ? Math.max(1, 26 - i) : 0,
       km: category === 'working' ? (120 - i * 9) * 12 : null,
       last_trip: category === 'working' ? dayISO(i % 5) : null,
-      lifetime_trips: category === 'never_started' ? 0 : 900 - i * 60,
+      /* Three states, because the page renders three: a real count, a zero for
+         somebody we looked for and found nothing, and null for somebody whose
+         only platform we collect no trips for. */
+      lifetime_trips: category === 'never_started' ? 0
+        : category === 'activity_unknown' ? null : 900 - i * 60,
       first_trip: category === 'never_started' ? null : dayISO(300),
       last_ever: category === 'never_started' ? null : dayISO(category === 'working' ? i % 5 : 40 + i),
       category, holding_vehicle_while_blocked: blocked,

@@ -135,7 +135,18 @@ export async function renderRoster(root) {
     return;
   }
 
-  const FILTER = {
+  /* What an absent date means, in the person's own terms.
+     null lifetime  we collect no trips for any platform they are on, so we
+                    cannot say whether they have ever driven
+     0              we looked and there is nothing: they have not
+     >0 with no date  they have driven and the record carries no timestamp */
+const neverOrUnknown = (r) => (r.lifetime_trips == null
+  ? '<span class="ent-off" title="we hold no trip history for any platform this person is on">not observed</span>'
+  : r.lifetime_trips
+    ? '<span class="ent-off">not recorded</span>'
+    : '<span class="ent-off">never</span>');
+
+const FILTER = {
     pipeline: (x) => ['in_pipeline', 'never_started', 'unclassified', 'activity_unknown'].includes(x.category),
     idle: (x) => x.category === 'idle_this_window',
     blocked: (x) => x.category === 'blocked',
@@ -284,15 +295,19 @@ export async function renderRoster(root) {
     { label: 'Trips ever', key: 'lifetime_trips', num: true,
       render: (r) => (r.lifetime_trips != null ? fmt(r.lifetime_trips)
         : '<span class="ent-off" title="we hold no trip history for any platform this person is on">not observed</span>') },
+    /* THREE STATES, not two. These two columns tested `r.lifetime_trips` for
+       truthiness, so a null — nobody on this person's platforms is a feed we
+       collect — fell into the same branch as a zero and the cell read "never".
+       "Never drove" is a claim about a person; the truth for those 31 people
+       is a claim about a FEED, and the Trips ever column beside these two has
+       always said so in its own words. */
     { label: 'First drove', key: 'first_trip',
-      render: (r) => (r.first_trip ? dateStr(r.first_trip)
-        : (r.lifetime_trips ? '<span class="ent-off">not recorded</span>' : '<span class="ent-off">never</span>')) },
+      render: (r) => (r.first_trip ? dateStr(r.first_trip) : neverOrUnknown(r)) },
     { label: 'Last drove', key: 'last_ever',
       sortValue: (r) => (r.last_ever ? Date.parse(r.last_ever) : null),
       render: (r) => (r.last_ever
         ? `${dateStr(r.last_ever)} <small class="dim">${fmt(r.days_since_last_trip)}d</small>`
-        : r.lifetime_trips ? '<span class="ent-off">not recorded</span>'
-          : '<span class="ent-off">never</span>') },
+        : neverOrUnknown(r)) },
     /* Named for what it is. A bare "Score" column that is Bolt's rating and
        null for 211 of 278 people reads as a fleet score nobody has. */
     ...(anyScore ? [{ label: 'Bolt score', key: 'score', num: true,

@@ -304,6 +304,24 @@ export function rosterRoutes(app, { q, wrap, range }) {
            it showed. */
         statement_fares: r.statement_fares == null ? null : round(r.statement_fares, 0),
         statement_fare_periods: r.statement_fare_periods ?? 0,
+        /* ZERO WHERE WE LOOKED, NULL WHERE WE COULD NOT.
+           ─────────────────────────────────────────────────────────────
+           The `ever` CTE only produces a row for somebody who has a trip, so
+           these three arrive null for everybody who has none — and the page
+           printed "—" in Trips ever, First drove and Last drove for 75 people
+           it had itself just labelled NEVER DRIVEN. The category is the
+           assertion "this person has taken no trip"; the column beside it said
+           we did not know. One of the two had to be wrong, and it was the
+           column: `lifetime === 0` is what put them in that category.
+
+           So a lifetime count of zero is REPORTED as zero wherever this
+           product can actually see the person's work — which is exactly the
+           activityKnown test the category above already runs — and stays null
+           for the 31 people whose only platform we collect no trips for, where
+           "no trips" would be a claim about a feed we do not have. The two
+           dates stay null either way: there is no day to name. */
+        lifetime_trips: r.lifetime_trips != null ? r.lifetime_trips
+          : (activityKnown ? 0 : null),
         payout: r.payout == null ? null : Number(r.payout),
         payout_days: r.payout_days ?? 0,
         km: r.km == null ? null : round(r.km, 0),
