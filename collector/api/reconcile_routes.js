@@ -51,7 +51,7 @@
    the page prints it where the range control used to sit, and the tiles and
    the table describe the same thing because they are computed from the same
    rows. */
-import { personKey } from './custody_sql.js';
+import { personKeyStored } from './custody_sql.js';
 
 import { dubaiDay } from './window.js';
 
@@ -137,10 +137,19 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
        The bank side is narrowed to the statement's own (platform, day) pairs
        before the fold is computed, which is also what keeps this cheap: the
        statement surface reaches back about a week and driver_payout_day holds
-       a year. */
+       a year.
+
+       personKeyStored, not personKey: the fold is two nested regexes, one with
+       a backreference, and computing it per row is what sql/schema_v20.sql
+       stored the trip column to stop doing. Both money tables carry the same
+       generated column since sql/schema_v51.sql — added because the slow-query
+       log measured this query at 5.0-5.7s and the monthly statement fold below
+       at 2.6-3.2s, on two tables of a few tens of thousands of rows. The answer
+       is identical by construction; test/person_key.test.mjs holds all four
+       copies of the expression to the JS one. */
     const coveredSql = (keyExpr, dayBound) => `
       WITH stmt AS (
-        SELECT s.platform, ${personKey('s.driver_ext_id', 's.driver_name')} AS person, s.day,
+        SELECT s.platform, ${personKeyStored('s')} AS person, s.day,
                sum(s.net) + coalesce(sum(s.tips), 0) + coalesce(sum(s.salik), 0)
                  - coalesce(sum(s.cash), 0) AS expected
           FROM driver_statement_day s
@@ -166,7 +175,7 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
       ), stmt_days AS (
         SELECT DISTINCT platform, day FROM stmt
       ), bank AS (
-        SELECT p.platform, ${personKey('p.driver_ext_id', 'p.driver_name')} AS person, p.day,
+        SELECT p.platform, ${personKeyStored('p')} AS person, p.day,
                sum(p.earnings) AS earnings
           FROM driver_payout_day p
           JOIN stmt_days d ON d.platform = p.platform AND d.day = p.day
@@ -211,7 +220,7 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
                 round(sum(s.salik)::numeric, 2) AS salik,
                 round(sum(s.cash)::numeric, 2) AS cash_collected,
                 count(DISTINCT s.day)::int AS ontrip_days,
-                count(DISTINCT ${personKey('s.driver_ext_id', 's.driver_name')})::int AS ontrip_drivers
+                count(DISTINCT ${personKeyStored('s')})::int AS ontrip_drivers
          FROM driver_statement_day s
          WHERE s.source <> 'ledger' AND ${sideWhere('s')}
          GROUP BY 1`, [platform, fleet]);
@@ -264,7 +273,7 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
                 round(sum(s.salik)::numeric, 2) AS salik,
                 round(sum(s.cash)::numeric, 2) AS cash_collected,
                 1::int AS ontrip_days,
-                count(DISTINCT ${personKey('s.driver_ext_id', 's.driver_name')})::int AS ontrip_drivers
+                count(DISTINCT ${personKeyStored('s')})::int AS ontrip_drivers
          FROM driver_statement_day s
          WHERE s.source <> 'ledger' AND ${sideWhere('s')} AND ${dayBound('s')}
          GROUP BY 1`, P);

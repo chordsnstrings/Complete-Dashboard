@@ -15,7 +15,7 @@
    necessary in the first place. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
-import { personFold } from '../api/custody_sql.js';
+import { personFold, personKey, personKeyStored } from '../api/custody_sql.js';
 import { readFileSync } from 'node:fs';
 
 const db = new PGlite();
@@ -169,6 +169,66 @@ console.log('\nthe cross-platform table groups on the stored fold');
     && !/GROUP BY 1\) s/.test(body),
     'the window is still grouped by person twice');
 }
+
+console.log('\nthe money tables fold people the same way');
+
+/* sql/schema_v51.sql put the same generated column on driver_statement_day and
+   driver_payout_day, because /api/reconcile folds BOTH of them per row and the
+   slow-query log measured the pair at eight seconds. Four copies of one
+   expression now exist in SQL; each one is a chance for a person's money and a
+   person's work to end up under two different keys. */
+let m = 0;
+for (const name of NAMES) {
+  m++;
+  await q(`INSERT INTO driver_statement_day (platform, fleet_id, driver_ext_id, driver_name, day,
+             net, tips, salik, cash, source, pseudo)
+           VALUES ('uber', 'ecosine', $1, $2, date '2026-05-01' + $3::int, 100, 0, 0, 0, 'uber_rest', false)`,
+    [`s${m}`, name, m]);
+  await q(`INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, driver_name, day,
+             period_start, period_end, earnings, cash_earnings)
+           VALUES ('uber', 'ecosine', $1, $2, date '2026-05-01' + $3::int,
+                   date '2026-05-01' + $3::int, date '2026-05-01' + $3::int, 100, 0)`,
+    [`p${m}`, name, m]);
+}
+for (const [table, col] of [['driver_statement_day', 'driver_name'], ['driver_payout_day', 'driver_name']]) {
+  const got = await q(`SELECT ${col} AS nm, person_key, ${CANON(col)} AS canon FROM ${table}`);
+  check(`${table} stores exactly what the JS fold computes`,
+    got.length === NAMES.length && got.every((r) => r.person_key === r.canon),
+    got.filter((r) => r.person_key !== r.canon)
+      .map((r) => `${JSON.stringify(r.nm)}: ${JSON.stringify(r.person_key)} vs ${JSON.stringify(r.canon)}`).join('; '));
+}
+/* And the two agree with each other, which is the property /api/reconcile
+   depends on: it joins a statement row to a payout row ON this key, so a fold
+   that differed by a space would compare a person against nobody and report
+   the platform as having paid for work it never reported. */
+const [{ joined }] = await q(
+  `SELECT count(*)::int AS joined FROM driver_statement_day s
+     JOIN driver_payout_day p ON p.person_key = s.person_key AND p.day = s.day`);
+check('a statement row and a payout row for the same human join on the key',
+  joined === NAMES.length,
+  `${joined} of ${NAMES.length} — one pair per name, and a fold that differed `
+  + 'on any of them by a space would leave that pair unjoined');
+
+/* The anonymous row, on the tables where money lives: an empty key here would
+   pool every unnamed payout under one person and hand them the fleet's cash. */
+await q(`INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, day,
+           period_start, period_end, earnings, cash_earnings)
+         VALUES ('uber', 'ecosine', 'p-anon', date '2026-06-01', date '2026-06-01', date '2026-06-01', 99, 0)`);
+const [anon] = await q(`SELECT person_key FROM driver_payout_day WHERE driver_ext_id = 'p-anon'`);
+check('a payout with no driver name has no person key', anon.person_key === null,
+  JSON.stringify(anon.person_key));
+/* personKeyStored is what the endpoint actually writes, and it has to answer
+   the id for exactly that row rather than NULL — a NULL person groups every
+   anonymous payout together again one level up. */
+const [{ k }] = await q(
+  `SELECT ${personKeyStored('p')} AS k FROM driver_payout_day p WHERE p.driver_ext_id = 'p-anon'`);
+check('…and personKeyStored falls back to the id, as personKey always did',
+  k === 'p-anon', JSON.stringify(k));
+const [{ same }] = await q(
+  `SELECT count(*)::int AS same FROM driver_payout_day p
+    WHERE ${personKeyStored('p')} IS DISTINCT FROM ${personKey('p.driver_ext_id', 'p.driver_name')}`);
+check('and answers identically to the expression it replaced, on every row',
+  same === 0, `${same} row(s) differ`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

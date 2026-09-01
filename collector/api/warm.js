@@ -79,6 +79,14 @@ const PATHS = [
 const BARE_PATHS = [
   '/api/trend/monthly', '/api/insights',
   '/api/compliance/drivers', '/api/coverage',
+  /* All-time by design — a reconciliation of six days of July against July's
+     bank payout is the mismatch of scopes that endpoint exists to prevent — so
+     it takes no window and the page asks for it bare. It is also the heaviest
+     read in the product after /api/coverage: both sides fold every driver-day
+     on record by person. Cold it was nine seconds, which bin/render-audit.mjs
+     reported as "blank-page — no kpi, table, chart or panel", because the page
+     gave up before the answer arrived. */
+  '/api/reconcile',
 ];
 
 // The windows the UI opens with. 30 is the default; 7 and 90 are one click away.

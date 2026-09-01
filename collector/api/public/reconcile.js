@@ -33,7 +33,7 @@
 import { empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, fmt, pct,
   countOf, plural, verdict } from './ui.js';
-import { api, state, href } from './data.js';
+import { qChan, href } from './data.js';
 
 /* Why a money column can be empty for a whole year of months.
    ─────────────────────────────────────────────────────────────────────────
@@ -133,11 +133,15 @@ export async function renderReconcile(root, month) {
   /* The window selector does not apply here — the whole record is the point of
      a reconciliation — but the platform and fleet filters do, and the endpoint
      answers for one platform when one is chosen. */
-  const p = new URLSearchParams();
-  if (month) p.set('month', month);
-  if (state.platform) p.set('platform', state.platform);
-  if (state.fleet) p.set('fleet', state.fleet);
-  const d = await api(`/api/reconcile?${p.toString()}`);
+  /* Through qChan, which is where the platform and fleet chips already come
+     from and — the part that matters here — omits the '?' when there is
+     nothing after it. This built its own query string, so with no chip chosen
+     it asked for "/api/reconcile?": one character away from the key
+     api/warm.js fills, and therefore a guaranteed cache miss on the page's own
+     default view, of the heaviest read in the product. api/cache.js keys on
+     the whole originalUrl; data.js has had this guard since the same bug cost
+     /api/coverage its warm entry. */
+  const d = await qChan('/api/reconcile', month ? { month } : {});
   host.innerHTML = '';
 
   if (month) {

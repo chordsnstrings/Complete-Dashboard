@@ -117,6 +117,15 @@ export const personFold = (col) => `regexp_replace(
 export const personKey = (idCol = 'driver_ext_id', nameCol = 'driver_name') =>
   `coalesce(nullif(${personFold(nameCol)}, ''), ${idCol})`;
 
+/** personKey from a table that STORES the fold, rather than computing it.
+    The same answer as personKey() and roughly a hundred times cheaper: the
+    regex runs once per write instead of once per row per request. Only for
+    tables carrying the generated column — trip, driver_platform_state,
+    vehicle_driver_day (sql/schema_v20.sql), driver_earnings_component
+    (v42), driver_statement_day and driver_payout_day (v51). */
+export const personKeyStored = (a) =>
+  `coalesce(nullif(${a}.person_key, ''), ${a}.driver_ext_id)`;
+
 /** How many DISTINCT PEOPLE, as opposed to how many platform records. */
 /* Counting people from the STORED fold, for a query that can reach it.
    ─────────────────────────────────────────────────────────────────────────
