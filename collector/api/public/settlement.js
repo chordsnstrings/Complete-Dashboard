@@ -233,10 +233,19 @@ async function settleCash(host) {
       sub: `over the ${pct(c.value_known_pct, 0)} of cash bookings that report a fare — the rest is real `
         + 'money with no figure attached',
       tone: c.value_known_pct != null && c.value_known_pct < 60 ? 'warn' : null },
+    /* Two numbers for one thing on one page, again — this tile reads the
+       whole fleet's statements and the Statement cash column below reads the
+       people who took a cash BOOKING, so they are a superset and a subset and
+       differed by AED 2,814 on production with nothing on screen saying why.
+       The tile now names the part that belongs to the list under it. */
     reported != null
       ? { label: 'Cash the platforms report', value: money(reported),
-        sub: 'from the payout statements, not from per-booking fares — a different measurement of the '
-          + 'same money, and the larger of the two' }
+        sub: 'from the payout statements, not from per-booking fares — a different measurement of '
+          + 'the same money, and the larger of the two'
+          + (c.total_statement_cash != null
+            ? `; ${money(c.total_statement_cash)} of it belongs to the `
+              + `${countOf(c.statement_cash_drivers || 0, 'person', 'people')} listed below`
+            : '') }
       : { label: 'Cash the platforms report', value: '—',
         sub: 'no payout statement covers this window' },
     /* Counted in the database. This was c.drivers.length — the length of a
