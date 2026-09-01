@@ -328,16 +328,26 @@ export async function renderCompare(root, aParam, bParam) {
          marked, exactly as #roster marks its statement figures. */
       { label: 'Money', key: 'money_shown', num: true,
         render: (r) => {
-          const cell = (x) => {
-            if (x.fares != null) return money(x.fares);
-            if (x.paid != null) return `${money(x.paid)}<span class="dim" title="the day's share of the weekly platform statement — an estimate"> stmt</span>`;
-            if (x.statement_net != null) return `${money(x.statement_net)}<span class="dim" title="the operator's own ledger import for this day"> ldg</span>`;
-            return '—';
+          /* The basis, and the value it applies to. A channel almost always
+             has the same basis on both days, so the marker is printed ONCE
+             after the pair — the panel is half a page wide and repeating it
+             was enough on its own to push the column into sideways scroll. */
+          const BASIS = {
+            fares: [null, null],
+            paid: ['stmt', 'the day’s share of the weekly platform statement — an estimate'],
+            statement_net: ['ldg', 'the operator’s own ledger import for this day'],
           };
-          const any = (x) => x.fares != null || x.paid != null || x.statement_net != null;
-          return any(r.a) || any(r.b)
-            ? `${cell(r.a)} <span class="dim">vs ${cell(r.b)}</span>`
-            : '<span class="dim">no money reported</span>';
+          const of = (x) => (x.fares != null ? 'fares'
+            : x.paid != null ? 'paid' : x.statement_net != null ? 'statement_net' : null);
+          const kA = of(r.a), kB = of(r.b);
+          if (!kA && !kB) return '<span class="dim">no money reported</span>';
+          const mark = (k) => (k && BASIS[k][0]
+            ? `<span class="dim" title="${esc(BASIS[k][1])}"> ${BASIS[k][0]}</span>` : '');
+          const same = kA && kB && kA === kB;
+          const val = (x, k) => (k ? money(x[k]) : '—');
+          return same
+            ? `${val(r.a, kA)} <span class="dim">vs ${val(r.b, kB)}</span>${mark(kA)}`
+            : `${val(r.a, kA)}${mark(kA)} <span class="dim">vs ${val(r.b, kB)}</span>${mark(kB)}`;
         } },
     ]));
     platP.body.append(el('p', 'cap',
