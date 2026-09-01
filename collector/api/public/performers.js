@@ -55,7 +55,49 @@ const eligible = (r) => (r.days_worked || 0) >= MIN_DAYS && (r.bookings || 0) >=
 const isWeek = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '')
   && new Date(`${v}T12:00:00Z`).getUTCDay() === 1;
 
-const rate = (r) => (r.days_worked ? (r.money || 0) / r.days_worked : null);
+/* THE MEASURE HAS TO EXIST IN THE WEEK.
+   ─────────────────────────────────────────────────────────────────────────
+   The rate is money per day worked. Uber publishes no per-trip fare, so on
+   this fleet the money IS the weekly payout statement — and the statements
+   held reach back only into early 2026. For every week before them `money` is
+   null on every row, the rate is 0 for everybody, and a sort by it leaves the
+   array exactly as the endpoint returned it: alphabetical. Making the older
+   weeks reachable turned that into a page: "Aamir Khan Amin earned most per
+   day worked — AED 0", with a hundred and ten people under him all on AED 0,
+   in alphabetical order, under a heading that called it a ranking.
+
+   An alphabetical list in a leaderboard's clothes is worse than no page. So
+   the basis is chosen FROM THE WEEK — money where the week has money, work
+   where it does not — and the swap is said out loud on the headline, the
+   tiles, the column and the caption, because a page that quietly changes what
+   it measures is the same failure wearing a different suit. */
+const MONEY_BASIS = {
+  money: true,
+  of: (r) => (r.days_worked ? (r.money || 0) / r.days_worked : null),
+  fmt: (v) => money(v),
+  unit: 'per day worked',
+  verb: (top) => (top ? 'earned most' : 'earned least'),
+  tile: (top) => (top ? 'Best per day' : 'Lowest per day'),
+  column: 'Per day',
+  caption: 'Money in per day worked',
+  why: null,
+};
+const WORK_BASIS = {
+  money: false,
+  of: (r) => (r.days_worked ? (r.bookings || 0) / r.days_worked : null),
+  fmt: (v) => (v == null ? '—' : fmt(v, 1)),
+  unit: 'bookings per day worked',
+  verb: (top) => (top ? 'drove most' : 'drove least'),
+  tile: (top) => (top ? 'Most a day' : 'Fewest a day'),
+  column: 'Bookings a day',
+  caption: 'Bookings per day worked',
+  why: 'No channel reported money for this week, so nobody can be ranked on it. Uber publishes '
+    + 'no per-trip fare and the payout statements this fleet holds do not reach back this far — '
+    + 'so the ranking below is on WORK DONE, bookings per day worked, and the money columns are '
+    + 'absent rather than zero.',
+};
+const NO_MONEY = 'no channel reported money for this week — Uber publishes no per-trip fare, and '
+  + 'the payout statements this fleet holds do not reach back to it';
 
 function whyNotRanked(r) {
   if (!r.days_worked) return 'did not drive';
@@ -122,6 +164,21 @@ export async function renderPerformers(root, band) {
     + 'Dubai days, the last one that finished. A part-finished week ranks whoever started earliest.';
   head.append(wkNote);
 
+  /* Chosen from the rows, not from the date: a week with money ranks on money
+     whatever its age, and a recent week that somehow arrived without any would
+     be caught by the same branch. */
+  const basis = rows.some((r) => (r.money || 0) > 0) ? MONEY_BASIS : WORK_BASIS;
+  const rate = basis.of;
+  if (basis.why) head.append(note(basis.why, 'warn'));
+  /* The caption was written before the fetch, when the measure was not yet
+     known. It names the measure, so it is corrected here rather than left
+     describing a ranking the page is not showing. */
+  const cap = listP.panel.querySelector('p.cap');
+  if (cap) {
+    cap.textContent = `${basis.caption}, over the week above. At least ${MIN_DAYS} days `
+      + `and ${MIN_BOOKINGS} bookings — click any row for the week in detail.`;
+  }
+
   const ranked = rows.filter(eligible).filter((r) => rate(r) != null);
   ranked.sort((a, b) => (top ? rate(b) - rate(a) : rate(a) - rate(b)));
   const rest = rows.filter((r) => !eligible(r) || rate(r) == null);
@@ -147,10 +204,10 @@ export async function renderPerformers(root, band) {
       ? Math.round((Math.abs(lR - oR) / base) * 100) : null;
     verdict(head, {
       claim: led
-        ? `${led.driver_name || 'Somebody'} ${top ? 'earned most' : 'earned least'} per day worked`
+        ? `${led.driver_name || 'Somebody'} ${basis.verb(top)} per day worked`
         : 'Nobody worked enough of this week to rank',
-      figure: led ? money(rate(led)) : '—',
-      unit: 'per day worked',
+      figure: led ? basis.fmt(rate(led)) : '—',
+      unit: basis.unit,
       tone: null,
       meta: `${fmt(ranked.length)} ranked`,
       sub: (spread != null
@@ -167,11 +224,16 @@ export async function renderPerformers(root, band) {
   kh.replaceWith(kpiRow([
     { label: 'People ranked', value: fmt(ranked.length),
       sub: `of ${fmt(rows.length)} who drove — the rest did too little of the week` },
-    { label: top ? 'Best per day' : 'Lowest per day',
-      value: ranked.length ? money(rate(ranked[0])) : '—',
+    { label: basis.tile(top),
+      value: ranked.length ? basis.fmt(rate(ranked[0])) : '—',
       sub: ranked.length ? esc(ranked[0].driver_name) : 'nobody cleared the threshold' },
-    { label: 'Fleet per day worked', value: money(t.aed_per_day_worked),
-      sub: 'every person, every day anyone drove' },
+    /* AED 0 is a claim about the week; "—" with the reason is the truth about
+       it. The fleet rate came through as a zero on every week before the
+       statements, and a tile reading AED 0 beside a hundred working drivers is
+       read as a bad week rather than as an absent feed. */
+    { label: 'Fleet per day worked',
+      value: basis.money ? money(t.aed_per_day_worked) : '—',
+      sub: basis.money ? 'every person, every day anyone drove' : NO_MONEY },
     /* Same trap as the two-ends table below: first-over-last is a magnitude on
        the page sorted highest-first and a fraction on the page sorted
        lowest-first, where AED 361 against AED 13 was rounded to "0x". */
@@ -207,13 +269,18 @@ export async function renderPerformers(root, band) {
       { label: 'Fleet', key: 'fleet_id', render: (r) => (r.fleet_id ? pill(sourceLabel(r.fleet_id)) : '—') },
       { label: 'Platforms', key: 'platforms',
         render: (r) => (r.platforms || []).map((x) => pill(sourceLabel(x))).join(' ') || '—' },
-      { label: 'Per day', key: '_rate', num: true, render: (r) => money(rate(r)) },
-      { label: 'Money in', key: 'money', num: true,
-        render: (r) => `${money(r.money)}<span class="dim" title="payout where the channel pays one, fare where it prices the trip"> ${
-          r.payouts && r.fares ? 'both' : r.payouts ? 'payout' : 'fare'}</span>` },
+      { label: basis.column, key: '_rate', num: true, render: (r) => basis.fmt(rate(r)) },
+      /* `absent` rather than a column of dashes: on a week the statements do
+         not reach, every money cell is empty and the reader is owed the reason
+         once, above the table, instead of eleven rows of "—". */
+      { label: 'Money in', key: 'money', num: true, absent: NO_MONEY,
+        render: (r) => (r.money == null ? '—'
+          : `${money(r.money)}<span class="dim" title="payout where the channel pays one, fare where it prices the trip"> ${
+            r.payouts && r.fares ? 'both' : r.payouts ? 'payout' : 'fare'}</span>`) },
       { label: 'Days', key: 'days_worked', num: true },
       { label: 'Bookings', key: 'bookings', num: true },
-      { label: 'Per booking', key: 'aed_per_booking', num: true, render: (r) => money(r.aed_per_booking) },
+      { label: 'Per booking', key: 'aed_per_booking', num: true, absent: NO_MONEY,
+        render: (r) => money(r.aed_per_booking) },
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
       { label: 'Completed', key: 'completion_pct', num: true,
         render: (r) => (r.completion_pct == null ? '—' : `${fmt(r.completion_pct)}%`) },
@@ -248,10 +315,14 @@ export async function renderPerformers(root, band) {
     const best = byRate.slice(0, n);
     const worst = byRate.slice(-n);
     const avg = (list, f) => list.reduce((a, x) => a + (f(x) || 0), 0) / list.length;
+    /* On a week with no money the first two rows would be the same measure
+       twice and the third a column of dashes, so the money rows are dropped
+       rather than printed empty — the note above the ranking has already said
+       why they are not there. */
     const cmp = [
-      ['Per day worked', avg(best, rate), avg(worst, rate), money],
+      ...(basis.money ? [['Per day worked', avg(best, rate), avg(worst, rate), money]] : []),
       ['Bookings a day', avg(best, (x) => x.bookings_per_day), avg(worst, (x) => x.bookings_per_day), (v) => fmt(v, 1)],
-      ['Per booking', avg(best, (x) => x.aed_per_booking), avg(worst, (x) => x.aed_per_booking), money],
+      ...(basis.money ? [['Per booking', avg(best, (x) => x.aed_per_booking), avg(worst, (x) => x.aed_per_booking), money]] : []),
       ['Km a day', avg(best, (x) => (x.km || 0) / (x.days_worked || 1)), avg(worst, (x) => (x.km || 0) / (x.days_worked || 1)), (v) => `${fmt(v)} km`],
       ['Days worked', avg(best, (x) => x.days_worked), avg(worst, (x) => x.days_worked), (v) => fmt(v, 1)],
       ['Completed', avg(best, (x) => x.completion_pct), avg(worst, (x) => x.completion_pct), (v) => `${fmt(v)}%`],
@@ -278,7 +349,8 @@ export async function renderPerformers(root, band) {
         render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
       { label: 'Days', key: 'days_worked', num: true },
       { label: 'Bookings', key: 'bookings', num: true },
-      { label: 'Money in', key: 'money', num: true, render: (r) => money(r.money) },
+      { label: 'Money in', key: 'money', num: true, absent: NO_MONEY,
+        render: (r) => money(r.money) },
       { label: 'Why not ranked', key: 'why' },
     ]));
     if (rest.length > 40) {
@@ -289,8 +361,8 @@ export async function renderPerformers(root, band) {
 
   if (!top) {
     root.append(note(
-      'This page ranks money against days worked. It cannot tell a person who worked and '
-      + 'earned little from one who was on leave, whose vehicle was off the road, or whose '
+      `This page ranks ${basis.unit} against days worked. It cannot tell a person who worked and `
+      + 'did little from one who was on leave, whose vehicle was off the road, or whose '
       + 'licence had lapsed — the standing and days columns are there for exactly that, and '
       + 'they should be read before anyone is spoken to.', 'warn'));
   }

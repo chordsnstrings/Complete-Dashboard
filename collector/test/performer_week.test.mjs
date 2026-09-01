@@ -55,26 +55,32 @@ const OLD_MON = new Date(mondayOf(new Date(LAST_MON.getTime() - 520 * 864e5)).ge
 const OLD_WEEK = iso(OLD_MON);
 
 let n = 0;
-const trip = (drv, name, day, price) => q(
+const trip = (platform, drv, name, day, price) => q(
   `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
      requested_at, ended_at, pickup_addr, dropoff_addr, distance_km, status, price, raw)
-   VALUES ('hotel', $1, 'ecosine', 'L900', $2, $3, $4::timestamptz,
-           $4::timestamptz + interval '22 min',
+   VALUES ($1, $2, 'ecosine', 'L900', $3, $4, $5::timestamptz,
+           $5::timestamptz + interval '22 min',
            'A - Business Bay - Dubai - UAE', 'B - Deira - Dubai - UAE',
-           14, 'completed', $5, '{}'::jsonb)`,
-  [`pw${++n}`, drv, name, `${day}T09:00:00+04`, price]);
+           14, 'completed', $6, '{}'::jsonb)`,
+  [platform, `pw${++n}`, drv, name, `${day}T09:00:00+04`, price]);
 
-const spread = async (drv, name, monday) => {
+const spread = async (platform, drv, name, monday, price) => {
   for (let d = 0; d < 6; d++) {
     const day = iso(new Date(new Date(`${monday}T12:00:00Z`).getTime() + d * 864e5));
-    for (let i = 0; i < 5; i++) await trip(drv, name, day, 130);
+    for (let i = 0; i < 5; i++) await trip(platform, drv, name, day, price);
   }
 };
 /* Two people, two weeks, no overlap: whichever week the page is showing, the
    OTHER person must not be in it. A ranking that silently answers for the
-   newest week is otherwise indistinguishable from one that honoured the ask. */
-await spread('old-1', 'Marwan Al Qassimi', OLD_WEEK);
-await spread('new-1', 'Idris Ferreira', LAST_WEEK);
+   newest week is otherwise indistinguishable from one that honoured the ask.
+
+   And the two weeks carry DIFFERENT money, deliberately. The old one is Uber,
+   which publishes no per-trip fare and whose money arrives as a weekly payout
+   statement — and this fleet's statements do not reach back that far, exactly
+   as in production. So the old week is a week with work in it and no money,
+   which is what every week before early 2026 actually is. */
+await spread('uber', 'old-1', 'Marwan Al Qassimi', OLD_WEEK, null);
+await spread('hotel', 'new-1', 'Idris Ferreira', LAST_WEEK, 130);
 await refreshRollups({ db });
 
 const { app: apiApp, get } = await mountAll(db, { serverRoutes: true });
@@ -160,6 +166,26 @@ const oldText = await bodyOf();
 check('an address naming an old week ranks that week',
   /Marwan Al Qassimi/.test(oldText) && !/Idris Ferreira/.test(oldText),
   oldText.slice(0, 120).replace(/\n/g, ' '));
+
+/* ── and ranks it on something that exists ──────────────────────────────
+   Reaching the older weeks is only half of it. The rate is money per day
+   worked, the money is the weekly payout statement, and the statements do not
+   reach back — so on every one of these weeks the rate is 0 for everybody, the
+   sort leaves the rows in the order the endpoint returned them, and the page
+   printed that alphabetical list under "X earned most per day worked — AED 0".
+   A leaderboard whose every row reads AED 0 is not a leaderboard. */
+check('a week with no money does not print a money ranking of zeroes',
+  !/earned most per day worked/.test(oldText) && !/AED 0\b/.test(oldText),
+  (oldText.match(/.{0,60}AED 0.{0,40}/) || ['—'])[0].replace(/\n/g, ' '));
+check('…it says so, in words, above the ranking',
+  /no channel reported money for this week/i.test(oldText),
+  oldText.slice(0, 300).replace(/\n/g, ' '));
+check('…and ranks on the work the week does carry',
+  /bookings per day worked/i.test(oldText) && /drove most/i.test(oldText),
+  oldText.slice(0, 300).replace(/\n/g, ' '));
+check('the week that HAS money still ranks on money',
+  /earned most per day worked/.test(nowText) && !/drove most/.test(nowText),
+  nowText.slice(0, 200).replace(/\n/g, ' '));
 
 const link = await page.evaluate(() => {
   const rows = [...document.querySelectorAll('tbody tr')];
