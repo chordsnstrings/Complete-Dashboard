@@ -394,18 +394,28 @@ function scrollCue(box, wrap) {
     box.classList.toggle('cue-l', over > 2 && wrap.scrollLeft > 2);
   };
   wrap.addEventListener('scroll', sync, { passive: true });
-  /* ResizeObserver rather than a window resize listener: a table can start
-     overflowing because a SIBLING changed — a panel gaining a chart, a filter
-     narrowing the grid — with the window untouched. */
-  if (typeof ResizeObserver === 'function') new ResizeObserver(sync).observe(wrap);
 
-  /* Named after layout, and only once. requestAnimationFrame because the
-     element is not in the document yet at this point, so scrollWidth is 0 and
-     every table would look like it fits. */
-  requestAnimationFrame(() => {
-    sync();
+  /* The caption is REMEASURED, not written once and left.
+     ─────────────────────────────────────────────────────────────────────
+     It used to be produced inside a single requestAnimationFrame and appended
+     for good. The fade beside it was already recomputed on scroll and resize,
+     so the two disagreed the moment a layout settled: on production #compare's
+     By channel panel carried "Scroll the table sideways for one more column:
+     Money" under a table measuring scrollWidth 660 against clientWidth 660 —
+     nothing hidden, nothing to scroll, and a sentence telling the reader a
+     figure they could see was out of reach. Any table can reach that state:
+     a chart above it finishing its layout, a filter widening the grid, a
+     window resized, a sibling panel collapsing.
+
+     Recomputed on RESIZE but not on scroll, deliberately. The fades answer
+     "is there more this way" and must follow the scroll position; the caption
+     answers "which columns are not on screen", and rewriting its wording under
+     the reader's finger as they drag is worse than leaving it. A scroll cannot
+     change WHETHER the table overflows, only where you are within it. */
+  let cue = null;
+  const name = () => {
+    if (!wrap.isConnected) return;
     const over = wrap.scrollWidth - wrap.clientWidth;
-    if (over <= 2 || !wrap.isConnected) return;
     /* Which columns are CUT, not which start off screen.
        ─────────────────────────────────────────────────────────────────────
        The first version tested the header's left edge, and on #reconcile at
@@ -415,15 +425,27 @@ function scrollCue(box, wrap) {
        value is clipped is a column you have to scroll for, whether or not its
        heading happens to fit. */
     const edge = wrap.getBoundingClientRect().right;
-    const hidden = [...wrap.querySelectorAll('thead th')]
-      .filter((th) => th.getBoundingClientRect().right > edge + 4)
-      .map((th) => th.textContent.replace(/[↑↓▾▴]/g, '').trim())
-      .filter(Boolean);
-    if (!hidden.length) return;
-    const p = el('p', 'cap tcue');
-    p.textContent = `Scroll the table sideways for ${hidden.length === 1 ? 'one more column' : `${hidden.length} more columns`}: ${hidden.join(', ')}.`;
-    box.parentElement.append(p);
-  });
+    const hidden = over > 2
+      ? [...wrap.querySelectorAll('thead th')]
+        .filter((th) => th.getBoundingClientRect().right > edge + 4)
+        .map((th) => th.textContent.replace(/[↑↓▾▴]/g, '').trim())
+        .filter(Boolean)
+      : [];
+    if (!hidden.length) { if (cue) { cue.remove(); cue = null; } return; }
+    if (!cue) { cue = el('p', 'cap tcue'); box.parentElement?.append(cue); }
+    cue.textContent = `Scroll the table sideways for ${hidden.length === 1 ? 'one more column' : `${hidden.length} more columns`}: ${hidden.join(', ')}.`;
+  };
+
+  /* ResizeObserver rather than a window resize listener: a table can start
+     overflowing because a SIBLING changed — a panel gaining a chart, a filter
+     narrowing the grid — with the window untouched. */
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => { sync(); name(); }).observe(wrap);
+  }
+
+  /* requestAnimationFrame because the element is not in the document yet at
+     this point, so scrollWidth is 0 and every table would look like it fits. */
+  requestAnimationFrame(() => { sync(); name(); });
 }
 
 /* There is no `drill()` any more.
