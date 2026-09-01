@@ -2679,7 +2679,7 @@ app.get('/api/insights/summary', wrap(async (req, res) => {
         AND i.computed_at >= r.last_run - interval '10 minutes'
       ORDER BY i.code, i.entity_type, i.entity_id, i.computed_at DESC)`;
   const P = [fleet];
-  const [bySev, byCat, [tot], [raw]] = await Promise.all([
+  const [bySev, byCat, [tot], [raw], [deduped]] = await Promise.all([
     q(`${base} SELECT severity, count(*)::int n FROM latest GROUP BY 1`, P),
     q(`${base} SELECT category, count(*)::int n FROM latest GROUP BY 1 ORDER BY 2 DESC`, P),
     q(`${base}
@@ -2689,6 +2689,16 @@ app.get('/api/insights/summary', wrap(async (req, res) => {
             count(*) FILTER (WHERE code = 'idle_vehicle')::int AS idle_vehicles
      FROM latest`, P),
     q(`SELECT count(*)::int n FROM insight WHERE ($1::text IS NULL OR fleet_id = $1)`, P),
+    /* The middle number: findings after de-duplication but BEFORE the
+       freshness rule. Without it the tile called every suppressed row a
+       duplicate — and since fix 20 most of them are not duplicates at all,
+       they are findings the rules have stopped emitting. Two different facts
+       about the list, and a tile that merges them is telling the reader the
+       wrong one. */
+    q(`SELECT count(*)::int n FROM (
+         SELECT DISTINCT ON (code, entity_type, entity_id) id
+           FROM insight WHERE ($1::text IS NULL OR fleet_id = $1)
+          ORDER BY code, entity_type, entity_id, computed_at DESC) d`, P),
   ]);
   res.json({
     total: tot, by_severity: bySev, by_category: byCat,
@@ -2699,7 +2709,11 @@ app.get('/api/insights/summary', wrap(async (req, res) => {
     },
     // Visible so a duplicate explosion cannot be silent again.
     stored_rows: raw?.n ?? 0,
-    duplicates_suppressed: Math.max(0, (raw?.n ?? 0) - (tot?.n ?? 0)),
+    /* Copies of a finding that is still current. */
+    duplicates_suppressed: Math.max(0, (raw?.n ?? 0) - (deduped?.n ?? 0)),
+    /* Findings the rules have stopped emitting. A different fact, and the one
+       that answers "why is this list shorter than yesterday". */
+    resolved_since_last_run: Math.max(0, (deduped?.n ?? 0) - (tot?.n ?? 0)),
     /* Platform is accepted and NOT applied, and says so rather than pretending.
        An insight is about a vehicle, a driver or the fleet; the generator does
        not record which booking channel it came from, so narrowing by one would

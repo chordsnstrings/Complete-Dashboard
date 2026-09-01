@@ -182,7 +182,7 @@ app.get('/api/insights/summary', (_, r) => r.json({ total: { n: 93, total_impact
   by_severity: [{ severity: 'critical', n: 85, impact: '19800' }, { severity: 'warning', n: 8, impact: null }],
   by_category: [{ category: 'utilisation', n: 55 }, { category: 'compliance', n: 35 }],
   // Modelled vs stored: the page must not present a projection as a record.
-  modelled: false, stored_rows: 93, duplicates_suppressed: 4,
+  modelled: false, stored_rows: 93, resolved_since_last_run: 6, duplicates_suppressed: 4,
   filter: { fleet: null, platform: null }, platform_applies: false }));
 
 const insights = [

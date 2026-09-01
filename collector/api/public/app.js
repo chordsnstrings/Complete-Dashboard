@@ -3098,8 +3098,17 @@ V.insights = async (root) => {
      ones", and the endpoint has always accepted `severity`. They were plain
      divs, so the only way to that list was to know the query string. */
   kh.innerHTML = [
+    /* Two different suppressions, and merging them told the reader the wrong
+       one: a duplicate is a copy of a finding that is still true, and a
+       resolved finding is one the rule has stopped emitting since it last
+       wrote it. After the freshness rule shipped, 145 of the 145 "duplicates"
+       this tile reported were the second kind. */
     ['Open actions', fmt(sum?.total?.n ?? all.length),
-      sum?.duplicates_suppressed ? `${fmt(sum.duplicates_suppressed)} duplicate rows suppressed` : 'across every source'],
+      [sum?.resolved_since_last_run
+        ? `${fmt(sum.resolved_since_last_run)} cleared since the rules last ran`
+        : null,
+      sum?.duplicates_suppressed ? `${fmt(sum.duplicates_suppressed)} duplicate rows suppressed` : null,
+      ].filter(Boolean).join(' · ') || 'across every source'],
     ['Critical', fmt(bySev.critical || 0), 'act today', bySev.critical ? 'err' : 'ok', '#insights/severity/critical'],
     ['Warnings', fmt(bySev.warning || 0), 'act this week', bySev.warning ? 'warn' : 'ok', '#insights/severity/warning'],
     ['Measured cost', measured ? 'AED ' + fmt(Math.round(measured)) : '—',

@@ -108,6 +108,17 @@ const total = sum.total?.n ?? sum.total ?? null;
 check('the summary counts what the list shows, not what the table holds',
   Number(total) === (d.insights || []).length,
   `summary ${total} vs list ${(d.insights || []).length}`);
+/* Two different suppressions, and the tile merged them: a duplicate is a copy
+   of a finding that is still true; a resolved finding is one the rule has
+   stopped emitting. This fixture holds no duplicates at all, so calling its
+   five cleared findings "duplicate rows suppressed" would be false. */
+check('the cleared findings are reported as cleared, not as duplicates',
+  sum.resolved_since_last_run === 5, String(sum.resolved_since_last_run));
+check('…and nothing here is a duplicate, so that count is zero',
+  sum.duplicates_suppressed === 0, String(sum.duplicates_suppressed));
+check('…and the two together account for every stored row',
+  (sum.stored_rows || 0) === Number(total) + sum.resolved_since_last_run + sum.duplicates_suppressed,
+  `${sum.stored_rows} stored vs ${total} + ${sum.resolved_since_last_run} + ${sum.duplicates_suppressed}`);
 
 /* A filter must narrow the current set rather than reopening the cleared one. */
 const one = await body('/api/insights?code=idle_vehicle');
