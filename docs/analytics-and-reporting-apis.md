@@ -7,7 +7,8 @@
 ## 1. Uber — historical report pipeline (this is the "full year of data" path)
 
 Async generate → poll download → signed CSV. Auth = Uber supplier **web session** (cookies + `x-csrf-token: x`).
-Base `https://supplier.uber.com`. Org (plaintext) `58ca3b81-4953-4793-9f56-d93e16f771bb`.
+Base `https://fleethub.uber.com` (was `supplier.uber.com`; renamed, every path 301s to the new
+host — verified 2026-09-01). Org (plaintext) `58ca3b81-4953-4793-9f56-d93e16f771bb`.
 
 **Step 1 — generate** `POST /api/vs-sp-reports-management/GenerateReport?localeCode=en-GB`
 ```json

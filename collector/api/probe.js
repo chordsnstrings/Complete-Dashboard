@@ -19,7 +19,7 @@
 
 import { config } from '../src/config.js';
 import { http, qs } from '../src/http.js';
-import { uberOAuthToken, uberWebHeaders } from '../src/auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, PORTAL } from '../src/auth/uber.js';
 import { probeEarnerWindow } from '../src/sources/uber.js';
 import { loadSettings } from '../src/settings.js';
 import { log } from '../src/log.js';
@@ -31,7 +31,7 @@ import { isAdmin } from './admin_gate.js';
    Ecosine uuid with the Egari cookie is a 401 wearing a confusing hat. */
 const uberOrg = () => config.uber.orgs?.[0] || config.uber;
 
-const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
+const REPORTS = `${PORTAL}/api/vs-sp-reports-management`;
 
 /* Report types worth testing for existence. Uber answers an unknown name with
    REPORT_TYPE_INVALID, so this enumerates the surface cheaply — the report is

@@ -1,10 +1,27 @@
 // Uber auth: OAuth client_credentials token (30-day, auto-refreshed) for api.uber.com,
-// plus the supplier web-session cookie (supplier.uber.com) supplied via env.
+// plus the supplier web-session cookie (the fleet portal) supplied via env.
 import { config } from '../config.js';
 import { http } from '../http.js';
 import { log } from '../log.js';
 
 let cached = { token: null, exp: 0 };
+
+/* The one place that names the fleet portal.
+   ─────────────────────────────────────────────────────────────────────────
+   Uber moved the supplier portal to fleethub.uber.com and left a 301 behind on
+   every path — /graphql, /chronicle/graphql, the report API, the org pages.
+   A redirect sounds harmless and is not: a 301 turns a POST into a GET, the
+   GET is not signed in, it lands on the login page, and what comes back is
+   HTML with a 200 on it. Nothing throws. The GraphQL body is read off a
+   string, every field is undefined, and a run that collected nothing reports
+   success. Naming the live host here means the request arrives where it is
+   meant to and a genuine refusal looks like a refusal.
+
+   It is also the address a human has to visit to re-paste a cookie, so the
+   settings hints below read from the same constant rather than repeating a
+   hostname that has already changed once. */
+export const PORTAL = 'https://fleethub.uber.com';
+
 
 export async function uberOAuthToken() {
   if (cached.token && Date.now() < cached.exp - 60000) return cached.token;

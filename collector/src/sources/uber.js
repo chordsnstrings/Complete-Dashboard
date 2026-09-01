@@ -8,7 +8,7 @@ import { config, normPlate } from '../config.js';
 import { http, qs, sleep } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
 import { dateChunks, weekChunks, iso, unixMs } from '../util.js';
-import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, PORTAL } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
 import { log } from '../log.js';
 
@@ -22,7 +22,7 @@ const SRC = 'uber';
    scheduler runs sources one at a time and every helper below awaits. */
 let cur = null;
 const org = () => cur || config.uber.orgs?.[0] || config.uber;
-const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
+const REPORTS = `${PORTAL}/api/vs-sp-reports-management`;
 
 // Uber caps an org at three reports in flight. Abandoning a report does not
 // release its slot, so a run that gives up on three slow reports poisons every
@@ -196,10 +196,18 @@ async function earnerCall(s, e, variables) {
     },
     query: EARNER_QUERY,
   });
-  const { data } = await http('https://supplier.uber.com/graphql',
+  const { data } = await http(`${PORTAL}/graphql`,
     { method: 'POST', headers: uberWebHeaders(org()), body });
-  // An expired web cookie answers with `errors` and no data, which is
-  // indistinguishable from "this fleet had no drivers" unless we say so.
+  // A cookie can fail two ways and only one of them was covered here. An
+  // expired-but-recognised session answers with `errors` and no data. A
+  // signed-OUT session never reaches GraphQL at all: the portal bounces to the
+  // login page and returns HTML under a 200, which http() hands back as a
+  // string. `data.errors` on a string is undefined, so the old check waved it
+  // through and the fleet was recorded as having had no drivers that week.
+  if (typeof data !== 'object' || data === null) {
+    return { err: 'signed out — the portal answered with its login page, not GraphQL'
+      + ' (re-paste the web cookie)', rows: [] };
+  }
   if (data?.errors?.length) {
     return { err: String(data.errors[0]?.message || data.errors[0]).slice(0, 250), rows: [] };
   }

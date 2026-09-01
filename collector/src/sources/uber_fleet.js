@@ -8,7 +8,7 @@ import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
 import { iso, weekChunks } from '../util.js';
-import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, PORTAL } from '../auth/uber.js';
 import { log } from '../log.js';
 
 const SRC = 'uber_fleet';
@@ -18,7 +18,7 @@ const SRC = 'uber_fleet';
 // for recommendations), so we ship the exact documents instead of a reconstruction.
 const __dir = dirname(fileURLToPath(import.meta.url));
 const Q = (f) => readFileSync(join(__dir, '..', 'gql', f), 'utf8');
-const GQL = 'https://supplier.uber.com/graphql';
+const GQL = `${PORTAL}/graphql`;
 const FLEET = 'ecosine';
 
 async function gql(operationName, query, variables) {
@@ -26,6 +26,15 @@ async function gql(operationName, query, variables) {
     method: 'POST', timeoutMs: 45000, retries: 2,
     headers: uberWebHeaders(), body: JSON.stringify({ operationName, query, variables }),
   });
+  // A signed-out session answers 200 with the login page, not with GraphQL.
+  // http() leaves unparseable bodies as a string, so `data.errors` is
+  // undefined, `data.data` is undefined, and every caller below reads its rows
+  // off `undefined || []` — a run that was refused, recorded as a run that
+  // found nothing. Say it instead.
+  if (typeof data !== 'object' || data === null) {
+    throw new Error(`${operationName}: portal returned ${String(data).length} bytes of non-JSON`
+      + ' — the web session is signed out (re-paste the cookie)');
+  }
   if (data?.errors) throw new Error(`${operationName}: ${data.errors[0]?.extensions?.code || data.errors[0]?.message}`);
   return data?.data;
 }

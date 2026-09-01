@@ -1879,7 +1879,7 @@ app.get('/api/probe/results', (_, r) => {
       unmapped: ['onboardingStatus', 'statusEntries'] },
     { provider: 'uber', surface: 'trip-report-session', ok: false, http_status: null, record_count: null,
       top_keys: null, fields: null, unmapped: null,
-      note: 'The trip export needs a supplier.uber.com session cookie, which expires and has to be re-pasted',
+      note: 'The trip export needs a fleethub.uber.com session cookie, which expires and has to be re-pasted',
       error: 'Error: UBER_WEB_COOKIE not set (session expired?)' },
     { provider: 'hotel', surface: 'trip-report', ok: true, http_status: 200, record_count: 135,
       top_keys: ['data'], note: 'the bookings themselves',
@@ -2607,7 +2607,7 @@ app.get('/api/schema/raw-values', (req, r) => {
 app.get('/api/settings', (_, r) => r.json([
   /* Unset in the API's own environment but held by the collector — the case
      that made this page tell an operator to re-capture a working session. */
-  { key: 'UBER_WEB_COOKIE', group: 'Uber', label: 'Supplier portal cookie', hint: 'Paste from a logged-in supplier.uber.com session',
+  { key: 'UBER_WEB_COOKIE', group: 'Uber', label: 'Supplier portal cookie', hint: 'Paste from a logged-in fleethub.uber.com session',
     secret: true, source: 'unset', configured: false, value: '', updated_at: null,
     seen_by: [{ component: 'collector', source: 'environment', observed_at: new Date().toISOString() }] },
   // And one genuinely missing everywhere, so the two render differently.

@@ -204,9 +204,15 @@ _Live-status sample (50 drivers): 15 online, 1 on-trip, 10 offline. Onboarding: 
 
 ### 4b. Supplier web GraphQL — **WORKS (browser session)**
 
-**Endpoint** `POST https://supplier.uber.com/graphql`
+**Endpoint** `POST https://fleethub.uber.com/graphql`
+_(Was `supplier.uber.com`. Uber renamed the portal; every path 301s to the new host, verified
+2026-09-01. The redirect is not a safe fallback — a 301 turns the POST into a GET, the GET is not
+signed in, and the login page comes back as HTML under a **200**, which reads as an empty result
+rather than a refusal. Call the new host directly.)_
 **Auth** browser cookies (`sid` / `csid`; `sp-jwt-session` was already stale yet the session held via
-`sid`/`csid`) + header `x-csrf-token: x`. **Will expire** — needs a periodic fresh login.
+`sid`/`csid`) + header `x-csrf-token: x`. **Will expire** — needs a periodic fresh login, and the
+cookie must be copied from a `fleethub.uber.com` page: values still sitting under the old
+`supplier.uber.com` origin are the expired ones.
 `orgUUID` (plaintext) = `58ca3b81-…` (the account/supplier uuid).
 
 Confirmed net-new data vs the OAuth layer:
