@@ -475,23 +475,45 @@ async function moneyTab(root) {
       { label: 'Journeys seen', key: 'telematics_journeys', num: true,
         render: (r) => (r.telematics_journeys
           ? `<b>${fmt(r.telematics_journeys)}</b>` : fmt(0)) },
-      /* On the IDLE panel this is empty for every row by construction — a
-         vehicle listed here has taken no booking — so one sentence says it
-         better than thirty-one identical dashes. On any panel where some of
-         them have driven, the column comes back on its own. */
-      { label: 'Last trip', key: 'last_trip',
-        absent: 'none of these vehicles has ever taken a booking on any channel — that is what '
-          + 'puts them on this list',
-        render: (r) => (r.last_trip ? dayStr(r.last_trip)
-          : absent('no booking on this plate in the whole record we hold')) },
+      /* THE QUESTION IN FRONT OF THIS LIST IS HOW LONG.
+         ─────────────────────────────────────────────────────────────────
+         last_trip is bounded by the window, and a vehicle is on this panel
+         precisely because it took no booking in the window — so the column was
+         empty on every row by construction, pruned itself, and printed one
+         sentence in its place: "none of these vehicles has ever taken a
+         booking on any channel". That is a claim about all time made from a
+         ninety-day query, and it is false for every one of these cars that
+         earned in the months before it.
+
+         last_booking_ever is the unfiltered fold. A car that last earned in
+         March is a different conversation from one that never has, and this is
+         the only column on the panel that can tell them apart. */
+      { label: 'Last earned', key: 'last_booking_ever',
+        sortValue: (r) => (r.last_booking_ever ? Date.parse(r.last_booking_ever) : null),
+        absent: 'no vehicle on this list has ever taken a booking on any channel — every one of '
+          + 'them has been held, insured and unused for the whole record',
+        render: (r) => {
+          if (r.last_trip) return dayStr(r.last_trip);
+          if (!r.last_booking_ever) return absent('no booking on this plate in the whole record we hold');
+          return `${dayStr(r.last_booking_ever)}<span class="dim" title="before the window above — `
+            + `${fmt(r.bookings_ever)} bookings on this plate in the whole record"> `
+            + `${fmt(r.days_since_last_booking)}d ago</span>`;
+        } },
       { label: 'Papers', key: 'doc_days_left', num: true,
         render: (r) => pill(`${fmt(r.doc_days_left)}d left`,
           r.doc_days_left < 30 ? 'warn' : 'ok') },
       { label: 'State', key: 'band', render: (r) => pill(BAND[r.band].label, BAND[r.band].tone) },
     ], { initial: 'idle_days', onRow: open });
+    /* Never-earned and stopped-earning are two different problems with two
+       different owners, and a count of "idle vehicles" hides which is which. */
+    const never = idle.filter((r) => !r.last_booking_ever).length;
     dead.body.append(el('p', 'cap',
-      `${fmt(idle.length)} vehicles. The ones with journeys seen but no bookings are the expensive `
-      + 'ones: the tracker watched them drive and no channel paid for it.'));
+      `${fmt(idle.length)} vehicles. ${never
+        ? `${fmt(never)} of them have never taken a booking on any channel; the rest earned before `
+          + 'this window and stopped — Last earned says when. '
+        : 'Every one of them earned before this window and stopped — Last earned says when. '}`
+      + 'The ones with journeys seen but no bookings are the expensive ones: the tracker watched '
+      + 'them drive and no channel paid for it.'));
   }
 
   const pCols = [

@@ -42,6 +42,27 @@ const get = async (p) => {
   return r.body;
 };
 
+/* ── a car that earned BEFORE the window and stopped ──────────────────────
+   The dead-capital panel lists vehicles with current papers and no money in
+   the window, and its Last trip column came out of the windowed fold — so it
+   was empty on every row BY CONSTRUCTION, pruned itself, and printed one
+   sentence in its place: "none of these vehicles has ever taken a booking on
+   any channel". That is a claim about all time made from a ninety-day query.
+
+   This plate earned in March and has not since. If the answer to "when did
+   this car last earn" is still null, the sentence above is still false. */
+const IDLE_PLATE = 'L77701';   // not otherwise in this fixture's window
+await db.query(
+  `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+     requested_at, ended_at, distance_km, status, price, pickup_addr, dropoff_addr)
+   VALUES ('uber','idle-1','ecosine',$1,'d-idle','Idle Driver',
+           '2026-03-04T09:00:00+04:00','2026-03-04T09:20:00+04:00', 11, 'completed', NULL,
+           'A - Deira - Dubai - UAE','B - Al Barsha - Dubai - UAE'),
+          ('uber','idle-2','ecosine',$1,'d-idle','Idle Driver',
+           '2026-03-05T09:00:00+04:00','2026-03-05T09:20:00+04:00', 11, 'completed', NULL,
+           'A - Deira - Dubai - UAE','B - Al Barsha - Dubai - UAE')`,
+  [IDLE_PLATE]);
+
 const WIN = 'from=2026-08-01&to=2026-08-31';
 const A = await get(`/api/economics/assets?${WIN}`);
 const D = await get(`/api/economics/drivers?${WIN}`);
@@ -268,6 +289,53 @@ check('people arrive ranked by money',
   check('and still says nothing when nothing was measured',
     /t\.aed_per_measured_hour != null/.test(src),
     'Uber reports no online hours, and AED 0 per hour is a different claim from "nobody reported one"');
+}
+
+/* ── when did it last earn ────────────────────────────────────────────── */
+{
+  const idle = A.rows.find((r) => r.plate === IDLE_PLATE);
+  check('the plate that earned before the window is in the ledger', !!idle, IDLE_PLATE);
+  check('it has no booking IN the window, which is what puts it on the idle list',
+    idle && !idle.last_trip, String(idle?.last_trip));
+  /* The whole fix: the windowed fold cannot answer this and the unfiltered one
+     can. Compared as a date rather than as a string so a driver of the query
+     changing type does not quietly pass. */
+  check('…and the whole-record fold still says when it last earned',
+    idle?.last_booking_ever
+      && new Date(idle.last_booking_ever).toISOString().slice(0, 10) === '2026-03-05',
+    String(idle?.last_booking_ever));
+  check('…with how many bookings that plate has ever carried',
+    (idle?.bookings_ever || 0) >= 2, String(idle?.bookings_ever));
+  check('…and how long ago, so the panel can say how long it has been idle',
+    idle?.days_since_last_booking > 100, String(idle?.days_since_last_booking));
+
+  /* A plate that really has never earned must stay null, or the column would
+     say "last earned" about a car that never did. */
+  const never = A.rows.filter((r) => r.bookings_ever === 0);
+  check('a plate that has never carried a booking reports no date at all',
+    never.every((r) => r.last_booking_ever == null),
+    JSON.stringify(never.filter((r) => r.last_booking_ever).map((r) => r.plate)));
+  /* And the fold is asked only of the plates that need it — the ones with no
+     booking in the window. A working car carries no all-time count, because
+     nobody measured one for it; reporting 0 there would be a number we did not
+     take. test/economics_cost.test.mjs is the other half of this: folded over
+     every plate, a one-day window cost as much as a month. */
+  check('a car that worked in the window is not folded over the whole record',
+    A.rows.filter((r) => r.bookings > 0).every((r) => r.bookings_ever == null),
+    JSON.stringify(A.rows.filter((r) => r.bookings > 0 && r.bookings_ever != null)
+      .map((r) => [r.plate, r.bookings_ever]).slice(0, 3)));
+  check('…and every car that did NOT is',
+    A.rows.filter((r) => !r.bookings).every((r) => r.bookings_ever != null),
+    JSON.stringify(A.rows.filter((r) => !r.bookings && r.bookings_ever == null)
+      .map((r) => r.plate).slice(0, 3)));
+
+  /* And the fold must not resurrect plates the window, the fleet filter and
+     the vehicle register have all excluded. */
+  const egari = await get(`/api/economics/assets?${WIN}&fleet=egari`);
+  const both = await get(`/api/economics/assets?${WIN}`);
+  check('the all-time fold does not add plates the filter excluded',
+    egari.rows.length <= both.rows.length,
+    `${egari.rows.length} filtered vs ${both.rows.length} unfiltered`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

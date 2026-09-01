@@ -333,7 +333,10 @@ export function economicsRoutes(app, { q, wrap, range }) {
       if (!byPlate.has(plate)) {
         byPlate.set(plate, { plate, platforms: new Map(), bookings: 0, telematics_journeys: 0,
           days_earning: 0, days_moved: 0, km: null, measured_bookings: 0, drivers: 0,
-          last_trip: null, fleet_id: null });
+          /* null, not 0: only the plates with no booking in the window are
+             folded over the whole record, so a zero on a working car would be
+             a measurement nobody took. */
+          last_trip: null, last_booking_ever: null, bookings_ever: null, fleet_id: null });
       }
       return byPlate.get(plate);
     };
@@ -346,6 +349,51 @@ export function economicsRoutes(app, { q, wrap, range }) {
         km: n(w.km), measured_bookings: w.measured_bookings, drivers: w.drivers,
         last_trip: w.last_trip, fleet_id: r.fleet_id || w.fleet_id,
       });
+    }
+    /* WHEN DID THIS CAR LAST EARN — over the whole record, not the window.
+       ─────────────────────────────────────────────────────────────────────
+       last_trip comes out of `w`, which is bounded by the window, so on the
+       "Held, insured, earning nothing" panel it is null for every row BY
+       CONSTRUCTION: a vehicle is on that list precisely because it took no
+       booking in the window. The column therefore pruned itself and printed
+       one sentence in its place — "none of these vehicles has ever taken a
+       booking on any channel" — a claim about ALL TIME derived from a
+       ninety-day query, and false for any of those 27 cars that earned in the
+       months before it. The question in front of that list is how long the car
+       has been idle, and a window containing no trips cannot answer it.
+
+       Asked ONLY of the plates that need it — the ones with no booking in the
+       window — and after the aggregation above, which is what knows who they
+       are. Written as a whole-table GROUP BY first, and test/economics_cost
+       .test.mjs caught it: a one-day window then cost as much as a month,
+       because the fold read every trip either way. Bounded like this it is a
+       handful of lookups on trip (plate, requested_at) — 27 of them on
+       production — and a narrow window stays narrow.
+
+       Unfiltered by platform and fleet on purpose, like the roster's own
+       `ever` fold: "has this car ever earned" is not a question about the
+       chips above the page. */
+    const cold = [...byPlate.values()].filter((r) => !r.bookings).map((r) => r.plate);
+    if (cold.length) {
+      for (const e of await q(
+        `SELECT plate,
+                max(requested_at) FILTER (WHERE platform <> 'fms') AS last_booking_ever,
+                count(*) FILTER (WHERE platform <> 'fms')::int      AS bookings_ever
+           FROM trip
+          WHERE plate = ANY($1)
+          GROUP BY 1`, [cold])) {
+        const r = byPlate.get(e.plate);
+        if (!r) continue;
+        r.last_booking_ever = e.last_booking_ever;
+        r.bookings_ever = e.bookings_ever || 0;
+      }
+      /* A cold plate the fold returned no row for has genuinely never carried
+         a booking — GROUP BY produces nothing for it — and that is a zero we
+         measured rather than an absence. */
+      for (const plate of cold) {
+        const r = byPlate.get(plate);
+        if (r && r.bookings_ever == null) r.bookings_ever = 0;
+      }
     }
     /* One entry per (plate, platform), carrying whichever of the two kinds of
        money that channel reports. chooseBasis then decides which to believe,
@@ -422,7 +470,14 @@ export function economicsRoutes(app, { q, wrap, range }) {
         any_even_split: !!r.any_even_split,
         soonest_expiry: r.soonest_expiry ?? null,
         doc_days_left: r.doc_days_left ?? null,
-        last_trip: r.last_trip ?? null, last_fix: r.last_fix ?? null,
+        last_trip: r.last_trip ?? null,
+        /* Beside last_trip, not instead of it: one is "last earned in the
+           window you are looking at" and the other is "last earned at all". */
+        last_booking_ever: r.last_booking_ever ?? null,
+        bookings_ever: r.bookings_ever ?? null,
+        days_since_last_booking: r.last_booking_ever
+          ? Math.floor((Date.now() - Date.parse(r.last_booking_ever)) / 864e5) : null,
+        last_fix: r.last_fix ?? null,
         stale: r.stale ?? null, status: r.status ?? null,
         lat: r.lat ?? null, lng: r.lng ?? null,
         current_driver: r.current_driver ?? null,

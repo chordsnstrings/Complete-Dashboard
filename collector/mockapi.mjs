@@ -3835,6 +3835,16 @@ const uAssets = plates.map((pl, i) => {
     soonest_expiry: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
     doc_days_left: i === 1 ? -12 : 5 + i * 14,
     last_trip: bookings ? new Date(Date.now() - i * 72e5).toISOString() : null,
+    /* The whole-record fold, which is the only thing that can tell a car that
+       stopped earning from one that never started. The still row (i === 7) has
+       never earned; the moved-unpaid row (i === 6) earned before the window
+       and stopped, which is the case the panel could not distinguish. */
+    last_booking_ever: bookings || still ? null
+      : new Date(Date.now() - 240 * 864e5).toISOString(),
+    /* null for a car that worked in the window — the fold is only asked of the
+       cold plates, so a zero there would be a number nobody took. */
+    bookings_ever: bookings ? null : (still ? 0 : 1830),
+    days_since_last_booking: bookings || still ? null : 240,
     last_fix: i === 5 ? null : new Date(Date.now() - i * 6e4).toISOString(),
     stale: i === 7, status: i % 3 === 0 ? 'Engaged' : 'Active',
     // One vehicle with no position at all, so the map's own caption is exercised.
