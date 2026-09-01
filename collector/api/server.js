@@ -107,7 +107,27 @@ const cache = responseCache({
 });
 app.use('/api', cache);
 
-const q = (text, params) => pool.query(text, params).then((r) => r.rows);
+/* A slow query is the most common reason a panel renders as a skeleton, and
+   until now nothing on the server said WHICH one. bin/render-audit.mjs can see
+   that #reconcile did not fill inside its settle window; it cannot see that
+   one of the four statements behind it cost ten seconds while the other three
+   cost forty milliseconds, and neither could anyone reading the logs. The
+   answer took a deploy per guess.
+
+   So a statement slower than SLOW_QUERY_MS says so, once, with its own opening
+   line — enough to identify it in the file it came from. The threshold is
+   deliberately well above a normal page: this is for finding the panel that
+   times out, not for narrating the working ones. */
+const SLOW_MS = Number(process.env.SLOW_QUERY_MS || 2500);
+const q = async (text, params) => {
+  const t0 = Date.now();
+  try {
+    return (await pool.query(text, params)).rows;
+  } finally {
+    const ms = Date.now() - t0;
+    if (ms >= SLOW_MS) log.warn('api', 'slow query', { ms, sql: String(text).replace(/\s+/g, ' ').trim().slice(0, 150) });
+  }
+};
 /* A 500 body used to carry the driver's own message, which names the storage
    engine, the column and the type ("invalid input syntax for type timestamp
    with time zone"). The full error is logged; the caller gets a reference to
