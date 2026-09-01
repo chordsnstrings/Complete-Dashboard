@@ -188,7 +188,16 @@ const PROBE = () => {
     const n = t.querySelectorAll('tbody tr').length;
     if (!CAPS.includes(n)) return;
     const panel = t.closest('.panel') || root;
-    const said = /showing|first|top |of \d|more|capped|limit/i.test(txt(panel));
+    /* A panel that CLAIMS totality and prints the count is not a silent cap:
+       "Every driver with an event — 20 rows" tells a reader exactly what the
+       phrases above tell them, in the words the product happens to use. The
+       claim alone is not enough and neither is the number alone — a heading
+       saying "every" over a list the endpoint capped is the failure this rule
+       is for, and #safety was making exactly that claim until the page learned
+       to read its own truncated flag. */
+    const ptxt = txt(panel);
+    const said = /showing|first|top |of \d|more|capped|limit/i.test(ptxt)
+      || (/\b(every|all)\b/i.test(ptxt) && new RegExp(`\\b${n}\\b`).test(ptxt));
     if (!said) push('w', 'silent-cap', `a table ends at exactly ${n} rows and nothing says whether that is all of them`);
   });
 

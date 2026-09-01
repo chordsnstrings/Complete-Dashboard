@@ -317,6 +317,36 @@ async function settleCash(host) {
       render: (r) => (r.last_cash_trip ? `${dateStr(r.last_cash_trip)} ${timeStr(r.last_cash_trip)}` : '—') },
   ], { sortable: true, sortId: 'cash', defaultSort: { key: 'cash_value', dir: 'desc' },
     capped: c.truncated ? `all ${fmt(c.driver_count)} drivers holding cash` : null }));
+  /* Why most of a column is dashes, said once under the table rather than
+     forty-two times in a tooltip.
+     ─────────────────────────────────────────────────────────────────────
+     bin/render-audit.mjs: "Value known is empty in 42 of 45 rows". It is, and
+     the reason is in the caption above — the fares of a driver's cash bookings
+     THAT CARRY ONE — but a reader scanning the column sees forty-two gaps and
+     a definition, not an explanation of what they are looking at. The per-cell
+     title says it, and nobody hovers forty-two cells; a phone cannot hover at
+     all.
+
+     Counted from the rows, and the silent channels named from the rows too: a
+     hard-coded "Uber publishes no cash fare" would read correctly today and be
+     wrong the day it starts, or the day another channel stops. */
+  const priced = c.drivers.filter((r) => r.cash_value != null);
+  const blank = c.drivers.length - priced.length;
+  if (blank) {
+    const pricedOn = new Set(priced.flatMap((r) => r.platforms || []));
+    const silent = [...new Set(c.drivers.filter((r) => r.cash_value == null)
+      .flatMap((r) => r.platforms || []))].filter((pl) => !pricedOn.has(pl));
+    const stmt = c.drivers.filter((r) => r.statement_cash != null).length;
+    cp.body.append(el('p', 'cap',
+      `Value known is empty on ${blank} of these ${fmt(c.drivers.length)} rows: not one of those `
+      + `${plural(blank, 'driver', 'drivers')}\u2019 cash bookings reports a fare. `
+      + (silent.length
+        ? `No cash booking on ${silent.map((pl) => esc(sourceLabel(pl))).join(' or ')} carries one at `
+          + 'all in this window \u2014 the export does not publish a fare on a cash trip. '
+        : '')
+      + 'The money is real; the amount is not recorded. Statement cash beside it is the same money '
+      + `seen from the payout side, and it is filled on ${fmt(stmt)} of them.`));
+  }
   /* The cap belongs with the table it caps, not adrift below it. */
   if (c.truncated) cp.body.append(note(
     `Listing the ${fmt(c.drivers.length)} drivers holding the most cash, of ${fmt(c.driver_count)}. `

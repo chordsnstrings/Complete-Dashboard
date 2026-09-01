@@ -353,6 +353,8 @@ async function corpGuests(host) {
         `Showing ${fmt(g.guests.length)} of ${countOf(g.total_guests, 'passenger record')}, busiest first. `
         + 'The tiles above are over all of them.'));
     }
+    const pn2 = purposeNote(g.guests);
+    if (pn2) b2.append(pn2);
     host.append(p2);
     return;
   }
@@ -375,7 +377,41 @@ async function corpGuests(host) {
     host.append(el('p', 'cap',
       `Showing ${fmt(g.guests.length)} of ${countOf(g.total_guests, 'guest')}, busiest first.`));
   }
+  const pn = purposeNote(g.guests);
+  if (pn) host.append(pn);
 }
+
+/* Why most of the Purpose column is blank, counted and attributed.
+   ─────────────────────────────────────────────────────────────────────────
+   bin/render-audit.mjs: "Purpose is empty in 24 of 27 rows". A purpose is free
+   text somebody types when they raise the booking, and only one of the sources
+   on this list has anywhere to type it — the hotel channel's booking form
+   carries no such field. So the blanks are not entries somebody failed to
+   make, they are the channel the ride came through.
+
+   Which sources those are is read from the rows rather than named here: a
+   hard-coded "the hotels record none" would be wrong the day one of them adds
+   the field, and would go on reading correctly for months first.
+
+   `absent` cannot prune the column, for the usual reason — some rows do carry
+   a purpose — so the explanation goes under the table, once. */
+const purposeNote = (rows) => {
+  const named = (rows || []).filter((r) => (r.purpose || '').trim());
+  if (!named.length || named.length === rows.length) return null;
+  const records = [...new Set(named.map((r) => r.property).filter(Boolean))];
+  const silent = [...new Set(rows.filter((r) => !(r.purpose || '').trim())
+    .map((r) => r.property).filter(Boolean))].filter((x) => !records.includes(x));
+  const list = (xs) => (xs.length > 3
+    ? `${xs.slice(0, 3).map((x) => esc(x)).join(', ')} and ${xs.length - 3} more`
+    : xs.map((x) => esc(x)).join(xs.length === 2 ? ' and ' : ', '));
+  return el('p', 'cap',
+    `Purpose is empty on ${fmt(rows.length - named.length)} of these ${countOf(rows.length, 'row')}. `
+    + `${list(records)} ${records.length === 1 ? 'is the only booking source that records one'
+      : 'are the only booking sources that record one'}`
+    + (silent.length ? `; ${list(silent)} publish no purpose with a booking at all` : '')
+    + ', so a blank here is the channel the ride came through rather than an entry somebody failed '
+    + 'to make.');
+};
 
 const GUEST_COLS = [
   { label: 'Record', key: 'guest_id', render: (r) => `<code>${esc(String(r.guest_id).slice(-8))}</code>` },

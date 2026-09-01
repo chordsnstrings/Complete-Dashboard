@@ -1895,6 +1895,26 @@ async function platformFunnel(root) {
       : '<span class="ent-off" title="this channel publishes no standing for its drivers, so neither this report nor the roster holds one">no standing published</span>') },
   ], { sortable: true, sortId: 'funnel', defaultSort: { key: 'offered', dir: 'desc' },
     capped: total && total > rows.length ? `all ${fmt(total)} rows` : null }));
+  /* Three columns of dashes, and the reason is a fact worth reading.
+     ─────────────────────────────────────────────────────────────────────
+     bin/render-audit.mjs: "Accept %", "Complete %" and "Cash share" empty in
+     5 of 6 rows. All three are rates over the offers a driver-period received,
+     and those rows received none — there is no rate to take, and `absent`
+     cannot prune the columns because the remaining rows do carry one.
+
+     What makes it worth a sentence rather than a tooltip is what sits beside
+     the zero: hours. A driver logged in for three hundred hours and offered
+     nothing is not a missing measurement, it is the measurement. */
+  const idle = live.filter((r) => !Number(r.offered));
+  if (idle.length && idle.length < live.length) {
+    const idleHours = idle.reduce((a, r) => a + (+r.hours || 0), 0);
+    fnp.body.append(el('p', 'cap',
+      `Accept %, Complete % and Cash share are empty on ${fmt(idle.length)} of these `
+      + `${countOf(live.length, 'row')}: those driver-periods were offered nothing at all, so there `
+      + 'is no rate to take. The hours beside them are the channel\u2019s own figure — '
+      + `${fmt(idleHours, 1)} hours logged on across those rows without a single job sent, which is `
+      + 'the finding rather than a gap in one.'));
+  }
   if (total && total > rows.length) {
     root.append(el('p', 'cap',
       `Showing ${fmt(rows.length)} of ${fmt(total)} driver-period records, the ones the server ranked highest.`));
@@ -2430,7 +2450,16 @@ V.safety = async (root) => {
   /* The longest table on the page carried no heading — sixty-two rows of names
      and event counts that began immediately under a chart about something
      else, with nothing saying what the rows were or how many there were. */
-  const dtab = panel(`Every driver with an event — ${countOf(byDrv.length, 'row')}`,
+  /* "Every" only when it is every. /api/alerts/by-driver caps its list, says so
+     in `truncated`, and this heading claimed totality regardless — so on any
+     window wide enough to reach the cap the page would have promised the whole
+     fleet above the worst hundred of it. The vehicle table beside this one has
+     read its own truncated flag since it was written; this one never did. */
+  const dTrunc = drvPage.truncated;
+  const dAll = dTot.drivers ?? byDrv.length;
+  const dtab = panel(dTrunc
+    ? `Drivers with an event — ${countOf(byDrv.length, 'row')} of ${fmt(dAll)}`
+    : `Every driver with an event — ${countOf(byDrv.length, 'row')}`,
     'One row per person, plus a row for the events no custody record could attribute. '
     + 'The four named categories and Other add up to Events.');
   host.append(dtab.panel);
@@ -2471,7 +2500,13 @@ V.safety = async (root) => {
         ? '<span class="ent-off" title="no booked distance on the days these events happened">distance unknown</span>'
         : `${fmt(r.per_100km, 2)}${+r.booked_km < 200
           ? '<span class="dim" title="under 200 booked km — too small a base to compare on"> ·  thin</span>' : ''}`) },
-  ], { sortable: true, sortId: 'safetydrv', defaultSort: { key: 'alerts', dir: 'desc' } }));
+  ], { sortable: true, sortId: 'safetydrv', defaultSort: { key: 'alerts', dir: 'desc' },
+    capped: dTrunc ? `all ${fmt(dAll)} drivers with an event` : null }));
+  if (dTrunc) {
+    dtab.body.append(el('p', 'cap',
+      `Showing ${fmt(byDrv.length)} of ${fmt(dAll)} drivers with an event, the worst first. `
+      + 'Sorting re-orders those rows and does not reach the rest.'));
+  }
   if (byDrv.some((r) => r.driver_name === '(unattributed)')) {
     dtab.body.append(note('"(unattributed)" is not a person. It is every event on a plate-day with no '
       + 'custody record — shown rather than folded into somebody else\'s total.'));
