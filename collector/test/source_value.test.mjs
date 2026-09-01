@@ -105,7 +105,8 @@ check('a caption under the table explains what a dash in Value is', !!cap,
    and would be wrong the day a second feed starts reporting money. */
 check('…and it names the dataset that does carry money', /earnings/i.test(cap), cap);
 check('…and counts the ones that do not, rather than leaving it to be counted',
-  new RegExp(`${blank.length}\\s+datasets`).test(cap), `${blank.length} blank — ${cap}`);
+  new RegExp(`empty on ${blank.length} of these ${c.rows.length} rows`).test(cap),
+  `${blank.length} blank of ${c?.rows.length} — ${cap}`);
 check('…and does not name a dataset that carries none',
   !/telemetry/i.test(cap), cap);
 

@@ -162,13 +162,36 @@ const PROBE = () => {
 
        Both are checked, so the note is found wherever tableFrom decides to put
        it, and the panel is the last resort for a caller that prints its own. */
-    const near = t.closest('.tblock') || t.closest('.panel') || t.closest('.tscroll') || t.parentElement;
-    const said = near && near.querySelector ? txt(near.querySelector('.tabsent') || {}) : '';
+    /* And a caption counts as an explanation, not only a .tabsent line.
+       ─────────────────────────────────────────────────────────────────────
+       `absent` — and the .tabsent note it prints — removes a column that is
+       empty on EVERY row. It cannot say anything about a column that is empty
+       on most of them, which is the case this rule is for, so the answer to a
+       sparse column is a sentence under the table and never a .tabsent line.
+       Four pages now carry one and every one of them was still being reported.
+
+       Two things are required of the sentence, so that any prose under a table
+       does not silence the rule: it must NAME the column, and it must say
+       something about emptiness. A caption describing what the column means is
+       a definition, and a definition is what the reader already had. */
+    /* The block AND the panel around it: tableFrom puts its own .tabsent note
+       in the .tblock, and a caller writing its own sentence appends it to the
+       panel body, a sibling of the block. Looking only at the nearest of the
+       two found the first kind and none of the second. */
+    const scopes = [t.closest('.tblock'), t.closest('.panel'), t.closest('.tscroll'), t.parentElement]
+      .filter((x, i, a) => x && x.querySelectorAll && a.indexOf(x) === i);
+    const EMPTINESS = /empty|carries no|carry no|records? none|publish(es)? no|not recorded|no rate|absent|blank|a dash/i;
+    const notes = scopes.flatMap((sc) => [...sc.querySelectorAll('.tabsent, p.cap')].map(txt))
+      .filter((x) => EMPTINESS.test(x));
+    /* Without the sort indicator a sortable header carries: the sentence names
+       the column, and "Value known↓" is not a phrase anybody would write. */
+    const bare = (h) => h.replace(/[↓↑▲▼]/g, '').trim();
     heads.forEach((h, i) => {
       const cells = rows.map((r) => txt(r.children[i] || {}));
       const dashes = cells.filter((c) => c === '—' || c === '-' || c === '').length;
+      const said = notes.some((x) => x.includes(bare(h)));
       if (dashes === cells.length) push('e', 'dead-column', `"${h}" is empty in all ${cells.length} rows`);
-      else if (dashes / cells.length > 0.8 && !said.includes(h)) {
+      else if (dashes / cells.length > 0.8 && !said) {
         push('w', 'sparse-column', `"${h}" is empty in ${dashes} of ${cells.length} rows`);
       }
     });

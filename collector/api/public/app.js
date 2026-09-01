@@ -3901,10 +3901,11 @@ V.sources = async (root) => {
      where the reader already is. */
   if (anyValue && priced.length < cov.length) {
     cv.body.append(el('p', 'cap',
-      `Only ${priced.map((x) => esc(String(x))).join(' and ')} carry a money value at all — the `
-      + `other ${countOf(cov.length - priced.length, 'dataset')} here `
-      + `${cov.length - priced.length === 1 ? 'records' : 'record'} movement, events or documents, `
-      + 'so a dash in Value is what those feeds are, not something missing from them.'));
+      `Value is empty on ${fmt(cov.length - priced.length)} of these ${countOf(cov.length, 'row')}: `
+      + `only ${priced.map((x) => esc(String(x))).join(' and ')} `
+      + `${priced.length === 1 ? 'carries' : 'carry'} a money value at all. The `
+      + `${cov.length - priced.length === 1 ? 'other one records' : 'others record'} movement, events `
+      + 'or documents, so a dash there is what those feeds are, not something missing from them.'));
   }
   const holed = cov.filter((r) => r.cal && r.cal.missing_days);
   if (holed.length) {

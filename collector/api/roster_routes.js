@@ -75,33 +75,43 @@ export function rosterRoutes(app, { q, wrap, range }) {
          WHERE ($3::text IS NULL OR platform = $3)
            AND coalesce(btrim(full_name), '') <> ''
        ),
-       /* Every fleet this person took a booking for in the window, whatever
-          the filter — the set membership is tested against, so it cannot be
-          narrowed by the filter it is deciding. */
-       fleets AS (
-         SELECT t.person_key AS person,
-                array_remove(array_agg(DISTINCT n.fleet_id), NULL) AS fleets_worked
-         FROM trip_norm n ${JOIN_TRIP}
-         WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
-           AND t.person_key IS NOT NULL AND t.person_key <> ''
-         GROUP BY 1
-       ),
-       -- Work inside the window, by the same folded name.
-       /* The stored fold, via the base table. Computed per row this was the
-          roster's cost over a wide window — 37 seconds across the full record —
-          and it is the same expression, so the same answer. Every column is
+       /* ONE pass over the window, answering both questions it was asked
+          twice for.
+          ─────────────────────────────────────────────────────────────────
+          This was two CTEs — fleets over trip_norm and w over trip_ext —
+          scanning the same rows of the same window for the same people, one
+          without the fleet filter and one with it. Over a 365-day window that
+          is the whole trip table, twice, and /api/roster answered in 25
+          seconds; api/warm.js requests exactly that window every time the data
+          version moves, so the cost was paid on a schedule whether anybody
+          read the page or not.
+
+          The filter moves onto the aggregates instead. Every fleet this person
+          took a booking for is still computed over ALL of their rows — it is
+          the set membership below is tested against, so it cannot be narrowed
+          by the filter it is deciding — while the work columns count only the
+          rows the filter admits. A person with no work for the filtered fleet
+          then arrives with trips 0 and the rest null, which is what the outer
+          coalesce already made of a missing row: the response is unchanged,
+          row for row.
+
+          The stored fold, via the base table. Computed per row this was the
+          roster's cost over a wide window — 37 seconds across the full record
+          — and it is the same expression, so the same answer. Every column is
           qualified because the join puts two of each in scope. */
        w AS (
          SELECT t.person_key AS person,
-                count(*)::int trips,
-                count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
-                sum(n.price) FILTER (WHERE n.price IS NOT NULL AND NOT n.is_complimentary) AS revenue,
-                sum(n.distance_km) FILTER (WHERE n.has_distance) AS km,
-                max(n.requested_at) AS last_trip,
-                array_agg(DISTINCT n.platform) AS platforms_worked
+                array_remove(array_agg(DISTINCT n.fleet_id), NULL) AS fleets_worked,
+                count(*) FILTER (WHERE $4::text IS NULL OR n.fleet_id = $4)::int trips,
+                count(*) FILTER (WHERE n.outcome = 'completed'
+                  AND ($4::text IS NULL OR n.fleet_id = $4))::int completed,
+                sum(n.price) FILTER (WHERE n.price IS NOT NULL AND NOT n.is_complimentary
+                  AND ($4::text IS NULL OR n.fleet_id = $4)) AS revenue,
+                sum(n.distance_km) FILTER (WHERE n.has_distance
+                  AND ($4::text IS NULL OR n.fleet_id = $4)) AS km,
+                max(n.requested_at) FILTER (WHERE $4::text IS NULL OR n.fleet_id = $4) AS last_trip
          FROM trip_ext n ${JOIN_TRIP}
          WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
-           AND ($4::text IS NULL OR n.fleet_id = $4)
            AND t.person_key IS NOT NULL AND t.person_key <> ''
          GROUP BY 1
        ),
@@ -192,7 +202,7 @@ export function rosterRoutes(app, { q, wrap, range }) {
                  row there. The fleets CTE has one row per person and the
                  join is on person, so every row in the group carries the same
                  array and max() is that array. */
-              max(f.fleets_worked) AS fleets_worked,
+              max(w.fleets_worked) AS fleets_worked,
               array_remove(array_agg(DISTINCT s.fleet_id), NULL) AS credential_fleets,
               count(*)::int AS accounts,
               array_agg(DISTINCT s.platform ORDER BY s.platform) AS platforms,
@@ -234,12 +244,11 @@ export function rosterRoutes(app, { q, wrap, range }) {
        LEFT JOIN w    ON w.person = s.person
        LEFT JOIN paid ON paid.person = s.person
        LEFT JOIN ever e ON e.person = s.person
-       LEFT JOIN fleets f ON f.person = s.person
        LEFT JOIN fare_line fl ON fl.person = s.person
        GROUP BY s.person
        HAVING $4::text IS NULL
-           OR bool_or(f.fleets_worked @> ARRAY[$4]::text[])
-           OR (bool_and(f.fleets_worked IS NULL) AND bool_or(s.fleet_id = $4))
+           OR bool_or(w.fleets_worked @> ARRAY[$4]::text[])
+           OR (bool_and(w.fleets_worked IS NULL) AND bool_or(s.fleet_id = $4))
        ORDER BY trips DESC, name`, p);
 
     const people = rows.map((r) => {

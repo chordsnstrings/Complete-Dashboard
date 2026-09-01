@@ -1173,7 +1173,10 @@ app.get('/api/drivers/performance', wrap(async (req, res) => {
     `SELECT count(DISTINCT (platform, driver_ext_id, period_start, period_end))::int total,
             count(DISTINCT (platform, period_start, period_end))::int periods,
             count(DISTINCT day)::int payout_days,
-            ${peopleCount('driver_ext_id', 'driver_name')}::int people,
+            /* driver_payout_day carries the stored fold since
+               sql/schema_v51.sql — the same expression, evaluated once per
+               write instead of once per row per request. */
+            ${peopleCountStored('person_key', 'driver_ext_id')}::int people,
             round(sum(earnings)::numeric, 2) AS earnings,
             round(sum(cash_earnings)::numeric, 2) AS cash_earnings,
             array_remove(array_agg(DISTINCT platform), NULL) AS platforms
@@ -1199,21 +1202,31 @@ app.get('/api/vehicles', wrap(async (req, res) => {
      so adding them showed a 2–3.5x overcount as "trips". Distance is guarded by
      has_distance for the same reason the schema documents — one odometer-derived
      FMS row carries 193,027 km and put 1.6 million km against a single car. */
-  `SELECT t.plate,
-          count(*) FILTER (WHERE t.is_booking)::int trips,
-          count(*) FILTER (WHERE NOT t.is_booking)::int telematics_journeys,
-          round(sum(t.distance_km) FILTER (WHERE t.is_booking AND t.has_distance)::numeric,0) km,
-          round(sum(t.distance_km) FILTER (WHERE NOT t.is_booking AND t.has_distance)::numeric,0) telematics_km,
-          round(sum(t.price) FILTER (WHERE t.has_fare)::numeric,0) revenue,
-          count(*) FILTER (WHERE t.has_fare)::int priced_trips,
-          ${peopleCount('t.driver_ext_id', 't.driver_name')}::int drivers,
-          count(distinct t.platform)::int platforms, max(t.requested_at) last_trip,
+  /* The people count comes from the STORED fold, through the base table.
+     ─────────────────────────────────────────────────────────────────────
+     peopleCount() evaluates two nested regexes — one with a backreference —
+     per row, and this query's row set is every trip in the window. That is the
+     same cost sql/schema_v20.sql stored the column to remove, and the same
+     reasoning that took /api/alerts/by-driver from 93 seconds; the view cannot
+     expose person_key, so JOIN_TRIP fetches it from the row the view is built
+     on. The answer is identical by construction — test/person_key.test.mjs
+     holds the stored expression to the JS one — and test/consistency.test.mjs
+     holds this endpoint's driver count to the pages that state it elsewhere. */
+  `SELECT n.plate,
+          count(*) FILTER (WHERE n.is_booking)::int trips,
+          count(*) FILTER (WHERE NOT n.is_booking)::int telematics_journeys,
+          round(sum(n.distance_km) FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) km,
+          round(sum(n.distance_km) FILTER (WHERE NOT n.is_booking AND n.has_distance)::numeric,0) telematics_km,
+          round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
+          count(*) FILTER (WHERE n.has_fare)::int priced_trips,
+          ${peopleCountStored()}::int drivers,
+          count(distinct n.platform)::int platforms, max(n.requested_at) last_trip,
           cd.driver_name AS current_driver, cd.driver_ext_id AS current_driver_id,
           cd.as_of AS driver_as_of
-   FROM trip_norm t
-   LEFT JOIN vehicle_current_driver cd ON cd.plate = t.plate
-   WHERE ${W('t')} AND t.plate IS NOT NULL AND t.plate<>''
-   GROUP BY t.plate, cd.driver_name, cd.driver_ext_id, cd.as_of
+   FROM trip_norm n ${JOIN_TRIP}
+   LEFT JOIN vehicle_current_driver cd ON cd.plate = n.plate
+   WHERE ${W('n')} AND n.plate IS NOT NULL AND n.plate<>''
+   GROUP BY n.plate, cd.driver_name, cd.driver_ext_id, cd.as_of
    ORDER BY trips DESC, telematics_journeys DESC LIMIT 200`, range(req));
   /* How many vehicles there ARE, so the busiest 200 cannot be read as the
      fleet. /api/vehicles/directory is the complete register; this endpoint is

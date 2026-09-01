@@ -361,6 +361,59 @@ check('a person who HAS driven keeps their real count',
   (d.people.find((x) => /Asad/.test(x.name || '')) || {}).lifetime_trips === 20,
   String((d.people.find((x) => /Asad/.test(x.name || '')) || {}).lifetime_trips));
 
+/* ── one pass over the window, still two answers ──────────────────────────
+   The window used to be scanned twice: once unfiltered, to learn which fleets
+   a person actually drove for, and once filtered, for their work. Over a
+   365-day window that is the whole trip table twice and /api/roster answered
+   in 25 seconds — a cost api/warm.js pays on a schedule whether anybody opens
+   the page or not.
+
+   The two now come off one scan, with the fleet filter moved onto the
+   aggregates. Which means the filter has to stop reaching exactly where it
+   stopped before: membership is decided over ALL of a person's rows, the work
+   columns count only the rows the filter admits, and a person with no work for
+   the filtered fleet must still read as zero trips rather than vanish. */
+{
+  await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_name,requested_at,status,price,distance_km)
+           VALUES ('uber','t-two-fleet-1','egari','L200','Asad Khan','2026-08-05T10:00:00+04:00','completed',80,9),
+                  ('uber','t-two-fleet-2','egari','L200','Asad Khan','2026-08-06T10:00:00+04:00','completed',60,7)`);
+  const W2 = 'from=2026-08-01&to=2026-08-31';
+  const all = await get(`/api/roster?${W2}`);
+  const eco = await get(`/api/roster?${W2}&fleet=ecosine`);
+  const ega = await get(`/api/roster?${W2}&fleet=egari`);
+  const asad = (r) => (r.people || []).find((x) => /Asad/.test(x.name || ''));
+
+  check('a person who drove for both fleets is listed under either',
+    !!asad(eco) && !!asad(ega), JSON.stringify([!!asad(eco), !!asad(ega)]));
+  check('…and both fleets are named on the row, whichever filter is on',
+    ['ecosine', 'egari'].every((f) => (asad(ega)?.fleets_worked || []).includes(f)),
+    JSON.stringify(asad(ega)?.fleets_worked));
+  /* The whole point of the filter: 20 Ecosine trips and 2 Egari ones. */
+  check('the work columns count only the filtered fleet',
+    asad(eco)?.trips === 20 && asad(ega)?.trips === 2,
+    JSON.stringify([asad(eco)?.trips, asad(ega)?.trips]));
+  check('…and unfiltered counts both', asad(all)?.trips === 22, String(asad(all)?.trips));
+  check('the money follows the same filter',
+    asad(ega)?.revenue === 140 && asad(eco)?.revenue == null,
+    JSON.stringify([asad(ega)?.revenue, asad(eco)?.revenue]));
+  /* Somebody an Egari credential describes who took no work at all in the
+     window: still a row, still zero, never a missing person — the state a LEFT
+     JOIN used to produce and an aggregate FILTER has to reproduce. The fleet
+     of last resort is what puts them on this list, which is the branch of the
+     HAVING that reads fleets_worked IS NULL. */
+  await q(`INSERT INTO driver_platform_state (platform,driver_ext_id,fleet_id,full_name,state,
+             state_raw,can_earn,observed_at)
+           VALUES ('uber','e9','egari','Egari Newcomer','active','active',true,now())`);
+  const ega2 = await get(`/api/roster?${W2}&fleet=egari`);
+  const newcomer = (ega2.people || []).find((x) => /Egari Newcomer/.test(x.name || ''));
+  check('a person with no work at all is a row of zeros under their credential fleet',
+    newcomer && newcomer.trips === 0 && newcomer.revenue == null
+      && newcomer.fleets_worked == null,
+    JSON.stringify(newcomer && [newcomer.trips, newcomer.revenue, newcomer.fleets_worked]));
+  check('…and the response still says which claim put them there',
+    /credential/.test(ega.fleet_basis || ''), String(ega.fleet_basis));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
