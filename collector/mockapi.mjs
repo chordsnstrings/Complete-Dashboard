@@ -1611,7 +1611,10 @@ app.get('/api/mix', (req, r) => {
    (category, parent), with the roots present so the tree can nest and net.
    The per-driver shape this used to return was never read — componentTree()
    folds on (parent, category) the moment it arrives. */
-app.get('/api/earnings/components', (_, r) => r.json([
+app.get('/api/earnings/components', (_, r) => r.json({
+  /* One shape whether or not a period fits the window: the span is what tells a
+     reader which range to ask for, and it is present either way. */
+  overlapping: 0, first_period: '2026-08-24', last_period: '2026-08-30', rows: [
   { category: 'earnings', parent: null, amount: 57232, currency: 'AED', drivers: 41 },
   { category: 'payouts', parent: null, amount: -23920, currency: 'AED', drivers: 38 },
   { category: 'reimbursements', parent: null, amount: 980, currency: 'AED', drivers: 12 },
@@ -1621,7 +1624,7 @@ app.get('/api/earnings/components', (_, r) => r.json([
   { category: 'toll_reimbursement', parent: 'reimbursements', amount: 980, currency: 'AED', drivers: 12 },
   { category: 'cash_collected', parent: 'payouts', amount: -14800, currency: 'AED', drivers: 38 },
   { category: 'service_fee', parent: 'payouts', amount: -9120, currency: 'AED', drivers: 38 },
-]));
+] }));
 
 /* Ranked by tip RATE, so the ranking needs a fare base worth dividing by: the
    real endpoint has a 300-dirham floor and reports how many drivers it left

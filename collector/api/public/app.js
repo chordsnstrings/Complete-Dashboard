@@ -2171,10 +2171,25 @@ V.finance = async (root) => {
   /* Components arrive signed: fares and tips add, cash already collected and
      fees subtract. Drawing them all one way would show a deduction as income. */
   comp.body.innerHTML = '';
-  if (!components.length) {
-    comp.body.append(note('No payout breakdown collected yet. Uber publishes components per payout period; they appear once a period covering this range has been pulled.'));
+  // {rows, overlapping, first_period, last_period}; a bare array before.
+  const compRows = components.rows || components;
+  if (!compRows.length) {
+    /* Two empties, two different actions. The breakdown is reported per PAYOUT
+       PERIOD — a week at a time — and only a period the range holds ENTIRELY is
+       counted, because counting one that straddles the edge would report part
+       of a week as the whole of it. On a seven-day range that empties the panel
+       while the database is full, and this note said "not collected yet",
+       sending a reader to the collector for data already held. */
+    comp.body.append(note(components.overlapping
+      ? `No payout period fits inside this range. Uber reports this breakdown a week at a time, and `
+        + `${countOf(components.overlapping, 'component')} of it ${components.overlapping === 1 ? 'overlaps' : 'overlap'} `
+        + 'the range without being contained by it — counting those would report part of a week as if '
+        + `it were the whole of one. The record runs ${dateStr(components.first_period)} to `
+        + `${dateStr(components.last_period)}; widen the range to hold a whole period and it appears.`
+      : 'No payout breakdown collected yet. Uber publishes components per payout period; they appear '
+        + 'once a period covering this range has been pulled.'));
   } else {
-    comp.body.append(componentTree(components));
+    comp.body.append(componentTree(compRows));
   }
 
   /* Tips are the one quality signal riders pay for directly. */

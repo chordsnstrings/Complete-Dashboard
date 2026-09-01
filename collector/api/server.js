@@ -3294,14 +3294,51 @@ app.get('/api/recommendations', wrap(async (_, res) => {
    driver away, so the per-driver rows were never used for anything. Grouping
    here instead makes the answer EXACT and about twenty rows rather than four
    hundred, and removes the need for a cap at all. */
-app.get('/api/earnings/components', wrap(async (req, res) => res.json(await q(
-  `SELECT category, parent, round(sum(amount)::numeric,2) amount, currency,
-          count(DISTINCT driver_ext_id)::int drivers
-   FROM driver_earnings_component
-   WHERE period_start >= $1 AND period_end <= $2
-     AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
-   GROUP BY 1,2,4 ORDER BY abs(sum(amount)) DESC`,
-  range(req)))));
+/* Contained by the window, never merely overlapping it — and the difference
+   said out loud when it empties the panel.
+   ─────────────────────────────────────────────────────────────────────────
+   These amounts are reported per PAYOUT PERIOD, a week at a time, and a period
+   is only counted when the window holds all of it: counting a period that
+   straddles the edge would report part of a week as if it were the whole of
+   one. That is right, and on a seven-day range it is also why the panel is
+   empty — bin/page-audit.mjs found it empty at 7 days and full at 30 — while
+   the page said "no payout breakdown collected yet", which sent a reader to
+   the collector for data that was already in the database.
+
+   So when nothing is contained, the endpoint counts what OVERLAPS and names
+   the span it holds. The second query runs only on the empty path, where its
+   cost buys the only sentence worth printing. */
+app.get('/api/earnings/components', wrap(async (req, res) => {
+  const p = range(req);
+  /* The span rides on the same grouping. One shape in both answers: when the
+     rows are there it is the span they came from, and when they are not it is
+     the span the record holds — either way it is what a reader needs to know
+     which range to ask for. */
+    const raw = await q(
+    `SELECT category, parent, round(sum(amount)::numeric,2) amount, currency,
+            count(DISTINCT driver_ext_id)::int drivers,
+            to_char(min(period_start), 'YYYY-MM-DD') AS _from,
+            to_char(max(period_end), 'YYYY-MM-DD') AS _to
+     FROM driver_earnings_component
+     WHERE period_start >= $1 AND period_end <= $2
+       AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
+     GROUP BY 1,2,4 ORDER BY abs(sum(amount)) DESC`, p);
+  const rows = raw.map(({ _from, _to, ...r }) => r);
+  if (rows.length) {
+    return res.json({ rows, overlapping: 0,
+      first_period: raw.reduce((a, r) => (a && a < r._from ? a : r._from), null),
+      last_period: raw.reduce((a, r) => (a && a > r._to ? a : r._to), null) });
+  }
+  const [ov] = await q(
+    `SELECT count(*)::int AS overlapping,
+            to_char(min(period_start), 'YYYY-MM-DD') AS first_period,
+            to_char(max(period_end), 'YYYY-MM-DD') AS last_period
+     FROM driver_earnings_component
+     WHERE period_start <= $2 AND period_end >= $1
+       AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)`, p);
+  return res.json({ rows, overlapping: ov?.overlapping || 0,
+    first_period: ov?.first_period || null, last_period: ov?.last_period || null });
+}));
 
 // per-driver tip rate — service quality expressed in money
 /* Ranked by RATE, which needs a base worth dividing by.

@@ -76,8 +76,12 @@ function sourceFor(view) {
    `/api/day?${params}` — so the character after the path is a `?`, and a regex
    demanding a quote matched none of them. Two views reported zero endpoints for
    that reason alone. */
+/* A dot is part of a path, not the end of one. /api/export/trips.csv is a real
+   endpoint and this regex stopped at the dot, so the audit fetched
+   /api/export/trips, got "no such endpoint", and reported #trips as a view with
+   a refused call — a 404 the harness had invented. */
 const paths = (src) => [...new Set(
-  [...src.matchAll(/['"`](\/api\/[a-z0-9/_-]+)/gi)].map((m) => m[1].replace(/\/$/, '')))];
+  [...src.matchAll(/['"`](\/api\/[a-z0-9/_.-]+)/gi)].map((m) => m[1].replace(/[/.]+$/, '')))];
 
 /* Real ids, so a detail page is audited against something that exists rather
    than against a 404 that would read as a clean pass. */

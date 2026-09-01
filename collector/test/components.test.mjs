@@ -43,7 +43,7 @@ await comp('d0', 'payouts', null, -400);
 const { server, get } = await mountAll(db, { serverRoutes: true });
 const res = await get(`/api/earnings/components?from=${P[0]}&to=${P[1]}`);
 check('the endpoint answers', res.status === 200, JSON.stringify(res.body).slice(0, 120));
-const rows = res.body;
+const rows = res.body.rows;
 
 console.log('\ncomponents: one row per component, not per driver per component');
 
@@ -85,6 +85,42 @@ check('and a component only one driver has says so',
 const src = (await import('node:fs')).readFileSync('api/server.js', 'utf8');
 const slice = src.slice(src.indexOf("app.get('/api/earnings/components'"), src.indexOf("app.get('/api/earnings/components'") + 700);
 check('no LIMIT survives on this endpoint', !/LIMIT/.test(slice), slice.slice(0, 200));
+
+/* ── an empty answer, and which of the two empties it is ──────────────────
+   These amounts are reported per PAYOUT PERIOD — a week at a time — and only a
+   period the window holds ENTIRELY is counted, because counting one that
+   straddles the edge reports part of a week as the whole of it. On a seven-day
+   range that empties the panel while the database is full, and the page said
+   "no payout breakdown collected yet": the reader was sent to the collector for
+   data it had already collected. bin/page-audit.mjs found it empty at 7 days
+   and full at 30.
+
+   The two empties lead to opposite actions — widen the range, or go and fix a
+   collector — so the endpoint has to tell them apart. */
+{
+  /* A three-day window inside the fixture's week: it overlaps every period and
+     contains none of them. */
+  const inside = await get(`/api/earnings/components?from=2026-08-03&to=2026-08-05`);
+  check('a window that splits every period returns nothing',
+    inside.body.rows.length === 0, JSON.stringify(inside.body.rows).slice(0, 80));
+  check('…and says the components are there, overlapping it',
+    inside.body.overlapping > 0, String(inside.body.overlapping));
+  check('…and names the span the record actually covers, so the range can be widened to it',
+    inside.body.first_period === P[0] && inside.body.last_period === P[1],
+    JSON.stringify([inside.body.first_period, inside.body.last_period]));
+
+  /* And a window nowhere near the data: nothing contained, nothing
+     overlapping. That is the collector's problem, and the only case where
+     saying so is right. */
+  const far = await get(`/api/earnings/components?from=2025-01-01&to=2025-01-31`);
+  check('a window the record does not reach reports no overlap either',
+    far.body.rows.length === 0 && far.body.overlapping === 0,
+    JSON.stringify([far.body.rows.length, far.body.overlapping]));
+
+  /* And the answer that IS full carries no count of overlaps to misread. */
+  check('a window that contains the periods reports no overlap to explain',
+    res.body.overlapping === 0, String(res.body.overlapping));
+}
 
 server.close();
 await db.close();
