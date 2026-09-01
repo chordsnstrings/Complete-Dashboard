@@ -2157,9 +2157,16 @@ app.get('/api/settlement/cash-exposure', (_, r) => r.json({
   drivers: drivers.map((d, i) => ({ driver_name: d, driver_ext_id: `drv-${i}`, cash_trips: 60 - i * 6,
     priced_cash_trips: Math.max(0, 14 - i * 2), cash_value: Math.max(0, 14 - i * 2) * 95,
     value_known_pct: Math.round((Math.max(0, 14 - i * 2) / (60 - i * 6)) * 100),
+    /* The platform's own cash figure per person, which is what the Value known
+       column cannot see: most of these people have one and no priced booking,
+       which is the production shape. One has neither, so the "—" branch stays
+       reachable. */
+    statement_cash: i === 3 ? null : (60 - i * 6) * 47,
+    statement_days: i === 3 ? 0 : 21 - i,
     platforms: ['uber', 'hotel'], plates: [plates[i], plates[(i + 1) % plates.length]],
     last_cash_trip: new Date(Date.now() - i * 36e5).toISOString() })),
   total_cash_trips: 430, total_cash_value_known: 7300, value_known_pct: 20,
+  total_statement_cash: 14570, statement_cash_drivers: 7,
   caveat: '342 of 430 cash trips come from a channel that does not report a fare, so the value column is a floor, not the total.',
 }));
 /* One row per counterparty — the group key used to carry driver_ext_id, which

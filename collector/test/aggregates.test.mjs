@@ -308,7 +308,11 @@ console.log('\ncash exposure aggregates the window once');
   newSql = newSql.slice(0, newSql.indexOf('`, p)')).replace('${FB}', FB2);
 
   const P = ['2026-08-01', '2026-08-31', null, null];
-  const strip = (rs) => rs.map(({ _drivers, _cash_trips, _priced, _value, ...r }) => r);
+  /* The window aggregates ride on the rows, and so does the statement-cash
+     join added beside the booking figure — neither belongs in a comparison
+     with the query that had neither. */
+  const strip = (rs) => rs.map(({ _drivers, _cash_trips, _priced, _value, _stmt_cash,
+    _stmt_drivers, statement_cash, statement_days, ...r }) => r);
   const before = await cq(oldRows, P);
   const [beforeT] = await cq(oldTotals, P);
   const after = await cq(newSql, P);

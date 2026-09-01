@@ -254,8 +254,11 @@ async function settleCash(host) {
      KNOWN money — AED 1,566 — sat 38th behind thirty-seven rows reading "—",
      and there was no way to reach him but to scroll. */
   const cp = panel(`Who is holding it — ${countOf(c.drivers.length, 'driver')}`,
-    'One row per person, ordered by the money this product can actually see. Coverage is the share of '
-    + 'that driver\u2019s cash bookings that report a fare at all.');
+    'One row per person. Value known is the fares of that driver\u2019s cash bookings that carry one '
+    + 'and Coverage is the share of them that do; Statement cash is what the platform\u2019s own '
+    + 'weekly statement says they took. Two measurements of the same money from opposite sides — '
+    + 'never added together, and the statement is matched on the driver\u2019s name, so two people '
+    + 'sharing one would merge.');
   host.append(cp.panel);
   cp.body.append(tableFrom(c.drivers, [
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
@@ -265,6 +268,23 @@ async function settleCash(host) {
         ? money(r.cash_value)
         : '<span class="ent-off" title="none of this driver’s cash bookings reports a fare — the money is real and the figure is not recorded">—</span>') },
     { label: 'Coverage', key: 'value_known_pct', num: true, render: (r) => pct(r.value_known_pct, 0) },
+    /* The column that answers the question this page is for. Value known is
+       the fares of the cash bookings that carry one, and Uber's export carries
+       none — so it read "—" for 106 of the 140 people listed, above a fleet
+       tile confidently reporting the platforms' own cash figure. The figure
+       behind that tile is per person, and this is it: what the platform's
+       weekly statement says this driver took in cash.
+
+       Its own column, never merged into Value known. The two measure the same
+       cash from opposite sides — one from the bookings, one from the payout —
+       and adding them counts it twice. */
+    { label: 'Statement cash', key: 'statement_cash', num: true,
+      absent: 'no payout statement in this window reports cash for anybody on this list — the '
+        + 'platform statement feeds reach back about 192 days',
+      render: (r) => (r.statement_cash == null
+        ? '<span class="ent-off" title="no payout statement in this window reports cash for this person">—</span>'
+        : `${money(r.statement_cash)}<span class="dim" title="the platform's own weekly statement, over ${
+          r.statement_days} day${r.statement_days === 1 ? '' : 's'} it covers"> stmt</span>`) },
     { label: 'Channels', key: 'platforms', render: (r) => esc((r.platforms || []).map(sourceLabel).join(', ')) },
     { label: 'Vehicles', key: 'plates',
       render: (r) => ((r.plates || []).slice(0, 3).map((pl) => entity('vehicle', pl, pl)).join(' ')

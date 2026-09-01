@@ -156,24 +156,69 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
            FROM trip_ext
           WHERE ${FB} AND driver_holds_cash
           GROUP BY 1, 2)
-       SELECT *,
+       SELECT h.*, s.statement_cash, s.statement_days,
               count(*) OVER ()::int AS _drivers,
-              sum(cash_trips) OVER ()::int AS _cash_trips,
-              sum(priced_cash_trips) OVER ()::int AS _priced,
-              sum(cash_value) OVER () AS _value
-         FROM holders ORDER BY cash_trips DESC LIMIT 200`, p);
+              sum(h.cash_trips) OVER ()::int AS _cash_trips,
+              sum(h.priced_cash_trips) OVER ()::int AS _priced,
+              sum(h.cash_value) OVER () AS _value,
+              sum(s.statement_cash) OVER () AS _stmt_cash,
+              count(s.statement_cash) OVER ()::int AS _stmt_drivers
+         FROM holders h
+         /* WHO is holding it, not just how much of it we can price.
+            ──────────────────────────────────────────────────────────────
+            cash_value above is sum(trip.price) over the cash bookings that
+            carry a fare, and Uber's export carries none — so on production
+            5,860 of 6,294 cash bookings had no figure and the Value column
+            read "—" for 106 of the 140 people on the list. The page already
+            showed a fleet-level "Cash the platforms report" tile from the
+            payout statements; the per-person figure behind it was never
+            joined, so an operator could see that AED 1.5m of cash existed and
+            not which drivers were holding it, which is the only question this
+            page is for.
+
+            driver_statement_day.cash is that figure per driver per day
+            (sql/schema_v25.sql:41). Identity there is the normalised NAME plus
+            fleet — the ledger predates our platform ids and its people must
+            not vanish for want of a match — so the name is matched first and
+            the platform id accepted as well where both sides carry one. Two
+            different people sharing a name merge, which happens on this fleet;
+            the page says so rather than the number pretending otherwise.
+
+            source <> 'ledger', matching /api/driver/earnings: the operator's
+            own import and the platform's statement are two measurements of the
+            same cash and adding them counts it twice. */
+         LEFT JOIN LATERAL (
+           SELECT round(sum(d.cash)::numeric, 2) AS statement_cash,
+                  count(DISTINCT d.day)::int     AS statement_days
+             FROM driver_statement_day d
+            WHERE d.source <> 'ledger' AND NOT d.pseudo AND d.cash IS NOT NULL
+              AND d.day BETWEEN $1::date AND $2::date
+              AND ($3::text IS NULL OR d.platform = $3)
+              AND ($4::text IS NULL OR d.fleet_id = $4)
+              AND (d.name_key = lower(regexp_replace(h.driver_name, '\s+', ' ', 'g'))
+                   OR (h.driver_ext_id IS NOT NULL AND d.driver_ext_id = h.driver_ext_id))
+         ) s ON true
+         ORDER BY h.cash_trips DESC LIMIT 200`, p);
     const totals = rows.length
       ? { drivers: rows[0]._drivers, cash_trips: rows[0]._cash_trips,
-          priced: rows[0]._priced, value: rows[0]._value }
-      : { drivers: 0, cash_trips: 0, priced: 0, value: null };
+          priced: rows[0]._priced, value: rows[0]._value,
+          stmt_cash: rows[0]._stmt_cash, stmt_drivers: rows[0]._stmt_drivers }
+      : { drivers: 0, cash_trips: 0, priced: 0, value: null, stmt_cash: null, stmt_drivers: 0 };
     for (const r of rows) {
       delete r._drivers; delete r._cash_trips; delete r._priced; delete r._value;
+      delete r._stmt_cash; delete r._stmt_drivers;
     }
     const cashTrips = totals.cash_trips || 0;
     const priced = totals.priced || 0;
     res.json({
       drivers: rows.map((r) => ({
         ...r, cash_value: r.priced_cash_trips ? round(r.cash_value, 0) : null,
+        /* Beside the booking figure, never merged with it: one is the fares of
+           the cash bookings that carry one, the other is what the platform's
+           statement says the person took. They measure the same cash from two
+           sides and adding them counts it twice. */
+        statement_cash: r.statement_cash == null ? null : round(r.statement_cash, 0),
+        statement_days: r.statement_days ?? 0,
         value_known_pct: share(r.priced_cash_trips, r.cash_trips),
       })),
       driver_count: totals.drivers || 0,
@@ -181,6 +226,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       truncated: (totals.drivers || 0) > rows.length,
       total_cash_trips: cashTrips,
       total_cash_value_known: priced ? round(NUM(totals.value) || 0, 0) : null,
+      /* The same money the fleet tile already shows, now summed over exactly
+         the people listed — so the tile and the column add up to each other. */
+      total_statement_cash: totals.stmt_cash == null ? null : round(NUM(totals.stmt_cash), 0),
+      statement_cash_drivers: totals.stmt_drivers || 0,
       value_known_pct: share(priced, cashTrips),
       caveat: priced < cashTrips
         ? `${(cashTrips - priced).toLocaleString('en-US')} of ${cashTrips.toLocaleString('en-US')} `

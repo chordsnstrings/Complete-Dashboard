@@ -171,6 +171,30 @@ analyticsRoutes(app, { q, wrap, range, F, FB });
 const server = app.listen(0);
 const port = server.address().port;
 const get = async (p) => (await fetch(`http://127.0.0.1:${port}${p}`)).json();
+/* THE CASH THE PLATFORM DOES REPORT.
+   ─────────────────────────────────────────────────────────────────────────
+   None of the Uber trips above carries a price, so the cash-exposure page's
+   Value known column — sum(trip.price) over the cash bookings — is empty for
+   every Uber-only driver. On production that was 106 of the 140 people listed,
+   under a fleet tile confidently reporting the platforms' own cash figure: the
+   operator could see that the money existed and not who was holding it, which
+   is the only question the page is for.
+
+   driver_statement_day.cash is that figure per person per day, and its
+   identity is the normalised NAME — the ledger predates our platform ids. One
+   row here carries a name and no id, deliberately, so a join written on the id
+   alone fails. */
+const stmtCash = (name, id, day, cash, source = 'statement_import') => q(
+  `INSERT INTO driver_statement_day (platform, fleet_id, driver_name, driver_ext_id, day, cash, net, source)
+   VALUES ('uber', 'ecosine', $1, $2, $3::date, $4, $4, $5)`,
+  [name, id, day, cash, source]);
+await stmtCash('Driver d3', 'd3', '2026-08-04', 260);
+await stmtCash('Driver d3', null, '2026-08-05', 140);      // no id at all: matched by name
+await stmtCash('Driver d1', 'd1', '2026-08-06', 95);
+/* The operator's own import of the same days. It is a SECOND measurement of
+   the same cash, so it must not be added to the statement figure. */
+await stmtCash('Driver d3', 'd3', '2026-08-04', 999, 'ledger');
+
 const W = 'from=2026-08-01&to=2026-08-31';
 
 /* ── settlement: a route, not a processor ────────────────────────────────── */
@@ -225,6 +249,34 @@ const W = 'from=2026-08-01&to=2026-08-31';
     !JSON.stringify(c.drivers).includes('cash-supervisor'));
   check('each driver says how much of their cash is valued',
     c.drivers.every((d) => d.value_known_pct != null));
+
+  /* ── who is holding it, not just how much we can price ──────────────── */
+  const d0 = c.drivers.find((d) => d.driver_name === 'Driver d3');
+  const d1 = c.drivers.find((d) => d.driver_name === 'Driver d1');
+  check('the statement’s own cash figure reaches the person',
+    Number(d0?.statement_cash) === 400, String(d0?.statement_cash));
+  check('…including the statement row that carries a name and no platform id',
+    Number(d0?.statement_cash) === 400, 'a join on the id alone returns 260');
+  check('…and the operator’s ledger import is not added on top of it',
+    Number(d0?.statement_cash) !== 1399, String(d0?.statement_cash));
+  check('it says how many days of statement it covers',
+    d0?.statement_days === 2, String(d0?.statement_days));
+  check('another person gets their own figure, not the first one’s',
+    Number(d1?.statement_cash) === 95, String(d1?.statement_cash));
+  check('somebody with no statement has none, rather than a zero',
+    c.drivers.filter((d) => !['Driver d3', 'Driver d1'].includes(d.driver_name))
+      .every((d) => d.statement_cash == null),
+    JSON.stringify(c.drivers.filter((d) => d.statement_cash != null).map((d) => d.driver_name)));
+  /* The booking figure and the statement figure measure the same cash from
+     opposite sides. Merging them would double it, so they stay apart. */
+  check('the booking-priced value is untouched by any of it',
+    c.drivers.every((d) => d.cash_value == null || d.cash_value > 0));
+  check('the fleet total over the list matches the column',
+    Number(c.total_statement_cash) === c.drivers.reduce((a, d) => a + (+d.statement_cash || 0), 0),
+    `${c.total_statement_cash} vs the column`);
+  check('…and it counts the people it found one for',
+    c.statement_cash_drivers === c.drivers.filter((d) => d.statement_cash != null).length,
+    String(c.statement_cash_drivers));
   /* Counted over the table, not over the returned list. "AED x is in drivers'
      hands" and "n drivers holding cash" are numbers somebody sizes a cash
      control on; both were the length and sum of a list the endpoint caps at
