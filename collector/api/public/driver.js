@@ -640,10 +640,18 @@ async function tabOverview(root, id, prof) {
        fares on their trips, and Uber's export has no fare column — so a driver
        doing eighty Uber trips and one hotel booking led with the price of the
        hotel booking. Their actual pay was three panels down under Earnings. */
+    /* Only the halves that exist are named. This printed both unconditionally,
+       so an Uber-only driver read "AED 0 in fares · AED 10,243 paid out" — and
+       once the tile beside it started showing the statement's fare line, the
+       same screen said AED 0 in fares and AED 15,738 in fares at the same
+       time. The zero was never a measurement: it is the trip record having no
+       fare column, which the Fares tile now says in words. */
     { label: 'Money in', value: k.accounted ? money(k.accounted) : '—',
       sub: k.accounted
-        ? `${money(k.accounted_fares || 0)} in fares · ${money(k.accounted_payouts || 0)} paid out `
-          + `by ${(k.accounted_platforms || []).map(sourceLabel).join(', ')}`
+        ? `${[k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
+          k.accounted_payouts ? `${money(k.accounted_payouts)} paid out` : null]
+          .filter(Boolean).join(' · ')}, from `
+          + `${(k.accounted_platforms || []).map(sourceLabel).join(', ')}`
         : 'no fare and no payout statement covers this window' },
     faresTile(k),
     /* The same renderer as the Quality tab, so the two tiles cannot drift into

@@ -2645,6 +2645,11 @@ app.get('/api/roster', (_, r) => {
       /* Most people have a payout and no fare — the production shape, where
          Uber is most of the work and publishes no fare per trip. */
       revenue: category === 'working' && i % 3 === 0 ? (120 - i * 9) * 74 : null,
+      /* …and the statement's own fare line for the two thirds who have no
+         per-trip fare, which is where the Fares column used to read "—". */
+      statement_fares: category === 'working' && i % 3 !== 0 ? (120 - i * 9) * 88 : null,
+      statement_fare_periods: category === 'working' && i % 3 !== 0 ? 3 : 0,
+      fleets_worked: category === 'working' ? [i % 2 ? 'ecosine' : 'egari'] : null,
       payout: category === 'working' ? (120 - i * 9) * 61 : null,
       payout_days: category === 'working' ? Math.max(1, 26 - i) : 0,
       km: category === 'working' ? (120 - i * 9) * 12 : null,

@@ -140,7 +140,15 @@ export async function renderRoster(root) {
     idle: (x) => x.category === 'idle_this_window',
     blocked: (x) => x.category === 'blocked',
   };
-  const shown = FILTER[tab] ? d.people.filter(FILTER[tab]) : d.people;
+  const people = (d.people || []).map((r) => ({
+    /* One column, two sources, one sortable number. The Fares column shows the
+       trips' own fares where the channel prices them and the statement's fare
+       line where it does not, and a renderer alone would leave the column
+       sorting on `revenue` — so every statement-sourced row would sort as
+       blank, which is the state the column exists to have stopped reporting. */
+    ...r, fares_shown: r.revenue ?? r.statement_fares ?? null,
+  }));
+  const shown = FILTER[tab] ? people.filter(FILTER[tab]) : people;
 
   if (tab === 'all') {
     const g = el('div', 'grid g2'); host.append(g);
@@ -236,11 +244,24 @@ export async function renderRoster(root) {
       absent: 'nobody in this group has driven in this window, so there is no distance to report '
         + '— that is what puts them on this list',
       render: (r) => fmt(r.km) }] : []),
-    { label: 'Fares', key: 'revenue', num: true,
-      absent: 'nobody in this group has a booking that reports a fare — Uber\'s trip export '
-        + 'carries no fare column, and on the pipeline and idle lists Uber is all of the work',
+    /* Two sources for one column, and the cell says which it used.
+       ─────────────────────────────────────────────────────────────────────
+       `revenue` is sum(trip.price), which Uber's export does not carry — so
+       this column was empty for 298 of the 335 people on production, on a
+       fleet whose weekly statements report the fare week by week. Where the
+       trips price the work, the trips win and the cell reads as it always
+       has. Where they do not, the statement's own fare line is shown, marked
+       so nobody reads it as a per-trip total: it is the gross the rider was
+       charged, and the Paid column beside it came out of exactly that money
+       rather than sitting alongside it. */
+    { label: 'Fares', key: 'fares_shown', num: true,
+      absent: 'nobody in this group has a booking that reports a fare, and no statement of '
+        + 'theirs reports one either — Uber\'s trip export carries no fare column',
       render: (r) => (r.revenue ? money(r.revenue)
-        : '<span class="ent-off" title="no booking of theirs reports a fare — Uber’s export has no fare column">—</span>') },
+        : r.statement_fares
+          ? `${money(r.statement_fares)}<span class="dim" title="no booking of theirs reports a fare; this is the fare line of ${
+            r.statement_fare_periods} weekly statement${r.statement_fare_periods === 1 ? '' : 's'}, which the Paid column came out of"> stmt</span>`
+          : '<span class="ent-off" title="no booking of theirs reports a fare and no statement reports one — Uber’s export has no fare column">—</span>') },
     /* The money this page was missing. Fares alone left 251 of 280 people
        blank on production — on the page an operator reads to decide who to
        keep supplying with cars. driver_payout_day is what their accounts were

@@ -151,14 +151,48 @@ export function rosterRoutes(app, { q, wrap, range }) {
          WHERE d.day BETWEEN $1::date AND $2::date
            AND ($4::text IS NULL OR d.fleet_id = $4)
          GROUP BY 1
+       ),
+       /* The fare the platform reports, for the channels that report no fare
+          per trip. The revenue column above is sum(trip.price), and Uber's export has
+          no price column at all — so the Fares column on this page was empty
+          for 298 of 335 people, on a fleet whose statements carry the figure
+          week by week. Read from the same breakdown /api/driver/earnings
+          draws, folded through s exactly as the paid CTE is.
+
+          Only the top of the tree: little_fare, surge, wait_time and the rest
+          hang off 'fare' as its components, and summing the category column
+          without regard to parent nearly doubles the total. Kept in its own
+          column and never added to the revenue — this is the gross the rider was
+          charged and the payout beside it came out of it. */
+       fare_line AS (
+         SELECT a.person,
+                round(sum(c.amount)::numeric, 2) AS statement_fares,
+                count(DISTINCT (c.period_start, c.period_end))::int AS statement_fare_periods
+         FROM driver_earnings_component c
+         JOIN (SELECT DISTINCT person, driver_ext_id FROM s
+                WHERE coalesce(btrim(driver_ext_id), '') <> '') a
+           ON a.driver_ext_id = c.driver_ext_id
+        WHERE c.category IN ('fare', 'net_fare')
+          AND c.period_start >= $1::date AND c.period_end <= $2::date
+        GROUP BY 1
        )
        SELECT s.person,
               max(s.full_name) AS name,
               /* Which fleet they actually worked for, and which fleet's
                  credentials described them. Returned because a filtered page
                  has to be able to say which of the two put this row here. */
-              (array_agg(DISTINCT f.fleets_worked) FILTER (WHERE f.fleets_worked IS NOT NULL))[1]
-                AS fleets_worked,
+              /* max(), not (array_agg(DISTINCT …))[1].
+                 ─────────────────────────────────────────────────────────
+                 f.fleets_worked is itself an array, so array_agg of it builds
+                 a TWO-DIMENSIONAL array, and subscripting a 2-D array with a
+                 single index returns NULL in Postgres — not the first row, not
+                 an error. This column was therefore null for every person on
+                 the roster: 335 of 335 on production, on a page that returns
+                 it so a filtered view can say which of the two fleets put the
+                 row there. The fleets CTE has one row per person and the
+                 join is on person, so every row in the group carries the same
+                 array and max() is that array. */
+              max(f.fleets_worked) AS fleets_worked,
               array_remove(array_agg(DISTINCT s.fleet_id), NULL) AS credential_fleets,
               count(*)::int AS accounts,
               array_agg(DISTINCT s.platform ORDER BY s.platform) AS platforms,
@@ -188,6 +222,8 @@ export function rosterRoutes(app, { q, wrap, range }) {
               coalesce(max(w.trips), 0)::int AS trips,
               coalesce(max(w.completed), 0)::int AS completed,
               max(w.revenue) AS revenue,
+              max(fl.statement_fares) AS statement_fares,
+              max(fl.statement_fare_periods) AS statement_fare_periods,
               max(paid.payout) AS payout, max(paid.payout_days) AS payout_days,
               max(w.km) AS km,
               max(w.last_trip) AS last_trip,
@@ -199,6 +235,7 @@ export function rosterRoutes(app, { q, wrap, range }) {
        LEFT JOIN paid ON paid.person = s.person
        LEFT JOIN ever e ON e.person = s.person
        LEFT JOIN fleets f ON f.person = s.person
+       LEFT JOIN fare_line fl ON fl.person = s.person
        GROUP BY s.person
        HAVING $4::text IS NULL
            OR bool_or(f.fleets_worked @> ARRAY[$4]::text[])
@@ -261,6 +298,12 @@ export function rosterRoutes(app, { q, wrap, range }) {
       return {
         ...r,
         revenue: r.revenue == null ? null : round(r.revenue, 0),
+        /* Beside `revenue`, never merged into it: one is what the trips say
+           and the other is what the statement says, on different populations
+           and different bases. The page chooses which to show and says which
+           it showed. */
+        statement_fares: r.statement_fares == null ? null : round(r.statement_fares, 0),
+        statement_fare_periods: r.statement_fare_periods ?? 0,
         payout: r.payout == null ? null : Number(r.payout),
         payout_days: r.payout_days ?? 0,
         km: r.km == null ? null : round(r.km, 0),

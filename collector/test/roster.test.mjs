@@ -114,6 +114,19 @@ await q(`UPDATE trip SET requested_at = '2026-05-01T10:00:00+04:00' WHERE driver
 for (let i = 1; i <= 4; i++) await trip('Stopped Person', i, null);
 await q(`UPDATE trip SET requested_at = '2026-06-01T10:00:00+04:00' WHERE driver_name = 'Stopped Person'`);
 
+/* Asad's Uber week as the statement files it: a fare line with its own
+   components hanging beneath it, and the earnings the fleet was actually paid
+   out of that same fare. None of his TRIPS carry a price — Uber's export has
+   no fare column — which is the state that left this page's Fares column
+   empty for 298 of 335 people on production. If the children were counted the
+   fare would read 1,600; if the payout were added it would read 1,540. */
+await q(`INSERT INTO driver_earnings_component
+           (platform, driver_ext_id, fleet_id, period_start, period_end, category, parent, amount, currency, driver_name)
+         VALUES ('uber','u1','ecosine','2026-08-10','2026-08-16','fare','your_earnings',900,'AED','Asad Khan'),
+                ('uber','u1','ecosine','2026-08-10','2026-08-16','little_fare','fare',700,'AED','Asad Khan'),
+                ('uber','u1','ecosine','2026-08-10','2026-08-16','your_earnings',NULL,640,'AED','Asad Khan'),
+                ('uber','u1','ecosine','2026-08-10','2026-08-16','service_fee','your_earnings',-260,'AED','Asad Khan')`);
+
 const app = express();
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
 const range = (req) => [req.query.from || '2000-01-01', req.query.to || '2100-01-01',
@@ -250,6 +263,38 @@ check('a platform filter narrows the roster',
   uberOnly.people.length < d.people.length
   && uberOnly.people.every((p) => p.platforms.every((x) => x === 'uber')),
   `${uberOnly.people.length} vs ${d.people.length}`);
+
+/* ── two columns that were structurally empty ──────────────────────────── */
+const asad = d.people.find((x) => /Asad/.test(x.name || ''));
+check('the roster found the person with two accounts', !!asad, String(d.people.length));
+
+/* array_agg(DISTINCT <array>) builds a TWO-dimensional array, and subscripting
+   one with a single index returns NULL in Postgres — not the first row, not an
+   error. So this column was null for every person on the roster, on every
+   window, and the page that returns it so a filtered view can say which fleet
+   put a row there had nothing to say. 335 of 335 on production. */
+check('the fleet a person actually worked for is reported',
+  Array.isArray(asad?.fleets_worked) && asad.fleets_worked.includes('ecosine'),
+  JSON.stringify(asad?.fleets_worked));
+check('…and it is a list of fleets, not a list of lists',
+  (asad?.fleets_worked || []).every((x) => typeof x === 'string'),
+  JSON.stringify(asad?.fleets_worked));
+
+/* The Fares column. None of his trips carries a price, and the statement says
+   the fare was 900 — the assertions are on the arithmetic, because the two
+   ways to get this wrong both produce a plausible number. */
+check('none of this person’s trips reports a fare', asad?.revenue == null, String(asad?.revenue));
+check('the statement’s fare line is read', Number(asad?.statement_fares) === 900,
+  String(asad?.statement_fares));
+check('…the components of the fare are not added to it',
+  Number(asad?.statement_fares) !== 1600, String(asad?.statement_fares));
+check('…and neither is the payout that came out of it',
+  Number(asad?.statement_fares) !== 1540, String(asad?.statement_fares));
+check('…and it is not folded into the trip revenue',
+  asad?.revenue == null, String(asad?.revenue));
+check('somebody with no statement has none of it',
+  d.people.filter((x) => !/Asad/.test(x.name || '')).every((x) => !x.statement_fares),
+  JSON.stringify(d.people.filter((x) => x.statement_fares).map((x) => x.name)));
 
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
