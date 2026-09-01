@@ -181,8 +181,20 @@ export async function renderRevenue(root) {
       render: (r) => (r.bookings
         ? `${fmt(r.priced_bookings)}<span class="dim"> · ${pct(r.fare_coverage_pct, 0)}</span>`
         : '—') },
+    /* Uber prices no booking, so this column read "none reported" for the
+       channel that is 95% of the work — over AED 1,535,180 of gross that its
+       weekly statement files and that nothing had ever written into
+       driver_statement_day. Same rule as #driver and #roster: the trips win
+       where they carry a fare, the statement fills in where they do not, and
+       the cell says which of the two it is. */
     { label: 'Fares (gross)', key: 'fares', num: true,
-      render: (r) => (r.fares != null ? money(r.fares) : '<span class="dim">none reported</span>') },
+      render: (r) => {
+        if (r.fares != null) return money(r.fares);
+        if (r.statement_gross != null) {
+          return `${money(r.statement_gross)}<span class="dim" title="no booking on this channel carries a fare; this is the gross its weekly statement reports"> stmt</span>`;
+        }
+        return '<span class="dim">none reported</span>';
+      } },
     { label: 'Payout (net)', key: 'payouts', num: true,
       /* With the share of the WINDOW it covers, the population it was paid to,
          and the period it actually spans. A payout is over DAYS, not over
@@ -202,34 +214,24 @@ export async function renderRevenue(root) {
          With the coverage it rests on. This column is identical at 7, 30 and
          365 days for Uber, because the statements we hold span nine days —
          so widening the window does not widen this figure and nothing said so. */
+      /* And what the channel kept, which is the other half of the same
+         statement and the most obvious question an operator has about a
+         channel. It rides in this cell rather than in a column of its own: the
+         table is already ten columns and a tenth pushed four of them off the
+         edge of a 1750px screen.
+
+         The rate is fees over gross and NOT (gross − net) / gross — the
+         component tree carries taxes, surcharges and promotions the fold does
+         not name, so only one of those two is a commission. */
       render: (r) => (r.statement_net == null ? '<span class="dim">not collected</span>'
         : `${money(r.statement_net)}<span class="dim"> · cash ${r.statement_cash != null ? money(r.statement_cash) : '—'}`
           + `${r.statement_days != null ? ` · ${r.statement_days} of ${d.window_days} days` : ''}`
-          + `${r.statement_drivers != null ? `, ${fmt(r.statement_drivers)} drivers` : ''}</span>`) },
-    /* WHAT THE CHANNEL CHARGED AND WHAT IT KEPT.
-       ─────────────────────────────────────────────────────────────────────
-       driver_statement_day has carried gross and fees columns since
-       sql/schema_v25.sql and the rollup never wrote them, so this endpoint
-       reported statement_gross and statement_fees as null on every platform
-       and every window — beside a statement_net of AED 1,038,040 drawn from
-       the same component tree that holds both. src/rollup.js fills them now,
-       and this is the question they answer: what the riders were charged, and
-       what share of it the channel kept.
+          + `${r.statement_drivers != null ? `, ${fmt(r.statement_drivers)} drivers` : ''}`
+          + `${r.statement_fees != null
+            ? `<br>channel took ${money(r.statement_fees)}${r.statement_gross
+              ? ` · ${pct((r.statement_fees / r.statement_gross) * 100, 1)} of the gross` : ''}`
+            : ''}</span>`) },
 
-       The rate is fees over gross, and it is NOT (gross − net) / gross: the
-       tree carries taxes, surcharges and promotions the fold does not name, so
-       the two differ by a little and only one of them is a commission. */
-    { label: 'Channel took', key: 'statement_fees', num: true,
-      absent: 'no channel here files a commission line — the statement feeds carry a net figure '
-        + 'and this fleet\u2019s other channels report fares rather than statements',
-      render: (r) => {
-        if (r.statement_fees == null) return '<span class="dim">not reported</span>';
-        const rate = r.statement_gross ? (r.statement_fees / r.statement_gross) * 100 : null;
-        return `${money(r.statement_fees)}<span class="dim">`
-          + `${rate != null ? ` · ${pct(rate, 1)} of ` : ' · gross '}`
-          + `${r.statement_gross != null ? money(r.statement_gross) : 'an unreported gross'}`
-          + ' charged to riders</span>';
-      } },
     /* The denominator is named, because it is not the same one on every row.
        A fares row divides gross fares by the distance of the bookings that
        carried a fare; a payout row divides the net payout by every booking
