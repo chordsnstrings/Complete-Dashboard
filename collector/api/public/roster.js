@@ -29,6 +29,13 @@ export const ROSTER_TABS = [
   { id: 'states', label: 'What each provider says', ic: '❑' },
 ];
 
+/* The pill a row wears. Only in_pipeline is conditional: the category means
+   "no platform this person holds permits work today", and that is a different
+   sentence for somebody who has never driven than for somebody who has. */
+export const categoryLabel = (r) => (r.category === 'in_pipeline' && r.lifetime_trips > 0
+  ? 'Cannot earn now'
+  : CAT[r.category]?.label || r.category);
+
 const CAT = {
   working: { label: 'Working', tone: 'ok' },
   idle_this_window: { label: 'No trip this window', tone: 'warn' },
@@ -103,8 +110,18 @@ export async function renderRoster(root) {
       sub: t.people ? `of ${fmt(t.people)} — no booking on any channel, ever` : 'no booking on any channel, ever',
       tone: t.never_started ? 'critical' : null,
       cohort: t.never_started ? 'roster-never-started' : null },
-    { label: 'Still waiting to start', value: fmt(t.in_pipeline), sub: 'onboarding or waitlisted',
-      cohort: t.in_pipeline ? 'roster-pipeline' : null },
+    (() => {
+      /* Same correction on the tile. The count is the category's, unchanged —
+         it is what the chips and the donut below use — but the sentence under
+         it no longer describes everybody in it as new. */
+      const back = d.people.filter((x) => x.category === 'in_pipeline' && x.lifetime_trips > 0).length;
+      return { label: 'Still waiting to start', value: fmt(t.in_pipeline),
+        sub: back
+          ? `onboarding or waitlisted — though ${countOf(back, 'of them has', 'of them have')} `
+            + 'driven before, so they are not new'
+          : 'onboarding or waitlisted',
+        cohort: t.in_pipeline ? 'roster-pipeline' : null };
+    })(),
     t.unclassified
       ? { label: 'Standing not reported', value: fmt(t.unclassified),
           sub: 'no provider used a word we recognise', tone: 'warn',
@@ -237,7 +254,14 @@ const FILTER = {
     { label: 'Driver', key: 'name',
       render: (r) => (r.driver_ext_id ? entity('driver', r.driver_ext_id, r.name || '(unnamed)') : esc(r.name || '—')) },
     { label: 'Standing', key: 'category',
-      render: (r) => pill(CAT[r.category]?.label || r.category, CAT[r.category]?.tone) },
+      /* "Not yet able to earn" is a claim about somebody's FIRST day, and 14 of
+         the 20 people in that category on production have driven before — one
+         of them 2,779 times, last on May 30. The category is right (no
+         platform they hold permits work today, and nobody called them
+         stopped); the word "yet" is what is false. A person who has driven and
+         cannot today is not new, and telling an operator they are waiting to
+         start sends them to the wrong conversation. */
+      render: (r) => pill(categoryLabel(r), CAT[r.category]?.tone) },
     { label: 'Platforms', key: 'platforms',
       render: (r) => `${(r.platforms || []).map(sourceLabel).join(', ')}${r.accounts > (r.platforms || []).length
         ? ` <small class="dim">${r.accounts} accounts</small>` : ''}` },

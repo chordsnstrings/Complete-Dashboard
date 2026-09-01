@@ -13,9 +13,9 @@
    Plus the finding the table exists for: a car attached to somebody who is not
    allowed to drive it. */
 import { PGlite } from '@electric-sql/pglite';
+import { launchChromium } from './browser.mjs';
 import { applySchema } from './schema.mjs';
 import express from 'express';
-import { readFileSync } from 'node:fs';
 import { normaliseState, canEarn, cleanReason, stateRow, STATES } from '../src/roster.js';
 import { rosterRoutes } from '../api/roster_routes.js';
 
@@ -319,6 +319,44 @@ check('somebody whose only platform we collect nothing for stays unknown',
 check('…and is categorised as unobserved rather than as never having driven',
   mystery?.category === 'activity_unknown' || mystery?.category === 'unclassified',
   String(mystery?.category));
+/* ── "not yet" is a claim about somebody's first day ────────────────────
+   in_pipeline means no platform this person holds permits work TODAY, which
+   is a different sentence for somebody who has never driven than for somebody
+   who has. On production 14 of the 20 people in that category had driven
+   before — one of them 2,779 times, last on May 30 — under a pill reading
+   "NOT YET ABLE TO EARN" and a tile reading "Still waiting to start". */
+{
+  /* The label function itself, run in a browser because roster.js imports
+     modules that read `location` — the same reason test/query_params.test.mjs
+     runs data.js there. Asserting the FUNCTION rather than the source text:
+     a grep for "Cannot earn now" passes whether or not anything calls it. */
+  const web = express();
+  web.use(express.static('api/public'));
+  const ws = web.listen(0);
+  const browser = await launchChromium();
+  const pg = await browser.newPage();
+  await pg.goto(`http://127.0.0.1:${ws.address().port}/index.html`, { waitUntil: 'domcontentloaded' });
+  const label = (row) => pg.evaluate(async (r) =>
+    (await import('/roster.js')).categoryLabel(r), row);
+
+  check('somebody who has never driven and cannot earn is waiting to start',
+    await label({ category: 'in_pipeline', lifetime_trips: 0 }) === 'Not yet able to earn');
+  const returning = await label({ category: 'in_pipeline', lifetime_trips: 2779 });
+  check('…and somebody with 2,779 trips behind them is not',
+    !/yet/i.test(returning), returning);
+  check('…they are described as unable to earn NOW, which is what the category means',
+    /cannot earn now/i.test(returning), returning);
+  check('every other category is unchanged by the switch',
+    await label({ category: 'never_started', lifetime_trips: 0 }) === 'Never driven'
+    && await label({ category: 'working', lifetime_trips: 900 }) === 'Working'
+    && await label({ category: 'blocked', lifetime_trips: 0 }) === 'Stopped everywhere');
+  check('a category nobody defined falls back to its own name rather than blank',
+    await label({ category: 'made_up', lifetime_trips: 0 }) === 'made_up');
+
+  await browser.close();
+  ws.close();
+}
+
 check('a person who HAS driven keeps their real count',
   (d.people.find((x) => /Asad/.test(x.name || '')) || {}).lifetime_trips === 20,
   String((d.people.find((x) => /Asad/.test(x.name || '')) || {}).lifetime_trips));
