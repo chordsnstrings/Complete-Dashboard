@@ -242,9 +242,15 @@ async function settleCash(host) {
       ? { label: 'Cash the platforms report', value: money(reported),
         sub: 'from the payout statements, not from per-booking fares — a different measurement of '
           + 'the same money, and the larger of the two'
+          /* NOT "of it": the tile reads every statement the fleet holds,
+             including the lines the operator could not tie to a name, and the
+             column below reads only the people who took a cash BOOKING. The
+             two are not a whole and its part in either direction, and saying
+             they were produced a part larger than its whole on production. */
           + (c.total_statement_cash != null
-            ? `; ${money(c.total_statement_cash)} of it belongs to the `
-              + `${countOf(c.statement_cash_drivers || 0, 'person', 'people')} listed below`
+            ? `. The column below reads the same statements per person and comes to `
+              + `${money(c.total_statement_cash)} across the `
+              + `${countOf(c.statement_cash_drivers || 0, 'person', 'people')} on this list`
             : '') }
       : { label: 'Cash the platforms report', value: '—',
         sub: 'no payout statement covers this window' },
@@ -266,8 +272,9 @@ async function settleCash(host) {
     'One row per person. Value known is the fares of that driver\u2019s cash bookings that carry one '
     + 'and Coverage is the share of them that do; Statement cash is what the platform\u2019s own '
     + 'weekly statement says they took. Two measurements of the same money from opposite sides — '
-    + 'never added together, and the statement is matched on the driver\u2019s name, so two people '
-    + 'sharing one would merge.');
+    + 'never added together. The statement is filed under the driver\u2019s name, so where this '
+    + 'fleet spells one person two ways both rows show that person\u2019s money and are marked \u2020; '
+    + 'the tile above counts it once.');
   host.append(cp.panel);
   cp.body.append(tableFrom(c.drivers, [
     { label: 'Driver', key: 'driver_name', render: (r) => entity('driver', r.driver_ext_id, r.driver_name) },
@@ -293,7 +300,14 @@ async function settleCash(host) {
       render: (r) => (r.statement_cash == null
         ? '<span class="ent-off" title="no payout statement in this window reports cash for this person">—</span>'
         : `${money(r.statement_cash)}<span class="dim" title="the platform's own weekly statement, over ${
-          r.statement_days} day${r.statement_days === 1 ? '' : 's'} it covers"> stmt</span>`) },
+          r.statement_days} day${r.statement_days === 1 ? '' : 's'} it covers"> stmt</span>${
+          /* The statement is filed under the NAME, and this fleet spells one
+             man's name two ways under two platform ids. Both rows show the
+             money — a reader searching either spelling has to find it — and
+             both say it is the same money, so nobody adds the column up. */
+          r.statement_name_rows > 1
+            ? `<span class="dim" title="filed under this name, which ${r.statement_name_rows} rows on this list share — the same money, not one figure each">†</span>`
+            : ''}`) },
     { label: 'Channels', key: 'platforms', render: (r) => esc((r.platforms || []).map(sourceLabel).join(', ')) },
     { label: 'Vehicles', key: 'plates',
       render: (r) => ((r.plates || []).slice(0, 3).map((pl) => entity('vehicle', pl, pl)).join(' ')

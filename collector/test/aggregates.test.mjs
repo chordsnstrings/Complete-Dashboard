@@ -312,7 +312,7 @@ console.log('\ncash exposure aggregates the window once');
      join added beside the booking figure — neither belongs in a comparison
      with the query that had neither. */
   const strip = (rs) => rs.map(({ _drivers, _cash_trips, _priced, _value, _stmt_cash,
-    _stmt_drivers, statement_cash, statement_days, ...r }) => r);
+    _stmt_drivers, _nk, _name_rows, _name_rn, statement_cash, statement_days, ...r }) => r);
   const before = await cq(oldRows, P);
   const [beforeT] = await cq(oldTotals, P);
   const after = await cq(newSql, P);

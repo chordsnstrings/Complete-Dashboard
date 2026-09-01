@@ -155,14 +155,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 max(requested_at) last_cash_trip
            FROM trip_ext
           WHERE ${FB} AND driver_holds_cash
-          GROUP BY 1, 2)
-       SELECT h.*, s.statement_cash, s.statement_days,
-              count(*) OVER ()::int AS _drivers,
-              sum(h.cash_trips) OVER ()::int AS _cash_trips,
-              sum(h.priced_cash_trips) OVER ()::int AS _priced,
-              sum(h.cash_value) OVER () AS _value,
-              sum(s.statement_cash) OVER () AS _stmt_cash,
-              count(s.statement_cash) OVER ()::int AS _stmt_drivers
+          GROUP BY 1, 2),
+       joined AS (
+         SELECT h.*, s.statement_cash, s.statement_days,
+                lower(regexp_replace(h.driver_name, '\\s+', ' ', 'g')) AS _nk
          FROM holders h
          /* WHO is holding it, not just how much of it we can price.
             ──────────────────────────────────────────────────────────────
@@ -195,18 +191,49 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               AND d.day BETWEEN $1::date AND $2::date
               AND ($3::text IS NULL OR d.platform = $3)
               AND ($4::text IS NULL OR d.fleet_id = $4)
-              AND (d.name_key = lower(regexp_replace(h.driver_name, '\s+', ' ', 'g'))
+              AND (d.name_key = lower(regexp_replace(h.driver_name, '\\s+', ' ', 'g'))
                    OR (h.driver_ext_id IS NOT NULL AND d.driver_ext_id = h.driver_ext_id))
          ) s ON true
-         ORDER BY h.cash_trips DESC LIMIT 200`, p);
+       ),
+       /* ONE PERSON PER NAME, when the total is taken.
+          ──────────────────────────────────────────────────────────────
+          holders is grouped by (driver_name, driver_ext_id), and this fleet
+          spells one man's name two ways under two ids — "Kashif Ali Ayyub
+          khan" and "KASHIF ALI AYYUB KHAN" are both on the production list.
+          The statement is filed under the NAME, so both rows match the same
+          statement and both SHOULD show it: as far as the statement is
+          concerned they are one person, and blanking one of them would hide
+          the money from whichever spelling the reader searched for.
+
+          The fleet total is a different question, and summing the rows
+          answered it wrong — AED 241,585 against a tile reading AED 234,098,
+          a part larger than its whole. It is taken over one row per name.
+          _name_rows rides out so a row can say it shares its statement. */
+       ranked AS (
+         SELECT j.*,
+                count(*)     OVER (PARTITION BY j._nk)::int AS _name_rows,
+                row_number() OVER (PARTITION BY j._nk ORDER BY j.cash_trips DESC) AS _name_rn
+           FROM joined j
+       )
+       SELECT *,
+              count(*) OVER ()::int AS _drivers,
+              sum(cash_trips) OVER ()::int AS _cash_trips,
+              sum(priced_cash_trips) OVER ()::int AS _priced,
+              sum(cash_value) OVER () AS _value,
+              sum(statement_cash) FILTER (WHERE _name_rn = 1) OVER () AS _stmt_cash,
+              count(statement_cash) FILTER (WHERE _name_rn = 1) OVER ()::int AS _stmt_drivers
+         FROM ranked
+         ORDER BY cash_trips DESC LIMIT 200`, p);
     const totals = rows.length
       ? { drivers: rows[0]._drivers, cash_trips: rows[0]._cash_trips,
           priced: rows[0]._priced, value: rows[0]._value,
           stmt_cash: rows[0]._stmt_cash, stmt_drivers: rows[0]._stmt_drivers }
       : { drivers: 0, cash_trips: 0, priced: 0, value: null, stmt_cash: null, stmt_drivers: 0 };
     for (const r of rows) {
+      r.statement_name_rows = r._name_rows || 1;
       delete r._drivers; delete r._cash_trips; delete r._priced; delete r._value;
-      delete r._stmt_cash; delete r._stmt_drivers;
+      delete r._stmt_cash; delete r._stmt_drivers; delete r._name_rows;
+      delete r._name_rn; delete r._nk;
     }
     const cashTrips = totals.cash_trips || 0;
     const priced = totals.priced || 0;
@@ -219,6 +246,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
            sides and adding them counts it twice. */
         statement_cash: r.statement_cash == null ? null : round(r.statement_cash, 0),
         statement_days: r.statement_days ?? 0,
+        /* How many rows on this list the statement behind that figure is
+           shared with. 1 for almost everybody; 2 where one man's name is
+           spelled two ways under two platform ids, which this fleet does. */
+        statement_name_rows: r.statement_name_rows || 1,
         value_known_pct: share(r.priced_cash_trips, r.cash_trips),
       })),
       driver_count: totals.drivers || 0,
@@ -226,8 +257,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       truncated: (totals.drivers || 0) > rows.length,
       total_cash_trips: cashTrips,
       total_cash_value_known: priced ? round(NUM(totals.value) || 0, 0) : null,
-      /* The same money the fleet tile already shows, now summed over exactly
-         the people listed — so the tile and the column add up to each other. */
+      /* Over one row per NAME, not per row: see the ranked CTE. Summing the
+         column double-counts every man this fleet spells two ways. */
       total_statement_cash: totals.stmt_cash == null ? null : round(NUM(totals.stmt_cash), 0),
       statement_cash_drivers: totals.stmt_drivers || 0,
       value_known_pct: share(priced, cashTrips),

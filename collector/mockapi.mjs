@@ -2163,10 +2163,13 @@ app.get('/api/settlement/cash-exposure', (_, r) => r.json({
        reachable. */
     statement_cash: i === 3 ? null : (60 - i * 6) * 47,
     statement_days: i === 3 ? 0 : 21 - i,
+    /* One name spelled two ways is the production shape; both rows carry the
+       same money and say so, so the dagger branch is reachable. */
+    statement_name_rows: i === 1 || i === 2 ? 2 : 1,
     platforms: ['uber', 'hotel'], plates: [plates[i], plates[(i + 1) % plates.length]],
     last_cash_trip: new Date(Date.now() - i * 36e5).toISOString() })),
   total_cash_trips: 430, total_cash_value_known: 7300, value_known_pct: 20,
-  total_statement_cash: 14570, statement_cash_drivers: 7,
+  total_statement_cash: 12034, statement_cash_drivers: 6,
   caveat: '342 of 430 cash trips come from a channel that does not report a fare, so the value column is a floor, not the total.',
 }));
 /* One row per counterparty — the group key used to carry driver_ext_id, which

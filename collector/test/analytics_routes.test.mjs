@@ -188,6 +188,20 @@ const stmtCash = (name, id, day, cash, source = 'statement_import') => q(
   `INSERT INTO driver_statement_day (platform, fleet_id, driver_name, driver_ext_id, day, cash, net, source)
    VALUES ('uber', 'ecosine', $1, $2, $3::date, $4, $4, $5)`,
   [name, id, day, cash, source]);
+/* And the shape that makes the fleet total wrong if the column is summed:
+   one man, two spellings, two platform ids, both taking cash. The statement is
+   filed under the NAME, so both rows match the same money and both must show
+   it — a reader who searches either spelling has to find it — but the fleet
+   total must count it once. */
+await q(
+  `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,requested_at,
+     distance_km,duration_s,status,payment_type,price)
+   VALUES ('uber','twin1','ecosine','L700','d-twin-a','Rashid Twin Person',
+           '2026-08-07T09:00:00+04:00', 9, 900, 'completed', 'cash', NULL),
+          ('uber','twin2','ecosine','L700','d-twin-b','RASHID TWIN PERSON',
+           '2026-08-08T09:00:00+04:00', 9, 900, 'completed', 'cash', NULL)`);
+await stmtCash('Rashid Twin Person', 'd-twin-a', '2026-08-07', 500);
+
 await stmtCash('Driver d3', 'd3', '2026-08-04', 260);
 await stmtCash('Driver d3', null, '2026-08-05', 140);      // no id at all: matched by name
 await stmtCash('Driver d1', 'd1', '2026-08-06', 95);
@@ -213,10 +227,11 @@ const W = 'from=2026-08-01&to=2026-08-31';
   // charted as a 40-trip "unknown" slice.
   check('telematics never appears as a settlement class',
     !s.classes.some((c) => c.platforms.includes('fms')), JSON.stringify(s.classes.map((c) => c.platforms)));
-  // 120 Uber + 52 hotel + 2 Yango = 174 bookings. The 40 telematics journeys
-  // are absent, not present-and-unlabelled.
+  // 122 Uber + 52 hotel + 2 Yango = 176 bookings — the two extra Uber rows are
+  // the one man this fixture spells two ways, below. The 40 telematics
+  // journeys are absent, not present-and-unlabelled.
   check('telematics is not in the settlement base at all',
-    s.total_trips === 174, String(s.total_trips));
+    s.total_trips === 176, String(s.total_trips));
   // 60 Uber cash-labelled rows carry no fare. Reporting AED 0 would say the
   // fleet took no cash; reporting null says we do not know the value.
   // Uber's 10 cash-labelled trips carry no fare. Reporting AED 0 would say the
@@ -224,7 +239,7 @@ const W = 'from=2026-08-01&to=2026-08-31';
   const uberOnly = await get(`/api/settlement/mix?${W}&platform=uber`);
   const uCash = uberOnly.classes.find((c) => c.settlement_class === 'cash');
   check('a class with no priced row reports unknown revenue, not zero',
-    uCash && uCash.trips === 10 && uCash.revenue === null && uCash.avg_fare === null,
+    uCash && uCash.trips === 12 && uCash.revenue === null && uCash.avg_fare === null,
     JSON.stringify(uCash));
   check('a class with priced rows reports its average fare',
     by.on_account && by.on_account.avg_fare === 100, JSON.stringify(by.on_account));
@@ -240,9 +255,9 @@ const W = 'from=2026-08-01&to=2026-08-31';
 /* ── cash exposure ───────────────────────────────────────────────────────── */
 {
   const c = await get(`/api/settlement/cash-exposure?${W}`);
-  // 10 Uber + 8 hotel cash-driver + 1 malformed-flag row + 2 Yango = 21.
+  // 12 Uber + 8 hotel cash-driver + 1 malformed-flag row + 2 Yango = 23.
   check('cash exposure counts cash trips on channels that report no fare',
-    c.total_cash_trips === 21, String(c.total_cash_trips));
+    c.total_cash_trips === 23, String(c.total_cash_trips));
   check('the value column is stated as a floor when a channel reports no fare',
     /floor, not the total/.test(c.caveat || ''), String(c.caveat));
   check('a supervisor-collected fare is not counted as cash in a driver’s hands',
@@ -264,19 +279,45 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('another person gets their own figure, not the first one’s',
     Number(d1?.statement_cash) === 95, String(d1?.statement_cash));
   check('somebody with no statement has none, rather than a zero',
-    c.drivers.filter((d) => !['Driver d3', 'Driver d1'].includes(d.driver_name))
+    c.drivers.filter((d) => !['Driver d3', 'Driver d1'].includes(d.driver_name)
+      && !/rashid twin person/i.test(d.driver_name || ''))
       .every((d) => d.statement_cash == null),
     JSON.stringify(c.drivers.filter((d) => d.statement_cash != null).map((d) => d.driver_name)));
   /* The booking figure and the statement figure measure the same cash from
      opposite sides. Merging them would double it, so they stay apart. */
   check('the booking-priced value is untouched by any of it',
     c.drivers.every((d) => d.cash_value == null || d.cash_value > 0));
-  check('the fleet total over the list matches the column',
-    Number(c.total_statement_cash) === c.drivers.reduce((a, d) => a + (+d.statement_cash || 0), 0),
-    `${c.total_statement_cash} vs the column`);
-  check('…and it counts the people it found one for',
-    c.statement_cash_drivers === c.drivers.filter((d) => d.statement_cash != null).length,
+  /* ── one man, two spellings ─────────────────────────────────────────── */
+  const twins = c.drivers.filter((d) => /rashid twin person/i.test(d.driver_name || ''));
+  check('both spellings of one name are on the list', twins.length === 2,
+    JSON.stringify(twins.map((d) => d.driver_name)));
+/* The second spelling has no statement row of its own and no matching
+   platform id, so it is reachable ONLY through the name fold. Its name also
+   contains a lowercase "s": inside a JS template literal '\s+' collapses to
+   's+' — an unknown escape drops its backslash — and the fold then replaces
+   the LETTER s, which matches for a name without one and silently fails for a
+   name with one. That is what this row is here to catch. */
+  check('…both show the statement filed under that name',
+    twins.every((d) => Number(d.statement_cash) === 500),
+    JSON.stringify(twins.map((d) => [d.driver_name, d.statement_cash])));
+  check('…and each says the figure is shared with another row',
+    twins.every((d) => d.statement_name_rows === 2),
+    JSON.stringify(twins.map((d) => d.statement_name_rows)));
+  /* The trap: summing the column counts that AED 500 twice. On production the
+     fleet figure came out AED 241,585 against a tile reading 234,098 — a part
+     larger than its whole — because this fleet spells one man's name two ways
+     under two platform ids. The total is over one row per name. */
+  const summed = c.drivers.reduce((a, d) => a + (+d.statement_cash || 0), 0);
+  check('the fleet total counts a shared name once, not once per spelling',
+    Number(c.total_statement_cash) === summed - 500,
+    `${c.total_statement_cash} against ${summed} summed over the rows`);
+  check('…and counts that person once as well',
+    c.statement_cash_drivers === c.drivers.filter((d) => d.statement_cash != null).length - 1,
     String(c.statement_cash_drivers));
+  check('everybody else is unaffected — one row, one name, one figure',
+    c.drivers.filter((d) => d.statement_cash != null && !/twin/i.test(d.driver_name))
+      .every((d) => d.statement_name_rows === 1),
+    JSON.stringify(c.drivers.filter((d) => d.statement_name_rows > 1).map((d) => d.driver_name)));
   /* Counted over the table, not over the returned list. "AED x is in drivers'
      hands" and "n drivers holding cash" are numbers somebody sizes a cash
      control on; both were the length and sum of a list the endpoint caps at
