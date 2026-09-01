@@ -1677,7 +1677,22 @@ export async function renderDriverDirectory(root) {
   root.append(tblP.panel);
   loading(tblP.body); loading(grid);
 
-  const rows = await qAll('/api/drivers/directory');
+  const rows = (await qAll('/api/drivers/directory')).map((r) => ({
+    ...r,
+    /* TRUE OR NOTHING, never false.
+       ─────────────────────────────────────────────────────────────────────
+       The Barred column declares `absent` so it prunes itself when nobody is
+       barred — and tableFrom decides that on the KEY, not on the renderer
+       (ui.js:187), deliberately, because that branch removes a column. The key
+       was is_banned, which arrives as `false` for every driver a platform has
+       answered about, and `false` is not blank. So the column counted itself
+       full, survived, and rendered 392 dashes.
+
+       bin/render-audit.mjs reported it as a dead column on production: "Barred
+       is empty in all 392 rows". Stamped as true-or-null, the key now says the
+       same thing the cell does. */
+    barred: r.is_banned === true ? true : null,
+  }));
   /* Position in the ranking the endpoint returned — busiest first — stamped on
      the row rather than counted at paint time. tableFrom re-orders the array it
      is given IN PLACE when a column header is clicked, and it is handed a
@@ -1817,7 +1832,7 @@ export async function renderDriverDirectory(root) {
     /* A ban is a harder constraint than a state of inactive, and it is the one
        fact here that changes what an operator does today. Shown only where it
        is true: a column of "no" on 360 people is not information. */
-    { label: 'Barred', key: 'is_banned', num: false,
+    { label: 'Barred', key: 'barred', num: false,
       absent: 'no platform has barred anybody in this window',
       render: (r) => (r.is_banned === true
         ? '<span class="tag bad" title="the platform has barred this driver">barred</span>'

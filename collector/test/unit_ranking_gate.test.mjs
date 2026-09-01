@@ -108,6 +108,11 @@ check('…and does not tell the reader it was lowered',
    sentence that could be about any page. */
 check('the empty state names the window it measured',
   /range of 30 days/i.test(q30[RANKED[0]]?.text || ''), q30[RANKED[0]]?.text?.slice(0, 140));
+/* "The window is 1 days" — the caption is prose and has to read like it. */
+const p1 = await panels('#unit?from=2026-08-10&to=2026-08-10');
+check('a one-day window is called one day, not "1 days"',
+  /is one day,/i.test(p1[RANKED[0]]?.cap || '') && !/1 days/.test(p1[RANKED[0]]?.cap || ''),
+  p1[RANKED[0]]?.cap);
 
 await browser.close();
 server.close();

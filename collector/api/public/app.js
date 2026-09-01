@@ -1799,12 +1799,32 @@ async function platformTiers(root) {
     { label: 'Electric', key: 'electric', num: true },
     { label: 'UberX', key: 'uberx', num: true },
     { label: 'Premium', key: 'premium_pct', num: true, render: (r) => pct(r.premium_pct, 1) },
-    { label: 'Best of this model', key: 'model_best_pct', num: true, render: (r) => pct(r.model_best_pct, 1) },
+    /* BOTH OF THESE REST ON A TRIP FLOOR, AND SAY SO WHEN NOBODY CLEARS IT.
+       ─────────────────────────────────────────────────────────────────────
+       A share over three trips is not a share, so the benchmark is taken over
+       cars with at least `premium_min_trips` of them. That is a sample-size
+       guard rather than a windowed one — but this page's default window is the
+       calendar month, and on its first days no car has twenty Uber trips yet,
+       so BOTH columns were empty on every row with nothing saying why.
+       bin/render-audit.mjs reported them as dead columns over 69 rows.
+
+       The floor and the count that cleared it come from the endpoint now
+       rather than being written into a tooltip here, so the sentence cannot
+       drift from the arithmetic it describes. */
+    { label: 'Best of this model', key: 'model_best_pct', num: true,
+      absent: `no car has the ${fmt(t.premium_min_trips || 20)} Uber trips this comparison needs `
+        + 'in this window — a share over a handful of trips is not a share',
+      render: (r) => (r.model_best_pct == null
+        ? `<span class="ent-off" title="no car of this model has ${fmt(t.premium_min_trips || 20)} trips in this window">—</span>`
+        : pct(r.model_best_pct, 1)) },
     // Not painted as a warning: the leader defines the benchmark, so a gap is
     // a distance from the front of the field and not a failure to meet a bar.
     { label: 'Behind by', key: 'premium_gap_pct', num: true,
+      absent: `no car is measurably behind the best of its own model — either none has the `
+        + `${fmt(t.premium_min_trips || 20)} trips this needs in this window, or no model has two `
+        + 'cars far enough apart to report',
       render: (r) => (r.premium_gap_pct == null
-        ? '<span class="ent-off" title="fewer than 20 trips, or no other car of this model">—</span>'
+        ? `<span class="ent-off" title="fewer than ${fmt(t.premium_min_trips || 20)} trips, or no other car of this model">—</span>`
         : `${pct(r.premium_gap_pct, 1)} pts`) },
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'Avg km', key: 'avg_km', num: true, render: (r) => fmt(r.avg_km, 1) },

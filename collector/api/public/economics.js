@@ -479,7 +479,8 @@ async function moneyTab(root) {
   const gate = Math.max(1, Math.min(10, Math.ceil(days / 3)));
   const nDays = (n, noun) => `${n === 1 ? 'one' : n} ${noun}${n === 1 ? '' : 's'}`;
   const capOf = (el2, text) => { const c = el2.querySelector('p.cap'); if (c) c.textContent = text; };
-  const short = gate < 10 ? ` The window is ${fmt(days)} days, so the usual ten would rank nobody.` : '';
+  const short = gate < 10
+    ? ` The window is ${nDays(days, 'day')}, so the usual ten would rank nobody.` : '';
   capOf(best.panel, `At least ${nDays(gate, 'earning day')}, so a car that worked once for a good `
     + `fare does not lead the fleet.${short}`);
   capOf(worst.panel, `The same threshold. These held a driver and produced almost nothing — the row `
@@ -494,7 +495,7 @@ async function moneyTab(root) {
   if (!rated.length) {
     /* Naming the gate it actually used. "ten earning days" over a three-day
        window described a threshold this page was not applying. */
-    const why = `No vehicle has ${nDays(gate, 'earning day')} in this range of ${fmt(days)} days`;
+    const why = `No vehicle has ${nDays(gate, 'earning day')} in this range of ${nDays(days, 'day')}`;
     empty(best.body, why);
     empty(worst.body, why);
   } else {
@@ -596,7 +597,7 @@ async function moneyTab(root) {
     .sort((a, b) => b.aed_per_day_worked - a.aed_per_day_worked);
   const openP = (r) => { location.hash = href('driver', r.driver_ext_id); };
   if (!pRated.length) {
-    const pwhy = `Nobody has ${nDays(gate, 'day')} driven and a payout in this range of ${fmt(days)} days`;
+    const pwhy = `Nobody has ${nDays(gate, 'day')} driven and a payout in this range of ${nDays(days, 'day')}`;
     empty(pbest.body, pwhy);
     empty(pworst.body, pwhy);
   } else {

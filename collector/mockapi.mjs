@@ -2341,6 +2341,10 @@ app.get('/api/corporate/stranding', (_, r) => r.json(
     }))));
 app.get('/api/tiers/by-vehicle', (_, r) => r.json({
   fleet_premium_pct: 12.1,
+  /* The trip floor the two comparison columns rest on, and how many cars
+     cleared it — returned so the page can name it instead of hardcoding a
+     number in a tooltip that can drift from the arithmetic. */
+  premium_min_trips: 20, premium_rated_vehicles: plates.length,
   total: plates.length, shown: plates.length, truncated: false,
   vehicles: plates.map((p, i) => {
     const trips = 400 - i * 40, black = i % 3 === 0 ? 0 : 30 - i * 3, comfort = i % 4 === 0 ? 2 : 20 - i * 2;

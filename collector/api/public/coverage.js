@@ -217,9 +217,18 @@ export async function renderCoverage(root) {
         { label: 'Agreement', key: 'agreement_pct', num: true,
           render: (r) => (r.agreement_pct == null ? '—' : `${r.agreement_pct}%`) },
         { label: 'Checked', key: 'verified_at', render: (r) => dayStr(r.verified_at) },
+        /* Empty on every row means Uber answered every window cleanly, which
+           is the good outcome and read as a broken column: bin/render-audit
+           .mjs reported "Uber's answer is empty in all 12 rows". Declaring
+           `absent` turns twelve blanks into one sentence saying so, and the
+           cell is a dash rather than an empty string so a reader can see the
+           column has a value to give. */
         { label: 'Uber’s answer', key: 'error',
+          absent: 'Uber answered every one of these windows without complaint — no refusal, and '
+            + 'nothing past the retention horizon',
           render: (r) => (r.past_retention ? '<span class="cap">past retention</span>'
-            : r.error ? `<span class="cap">${esc(String(r.error).slice(0, 60))}</span>` : '') },
+            : r.error ? `<span class="cap">${esc(String(r.error).slice(0, 60))}</span>`
+              : '<span class="ent-off" title="Uber served this window without an error">—</span>') },
       ]));
       const mis = ver.trips_filed_under_the_other_fleet || 0;
       if (mis) {

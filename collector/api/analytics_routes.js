@@ -903,12 +903,19 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     // everywhere. Comparing a car against its OWN model's best premium share is
     // the honest version of "this car is under-used" — comparing a BYD against
     // a Lexus is not a finding, it is a spec sheet.
+    /* Enough trips for a SHARE to mean anything. Deliberately not scaled to
+       the window the way #unit's day gate is: that one asks "has this car
+       worked enough of the window", which is a question about the window; this
+       one asks "is this proportion measured over enough trips to compare",
+       which is a question about arithmetic and has the same answer over a day
+       as over a year. */
+    const PREMIUM_MIN_TRIPS = 20;
     const byModel = new Map();
     for (const r of rows) {
       const k = [r.make, r.model].filter(Boolean).join(' ') || '(unknown)';
       const cur = byModel.get(k) || { premium: 0, trips: 0, best: 0 };
       cur.premium += r.premium; cur.trips += r.trips;
-      cur.best = Math.max(cur.best, r.trips >= 20 ? (r.premium / r.trips) * 100 : 0);
+      cur.best = Math.max(cur.best, r.trips >= PREMIUM_MIN_TRIPS ? (r.premium / r.trips) * 100 : 0);
       byModel.set(k, cur);
     }
     /* How many Uber-carrying vehicles there ARE, so the 250 the list stops at
@@ -918,6 +925,14 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
         WHERE ${F} AND platform = 'uber' AND plate IS NOT NULL`, p);
     res.json({
       fleet_premium_pct: fleetPct,
+      /* The floor the two comparison columns rest on, RETURNED rather than
+         written into a tooltip on the page. It is a sample-size guard, not a
+         windowed one — a share over three trips is not a share — so it does
+         not scale with the window, and on a window short enough that no car
+         reaches it BOTH columns are empty on every row. The page can only say
+         that if it knows the number and how many cars cleared it. */
+      premium_min_trips: PREMIUM_MIN_TRIPS,
+      premium_rated_vehicles: rows.filter((r) => r.trips >= PREMIUM_MIN_TRIPS).length,
       total: vt?.vehicles ?? rows.length,
       shown: rows.length,
       truncated: (vt?.vehicles ?? 0) > rows.length,
@@ -932,7 +947,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           model_best_pct: m && m.best ? round(m.best, 1) : null,
           // Only claim a shortfall where the same model demonstrably carries
           // more premium work and this car has enough trips to judge.
-          premium_gap_pct: m && m.best && r.trips >= 20 && pctv != null && m.best - pctv > 5
+          premium_gap_pct: m && m.best && r.trips >= PREMIUM_MIN_TRIPS && pctv != null && m.best - pctv > 5
             ? round(m.best - pctv, 1) : null,
         };
       }),
