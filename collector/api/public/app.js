@@ -3813,6 +3813,7 @@ V.sources = async (root) => {
   ].map((r) => ({ ...r, cal: (r.src ? byCal[r.src] : null)
     || (coverage.dataset_calendar || {})[r.key] || null }));
   const anyValue = cov.some((r) => r.value != null);
+  const priced = cov.filter((r) => r.value != null).map((r) => r.what);
   cv.body.append(tableFrom(cov, [
     { label: 'Dataset', key: 'what' },
     { label: 'Rows', key: 'n', num: true, render: (r) => fmt(r.n) },
@@ -3857,6 +3858,19 @@ V.sources = async (root) => {
         : (r.cal ? '<span class="ent-off">none</span>' : '—');
     } },
   ], { sortable: true, sortId: 'covrows' }));
+  /* Which of these datasets money can even be asked about. Nine of the eleven
+     carry none — telemetry fixes, harsh-braking events, a document register —
+     and each printed a dash with a per-cell tooltip nobody hovers, so the
+     column read as nine gaps in a table about coverage. `absent` cannot help
+     here because two rows DO carry money; the sentence goes under the table
+     where the reader already is. */
+  if (anyValue && priced.length < cov.length) {
+    cv.body.append(el('p', 'cap',
+      `Only ${priced.map((x) => esc(String(x))).join(' and ')} carry a money value at all — the `
+      + `other ${countOf(cov.length - priced.length, 'dataset')} here `
+      + `${cov.length - priced.length === 1 ? 'records' : 'record'} movement, events or documents, `
+      + 'so a dash in Value is what those feeds are, not something missing from them.'));
+  }
   const holed = cov.filter((r) => r.cal && r.cal.missing_days);
   if (holed.length) {
     const h = el('div', 'note');
