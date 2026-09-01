@@ -50,6 +50,44 @@ const CAT = {
   activity_unknown: { label: 'Output not observed', tone: 'warn' },
 };
 
+/* Two records, one human — stated as a suspicion, never acted on as a merge.
+   ─────────────────────────────────────────────────────────────────────────
+   bin/numbers-audit.mjs put three payouts against rows on #roster/pipeline
+   that did not carry them, and the reason turned out to be the finding rather
+   than the fault: "Anoj Gautam" has 646 lifetime trips and "Anoj Gautam Mohan
+   Bahadur" has never driven, and they are one man filed twice — once under the
+   name a provider issues him by and once under his full legal name.
+
+   personFold cannot see it. It collapses case, whitespace and a repeated word,
+   which is the noise it was written for; a name with three extra words in the
+   middle is not noise and folding on a shared prefix would merge real people —
+   the product's own comments record "Muhammad Khalid" and "Muhammad Khalid Gul"
+   as two different drivers, both with payouts.
+
+   Measured on production, 64 of the 133 people this tab lists share every word
+   of their name with somebody on the same roster who HAS driven, 31 of them in
+   the "never driven" bucket alone. That is half a list an operator reads as
+   people to chase. So the suspicion is printed beside the row, with the record
+   to check it against, and nothing is merged: showing one person twice is
+   recoverable and merging two people is not. */
+const nameWords = (n) => String(n || '').toLowerCase().trim().split(/\s+/).filter(Boolean);
+export const hasDriven = (p) => (p.trips || 0) > 0 || (p.lifetime_trips || 0) > 0;
+/* Same first word, and one name's words a subset of the other's. The first
+   word is the guard that keeps "Ali Nawaz Muhammad Nawaz" away from every
+   other Muhammad on the roster: a given name leads in every form this fleet's
+   providers file, and without it the rule matches on surnames alone. */
+export const twinFor = (r, drove) => {
+  const a = nameWords(r.name);
+  if (a.length < 2) return null;
+  const as = new Set(a);
+  return drove.find((o) => {
+    const b = nameWords(o.name);
+    if (b.length < 2 || b[0] !== a[0] || o.name === r.name) return false;
+    const bs = new Set(b);
+    return [...as].every((w) => bs.has(w)) || [...bs].every((w) => as.has(w));
+  }) || null;
+};
+
 export async function renderRoster(root) {
   const tab = ROSTER_TABS.some((t) => t.id === state.param) ? state.param : 'all';
   root.innerHTML = '';
@@ -168,6 +206,11 @@ const FILTER = {
     idle: (x) => x.category === 'idle_this_window',
     blocked: (x) => x.category === 'blocked',
   };
+  /* Only people who have produced nothing are given a twin. Two records that
+     have BOTH driven are two working drivers until something other than a name
+     says otherwise; the signal here is a record with no output beside a record
+     with a great deal of it. */
+  const drove = (d.people || []).filter(hasDriven);
   const people = (d.people || []).map((r) => ({
     /* One column, two sources, one sortable number. The Fares column shows the
        trips' own fares where the channel prices them and the statement's fare
@@ -175,6 +218,7 @@ const FILTER = {
        sorting on `revenue` — so every statement-sourced row would sort as
        blank, which is the state the column exists to have stopped reporting. */
     ...r, fares_shown: r.revenue ?? r.statement_fares ?? null,
+    twin: hasDriven(r) ? null : twinFor(r, drove),
   }));
   const shown = FILTER[tab] ? people.filter(FILTER[tab]) : people;
 
@@ -347,6 +391,14 @@ const FILTER = {
     /* A reason is a fact about a SUSPENSION. Filtered to the pipeline or the
        idle list — people who are on the books and simply not driving — nobody
        has one, and 113 dashes under "Reason given" reads as a missing feed. */
+    /* The record this one may already be. Only where at least one row has a
+       candidate, so a roster with no duplicates carries no column about them. */
+    ...(shown.some((r) => r.twin) ? [{ label: 'Possibly already driving', key: '_twin',
+      sortValue: (r) => (r.twin ? -(r.twin.lifetime_trips || 0) : 1),
+      render: (r) => (r.twin
+        ? `${entity('driver', r.twin.driver_ext_id, r.twin.name)}<span class="dim" title="every word of one of these names appears in the other, and this record has driven"> · ${
+          fmt(r.twin.lifetime_trips || 0)} trips</span>`
+        : '<span class="ent-off" title="no driving record on this roster shares every word of this name">no match</span>') }] : []),
     { label: 'Reason given', key: 'reason',
       absent: 'no channel gave a reason for anybody in this group — a reason is attached to a '
         + 'suspension, and nobody here is suspended',
@@ -356,6 +408,23 @@ const FILTER = {
         : '—') },
   ], { sortable: true, sortId: 'roster', defaultSort: { key: 'trips', dir: 'desc' } });
   foldRows(rp.body, rosterTable, { shown: 12, total: shown.length, noun: 'person', key: `roster-${tab}` });
+  const twins = shown.filter((r) => r.twin);
+  if (twins.length) {
+    /* The busiest of the candidates, not whichever the current sort put first
+       — the sentence calls it the busiest and a table anybody can re-sort must
+       not be what decides which name goes in it. */
+    const top = twins.reduce((a, r) =>
+      ((r.twin.lifetime_trips || 0) > (a.twin.lifetime_trips || 0) ? r : a)).twin;
+    rp.body.append(el('p', 'cap',
+      `${fmt(twins.length)} of these ${countOf(shown.length, 'person', 'people')} share every word `
+      + 'of their name with somebody on this same roster who HAS driven — the busiest of them '
+      + `${entity('driver', top.driver_ext_id, top.name)}, with `
+      + `${countOf(top.lifetime_trips || 0, 'trip')} behind them. This list is very `
+      + 'likely counting those people twice: once under the name a provider issues them by and '
+      + 'once under a fuller legal name. They are shown separately rather than folded together, '
+      + 'because showing one person twice can be undone and merging two people cannot — the '
+      + 'column names the record to check each against.'));
+  }
 
   if (tab === 'blocked') {
     const holding = shown.filter((x) => x.holding_vehicle_while_blocked);

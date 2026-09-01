@@ -313,11 +313,19 @@ for (const route of routes) {
      away: the source table's rows_24h is 0 for the ledger, and 0 never
      becomes a figure, so the collision it causes was invisible. */
   const keysAt = new Map();
+  const allIds = new Map();
   latest.forEach((body, u) => {
     const url = u.split('?')[0];
     const walk = (o) => {
       if (Array.isArray(o)) {
-        for (const r of o.slice(0, 80)) {
+        /* Every row, not the first eighty. The slice was a bound on work and
+           it silently bounded CORRECTNESS: the identities collected here are
+           what stops a loose match landing on somebody else's row, and the
+           roster carries 336 people. Anoj Gautam Mohan Bahadur sits well past
+           the eightieth, so he was not in the set, and Anoj Gautam's payout
+           was demanded of his row. Collecting a name and a set of key names
+           per row costs nothing worth bounding. */
+        for (const r of o.slice(0, 5000)) {
           if (!r || typeof r !== 'object') continue;
           const id = identityOf(r);
           if (!id) continue;
@@ -325,6 +333,18 @@ for (const route of routes) {
           const set = keysAt.get(k) || new Set();
           for (const [kk, vv] of Object.entries(r)) if (isNum(vv)) set.add(kk);
           keysAt.set(k, set);
+          /* Every identity, not only the ones that produced a figure.
+             ─────────────────────────────────────────────────────────────
+             This set exists to stop a loose match landing on somebody else's
+             row, and it was built from `pairs` — the rows that carried a
+             number big enough to be worth checking. A person with no output
+             carries none, so the roster's "Anoj Gautam Mohan Bahadur" was not
+             in it, and the guard let "Anoj Gautam"'s payout be demanded of
+             his row. The people this catches are exactly the people with
+             nothing in their row. */
+          const ids = allIds.get(url) || new Set();
+          ids.add(String(id).toLowerCase().trim());
+          allIds.set(url, ids);
         }
         return;
       }
@@ -334,13 +354,9 @@ for (const route of routes) {
   });
 
   /* Every identity each endpoint names, so a loose match can be stopped from
-     landing on a row that belongs to a different one. */
-  const idsByUrl = new Map();
-  for (const f of pairs) {
-    const set = idsByUrl.get(f.url) || new Set();
-    set.add(String(f.id).toLowerCase().trim());
-    idsByUrl.set(f.url, set);
-  }
+     landing on a row that belongs to a different one. Built by the walk above,
+     which sees every row rather than only the ones carrying a figure. */
+  const idsByUrl = allIds;
   /* How many payload rows one endpoint offers under the same identity. */
   const idCount = new Map();
   for (const f of pairs) {
@@ -413,6 +429,25 @@ for (const route of routes) {
          correctly reads 0. When more than one endpoint offers this identity
          a field that lands on this column, the column cannot be attributed
          to either. */
+
+      /* …and the guard the paragraph above describes, which was written down
+         and never written. keysAt holds every numeric field every endpoint
+         offers under this identity; if another endpoint offers one that lands
+         on this same column, the column cannot be attributed to either, and a
+         harness that guesses is worse than one that says nothing.
+
+         Measured: #revenue's Bookings column is /api/revenue's windowed count
+         and /api/platforms — which the same page also fetches, for the channel
+         inventory — offers an all-time `bookings` for the same channel. One
+         column, two true numbers, and the audit demanded the one the column
+         was never about. */
+      const rival = [...keysAt].some(([k2, set]) => {
+        const at = k2.indexOf('|');
+        if (k2.slice(0, at) === f.url) return false;
+        if (k2.slice(at + 1).toLowerCase().trim() !== String(f.id).toLowerCase().trim()) return false;
+        return [...set].some((kk) => columnFor(t.heads, kk, t.keys) === col);
+      });
+      if (rival) break;
 
       /* A column is free to render a duration in the unit that reads best.
          /api/rollups reports duration_ms and the "Took" column prints 3.5s;

@@ -1,0 +1,19 @@
+{
+  "base": "http://localhost:8100",
+  "width": 412,
+  "at": "2026-09-01T17:30:11.852Z",
+  "findings": [
+    {
+      "route": "roster",
+      "code": "unshown",
+      "detail": "5 figure(s) have a column on this page, sit in a row it is showing, and are not in that row",
+      "examples": [
+        "Muhammad Khalid · Paid should be 10409 (/api/roster payout)",
+        "Mohammed Selim Shafiqur Rahman · Paid should be 9021 (/api/roster payout)",
+        "Bakht Zada Sharif · Paid should be 9591 (/api/roster payout)",
+        "Muhammad Khalid Gul · Paid should be 9141 (/api/roster payout)",
+        "Aliyan Khalil · Paid should be 11611 (/api/roster payout)"
+      ]
+    }
+  ]
+}
