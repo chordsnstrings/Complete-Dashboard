@@ -1364,6 +1364,17 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
      The three shapes come back in one result set with a kind on each row,
      because splitting them in JS costs nothing and a second statement would
      cost a second scan. */
+  /* The seconds a booking took, from whichever of the two the record has.
+     A channel's own duration wins where it files one; otherwise the gap
+     between the request and the dropoff, which every page in this product
+     that measures on-trip time already uses (api/performer_routes.js:93,
+     api/public/trip.js:67). Bounded: an end at or before the request is a
+     clock artefact, and no Dubai corridor takes six hours. */
+  const TRIP_SECONDS = `coalesce(duration_s,
+    CASE WHEN ended_at IS NOT NULL AND ended_at > requested_at
+          AND ended_at < requested_at + interval '6 hours'
+         THEN extract(epoch FROM (ended_at - requested_at)) END)`;
+
   app.get('/api/geo/corridors', wrap(async (req, res) => {
     const p = range(req);
     /* Which half of the page is being asked for.
@@ -1384,7 +1395,29 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 coalesce(${areaOf('dropoff_addr')}, '(unrecorded)') AS to_area,
                 count(*)::int AS trips,
                 round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) AS avg_km,
-                round(avg(duration_s)::numeric / 60, 1) AS avg_min,
+                /* THE TIME A CORRIDOR TAKES, WHICH THIS PAGE IS FOR.
+                   ────────────────────────────────────────────────────────
+                   duration_s is declared on sql/schema.sql:64, mapped from
+                   Uber's "Trip Duration" in src/probe.js, and written by
+                   nothing — so avg_min was NULL on all 119 corridors in every
+                   window, on the page whose whole subject is which routes
+                   carry the work and what they cost in time.
+
+                   The measurement exists. 180 of 200 production bookings
+                   carry BOTH requested_at and ended_at, and #trip has always
+                   shown their difference ("3 min · requested to ended — the
+                   channel reports no duration") while this page said nothing
+                   was measured about the same trips. Two pages disagreeing
+                   about whether a figure exists is the failure this product
+                   is built to avoid.
+
+                   It is request-to-dropoff, not drive time: it contains the
+                   approach and the rider's wait, and the page says so rather
+                   than presenting one as the other. Bounded on both sides —
+                   an end before the request is a clock artefact and six hours
+                   is not a Dubai corridor — so one bad row cannot move a
+                   corridor's average by an hour. */
+                round(avg(${TRIP_SECONDS})::numeric / 60, 1) AS avg_min,
                 /* The denominator the average actually used. "priced" counted
                    price IS NOT NULL while avg_fare additionally excluded
                    complimentary rides, so the printed "N priced" was not the N
@@ -1401,7 +1434,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                    column of dashes with no denominator reads as "these trips
                    took no time"; with the count beside it the page can say the
                    field is not collected. */
-                count(duration_s)::int AS min_n,
+                count(${TRIP_SECONDS})::int AS min_n,
+                /* Which of the two answered, so the page can name the basis
+                   rather than implying a channel reported it. */
+                count(duration_s)::int AS min_reported_n,
                 array_agg(DISTINCT platform) AS platforms,
                 -- The pickup-only measures, carried at corridor grain so the
                 -- origins panel is a roll-up rather than another scan. The
@@ -1436,13 +1472,14 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                    FROM base WHERE ${wantSummary ? 'true' : 'false'} GROUP BY 1
                   HAVING sum(from_trips) > 0
                   ORDER BY trips DESC LIMIT 60) o)
-       SELECT 'corridor' AS kind, seq, from_area, to_area, trips, avg_km, avg_min, min_n, priced,
+       SELECT 'corridor' AS kind, seq, from_area, to_area, trips, avg_km, avg_min, min_n,
+              min_reported_n, priced,
               complimentary, avg_fare, platforms, NULL::int AS morning, NULL::int AS evening,
               NULL::int AS corridors_3plus, NULL::int AS corridors_all, NULL::int AS origins_all,
               NULL::int AS pickups_all, NULL::int AS pickups_named
          FROM corridor
        UNION ALL
-       SELECT 'origin', seq, area, NULL, trips, avg_km, NULL, NULL, NULL,
+       SELECT 'origin', seq, area, NULL, trips, avg_km, NULL, NULL, NULL, NULL,
               NULL, NULL, NULL, morning, evening,
               NULL, NULL, NULL, NULL, NULL
          FROM origin
@@ -1452,7 +1489,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           lists capped at 60 and 120 rows — right until the fleet works more
           than 120 distinct corridors, at which point both tiles quietly become
           the cap. One row, always, so an empty window still states its zeroes. */
-       SELECT 'total', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+       SELECT 'total', 0, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
               NULL, NULL, NULL, NULL, NULL,
               count(*) FILTER (WHERE from_trips >= 3)::int,
               count(*) FILTER (WHERE from_trips > 0)::int,
@@ -1480,7 +1517,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     };
     const corridors = rows.filter((r) => r.kind === 'corridor').map((r) => ({
       from_area: r.from_area, to_area: r.to_area, trips: r.trips, avg_km: r.avg_km,
-      avg_min: r.avg_min, min_n: r.min_n, priced: r.priced, complimentary: r.complimentary,
+      avg_min: r.avg_min, min_n: r.min_n, min_reported_n: r.min_reported_n,
+      priced: r.priced, complimentary: r.complimentary,
       avg_fare: r.avg_fare, platforms: r.platforms,
     }));
     const origins = rows.filter((r) => r.kind === 'origin').map((r) => ({
@@ -1499,10 +1537,13 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       truncated: t.corridors_all > shown.length,
       origins_shown: origins.length,
       origins_truncated: t.origins_all > origins.length,
-      /* Duration is declared on the trip table and written by nothing, so
-         avg_min is NULL on every corridor in every window. Said once, here,
-         rather than left as a column of dashes. */
+      /* How many of the bookings behind these corridors carry a time at all,
+         and how many of those a channel actually reported rather than the
+         record implying. Both, because they are different claims: no channel
+         on this fleet files a duration, so the whole of the first number is
+         request-to-dropoff and the page has to be able to say that. */
       duration_measured: corridors.reduce((a, r) => a + (r.min_n || 0), 0),
+      duration_reported: corridors.reduce((a, r) => a + (r.min_reported_n || 0), 0),
     });
   }));
 

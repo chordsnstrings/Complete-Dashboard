@@ -403,7 +403,16 @@ console.log('\ncash exposure aggregates the window once');
               coalesce(${AREA('dropoff_addr')}, '(unrecorded)') AS to_area,
               count(*)::int trips,
               round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_km,
-              round(avg(duration_s)::numeric / 60, 1) avg_min,
+              /* The same derivation the endpoint uses. duration_s is declared
+                 and written by no collector, so this reference query measured
+                 nothing at all; the two timestamps carry it, and #trip has
+                 always shown their difference for the same bookings. Bounded
+                 the same way: an end at or before the request is a clock
+                 artefact and no Dubai corridor takes six hours. */
+              round(avg(coalesce(duration_s,
+                CASE WHEN ended_at IS NOT NULL AND ended_at > requested_at
+                      AND ended_at < requested_at + interval '6 hours'
+                     THEN extract(epoch FROM (ended_at - requested_at)) END))::numeric / 60, 1) avg_min,
               count(*) FILTER (WHERE price IS NOT NULL)::int priced,
               round(avg(price) FILTER (WHERE price IS NOT NULL AND NOT is_complimentary)::numeric, 2) avg_fare,
               array_agg(DISTINCT platform) platforms
@@ -451,7 +460,7 @@ console.log('\ncash exposure aggregates the window once');
      the average fare excludes and `priced` did not, so the printed denominator
      was not the one the AED was divided by; `min_n` says how many rows carried
      a duration at all, which on the live fleet is zero on every corridor. */
-  const ADDED = ['complimentary', 'min_n'];
+  const ADDED = ['complimentary', 'min_n', 'min_reported_n'];
   const trim = (r) => { const c = { ...r }; for (const k of ADDED) delete c[k]; return c; };
   const sorted = (a) => JSON.stringify([...a].map(trim)
     .sort((x, y) => JSON.stringify(x).localeCompare(JSON.stringify(y))));

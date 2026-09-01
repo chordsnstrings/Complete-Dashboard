@@ -2482,16 +2482,19 @@ app.get('/api/geo/corridors', (_, r) => {
        days the live endpoint measured 8.45s and the page 7.9-14.4s of one
        skeleton. */
     part: 'all',
-    /* duration_s is declared on the trip table and written by no collector, so
-       avg_min is NULL on every corridor in every window. Said once rather than
-       drawn as a column of dashes. */
-    duration_measured: 0,
+    /* No collector writes duration_s, so nothing here is REPORTED — but the
+       two timestamps on a booking carry the time and the endpoint derives it,
+       which is why duration_measured is large and duration_reported is zero.
+       That pair is what makes the page label the column "Request → drop"
+       rather than "Avg minutes". */
+    duration_measured: 4120,
+    duration_reported: 0,
     note: 'Areas are parsed from the address text each provider returns, not from a place id. '
       + 'Bookings only — an FMS row is the tracker\'s own record of a journey a ride platform '
       + 'already reported, and counting it would chart the same trip twice.',
     corridors: areas.flatMap((a, i) => areas.slice(0, 4).map((b, j) => ({
       from_area: a, to_area: b, trips: Math.max(3, 90 - i * 6 - j * 9),
-      avg_km: 8 + j * 4, avg_min: 18 + j * 7, min_n: 18 + j,
+      avg_km: 8 + j * 4, avg_min: 18 + j * 7, min_n: 18 + j, min_reported_n: 0,
       priced: (i + j) % 3 ? 0 : 20, complimentary: (i + j) % 5 === 0 ? 1 : 0,
       avg_fare: (i + j) % 3 ? null : 96 + j * 12, platforms: ['uber', 'fms'] }))).filter((c) => c.from_area !== c.to_area),
     origins: areas.map((area, i) => ({ area, trips: 420 - i * 34, morning: 200 - i * 18,

@@ -210,16 +210,30 @@ export async function renderCorridors(root) {
   } else empty(b2, 'Not enough addressed trips in either wave');
 
   b3.innerHTML = '';
-  /* `avg_min` is null on every corridor in every window, because duration_s is
-     declared and never written. A column of dashes reads as "these particular
-     corridors have no timing"; one sentence says what it actually is. */
+  /* The column used to be absent on every window, because it read duration_s
+     — declared in the schema and written by no collector. The measurement was
+     there all along in the two timestamps, which #trip has always shown and
+     this page said nothing about; the endpoint derives it now. Still guarded,
+     because a window with no ended_at at all is a real state. */
   const anyMin = c.corridors.some((r) => r.avg_min != null);
+  /* Request to dropoff CONTAINS the approach and the rider's wait, so it is
+     not drive time and must not be labelled as one. Named on the MAJORITY
+     rather than on "did any channel file one": on this fleet none does, so the
+     whole column is derived — but a single channel-timed booking must not
+     rename the column back to a measure the other several thousand rows are
+     not. Where any of it is derived, the header says so and the caption says
+     how much of it a channel actually filed. */
+  const minsReported = c.duration_reported || 0;
+  const minsDerived = (c.duration_measured || 0) > minsReported;
   const corrTable = tableFrom(c.corridors, [
     { label: 'From', key: 'from_area' },
     { label: 'To', key: 'to_area' },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Avg km', key: 'avg_km', num: true, render: (r) => fmt(r.avg_km, 1) },
-    ...(anyMin ? [{ label: 'Avg minutes', key: 'avg_min', num: true, render: (r) => fmt(r.avg_min, 0) }] : []),
+    ...(anyMin ? [{ label: minsDerived ? 'Request → drop' : 'Avg minutes', key: 'avg_min', num: true,
+      render: (r) => (r.avg_min == null
+        ? '<span class="ent-off" title="no booking on this corridor records both a request and an end time">—</span>'
+        : `${fmt(r.avg_min, 0)}<span class="dim" title="over the ${r.min_n} of ${r.trips} trips on this corridor that record both times"> min</span>`) }] : []),
     /* An average over 2% of a corridor's trips is not the corridor's average.
        The denominator sits beside it and the tone is withheld below half. */
     { label: 'Avg fare', key: 'avg_fare', num: true,
@@ -251,9 +265,16 @@ export async function renderCorridors(root) {
       + 'priced minority — two starred averages are not comparable with each other');
   }
   if (!anyMin) {
-    caps.push('There is no average-minutes column because no provider\'s trip duration is stored: the '
-      + 'field is declared in the schema and the collector never writes it, so a column here would be '
-      + 'empty on every corridor in every window rather than on these ones');
+    caps.push('There is no timing column because no booking in this window records both a request '
+      + 'time and an end time, and no channel files a duration of its own — the field is declared '
+      + 'in the schema and the collector never writes it');
+  } else if (minsDerived) {
+    caps.push('"Request → drop" is the gap between the two timestamps on the booking, not drive '
+      + 'time: it contains the approach and the rider\'s wait. It is measured over the '
+      + `${fmt(c.duration_measured || 0)} bookings that record both times`
+      + (minsReported
+        ? `, of which ${fmt(minsReported)} carry a duration the channel filed itself`
+        : ', and no channel here files a duration of its own'));
   }
   if (caps.length) b3.append(el('p', 'cap', `${caps.join('. ')}.`));
 
