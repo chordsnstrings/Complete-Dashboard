@@ -630,10 +630,32 @@ export async function refreshStatements(db = pool) {
                ${NET_FARE_SQL}                                        AS net,
                sum(amount) FILTER (WHERE category = 'tip')             AS tips,
                sum(amount) FILTER (WHERE category = 'toll')            AS salik,
-               -sum(amount) FILTER (WHERE category = 'cash_collected') AS cash
+               -sum(amount) FILTER (WHERE category = 'cash_collected') AS cash,
+               /* THE TWO LINES THIS FOLD NEVER READ.
+                  ───────────────────────────────────────────────────────
+                  driver_statement_day has carried gross and fees columns
+                  since sql/schema_v25.sql and nothing has ever written them,
+                  so /api/revenue reported statement_gross and statement_fees
+                  as null on every platform, on every window — beside a
+                  statement_net of AED 1,038,040 that came out of this same
+                  tree.
+
+                  They are both in it. The fare line is the gross the rider was
+                  charged and service_fee is the platform's commission out of
+                  it; your_earnings, the root, is what is left. Negated like
+                  cash above, so every column in this table is a magnitude and
+                  a reader does not have to know which of them arrive signed.
+
+                  NOT asserted to reconcile: gross minus fees is not net. The
+                  tree carries taxes, surcharges and promotions this fold
+                  deliberately does not name, and on one production driver the
+                  two sides differ by AED 124.87. Each column is the line the
+                  statement itself files, which is all any of them claims. */
+               sum(amount) FILTER (WHERE category = 'fare')            AS gross,
+               -sum(amount) FILTER (WHERE category = 'service_fee')    AS fees
         FROM driver_earnings_component
         WHERE category IN ('net_fare', 'your_earnings', 'taxes_earnings',
-                           'tip', 'toll', 'cash_collected')
+                           'tip', 'toll', 'cash_collected', 'fare', 'service_fee')
         GROUP BY platform, fleet_id, driver_ext_id, period_start, period_end
         HAVING ${NET_FARE_SQL} IS NOT NULL
       ),
@@ -649,7 +671,8 @@ export async function refreshStatements(db = pool) {
                   seven days that were each measured. See sql/schema_v44.sql. */
                p.days::int AS period_days,
                p.net / p.days AS net, p.tips / p.days AS tips,
-               p.salik / p.days AS salik, p.cash / p.days AS cash
+               p.salik / p.days AS salik, p.cash / p.days AS cash,
+               p.gross / p.days AS gross, p.fees / p.days AS fees
         FROM per p
         CROSS JOIN LATERAL generate_series(p.period_start, p.period_end, interval '1 day') AS d(day)
         ORDER BY p.platform, p.fleet_id, p.driver_ext_id, d.day,
@@ -665,19 +688,21 @@ export async function refreshStatements(db = pool) {
                -- The COARSEST window behind the folded figure: it is what
                -- limits what can be claimed about the day.
                max(period_days) AS period_days,
-               sum(net) AS net, sum(tips) AS tips, sum(salik) AS salik, sum(cash) AS cash
+               sum(net) AS net, sum(tips) AS tips, sum(salik) AS salik, sum(cash) AS cash,
+               sum(gross) AS gross, sum(fees) AS fees
         FROM resolved
         GROUP BY platform, fleet_id, lower(regexp_replace(driver_name, '\\s+', ' ', 'g')), day
       )
       INSERT INTO driver_statement_day
         (platform, fleet_id, driver_name, driver_ext_id, day,
-         net, tips, salik, cash, period_days, source, pseudo)
+         net, tips, salik, cash, gross, fees, period_days, source, pseudo)
       SELECT platform, fleet_id, driver_name, driver_ext_id, day,
-             net, tips, salik, cash, period_days, 'uber_rest', false
+             net, tips, salik, cash, gross, fees, period_days, 'uber_rest', false
       FROM folded
       ON CONFLICT (platform, fleet_id, name_key, day, source) DO UPDATE SET
         net = EXCLUDED.net, tips = EXCLUDED.tips, salik = EXCLUDED.salik,
-        cash = EXCLUDED.cash, period_days = EXCLUDED.period_days,
+        cash = EXCLUDED.cash, gross = EXCLUDED.gross, fees = EXCLUDED.fees,
+        period_days = EXCLUDED.period_days,
         driver_ext_id = EXCLUDED.driver_ext_id,
         ingested_at = now()`);
     await db.query('COMMIT');

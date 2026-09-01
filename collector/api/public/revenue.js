@@ -206,6 +206,30 @@ export async function renderRevenue(root) {
         : `${money(r.statement_net)}<span class="dim"> · cash ${r.statement_cash != null ? money(r.statement_cash) : '—'}`
           + `${r.statement_days != null ? ` · ${r.statement_days} of ${d.window_days} days` : ''}`
           + `${r.statement_drivers != null ? `, ${fmt(r.statement_drivers)} drivers` : ''}</span>`) },
+    /* WHAT THE CHANNEL CHARGED AND WHAT IT KEPT.
+       ─────────────────────────────────────────────────────────────────────
+       driver_statement_day has carried gross and fees columns since
+       sql/schema_v25.sql and the rollup never wrote them, so this endpoint
+       reported statement_gross and statement_fees as null on every platform
+       and every window — beside a statement_net of AED 1,038,040 drawn from
+       the same component tree that holds both. src/rollup.js fills them now,
+       and this is the question they answer: what the riders were charged, and
+       what share of it the channel kept.
+
+       The rate is fees over gross, and it is NOT (gross − net) / gross: the
+       tree carries taxes, surcharges and promotions the fold does not name, so
+       the two differ by a little and only one of them is a commission. */
+    { label: 'Channel took', key: 'statement_fees', num: true,
+      absent: 'no channel here files a commission line — the statement feeds carry a net figure '
+        + 'and this fleet\u2019s other channels report fares rather than statements',
+      render: (r) => {
+        if (r.statement_fees == null) return '<span class="dim">not reported</span>';
+        const rate = r.statement_gross ? (r.statement_fees / r.statement_gross) * 100 : null;
+        return `${money(r.statement_fees)}<span class="dim">`
+          + `${rate != null ? ` · ${pct(rate, 1)} of ` : ' · gross '}`
+          + `${r.statement_gross != null ? money(r.statement_gross) : 'an unreported gross'}`
+          + ' charged to riders</span>';
+      } },
     /* The denominator is named, because it is not the same one on every row.
        A fares row divides gross fares by the distance of the bookings that
        carried a fare; a payout row divides the net payout by every booking

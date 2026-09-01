@@ -134,6 +134,14 @@ await dec('u-1', '2026-08-03', '2026-08-09', 'net_fare', 700, 'Test Driver');
 await dec('u-1', '2026-08-03', '2026-08-09', 'tip', 14, 'Test Driver');
 await dec('u-1', '2026-08-03', '2026-08-09', 'toll', 7, 'Test Driver');
 await dec('u-1', '2026-08-03', '2026-08-09', 'cash_collected', -140, 'Test Driver');
+/* The two lines this fold never read. driver_statement_day has carried gross
+   and fees since sql/schema_v25.sql and nothing wrote them, so /api/revenue
+   reported both as null on every platform and window beside a statement_net of
+   AED 1,038,040 drawn from this same tree. `fare` is the gross the rider was
+   charged; `service_fee` is the channel's commission out of it, and arrives
+   negative like cash_collected. */
+await dec('u-1', '2026-08-03', '2026-08-09', 'fare', 1050, 'Test Driver');
+await dec('u-1', '2026-08-03', '2026-08-09', 'service_fee', -280, 'Test Driver');
 // an older, coarser run-stamped period overlapping the same days
 await dec('u-1', '2026-08-01', '2026-08-28', 'net_fare', 9999, 'Test Driver');
 // a second account of the same person, same week
@@ -149,6 +157,24 @@ check('cash flips positive on the way in', d1 && Math.abs(Number(d1.cash) - 20) 
   d1 && String(d1.cash));
 check('tips and salik ride separately',
   d1 && Math.abs(Number(d1.tips) - 2) < 0.01 && Math.abs(Number(d1.salik) - 1) < 0.01);
+check('the gross the rider was charged is written, spread over the same days',
+  d1 && Math.abs(Number(d1.gross) - 150) < 0.01, d1 && String(d1.gross));
+check('the commission is written, and flips positive like cash',
+  d1 && Math.abs(Number(d1.fees) - 40) < 0.01, d1 && String(d1.fees));
+/* The two new columns are READ, not derived from, and they do not disturb the
+   one that was already right. net comes from net_fare — or from your_earnings
+   less tips and taxes — and must be exactly what it was before a fare line and
+   a service_fee line existed on the same week. Somebody later "reconciling"
+   net to gross minus fees would break this: the tree carries taxes, surcharges
+   and promotions this fold deliberately does not name, and on one production
+   driver those two sides differ by AED 124.87. */
+check('adding the gross and commission lines leaves net exactly as it was',
+  d1 && Math.abs(Number(d1.net) - 110) < 0.01, d1 && String(d1.net));
+/* A driver whose statement files no fare line must stay null rather than
+   collapse to zero: nobody measured a gross for them. */
+check('a component tree with no fare line reports no gross at all',
+  (await db.query(`SELECT count(*)::int n FROM driver_statement_day
+     WHERE source='uber_rest' AND gross IS NULL`)).rows[0].n > 0);
 check('two accounts of one person sum rather than last-write-wins',
   d1 && Math.abs(Number(d1.net) - 110) < 0.01, 'expected 100 + 10');
 /* The resolver honestly gives a day to the only period covering it — even a
