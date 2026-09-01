@@ -21,8 +21,10 @@
    - A day is a DUBAI day. A trip at 01:00 Dubai belongs to that date, not to
      the UTC one four hours behind it. */
 import { PGlite } from '@electric-sql/pglite';
+import express from 'express';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
+import { launchChromium } from './browser.mjs';
 
 const db = new PGlite();
 const q = (t, p = []) => db.query(t, p).then((r) => r.rows);
@@ -253,6 +255,44 @@ check('the fares are not touched by any of it',
 check('a channel with fares and no statement reports no payout rather than zero',
   hotel?.a.paid == null && hotel?.a.statement_net == null, JSON.stringify(hotel?.a));
 
+/* ── and the column actually appears ──────────────────────────────────────
+   The first cut of this shipped a Paid column that never rendered. tableFrom
+   PRUNES a column that declares `absent` and whose KEY is empty on every row
+   (ui.js:187), and for that decision it reads the key rather than running the
+   renderer — so a column keyed 'paid' whose money lives under r.a / r.b was
+   dropped from every render, silently, with the endpoint answering correctly
+   the whole time. Asserting the JSON was not enough; this asserts the cell. */
+console.log('\ncompare: the money column reaches the page');
+const shell = express();
+shell.use(express.static('api/public'));
+shell.use('/api', (req, res) => raw(`/api${req.url}`)
+  .then((x) => res.status(x.status).json(x.body))
+  .catch((e) => res.status(500).json({ error: String(e) })));
+const web = shell.listen(0);
+const browser = await launchChromium();
+const page = await browser.newPage({ viewport: { width: 1500, height: 1400 } });
+await page.goto(`http://127.0.0.1:${web.address().port}/?ui=desktop#compare/${A}/${B}?cut=full`,
+  { waitUntil: 'domcontentloaded' });
+await page.waitForTimeout(7000);
+const panel = await page.evaluate(() => {
+  const h = [...document.querySelectorAll('h3')].find((x) => /By channel/i.test(x.textContent));
+  const el2 = h?.closest('.panel');
+  if (!el2) return null;
+  return {
+    cols: [...el2.querySelectorAll('thead th')].map((x) => x.innerText.trim()),
+    body: el2.innerText.replace(/\n/g, ' '),
+  };
+});
+check('the By channel panel rendered', !!panel, String(panel));
+check('…with a Paid column, not just Fares',
+  (panel?.cols || []).some((c) => /^Paid$/i.test(c)), (panel?.cols || []).join(' | '));
+check('…carrying the statement share for the day inside the horizon',
+  /780/.test(panel?.body || ''), (panel?.body || '').slice(0, 200));
+check('…and the ledger import for the day outside it, marked as one',
+  /615/.test(panel?.body || '') && /ldg/.test(panel?.body || ''), (panel?.body || '').slice(0, 200));
+
+await browser.close();
+web.close();
 server.close();
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);

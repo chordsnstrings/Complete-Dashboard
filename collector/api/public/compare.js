@@ -291,7 +291,16 @@ export async function renderCompare(root, aParam, bParam) {
   }
 
   platP.body.innerHTML = '';
-  const pls = p.platforms || [];
+  /* Stamped flat, and that is not cosmetic: tableFrom PRUNES a column that
+     declares `absent` and whose KEY is empty on every row (ui.js:187), and it
+     reads the key rather than running the renderer for that decision. The Paid
+     column's money lives under r.a / r.b, so keyed on 'paid' it was dropped
+     from every render — the column shipped and never appeared. Stamping also
+     gives it something to sort on. */
+  const pls = (p.platforms || []).map((r) => ({
+    ...r,
+    paid_shown: r.a?.paid ?? r.a?.statement_net ?? r.b?.paid ?? r.b?.statement_net ?? null,
+  }));
   if (!pls.length) empty(platP.body, 'No booking on either day.');
   else {
     platP.body.append(tableFrom(pls, [
@@ -314,7 +323,7 @@ export async function renderCompare(root, aParam, bParam) {
          which is an estimate and is captioned as one; where no statement
          reaches the day, the operator's own ledger import is shown instead and
          the cell says which of the two it is. */
-      { label: 'Paid', key: 'paid', num: true,
+      { label: 'Paid', key: 'paid_shown', num: true,
         absent: 'no statement and no ledger import reaches either of these days for any channel '
           + '— the platform payout feeds reach back about 192 days',
         render: (r) => {
