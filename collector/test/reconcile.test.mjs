@@ -401,6 +401,60 @@ console.log('\na percentage needs a base worth dividing by');
     JSON.stringify(d.rows.filter((r) => r.delta_pct != null).map((r) => [r.d, r.delta_pct])));
 }
 
+/* ── the bank side is a SEMI-join, not a join ─────────────────────────────
+   The covered figures ask "what did the bank pay on days a statement covers".
+   That was written as a correlated EXISTS against a CTE, which carries no
+   index — Postgres re-scanned the whole statement fold once per payout row,
+   and /api/reconcile answered in 10.0 seconds cold on production, on every
+   window, because the endpoint is all-time whatever range it is given.
+   bin/render-audit.mjs escalated it from "slow-panel" to "blank-page: no kpi,
+   table, chart or panel" when the page's settle window expired first.
+
+   The rewrite is a join over the DISTINCT (platform, day) pairs. The DISTINCT
+   is the whole difference between a semi-join and a fan-out, and the fixture
+   above cannot tell them apart because it has one statement row per day — so
+   this seeds a day carrying THREE, where a plain join multiplies the payout by
+   three and the covered total silently triples. */
+{
+  /* The month already carries a covered day of its own, so the assertions are
+     on the DELTA this one day adds — an absolute total would be a test of the
+     fixture above rather than of the join. */
+  const before = ((await get('/api/reconcile')).body.rows || [])
+    .find((x) => x.m === '2026-05' && x.platform === '*') || {};
+  const day = '2026-05-12';
+  for (const who of ['Amina Rashid', 'Bilal Noor', 'Chandra Rao']) {
+    await db.query(
+      `INSERT INTO driver_statement_day (platform, fleet_id, driver_name, driver_ext_id, day,
+         net, tips, salik, cash, source, pseudo)
+       VALUES ('uber', 'ecosine', $1, $2, $3, 100, 0, 0, 0, 'uber_rest', false)`,
+      [who, who === 'Amina Rashid' ? 'u-fanout' : `u-${who.split(' ')[0].toLowerCase()}`, day]);
+  }
+  /* ONE payout row on that day, for one of the three. */
+  await db.query(
+    `INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, driver_name, day,
+       period_start, period_end, earnings, cash_earnings)
+     VALUES ('uber', 'ecosine', 'u-fanout', 'Amina Rashid', $1, $1, $1, 210, 0)`, [day]);
+
+  const after = ((await get('/api/reconcile')).body.rows || [])
+    .find((x) => x.m === '2026-05' && x.platform === '*');
+  const grew = (f) => Number(after?.[f] || 0) - Number(before[f] || 0);
+  check('the month with three statement rows on one day is reported', !!after,
+    JSON.stringify(before));
+  /* 210 once. A plain join over the three statement rows adds 630. */
+  check('the bank side counts each payout once, not once per statement row',
+    after && Math.abs(grew('bank_covered') - 210) < 0.01,
+    `bank_covered ${before.bank_covered} → ${after?.bank_covered}, `
+    + `a rise of ${grew('bank_covered')} — 630 means the semi-join became a fan-out`);
+  check('…and one payout matching one statement row is one pair',
+    grew('matched_pairs') === 1,
+    `matched_pairs ${before.matched_pairs} → ${after?.matched_pairs}`);
+  /* The expected side is joined on the PERSON as well as the day, so the two
+     drivers the bank did not pay that day add nothing: one row, 100 net. */
+  check('the statement side counts only the person the bank paid',
+    after && Math.abs(grew('expected_covered') - 100) < 0.01,
+    `expected_covered ${before.expected_covered} → ${after?.expected_covered}`);
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

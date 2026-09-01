@@ -146,12 +146,31 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
           FROM driver_statement_day s
          WHERE s.source <> 'ledger' AND ${sideWhere('s')}${dayBound ? ` AND ${dayBound('s')}` : ''}
          GROUP BY 1, 2, 3
+      /* The days a statement covers, folded ONCE.
+         ─────────────────────────────────────────────────────────────────
+         The bank side below used to say
+             AND EXISTS (SELECT 1 FROM stmt x
+                          WHERE x.platform = p.platform AND x.day = p.day)
+         — a correlated EXISTS against a CTE, which carries no index, so
+         Postgres re-scanned the whole statement fold once per payout row.
+         Measured on production: /api/reconcile answered in 10.0s cold on
+         every window, because the endpoint is all-time whatever the range is,
+         and bin/render-audit.mjs escalated it from "slow-panel" to
+         "blank-page — no kpi, table, chart or panel" when the page's own
+         settle window expired first.
+
+         The same rows, as a semi-join over the distinct pairs. DISTINCT is
+         what makes it a semi-join rather than a fan-out: without it a day
+         carrying forty statement rows would multiply every payout row on it
+         by forty and the covered totals would be forty times too large. */
+      ), stmt_days AS (
+        SELECT DISTINCT platform, day FROM stmt
       ), bank AS (
         SELECT p.platform, ${personKey('p.driver_ext_id', 'p.driver_name')} AS person, p.day,
                sum(p.earnings) AS earnings
           FROM driver_payout_day p
+          JOIN stmt_days d ON d.platform = p.platform AND d.day = p.day
          WHERE ${sideWhere('p')}${dayBound ? ` AND ${dayBound('p')}` : ''}
-           AND EXISTS (SELECT 1 FROM stmt x WHERE x.platform = p.platform AND x.day = p.day)
          GROUP BY 1, 2, 3
       )
       SELECT ${keyExpr} AS k,
