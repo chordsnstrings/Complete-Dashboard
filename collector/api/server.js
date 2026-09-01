@@ -2990,6 +2990,12 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => {
 
    A repeated date is a data-quality problem, not a compliance one, and it is
    returned as such. */
+/* The same fold driver_lifetime, driver_statement_day.name_key and every
+   person-level join in this product use. Written once here because the
+   compliance list needs it on both sides of a join and a copy that drifts by a
+   btrim is a join that silently matches nothing. */
+const CANON_NAME = (col) => `lower(regexp_replace(btrim(${col}), '\\s+', ' ', 'g'))`;
+
 app.get('/api/compliance/drivers', wrap(async (req, res) => {
   /* The fleet chip reached this page and was dropped. driver_compliance
      records which fleet's credentials collected the row, and on a two-fleet
@@ -3023,9 +3029,45 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      toolbar said "77 with an expired licence" while this endpoint's own
      totals said expired: 0. */
   const rows = await q(
-    `SELECT platform, c.driver_ext_id, full_name, phone, licence_no, licence_expires,
+    `WITH life AS (
+       /* driver_lifetime folded to one row per NAME, so a person holding three
+          platform accounts is one answer rather than three. max() for the last
+          day and sum() for the count is what "this person's driving" means when
+          the accounts belong to one human. */
+       SELECT ${CANON_NAME('driver_name')} AS nk,
+              max(last_ever) AS last_ever,
+              sum(lifetime)::int AS lifetime
+         FROM driver_lifetime
+        WHERE coalesce(btrim(driver_name), '') <> ''
+        GROUP BY 1
+     )
+     SELECT platform, c.driver_ext_id, full_name, phone, licence_no, licence_expires,
             c.fleet_id,
             (licence_expires - now()::date) AS days_left, state, suspension_reason, rating,
+            /* IS THIS PERSON STILL DRIVING?
+               ─────────────────────────────────────────────────────────────
+               The single most consequential sentence this product prints is
+               "licence expired — stand down until renewed", and this list gave
+               a reader no way to tell an expiry that matters from one that does
+               not. All 132 rows on production read state 'offline' — the hotel
+               channel's own word for every account it holds, whether the person
+               drove yesterday or has never driven at all — and 243 days past
+               expiry on somebody idle since spring is a filing job, while the
+               same row on somebody who worked last night is a car to take off
+               the road this morning.
+
+               driver_lifetime is the precomputed answer (sql/schema_v29.sql),
+               keyed on the SYNTHESISED key — the platform id where there is
+               one, the folded name where there is not — so a hotel account is
+               matched by its id when the trips carry it and by the person's
+               name when they do not. That second branch is the one that
+               matters here: this roster's compliance rows are a hotel
+               channel's and much of its work is filed under Uber ids. */
+            coalesce(li.last_ever, lf.last_ever) AS last_ever,
+            coalesce(li.lifetime, lf.lifetime)   AS lifetime_trips,
+            (li.driver_ext_id IS NULL AND lf.nk IS NOT NULL) AS activity_by_name,
+            (now()::date - (coalesce(li.last_ever, lf.last_ever)
+                              AT TIME ZONE 'Asia/Dubai')::date) AS days_since_last_trip,
             ($1::text IS NOT NULL
              AND to_char(licence_expires,'YYYY-MM-DD') = $1) AS licence_placeholder,
             -- A licence expiring in six days is a CAR that stops earning in six
@@ -3033,6 +3075,18 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
             -- out by hand, which is the difference between a list and a plan.
             ${vehicleLatest('c.driver_ext_id')} AS vehicle
      FROM driver_compliance c
+     /* Two joins, not one OR'd join: an OR that can match a row keyed by id
+        AND a row keyed by name duplicates the compliance row, which on a page
+        headed "whose licence lapses next" would list one person twice.
+
+        The id match is exact and wins. The name fold is the fall-back and is
+        the branch that matters on this fleet: these compliance rows come from
+        the hotel channel and much of the same people's driving is filed under
+        Uber ids, so the id never matches for them. Two different people who
+        share a name merge — this roster does that — and the page says so
+        rather than letting the number imply otherwise. */
+     LEFT JOIN driver_lifetime li ON li.driver_ext_id = nullif(btrim(c.driver_ext_id), '')
+     LEFT JOIN life lf ON lf.nk = ${CANON_NAME('c.full_name')}
      WHERE ($2::text IS NULL OR c.fleet_id = $2)
      ORDER BY ($1::text IS NOT NULL
                AND to_char(licence_expires,'YYYY-MM-DD') = $1) ASC,

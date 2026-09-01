@@ -58,6 +58,28 @@ await q(`INSERT INTO driver_compliance (platform, fleet_id, driver_ext_id, full_
                 ('uber','egari','real-gone','Genuinely Expired','AE222',$2,'working')`,
 [day(3), day(-9)]);
 
+/* WHETHER THE EXPIRY MATTERS.
+   ─────────────────────────────────────────────────────────────────────────
+   The compliance list gave no way to tell an expiry that has to be acted on
+   this morning from one that is a filing job: all 132 production rows read
+   State "offline", the hotel channel's word for every account it holds,
+   whether the person drove last night or has never driven at all.
+
+   This row is the shape that makes the join hard, and it is the common one on
+   production: the compliance record is a HOTEL account and the person's
+   driving is filed under a different platform's id. Matching on the id alone
+   finds nothing; only the name fold reaches it. */
+await q(`INSERT INTO driver_compliance (platform, fleet_id, driver_ext_id, full_name, licence_no,
+           licence_expires, state)
+         VALUES ('hotel','ecosine','h-night','Night  Shift Person','AE333',$1,'offline')`,
+[day(10)]);
+for (let d = 20; d <= 24; d++) {
+  await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+             requested_at, distance_km, status)
+           VALUES ('uber',$1,'ecosine','ECO-9','u-night','Night Shift Person',$2,14,'completed')`,
+  [`night-${d}`, `2026-08-${d}T22:00:00+04:00`]);
+}
+
 /* One driver with work, a standing, a payout period and some alerts — enough
    for the profile, quality and earnings panels to have something to say. */
 let n = 0;
@@ -153,6 +175,43 @@ check('the list does not open on six rows of a data-quality artefact',
   JSON.stringify(comp.drivers.slice(0, 2).map((r) => [r.full_name, r.licence_placeholder])));
 check('and the soonest real expiry is what a reader sees first',
   comp.drivers[0].full_name === 'Genuinely Expired', comp.drivers[0].full_name);
+/* ── whether the expiry matters ────────────────────────────────────────── */
+{
+  const byName = Object.fromEntries(comp.drivers.map((r) => [r.full_name, r]));
+  const worker = byName['Expires Thursday'];
+  const idle = byName['Genuinely Expired'];
+  const night = byName['Night  Shift Person'];
+
+  check('a compliance row whose id matches the trips reports their driving',
+    worker && worker.lifetime_trips === 13, String(worker?.lifetime_trips));
+  check('…by the id, so it is not marked as a name match',
+    worker && worker.activity_by_name === false, String(worker?.activity_by_name));
+
+  /* The branch that matters on production: a hotel compliance record whose
+     person drives under a different platform's id. A join written on the id
+     alone finds nothing here and the row reads as though they never drive. */
+  check('a hotel record whose driving is filed under another id is still reached',
+    night && night.lifetime_trips === 5, JSON.stringify([night?.full_name, night?.lifetime_trips]));
+  check('…and says it was matched by name, not by platform id',
+    night && night.activity_by_name === true, String(night?.activity_by_name));
+  check('…including the day they last drove, which is what makes the expiry urgent',
+    night && String(night.last_ever).slice(0, 10) === '2026-08-24', String(night?.last_ever));
+  /* The double-spaced name is deliberate: the fold has to normalise runs of
+     whitespace on both sides or this row silently reports nothing. */
+  check('…even though the two spellings differ by whitespace',
+    night && /Night {2}Shift/.test(night.full_name), night?.full_name);
+
+  check('somebody with no driving under either key reports none',
+    idle && idle.last_ever == null && !idle.lifetime_trips,
+    JSON.stringify([idle?.last_ever, idle?.lifetime_trips]));
+
+  /* An OR'd join across the id and the name can match two driver_lifetime rows
+     and list one person twice, on a page headed "whose licence lapses next". */
+  check('no compliance row is duplicated by the join',
+    comp.drivers.length === new Set(comp.drivers.map((r) => r.driver_ext_id)).size,
+    `${comp.drivers.length} rows, ${new Set(comp.drivers.map((r) => r.driver_ext_id)).size} ids`);
+}
+
 const compEga = await body('/api/compliance/drivers?fleet=egari');
 check('the fleet chip narrows the compliance list',
   compEga.drivers.length === 1 && compEga.drivers[0].full_name === 'Genuinely Expired',

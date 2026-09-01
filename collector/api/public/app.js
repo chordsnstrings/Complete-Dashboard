@@ -3482,6 +3482,40 @@ V.compliance = async (root) => {
     } },
     { label: 'State', key: 'state', render: (r) => `<span class="tag ${/suspend|deact/i.test(r.state || '') ? 'warn' : 'ok'}">${esc(r.state || '—')}</span>`
       + (r.suspension_reason ? `<div class="dim">${esc(String(r.suspension_reason).slice(0, 90))}</div>` : '') },
+    /* WHETHER THE EXPIRY MATTERS.
+       ─────────────────────────────────────────────────────────────────────
+       "Licence expired — stand down until renewed" is the most consequential
+       sentence this product prints, and this list gave no way to tell an
+       expiry that matters from one that does not. All 132 production rows read
+       State "offline" — the hotel channel's own word for every account it
+       holds, whether the person drove last night or has never driven — so 243
+       days past expiry read identically for a filing job and for a car that
+       has to come off the road this morning.
+
+       The count is over the whole record, not the window: a lapsed licence is
+       not a question about the last thirty days. */
+    { label: 'Still driving?', key: 'last_ever',
+      sortValue: (r) => (r.last_ever ? Date.parse(r.last_ever) : null),
+      absent: 'no driving is recorded for anybody on this list under either their platform id '
+        + 'or their name, so none of these expiries can be read as urgent or not',
+      render: (r) => {
+        if (!r.last_ever) {
+          return r.lifetime_trips === 0
+            ? '<span class="ent-off" title="this person has never taken a booking on any channel we collect">never has</span>'
+            : '<span class="ent-off" title="we hold no trip history matching this person by id or by name">not observed</span>';
+        }
+        const d = r.days_since_last_trip;
+        const tone = d != null && d <= 7 ? 'warn' : null;
+        return `${dateStr(r.last_ever)}<span class="dim">`
+          + `${d != null ? ` · ${fmt(d)}d ago` : ''}`
+          + `${r.lifetime_trips != null ? ` · ${fmt(r.lifetime_trips)} trips` : ''}`
+          /* Matched on the name rather than on the platform id, which is how
+             most of these rows resolve — and how two people sharing one name
+             would merge. Marked, so a reader can weigh it. */
+          + `${r.activity_by_name ? '<span title="matched to this person by name, not by platform id — two people sharing a name would merge here">†</span>' : ''}`
+          + '</span>'
+          + (tone ? ` ${pill('drove this week', 'warn')}` : '');
+      } },
   ], { sortable: true, sortId: 'licences', defaultSort: { key: 'days_left', dir: 'asc' } }),
     { shown: 12, total: Math.min(120, drv.length), noun: 'licence', key: 'compl-drv' });
   if (drv.length) dp.body.append(el('p', 'cap',

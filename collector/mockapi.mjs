@@ -296,6 +296,15 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
          reported expired: 0 about the same people. */
       licence_placeholder: true,
       suspension_reason: null, rating: 4.8 - i * 0.05,
+      /* Whether the expiry matters. Three shapes, because the column renders
+         three: somebody who drove this week, somebody idle for months, and
+         somebody who has never driven at all. The middle one is matched by
+         NAME rather than by platform id, which is how most of these rows
+         resolve on production. */
+      last_ever: i === 5 ? null : new Date(Date.now() - (i === 0 ? 2 : 40 + i * 30) * 864e5).toISOString(),
+      lifetime_trips: i === 5 ? 0 : 1400 - i * 120,
+      days_since_last_trip: i === 5 ? null : (i === 0 ? 2 : 40 + i * 30),
+      activity_by_name: i === 1 || i === 2,
       // A licence expiring is a CAR that stops earning. The row names it.
       vehicle: { plate: plates[i % plates.length], day: '2026-08-21' } })),
     { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', phone: '+9715000001',
