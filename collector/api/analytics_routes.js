@@ -260,9 +260,21 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        AND ($2::text IS NULL OR platform=$2) AND ($3::text IS NULL OR fleet_id=$3)`;
     const AGE = (lo, hi) => `($1::date - local_day) >= ${lo}`
       + (hi == null ? '' : ` AND ($1::date - local_day) <= ${hi}`);
+    /* Counted over the same pair the list groups on, so "3 counterparties in
+       0-30 days" means the same three rows a reader can scroll to. Counting
+       distinct driver_ext_id here instead would split one hotel's debt across
+       whichever drivers ran its bookings — the exact error the KEY comment
+       above describes, arriving by a different route. */
+    const CPARTY = `(settlement_class,
+              CASE WHEN settlement_class = 'salary' THEN coalesce(driver_name, '(unnamed driver)')
+                   ELSE coalesce(partner_name, partner_id, '(unnamed property)') END)`;
     const [age] = await q(
       `SELECT min(requested_at) AS oldest,
               count(*)::int trips,
+              count(DISTINCT ${CPARTY}) FILTER (WHERE ${AGE(0, 30)})::int c_0_30,
+              count(DISTINCT ${CPARTY}) FILTER (WHERE ${AGE(31, 60)})::int c_31_60,
+              count(DISTINCT ${CPARTY}) FILTER (WHERE ${AGE(61, 90)})::int c_61_90,
+              count(DISTINCT ${CPARTY}) FILTER (WHERE ${AGE(91, null)})::int c_90_plus,
               count(*) FILTER (WHERE ${AGE(0, 30)})::int n_0_30,
               count(*) FILTER (WHERE ${AGE(31, 60)})::int n_31_60,
               count(*) FILTER (WHERE ${AGE(61, 90)})::int n_61_90,
@@ -285,6 +297,11 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       /* Measured over every receivable up to the end of the window, not over
          the window — see RECV_TO_DATE above. */
       oldest_days: age?.oldest ? Math.floor((Date.now() - Date.parse(age.oldest)) / 864e5) : null,
+      /* RECV_TO_DATE binds only the upper end, so this really is the oldest
+         unsettled booking on record. The tile has always branched on this flag
+         and the response has never sent it, so the page has been telling every
+         reader the figure was bounded by their window when it never was. */
+      ages_over_all_time: true,
       ageing: {
         as_at: p[1],
         note: 'Nothing in this data records a receivable being settled, so every '
@@ -292,10 +309,14 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           + 'outstanding. Ageing is measured from the booking date.',
         total_trips: age?.trips || 0,
         buckets: [
-          { label: '0-30 days', trips: age?.n_0_30 || 0, amount: round(NUM(age?.a_0_30) || 0, 0) },
-          { label: '31-60 days', trips: age?.n_31_60 || 0, amount: round(NUM(age?.a_31_60) || 0, 0) },
-          { label: '61-90 days', trips: age?.n_61_90 || 0, amount: round(NUM(age?.a_61_90) || 0, 0) },
-          { label: 'over 90 days', trips: age?.n_90_plus || 0, amount: round(NUM(age?.a_90_plus) || 0, 0) },
+          { label: '0-30 days', trips: age?.n_0_30 || 0, counterparties: age?.c_0_30 || 0,
+            amount: round(NUM(age?.a_0_30) || 0, 0) },
+          { label: '31-60 days', trips: age?.n_31_60 || 0, counterparties: age?.c_31_60 || 0,
+            amount: round(NUM(age?.a_31_60) || 0, 0) },
+          { label: '61-90 days', trips: age?.n_61_90 || 0, counterparties: age?.c_61_90 || 0,
+            amount: round(NUM(age?.a_61_90) || 0, 0) },
+          { label: 'over 90 days', trips: age?.n_90_plus || 0, counterparties: age?.c_90_plus || 0,
+            amount: round(NUM(age?.a_90_plus) || 0, 0) },
         ],
       },
       shown: rows.length,

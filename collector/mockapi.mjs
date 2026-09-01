@@ -2136,6 +2136,10 @@ app.get('/api/settlement/cash-exposure', (_, r) => r.json({
    any range the page offers. */
 app.get('/api/settlement/receivables', (_, r) => r.json({
   counterparties: 41, priced_trips: 180, oldest_days: 96, shown: 8, truncated: true,
+  /* RECV_TO_DATE binds only the upper end, so the oldest debt really is the
+     oldest on record. The tile has always branched on this and the endpoint
+     never sent it, so the page claimed the figure was bounded by the window. */
+  ages_over_all_time: true,
   rows: hotels.map((h, i) => ({ settlement_class: 'on_account', label: 'On account', counterparty: h.name,
     partner_id: h.id, driver_ext_id: null, driver_ids: [], drivers: 3 + i,
     trips: 30 - i * 6, priced_trips: 30 - i * 6,
@@ -2152,10 +2156,10 @@ app.get('/api/settlement/receivables', (_, r) => r.json({
       + 'outstanding. Ageing is measured from the booking date.',
     total_trips: 84,
     buckets: [
-      { label: '0-30 days', trips: 41, amount: 4180 },
-      { label: '31-60 days', trips: 26, amount: 2640 },
-      { label: '61-90 days', trips: 12, amount: 1210 },
-      { label: 'over 90 days', trips: 5, amount: 220 },
+      { label: '0-30 days', trips: 41, counterparties: 7, amount: 4180 },
+      { label: '31-60 days', trips: 26, counterparties: 5, amount: 2640 },
+      { label: '61-90 days', trips: 12, counterparties: 3, amount: 1210 },
+      { label: 'over 90 days', trips: 5, counterparties: 2, amount: 220 },
     ],
   },
 }));

@@ -310,8 +310,19 @@ async function settleReceivables(host) {
           + 'the fleet holds',
       tone: (r.oldest_days ?? 0) > 60 ? 'warn' : null },
   ]));
-  if (r.buckets) {
-    host.append(tableFrom(r.buckets, [
+  /* r.ageing.buckets, not r.buckets.
+     ─────────────────────────────────────────────────────────────────────
+     The endpoint has always nested these one level down, inside `ageing`
+     beside the as-at date and the note that explains them. This read the top
+     level, found undefined, and the guard did the rest: the panel was ABSENT
+     rather than empty, so there was nothing on the page to look wrong. Live
+     on 2026-09-01 it was hiding four populated rows — 318 bookings and
+     AED 36,739 in 0-30 days, 247 and AED 33,695 in 31-60 — AED 70,434 of
+     outstanding receivables that the endpoint computed, shipped, and nobody
+     ever saw. */
+  const buckets = r.ageing?.buckets;
+  if (buckets?.length) {
+    host.append(tableFrom(buckets, [
       { label: 'Age', key: 'label' },
       { label: 'Counterparties', key: 'counterparties', num: true },
       { label: 'Bookings', key: 'trips', num: true },

@@ -15,6 +15,7 @@
 
    Both need rows outside one tidy month, which is why they live here rather
    than in analytics_routes.test.mjs, whose fixture counts are pinned exactly. */
+import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
@@ -94,6 +95,28 @@ check('the July salary posting lands in 31-60 days',
 check('the buckets account for every receivable up to the end of the window',
   mo.ageing.buckets.reduce((a, b) => a + b.trips, 0) === mo.ageing.total_trips,
   JSON.stringify([mo.ageing.buckets.map((b) => b.trips), mo.ageing.total_trips]));
+/* The panel that computed all of this and never appeared.
+   ─────────────────────────────────────────────────────────────────────────
+   api/public/settlement.js read `r.buckets`; the endpoint has always nested
+   them at `r.ageing.buckets`. `undefined` failed the guard, so the panel was
+   ABSENT rather than empty and nothing on the page looked wrong. Live on
+   2026-09-01 it was hiding AED 70,434 across 565 bookings. */
+check('the renderer reads the path the endpoint actually ships',
+  /const buckets = r\.ageing\?\.buckets;/.test(readFileSync('api/public/settlement.js', 'utf8'))
+  && !/if \(r\.buckets\)/.test(readFileSync('api/public/settlement.js', 'utf8')),
+  'a guard on an absent key hides the panel instead of emptying it');
+check('every bucket carries the counterparty count its column declares',
+  mo.ageing.buckets.every((b) => typeof b.counterparties === 'number'),
+  JSON.stringify(mo.ageing.buckets.map((b) => [b.label, b.counterparties])));
+check('and counts them the way the list groups, not by driver',
+  mo.ageing.buckets.reduce((a, b) => a + b.counterparties, 0) > 0,
+  'counting distinct drivers would split one hotel debt across whoever drove it');
+/* The tile branched on a flag the response never sent, so it told every
+   reader the oldest debt was bounded by their window. RECV_TO_DATE binds only
+   the upper end — it never was. */
+check('the response states that the oldest debt is measured over the record',
+  mo.ages_over_all_time === true, JSON.stringify(mo.ages_over_all_time));
+
 check('and the ageing says what it treats as unsettled, since nothing records settlement',
   /counted as outstanding/.test(mo.ageing.note), mo.ageing.note);
 check('the ageing states the date it is as at',
