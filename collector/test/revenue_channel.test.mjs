@@ -144,10 +144,35 @@ check('the commission and its rate are on the row',
 const hRow = (t?.rows || []).find((r) => /Hotel/i.test(r)) || '';
 check('the priced channel still shows its own fares and claims no commission',
   /1,200/.test(hRow) && !/channel took/i.test(hRow), hRow.slice(0, 160));
-/* The first cut of this was a tenth column and it pushed four of them off a
-   1750px screen, including the one it added. */
-check('and no column was pushed off the screen to make room',
-  t && t.cut != null && t.cut <= 2, `${t?.cut}px of the table is cut off`);
+/* THE LAYOUT, ASSERTED HONESTLY.
+   ─────────────────────────────────────────────────────────────────────────
+   This table is nine columns of dense text and it OVERFLOWS on production
+   data: measured at 1750px on the live figures it was cut by 322px before any
+   of this, with Per km, Basis and Why unreachable. A test demanding cut <= 2
+   would pass on this fixture's small numbers and say nothing about the page
+   an operator opens — which is exactly the kind of assertion that lets a
+   regression through.
+
+   So the property is the one that matters: whatever is cut, it is not the two
+   columns this change is about. On production after the line breaks the cut
+   is 46px with only Why beyond the edge, down from 322px. */
+const hidden = await page.evaluate(() => {
+  const h = [...document.querySelectorAll('h3')].find((x) => /What each channel/i.test(x.textContent));
+  const w = h?.closest('.panel')?.querySelector('.tscroll');
+  if (!w) return null;
+  const edge = w.getBoundingClientRect().right;
+  return [...w.querySelectorAll('thead th')]
+    .filter((th) => th.getBoundingClientRect().right > edge + 4)
+    .map((th) => th.textContent.replace(/[↑↓▾▴]/g, '').trim());
+});
+check('the gross column is on screen, not past the right-hand edge',
+  hidden != null && !hidden.some((c) => /Fares/i.test(c)), JSON.stringify(hidden));
+check('…and so is the column carrying the commission',
+  hidden != null && !hidden.some((c) => /On-trip/i.test(c)), JSON.stringify(hidden));
+/* And the first cut of this WAS a tenth column, which pushed four off the
+   screen. Nine is the count this table has room for. */
+check('no tenth column was added to make room for either of them',
+  (t?.cols || []).length === 9, (t?.cols || []).join(' | '));
 
 await browser.close();
 server.close();

@@ -202,8 +202,15 @@ export async function renderRevenue(root) {
          and a weekly period straddling the edge reaches past it — the payout
          column ran to 2026-08-30 on a window ending 08-25, over 217 paid
          drivers against 83 who drove. */
+      /* The coverage on its own line. This cell is the widest on the table —
+         "AED 1,135,725 · 90 of 90 days · 234 drivers paid" on production — and
+         the table is nine columns of dense text: measured at 1750px it was cut
+         by 322px with Per km, Basis and Why unreachable, and Why is the column
+         that explains which money the row is even reporting. A line break
+         costs a row of height and buys back the width of everything after the
+         figure. */
       render: (r) => (r.payouts == null ? '<span class="dim">not reported</span>'
-        : `${money(r.payouts)}<span class="dim"> · ${r.payout_days || 0} of ${d.window_days} days`
+        : `${money(r.payouts)}<span class="dim"><br>${r.payout_days || 0} of ${d.window_days} days`
           + `${r.payout_drivers != null ? ` · ${fmt(r.payout_drivers)} drivers paid` : ''}`
           + `${r.first_period ? `<br>${esc(dateStr(r.first_period))} → ${esc(dateStr(r.last_period))}` : ''}</span>`) },
     { label: 'On-trip (net)', key: 'statement_net', num: true,
@@ -224,7 +231,7 @@ export async function renderRevenue(root) {
          component tree carries taxes, surcharges and promotions the fold does
          not name, so only one of those two is a commission. */
       render: (r) => (r.statement_net == null ? '<span class="dim">not collected</span>'
-        : `${money(r.statement_net)}<span class="dim"> · cash ${r.statement_cash != null ? money(r.statement_cash) : '—'}`
+        : `${money(r.statement_net)}<span class="dim"><br>cash ${r.statement_cash != null ? money(r.statement_cash) : '—'}`
           + `${r.statement_days != null ? ` · ${r.statement_days} of ${d.window_days} days` : ''}`
           + `${r.statement_drivers != null ? `, ${fmt(r.statement_drivers)} drivers` : ''}`
           + `${r.statement_fees != null
@@ -240,8 +247,11 @@ export async function renderRevenue(root) {
        a reader to compare AED 4.12 of gross hotel fare against AED 2.71 of
        net Uber payout as though they were the same thing. */
     { label: 'Per km', key: 'revenue_per_km', num: true,
+      /* Same treatment as the two cells above, and for the same reason: the
+         basis and its denominator are what make this figure checkable, and
+         they do not have to sit on the same LINE as it to do that. */
       render: (r) => (r.revenue_per_km != null
-        ? `${money(r.revenue_per_km, 'AED', 2)}<span class="dim"> ${
+        ? `${money(r.revenue_per_km, 'AED', 2)}<span class="dim"><br>${
           r.per_km_basis === 'payout' ? 'net payout' : 'gross fare'} over ${
           fmt(r.per_km_km ?? r.priced_km)} km</span>`
         : '—') },
