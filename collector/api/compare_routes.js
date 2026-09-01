@@ -96,7 +96,7 @@ export function compareRoutes(app, { q, wrap }) {
         AND ($4::text IS NULL OR n.fleet_id = $4)
         AND ($5::text IS NULL OR n.platform = $5)`;
 
-    const [totals, uncut, hours, platforms, people, gaps, fresh] = await Promise.all([
+    const [totals, uncut, hours, platforms, paidByPlat, stmtByPlat, people, gaps, fresh] = await Promise.all([
       q(`SELECT to_char(n.local_day, 'YYYY-MM-DD') AS day,
                 count(*) FILTER (WHERE n.is_booking)::int bookings,
                 count(*) FILTER (WHERE n.outcome = 'completed')::int completed,
@@ -140,6 +140,39 @@ export function compareRoutes(app, { q, wrap }) {
                 round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric, 0) km,
                 sum(n.price) FILTER (WHERE n.has_fare) fares
            FROM trip_norm n WHERE ${WHERE} GROUP BY 1, 2`, p),
+      /* THE MONEY THE BIGGEST CHANNEL DOES REPORT.
+         ─────────────────────────────────────────────────────────────────
+         The Fares column above is sum(trip.price) and Uber's export carries no
+         price at all — so on a day that is 89% Uber the By channel table's only
+         money column described a tenth of the work, and read "—" against the
+         rows that mattered. The page's own header already says this in words;
+         it had nothing to put beside the sentence.
+
+         driver_payout_day spreads each weekly statement across the days it
+         covers, so a single day carries a share of it. That share is an
+         ESTIMATE — nobody earns a seventh of their week each day — and it is
+         labelled as one. It is the right estimate for "what did this day bring
+         in" and exactly the wrong one for "what did this driver earn on
+         Tuesday", which is why it is aggregated per channel and never per
+         person here. Beside the fares, never added to them. */
+      q(`SELECT to_char(day, 'YYYY-MM-DD') AS day, platform,
+                round(sum(earnings)::numeric, 2) AS paid
+           FROM driver_payout_day
+          WHERE day IN ($1::date, $2::date)
+            AND ($3::text IS NULL OR fleet_id = $3)
+            AND ($4::text IS NULL OR platform = $4)
+          GROUP BY 1, 2`, pw),
+      /* And the operator's own import, which is the only money that exists for
+         the months the platform APIs no longer serve — driver_payout_day is
+         built from the Uber earner breakdown and reaches back about 192 days.
+         Read beside the payout, never summed with it. */
+      q(`SELECT to_char(day, 'YYYY-MM-DD') AS day, platform,
+                round(sum(net)::numeric, 2) AS statement_net
+           FROM driver_statement_day
+          WHERE day IN ($1::date, $2::date) AND source = 'ledger' AND net IS NOT NULL
+            AND ($3::text IS NULL OR fleet_id = $3)
+            AND ($4::text IS NULL OR platform = $4)
+          GROUP BY 1, 2`, pw),
       /* Keyed on the account, not the display name: two people share a name on
          this fleet and one person appears under three spellings. The name is
          carried for the label only. */
@@ -267,16 +300,33 @@ export function compareRoutes(app, { q, wrap }) {
     }).sort((x, y) => Math.abs(y.d_bookings) - Math.abs(x.d_bookings)
       || Math.abs(y.d_km) - Math.abs(x.d_km));
 
-    const plats = [...new Set(platforms.map((r) => r.platform))].map((name) => {
-      const A = platforms.find((r) => r.platform === name && r.day === a) || {};
-      const B = platforms.find((r) => r.platform === name && r.day === b) || {};
-      return {
-        platform: name,
-        a: { n: A.n || 0, completed: A.completed || 0, cancelled: A.cancelled || 0, km: num(A.km), fares: num(A.fares) },
-        b: { n: B.n || 0, completed: B.completed || 0, cancelled: B.cancelled || 0, km: num(B.km), fares: num(B.fares) },
-        d: (A.n || 0) - (B.n || 0),
-      };
-    }).sort((x, y) => (y.a.n + y.b.n) - (x.a.n + x.b.n));
+    /* The channel set is the union of the three sources, not the trip table
+       alone: a channel can be paid on a day whose bookings we did not collect,
+       and dropping that row would report the money as absent rather than the
+       bookings as missing. */
+    const moneyOf = (rows, name, day, key) => {
+      const r = rows.find((x) => x.platform === name && x.day === day);
+      return r ? num(r[key]) : null;
+    };
+    const plats = [...new Set([...platforms, ...paidByPlat, ...stmtByPlat].map((r) => r.platform))]
+      .map((name) => {
+        const A = platforms.find((r) => r.platform === name && r.day === a) || {};
+        const B = platforms.find((r) => r.platform === name && r.day === b) || {};
+        const side = (row, day) => ({
+          n: row.n || 0, completed: row.completed || 0, cancelled: row.cancelled || 0,
+          km: num(row.km), fares: num(row.fares),
+          /* Beside the fares, never inside them: a fare is what the rider was
+             charged and a payout is what reached the fleet after commission. */
+          paid: moneyOf(paidByPlat, name, day, 'paid'),
+          statement_net: moneyOf(stmtByPlat, name, day, 'statement_net'),
+        });
+        return {
+          platform: name,
+          a: side(A, a),
+          b: side(B, b),
+          d: (A.n || 0) - (B.n || 0),
+        };
+      }).sort((x, y) => (y.a.n + y.b.n) - (x.a.n + x.b.n));
 
     const hourly = [...Array(24).keys()].map((h) => {
       const A = hours.find((r) => r.hour === h && r.day === a) || {};

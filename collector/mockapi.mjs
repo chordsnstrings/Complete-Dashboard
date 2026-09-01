@@ -488,11 +488,19 @@ app.get('/api/compare', (req, r) => {
     hours: [...Array(24).keys()].map((h) => ({
       hour: h, a: h < 13 ? (h % 5) + 1 : 0, b: (h % 6) + 1,
       a_cancelled: h === 9 ? 1 : 0, b_cancelled: 0, past_cut: h * 60 >= cut })),
+    /* Uber prices nothing and is paid; the hotel channel prices everything and
+       has no statement; and one day of the Uber row falls outside the payout
+       horizon, so its money comes from the operator's ledger instead. All
+       three branches of the Paid column are reachable from here. */
     platforms: [
-      { platform: 'uber', a: { n: 28, completed: 26, cancelled: 2, km: 340, fares: null },
-        b: { n: 33, completed: 31, cancelled: 2, km: 400, fares: null }, d: -5 },
-      { platform: 'hotel', a: { n: 6, completed: 5, cancelled: 1, km: 70, fares: 640 },
-        b: { n: 8, completed: 7, cancelled: 1, km: 105, fares: 820 }, d: -2 },
+      { platform: 'uber',
+        a: { n: 28, completed: 26, cancelled: 2, km: 340, fares: null, paid: 2140, statement_net: null },
+        b: { n: 33, completed: 31, cancelled: 2, km: 400, fares: null, paid: null, statement_net: 2510 },
+        d: -5 },
+      { platform: 'hotel',
+        a: { n: 6, completed: 5, cancelled: 1, km: 70, fares: 640, paid: null, statement_net: null },
+        b: { n: 8, completed: 7, cancelled: 1, km: 105, fares: 820, paid: null, statement_net: null },
+        d: -2 },
     ],
     drivers: roster,
     stopped: [{ driver_ext_id: 'drv-2', driver_name: drivers[2], bookings: 6, plates: ['L44251'] }],

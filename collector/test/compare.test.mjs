@@ -83,6 +83,25 @@ await trip({ drv: 'd-steady', platform: 'hotel', at: `${A}T08:45:00+04:00`,
 await trip({ drv: 'd-steady', platform: 'hotel', at: `${B}T08:45:00+04:00`,
   end: `${B}T09:10:00+04:00`, price: 300, pay: 'room-charge', plate: 'L100' });
 
+/* ── THE MONEY THE UBER ROWS DO CARRY ─────────────────────────────────────
+   None of the Uber trips above has a price, because the export has no price
+   column — which left the By channel panel's only money column reading "no
+   fare reported" against 89% of a real day's bookings. The money exists one
+   table away: driver_payout_day is the weekly statement spread across the days
+   it covers, and for days older than the platform feeds reach, the operator's
+   own ledger import in driver_statement_day.
+
+   Both are seeded here, on DIFFERENT days, so a column that shows one and
+   silently drops the other fails. */
+await q(`INSERT INTO driver_payout_day
+           (platform, fleet_id, driver_ext_id, driver_name, day, period_start, period_end,
+            period_days, earnings, period_earnings, trips)
+         VALUES ('uber','ecosine','d-steady','Steady', $1::date, $1::date, $1::date, 1, 780, 780, 9)`,
+  [A]);
+await q(`INSERT INTO driver_statement_day
+           (platform, fleet_id, driver_name, driver_ext_id, day, net, source)
+         VALUES ('uber','ecosine','Steady','d-steady', $1::date, 615, 'ledger')`, [B]);
+
 const { server, get: raw } = await mountAll(db, { serverRoutes: false });
 const get = (qs) => raw(`/api/compare?${qs}`);
 
@@ -209,6 +228,30 @@ check('and the week total is the sum of its days, not a second query that can '
   + 'disagree with them',
   perf.body.wait_min === (perf.body.days || []).reduce((a2, d) => a2 + (d.wait_min || 0), 0),
   JSON.stringify([perf.body.wait_min, (perf.body.days || []).map((d) => d.wait_min)]));
+
+/* ── the By channel money column ──────────────────────────────────────── */
+console.log('\ncompare: the channel that publishes no fare still reports its money');
+const money = (await get(`a=${A}&b=${B}&cut=1440`)).body;
+const uber = (money.platforms || []).find((r) => r.platform === 'uber');
+const hotel = (money.platforms || []).find((r) => r.platform === 'hotel');
+
+check('the Uber rows still carry no fare, because the export carries none',
+  uber && uber.a.fares == null && uber.b.fares == null, JSON.stringify(uber && [uber.a.fares, uber.b.fares]));
+check('the day inside the payout horizon reports the statement’s share',
+  Number(uber?.a.paid) === 780, String(uber?.a.paid));
+check('the day outside it reports the operator’s ledger instead',
+  uber?.b.paid == null && Number(uber?.b.statement_net) === 615,
+  JSON.stringify([uber?.b.paid, uber?.b.statement_net]));
+/* Two measures of the same money on the same row would be added by anybody
+   reading the JSON, so only one of them is ever present per day. */
+check('…and never both on the same day',
+  (money.platforms || []).every((r) => [r.a, r.b].every((x) => !(x.paid != null && x.statement_net != null))),
+  JSON.stringify(money.platforms));
+check('the fares are not touched by any of it',
+  Number(hotel?.a.fares) === 240 && Number(hotel?.b.fares) === 300,
+  JSON.stringify(hotel && [hotel.a.fares, hotel.b.fares]));
+check('a channel with fares and no statement reports no payout rather than zero',
+  hotel?.a.paid == null && hotel?.a.statement_net == null, JSON.stringify(hotel?.a));
 
 server.close();
 await db.close();

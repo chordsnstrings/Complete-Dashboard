@@ -306,8 +306,29 @@ export async function renderCompare(root, aParam, bParam) {
       { label: 'Fares', key: 'fares', num: true,
         render: (r) => (r.a.fares || r.b.fares
           ? `${money(r.a.fares)} <span class="dim">vs ${money(r.b.fares)}</span>`
-          : '<span class="dim">no fare reported</span>') },
+          : '<span class="dim">no fare per trip</span>') },
+      /* The column this panel was missing. Fares alone left Uber — 89% of the
+         bookings on a typical day — reading "no fare reported" on the one panel
+         whose job is to say which channel moved, because its export carries no
+         price column. The payout is the day's share of the weekly statement,
+         which is an estimate and is captioned as one; where no statement
+         reaches the day, the operator's own ledger import is shown instead and
+         the cell says which of the two it is. */
+      { label: 'Paid', key: 'paid', num: true,
+        absent: 'no statement and no ledger import reaches either of these days for any channel '
+          + '— the platform payout feeds reach back about 192 days',
+        render: (r) => {
+          const cell = (x) => (x.paid != null ? money(x.paid)
+            : x.statement_net != null ? `${money(x.statement_net)}<span class="dim"> ldg</span>` : '—');
+          return (r.a.paid ?? r.a.statement_net ?? r.b.paid ?? r.b.statement_net) != null
+            ? `${cell(r.a)} <span class="dim">vs ${cell(r.b)}</span>` : '—';
+        } },
     ]));
+    platP.body.append(el('p', 'cap',
+      'A fare is what the rider was charged, and only two of these channels publish one per trip. '
+      + 'Paid is the day’s share of the weekly platform statement — an estimate, because nobody '
+      + 'earns a seventh of their week each day — or, marked “ldg”, the operator’s own ledger '
+      + 'import for days the platform feeds no longer reach. The two are never added.'));
   }
 
   rosterP.body.innerHTML = '';
