@@ -375,21 +375,38 @@ const dailyFor = (id) => {
    most bookings carry an end time and some do not, one channel prices its
    trips and the other pays a statement, and the Uber status rows exist for
    one org only — so the "no status for this person" branch is reachable. */
+/* Three weeks, not one, and one of them far enough back that a picker which
+   silently pins itself to the newest is visible as a bug rather than as a
+   coincidence. `first_booking` is what the control quotes as its reach. */
 app.get('/api/performer/weeks', (_, r) => r.json({
-  weeks: [{ week: '2026-08-17', to: '2026-08-23' }, { week: '2026-08-10', to: '2026-08-16' }],
+  weeks: [{ week: '2026-08-17', to: '2026-08-23' }, { week: '2026-08-10', to: '2026-08-16' },
+    { week: '2025-11-03', to: '2025-11-09' }],
   latest_complete: '2026-08-17',
+  first_booking: '2025-11-03',
+  last_booking: '2026-08-23',
 }));
 app.get('/api/performer', (req, r) => {
   const solo = String(req.query.id || '').endsWith('9');
+  /* The week the caller asked for, echoed. The mock answered for one fixed
+     week whatever it was handed, so a page that dropped the week on the way to
+     the endpoint looked identical to one that carried it. */
+  const wk = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.week || ''))
+    ? String(req.query.week) : '2026-08-17';
+  const end = new Date(new Date(`${wk}T12:00:00Z`).getTime() + 6 * 864e5).toISOString().slice(0, 10);
   return r.json({
-    week: ['2026-08-17', '2026-08-23'],
+    week: [wk, end],
     driver_ext_id: String(req.query.id || 'drv-0'),
     name: solo ? 'Roy Vellespen Ocdol' : 'Ahmed Tarig Mohamed',
-    days: [0, 1, 2, 3, 4].map((i) => ({
-      day: `2026-08-${17 + i}`, bookings: 12 - i, completed: 11 - i, cancelled: i % 2,
+    /* Days OF THE ASKED-FOR WEEK. They were five fixed dates in August, so a
+       November week came back headed November and filled with August. */
+    days: [0, 1, 2, 3, 4].map((i) => {
+      const day = new Date(new Date(`${wk}T12:00:00Z`).getTime() + i * 864e5)
+        .toISOString().slice(0, 10);
+      return {
+      day, bookings: 12 - i, completed: 11 - i, cancelled: i % 2,
       km: 140 - i * 9, fares: i === 0 ? 320 : null,
-      first_trip: `2026-08-${17 + i}T04:${10 + i}:00.000Z`,
-      last_trip: `2026-08-${17 + i}T16:${20 + i}:00.000Z`,
+      first_trip: `${day}T04:${10 + i}:00.000Z`,
+      last_trip: `${day}T16:${20 + i}:00.000Z`,
       plates: ['L44251'], platforms: ['uber'],
       on_trip_min: 300 - i * 20, elapsed_min: 720,
       /* The gaps between bookings. Day 3 deliberately reports none — a day
@@ -400,7 +417,7 @@ app.get('/api/performer', (req, r) => {
       longest_wait_min: i === 3 ? null : 90 + i * 10,
       median_wait_min: i === 3 ? null : 18 + i,
       gaps: i === 3 ? 0 : 11 - i, overlaps: i === 1 ? 2 : 0,
-    })),
+    }; }),
     areas: [{ area: 'Business Bay', picked_up: 22, stayed: 6 },
       { area: 'Downtown Dubai', picked_up: 14, stayed: 3 },
       { area: '(unrecorded)', picked_up: 2, stayed: 0 }],

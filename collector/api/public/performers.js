@@ -46,6 +46,15 @@ const MIN_BOOKINGS = 15;
 
 const eligible = (r) => (r.days_worked || 0) >= MIN_DAYS && (r.bookings || 0) >= MIN_BOOKINGS;
 
+/* The week rides in the address — `#top-performers/<monday>` and
+   `#performer/<id>/<monday>` — so a ranking of March can be linked, opened in
+   a tab, and drilled into without snapping back to the current week. Only a
+   MONDAY is honoured: the server treats whatever it is given as a week start,
+   so a hand-typed Wednesday would rank a seven-day window aligned to nothing
+   while every caption on the page still said "Monday to Sunday". */
+const isWeek = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '')
+  && new Date(`${v}T12:00:00Z`).getUTCDay() === 1;
+
 const rate = (r) => (r.days_worked ? (r.money || 0) / r.days_worked : null);
 
 function whyNotRanked(r) {
@@ -73,11 +82,37 @@ export async function renderPerformers(root, band) {
   [kh, listP.body, shapeP.body, outP.body].forEach(loading);
 
   const weeks = await q('/api/performer/weeks').catch(() => ({ weeks: [] }));
-  const wk = state.week || weeks.latest_complete;
+  /* `state.week` — which is what this read for months — is not a field of
+     `state`. It was always undefined, so every visit fell to the newest week
+     and the list of weeks fetched on the line above was fetched and thrown
+     away: no control offered them, no address named one, and the endpoint's
+     whole purpose went unused. The week now comes off the hash. */
+  const wk = (isWeek(state.param) ? state.param : null) || weeks.latest_complete;
   const d = await q('/api/economics/drivers', wk ? { from: wk, to: weekEnd(wk) } : {});
   const rows = (d.rows || []).filter((r) => (r.days_worked || 0) > 0);
 
   head.innerHTML = '';
+  /* An asked-for week that the endpoint does not list is still shown, and still
+     listed, rather than quietly swapped for the newest one — a page that ranks
+     one week under a heading naming another is the failure this control exists
+     to prevent. It will simply be empty, which is the truth about it. */
+  const offered = (weeks.weeks || []).map((w) => w.week);
+  const list = wk && !offered.includes(wk) ? [wk, ...offered] : offered;
+  if (list.length > 1) {
+    const pick = el('div', 'note');
+    pick.append(el('span', 'cap', 'Week&nbsp;'));
+    const sel = el('select', 'btn');
+    sel.innerHTML = list.map((w) => `<option value="${esc(w)}"${w === wk ? ' selected' : ''}>`
+      + `${esc(dateStr(w))} – ${esc(dateStr(weekEnd(w)))}</option>`).join('');
+    sel.onchange = () => { location.hash = href(top ? 'top-performers' : 'low-performers', sel.value); };
+    pick.append(sel);
+    if (weeks.first_booking) {
+      pick.append(el('span', 'cap',
+        `&nbsp; every complete week back to ${esc(dateStr(weeks.first_booking))}, `
+        + 'the first booking on record'));
+    }
+    head.append(pick);
+  }
   const wkNote = el('div', 'note info');
   /* The only two dates on this page, and they were the raw ISO strings the
      endpoint returns — "2026-08-17 to 2026-08-23" — in a product that writes
@@ -186,7 +221,13 @@ export async function renderPerformers(root, band) {
         absent: 'no channel published a standing for these people — the roster snapshot carries '
           + 'one only for accounts a provider has judged',
         render: (r) => (r.state ? pill(r.state, r.can_earn === false ? 'warn' : null) : '—') },
-    ], { onRow: (r) => { location.hash = `#performer/${encodeURIComponent(r.driver_ext_id)}`; } }));
+    ], {
+      /* The week travels with the click. Without it a reader who picked March,
+         read the ranking and opened somebody in it landed on that person's
+         CURRENT week — often "No booking in this week" for a man they were
+         looking at a moment earlier. */
+      onRow: (r) => { location.hash = href('performer', r.driver_ext_id, wk || null); },
+    }));
     /* A table that ends on exactly forty rows is a table somebody cut, and
        nothing on the page said so — the reader had no way to tell "these are
        the ranked drivers" from "these are the first forty of them". */
@@ -268,7 +309,7 @@ const weekEnd = (mon) => {
   return new Date(d.getTime() + 6 * 864e5).toISOString().slice(0, 10);
 };
 
-export { weekEnd, MIN_DAYS, MIN_BOOKINGS };
+export { weekEnd, isWeek, MIN_DAYS, MIN_BOOKINGS };
 
 /* One person's week. This is the page the two lists exist to reach: a rank is
    a claim, and this is the evidence for it.
@@ -278,7 +319,7 @@ export { weekEnd, MIN_DAYS, MIN_BOOKINGS };
    first request to last dropoff and contains every gap — it is not a shift and
    is never called one. ONLINE is what Uber does not report, and where a
    platform status happens to exist it is shown as observations, not hours. */
-export async function renderPerformer(root, id) {
+export async function renderPerformer(root, id, week) {
   /* Addressed with no id — a typed URL, a stale bookmark, a link whose id
      never got filled in. It went to the endpoint and printed the API's own
      complaint. #day has always answered this properly; these four did not. */
@@ -302,13 +343,21 @@ export async function renderPerformer(root, id) {
   root.append(statusP.panel);
   [kh, dayP.body, platP.body, areaP.body, statusP.body].forEach(loading);
 
-  const p = await q('/api/performer', { id });
+  const p = await q('/api/performer', isWeek(week) ? { id, week } : { id });
   const days = p.days || [];
   const onTrip = p.on_trip_min || 0;
   const elapsed = days.reduce((a, d) => a + (d.elapsed_min || 0), 0);
 
   kh.replaceWith(kpiRow([
-    { label: 'Days worked', value: fmt(days.length), sub: `week of ${esc((p.week || [])[0] || '—')}` },
+    /* The week the SERVER answered for, not the one this page asked for: the
+       two differ the moment a hand-typed address names a week the endpoint
+       declines, and the tile must name the days actually counted below it.
+       The raw ISO string was the sub-line here — "week of 2026-08-24" — in a
+       product that writes "Aug 24, 2026" in every date column it owns. */
+    { label: 'Days worked', value: fmt(days.length),
+      sub: (p.week || [])[0]
+        ? `week of ${esc(dateStr(p.week[0]))} to ${esc(dateStr(p.week[1] || weekEnd(p.week[0])))}`
+        : 'week unknown' },
     { label: 'Bookings', value: fmt(p.bookings), sub: `${fmt(days.reduce((a, d) => a + (d.completed || 0), 0))} completed` },
     { label: 'Carrying someone', value: onTrip ? `${fmt(onTrip / 60, 1)} h` : '—',
       sub: p.duration_coverage_pct != null
@@ -323,8 +372,15 @@ export async function renderPerformer(root, id) {
   ]));
 
   dayP.body.innerHTML = '';
-  if (!days.length) empty(dayP.body, 'No booking in this week.');
-  else {
+  if (!days.length) {
+    /* Which week, in words. "No booking in this week" over a page whose only
+       other mention of the week is a KPI sub-line reads as "this person does
+       not drive" — and the reader who arrived from a ranking of March has no
+       way to tell that from a week they did not mean to ask for. */
+    empty(dayP.body, (p.week || [])[0]
+      ? `No booking in the week of ${dateStr(p.week[0])} to ${dateStr(p.week[1] || weekEnd(p.week[0]))}.`
+      : 'No booking in this week.');
+  } else {
     dayP.body.append(tableFrom(days, [
       { label: 'Day', key: 'day', render: (r) => String(r.day).slice(0, 10) },
       { label: 'Bookings', key: 'bookings', num: true },

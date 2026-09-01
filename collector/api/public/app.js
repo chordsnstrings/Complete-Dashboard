@@ -39,7 +39,7 @@ import { renderCapacity } from './capacity.js';
 import { renderRevenue } from './revenue.js';
 import { renderReconcile } from './reconcile.js';
 import { renderEconomics, UNIT_TABS } from './economics.js';
-import { renderPerformers, renderPerformer } from './performers.js';
+import { renderPerformers, renderPerformer, isWeek } from './performers.js';
 import { renderCompare } from './compare.js';
 import { renderSupply } from './supply.js';
 import { renderOptimise } from './optimise.js';
@@ -445,7 +445,11 @@ function setHeader(detail) {
     $('#viewTitle').textContent = detail?.name || 'One person’s week';
     $('#viewSub').textContent = 'Day by day: what they drove, where they picked up, how long they '
       + 'carried someone and how long they waited between jobs';
-    crumb.innerHTML = `<a href="${href('top-performers')}">Top performers</a><span>/</span>`
+    /* Back to the ranking of the SAME week. Without the week the crumb walked
+       the reader out of March and into the current week, which is a different
+       list of people from the one they arrived through. */
+    crumb.innerHTML = `<a href="${href('top-performers', isWeek(state.sub) ? state.sub : null)}">`
+      + `Top performers</a><span>/</span>`
       + `<b>${esc(detail?.name || state.param || '')}</b>`;
     crumb.style.display = 'flex';
   } else if (state.view === 'compare') {
@@ -1401,7 +1405,9 @@ V.provenance = async (root) => renderProvenance(root);
 V.unit = async (root) => renderEconomics(root);
 V['top-performers'] = async (root) => renderPerformers(root, 'top');
 V['low-performers'] = async (root) => renderPerformers(root, 'low');
-V.performer = async (root) => renderPerformer(root, state.param);
+/* `#performer/<id>/<monday>` — the week the reader was ranking when they
+   clicked, so the drill-down shows the week they came from. */
+V.performer = async (root) => renderPerformer(root, state.param, state.sub);
 V.revenue = async (root) => renderRevenue(root);
 // `#reconcile` is every month; `#reconcile/<YYYY-MM>` is that month's days.
 V.reconcile = async (root) => renderReconcile(root, state.param);

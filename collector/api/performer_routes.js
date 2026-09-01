@@ -238,7 +238,16 @@ export function performerRoutes(app, { q, wrap }) {
   }));
 
   /* The weeks a page may offer. Only complete ones, newest first — an
-     incomplete week in a ranking picker is a trap, not an option. */
+     incomplete week in a ranking picker is a trap, not an option.
+
+     EVERY week the bookings reach back to, not a fixed twenty-six. The count
+     was a horizon nobody had chosen: trip_norm starts 2025-04-05 and this
+     stopped at 2026-03-02, so forty-seven weeks — around 309,000 bookings and
+     AED 2.4m — had no address any picker on the three performer pages could
+     produce. What ends the walk is first_day. The 520 is a runaway guard, ten
+     years of it, and applies only once there is a first day to walk toward;
+     with no bookings at all the endpoint still offers the last twenty-six so
+     an empty database does not also produce an empty control. */
   app.get('/api/performer/weeks', wrap(async (_req, res) => {
     const [, lastTo] = lastCompleteWeek();
     const rows = await q(
@@ -247,11 +256,21 @@ export function performerRoutes(app, { q, wrap }) {
     const first = rows[0]?.first_day ? new Date(rows[0].first_day) : null;
     const out = [];
     let cur = new Date(`${lastTo}T12:00:00Z`);
-    for (let i = 0; i < 26 && (!first || cur >= first); i++) {
+    for (let i = 0; i < (first ? 520 : 26) && (!first || cur >= first); i++) {
       const mon = new Date(cur.getTime() - 6 * 864e5);
       out.push({ week: mon.toISOString().slice(0, 10), to: cur.toISOString().slice(0, 10) });
       cur = new Date(cur.getTime() - 7 * 864e5);
     }
-    res.json({ weeks: out, latest_complete: out[0]?.week || null });
+    /* Named so the picker can say how far back it goes rather than making the
+       reader scroll to the end of the list to find out. A `date` column comes
+       back from pg as a Date and String(Date) is "Sat Apr 05 2025 …". */
+    const day = (v) => (v == null ? null
+      : (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10)));
+    res.json({
+      weeks: out,
+      latest_complete: out[0]?.week || null,
+      first_booking: day(rows[0]?.first_day),
+      last_booking: day(rows[0]?.last_day),
+    });
   }));
 }
