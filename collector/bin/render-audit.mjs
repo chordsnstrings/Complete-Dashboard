@@ -92,6 +92,34 @@ const PROBE = () => {
   const root = document.querySelector('#view') || document.body;
   const txt = (n) => (n.textContent || '').trim();
 
+  /* 0. The view that threw and CAUGHT ITSELF.
+        ─────────────────────────────────────────────────────────────────────
+        This harness listens for `pageerror`, which fires only for an exception
+        that reaches the window. app.js:4890 failureBox() catches every view's
+        throw and renders `<div class="empty"><b>Could not load this view</b>`
+        instead — so a page replaced entirely by an error box raises nothing,
+        and everything below this line then measures the error box and finds it
+        healthy.
+
+        Measured on production 2026-09-02: #supply was dead — `d is not
+        defined`, the whole body an error box, no grid, no table, no figure —
+        and this file rendered it and reported ZERO findings. Re-verified by
+        reintroducing the fault deliberately: 1 page-render, 0 routes with
+        findings, on a page a reader cannot use at all. That is the worst thing
+        an audit tool can do, because it is the one that gets believed.
+
+        The class is `empty`, shared with legitimate empty states, so the <b>
+        is what separates them. Reported as an error and returned on, because
+        every other check below is about a page that rendered. */
+  const failed = [...root.querySelectorAll('.empty > b')]
+    .find((b) => /^Could not load this view/.test(txt(b)));
+  if (failed) {
+    const why = txt(failed.parentNode).replace(/^Could not load this view/, '').replace(/Try again$/, '');
+    push('e', 'view-failed', (why.trim() || 'no reason given').slice(0, 120));
+    out.stats.title = (document.title || '').replace(/\s*[·|—-].*$/, '').trim();
+    return out;
+  }
+
   /* 1. A value that is not a value. These reach the screen as literal text and
         every one of them is a formatter meeting a shape it did not expect. */
   const BAD = /\b(NaN|undefined|null|Infinity|\[object Object\]|Invalid Date)\b/;

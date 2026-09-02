@@ -148,12 +148,12 @@ export async function renderSupply(root) {
        describes a month of it — and said without that, widening the range
        looked like the fleet getting busier. */
     meta: `${fmt(t.online_h)} online h · ${fmt(t.on_job_h)} on job`
-      + (d.measured && d.measured.narrower_than_window
-        ? ` · over the ${countOf(d.measured.days, 'day')} availability covers, not the whole range`
+      + (bal.measured && bal.measured.narrower_than_window
+        ? ` · over the ${countOf(bal.measured.days, 'day')} availability covers, not the whole range`
         : ''),
     sub: `${fmt(t.idle_h)} driver-hours were available and not dispatched.`
-      + (d.measured && d.measured.narrower_than_window
-        ? ` Availability is only reported from ${dayStr(d.measured.from)}, so every hour figure `
+      + (bal.measured && bal.measured.narrower_than_window
+        ? ` Availability is only reported from ${dayStr(bal.measured.from)}, so every hour figure `
           + 'here is over that span rather than the range above — the two halves of the rate have '
           + 'to describe the same days or widening the range would simply lower it.'
         : '')

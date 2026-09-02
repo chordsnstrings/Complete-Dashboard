@@ -1,17 +1,17 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-09-02T08:02:41.871Z",
+  "at": "2026-09-02T12:47:03.423Z",
   "widths": [
     1440
   ],
   "routes": 1,
   "findings": [
     {
-      "route": "reconcile",
+      "route": "supply",
       "width": 1440,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":24,\"explained\":true,\"title\":\"Reconciliation\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":29,\"explained\":false,\"title\":\"Supply vs demand\",\"kpis\":0,\"tables\":1,\"charts\":0}"
     }
   ]
 }
