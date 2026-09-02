@@ -16,6 +16,17 @@ const money = (n) => (n == null ? null : Math.round(Number(n) * 100) / 100);
    date that reaches a sentence goes through one of these. */
 const day = (v) => (v == null ? null : new Date(v).toISOString().slice(0, 10));
 const minute = (v) => (v == null ? null : new Date(v).toISOString().slice(0, 16).replace('T', ' '));
+
+/* A feed's name as a person writes it, for the two feeds that carry a tracker.
+   ─────────────────────────────────────────────────────────────────────────
+   These strings are stored in the finding and rendered raw, so `cabman` would
+   reach an operator as a database key. api/public/ui.js has the display copy
+   for every source and cannot be imported here — it is a browser module — so
+   this is the collector's own, kept to the sources that can actually appear in
+   a telemetry finding. test/consistency.test.mjs holds the two to each other,
+   because two label maps are two chances to call one feed two things. */
+const TELEMETRY_LABEL = { fms: 'FMS telematics', cabman: 'CABMAN' };
+const sourceName = (s) => TELEMETRY_LABEL[s] || String(s || '').toUpperCase();
 const month = (v) => (v == null ? null : new Date(v).toLocaleDateString('en-GB',
   { month: 'long', year: 'numeric', timeZone: 'UTC' }));
 const daysAgoFrom = (v) => (v == null ? null : Math.floor((Date.now() - new Date(v).getTime()) / 864e5));
@@ -436,21 +447,99 @@ async function volumeTrend() {
 /* ─────────────────── 7. Stale trackers: recently went dark ───────────────────
    Scoped to 24h–30d. Beyond 30 days it is reported once as `vehicle_dormant`
    (an asset-register question), so the same plate is never flagged twice. */
+/* Eighty-five vehicles that all stopped at the same minute are one fault.
+   ─────────────────────────────────────────────────────────────────────────
+   Measured on production 2026-09-02: 89 stale_tracker findings, 85 of them
+   CABMAN, and 47 of those last reported inside the single hour 2026-08-31
+   08:00 with another 10 in the hour before it. That is not eighty-five dead
+   devices. It is one feed going quiet, printed eighty-five times, each copy
+   saying "Check the device" — and burying the four FMS units that really had
+   failed, one of them dark for 641 hours.
+
+   So vehicles that went dark TOGETHER, on the same source and inside the same
+   hour, are reported once against the source, naming the moment and listing
+   the plates. A vehicle whose tracker stopped on its own is still its own
+   finding, because that one really is a device to go and check.
+
+   The threshold is five. Two or three cars parked up for a weekend share an
+   hour often enough; five sharing a single hour on one feed is the feed. */
+const FEED_DARK_MIN = 5;
+
 async function staleTelemetry() {
   const rows = await q(
     `SELECT DISTINCT ON (plate) plate, fleet_id, source, captured_at
      FROM telemetry_snapshot ORDER BY plate, polled_at DESC`);
-  let n = 0;
+  const stale = [];
   for (const r of rows) {
     const ageH = (Date.now() - new Date(r.captured_at)) / 36e5;
     if (ageH < 24 || ageH > 24 * 30) continue;            // dormant handled separately
+    stale.push({ ...r, ageH });
+  }
+  /* Clustered by PROXIMITY, not by the clock.
+     ─────────────────────────────────────────────────────────────────────
+     Bucketing on the calendar hour splits an outage that happens at 07:58 in
+     half and can drop both halves under the threshold — the fixture that
+     first exercised this rule straddled a boundary and produced 7 and 2. So
+     the rows are swept in time order and a new cluster starts wherever the
+     gap to the previous last-fix exceeds an hour: "stopped at about the same
+     time" with no edge to fall off. */
+  const GAP_MS = 36e5;
+  const groups = new Map();
+  const byFeed = new Map();
+  for (const r of stale) {
+    const k = `${r.source}|${r.fleet_id}`;
+    if (!byFeed.has(k)) byFeed.set(k, []);
+    byFeed.get(k).push(r);
+  }
+  for (const [k, feedRows] of byFeed) {
+    feedRows.sort((a, b) => new Date(a.captured_at) - new Date(b.captured_at));
+    let cluster = [];
+    const flush = () => {
+      if (!cluster.length) return;
+      groups.set(`${k}|${new Date(cluster[0].captured_at).toISOString()}`, cluster);
+      cluster = [];
+    };
+    for (const r of feedRows) {
+      if (cluster.length
+        && new Date(r.captured_at) - new Date(cluster[cluster.length - 1].captured_at) > GAP_MS) flush();
+      cluster.push(r);
+    }
+    flush();
+  }
+  let n = 0;
+  const covered = new Set();
+  for (const [k, members] of groups) {
+    if (members.length < FEED_DARK_MIN) continue;
+    const [source, fleetId] = k.split('|');
+    const at = members[0].captured_at;
+    const ageH = Math.round((Date.now() - new Date(at)) / 36e5);
+    members.forEach((r) => covered.add(r.plate));
+    const plates = members.map((r) => r.plate).sort();
     await put({
-      code: 'stale_tracker', severity: ageH > 72 ? 'critical' : 'warning', category: 'data',
+      code: 'tracker_feed_dark', severity: 'critical', category: 'data',
+      /* Keyed on the source and the hour, so a feed that goes quiet twice is
+         two findings and a feed that is STILL quiet is the same one. */
+      /* Keyed on the feed and the moment the cluster begins, so a feed that is
+         still dark is the same finding and a feed that goes quiet a second
+         time is a second one. */
+      entity_type: 'source', entity_id: `${source}:${String(at.toISOString ? at.toISOString() : at).slice(0, 13)}`,
+      fleet_id: fleetId,
+      title: `${plates.length} ${sourceName(source)} trackers stopped reporting within the same hour`,
+      detail: `All ${plates.length} last reported around ${minute(at)}, ${ageH}h ago — ${plates.slice(0, 8).join(', ')}${plates.length > 8 ? ` and ${plates.length - 8} more` : ''}. Vehicles do not fail together; a feed does.`,
+      action: `Check the ${sourceName(source)} integration — the account, its credential and its vehicle list — before checking any of the vehicles. Each of these cars is invisible to unauthorised-use detection while it is dark.`,
+      impact_aed: null, metric: plates.length, window_start: null, window_end: null,
+    });
+    n++;
+  }
+  for (const r of stale) {
+    if (covered.has(r.plate)) continue;                    // reported as one feed outage
+    await put({
+      code: 'stale_tracker', severity: r.ageH > 72 ? 'critical' : 'warning', category: 'data',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
-      title: `${r.plate} has not reported a position for ${Math.round(ageH)}h`,
-      detail: `Last fix from ${r.source} at ${minute(r.captured_at)}. Either the vehicle is off the road or the tracker has failed — and while it is dark, nothing about this car can be verified.`,
+      title: `${r.plate} has not reported a position for ${Math.round(r.ageH)}h`,
+      detail: `Last fix from ${r.source} at ${minute(r.captured_at)}. No other vehicle on this feed stopped at the same time, so this is the vehicle rather than the feed — either it is off the road or the tracker has failed, and while it is dark nothing about this car can be verified.`,
       action: `Check the device. A dead tracker also disables unauthorised-use detection for this vehicle.`,
-      impact_aed: null, metric: ageH, window_start: null, window_end: null,
+      impact_aed: null, metric: r.ageH, window_start: null, window_end: null,
     });
     n++;
   }
@@ -711,7 +800,7 @@ export async function computeInsights({ from, to } = {}) {
     ['unsafe_driving', ['unsafe_driving'], () => unsafeDriving(start, end)],
     ['deadhead', ['deadhead_waste'], () => deadhead(start, end)],
     ['volume_trend', ['volume_trend'], () => volumeTrend()],
-    ['stale_tracker', ['stale_tracker'], () => staleTelemetry()],
+    ['stale_tracker', ['stale_tracker', 'tracker_feed_dark'], () => staleTelemetry()],
     ['cancellations', ['cancellation_rate'], () => cancellations(start, end)],
     ['weather', ['weather_rain', 'weather_heat'], () => weatherOutlook()],
     ['partner_mix', ['partner_concentration'], () => partnerMix(start, end)],

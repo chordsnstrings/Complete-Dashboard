@@ -1321,9 +1321,16 @@ V.action = async (root) => {
     { label: 'Severity', value: sentence(r.severity),
       tone: { critical: 'critical', warning: 'warn', good: 'good' }[r.severity] },
     { label: 'Category', value: sentence(r.category) },
+    /* A finding about a FEED, not a thing on the road. Its id carries the
+       moment the feed went quiet as well as its name — cabman:2026-08-31T07 —
+       which is the right key and the wrong sentence, so the tile prints the
+       feed the way every other page names it and the detail below carries the
+       moment. */
     { label: 'About', html: view && r.entity_id
       ? entity(view, r.entity_id, `${sentence(r.entity_type)} ${r.entity_id}`)
-      : esc(`${sentence(r.entity_type || 'fleet')} ${r.entity_id || ''}`) },
+      : r.entity_type === 'source' && r.entity_id
+        ? `${esc(sourceLabel(String(r.entity_id).split(':')[0]))} <span class="dim">feed</span>`
+        : esc(`${sentence(r.entity_type || 'fleet')} ${r.entity_id || ''}`) },
     { label: 'Computed', value: r.computed_at ? dtStr(r.computed_at) : '—',
       sub: r.window_start ? `over ${dayStr(r.window_start)} → ${dayStr(r.window_end)}` : 'current state' },
     r.impact_aed
@@ -3300,7 +3307,10 @@ V.insights = async (root) => {
           <div class="insight-action">${esc(r.action || '')}</div>
         </div>
         <div class="insight-meta">
-          ${view && r.entity_id ? `<span class="tag">${esc(r.entity_type)} ${esc(r.entity_id).slice(0, 14)}</span>` : `<span class="tag">${esc(r.category)}</span>`}
+          ${view && r.entity_id ? `<span class="tag">${esc(r.entity_type)} ${esc(r.entity_id).slice(0, 14)}</span>`
+            : r.entity_type === 'source' && r.entity_id
+              ? `<span class="tag">${esc(sourceLabel(String(r.entity_id).split(':')[0]))} feed</span>`
+              : `<span class="tag">${esc(r.category)}</span>`}
           ${r.fleet_id ? `<span class="tag dim">${esc(sourceLabel(r.fleet_id))}</span>` : ''}
           ${r.metric != null ? `<span class="dim num" title="the figure this rule fired on">${fmt(r.metric, 2)}</span>` : ''}
           ${r.impact_aed

@@ -575,5 +575,29 @@ const get = async (p) => {
 }
 
 server.close(); await db.close();
+/* ── one name per feed, on both sides of the wire ─────────────────────────
+   src/insights.js writes a feed's name INTO a finding — "85 CABMAN trackers
+   stopped reporting" — and that string is stored and rendered raw, so the
+   collector cannot use the database key. api/public/ui.js has the display name
+   for every source and cannot be imported by a collector module; two label
+   maps are two chances to call one feed two things, on the page that exists to
+   say which feed is broken. */
+{
+  const src = readFileSync('src/insights.js', 'utf8');
+  const ui = readFileSync('api/public/ui.js', 'utf8');
+  const m = src.match(/const TELEMETRY_LABEL = \{([^}]*)\}/);
+  const u = ui.match(/export const SOURCE_LABEL = \{([\s\S]*?)\}/);
+  check('the collector has a label map for the feeds it names', !!m, 'TELEMETRY_LABEL is gone');
+  const pairs = (t) => Object.fromEntries([...(t || '').matchAll(/(\w+)\s*:\s*'([^']+)'/g)]
+    .map((x) => [x[1], x[2]]));
+  const mine = pairs(m?.[1]);
+  const theirs = pairs(u?.[1]);
+  check('…and it names at least the two feeds that carry a tracker',
+    'fms' in mine && 'cabman' in mine, JSON.stringify(Object.keys(mine)));
+  check('…and every one of them matches what the page prints',
+    Object.entries(mine).every(([k, v]) => theirs[k] === v),
+    JSON.stringify(Object.entries(mine).filter(([k, v]) => theirs[k] !== v)));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
