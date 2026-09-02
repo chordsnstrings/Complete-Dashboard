@@ -2682,12 +2682,21 @@ V.safety = async (root) => {
      A rate also needs a small-sample floor: three events over 40 km is 7.5 per
      100 km and means nothing. */
   const KM_FLOOR = 200;
-  const rated = named.filter((r) => r.per_100km != null && +r.booked_km >= KM_FLOOR)
+  /* alert_km, not booked_km — the distance the rate is actually divided by.
+     The two differ whenever the alert feed was dark for part of the window,
+     and the endpoint now measures the rate over the days the feed covered (see
+     api/alert_coverage_sql.js). Filtering and labelling on the whole-window
+     distance while dividing by the covered one would put a floor on one number
+     and print it beside another: a driver could be excluded for "too little
+     distance" on kilometres the rate never used, and the km beside each bar
+     would not be the km the bar was computed from. */
+  const rateKm = (r) => +(r.alert_km ?? r.booked_km);
+  const rated = named.filter((r) => r.per_100km != null && rateKm(r) >= KM_FLOOR)
     .sort((a, b) => Number(b.per_100km) - Number(a.per_100km)).slice(0, 12);
-  const thinKm = named.filter((r) => r.per_100km != null && +r.booked_km < KM_FLOOR).length;
+  const thinKm = named.filter((r) => r.per_100km != null && rateKm(r) < KM_FLOOR).length;
   if (rated.length) {
     hbars(dp.body, rated.map((r) => ({
-      label: `${r.driver_name} · ${fmt(r.booked_km)} km`, n: Number(r.per_100km), id: r.driver_ext_id })), {
+      label: `${r.driver_name} · ${fmt(rateKm(r))} km`, n: Number(r.per_100km), id: r.driver_ext_id })), {
       color: '--s8', valueFmt: (v) => `${fmt(v, 2)} / 100km`, signed: false,
       onClick: (d) => { if (d.id) location.hash = href('driver', d.id, 'quality'); } });
     dp.body.append(el('p', 'cap', 'Ordered by the rate the bars measure, with the distance it was '
@@ -2753,9 +2762,10 @@ V.safety = async (root) => {
     } },
     { label: 'Per 100 km', key: 'per_100km', num: true,
       render: (r) => (r.per_100km == null
-        ? '<span class="ent-off" title="no booked distance on the days these events happened">distance unknown</span>'
-        : `${fmt(r.per_100km, 2)}${+r.booked_km < 200
-          ? '<span class="dim" title="under 200 booked km — too small a base to compare on"> ·  thin</span>' : ''}`) },
+        ? `<span class="ent-off" title="${esc(r.per_100km_absent
+          || 'no booked distance on the days these events happened')}">not measured</span>`
+        : `${fmt(r.per_100km, 2)}${+(r.alert_km ?? r.booked_km) < 200
+          ? '<span class="dim" title="under 200 km on the days the alert feed covered — too small a base to compare on"> ·  thin</span>' : ''}`) },
   ], { sortable: true, sortId: 'safetydrv', defaultSort: { key: 'alerts', dir: 'desc' },
     capped: dTrunc ? `all ${fmt(dAll)} drivers with an event` : null }));
   if (dTrunc) {

@@ -3057,10 +3057,20 @@ app.get('/api/alerts/by-driver', (_, r) => r.json({ totals: { drivers: 74, alert
     plates: 1 + (i % 2), plate_list: [plates[i % plates.length]].concat(
       i % 2 ? [plates[(i + 1) % plates.length]] : []),
     booked_km: km,
-    per_100km: Math.round(((brake + accel + turn + over) * 100 / km) * 100) / 100 };
+    /* The distance over the days the ALERT FEED covered, which is what the rate
+       divides by. Deliberately SHORTER than booked_km here — the feed's real
+       hole was 73 days of a 103-day span — so the page's floor, its per-bar
+       label and its "thin" marker are all exercised against the distance the
+       rate actually used rather than the whole window's. */
+    alert_km: Math.round(km * 0.73),
+    per_100km: Math.round(((brake + accel + turn + over) * 100 / Math.round(km * 0.73)) * 100) / 100,
+    per_100km_absent: null };
 }).concat([{ driver_name: '(unattributed)', driver_ext_id: null, alerts: 9, harsh_brake: 6,
   harsh_accel: 2, sharp_turn: 1, overspeed: 0, other: 0, plates: 4,
-  plate_list: plates.slice(0, 3), booked_km: null, per_100km: null }]) }));
+  plate_list: plates.slice(0, 3), booked_km: null, alert_km: null, per_100km: null,
+  per_100km_absent: 'no booked distance on the days the alert feed covered' }]),
+alert_coverage: { measured: true, days: 22, window_days: 30,
+  rule: 'a day the alert feed produced at least one row on' } }));
 
 
 app.get('/api/alerts/summary', (_, r) => r.json([

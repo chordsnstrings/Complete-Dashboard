@@ -34,7 +34,7 @@ import { barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, dayStr, plural, countOf, sourceLabel, verdict, signed } from './ui.js';
 import { q, href, parseHash, state } from './data.js';
-import { dubaiDay } from './tz.js';
+import { dubaiDay, TZ } from './tz.js';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -53,7 +53,7 @@ const hhmm = (ts) => {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return '—';
   return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+    timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
 };
 
 const hrs = (m) => (m == null || !Number.isFinite(Number(m)) ? '—' : `${fmt(Number(m) / 60, 1)} h`);

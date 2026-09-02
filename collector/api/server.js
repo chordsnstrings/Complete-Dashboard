@@ -1578,6 +1578,10 @@ app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
    named nobody at all: it fetched a driver column and rendered only the plate. */
 app.get('/api/alerts/by-driver', wrap(async (req, res) => {
   const [from, to, , fleet] = range(req);
+  /* Fleet-filtered with the list, so the numerator and the denominator name
+     the same days — see api/alert_coverage_sql.js for why coverage is never
+     computed per person. */
+  const cov = await alertCoverage(q, from, to, { fleet });
   const rows = await q(
     `WITH ev AS (
        SELECT plate, alert_type, (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day
@@ -1677,7 +1681,18 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
           fleet to decorate a list ordered by something distance has no part in,
           so seven of every eight sums it computed were for somebody the page
           was never going to name. */
-       SELECT t.person_key AS person, sum(n.distance_km) AS km
+       SELECT t.person_key AS person, sum(n.distance_km) AS km,
+              /* The same distance again, over the days the ALERT feed covered.
+                 booked_km stays whole-window because distance is a question
+                 about the window; the RATE is a question about the days the
+                 numerator could have come from, and mixing them is what made
+                 the fleet rate read 41.5 per 100 km at thirty days and 94.1 at
+                 the same thirty days once the feed's 73-day hole was filled.
+                 See api/alert_coverage_sql.js. Bound as a parameter rather
+                 than interpolated, because test/alerts_by_driver.test.mjs
+                 evaluates this literal with new Function and only DAYWIN and
+                 JOIN_TRIP are in scope there. */
+              sum(n.distance_km) FILTER (WHERE n.local_day = ANY($4::date[])) AS alert_km
        FROM trip_norm n ${JOIN_TRIP}
        WHERE t.person_key IN (SELECT person FROM shown WHERE person IS NOT NULL)
          AND ${DAYWIN('t.requested_at')}
@@ -1689,18 +1704,28 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
             s.harsh_brake, s.harsh_accel, s.sharp_turn, s.overspeed, s.other,
             s.plates, s.plate_list,
             round(km.km::numeric, 0) AS booked_km,
-            round((s.alerts * 100.0 / nullif(km.km, 0))::numeric, 2) AS per_100km,
+            round(km.alert_km::numeric, 0) AS alert_km,
             s._drivers, s._alerts, s._unattributed
      FROM shown s LEFT JOIN km ON km.person = s.person
-     ORDER BY s.alerts DESC`, [from, to, fleet]);
+     ORDER BY s.alerts DESC`, [from, to, fleet, cov.days]);
   /* Named drivers, counted over the whole window rather than over the returned
      rows, and counted the way the list groups: by custody name, excluding the
      "(unattributed)" bucket, which is not a person. */
   const totals = rows.length
     ? { drivers: rows[0]._drivers, alerts: rows[0]._alerts, unattributed: rows[0]._unattributed }
     : { drivers: 0, alerts: 0, unattributed: 0 };
-  for (const r of rows) { delete r._drivers; delete r._alerts; delete r._unattributed; }
+  for (const r of rows) {
+    delete r._drivers; delete r._alerts; delete r._unattributed;
+    /* Computed here rather than in SQL, so that a window the feed never
+       covered renders as "not measured" with a reason — the same words the
+       other five call sites use — instead of the 0 that SQL's nullif would
+       have produced, which reads as a perfect safety record for a fleet nobody
+       was watching. */
+    r.per_100km = alertRate(r.alerts, r.alert_km, cov, 2);
+    r.per_100km_absent = alertRateReason(r.alert_km, cov);
+  }
   res.json({ rows, totals, shown: rows.length,
+    alert_coverage: cov,
     truncated: totals.drivers > rows.filter((r) => r.driver_name !== '(unattributed)').length });
 }));
 

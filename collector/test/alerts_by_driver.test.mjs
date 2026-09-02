@@ -105,7 +105,14 @@ const CARRIED = ['_drivers', '_alerts', '_unattributed'];
    carried the residual since it was written. It is projected out of the
    rewrite comparison below, which is about the query rewrite preserving the
    values it already produced, and asserted on its own afterwards. */
-const ADDED = ['other'];
+/* alert_km is new: the distance over the days the ALERT FEED covered, which
+   is what the rate is now measured against — see api/alert_coverage_sql.js.
+   per_100km MOVED rather than vanished; SQL used to round it and JS computes
+   it now, so that a window the feed never covered renders as "not measured"
+   rather than as the 0 nullif produced. Both are excluded from the row-for-row
+   equivalence and per_100km is then asserted directly, below, against the
+   figure the old SQL produced. */
+const ADDED = ['other', 'alert_km', 'per_100km'];
 const uncap = (s) => s.replace('LIMIT 100', '');
 const bare = (r) => { const c = { ...r }; for (const k of [...CARRIED, ...ADDED]) delete c[k]; return c; };
 // Order within a tie is the planner's, on both sides. Compare the sets.
@@ -124,7 +131,15 @@ async function compare(label, { wide }) {
      a two-fleet operator — and /api/kpis has always narrowed its own alert
      count by alert.fleet_id, so the tile and the page disagreed under a
      filter. NULL here means "every fleet", which is what this fixture is. */
-  const P = [DAY0, DAY1, null];
+  /* A fourth parameter: the days the alert feed covered. The rate is measured
+     over those and not over the whole window — see api/alert_coverage_sql.js.
+     Every day in this fixture carries alerts, so the set is the whole window
+     and nothing else in this file's arithmetic moves. */
+  const COVERED = [];
+  for (let t = Date.parse(`${DAY0}T12:00:00Z`); t <= Date.parse(`${DAY1}T12:00:00Z`); t += 864e5) {
+    COVERED.push(new Date(t).toISOString().slice(0, 10));
+  }
+  const P = [DAY0, DAY1, null, COVERED];
 
   /* Events on a plate nobody was recorded driving. Every plate in both fixtures
      carries trips on every day, so without this the "(unattributed)" bucket —
@@ -147,6 +162,32 @@ async function compare(label, { wide }) {
   check('and the same values, row for row',
     JSON.stringify(sorted(before)) === JSON.stringify(sorted(after)),
     JSON.stringify(sorted(after).filter((r) => !sorted(before).includes(r)).slice(0, 2)));
+
+  /* per_100km moved out of SQL, so prove it did not change while moving. Every
+     day in this fixture carries alerts, so the covered set is the whole window
+     and the JS rate must equal the figure the old SQL rounded — if it does
+     not, the move changed the number rather than only its home. */
+  {
+    const { alertCoverageOf, alertRate } = await import('../api/alert_coverage_sql.js');
+    const cov = alertCoverageOf(P[3], P[0], P[1]);
+    const oldBy = new Map(before.map((r) => [r.driver_ext_id ?? r.driver_name, r.per_100km]));
+    const off = after.filter((r) => {
+      const was = oldBy.get(r.driver_ext_id ?? r.driver_name);
+      const now = alertRate(r.alerts, r.alert_km, cov, 2);
+      return was == null ? now != null : Math.abs(Number(was) - Number(now)) > 0.005;
+    });
+    check('the rate is the same figure after moving out of SQL',
+      off.length === 0, JSON.stringify(off.slice(0, 2).map((r) => [r.driver_name, r.alert_km])));
+    /* Where every day is covered the two distances must be the SAME number —
+       that is what makes the equivalence above meaningful rather than a
+       comparison of two things that happen to agree. A driver with no trips
+       has neither, which is correct and is why this is an agreement test and
+       not a not-null one. */
+    const disagree = after.filter((r) => String(r.alert_km ?? '') !== String(r.booked_km ?? ''));
+    check('…and over a fully covered window it is the booked distance, to the km',
+      disagree.length === 0,
+      JSON.stringify(disagree.slice(0, 2).map((r) => [r.driver_name, r.alert_km, r.booked_km])));
+  }
 
   /* The population figures the page prints underneath the table. They used to
      be their own query; they ride on the list now, and they must still be

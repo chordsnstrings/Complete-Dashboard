@@ -27,12 +27,13 @@
    of a popover is a bottom sheet, which is a placement decision and not a
    different control. */
 import { el, esc } from './ui.js';
+import { TZ } from './tz.js';
 import { state, qAll, PERIODS, PERIOD_LABEL, periodLabel, dayLabel, MONTH_SHORT } from './data.js';
 
 /* Dubai's today, not the reader's. Every boundary in this product is on the
    fleet's calendar, and at 02:00 Dubai those are different dates. */
 export const dubaiToday = () => new Intl.DateTimeFormat('en-CA', {
-  timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit',
+  timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(new Date());
 
 const ROLLING = [[7, 'Last 7 days'], [30, 'Last 30 days'], [90, 'Last 90 days'],

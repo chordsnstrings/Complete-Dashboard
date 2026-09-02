@@ -62,6 +62,11 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     [new RegExp(`(?<!ZONE '[^']*'\\)\\s*)\\b${TS}\\s*::\\s*date`, 'g'), 'a bare ::date'],
     [new RegExp(`date_trunc\\(\\s*'(?:day|week|month)'\\s*,\\s*[\\w.]*${TS}\\s*\\)`, 'g'), 'date_trunc'],
     [new RegExp(`extract\\(\\s*(?:hour|dow|isodow|day|month|year)\\s+from\\s+[\\w.]*${TS}\\s*\\)`, 'gi'), 'extract'],
+    /* to_char produces exactly the same UTC calendar key as the three above
+       and matched none of them. It is not hypothetical: detectBreaks bucketed
+       trips into months with date_trunc, and to_char(requested_at, 'YYYY-MM')
+       is the one refactor away that would have passed silently. */
+    [new RegExp(`to_char\\(\\s*[\\w.]*${TS}\\s*,`, 'g'), 'to_char'],
   ];
   const offenders = [];
   {
@@ -128,6 +133,37 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
       if (/timeZone/.test(m[1])) continue;
       offenders.push(`api/public/${f}:${lineOf(m.index)}  ${m[0].replace(/\s+/g, ' ').slice(0, 90)}`);
     }
+    /* A bare Intl.DateTimeFormat. It is the shape this product writes MOST,
+       precisely because adding the timeZone option is what makes the line long
+       enough to want a formatter in the first place — so the one call that
+       most needs the option is the one most likely to be written without it,
+       and nothing here could see it. */
+    for (const m of src.matchAll(/new Intl\.DateTimeFormat\s*\(([\s\S]{0,220}?)\)/g)) {
+      if (/timeZone/.test(m[1])) continue;
+      offenders.push(`api/public/${f}:${lineOf(m.index)}  ${m[0].replace(/\s+/g, ' ').slice(0, 90)}`);
+    }
+    /* The calendar fields of a Date, read straight off it. `.getHours()` is
+       the viewer's clock exactly as surely as toLocaleTimeString, and it is
+       how a naive "what hour is it now" helper gets written. getUTC* is the
+       deliberate form and is left alone. */
+    for (const m of src.matchAll(/\.get(?:Hours|Minutes|Date|Day|Month|FullYear)\s*\(\)/g)) {
+      const before = src.slice(Math.max(0, m.index - 200), m.index);
+      /* Anchored at noon UTC, the codebase's documented way of doing date
+         arithmetic on a bare YYYY-MM-DD, which is zone-independent by
+         construction — see the T12:00:00Z reasoning below. */
+      if (/T12:00:00Z/.test(before)) continue;
+      offenders.push(`api/public/${f}:${lineOf(m.index)}  ${m[0]} on the viewer's clock`);
+    }
+    /* The zone written out as a string, anywhere but its one home. The rule
+       above accepts any call containing "timeZone", so a hand-copied
+       { …, timeZone: 'Asia/Dubai' } passes while being another copy of ui.js's
+       options object, unreachable from the TZ constant that is supposed to
+       decide it. api/public/m/screens.js was exactly that, and it passed. */
+    if (!/^tz\.js$/.test(f)) {
+      for (const m of src.matchAll(/['"]Asia\/Dubai['"]/g)) {
+        offenders.push(`api/public/${f}:${lineOf(m.index)}  the zone written out, not taken from TZ`);
+      }
+    }
     /* The UTC day, taken from a clock, used as a business date.
        Date arithmetic on a YYYY-MM-DD string is a different thing and is fine:
        anchoring at T12:00:00Z (16:00 in Dubai) puts the instant far enough from
@@ -141,6 +177,35 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     }
   }
   check('no date or time is rendered in the viewer’s own timezone',
+    offenders.length === 0, offenders.length ? `\n      ${offenders.join('\n      ')}` : '');
+}
+
+/* ── 2b. the COLLECTOR's clock — a third half this guard did not have ────
+   src/util.js's iso() is the UTC date, so calling it on a clock is the
+   collector-side twin of `toISOString().slice(0, 10)` in the browser — and the
+   browser rule only ever looked under api/public. src/sources/external.js's own
+   header records what that cost: it wrote exactly one row per run keyed on
+   `iso(now)`, so calendar_day held the UTC day the collector happened to wake
+   on. test/calendar_range.test.mjs enforces this for that one file by hand;
+   twelve collectors share the mistake's shape, and this is where the rule
+   belongs. src/util.js exports dubaiIso/dubaiMonth as the correct alternative,
+   so there is somewhere to point.
+
+   Clean on the tree as it stands — the only matches are the comments that
+   describe the bug, which is why they are blanked first. */
+{
+  const offenders = [];
+  for (const path of [...walk('src', '.js'), ...walk('api', '.js')]) {
+    const raw = readFileSync(path, 'utf8');
+    const src = raw
+      .replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
+      .replace(/(^|[^:])\/\/[^\n]*/g, (c, p1) => p1 + ' '.repeat(c.length - p1.length));
+    const lineOf = (idx) => src.slice(0, idx).split('\n').length;
+    for (const m of src.matchAll(/\biso\(\s*(?:new Date\(\s*(?:Date\.now\(\))?\s*\)|now)\s*\)/g)) {
+      offenders.push(`${path}:${lineOf(m.index)}  ${m[0]} is the UTC day — use dubaiIso`);
+    }
+  }
+  check('no collector keys a row on the UTC day of the clock it woke on',
     offenders.length === 0, offenders.length ? `\n      ${offenders.join('\n      ')}` : '');
 }
 
@@ -165,6 +230,26 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     `${from} → ${to}`);
   check('and its end is today in Dubai, not today in UTC or in the browser',
     to === dubaiDay(), `${to} vs ${dubaiDay()}`);
+
+  /* The formatters themselves, driven rather than pattern-matched. Every rule
+     above proves a SHAPE — that a call carries a timeZone option — and a shape
+     is not a result: the options object could name the wrong zone, or the
+     constant could be edited, and every regex here would still pass.
+
+     The instants are real, read from production on 2026-09-02 while this
+     process runs on a clock twelve hours from Dubai. */
+  const { timeStr, dtStr } = await import('../api/public/ui.js');
+  check('a tracker fix renders in Dubai, not on the process clock',
+    timeStr('2026-09-02T13:00:01.603Z') === '17:00', timeStr('2026-09-02T13:00:01.603Z'));
+  check('and so does a collector run time',
+    timeStr('2026-09-02T12:40:13.916Z') === '16:40', timeStr('2026-09-02T12:40:13.916Z'));
+  /* The one worth having. Everywhere else the viewer's clock moves the HOUR;
+     here it moves the DATE. The analyst's last pass at 23:10 UTC on the 1st is
+     03:10 on the 2nd in Dubai — and rendered on a New York clock the phone
+     said "Sep 1", telling a reader the analyst had not run today. No rule
+     about call shapes can ever state that. */
+  check('an instant that falls on a different DATE in Dubai renders as the Dubai date',
+    /Sep\s*2\b/.test(dtStr('2026-09-01T23:10:13.470Z')), dtStr('2026-09-01T23:10:13.470Z'));
 }
 
 /* ── 4. and the API agrees with it, over a real database ───────────────── */

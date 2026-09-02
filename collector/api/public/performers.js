@@ -37,6 +37,7 @@
 import { hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, noneChosen, sourceLabel, dateStr, verdict, countOf } from './ui.js';
+import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
 
 /* Enough of a week to rank on. Two thirds of a working week: below it a
@@ -557,5 +558,5 @@ const hhmm = (ts) => {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return '—';
   return new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Asia/Dubai', hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
+    timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false }).format(d);
 };
