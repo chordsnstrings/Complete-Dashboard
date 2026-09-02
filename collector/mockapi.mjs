@@ -759,6 +759,12 @@ app.get('/api/driver/kpis', (req, r) => {
        the rider's wait. Nothing this fleet collects separates the ride out of
        it, and the tile no longer claims otherwise. */
     hours_on_job: +d.reduce((a, x) => a + x.hours_on_job, 0).toFixed(1),
+    /* Every day of work, beside the days a basis measured. The ratio uses the
+       first; the panels that ask how long somebody was on jobs use this. They
+       are returned apart so nothing can divide one by the other's denominator
+       — production read 437% when they were one field. */
+    hours_on_job_all_days: +d.reduce((a, x) => a + x.hours_on_job, 0).toFixed(1),
+    hours_on_job_days: d.length,
     hours_idle_online: +d.reduce((a, x) => a + x.hours_idle_online, 0).toFixed(1),
     hours_basis: 'availability',
     hours_days: d.length,
@@ -1811,6 +1817,10 @@ app.get('/api/supply/balance', (req, r) => {
       idle_pct: Math.round((s('idle_h') / s('online_h')) * 100),
       jobs_per_online_h: Math.round((s('jobs') / s('online_h')) * 100) / 100 },
     covered: true,
+    /* The span the availability feed actually covers inside the window, which
+       is what every hour figure above is over. Uber serves about 31 days of
+       it and nothing older. */
+    measured: { from: '2026-08-03', to: '2026-09-02', days: 31, narrower_than_window: false },
     basis: 'Online hours are split across the hours they were actually online in.',
   });
 });

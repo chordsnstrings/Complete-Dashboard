@@ -15,7 +15,7 @@
      WHERE how long the wait is after a dropoff in each area — the
            repositioning question, in the only geography this data has */
 import { el, esc, panel, loading, note, tableFrom, fmt, empty, verdict, foldRows,
-  plural, countOf } from './ui.js';
+  plural, countOf, dayStr } from './ui.js';
 import { q, href } from './data.js';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -143,8 +143,20 @@ export async function renderSupply(root) {
     figure: t.jobs_per_online_h != null ? fmt(t.jobs_per_online_h, 2) : fmt(t.jobs),
     unit: t.jobs_per_online_h != null ? 'jobs per online hour' : 'jobs',
     tone: t.idle_pct != null && t.idle_pct >= 70 ? 'warn' : null,
-    meta: `${fmt(t.online_h)} online h · ${fmt(t.on_job_h)} on job`,
+    /* The span the rate is actually over. Uber serves about 31 days of
+       availability and nothing older, so on a 12-month range this figure
+       describes a month of it — and said without that, widening the range
+       looked like the fleet getting busier. */
+    meta: `${fmt(t.online_h)} online h · ${fmt(t.on_job_h)} on job`
+      + (d.measured && d.measured.narrower_than_window
+        ? ` · over the ${countOf(d.measured.days, 'day')} availability covers, not the whole range`
+        : ''),
     sub: `${fmt(t.idle_h)} driver-hours were available and not dispatched.`
+      + (d.measured && d.measured.narrower_than_window
+        ? ` Availability is only reported from ${dayStr(d.measured.from)}, so every hour figure `
+          + 'here is over that span rather than the range above — the two halves of the rate have '
+          + 'to describe the same days or widening the range would simply lower it.'
+        : '')
       + (worst ? ` The worst-selling hour with real supply behind it is ${DOW[worst.dow]} `
         + `${hh(worst.h)} — ${fmt(worst.online_h, 1)} online hours on a typical one, selling `
         + `${fmt(worst.jobs, 1)} jobs.` : '')

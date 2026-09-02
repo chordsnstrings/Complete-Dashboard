@@ -61,7 +61,17 @@ const api = readdirSync('api').filter((f) => f.endsWith('.js'))
    the greedy prefix eats all but the last character of an unqualified column,
    so `captured_at` was read as the column `t` — a check that reports a column
    nobody wrote is a check nobody will believe. */
+/* A PROJECTION is not a filter, and only a filter scans.
+   ─────────────────────────────────────────────────────────────────────────
+   `count(DISTINCT (at AT TIME ZONE 'Asia/Dubai')::date)` in a SELECT list
+   folds rows the query has already chosen; the index this check is about
+   exists so a WHERE can find them. Flagging the projection asks for an index
+   that would never be used, and a check that demands something pointless is
+   one somebody eventually silences. So a match sitting directly inside an
+   aggregate is skipped — the query's own WHERE is checked on its merits. */
+const AGG_BEFORE = /(count|sum|min|max|avg)\s*\(\s*(DISTINCT\s+)?$/i;
 const used = new Set([...api.matchAll(/\(\s*(?:\w+\.)?(\w+)\s+AT TIME ZONE 'Asia\/Dubai'\)::date/g)]
+  .filter((m) => !AGG_BEFORE.test(api.slice(Math.max(0, m.index - 24), m.index)))
   .map((m) => m[1]));
 const known = new Set(DUBAI_DAY.map(([, c]) => c));
 /* Columns that belong to views (which cannot be indexed) or to derived CTEs

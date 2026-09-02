@@ -109,7 +109,13 @@ export async function renderOptimise(root) {
     figure: opt.median_wait_overall != null ? `${opt.median_wait_overall} min` : '—',
     unit: 'between one job and the next',
     tone: idlePct >= 70 ? 'warn' : null,
-    meta: `${fmt(Math.round(onlineH))} online hours measured`,
+    /* Over the days availability actually covers, which on a wide range is a
+       fraction of it. Both halves of this rate come from the endpoint clamped
+       to that span; saying so is what stops "widen the range" reading as
+       "the fleet got busier". */
+    meta: `${fmt(Math.round(onlineH))} online hours measured`
+      + (bal.measured && bal.measured.narrower_than_window
+        ? ` over ${countOf(bal.measured.days, 'day')}, not the whole range` : ''),
     sub: idlePct
       ? `${fmt(Math.round(jobH))} of ${fmt(Math.round(onlineH))} online hours were spent on a job. `
         + spread
@@ -117,7 +123,10 @@ export async function renderOptimise(root) {
         + 'cannot be separated from time off.',
     recommend: upside > 0
       ? `Bringing every below-median hour up to the fleet's OWN median is `
-        + `${fmt(Math.round(upside))} more ${plural(Math.round(upside), 'trip')} a month `
+        /* "a month" was hardcoded while the arithmetic runs over whatever
+           window is selected — on a 7-day range it promised a month of trips
+           from a week of evidence. */
+        + `${fmt(Math.round(upside))} more ${plural(Math.round(upside), 'trip')} over this window `
         + `(${Math.round((upside / Math.max(1, jobsSeen)) * 100)}% on the ${fmt(Math.round(jobsSeen))} `
         + 'this view covers) on hours already being paid for — no extra driver, no extra car.'
       : null,

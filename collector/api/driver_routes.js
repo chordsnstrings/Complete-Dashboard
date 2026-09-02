@@ -864,9 +864,25 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 CASE WHEN ph.hours_online IS NOT NULL THEN 'platform'
                      WHEN av.online_min IS NOT NULL THEN 'availability' END AS basis
            FROM ph FULL OUTER JOIN av USING (day))
+       /* Numerator and denominator over the SAME days.
+          ────────────────────────────────────────────────────────────────
+          on_job_h lands on every day that carries on-job minutes; online_h
+          only on days that carry online minutes. Summed unfiltered and then
+          divided, that is a ratio between two different day sets — and on
+          production it read 437.4% for one driver: 2,112.5 on-job hours over
+          483 online, across 36 days that had a basis and an unknown number
+          that did not. A utilisation over 100% is not a busy driver, it is
+          two questions answered as one.
+
+          So the ratio's halves are both restricted to the days that carry a
+          basis, and the unrestricted on-job total is returned beside them
+          under its own name for the panels that legitimately want every day
+          of work rather than every day of measurement. */
        SELECT round(sum(online_h)::numeric,1) online_h,
-              round(sum(on_job_h)::numeric,1) on_job_h,
-              round(sum(idle_h)::numeric,1) idle_online_h,
+              round(sum(on_job_h) FILTER (WHERE basis IS NOT NULL)::numeric,1) on_job_h,
+              round(sum(on_job_h)::numeric,1) on_job_h_all_days,
+              count(*) FILTER (WHERE on_job_h IS NOT NULL)::int on_job_days_all,
+              round(sum(idle_h) FILTER (WHERE basis IS NOT NULL)::numeric,1) idle_online_h,
               count(*) FILTER (WHERE basis IS NOT NULL)::int online_days,
               count(*) FILTER (WHERE basis = 'platform')::int platform_days,
               count(*) FILTER (WHERE basis = 'availability')::int availability_days
@@ -1035,6 +1051,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       /* on_job, not on_trip: request to dropoff, which contains the approach
          and the rider's wait. No feed here separates them. */
       hours_on_job: hoursOnJob,
+      /* Every day of work, not only the days a basis measured — the panels
+         that ask "how long was this person on jobs" want all of them, and the
+         utilisation ratio above deliberately does not. Returned separately so
+         the two can never be summed into one another again. */
+      hours_on_job_all_days: num(kept?.on_job_h_all_days),
+      hours_on_job_days: kept?.on_job_days_all ?? null,
       hours_idle_online: num(kept?.idle_online_h),
       /* Which feed answered, and mixed where the window contains both — a
          platform's on-trip figure and our request-to-dropoff fold are not the

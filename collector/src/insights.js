@@ -134,17 +134,32 @@ async function idleVehicles() {
         on one source inside the same hour, more than six hours ago. That is
         the same shape staleTelemetry() clusters on, applied here to stop the
         two rules contradicting each other. */
-     crowd AS (
-       SELECT source, date_trunc('hour', max_at) AS hr, count(*)::int n
-       FROM (SELECT plate, source, max(captured_at) AS max_at
-               FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, source) x
-       WHERE max_at < now() - interval '6 hours'
-       GROUP BY 1, 2 HAVING count(*) >= 5),
+     last_fix AS (
+       SELECT plate, source, max(captured_at) AS max_at
+         FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, source),
+     /* Gap-and-island, not a clock bucket. staleTelemetry() clusters by
+        PROXIMITY for a reason its own comment records: an outage beginning at
+        07:58 puts some vehicles in one calendar hour and the rest in the next,
+        and bucketing splits it — the first version of this exclusion did
+        exactly that and left four of nine plates behind, still being called
+        idle by one rule and dark by the other. A new island starts wherever
+        the gap to the previous last-fix on the same feed exceeds an hour,
+        which is the same rule expressed in SQL. */
+     /* Two steps, because a window function cannot be nested inside another:
+        the gap flag first, the running sum of it second. */
+     breaks AS (
+       SELECT plate, source, max_at,
+              CASE WHEN max_at - lag(max_at) OVER (PARTITION BY source ORDER BY max_at)
+                        > interval '1 hour' THEN 1 ELSE 0 END AS is_break
+         FROM last_fix WHERE max_at < now() - interval '6 hours'),
+     islands AS (
+       SELECT plate, source, max_at,
+              sum(is_break) OVER (PARTITION BY source ORDER BY max_at) AS island
+         FROM breaks),
      dark AS (
-       SELECT DISTINCT t.plate
-       FROM (SELECT plate, source, max(captured_at) AS max_at
-               FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, source) t
-       JOIN crowd c ON c.source = t.source AND c.hr = date_trunc('hour', t.max_at))
+       SELECT plate FROM islands
+        WHERE (source, island) IN (
+          SELECT source, island FROM islands GROUP BY 1, 2 HAVING count(*) >= 5))
      SELECT s.plate, s.fleet_id, s.last_seen, coalesce(e.trips,0) trips,
             ev.last_trip, coalesce(ev.lifetime, 0) AS lifetime
      FROM seen s

@@ -65,6 +65,43 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
   app.get('/api/supply/balance', wrap(async (req, res) => {
     const p = range(req);
 
+    /* Both halves over the days the AVAILABILITY feed actually covers.
+       ─────────────────────────────────────────────────────────────────────
+       Online hours come from driver_timeline_event, which Uber serves for
+       about 31 days and nothing older; time on a job comes from the trip
+       record, which goes back a year. Both queries honoured the requested
+       window, and that was the bug: widening the range added job hours and no
+       online hours, so the headline moved without the fleet moving. Measured
+       on production, the same fleet through the four range chips:
+
+         30 days  online 24,344  on job  5,288  →  78% idle
+         90 days  online 29,175  on job 11,962  →  59% idle
+         6 months online 29,175  on job 19,087  →  35% idle
+         12 months online 29,175  on job 89,379 →   1% idle
+
+       — three times as many on-job hours as online hours at a year, which is
+       impossible, printed as "1% of the hours this fleet pays for are idle".
+       The denominator was frozen and only the numerator grew.
+
+       So the span the availability feed covers INSIDE the window is measured
+       first, and the job and demand halves are clamped to it. The response
+       says which span it used, because a rate over 31 of the 365 days somebody
+       asked for is only honest if it says so. */
+    const [span] = await q(
+      `SELECT min(at) AS from_at, max(at) AS to_at,
+              count(DISTINCT (at AT TIME ZONE 'Asia/Dubai')::date)::int AS days
+         FROM driver_timeline_event
+        WHERE kind = 'status' AND status <> ''
+          AND at >= $1::timestamptz AND at <= $2::timestamptz`, [p[0], p[1]]);
+    /* Where the feed has nothing, leave the window alone: every query then
+       returns nothing and `covered` already says so. */
+    /* ISO strings, not the driver's Date objects: the occurrence query below
+       slices these to a date, and String(Date) is "Thu Aug 07 2026 …". */
+    const iso = (v) => (v instanceof Date ? v.toISOString() : String(v));
+    const bounded = span && span.from_at
+      ? [iso(span.from_at), iso(span.to_at), ...p.slice(2)]
+      : p;
+
     /* Online minutes land in the hour they were online IN, not the hour the
        span started — a shift from 18:00 to 02:00 is eight hours of supply
        across eight slots, and attributing all of it to 18:00 would invent a
@@ -111,11 +148,11 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
                   j.e AT TIME ZONE 'Asia/Dubai', interval '1 hour') AS g)
        SELECT extract(dow FROM slot)::int AS dow, extract(hour FROM slot)::int AS h,
               round(sum(greatest(0, mins))::numeric / 60, 1) AS on_job_h
-         FROM slots GROUP BY 1, 2`, p);
+         FROM slots GROUP BY 1, 2`, bounded);
 
     const demand = await q(
       `SELECT local_dow AS dow, local_hour AS h, count(*)::int AS jobs
-         FROM trip_norm WHERE ${FB} GROUP BY 1, 2`, p);
+         FROM trip_norm WHERE ${FB} GROUP BY 1, 2`, bounded);
 
     /* How many times each weekday actually OCCURRED in the window.
        ─────────────────────────────────────────────────────────────────────
@@ -132,7 +169,7 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
     const occ = await q(
       `SELECT extract(dow FROM d)::int AS dow, count(*)::int AS n
          FROM generate_series($1::date, $2::date, interval '1 day') AS g(d)
-        GROUP BY 1`, [String(p[0]).slice(0, 10), String(p[1]).slice(0, 10)]);
+        GROUP BY 1`, [String(bounded[0]).slice(0, 10), String(bounded[1]).slice(0, 10)]);
     const occBy = new Map(occ.map((r) => [r.dow, r.n || 1]));
     const per = (dow, v) => Math.round((v / (occBy.get(dow) || 1)) * 100) / 100;
 
@@ -187,6 +224,18 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
          started has demand and no supply — and a balance chart drawn over that
          reads as a fleet that was never online. */
       covered: supply.length > 0,
+      /* The span every figure above is actually over, which is the
+         availability feed's own reach inside the window rather than the window
+         the reader picked. A page that prints a rate has to be able to say
+         what it divided by. */
+      measured: span && span.from_at ? {
+        from: iso(span.from_at).slice(0, 10),
+        to: iso(span.to_at).slice(0, 10),
+        days: span.days,
+        /* True when the reader asked for more than the feed can answer, which
+           is the case the pages have to caption. */
+        narrower_than_window: iso(span.from_at).slice(0, 10) > iso(p[0]).slice(0, 10),
+      } : null,
       basis: 'Online hours are split across the hours they were actually online in, not attributed '
         + 'to the hour a shift started; time on a job is split the same way, so idle is a '
         + 'subtraction over identical slots. Every per-hour figure is PER OCCURRENCE of that '

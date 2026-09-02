@@ -309,6 +309,40 @@ check('…and the 01:00 Dubai trip is in it, as it is in the directory',
   'a `day` and a one-day from/to must be the same window');
 check('date-only `to` includes the whole day', narrow.days_worked === 1, String(narrow.days_worked));
 
+/* ── a utilisation of 437% ────────────────────────────────────────────────
+   The ratio is on-job hours over online hours, and the two came from
+   different day sets: on_job_h lands on every day carrying on-job minutes,
+   online_h only on days carrying online minutes, and both were summed
+   unfiltered before dividing. Production showed one driver at 483 online
+   hours against 2,112.5 on-job — 437.4% — which is not a busy driver but two
+   questions answered as one.
+
+   Seeded here as the exact shape that produces it: a day with on-job minutes
+   and no online minutes at all. */
+{
+  await q(`INSERT INTO driver_day (driver_ext_id, day, fleet_id, trips, completed, cancelled,
+             km, online_min, idle_online_min, on_job_min)
+           VALUES ($1, '2026-08-20', 'ecosine', 4, 4, 0, 40, 600, 200, 400),
+                  ($1, '2026-08-21', 'ecosine', 4, 4, 0, 40, NULL, NULL, 900)`, [UBER]);
+  const u = (await get(`/api/driver/kpis?id=${UBER}&from=2026-08-20&to=2026-08-21`)).body;
+  check('a day with on-job minutes and no online minutes cannot push utilisation over 100',
+    u.utilisation_pct == null || u.utilisation_pct <= 100,
+    `${u.utilisation_pct}% — ${u.hours_on_job}h on job over ${u.hours_online}h online`);
+  /* The ratio's halves must describe the same days: 400 minutes of on-job on
+     the one day that also reports online minutes. */
+  check('…because the ratio is taken over the days that carry both',
+    Math.abs(Number(u.hours_on_job) - 400 / 60) < 0.05,
+    `hours_on_job ${u.hours_on_job}, expected ${(400 / 60).toFixed(2)}`);
+  /* And the work on the other day is not thrown away — it is returned under a
+     name that says what it is, so no panel has to choose between a wrong
+     ratio and a missing total. */
+  check('the whole window’s on-job hours are still reported, separately',
+    Math.abs(Number(u.hours_on_job_all_days) - 1300 / 60) < 0.05,
+    `hours_on_job_all_days ${u.hours_on_job_all_days}, expected ${(1300 / 60).toFixed(2)}`);
+  check('…with its own day count, so the two totals can never be read as one',
+    u.hours_on_job_days === 2, String(u.hours_on_job_days));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
