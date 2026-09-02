@@ -34,7 +34,7 @@
    No network and no database here on purpose: the old calendar could only be
    exercised by reaching two public APIs, which is exactly why "wrote no day"
    shipped and ran for two days without a test noticing. */
-import { hijriOf, gregorianOfHijri, calendarDays } from '../src/sources/external.js';
+import { hijriOf, gregorianOfHijri, calendarDays, HIJRI_CALENDAR_AVAILABLE } from '../src/sources/external.js';
 import { ramadanEvents } from '../src/sources/events.js';
 import { readFileSync } from 'node:fs';
 
@@ -123,6 +123,16 @@ check('the month names are the provider\'s transliteration, not ICU\'s',
 
 check('a day that is not a day is refused rather than guessed at',
   hijriOf('not-a-day') === null && hijriOf(null) === null);
+
+/* Intl does not throw when the calendar is missing — it silently answers with
+   Gregorian, which would fill hijri_date with a Gregorian date wearing a Hijri
+   label. The collector asserts the calendar is really there and says so in the
+   run error if it is not, rather than writing a year of confident nonsense. */
+check('the runtime actually has the Umm al-Qura calendar, and the code checks',
+  HIJRI_CALENDAR_AVAILABLE === true
+  && new Intl.DateTimeFormat('en-u-ca-islamic-umalqura').resolvedOptions().calendar === 'islamic-umalqura');
+check('…and the collector names that as the reason rather than "wrote no day"',
+  /no islamic-umalqura /.test(readFileSync('src/sources/external.js', 'utf8')));
 
 console.log('\nand it converts back, which is what the events collector needs');
 

@@ -24,6 +24,10 @@
        BASE=http://localhost:8099 node bin/live-audit.mjs
        WIN='from=2026-01-01&to=2026-08-22' node bin/live-audit.mjs
 */
+import { readFileSync, readdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 const B = process.env.BASE || 'https://fleet-dashboard-wpeqb.ondigitalocean.app';
 const W = process.env.WIN || 'from=2026-07-23&to=2026-08-22';
 let pass = 0, fail = 0;
@@ -205,40 +209,78 @@ const DETAIL = {
   driver: `id=${encodeURIComponent(someDriver || '')}`,
   vehicle: `plate=${encodeURIComponent(somePlate || '')}`,
 };
-const routes = (await (await fetch(`${B}/api/endpoints`)).text().catch(() => '')) || '';
-const KNOWN = ['/api/kpis','/api/trips/daily','/api/trips/hourly','/api/trips/heatmap','/api/mix','/api/mix/detail',
-  '/api/drivers/leaderboard','/api/drivers/cross-platform','/api/drivers/performance','/api/drivers/directory',
-  '/api/vehicles','/api/vehicles/directory','/api/live','/api/track','/api/map/days','/api/map/journey',
-  '/api/alerts/summary','/api/alerts/by-vehicle','/api/alerts/by-driver','/api/finance/ledger','/api/finance/daily',
-  '/api/unauthorized/summary','/api/unauthorized/list','/api/unauthorized/by-vehicle','/api/unauthorized/daily',
-  '/api/sensor-health','/api/platforms','/api/status','/api/coverage','/api/settings','/api/insights',
-  '/api/insights/summary','/api/compliance/vehicles','/api/compliance/drivers','/api/recommendations',
-  '/api/earnings/components','/api/earnings/tips','/api/tiers/by-vehicle','/api/tiers/mix','/api/product/by-vehicle',
-  '/api/breaks','/api/events','/api/trend/monthly','/api/geo/corridors','/api/settlement/mix',
-  '/api/settlement/cash-exposure','/api/corporate/properties','/api/corporate/leakage','/api/corporate/approach',
-  '/api/roster','/api/roster/states','/api/schema/raw-fields','/api/schema/raw-values','/api/day','/api/slot',
-  '/api/segments','/api/forecast','/api/playbook','/api/retention','/api/capacity','/api/revenue',
-  '/api/probe/results','/api/analyst/findings','/api/analyst/rules','/api/settings/jobs'];
-const broke = [];
-for (const r of KNOWN) {
-  const extra = ARGS[r] ? `&${ARGS[r]}` : (r === '/api/track' || r === '/api/map/journey' ? `&plate=${somePlate}&day=${new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10)}` : '');
-  const { status } = await get(`${r}${extra ? `?${extra.slice(1)}` : ''}`);
+/* One real booking, by the provider's own platform and id: /api/trip answers
+   "platform and id are both required" to anything else, and a 400 read as a
+   pass is the whole failure mode this section is guarding against. */
+const TRIP = await (async () => {
+  const b = (await get(`/api/vehicle/trips?plate=${encodeURIComponent(somePlate || '')}`)).body;
+  const rows = Array.isArray(b) ? b : (b?.rows || b?.trips || []);
+  const t = rows.find((x) => x.platform && x.external_id);
+  return t ? { platform: t.platform, id: t.external_id } : null;
+})();
+/* THE ROUTES THE APP DECLARES, read from the app.
+   ─────────────────────────────────────────────────────────────────────────
+   This was a hand-kept list under a heading that says "every route the app
+   declares", and a hand-kept list of a moving API is a list that quietly stops
+   being every route. Measured today: api/*.js declares 123 GET endpoints and
+   this file named 91 of them. The 32 nobody was asking included /api/reconcile,
+   /api/economics/drivers, /api/compare, /api/optimise, /api/coverage/calendar
+   and /api/money/sources — whole pages whose backend could have started
+   answering 500 without this run saying a word.
+
+   The `/api/endpoints` fetch that used to sit here was the intended fix and
+   never landed: the route does not exist (it answers "no such endpoint"), and
+   the string it returned was assigned to a variable nothing read. So the list
+   is derived the way bin/cap-audit.mjs derives its own — from the source in
+   this working tree, which is the thing being deployed. */
+const SRC = join(dirname(fileURLToPath(import.meta.url)), '..', 'api');
+const declared = [...new Set(
+  ['server.js', ...readdirSync(SRC).filter((f) => f.endsWith('_routes.js'))]
+    .flatMap((f) => [...readFileSync(join(SRC, f), 'utf8')
+      .matchAll(/app\.get\('(\/api\/[^']*)'/g)].map((m) => m[1])))]
+  /* `:id` is a pattern rather than an address, and /api/probe/<provider> reaches
+     out to a provider on request — this run is read-only. /api/probe/results
+     only reads what the nightly pass already stored, so it stays. */
+  .filter((r) => !r.includes(':') && !/^\/api\/probe\/(?!results)/.test(r)).sort();
+
+/* What an endpoint needs before it can answer at all, so a route is exercised
+   rather than audited against its own 400. Same shape as the table in
+   bin/page-audit.mjs, and for the same reason: a refusal read as a pass is how
+   a panel goes unchecked while the run says every route is fine. */
+const day3 = new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+const NEEDS = (r) => {
+  if (r === '/api/trip') return TRIP ? `platform=${encodeURIComponent(TRIP.platform)}&id=${encodeURIComponent(TRIP.id)}` : '';
+  if (r === '/api/segment') return seg ? `plate=${encodeURIComponent(seg.plate)}&at=${encodeURIComponent(seg.started_at)}` : '';
+  if (r.startsWith('/api/corporate/property')) return someProp ? `id=${encodeURIComponent(someProp)}` : '';
+  if (r.startsWith('/api/driver/')) return `${DETAIL.driver}&day=${day3}`;
+  if (r.startsWith('/api/vehicle/')) return `${DETAIL.vehicle}&day=${day3}`;
+  if (r === '/api/performer') return DETAIL.driver;
+  if (r === '/api/track' || r === '/api/map/journey') return `plate=${somePlate}&day=${day3}`;
+  if (ARGS[r]) return ARGS[r];
+  return '';
+};
+const broke = [], unreached = [];
+for (const r of declared) {
+  const first = NEEDS(r);
+  let { status } = await get(`${r}${first ? `?${first}` : ''}`);
+  /* A route that refuses is offered everything this run holds before it is
+     written off — an endpoint ignores the parameters it does not want. */
+  if (status === 400 || status === 404) {
+    const all = [DETAIL.driver, DETAIL.vehicle, `day=${day3}`, 'dow=2&hour=19'].filter(Boolean).join('&');
+    ({ status } = await get(`${r}?${all}`));
+  }
   if (status >= 500) broke.push(`${r} → ${status}`);
-}
-for (const r of ['/api/driver/profile','/api/driver/kpis','/api/driver/daily','/api/driver/trips','/api/driver/custody',
-  '/api/driver/vehicles','/api/driver/quality','/api/driver/earnings','/api/driver/standing','/api/driver/territory',
-  '/api/driver/mix','/api/driver/heatmap']) {
-  const { status } = await get(`${r}?${DETAIL.driver}`);
-  if (status >= 500 || status === 404) broke.push(`${r} → ${status}`);
-}
-for (const r of ['/api/vehicle/profile','/api/vehicle/kpis','/api/vehicle/daily','/api/vehicle/drivers-detail',
-  '/api/vehicle/movement','/api/vehicle/safety','/api/vehicle/mix','/api/vehicle/trips','/api/vehicle/drivers']) {
-  const { status } = await get(`${r}?${DETAIL.vehicle}`);
-  if (status >= 500 || status === 404) broke.push(`${r} → ${status}`);
+  else if (status >= 400) unreached.push(`${r} → ${status}`);
 }
 if (someProp) { const { status } = await get(`/api/corporate/property?id=${encodeURIComponent(someProp)}`); if (status >= 400) broke.push(`/api/corporate/property → ${status}`); }
 if (seg) { const { status } = await get(`/api/segment?plate=${encodeURIComponent(seg.plate)}&at=${encodeURIComponent(seg.started_at)}`); if (status >= 400) broke.push(`/api/segment → ${status}`); }
 check('no route errors or 404s against live data', broke.length === 0, broke.slice(0, 10).join(' | '));
+/* Still refusing after being handed every id this run holds. Not an error —
+   it is an endpoint this run did not manage to exercise, which is a different
+   thing from one that answered. Named rather than counted, because "62 routes
+   walked" reads as coverage and this is the part of it that is not. */
+check(`every one of the ${declared.length} declared routes answered`,
+  unreached.length === 0, unreached.slice(0, 10).join(' | '));
 
 /* ── the pages that reason, reasoned about themselves ───────────────────── */
 {

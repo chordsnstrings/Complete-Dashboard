@@ -31,6 +31,54 @@ const REPORTS = `${UBER_WEB_HOST}/api/vs-sp-reports-management`;
 // "succeeds" with zero rows. Wait the limit out rather than burning the run.
 const CONCURRENCY_HINT = /concurrent|too many|limit|in progress|rate/i;
 
+/* Was that an answer, or a door?
+   ─────────────────────────────────────────────────────────────────────────
+   earnerCall below has classified its responses since 2026-08-26: a request
+   that comes back from a host it was not sent to did not return no data, it
+   was never asked. The REPORT pipeline never learned. It reads
+   `data.status === 'success'` and calls everything else a report the provider
+   declined to generate.
+
+   Measured, not supposed. Production uber/catchup, both fleets, run finished
+   2026-09-01T21:05:47Z: 44 of 44 windows failed, 0 rows written, and the 44
+   split two ways — 37 earner windows said "redirected to auth.uber.com — the
+   session is no longer signed in", and the 7 that go through here (the trip
+   window 2026-08-02..2026-09-01 and all six DRIVER_QUALITY weeks) said, in
+   full,
+
+       generate: "Not Found"
+
+   which names no surface, no session and no host. One event described twice:
+   supplier.uber.com had begun answering 301, a POST does not survive a 301, it
+   degrades to a GET and lands on the login page, and `"Not Found"` is
+   JSON.stringify of that page's body. A reader could only reach that from the
+   OTHER windows' wording. src/auth/uber.js carries the host measurement.
+
+   Both ends of the hop are in the message, and the one that matters is the URL
+   the request was SENT to. A bounce that lands on a login host reads as an
+   expired session whether the session is dead or the endpoint has moved, and
+   that reading is exactly what sent this product to re-capture cookies that
+   were never the problem. "asked supplier.uber.com" is the half that
+   distinguishes them, and it was the half nobody had.
+
+   Consulted only when the envelope the caller expects is absent, so a report
+   that generated is never second-guessed about where its 200 came from —
+   this classifies failures, it does not add a new way to fail. */
+function reportBounce(url, res) {
+  /* Whatever the status code: if Uber answered in the shape it promised, then
+     Uber answered, and its own words beat any reading of them. The reports API
+     puts them at data.meta.details — "endDate is too late", "invalid date
+     range", "permission-denied" — none of which authFailure's generic
+     providerWords() knows how to find, so classifying a refusal that arrived
+     as a 403 would replace the one useful sentence with "the credential was
+     refused". A door has no envelope at all. */
+  if (res?.data?.data?.meta?.details != null || res?.data?.status != null) return null;
+  const bad = authFailure(url, res);
+  if (!bad) return null;
+  const bare = (u) => String(u || '').split('?')[0];
+  return `${bad.reason} — asked ${bare(url)}, answered by ${bare(res?.finalUrl) || 'elsewhere'}`;
+}
+
 async function generateReport(start, end, attempt = 0, reportType = 'REPORT_TYPE_TRIP_ACTIVITY') {
   const body = JSON.stringify({
     orgId: { uuid: { value: org().orgUuid } },
@@ -38,9 +86,15 @@ async function generateReport(start, end, attempt = 0, reportType = 'REPORT_TYPE
     startDate: { value: iso(start) }, endDate: { value: iso(end) },
     childOrgUuids: [{ uuid: { value: org().orgUuid } }],
   });
-  const { data } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`,
-    { method: 'POST', headers: uberWebHeaders(org()), body });
+  const url = `${REPORTS}/GenerateReport?localeCode=en-GB`;
+  const res = await http(url, { method: 'POST', headers: uberWebHeaders(org()), body });
+  const { data } = res;
   if (data.status !== 'success') {
+    /* Before the concurrency retry, because a login page is not a busy slot:
+       waiting 60, 120, 180 and 240 seconds for one would cost ten minutes a
+       window and then report the wrong reason anyway. */
+    const bounced = reportBounce(url, res);
+    if (bounced) throw new Error(`generate: ${bounced}`);
     const detail = JSON.stringify(data?.data?.meta?.details || data);
     if (CONCURRENCY_HINT.test(detail) && attempt < 4) {
       const wait = 60000 * (attempt + 1);
@@ -60,12 +114,20 @@ async function downloadReport(reportId, budgetMs = 600000) {
   const deadline = Date.now() + budgetMs;
   let wait = 4000;
   while (Date.now() < deadline) {
-    const { data } = await http(`${REPORTS}/DownloadReport?localeCode=en-GB`, {
+    const poll = `${REPORTS}/DownloadReport?localeCode=en-GB`;
+    const res = await http(poll, {
       method: 'POST', headers: uberWebHeaders(org()),
       body: JSON.stringify({ orgId: { uuid: { value: org().orgUuid } }, reportId: { uuid: { value: reportId } } }),
     });
+    const { data } = res;
     const url = data?.data?.signedUrl?.value;
     if (url) return url;
+    /* A login page carries no signedUrl and no status, which is precisely the
+       shape of a report still generating — so this loop used to poll a closed
+       door for the whole 600s budget and then blame the provider for being
+       slow. Asked once, answered from somewhere else: stop. */
+    const bounced = reportBounce(poll, res);
+    if (bounced) throw new Error(`download: ${bounced}`);
     const status = JSON.stringify(data?.data?.status || data?.status || '');
     if (/fail|error/i.test(status)) throw new Error(`report ${reportId} failed server-side: ${status.slice(0, 160)}`);
     await sleep(wait);

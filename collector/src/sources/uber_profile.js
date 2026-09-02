@@ -131,7 +131,18 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
   const ids = await driverIdsFor(o);
   if (!ids.length) {
     log.warn(SRC, 'no roster to profile', { fleet: o.fleet });
-    return { drivers: 0, rated: 0, vehicles: 0 };
+    /* `noRoster`, not a bare zero.
+       ─────────────────────────────────────────────────────────────────────
+       This returned { drivers: 0, rated: 0, vehicles: 0 } — no `failed` key —
+       and collect() decided the status with `r.failed ? 'partial' : 'ok'`.
+       An absent key is falsy, so a pass that could not begin, asked nobody and
+       stored nothing recorded itself as a clean run: status ok, and the
+       Data-sources page prints a green "healthy" in the Detail column for any
+       row with no error. The one surface this could happen to is the one it
+       matters most for — driver_platform_state is written by the OAuth REST
+       roster, which 403s for Egari (see src/sources/uber_timeline.js), so an
+       empty roster here is a credential story, not a fleet with no drivers. */
+    return { drivers: 0, rated: 0, vehicles: 0, asked: 0, failed: 0, skipped: 0, noRoster: true };
   }
   const rows = [];
   const cars = new Map();
@@ -146,7 +157,19 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
     if (out.auth) {
       /* A dead cookie is not a fleet of unrated drivers. Stop the pass and say
          so, rather than writing 160 nulls that read as an answer. */
-      await noteCredential(pool, { provider: 'uber', fleet: o.fleet,
+      /* provider SRC ('uber_profile'), not 'uber'.
+         ─────────────────────────────────────────────────────────────────────
+         credential_state is keyed (provider, fleet_id, credential), so writing
+         'uber' here put this refusal in the row src/sources/uber.js rewrites
+         every half hour — measured on production /api/auth 2026-09-02, that
+         row reads surface "supplier graphql", the half-hourly writer's, not
+         this one's. A GetDriver refusal recorded on a Monday was green again
+         by 00:50. And /api/auth ages a credential against the collection_run
+         whose SOURCE matches the PROVIDER, so under 'uber' this surface's
+         staleness was measured against a feed that runs every thirty minutes.
+         src/sources/uber_fleet.js already writes under its own provider name
+         with this same cookie. */
+      await noteCredential(pool, { provider: SRC, fleet: o.fleet,
         credential: credOf(o), state: 'expired', detail: out.err,
         surface: 'supplier graphql GetDriver' });
       throw new Error(`profile ${o.fleet}: ${out.err}`);
@@ -205,7 +228,11 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
   }
   log.info(SRC, 'profiles', { fleet: o.fleet, asked: ids.length - skipped, stored: rows.length,
     rated, vehicles: cars.size, failed, skipped });
-  return { drivers: rows.length, rated, vehicles: cars.size, failed, skipped };
+  /* `asked` travels with the counts. Without it collect() cannot tell "three
+     drivers refused out of three hundred" from "three out of three", and those
+     are a blip and a dead surface. */
+  return { drivers: rows.length, rated, vehicles: cars.size, asked: ids.length - skipped,
+    failed, skipped };
 }
 
 export async function collect({ mode = 'profile', fleet = null, checkpoint = null, onStep = null } = {}) {
@@ -214,9 +241,44 @@ export async function collect({ mode = 'profile', fleet = null, checkpoint = nul
     try {
       const r = await pullOrg(o, { checkpoint, onStep });
       any += r.drivers;
-      await logRun({ source: SRC, fleet_id: o.fleet, mode, status: r.failed ? 'partial' : 'ok',
-        rows_written: r.drivers,
-        error: r.failed ? `${r.failed} driver(s) refused by the provider` : null });
+      /* ok | partial | error, decided on how much of the pass survived.
+         ─────────────────────────────────────────────────────────────────────
+         Two things were wrong with `r.failed ? 'partial' : 'ok'`.
+
+         A pass with no roster (above) fell to 'ok'. And a pass in which the
+         provider refused EVERY driver fell to 'partial' with rows_written 0 —
+         the exact shape src/db.js's logRun refuses to allow a chunked source,
+         in its own words: "one that failed on ALL of them is not 'partial'
+         either — there is no part". The Data-sources page paints partial amber
+         and error red, so a surface that answered for nobody wore the colour
+         of a run that mostly worked.
+
+         Live reading this corrects: /api/status on 2026-09-02 showed
+         uber_profile ecosine/egari 'ok', 113 and 43 rows, 46 h old. Those are
+         real numbers from a real pass (job 34, 31 Aug 13:27) — the point is
+         that nothing in that row shape could have said otherwise if they had
+         not been. */
+      const allRefused = r.asked > 0 && r.failed === r.asked;
+      const status = (r.noRoster || allRefused) ? 'error' : (r.failed ? 'partial' : 'ok');
+      const error = r.noRoster
+        ? `no Uber roster for ${o.fleet} to profile — driver_platform_state names no driver `
+          + 'for this fleet, so this pass asked nobody'
+        : (r.failed ? `${r.failed} of ${r.asked} driver(s) refused by the provider` : null);
+      await logRun({ source: SRC, fleet_id: o.fleet, mode, status,
+        rows_written: r.drivers, error });
+      /* The green half, which did not exist.
+         ─────────────────────────────────────────────────────────────────────
+         This module wrote credential_state only from the `out.auth` branch in
+         pullOrg — a refusal and never a success — so once the row went red
+         nothing this surface could do would clear it, and replacing the cookie
+         would leave the banner red until some other surface happened to write
+         the same key. src/auth_state.js states the rule for the REST surfaces:
+         "a banner that can only ever go red never goes green again". Any
+         answered driver is proof the session authenticated. */
+      if (r.asked > 0 && r.failed < r.asked) {
+        await noteCredential(pool, { provider: SRC, fleet: o.fleet, credential: credOf(o),
+          state: 'ok', detail: null, surface: 'supplier graphql GetDriver' });
+      }
     } catch (e) {
       await logRun({ source: SRC, fleet_id: o.fleet, mode, status: 'error', error: String(e).slice(0, 400) });
       log.error(SRC, 'failed', { fleet: o.fleet, err: String(e).slice(0, 200) });

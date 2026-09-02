@@ -27,6 +27,28 @@ import { uberOrgs } from './uber.js';
 import { noteCredential } from '../auth_state.js';
 
 const SRC = 'uber';
+/* The name this surface answers to in collection_run AND in credential_state,
+   and they have to be the same string.
+   ─────────────────────────────────────────────────────────────────────────
+   credential_state is keyed (provider, fleet_id, credential) — sql/schema_v33
+   — and this module used to write provider 'uber', which is the row
+   src/sources/uber.js rewrites on its half-hourly incremental. Measured on
+   production /api/auth 2026-09-02 11:30 UTC: the ecosine UBER_WEB_COOKIE row
+   reads surface "supplier graphql", not "supplier chronicle timeline" — the
+   half-hourly writer had already erased this one. So a chronicle session that
+   died on Thursday went back to green within thirty minutes of dying, every
+   time, and could never be reported.
+
+   Worse, /api/auth measures a credential's stall as the age of the newest
+   collection_run whose SOURCE equals the credential's PROVIDER. Under
+   'uber' that clock read 0.6 h while this surface's own last roster sweep was
+   148 h old. Under 'uber_timeline' it reads the timeline's own runs, which is
+   the only way the banner can ever say this feed has stopped.
+
+   src/sources/uber_fleet.js already does exactly this with the same cookie —
+   /api/auth carries a separate uber_fleet row for it — so this is the pattern
+   the codebase already has, not a new one. */
+const RUN_SRC = 'uber_timeline';
 const GQL = `${UBER_WEB_HOST}/chronicle/graphql`;
 
 /* Uber's own limit, not a chosen one. 31 days is refused with
@@ -193,25 +215,52 @@ export async function collect({ from, to, mode, roster = false }) {
        that stayed offline. Recorded as a credential failure so the banner says
        so, rather than the panel quietly drawing a month of nothing. */
     const asked = drivers.length * wins.length;
+    const cred = o.fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI';
     if (asked && failed === asked) {
       await noteCredential(pool, {
-        provider: SRC, fleet: o.fleet,
-        credential: o.fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI',
+        provider: RUN_SRC, fleet: o.fleet, credential: cred,
         state: 'expired', detail: `driver timeline refused for every driver — ${firstErr}`,
         surface: 'supplier chronicle timeline',
       });
-    } else if (rows) {
+    } else if (asked) {
+      /* Any answered ask is proof the session authenticated, so the green half
+         keys on that rather than on rows. It used to key on `rows`, which meant
+         a window in which every driver was genuinely idle — an answered request
+         carrying no events — left the row wherever the last failure had put it.
+         A banner that can only ever go red never goes green again. */
       await noteCredential(pool, {
-        provider: SRC, fleet: o.fleet,
-        credential: o.fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI',
+        provider: RUN_SRC, fleet: o.fleet, credential: cred,
         state: 'ok', detail: null, surface: 'supplier chronicle timeline',
       });
     }
     log.info(SRC, 'driver timeline', { fleet: o.fleet, drivers: drivers.length, windows: wins.length, rows, empty, failed });
-    await logRun({ source: `${SRC}_timeline`, fleet_id: o.fleet, mode,
+    /* ok | partial | error, and nothing else.
+       ─────────────────────────────────────────────────────────────────────
+       This reported the literal string 'failed' when every ask was refused and
+       'ok' for everything else, and both halves were wrong.
+
+       'failed' is not a word the rest of the product knows. The Data-sources
+       page maps { ok: 'ok', partial: 'warn', error: 'bad' } and falls through
+       to 'bad', so it happened to paint red; src/db.js's logRun, which decides
+       the same question for every chunked source, calls that case 'error'.
+       One vocabulary, and this is now in it.
+
+       The 'ok' was the expensive half. A stale supplier session does not
+       refuse every driver at once — it keeps answering for what it has warm —
+       so the ordinary shape of this surface dying is most drivers refused and
+       a few answered, and that reported status 'ok' with a green "healthy" in
+       the Detail column of the page whose subject is which collector has
+       stopped. The error string carried the provider's message and nothing
+       about how much of the run it applied to, so 3-of-4 refused and 1-of-400
+       refused read identically. */
+    const someFailed = failed > 0 && failed < asked;
+    await logRun({ source: RUN_SRC, fleet_id: o.fleet, mode,
       window_start: from, window_end: to,
-      status: asked && failed === asked ? 'failed' : 'ok',
-      rows_written: rows, error: firstErr });
+      status: asked && failed === asked ? 'error' : (someFailed ? 'partial' : 'ok'),
+      rows_written: rows,
+      error: failed
+        ? `${failed} of ${asked} driver-window request(s) refused — ${firstErr}`
+        : null });
     grand += rows;
   }
   return grand;

@@ -36,7 +36,6 @@
      → "Code: invalid-argument, Message: endDate is too late"
    and that must keep arriving verbatim. A refusal is the provider talking; a
    bounce is the provider never having been asked. */
-import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -110,6 +109,17 @@ check('the provider’s own words survive', /endDate is too late/.test(refused.e
 check('and a refusal is not dressed up as a redirect',
   !/redirected|auth\.uber\.com/.test(refused.error || ''), refused.error);
 
+/* A refusal can arrive as a 4xx and still be a refusal. Measured on
+   2026-08-27 (test/uber_per_fleet_oauth.test.mjs' header): the Egari session
+   generating a report for the Ecosine org is answered `permission-denied`.
+   Reading that as "the credential was refused" would replace the one sentence
+   that says WHICH org the session may not see. */
+stubFetch({ status: 403, url: 'https://fleethub.uber.com/api/vs-sp-reports-management/GenerateReport',
+  body: JSON.stringify({ status: 'error', data: { meta: { details: 'permission-denied' } } }) });
+const denied = await askOneWindow();
+check('a refusal that arrives as a 403 keeps the words that name the org',
+  /permission-denied/.test(denied.error || ''), denied.error);
+
 console.log('\nthe polling loop does not wait ten minutes for a login page');
 
 /* DownloadReport is polled for up to 600s. A login page carries no signedUrl
@@ -140,16 +150,38 @@ check('and says so as a download, not as a report that never finished',
   /auth\.uber\.com/.test(stalled.error || '') && !/timed out|still polling/.test(stalled.error || ''),
   stalled.error);
 
-globalThis.fetch = realFetch;
-
 console.log('\nthe rule the report path now shares with the earnings path');
 
-const body = readFileSync('src/sources/uber.js', 'utf8');
-check('a successful envelope is never second-guessed about its host',
-  /data\.status !== 'success'[\s\S]{0,220}reportBounce\(/.test(body),
-  'classifying first would let a quirk of where a 200 came from throw away a report that generated');
-check('both report calls are classified, not only the first',
-  (body.match(/reportBounce\(/g) || []).length >= 3, 'generate, download, and the helper itself');
+/* Classification answers a FAILURE; it must never be able to invent one.
+   A report that generated and a signed URL that came back are the envelope
+   the caller asked for, and where the 200 was served from is then not this
+   code's business — a CDN hop or a regional host must not throw away a report
+   that is sitting there ready to download. So the envelope is read first and
+   the host only when it is missing. */
+pool.query = async () => ({ rows: [] });
+let step = 0;
+globalThis.fetch = async (u, opts = {}) => {
+  step++;
+  const from = (url, text) => ({ status: 200, ok: true, url, redirected: true,
+    headers: new Map(), text: async () => text });
+  if (step === 1) {
+    return from('https://fleethub-edge.uber.com/api/vs-sp-reports-management/GenerateReport',
+      JSON.stringify({ status: 'success', data: { reportId: { uuid: { value: 'r1' } } } }));
+  }
+  if (step === 2) {
+    return from('https://fleethub-edge.uber.com/api/vs-sp-reports-management/DownloadReport',
+      JSON.stringify({ status: 'success', data: { signedUrl: { value: 'https://files.example/r1.csv' } } }));
+  }
+  return from('https://files.example/r1.csv', 'Trip UUID,Driver UUID,Number plate\n');
+};
+const served = await askOneWindow();
+check('a report that generated is not thrown away over where its 200 came from',
+  !served.error, served.error);
+check('and the window is measured, which is the whole point of not throwing it away',
+  served.uber_rows_in_window === 0 && typeof served.took_ms === 'number',
+  JSON.stringify(served).slice(0, 200));
+
+globalThis.fetch = realFetch;
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

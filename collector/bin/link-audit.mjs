@@ -29,13 +29,27 @@ const sub = (r) => r
   .replace('drv-0', '0a6eb545-aa3b-4441-882c-34204df3d451')
   .replace('drv-9', '0a6eb545-aa3b-4441-882c-34204df3d451')
   .replace('L45235', 'L36397').replace('h-palm', '673dc94395448356a777f1ec');
+/* ONLY, the same lever bin/numbers-audit.mjs offers. A hundred and sixteen
+   routes at three and a half seconds each is eight minutes, which is the right
+   cost for a full pass and the wrong one for checking a single page — or for
+   proving this tool still catches what it says it catches. */
+const WALK = process.env.ONLY ? process.env.ONLY.split(',').map((s) => s.trim()) : ROUTES;
 let n = 0, bad = 0;
-for (const r0 of ROUTES) {
+/* A page that would not load is NOT a page with no bad links.
+   ─────────────────────────────────────────────────────────────────────────
+   The catch below used to `continue` in silence. Measured while proving this
+   tool still works: pointed at a copy of the front-end served with the wrong
+   content-type, every navigation failed with "Download is starting", and this
+   printed "0 routes walked, 0 with a malformed link" and exited 0 — a clean
+   bill of health for a hundred and sixteen pages it never opened. Every failed
+   load is now named and counted, and a run that opened nothing fails. */
+const unloadable = [];
+for (const r0 of WALK) {
   const r = sub(r0);
   try {
     await page.goto(`${BASE}/#${r}`, { waitUntil: 'domcontentloaded', timeout: 45000 });
     await page.waitForTimeout(3500);
-  } catch { continue; }
+  } catch (e) { unloadable.push(`${r0} — ${String(e.message).split('\n')[0].slice(0, 90)}`); continue; }
   const hits = await page.evaluate((re) => {
     const rx = new RegExp(re);
     return [...new Set([...document.querySelectorAll('a[href]')]
@@ -45,6 +59,10 @@ for (const r0 of ROUTES) {
   n += 1;
   if (hits.length) { bad += 1; console.log(`\n#${r0}`); hits.forEach((h) => console.log('   ', h)); }
 }
-console.log(`\n${n} routes walked, ${bad} with a malformed link`);
+if (unloadable.length) {
+  console.log(`\n${unloadable.length} route(s) never opened, so nothing was checked on them:`);
+  unloadable.slice(0, 10).forEach((u) => console.log(`   ✗ #${u}`));
+}
+console.log(`\n${n} of ${WALK.length} routes walked, ${bad} with a malformed link`);
 await b.close();
-process.exit(bad ? 1 : 0);
+process.exit(bad || unloadable.length || !n ? 1 : 0);

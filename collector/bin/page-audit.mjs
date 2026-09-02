@@ -47,16 +47,32 @@ const modules = Object.fromEntries(readdirSync(PUB)
   .map((f) => [f.replace('.js', ''), readFileSync(`${PUB}/${f}`, 'utf8')]));
 const app = modules.app;
 
-// Every view the router knows about.
-const VIEWS = [...app.matchAll(/^V\.([a-z]+) = /gm)].map((m) => m[1]);
+/* Every view the router knows about — BOTH ways one is declared.
+   ─────────────────────────────────────────────────────────────────────────
+   `V.overview = ` is the common form and was the only form this matched. A
+   view whose name is not a bare identifier has to be declared with a subscript,
+   and two are: V['top-performers'] and V['low-performers']. Both are real
+   pages, both are in test/routes_list.mjs, both call endpoints through
+   renderPerformers — and neither has ever been audited by this tool, which
+   reported "45 views" and read as complete coverage. Measured against the
+   product's own router: 47 views exist. */
+const DECL = /^V(?:\.([A-Za-z0-9_$]+)|\['([^']+)'\]) = /gm;
+const VIEWS = [...app.matchAll(DECL)].map((m) => m[1] || m[2]);
+const declOf = (view) => {
+  const at = app.indexOf(`V.${view} = `);
+  return at !== -1 ? at : app.indexOf(`V['${view}'] = `);
+};
 
 /* The source that backs one view: its slice of app.js, plus the module it
    delegates to if there is one. A view whose panels live in another file would
    otherwise look like it calls nothing. */
 function sourceFor(view) {
-  const start = app.indexOf(`V.${view} = `);
+  const start = declOf(view);
   const rest = app.slice(start + 1);
-  const nextAt = rest.search(/^V\.[a-z]+ = /m);
+  /* The NEXT declaration in either form, so a subscript-declared view does not
+     swallow the rest of the file — and so its neighbour's endpoints are not
+     credited to it. */
+  const nextAt = rest.search(/^V(?:\.[A-Za-z0-9_$]+|\['[^']+'\]) = /m);
   const slice = nextAt === -1 ? app.slice(start) : app.slice(start, start + 1 + nextAt);
   /* Resolved by WHO EXPORTS the function, not by guessing a filename from it.
      renderSegment lives in segments.js and renderProperty in corporate.js, so a
@@ -457,10 +473,10 @@ if (NARROW !== WIDE) {
     return nextAt === -1 ? srcText.slice(m.index) : srcText.slice(m.index, m.index + 1 + nextAt);
   };
   const runSourceFor = (view) => {
-    const start = app.indexOf(`V.${view} = `);
+    const start = declOf(view);
     if (start === -1) return '';
     const rest = app.slice(start + 1);
-    const nextAt = rest.search(/^V\.[a-z]+ = /m);
+    const nextAt = rest.search(/^V(?:\.[A-Za-z0-9_$]+|\['[^']+'\]) = /m);
     const slice = nextAt === -1 ? app.slice(start) : app.slice(start, start + 1 + nextAt);
     const parts = [slice];
     for (const m of slice.matchAll(/\b(render[A-Z][a-zA-Z]*)\(/g)) {

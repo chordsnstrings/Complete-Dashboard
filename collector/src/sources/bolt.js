@@ -1,5 +1,8 @@
 // Bolt collector.
 //  FI API (client_credentials)  : Egari roster only — getDrivers / getVehicles. No trips/earnings.
+//                                 "Egari only" is not a design choice, it is a measured refusal:
+//                                 this OAuth client is not entitled to Ecosine's company_id 142868.
+//                                 See the fiRefusal comment below for the probe that shows it.
 //  Fleet Owner Portal (refresh) : trips + earnings for BOTH fleets — GUARDED on BOLT_REFRESH_TOKEN.
 //                                 Refresh tokens last ~7 days; when expired the portal path is skipped
 //                                 and the supervisor must re-capture one.
@@ -46,10 +49,88 @@ export function rosterWindow(from, to) {
   return [start > earliest ? start : earliest, end];
 }
 
+/* ── the FI gateway refuses a COMPANY, not a credential ───────────────────
+   `code: 503, message: NOT_AUTHORIZED, error_hint: COMPANIES_NOT_ALLOWED` is a
+   strange-looking triple, and the strangeness is the answer. The 503 is not an
+   HTTP status: the HTTP status is 200 and 503 is the number Bolt puts in its
+   own JSON `code` field. So it is not an outage, and there is nothing to wait
+   out or retry.
+
+   Which credential and which company was measured rather than guessed.
+   Production /api/probe/results, one pass at 2026-09-02T10:52:23Z, with ONE
+   set of client credentials minted by one call to fiToken():
+
+     egari:getDrivers    company_id 142897 → http 200, code 0, 50 driver rows
+     ecosine:getDrivers  company_id 142868 → http 200, code 503,
+                                             NOT_AUTHORIZED,
+                                             COMPANIES_NOT_ALLOWED
+
+   Two calls 200ms apart carrying the same bearer token. The token therefore
+   authenticates, the gateway is up, and the only thing that differs between
+   the answer and the refusal is the company id — so the client credentials are
+   being asked for a company they are not entitled to. The id is not a typo
+   either: the portal half of this same collector authenticates company_id
+   142868 for user 173999 on every run, and "portal ecosine" is not among the
+   failures /api/status lists.
+
+   None of that reached the operator. The run said
+
+     "FI roster ecosine: code=503 NOT_AUTHORIZED hint=COMPANIES_NOT_ALLOWED"
+
+   which names neither the credential that was refused nor the company it was
+   refused for, so it reads like Bolt having a bad minute — and the obvious
+   remedy it suggests, re-pasting BOLT_CLIENT_SECRET, cannot change the
+   answer. */
+const FI_CREDENTIAL = 'BOLT_CLIENT_ID';
+const FI_SURFACE = 'fleet-integration getDrivers';
+const NOT_ENTITLED = /COMPANIES?_NOT_ALLOWED/i;
+
+/* One refusal, read. `allowed` is the companies that ANSWERED in the same
+   pass on the same token — the evidence that separates "this credential is
+   broken" from "this credential does not cover this company", which is the
+   distinction the whole message turns on.
+
+   Exported so the reading can be checked against Bolt's real payloads without
+   standing up the gateway. */
+export function fiRefusal(company, data, allowed = []) {
+  const why = [data?.message, data?.error_hint && `hint=${data.error_hint}`]
+    .filter(Boolean).join(' ') || 'no message';
+  if (!NOT_ENTITLED.test(`${data?.error_hint ?? ''} ${data?.message ?? ''}`)) {
+    /* Anything else — the 498806 INVALID_DATE_RANGE this file already carries a
+       fix for, a validation error, a genuine outage — is not an authorization
+       verdict, so it names no credential and writes no credential row. A panel
+       that goes red for a bad date range is a panel nobody believes. The
+       company id is still named, because a refusal that does not say what was
+       asked for cannot be reproduced. */
+    return { fail: `FI roster ${company.fleet} (company_id ${company.companyId}): code=${data?.code} ${why}`,
+      credential: null };
+  }
+  const others = allowed.filter((c) => c.companyId !== company.companyId);
+  // Kept short on purpose: credential_state.detail is truncated at 240 chars by
+  // noteCredential, and a remedy past the cut is a remedy nobody reads.
+  const proof = others.length
+    ? ` The same token read ${others.map((c) => `${c.companyId} (${c.fleet})`).join(', ')}, so the secret is fine.`
+    : '';
+  return {
+    credential: FI_CREDENTIAL,
+    state: 'invalid',
+    fail: `FI roster ${company.fleet}: ${FI_CREDENTIAL} is not entitled to company_id ${company.companyId}`
+      + ` — code=${data?.code} ${why}`,
+    detail: `${FI_CREDENTIAL} is not entitled to company_id ${company.companyId} (${company.fleet}): ${why}.`
+      + `${proof} Add ${company.companyId} to this fleet-integration app in the Bolt portal.`,
+  };
+}
+
 async function pullFiRoster(from, to, fails) {
   const token = await fiToken();
   let total = 0;
   const [rFrom, rTo] = rosterWindow(from, to);
+  /* Gathered, then reported — so a refusal can be described using what the
+     OTHER company did in the same pass. Reporting inside the loop could only
+     ever say that about companies earlier in config order, and the config
+     order is not something a message should depend on. */
+  const allowed = [];
+  const refused = [];
   for (const c of config.bolt.companies) {
     const body = JSON.stringify({ company_id: c.companyId, offset: 0, limit: 200, start_ts: Number(unixS(rFrom)), end_ts: Number(unixS(rTo)) });
     const { data } = await http(`${config.bolt.fiGateway}/getDrivers`,
@@ -59,12 +140,10 @@ async function pullFiRoster(from, to, fails) {
        gateway's. Two different codes are two different problems, and the
        message beside them is what says which. */
     if (data?.code !== 0) {
-      const why = [data?.message, data?.error_hint && `hint=${data.error_hint}`].filter(Boolean).join(' ')
-        || 'no message';
-      log.warn(SRC, `FI getDrivers rejected for ${c.fleet} — ${why}`, { code: data?.code, company_id: c.companyId });
-      fails.push(`FI roster ${c.fleet}: code=${data?.code} ${why}`);
+      refused.push({ c, data });
       continue;
     }
+    allowed.push(c);
     const rows = (data.data?.drivers || []).map((d) => ({
       platform: SRC, fleet_id: c.fleet, driver_ext_id: d.driver_uuid,
       driver_name: `${d.first_name || ''} ${d.last_name || ''}`.trim(),
@@ -91,6 +170,30 @@ async function pullFiRoster(from, to, fails) {
         has_cash_payment: d.has_cash_payment, eligible_for_scheduled_ride: d.eligible_for_scheduled_ride },
     })).filter((r) => r.driver_ext_id && r.driver_ext_id !== 'undefined');
     if (roster.length) await upsertMany('driver_platform_state', roster, ['platform', 'driver_ext_id']);
+  }
+
+  for (const { c, data } of refused) {
+    const r = fiRefusal(c, data, allowed);
+    log.warn(SRC, `FI getDrivers rejected for ${c.fleet} — ${data?.message || 'no message'}`
+      + `${data?.error_hint ? ` hint=${data.error_hint}` : ''}`,
+      { code: data?.code, company_id: c.companyId,
+        credential: r.credential || 'none — this is not an authorization verdict',
+        // The comparison that makes the refusal readable: the companies this
+        // same bearer token DID read, in this same pass.
+        companies_this_credential_did_read: allowed.map((a) => a.companyId) });
+    fails.push(r.fail);
+    if (r.credential) {
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: r.credential,
+        state: r.state, surface: FI_SURFACE, detail: r.detail });
+    }
+  }
+  /* And the fleets that DID answer, recorded green. auth_state.js's own note:
+     "a banner that can only ever go red never goes green again" — and without
+     this the panel could never say that the FI client works for Egari, which
+     is half of what makes the Ecosine refusal legible. */
+  for (const c of allowed) {
+    await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: FI_CREDENTIAL,
+      state: 'ok', surface: FI_SURFACE, detail: null });
   }
   return total;
 }
@@ -132,15 +235,64 @@ export function readRefreshToken(tok) {
   };
 }
 
+// Which fleet a portal owner id belongs to, by the same table the collector
+// collects against — so a message cannot name a fleet the config does not have.
+const fleetOfOwner = (id) =>
+  (config.bolt.companies || []).find((c) => String(c.userId) === String(id))?.fleet || null;
+
+/* ── a refresh token belongs to ONE owner, and cannot be lent to the other ──
+   Measured, not inferred. The token the Egari path has been presenting is the
+   one test/credentials.test.mjs keeps as its REAL fixture, and its payload
+   reads `data.fleet_owner_id: 173999`, `exp: 1787834531`. 1787834531 is
+   2026-08-27T12:42:11Z — the exact instant /api/status has been printing in
+   "portal egari: refresh token expired 2026-08-27T12:42:11.000Z". 173999 is
+   ECOSINE's owner in config.bolt.companies; Egari's is 174036. So Egari has
+   been handed Ecosine's token, by the `|| config.bolt.refreshToken` fallback
+   above, because BOLT_REFRESH_TOKEN_EGARI has never been set.
+
+   The owner is checked BEFORE the expiry, and the order is the fix rather than
+   a detail of it. Both facts are true of this token, only one of them is
+   actionable, and the run has been printing the wrong one: "re-capture from
+   the portal" sends an operator to a portal session signed in as 173999, which
+   produces another Ecosine token that Egari refuses identically. An operator
+   acts on the first sentence they are given, so it has to be the sentence that
+   can work.
+
+   And a token this function can already read as the wrong fleet's is not sent
+   anywhere. Today's is also expired, so the expiry guard happens to spare the
+   request — but for the whole week before 2026-08-27 it did not, and every
+   cycle spent one getAccessToken call on company_id 142897 to be told no. That
+   is measured: with the same token given a live `exp`, test/bolt_refusals
+   recorded getAccessToken sent for 142897 before this guard existed. Nothing
+   about an owner claim needs the network to read.
+
+   (Whether the portal ROTATES a refresh token it then refuses is not something
+   this deployment can observe from outside, so it is not claimed here — but if
+   it does, the successor would have been written to BOLT_REFRESH_TOKEN_EGARI
+   and Ecosine's live credential spent to fill the wrong slot. Not making the
+   call removes the question.) */
+
 /* Exchange, and keep the successor. Returns { at, err } — never throws, because
    one fleet's dead token must not cost us the other fleet's trips. */
-async function portalToken(fleet, companyId) {
+async function portalToken(company) {
+  const { fleet, companyId, userId } = company;
   const rt = refreshTokenFor(fleet);
   if (!rt) return { at: null, err: 'no refresh token configured' };
 
   const meta = readRefreshToken(rt);
+  /* String-compared: a settings value that arrives as "174036" and a JWT claim
+     that arrives as 174036 are the same owner, and a strict !== here would
+     switch off a fleet that is working. */
+  if (meta && meta.fleet_owner_id != null && userId != null
+      && String(meta.fleet_owner_id) !== String(userId)) {
+    const theirs = fleetOfOwner(meta.fleet_owner_id);
+    return { at: null, meta, wrongOwner: true,
+      err: `refresh token is owner ${meta.fleet_owner_id}'s${theirs ? ` (${theirs})` : ''},`
+        + ` not owner ${userId}'s — not asked, it cannot work;`
+        + ` set ${RT_KEY(fleet)} from a portal session signed in as ${userId}` };
+  }
   if (meta?.expired) {
-    return { at: null, err: `refresh token expired ${meta.expires_at} — re-capture from the portal` };
+    return { at: null, meta, err: `refresh token expired ${meta.expires_at} — re-capture from the portal` };
   }
 
   const { data } = await http(`${config.bolt.portalBase}/getAccessToken?language=en-us&version=FO.3.856&brand=bolt`, {
@@ -196,7 +348,7 @@ async function pullPortalTrips(from, to, fails) {
       continue;
     }
 
-    const { at, err, meta } = await portalToken(c.fleet, c.companyId);
+    const { at, err, meta, wrongOwner } = await portalToken(c);
     if (!at) {
       const m = meta || readRefreshToken(rt);
       /* The owner the token was issued to, next to the fleet it is being used
@@ -206,8 +358,14 @@ async function pullPortalTrips(from, to, fails) {
         company_id: c.companyId,
         token_owner: m?.fleet_owner_id ?? 'unreadable',
         expected_owner: c.userId,
-        owner_matches: m?.fleet_owner_id == null ? null : m.fleet_owner_id === c.userId,
+        // String-compared, like the guard in portalToken: a strict === between
+        // a settings string and a JWT number would report a working token as
+        // the wrong fleet's.
+        owner_matches: m?.fleet_owner_id == null ? null : String(m.fleet_owner_id) === String(c.userId),
         expires_at: m?.expires_at || 'unknown',
+        // So the log says outright that no request was spent, rather than
+        // leaving a reader to infer it from the absence of a response line.
+        asked: !wrongOwner,
       });
       fails.push(`portal ${c.fleet}: ${err}`);
       /* Bolt refresh tokens last about seven days, so this is the routine
@@ -217,8 +375,14 @@ async function pullPortalTrips(from, to, fails) {
          because re-pasting cannot fix a token minted for the other fleet. */
       await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
         state: 'invalid', surface: 'orderHistory',
-        detail: m?.fleet_owner_id != null && m.fleet_owner_id !== c.userId
-          ? `the token belongs to owner ${m.fleet_owner_id}, not ${c.userId} — it is the wrong fleet's token, not an expired one`
+        /* The remedy is part of the sentence now. "It is the wrong fleet's
+           token" told an operator what NOT to do and left them without
+           anything to do instead — and the thing to do is not guessable: it is
+           a different portal login, and a differently-named setting. */
+        detail: m?.fleet_owner_id != null && String(m.fleet_owner_id) !== String(c.userId)
+          ? `the token belongs to owner ${m.fleet_owner_id}${fleetOfOwner(m.fleet_owner_id) ? ` (${fleetOfOwner(m.fleet_owner_id)})` : ''},`
+            + ` not ${c.userId} — it is the wrong fleet's token, not an expired one.`
+            + ` Capture ${RT_KEY(c.fleet)} from a Bolt portal session signed in as owner ${c.userId}.`
           : `${String(err).slice(0, 150)}${m?.expires_at ? ` (expired ${m.expires_at})` : ''}` });
       continue;
     }

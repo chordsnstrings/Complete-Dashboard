@@ -27,6 +27,7 @@
        node bin/live-ui.mjs &
        node bin/numbers-audit.mjs
        ONLY=reconcile,drivers node bin/numbers-audit.mjs
+       EXPLAIN=1 node bin/numbers-audit.mjs     # …and why a page said nothing
 */
 import { launchChromium } from '../test/browser.mjs';
 import { ROUTES } from '../test/routes_list.mjs';
@@ -94,14 +95,34 @@ const big = (v) => {
    fetches the whole asset ledger for a tab it is not currently showing. A
    harness that cannot tell "not rendered" from "rendered wrong" reports the
    product as broken and gets switched off. */
+/* EVERY name a row could be drawn under, not the first one on this list.
+   ─────────────────────────────────────────────────────────────────────────
+   This used to return one identity: the first key present, with `plate` at the
+   head of the list. Which is right for a vehicle row and wrong for a driver
+   row that happens to name the car — and /api/drivers/directory names the car,
+   under "Usual vehicle". So every row of that endpoint was identified as a
+   PLATE while the table it is drawn in leads with the person's name, no row
+   ever matched, and the figure was skipped as "not drawn here".
+
+   Measured on #drivers against the live API, with every figure over a thousand
+   on the page deliberately multiplied by three: 488 payload figures, three
+   tables, 395 rows on screen — and this audit reported no findings at all. It
+   had not been checking that page for some time; it had been failing to find
+   the rows.
+
+   So a row offers every identity it carries, in this order, and the matcher
+   below takes the first that names a row the page is actually showing. A
+   candidate that matches nothing costs nothing; the one that matches is the
+   one the table is keyed on. */
 const ID_KEYS = ['plate', 'driver_name', 'name', 'm', 'month', 'day', 'area', 'place',
   'platform', 'category', 'label', 'source', 'partner_name', 'property', 'from_area'];
-const identityOf = (row) => {
+const identitiesOf = (row) => {
+  const out = [];
   for (const k of ID_KEYS) {
     const v = row[k];
-    if (typeof v === 'string' && v.trim().length > 1) return v.trim();
+    if (typeof v === 'string' && v.trim().length > 1 && !out.includes(v.trim())) out.push(v.trim());
   }
-  return null;
+  return out;
 };
 
 /* Every (identity, figure) pair in a payload, from the lists inside it. */
@@ -118,18 +139,24 @@ function rowFigures(o, out = [], where = '') {
     const rowsWithId = new Map();
     for (const r of slice) {
       if (!r || typeof r !== 'object') continue;
-      const id = identityOf(r);
-      if (id) rowsWithId.set(id, (rowsWithId.get(id) || 0) + 1);
+      for (const id of identitiesOf(r)) rowsWithId.set(id, (rowsWithId.get(id) || 0) + 1);
     }
     slice.forEach((r) => {
       if (!r || typeof r !== 'object') return;
-      const id = identityOf(r);
-      if (!id) return;
+      const ids = identitiesOf(r);
+      if (!ids.length) return;
       const siblings = Object.keys(r);
       for (const [k, v] of Object.entries(r)) {
         if (!isNum(v)) continue;
         const n = big(v);
-        if (n != null) out.push({ id, key: k, n, where, siblings, rows: rowsWithId.get(id) || 1 });
+        if (n != null) {
+          out.push({ id: ids[0], ids, key: k, n, where, siblings,
+            /* per identity, because "how many payload rows share this name"
+               has a different answer for the person and for the car they
+               drive, and the guard below has to ask about the one the table
+               is actually keyed on. */
+            rowsBy: Object.fromEntries(ids.map((x) => [x, rowsWithId.get(x) || 1])) });
+        }
       }
     });
     return out;
@@ -327,12 +354,14 @@ for (const route of routes) {
            per row costs nothing worth bounding. */
         for (const r of o.slice(0, 5000)) {
           if (!r || typeof r !== 'object') continue;
-          const id = identityOf(r);
-          if (!id) continue;
-          const k = `${url}|${id}`;
-          const set = keysAt.get(k) || new Set();
-          for (const [kk, vv] of Object.entries(r)) if (isNum(vv)) set.add(kk);
-          keysAt.set(k, set);
+          /* Under every name the row could be drawn as, for the same reason
+             identitiesOf returns them all: the table decides which of a row's
+             names is its subject, and this side does not get to guess. */
+          for (const id of identitiesOf(r)) {
+            const k = `${url}|${id}`;
+            const set = keysAt.get(k) || new Set();
+            for (const [kk, vv] of Object.entries(r)) if (isNum(vv)) set.add(kk);
+            keysAt.set(k, set);
           /* Every identity, not only the ones that produced a figure.
              ─────────────────────────────────────────────────────────────
              This set exists to stop a loose match landing on somebody else's
@@ -342,9 +371,10 @@ for (const route of routes) {
              in it, and the guard let "Anoj Gautam"'s payout be demanded of
              his row. The people this catches are exactly the people with
              nothing in their row. */
-          const ids = allIds.get(url) || new Set();
-          ids.add(String(id).toLowerCase().trim());
-          allIds.set(url, ids);
+            const ids = allIds.get(url) || new Set();
+            ids.add(String(id).toLowerCase().trim());
+            allIds.set(url, ids);
+          }
         }
         return;
       }
@@ -360,8 +390,10 @@ for (const route of routes) {
   /* How many payload rows one endpoint offers under the same identity. */
   const idCount = new Map();
   for (const f of pairs) {
-    const k = `${f.url}|${f.id}`;
-    idCount.set(k, Math.max(idCount.get(k) || 1, f.rows || 1));
+    for (const cand of f.ids) {
+      const k = `${f.url}|${cand}`;
+      idCount.set(k, Math.max(idCount.get(k) || 1, f.rowsBy?.[cand] || 1));
+    }
   }
 
   const onPage = new Set(dom.page);
@@ -374,12 +406,22 @@ for (const route of routes) {
      render whichever of them reads better. */
   const STEM = /_(s|ms|sec|secs|min|mins|hours|hrs|km|m|pct|percent)$/;
   const missing = [];
+  /* WHY this page produced no findings, on request.
+     ─────────────────────────────────────────────────────────────────────
+     Every guard below is a reason to say nothing, and each of them is right
+     about the case it was written for. Together they are also how this audit
+     went quiet on a page it had stopped being able to read: 488 figures in,
+     none compared, "0 findings" out — which is indistinguishable from a page
+     that is correct. EXPLAIN=1 prints the funnel, so "nothing found" can be
+     told apart from "nothing checked". */
+  const D = { col: 0, rows: 0, granular: 0, rival: 0, compared: 0 };
   for (const f of pairs) {
     if (STEM.test(f.key) && f.siblings.some((k) => k !== f.key
       && k.replace(STEM, '') === f.key.replace(STEM, ''))) continue;
     for (const t of dom.tables) {
       const col = columnFor(t.heads, f.key, t.keys);
       if (!col) continue;
+      D.col += 1;
       /* EVERY row carrying this identity, not the first.
          A platform name is not unique — /api/revenue has an `uber` row per
          fleet and per month, and /api/platforms one per fleet — so matching
@@ -394,20 +436,30 @@ for (const route of routes) {
          match handed the first man's figure to the second man's row and
          called a correctly drawn table wrong. A row whose subject IS the
          identity is the row; anything else is a guess. */
-      const want = f.id.toLowerCase().trim();
-      const exact = t.rows.filter((r) => r.subject.trim() === want);
-      /* The fallback exists because a subject often carries more than the
-         identity — a plate beside a badge, a name beside a tag. It must not
-         reach a row that is somebody ELSE's exact match: "Muhammad Khalid"
-         is a prefix of "Muhammad Khalid Gul", both are drivers in
-         /api/earnings/tips, and the loose match handed one man's fare to
-         the other's row. When the man's own row is simply not drawn — the
-         table is sorted and cut — the honest answer is no row at all. */
-      const others = idsByUrl.get(f.url) || new Set();
-      const rows = exact.length ? exact
-        : t.rows.filter((r) => r.subject.includes(want.slice(0, 18))
-          && !(others.has(r.subject.trim()) && r.subject.trim() !== want));
+      /* Each name the row could be drawn under, in order, until one of them
+         names a row this table is showing. A driver row from
+         /api/drivers/directory carries both the person and their usual plate;
+         the directory table is keyed on the person and the vehicle table on
+         the plate, and neither side should have to guess which. */
+      let want = null, exact = [], rows = [];
+      for (const cand of (f.ids || [f.id])) {
+        want = String(cand).toLowerCase().trim();
+        exact = t.rows.filter((r) => r.subject.trim() === want);
+        /* The fallback exists because a subject often carries more than the
+           identity — a plate beside a badge, a name beside a tag. It must not
+           reach a row that is somebody ELSE's exact match: "Muhammad Khalid"
+           is a prefix of "Muhammad Khalid Gul", both are drivers in
+           /api/earnings/tips, and the loose match handed one man's fare to
+           the other's row. When the man's own row is simply not drawn — the
+           table is sorted and cut — the honest answer is no row at all. */
+        const others = idsByUrl.get(f.url) || new Set();
+        rows = exact.length ? exact
+          : t.rows.filter((r) => r.subject.includes(want.slice(0, 18))
+            && !(others.has(r.subject.trim()) && r.subject.trim() !== want));
+        if (rows.length) break;
+      }
       if (!rows.length) continue;                          // this row is not drawn here
+      D.rows += 1;
       /* More payload rows share this identity than the page draws.
          ─────────────────────────────────────────────────────────────────
          /api/status holds one record per (source, mode, fleet) — four for
@@ -417,7 +469,7 @@ for (const route of routes) {
          thing happens to two drivers who share a name. When the payload is
          more granular than the table, this check cannot say which row a
          figure belongs to, so it says nothing. */
-      if ((idCount.get(`${f.url}|${f.id}`) || 1) > rows.length) break;
+      if ((idCount.get(`${f.url}|${want}`) || 1) > rows.length) { D.granular += 1; break; }
       /* Two endpoints, one column heading, different measurements.
          ─────────────────────────────────────────────────────────────────
          The source-health table's "Rows written" is rows_24h — every write
@@ -444,34 +496,58 @@ for (const route of routes) {
       const rival = [...keysAt].some(([k2, set]) => {
         const at = k2.indexOf('|');
         if (k2.slice(0, at) === f.url) return false;
-        if (k2.slice(at + 1).toLowerCase().trim() !== String(f.id).toLowerCase().trim()) return false;
+        if (k2.slice(at + 1).toLowerCase().trim() !== want) return false;
         return [...set].some((kk) => columnFor(t.heads, kk, t.keys) === col);
       });
-      if (rival) break;
+      if (rival) { D.rival += 1; break; }
 
       /* A column is free to render a duration in the unit that reads best.
          /api/rollups reports duration_ms and the "Took" column prints 3.5s;
          the STEM rule above only covers a payload carrying BOTH units on the
          same row, and this one carries only the small one. So the ordinary
          conversions count as shown. */
-      const forms = (v) => {
+      /* …but only where a unit is what the field IS.
+         ─────────────────────────────────────────────────────────────────
+         Dividing every figure by 1000, 60, 3600 and 60000 and accepting any
+         of the results turned this comparison into a rubber stamp. A value
+         of 3,496 accepts the tokens 0, 1, 2, 3, 4, 57, 58 and 59 — and every
+         row of a ranked table starts with its rank, so "3,496 km" was
+         satisfied by the digit 3 sitting in the rank column three cells to
+         the left. Measured: with every figure over a thousand on #drivers
+         deliberately multiplied by three, 213 figures were compared against
+         the DOM and not one was reported.
+
+         A duration is the only thing this allowance was written for —
+         /api/rollups reports duration_ms and the column prints 3.5s — so it
+         now applies only to a field whose name says it carries a unit of
+         time. Everything else is compared as the number it is. */
+      const TIMEY = /(^|_)(ms|s|sec|secs|second|seconds|min|mins|minute|minutes|hour|hours|hrs|duration|elapsed|took|age|uptime|runtime|time)(_|$)/i;
+      const forms = (v, key) => {
         const out = new Set([v, v - 1, v + 1]);
-        for (const d of [1000, 60, 3600, 60000]) {
-          const q2 = Math.round(v / d);
-          if (q2 >= 1) { out.add(q2); out.add(q2 - 1); out.add(q2 + 1); }
+        if (TIMEY.test(key)) {
+          for (const d of [1000, 60, 3600, 60000]) {
+            const q2 = Math.round(v / d);
+            if (q2 >= 1) { out.add(q2); out.add(q2 - 1); out.add(q2 + 1); }
+          }
         }
         return [...out].map(String);
       };
-      const near = (r, v) => forms(v).some((x) => r.nums.includes(x));
-      if (!rows.some((r) => near(r, f.n)) && !anywhere(f.n)) missing.push({ ...f, col });
+      const near = (r, v) => forms(v, f.key).some((x) => r.nums.includes(x));
+      D.compared += 1;
+      if (!rows.some((r) => near(r, f.n)) && !anywhere(f.n)) missing.push({ ...f, col, as: want });
       break;
     }
+  }
+  if (process.env.EXPLAIN) {
+    console.error(`\n  ${route}: ${pairs.length} payload figures → ${D.col} have a column`
+      + ` → ${D.rows} sit in a drawn row → ${D.compared} compared`
+      + ` (${D.granular} more granular than the table, ${D.rival} claimed by two endpoints)`);
   }
   if (missing.length) {
     findings.push({ route, code: 'unshown',
       detail: `${missing.length} figure(s) have a column on this page, sit in a row it is `
         + 'showing, and are not in that row',
-      examples: [...new Set(missing.map((f) => `${f.id} · ${f.col} should be ${f.n} (${f.url} ${f.key})`))].slice(0, 6) });
+      examples: [...new Set(missing.map((f) => `${f.as || f.id} · ${f.col} should be ${f.n} (${f.url} ${f.key})`))].slice(0, 6) });
   }
   if (dom.indexPinned?.length) {
     findings.push({ route, code: 'index-pinned',

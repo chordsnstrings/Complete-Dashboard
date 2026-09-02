@@ -151,8 +151,18 @@ const hijriFmt = new Intl.DateTimeFormat('en-u-ca-islamic-umalqura',
 
 const pad2 = (n) => String(n).padStart(2, '0');
 
+/* A runtime whose ICU has no Umm al-Qura calendar does not throw — Intl
+   silently falls back to Gregorian, and every hijri_date would then be a
+   Gregorian date wearing a Hijri label. That is precisely the silent-wrong
+   this file exists to stop, so it is checked once rather than assumed. The app
+   image is node:20-slim, which is an official Node build and ships full ICU;
+   this is the guard for the day that stops being true. */
+export const HIJRI_CALENDAR_AVAILABLE =
+  hijriFmt.resolvedOptions().calendar === 'islamic-umalqura';
+
 // The Hijri date of a 'YYYY-MM-DD' Gregorian day, or null if it is not one.
 export function hijriOf(day) {
+  if (!HIJRI_CALENDAR_AVAILABLE) return null;
   const t = Date.parse(`${String(day).slice(0, 10)}T00:00:00Z`);
   if (!Number.isFinite(t)) return null;
   const p = Object.fromEntries(hijriFmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
@@ -197,7 +207,9 @@ const nextDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOStrin
 export function calendarDays(from, to) {
   const rows = [];
   if (!from || !to || from > to) return rows;
-  for (let d = from, guard = 0; d <= to && guard < 4000; d = nextDay(d), guard++) {
+  // A runaway guard, not a range limit: the longest window this collector is
+  // ever handed is the 25-month backfill, ~760 days.
+  for (let d = from, guard = 0; d <= to && guard < 40000; d = nextDay(d), guard++) {
     const h = hijriOf(d);
     if (!h) continue;
     rows.push({ day: d, hijri_date: h.date, hijri_month: h.month_en, is_ramadan: h.month === 9 });
@@ -315,8 +327,11 @@ async function pullCalendar(rawFrom, rawTo, failed = []) {
      unreachable for any real window, and it stays because "should" is not
      "is". */
   if (!rows.length) {
-    failed.push(`calendar ${from}..${end}: asked for `
-      + `${monthsBetween(from, end).length} month(s) and wrote no day`);
+    failed.push(HIJRI_CALENDAR_AVAILABLE
+      ? `calendar ${from}..${end}: asked for `
+        + `${monthsBetween(from, end).length} month(s) and wrote no day`
+      : `calendar ${from}..${end}: this runtime's ICU has no islamic-umalqura `
+        + `calendar (resolved '${hijriFmt.resolvedOptions().calendar}'), so no Hijri date can be computed`);
     return 0;
   }
   return upsertMany('calendar_day', rows, ['day']);
