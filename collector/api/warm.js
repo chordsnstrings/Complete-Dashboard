@@ -20,6 +20,7 @@
    the collector is small enough that eight parallel aggregates would be felt by
    anyone reading a page at that moment. */
 import { log } from '../src/log.js';
+import { CAPACITY_WINDOW_DAYS } from './capacity_routes.js';
 
 const SRC = 'warm';
 
@@ -79,6 +80,14 @@ const PATHS = [
 const BARE_PATHS = [
   '/api/trend/monthly', '/api/insights',
   '/api/compliance/drivers', '/api/coverage',
+  /* And /api/platforms, deliberately in BOTH lists, for the same reason
+     /api/coverage is: #platforms asks through qAll and needs the windowed key,
+     while #settings and #sources hide the range control entirely and ask bare.
+     The provenance line on those pages reads the all-time column, so the
+     window was never used — it only gave the cache one entry per window for an
+     identical answer, and left the key every reader of those pages hits
+     permanently cold. */
+  '/api/platforms',
   /* All-time by design — a reconciliation of six days of July against July's
      bank payout is the mismatch of scopes that endpoint exists to prevent — so
      it takes no window and the page asks for it bare. It is also the heaviest
@@ -169,6 +178,12 @@ export function startWarmer({ port, pool, everyMs = 60000, enabled = true }) {
         if (stopped) return;
         await hit(`http://127.0.0.1:${port}${path}`);
       }
+      /* #capacity's channel provenance, over the window its rota is fitted on
+         rather than the reader's — the page has no range control, so it asks
+         for CAPACITY_WINDOW_DAYS and nothing in WINDOWS below matches it. The
+         constant is imported rather than repeated: a warmer guessing 84 would
+         warm a key nobody requests the day that number changes. */
+      if (!stopped) await hit(`http://127.0.0.1:${port}/api/platforms?${windowQs(CAPACITY_WINDOW_DAYS)}`);
       for (const days of WINDOWS) {
         for (const path of PATHS) {
           if (stopped) return;

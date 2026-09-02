@@ -15,7 +15,8 @@
 import { empty, fmt, heatmap } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, countOf, plural,
   signed, foldRows, verdict, sourceLine } from './ui.js';
-import { q, href } from './data.js';
+import { q, api, href } from './data.js';
+import { dubaiDay } from './tz.js';
 
 const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 const SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -37,10 +38,27 @@ const isShort = (r) => r.driver_gap != null && r.driver_gap >= 0.5 && !r.thin;
 export async function renderCapacity(root) {
   root.innerHTML = '';
   loading(root);
-  const [d, plats] = await Promise.all([
-    q('/api/capacity'),
-    q('/api/platforms').catch(() => []),
-  ]);
+  /* The channels are asked for the window the PROJECTION was fitted over, not
+     for the reader's.
+     ─────────────────────────────────────────────────────────────────────────
+     #capacity hides the range control — it fits a rota over its own trailing
+     window, 84 days, and says so — but this fetched /api/platforms through
+     q(), which sends whatever window state happens to hold, and the default is
+     thirty days. So the provenance line beneath the page printed a 30-day
+     figure under the sentence "the demand these channels reported in the
+     window it was fitted over". Measured on production 2026-09-03: the
+     projection was fitted over 84 days and 31,247 bookings, and the line said
+     13,390. Two windows in one sentence, 2.3x apart, neither of them named.
+
+     So the capacity answer comes first and its own window_days decides what
+     the channels are asked for. Sequential rather than parallel on purpose:
+     the second request cannot be built until the first has answered. */
+  const d = await q('/api/capacity');
+  const fitted = Number(d?.window_days) > 0 ? Number(d.window_days) : 84;
+  const to = dubaiDay();
+  const from = dubaiDay(new Date(Date.now() - (fitted - 1) * 864e5));
+  const plats = await api(`/api/platforms?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`)
+    .catch(() => []);
   root.innerHTML = '';
 
   if (!d.ok) {
@@ -343,8 +361,8 @@ export async function renderCapacity(root) {
      built on a window in which one channel was silent is a projection of a
      smaller fleet, and the reader has to be able to see that. */
   const src = sourceLine(plats, {
-    note: 'The projection is built on the demand these channels reported in the window it was '
-      + 'fitted over, so a channel that stopped collecting lowers it',
+    note: `The projection is built on the demand these channels reported over the ${fmt(fitted)} `
+      + 'days it was fitted over, so a channel that stopped collecting lowers it',
   });
   if (src) root.append(src);
 }

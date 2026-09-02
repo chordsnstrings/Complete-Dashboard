@@ -33,7 +33,7 @@
 import { barChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
   fmt, empty, dayStr, plural, countOf, sourceLabel, verdict, signed } from './ui.js';
-import { q, href, parseHash, state } from './data.js';
+import { q, href, parseHash, state, qChan } from './data.js';
 import { dubaiDay, TZ } from './tz.js';
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
@@ -142,7 +142,14 @@ export async function renderCompare(root, aParam, bParam) {
      wire, which a route reading `req.query.fleet || null` accepts as a fleet
      name. Three panels then reported "No booking on either day" over a
      database holding 293 of them. */
-  const p = await q('/api/compare', { a, b, cut });
+  /* qChan, not q. /api/compare reads a, b, cut, fleet and platform and no
+     window at all (api/compare_routes.js:63-80) — the two days ARE the window
+     — and #compare is on NO_RANGE, so the control is hidden. Sending a range
+     it does not read made a request that claimed a span the page has no
+     control for, and gave the response cache one entry per window for an
+     answer identical across all of them. Verified: the same a/b answers
+     byte-for-byte over a 7-day and a 365-day window. */
+  const p = await qChan('/api/compare', { a, b, cut });
 
   const A = p.totals.a, B = p.totals.b;
   const partial = p.cut_minutes < 1440;

@@ -14,7 +14,7 @@ import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, dayStr, dateStr,
   sourceLabel, countOf, plural, verdict } from './ui.js';
 import { dubaiDay } from './tz.js';
-import { q, api, state, href, currentGen, alive } from './data.js';
+import { q, api, state, href, currentGen, alive, qChan } from './data.js';
 
 export async function renderCoverage(root) {
   root.innerHTML = '';
@@ -38,7 +38,13 @@ export async function renderCoverage(root) {
        use it. "Every source has a row for every day" is a true sentence and a
        misleading one on its own, and the qualification has to travel with the
        claim rather than sit four screens below it. */
-    q('/api/coverage/verified').catch(() => null),
+    /* qChan, not q. This reads uber_trip_audit — every window ever audited —
+       and takes only a fleet (api/analytics_routes.js:1295). A date range is
+       meaningless to it, and sending one made bin/page-audit.mjs read
+       #coverage as "a control that is on screen and changes nothing": one of
+       the two windowed calls it counted could never move. Verified: identical
+       byte-for-byte over a 7-day and a 365-day window. */
+    qChan('/api/coverage/verified').catch(() => null),
   ]);
   if (!alive(gen)) return;
   const c = all;

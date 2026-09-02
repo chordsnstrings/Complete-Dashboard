@@ -8,7 +8,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine } from './ui.js';
 import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
-import { state, api, params, q, qAll, href, parseHash, navigate, store, setFilter,
+import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow } from './data.js';
 import { volatilePath } from './swr.js';
@@ -5321,8 +5321,22 @@ async function stampSource(root, gen) {
        page the reader came from, and q() applies it unconditionally. The
        provenance line would then describe one channel under a page showing
        all of them. */
-    const plats = hidesChannel(state.view)
-      ? await qAll('/api/platforms') : await q('/api/platforms');
+    /* Two independent questions, so four cases rather than two.
+       ─────────────────────────────────────────────────────────────────────
+       This branched on the channel filters alone and sent the reader's window
+       either way. On a page that hides the RANGE — #settings, #capacity,
+       #sources — that is a window the reader cannot see or change riding on
+       every request, and sourceLine() below is already told `whole` and reads
+       the all-time column instead, so the parameter was never used: it only
+       gave the response cache one entry per window for an identical answer.
+       Now each request carries exactly the filters its page offers. */
+    const plats = hidesRange(state.view)
+      ? (hidesChannel(state.view)
+        ? await api('/api/platforms')
+        : await qChan('/api/platforms'))
+      : (hidesChannel(state.view)
+        ? await qAll('/api/platforms')
+        : await q('/api/platforms'));
     if (!alive(gen)) return;
     /* A page with no range selector is not answering about a window — #causes
        is a monthly trend over the whole record, #map is one day's replay — so

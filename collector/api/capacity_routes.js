@@ -22,6 +22,20 @@ import { forecastMonths, weekdayShares } from '../src/forecast.js';
 import { peopleCount } from './custody_sql.js';
 import { rollupGrainSql } from '../src/rollup.js';
 
+/* The trailing window the rota is fitted over.
+   ─────────────────────────────────────────────────────────────────────────
+   Measured over a trailing window rather than the whole record: the fleet that
+   produced 2025's hours is not the fleet rostering next month's, and a shape
+   averaged across a 76% collapse describes neither.
+
+   Exported because two other things have to agree with it. The page echoes it
+   back as `window_days` and asks /api/platforms for the SAME span, so its
+   provenance line describes the demand the projection was actually built on —
+   it used to quote whatever window the reader's state held, which on a page
+   with no range control was always the default thirty. And api/warm.js warms
+   that exact key, which it cannot do by guessing. */
+export const CAPACITY_WINDOW_DAYS = 84;
+
 export function capacityRoutes(app, { q, wrap }) {
   app.get('/api/capacity', wrap(async (req, res) => {
     /* The platform and fleet chips were displayed, written into the address,
@@ -85,10 +99,7 @@ export function capacityRoutes(app, { q, wrap }) {
     const target = fc.forecast.find((r) => r.m > (fc.horizon_from || '')) || fc.forecast[0];
 
     /* ── how the work is distributed, and who covers it ────────────────── */
-    /* Measured over a trailing window rather than the whole record: the fleet
-       that produced 2025's hours is not the fleet rostering next month's, and
-       a shape averaged across a 76% collapse describes neither. */
-    const WINDOW_DAYS = 84;
+    const WINDOW_DAYS = CAPACITY_WINDOW_DAYS;
     const cells = await q(
       `WITH c AS (
          SELECT local_dow AS dow, local_hour AS slot_hour, local_day AS day,
