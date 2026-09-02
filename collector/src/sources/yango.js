@@ -54,10 +54,20 @@ const post = async (path, body) => {
           'content-type': 'application/json', 'Accept-Language': 'en' },
       }).catch(() => null);
       const cookieIsNotIt = bare && bare.status === r.status;
+      /* The bare status is recorded either way, because the verdict is only
+         as good as the comparison behind it and the comparison is invisible
+         once it has been turned into a sentence. A probe that could not run
+         at all (network, proxy, a throw) must not silently become evidence
+         FOR the cookie — that is how the old unconditional hint got there. */
+      const bareSays = bare ? `without a cookie: HTTP ${bare.status}` : 'the cookie-free probe did not complete';
       hint = cookieIsNotIt
         ? ` — the same refusal arrives with no cookie at all, so the session is not what is being rejected;`
           + ` check YANGO_PARK_ID (${config.yango.parkId}) and YANGO_API_KEY`
-        : ' — the Yandex session has expired; re-paste YANGO_COOKIE from a logged-in fleet.yango.com tab';
+        : bare
+          ? ` — with no cookie this call answers HTTP ${bare.status} instead, so the session IS being read;`
+            + ' re-paste YANGO_COOKIE from a logged-in fleet.yango.com tab'
+          : ' — and the cookie-free comparison did not complete, so which credential is being'
+            + ' refused is not yet established';
       /* Recorded, not only thrown: a thrown error dies with the run, and the
          credential panel is where somebody goes to find out what to re-paste.
          Uber has done this since the OAuth work; the other five sources never
@@ -66,8 +76,8 @@ const post = async (path, body) => {
       await noteCredential(pool, {
         provider: SRC, fleet: config.yango.fleet || '*',
         credential: cookieIsNotIt ? 'YANGO_API_KEY' : 'YANGO_COOKIE',
-        state: 'invalid', surface: path,
-        detail: `HTTP ${r.status}${cookieIsNotIt ? ' with or without a cookie' : ''}`,
+        state: cookieIsNotIt || bare ? 'invalid' : 'unknown', surface: path,
+        detail: `HTTP ${r.status}; ${bareSays}`,
       });
     }
     throw new Error(`yango ${path} refused: HTTP ${r.status}${hint}`);

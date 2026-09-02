@@ -144,7 +144,14 @@ async function checkYango({ value }) {
           + 'so the cookie is not what it is rejecting — check YANGO_PARK_ID and YANGO_API_KEY, '
           + `whose park is ${config.yango.parkId}`);
       }
-      return verdict(false, `the fleet portal refused this session (${status})`);
+      /* The comparison is reported, not just its verdict: a check that says
+         "refused" without saying what it compared against is the same
+         unfalsifiable claim this block replaced. */
+      if (bare) return verdict(false, `the fleet portal refused this session (${status}), `
+        + `where the same call without a cookie answers ${bare.status} — so the session is being read`);
+      return { verdict: 'unknown',
+        detail: `the portal refused (${status}), and the cookie-free comparison did not complete, `
+          + 'so this does not establish which of the park id, the API key and the cookie is being refused' };
     }
     /* `orders` present — even empty — is the portal answering as this park. */
     if (data && typeof data === 'object' && Array.isArray(data.orders)) {

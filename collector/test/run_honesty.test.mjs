@@ -115,6 +115,25 @@ console.log('\na context source that wrote half of itself says so');
     !/status: 'ok'/.test(ev) && /written \+ breaks > 0 \? 'partial' : 'error'/.test(ev));
 }
 
+console.log('\nand a network failure says what actually went wrong');
+
+{
+  /* "TypeError: fetch failed" names nothing. The calendar feed was dead for two
+     days and, once the run finally reported it, that was the whole message —
+     for a host answering 200 in half a second from outside the app. */
+  const { http } = await import('../src/http.js');
+  let msg = '';
+  /* A port nothing is listening on: the failure is real and its cause is
+     knowable, which is the pair this assertion is about. */
+  try {
+    await http('http://127.0.0.1:45999/nothing', { retries: 0, timeoutMs: 3000 });
+  } catch (e) { msg = String(e.message || e); }
+  check('the underlying reason is in the message, not only on err.cause',
+    /ECONNREFUSED/i.test(msg), msg.slice(0, 140));
+  check('…and so is the host it was talking to',
+    /127\.0\.0\.1:45999/.test(msg), msg.slice(0, 140));
+}
+
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

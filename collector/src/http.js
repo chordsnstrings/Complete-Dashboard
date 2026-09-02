@@ -57,6 +57,20 @@ export async function http(url, { method = 'GET', headers = {}, body, timeoutMs 
         await sleep(wait);
         continue;
       }
+      /* `TypeError: fetch failed` names nothing. undici puts the real reason —
+         ENOTFOUND, ECONNREFUSED, a TLS failure, a timeout — on err.cause, and
+         every caller that logs String(err) throws it away.
+         ─────────────────────────────────────────────────────────────────────
+         Measured 2026-09-02: the calendar feed had been dead since 08-31 and
+         once the run finally reported it, all it could say was "hijri 2026-09:
+         TypeError: fetch failed" — for a host that answers 200 in 0.5s from
+         outside the app. Two days of a silent gap became a message that could
+         not be acted on either. The cause is attached rather than replacing
+         the error, so nothing that matches on err.name changes behaviour. */
+      const why = err?.cause?.code || err?.cause?.message;
+      if (why && !String(err.message).includes(why)) {
+        err.message = `${err.message} (${String(why).slice(0, 120)}) ${url.split('?')[0]}`;
+      }
       throw err;
     }
   }
