@@ -304,10 +304,12 @@ check('and the drivers below the floor are counted rather than dropped',
    ─────────────────────────────────────────────────────────────────────────
    #finance computed the tile by adding up these rows — ranked, capped at 200,
    and filtered to drivers with at least AED 300 of net fare — so every driver
-   the floor removed took their tips out of the fleet's total with them. On
-   production over 365 days that read AED 12,204 against a real AED 53,616.
-   Here it is the same shape at seed size: Tiny Base tipped 10 and is below the
-   floor, Real Base tipped 30 and is on the list. */
+   the floor removed took their tips out of the fleet's total with them. The
+   dashboard opens on two days, where almost nobody clears AED 300: measured on
+   production 2026-09-02 at ?days=2, the tile read AED 68.96 against a real
+   AED 168.09, with 60 of 85 drivers excluded. Here it is the same shape at
+   seed size: Tiny Base tipped 10 and is below the floor, Real Base tipped 30
+   and is on the list. */
 const rankedTips = tips.rows.reduce((a, r) => a + Number(r.tips || 0), 0);
 check('the endpoint carries the fleet total, over every driver and no floor',
   Number(tips.totals?.tips) === 40, JSON.stringify(tips.totals));

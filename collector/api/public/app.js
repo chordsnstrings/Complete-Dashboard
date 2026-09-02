@@ -2307,10 +2307,13 @@ V.finance = async (root) => {
      These two lines added up `tipList`, which is /api/earnings/tips — ranked
      by tip rate, capped at 200 rows and filtered to drivers with at least
      AED 300 of net fare. The Tips tile then printed that sum as the fleet's
-     tips: AED 12,204 on production over 365 days against a real AED 53,616,
-     understating by 77%, and the tile is small enough that nobody would catch
-     it by eye. The endpoint now selects the population total separately;
-     `totals.ranked_tips` is what the table below still adds up to. */
+     tips — and this page opens on a two-day window, where 60 of 85 drivers are
+     under the floor: measured on production 2026-09-02 at ?days=2, AED 68.96
+     on the tile against a real AED 168.09, 59% of the fleet's tips missing.
+     Over 365 days the same floor removes 0.2%, so the figure is wrong when the
+     page is opened and right by the time anybody checks it. The endpoint now
+     selects the population total separately; `totals.ranked_tips` is what the
+     table below still adds up to. */
   const tipAll = tipRows?.totals || null;
   const rankedTips = tipList.reduce((a, r) => a + (+r.tips || 0), 0);
   const rankedFare = tipList.reduce((a, r) => a + (+r.fare || 0), 0);

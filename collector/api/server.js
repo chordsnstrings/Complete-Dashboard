@@ -3611,11 +3611,15 @@ app.get('/api/earnings/tips', wrap(async (req, res) => {
      ─────────────────────────────────────────────────────────────────────────
      The #finance Tips tile added up the rows of `rows` — a list that is
      ranked, capped at 200 and filtered to drivers with at least AED 300 of
-     fare — and printed the sum as the fleet's tips. Measured on production
-     2026-09-02 over 365 days that reported AED 12,204 against a real
-     AED 53,616: a 77% understatement, on a tile whose whole subject is a
-     number too small to sanity-check by eye. A ranking's total is not a
-     population's total, and the two must be selected separately. */
+     fare — and printed the sum as the fleet's tips. The floor bites hardest on
+     the window the dashboard OPENS on: measured on production 2026-09-02 at
+     ?days=2, 60 of the 85 drivers with a statement fall under AED 300 of fare
+     in two days, so the tile read AED 68.96 against a real AED 168.09 — 59% of
+     the fleet's tips missing from the tile about tips. Over a year the same
+     floor removes 0.2%, which is exactly why nobody caught it: the number is
+     wrong when the page is opened and right when it is investigated. A
+     ranking's total is not a population's total, and the two must be selected
+     separately. */
   const [all] = await q(
     `SELECT round(sum(tips)::numeric,2) tips, round(sum(net)::numeric,2) fare,
             count(DISTINCT name_key)::int drivers,
