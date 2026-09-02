@@ -28,7 +28,7 @@
    different control. */
 import { el, esc } from './ui.js';
 import { TZ } from './tz.js';
-import { state, qAll, PERIODS, PERIOD_LABEL, periodLabel, dayLabel, MONTH_SHORT } from './data.js';
+import { state, PERIODS, PERIOD_LABEL, periodLabel, dayLabel, MONTH_SHORT, api } from './data.js';
 
 /* Dubai's today, not the reader's. Every boundary in this product is on the
    fleet's calendar, and at 02:00 Dubai those are different dates. */
@@ -50,7 +50,15 @@ export async function dataSpan() {
   if (span) return span;
   const today = dubaiToday();
   try {
-    const rows = await qAll('/api/platforms');
+    /* Bare api(), not qAll(). This reads `earliest` and `latest` — each
+       channel's first and last row ever — which no window can change, and the
+       result is memoised in `span` for the life of the page whatever window
+       was current when it was first asked. Sending one was the last of the
+       four requests bin/page-audit.mjs found carrying a parameter its caller
+       does not read: it made #settings, a page with no range control at all,
+       report a windowed call, and gave the cache one entry per window for an
+       answer identical across every one of them. */
+    const rows = await api('/api/platforms');
     const days = (Array.isArray(rows) ? rows : rows?.rows || [])
       .flatMap((r) => [r.earliest, r.latest]).filter(Boolean)
       .map((t) => String(t).slice(0, 10)).sort();

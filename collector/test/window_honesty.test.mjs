@@ -79,6 +79,11 @@ console.log('\nthe pages whose range control is hidden do not send a range');
     /q\('\/api\/coverage\/calendar'\)/.test(cov),
     'that one DOES move, and it is what the range control on this page governs');
 
+  const dr = blank(readFileSync('api/public/daterange.js', 'utf8'));
+  check('the date picker asks for the record\u2019s span with no window at all',
+    /const rows = await api\('\/api\/platforms'\)/.test(dr) && !/qAll/.test(dr),
+    'it reads earliest/latest — all-time fields — and memoises the answer for the page\u2019s life');
+
   const app = blank(readFileSync('api/public/app.js', 'utf8'));
   check('the provenance line picks its request by BOTH questions, not one',
     /hidesRange\(state\.view\)[\s\S]{0,260}hidesChannel\(state\.view\)[\s\S]{0,120}api\('\/api\/platforms'\)/.test(app),
