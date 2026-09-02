@@ -620,6 +620,42 @@ console.log('\nthe repeat caption counts either side, not both');
     && /reports mixed/.test(uiSrc2));
 }
 
+/* ── the accrued slice is counted in days, like the column beside it ──────
+   accrual_days was count(*) over driver_payout_day, which is one row per
+   DRIVER per day. Production showed accrual_days 948 beside payout_days 6 —
+   two columns of the same row counting different things under names that read
+   alike, and the page rendering the larger one as a quantity of days. */
+console.log('\nthe accrued days are days');
+{
+  const m = new Date().toISOString().slice(0, 7);
+  const ahead = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
+  if (ahead.slice(0, 7) === m) {
+    /* Three drivers, two future days: six rows, two days. count(*) answers 6
+       and only a DISTINCT count answers 2. */
+    for (const who of ['a', 'b', 'c']) {
+      for (const off of [2, 3]) {
+        const d = new Date(Date.now() + off * 864e5).toISOString().slice(0, 10);
+        await db.query(
+          `INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, driver_name, day,
+             period_start, period_end, earnings, cash_earnings)
+           VALUES ('uber','ecosine',$2,$2,$1,$1,$1,100,0)`, [d, `acc-${who}`]);
+      }
+    }
+    const all = (await get('/api/reconcile')).body;
+    const row = all.rows.find((r) => r.m === m);
+    check('the accrued slice counts days, not driver-days',
+      row && row.accrual_days === 2, JSON.stringify(row && [row.accrual_days, row.payout_days]));
+    check('…and it is never larger than the payout days it is part of',
+      row && row.accrual_days <= row.payout_days,
+      JSON.stringify(row && [row.accrual_days, row.payout_days]));
+    check('…while the money it names is the whole of those rows, not one of them',
+      row && Number(row.bank_accrued) >= 600,
+      JSON.stringify(row && row.bank_accrued));
+  } else {
+    check('accrual-day check skipped — three days from now is next month', true, ahead);
+  }
+}
+
 /* ── a month the provider will no longer answer about is not a bad month ──
    Uber's earner-payments surface serves a rolling window measured at about
    192 days, so the statement half of this page gets thinner the further back a

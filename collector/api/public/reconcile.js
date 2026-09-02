@@ -197,7 +197,7 @@ const COLS = (keyCol) => [
     render: (r) => withCompared(r.bank_payout, r.bank_covered, 'no payout reported')
       + basis(r.bank_period_days_min, r.bank_period_days, 'bank')
       + (r.bank_accrued
-        ? `<span class="dim" title="${fmt(r.accrual_days)} payout rows dated after today — Uber `
+        ? `<span class="dim" title="${countOf(r.accrual_days, 'day')} of this month dated after today — Uber `
           + `writes a whole weekly period when it opens, so this much of the month is a forward `
           + `projection rather than money already wired"> · ${money(r.bank_accrued)} not yet paid</span>`
         : '') },

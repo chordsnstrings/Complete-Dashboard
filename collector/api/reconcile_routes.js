@@ -294,7 +294,11 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         `SELECT to_char(date_trunc('month', p.day), 'YYYY-MM') AS m,
                 round(sum(p.earnings)::numeric, 2) AS bank_payout,
                 round(sum(p.earnings) FILTER (WHERE p.day > $3::date)::numeric, 2) AS bank_accrued,
-                count(*) FILTER (WHERE p.day > $3::date)::int AS accrual_days,
+                /* DISTINCT days, like payout_days beside it. count(*) here
+                   counts driver-day ROWS: production showed accrual_days 948
+                   next to payout_days 6, two columns of the same row counting
+                   different things under names that read alike. */
+                count(DISTINCT p.day) FILTER (WHERE p.day > $3::date)::int AS accrual_days,
                 count(DISTINCT p.day)::int AS payout_days,
                 ${BASIS('p')}
          FROM driver_payout_day p
