@@ -489,6 +489,36 @@ console.log(Object.entries(counts).sort((a, b) => b[1] - a[1])
 
 /* REPORT_DIR for the same reason numbers-audit has one: a test that drives
    this tool must not overwrite the production sweep it is named after. */
+/* A run that could not REACH the site is not a run that found 114 defects.
+   ─────────────────────────────────────────────────────────────────────────
+   Measured on 2026-09-02: with four Chromium sweeps and a fleet of agents all
+   pulling on production through the same egress proxy at once, the proxy began
+   resetting connections, and every route in turn recorded
+   `crashed net::ERR_CONNECTION_RESET at .../#<route>`. The tool then wrote a
+   report naming 114 of 116 routes as findings, exited 1, and looked exactly
+   like a dashboard that had collapsed — while /api/kpis answered 200 in 0.9s
+   the whole time. An audit that cannot tell "the site is broken" from "I could
+   not get to the site" is worse than no audit: it is a false alarm with a
+   machine-readable file behind it.
+
+   So a transport failure is counted separately and, past a third of the run,
+   the whole sweep is declared UNUSABLE: no report is written, because a report
+   is a claim about the product, and nothing here observed the product. */
+const TRANSPORT = /ERR_CONNECTION_(RESET|CLOSED|REFUSED|ABORTED)|ERR_NETWORK|ERR_EMPTY_RESPONSE|ERR_SOCKET|ECONNRESET|socket hang up|ERR_TUNNEL|net::ERR_TIMED_OUT|Timeout .* exceeded.*goto/i;
+const transportFailures = findings.filter(
+  (f) => f.code === 'crashed' && TRANSPORT.test(String(f.detail || '')));
+/* Page-RENDERS, not routes: this tool sweeps every route at each width, so the
+   denominator is the number of attempts it actually made. */
+const attempts = routes.length * WIDTHS.length;
+if (transportFailures.length > attempts / 3) {
+  console.error(`\n${transportFailures.length} of ${attempts} page-renders could not be REACHED `
+    + `(${String(transportFailures[0].detail).slice(0, 80)}).`);
+  console.error('This is a transport failure, not a finding. Nothing about the product was '
+    + 'observed, so no report is written. Re-run when the network is quiet — one sweep at a '
+    + 'time, and not while other jobs are pulling on the same host.');
+  process.exit(2);
+}
+
 const REPORT_DIR = process.env.REPORT_DIR || 'docs/audit';
 mkdirSync(REPORT_DIR, { recursive: true });
 const out = `${REPORT_DIR}/render-${TODAY}.json`;

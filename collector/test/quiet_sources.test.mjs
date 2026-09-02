@@ -274,6 +274,27 @@ console.log('\nthe operator ledger, which is an import and not a poll');
     broke.state === 'broken' && /rejected/.test(broke.sentence), broke.sentence);
   check('a table nobody has ever imported into is neither', silence(null).state === 'never');
 
+  /* The day, as the date the column holds. A pg DATE arrives as a Date object,
+     and `String(aDate).slice(0, 10)` is "Fri Aug 21" — which is what this
+     sentence printed on production within the hour of shipping. Driven under a
+     zone thirteen hours EAST of UTC, where local midnight is the previous day
+     in UTC, so a toISOString() fix would fail here too. */
+  {
+    const tz = process.env.TZ;
+    process.env.TZ = 'Pacific/Kiritimati';
+    const { isoDay: iso2, silence: silence2 } = await import('../src/sources/ledger.js?tzcase');
+    const asDate = new Date(2026, 7, 21);   // local midnight on 21 August
+    check('a DATE column reads back as the day it holds, not as "Fri Aug 21"',
+      iso2(asDate) === '2026-08-21', String(iso2(asDate)));
+    check('...and a string day is left alone', iso2('2026-08-21T00:00:00.000Z') === '2026-08-21');
+    check('...and null is null, not the string "null"', iso2(null) === null);
+    const said = silence2({ finished_at: '2026-08-24T09:00:09.118Z', status: 'ok',
+      window_end: asDate }, Date.parse('2026-09-02T11:30:00Z')).sentence;
+    check('so the sentence names a date rather than a weekday fragment',
+      /covering days up to 2026-08-21\./.test(said), said);
+    process.env.TZ = tz;
+  }
+
   await db.close();
 }
 

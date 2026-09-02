@@ -227,6 +227,22 @@ export async function recordImport({ db = pool, source = SOURCE, mode = MODE,
  * @param run  the latest ledger run row (or null if there has never been one)
  * @param now  ms, injected so this is testable without freezing the clock
  */
+/* A DATE column, as the date it holds.
+   ──────────────────────────────────────────────────────────────────────────
+   node-postgres parses a DATE into a Date at LOCAL midnight, and
+   `String(aDate).slice(0, 10)` is "Fri Aug 21" — which is what this sentence
+   printed on production the hour it shipped: "covering days up to Fri Aug 21".
+   toISOString() is not the fix either: it converts an INSTANT, so under a zone
+   east of UTC local midnight is the previous day in UTC and the sentence would
+   quietly name the wrong day. The local components ARE the date the column
+   holds, whatever zone the process runs in. */
+export const isoDay = (v) => {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.slice(0, 10);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}`;
+};
+
 export function silence(run, now = Date.now()) {
   if (!run || !run.finished_at) {
     return { state: 'never',
@@ -244,7 +260,7 @@ export function silence(run, now = Date.now()) {
   }
   return { state: 'idle', age_h: ageH,
     sentence: `The last statement ledger was imported ${days} day(s) ago`
-      + (run.window_end ? `, covering days up to ${String(run.window_end).slice(0, 10)}` : '')
+      + (run.window_end ? `, covering days up to ${isoDay(run.window_end)}` : '')
       + '. Nothing schedules this: it is a workbook an operator exports, so an '
       + 'old date means none has been exported since, not that the importer has stopped.' };
 }

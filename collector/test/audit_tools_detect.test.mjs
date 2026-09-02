@@ -298,6 +298,47 @@ fetch('/api/drivers/directory?from=2026-01-01&to=2026-01-31').then((r) => r.json
   }
 }
 
+/* ── an audit that could not REACH the site reports nothing ───────────────
+   Measured on 2026-09-02: four Chromium sweeps and a fleet of agents pulling on
+   production through one egress proxy at once, and the proxy began resetting
+   connections. numbers-audit recorded `crashed net::ERR_CONNECTION_RESET` for
+   every route in turn, then wrote a report naming 114 of 116 routes as findings
+   and exited 1 — while /api/kpis answered 200 in 0.9s throughout. A false alarm
+   with a machine-readable file behind it is worse than no audit at all, so past
+   a third of the run the sweep is declared unusable and NO report is written.
+
+   Driven here by pointing the tool at a port with nothing listening, which is
+   the same class of failure (a refused connection) reaching the same code. */
+{
+  /* Earlier blocks in this file already wrote a numbers report into REPORTS, so
+     "no report" has to mean "nothing NEW", not "the directory is empty". */
+  const beforeReports = Object.fromEntries(readdirSync(REPORTS)
+    .map((f) => [f, statSync(join(REPORTS, f)).mtimeMs]));
+  const dead = createServer(() => {});
+  await new Promise((r) => dead.listen(0, '127.0.0.1', r));
+  const port = dead.address().port;
+  dead.close();
+  await new Promise((r) => dead.on('close', r));
+
+  for (const tool of ['numbers-audit.mjs', 'render-audit.mjs']) {
+    const { code, out } = await run(tool, {
+      BASE: `http://127.0.0.1:${port}`,
+      ...(tool === 'render-audit.mjs' ? { WIDTHS: '1180' } : {}),
+      SETTLE: '100',
+    });
+    check(`${tool} exits 2 — unusable — when it cannot reach the site at all`,
+      code === 2, `exit ${code}: ${out.split('\n').slice(-4).join(' | ').slice(0, 200)}`);
+    check(`…saying so in those words rather than as findings`,
+      /could not be REACHED/.test(out) && /transport failure, not a finding/.test(out),
+      out.split('\n').slice(-4).join(' | ').slice(0, 200));
+    const now = Object.fromEntries(readdirSync(REPORTS)
+      .map((f) => [f, statSync(join(REPORTS, f)).mtimeMs]));
+    const changed = Object.keys(now).filter((f) => now[f] !== beforeReports[f]);
+    check(`…and writing no report, because a report is a claim about the product`,
+      changed.length === 0, JSON.stringify(changed));
+  }
+}
+
 /* ── the tools under test must not overwrite the tools' own output ────────
    Every run above went through `run`, which sets REPORT_DIR. If a tool ever
    ignores it again, the day's production sweep is silently replaced by a
