@@ -38,13 +38,13 @@
 import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
 import { upsertMany, pool, logRun } from '../db.js';
-import { uberWebHeaders } from '../auth/uber.js';
+import { uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
 import { authFailure, saysAuth, noteCredential } from '../auth_state.js';
 import { log } from '../log.js';
 
 const SRC = 'uber_profile';
-const URL_ = 'https://supplier.uber.com/graphql';
+const URL_ = `${UBER_WEB_HOST}/graphql`;
 
 /* The selection set, trimmed to what we store. The portal's own query asks for
    a picture url, a phone number and an email as well; none of them is a fact

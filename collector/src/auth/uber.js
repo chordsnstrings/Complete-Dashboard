@@ -1,5 +1,21 @@
 // Uber auth: OAuth client_credentials token (30-day, auto-refreshed) for api.uber.com,
-// plus the supplier web-session cookie (supplier.uber.com) supplied via env.
+// plus the supplier web-session cookie (fleethub.uber.com) supplied via env.
+
+/* WHERE the supplier surface lives, in one place.
+   ─────────────────────────────────────────────────────────────────────────
+   Uber moved it. supplier.uber.com now answers 301 to fleethub.uber.com on
+   every path this collector uses — /graphql, /chronicle/graphql and the
+   reports API — and a POST does not survive a 301: it degrades to a GET,
+   lands on the login page and comes back 404. authFailure() read that as
+   "redirected to auth.uber.com — the session is no longer signed in", so the
+   product spent days reporting an expired credential for a renamed host,
+   while the cookie in the settings was perfectly good.
+
+   Measured 2026-09-02 with a freshly captured Ecosine session: against
+   fleethub the same request answers 200 with 98 vehicles and 98 compliance
+   documents. Four call sites had the old host written into them separately,
+   which is why this is now one export: the next move is one line. */
+export const UBER_WEB_HOST = 'https://fleethub.uber.com';
 import { config } from '../config.js';
 import { http } from '../http.js';
 import { log } from '../log.js';

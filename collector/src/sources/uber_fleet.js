@@ -8,7 +8,7 @@ import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
 import { iso, weekChunks } from '../util.js';
-import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
 import { log } from '../log.js';
 import { authFailure, saysAuth, noteCredential, noteUberRest } from '../auth_state.js';
@@ -20,7 +20,7 @@ const SRC = 'uber_fleet';
 // for recommendations), so we ship the exact documents instead of a reconstruction.
 const __dir = dirname(fileURLToPath(import.meta.url));
 const Q = (f) => readFileSync(join(__dir, '..', 'gql', f), 'utf8');
-const GQL = 'https://supplier.uber.com/graphql';
+const GQL = `${UBER_WEB_HOST}/graphql`;
 
 /* Every surface below used to be stamped `fleet_id: 'ecosine'` and addressed
    with config.uber.orgUuid — the unsuffixed, Ecosine key. Egari is a

@@ -8,7 +8,7 @@ import { config, normPlate } from '../config.js';
 import { http, qs, sleep } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
 import { dateChunks, weekChunks, dubaiDayChunks, iso, unixMs } from '../util.js';
-import { uberOAuthToken, uberWebHeaders } from '../auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
 import { log } from '../log.js';
 import { authFailure, saysAuth, noteCredential, noteUberRest } from '../auth_state.js';
@@ -23,7 +23,7 @@ const SRC = 'uber';
    scheduler runs sources one at a time and every helper below awaits. */
 let cur = null;
 const org = () => cur || config.uber.orgs?.[0] || config.uber;
-const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
+const REPORTS = `${UBER_WEB_HOST}/api/vs-sp-reports-management`;
 
 // Uber caps an org at three reports in flight. Abandoning a report does not
 // release its slot, so a run that gives up on three slow reports poisons every
@@ -582,7 +582,7 @@ async function earnerCall(s, e, variables) {
     },
     query: EARNER_QUERY,
   });
-  const URL_ = 'https://supplier.uber.com/graphql';
+  const URL_ = `${UBER_WEB_HOST}/graphql`;
   const res = await http(URL_, { method: 'POST', headers: uberWebHeaders(org()), body });
   const { data } = res;
   /* An expired web cookie says NOTHING. Measured live: with `sid` dropped this

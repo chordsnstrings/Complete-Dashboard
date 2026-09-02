@@ -22,12 +22,12 @@
 import { pool, upsertMany, logRun } from '../db.js';
 import { http } from '../http.js';
 import { log } from '../log.js';
-import { uberWebHeaders } from '../auth/uber.js';
+import { uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
 import { noteCredential } from '../auth_state.js';
 
 const SRC = 'uber';
-const GQL = 'https://supplier.uber.com/chronicle/graphql';
+const GQL = `${UBER_WEB_HOST}/chronicle/graphql`;
 
 /* Uber's own limit, not a chosen one. 31 days is refused with
    "Time Range Exceeds 31 days maximum", so windows are cut at 30 to leave the
