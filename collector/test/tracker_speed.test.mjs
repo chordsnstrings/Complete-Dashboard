@@ -141,6 +141,35 @@ check('…and neither is anything forEach passes a callback',
    nothing to say would blank the word the reader is waiting on. */
 check('an empty message leaves the word alone', (await skel('')).text === 'Loading…');
 
+/* ── "Show the other 18 persons" ──────────────────────────────────────────
+   foldRows() takes a `noun` and builds its own plural, and the default plural
+   is the word plus an s — so #cohort/roster-blocked offered to show the other
+   18 *persons*. Nobody writes that at the call site; the call site writes
+   noun:'person' and never sees the sentence. */
+console.log('\nthe plural of person is people');
+const plurals = await page.evaluate(async () => {
+  const ui = await import('/ui.js');
+  return {
+    one: ui.plural(1, 'person'),
+    many: ui.plural(18, 'person'),
+    countOf: ui.countOf(18, 'person'),
+    explicit: ui.plural(18, 'person', 'persons'),
+    regular: ui.plural(2, 'vehicle'),
+    regularOne: ui.plural(1, 'vehicle'),
+    zero: ui.plural(0, 'person'),
+  };
+});
+check('one person is a person', plurals.one === 'person', plurals.one);
+check('eighteen are people, not persons', plurals.many === 'people', plurals.many);
+check('…including through countOf, which is how most of the product asks',
+  plurals.countOf === '18 people', plurals.countOf);
+/* A caller that has already decided is still obeyed: the irregular is a
+   default, not an override. */
+check('an explicit plural still wins', plurals.explicit === 'persons', plurals.explicit);
+check('a regular noun is untouched', plurals.regular === 'vehicles' && plurals.regularOne === 'vehicle',
+  JSON.stringify([plurals.regular, plurals.regularOne]));
+check('zero takes the plural, as English does', plurals.zero === 'people', plurals.zero);
+
 await browser.close();
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);

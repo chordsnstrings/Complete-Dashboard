@@ -789,7 +789,15 @@ export const tierLabel = (t) => {
 
 /* "yango is missing 1 days" and "1 have no record of ever being requested".
    Takes the count so the caller cannot forget to look at it. */
-export const plural = (n, one, many) => (Math.abs(Number(n)) === 1 ? one : (many ?? `${one}s`));
+/* Irregular plurals the product actually uses. A caller passing an explicit
+   `many` still wins; this is for the ones that reach the page through a `noun`
+   option nobody thinks about at the call site — #cohort/roster-blocked offered
+   to "Show the other 18 persons", because foldRows takes noun:'person' and the
+   default plural is the word plus an s. */
+const IRREGULAR = { person: 'people', company: 'companies', day: 'days' };
+export const plural = (n, one, many) => (Math.abs(Number(n)) === 1
+  ? one
+  : (many ?? IRREGULAR[one] ?? `${one}s`));
 export const countOf = (n, one, many) => `${fmt(n)} ${plural(n, one, many)}`;
 
 /* A tracker fix, and the two columns that only make sense together.

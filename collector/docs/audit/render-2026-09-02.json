@@ -1,17 +1,33 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-09-02T00:13:20.588Z",
+  "at": "2026-09-02T00:57:18.354Z",
   "widths": [
-    412
+    1500,
+    1180,
+    820
   ],
-  "routes": 1,
+  "routes": 3,
   "findings": [
     {
-      "route": "vehicle/L36397/movement",
-      "width": 412,
+      "route": "cohort/roster-blocked",
+      "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":47,\"explained\":true,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":2}"
+      "detail": "{\"panels\":32,\"empty_panels\":0,\"rows\":30,\"explained\":false,\"title\":\"Stopped everywhere\",\"kpis\":32,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "cohort/settlement-cash",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":48,\"empty_panels\":0,\"rows\":46,\"explained\":false,\"title\":\"Holding cash\",\"kpis\":305,\"tables\":1,\"charts\":0}"
+    },
+    {
+      "route": "roster",
+      "width": 1500,
+      "sev": "i",
+      "code": "stats",
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":337,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":1}"
     }
   ]
 }

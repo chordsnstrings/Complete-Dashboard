@@ -228,7 +228,12 @@ const PROBE = () => {
        is for, and #safety was making exactly that claim until the page learned
        to read its own truncated flag. */
     const ptxt = txt(panel);
-    const said = /showing|first|top |of \d|more|capped|limit/i.test(ptxt)
+    /* A FOLD is not a cap. foldRows() renders the first N rows with a control
+       reading "Show the other 18 people →" underneath — the rest are one click
+       away and the count is on the button. #cohort/roster-blocked was reported
+       three times over for a table that said exactly what this rule asks of
+       it, in words the regex happened not to carry. */
+    const said = /showing|first|top |of \d|more|capped|limit|show the other/i.test(ptxt)
       || (/\b(every|all)\b/i.test(ptxt) && new RegExp(`\\b${n}\\b`).test(ptxt));
     if (!said) push('w', 'silent-cap', `a table ends at exactly ${n} rows and nothing says whether that is all of them`);
   });
