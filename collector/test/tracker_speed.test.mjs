@@ -43,6 +43,7 @@ const draw = (rows) => page.evaluate(async (rs) => {
     cells: [...t.querySelectorAll('tbody tr')].map((r) => [...r.cells].map((c) => c.textContent.trim())),
     titles: [...t.querySelectorAll('tbody tr')].map((r) => r.cells[2]?.querySelector('[title]')?.title || null),
     note: host.querySelector('p.cap')?.textContent || null,
+    absent: host.querySelector('.tabsent')?.textContent || null,
   };
 }, rows);
 
@@ -78,6 +79,14 @@ check('every fix moving: no sentence', allMoving.note === null, String(allMoving
    some of the rows would be wrong about all of them. */
 const allStill = await draw([fix(1, 'Stopped', null), fix(2, 'Idle', null)]);
 check('every fix stationary: no sentence either', allStill.note === null, String(allStill.note));
+/* …because the COLUMN goes instead. Both halves are needed: with the sentence
+   suppressed and no `absent` rule, a parked car rendered forty dashes and
+   bin/render-audit.mjs read the column as dead — which is what a reader would
+   have read it as too. */
+check('…and the column prunes itself rather than printing dashes',
+  !allStill.heads.includes('Speed'), JSON.stringify(allStill.heads));
+check('…saying so once, where the column was',
+  /reports a speed only when it is/.test(allStill.absent || ''), String(allStill.absent));
 
 console.log('\na feed that sends no state word is not made to have one');
 const noState = await draw([fix(1, null, 12), fix(2, null, null), fix(3, null, null)]);

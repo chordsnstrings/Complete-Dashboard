@@ -810,6 +810,14 @@ export const trackerState = { label: 'State', key: 'status',
     : '<span class="ent-off" title="this feed sends no state word with a fix">—</span>') };
 
 export const trackerSpeed = { label: 'Speed', key: 'speed', num: true,
+  /* And when EVERY fix is a stationary one the column has nothing to say at
+     all, so it prunes itself and says this instead — stillNote() deliberately
+     stays quiet there, because a sentence about some of the rows would be
+     wrong about all of them. Without the two halves the column rendered forty
+     dashes on a parked car and bin/render-audit.mjs read it as dead, which is
+     what a reader would have read it as too. */
+  absent: 'no fix in this table was taken while the vehicle was moving, and this tracker reports '
+    + 'a speed only when it is — the State column beside it is what these fixes have to say',
   render: (r) => (r.speed != null ? `${fmt(r.speed)} km/h`
     : `<span class="ent-off" title="this tracker reports a speed only while the vehicle is moving${
       r.status ? `; this fix is ${esc(String(r.status).toLowerCase())}` : ''}">—</span>`) };
