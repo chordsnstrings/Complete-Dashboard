@@ -2242,9 +2242,25 @@ app.get('/api/coverage', wrap(async (req, res) => {
        the two earnings rows were the last on the page with nothing to say
        about their own gaps, on a product where the money reaching back only
        to February is the single most consequential hole in the record. */
+    /* Days that have HAPPENED. driver_payout_day expands a payout period across
+       period_start..period_end, and weekChunks runs an open week to the
+       following Sunday, so this table legitimately holds rows for days in the
+       future — that is what #reconcile reports as an accrual.
+       ─────────────────────────────────────────────────────────────────────
+       Here it was a contradiction. Read from production on 2026-09-02:
+
+         earnings:uber  first 2026-02-06  last 2026-09-06  213 days  missing 0
+
+       Four days that had not happened, on the page an operator opens
+       specifically to find out what is MISSING — while /api/reconcile named
+       the same rows honestly (accrual_days 4, period_cut true). One set of
+       rows, two pages, two treatments, and the one claiming completeness was
+       the one describing days that did not exist yet. */
     q(`SELECT 'earnings:' || platform AS dataset,
               to_char(day, 'YYYY-MM-DD') AS day, count(*)::int rows
-         FROM driver_payout_day GROUP BY 1, 2 ORDER BY 1, 2`),
+         FROM driver_payout_day
+        WHERE day <= (now() AT TIME ZONE 'Asia/Dubai')::date
+        GROUP BY 1, 2 ORDER BY 1, 2`),
   ]);
   /* Per platform: where the trip feed starts, where the money starts, and how
      much work sits before it. A page can then say "6,231 bookings we hold no
@@ -2521,9 +2537,30 @@ app.post('/api/import/statement-days', requireAdmin, wrap(async (req, res) => {
   const bad = [];
   const clean = [];
   const num = (v) => (v === '' || v == null ? null : Number(v));
+  /* An allow-list, because this writes into driver_statement_day and therefore
+     into money_event, and "Where the money came from" lists whatever it finds.
+     ─────────────────────────────────────────────────────────────────────────
+     platform and company were lowercased and inserted with no check at all,
+     though FLEETS is declared eighteen lines above and validated elsewhere in
+     this same handler's neighbourhood. Measured on production 2026-09-02: a
+     platform called `yay` — 22 rows, AED 881.98, 2026-02-14 to 2026-04-06,
+     across both fleets — is in the table now, and a misspelling was being
+     offered to a reader as a revenue source. It has done no further harm only
+     because every money read filters source='ledger' out, which is a
+     coincidence of this importer's other job rather than a defence.
+
+     Rejected rows are REPORTED, not dropped: the response already carries a
+     `bad` list of row indices, and an import that silently discards a
+     misspelled platform is how somebody spends an afternoon looking for money
+     they believe they uploaded. */
+  const PLATFORMS = new Set(['uber', 'yango', 'bolt', 'hotel', 'cabman', 'fms', 'careem']);
   for (const [i, r] of rows.entries()) {
     const day = String(r.date || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !r.driver || !r.platform || !r.company) {
+      bad.push(i); continue;
+    }
+    if (!PLATFORMS.has(String(r.platform).toLowerCase())
+        || !FLEETS.includes(String(r.company).toLowerCase())) {
       bad.push(i); continue;
     }
     clean.push([String(r.platform).toLowerCase(), String(r.company).toLowerCase(),
@@ -2654,12 +2691,34 @@ app.get('/api/settings/jobs', wrap(async (_req, res) => {
             CASE WHEN finished_at IS NOT NULL AND started_at IS NOT NULL
                  THEN round(extract(epoch FROM finished_at - started_at))::int END AS seconds,
             CASE WHEN finished_at IS NULL AND started_at IS NOT NULL
-                 THEN round(extract(epoch FROM now() - started_at))::int END AS running_seconds
+                 THEN round(extract(epoch FROM now() - started_at))::int END AS running_seconds,
+            /* The true size of the set, carried on the rows the cap let
+               through. A window over the ordered query counts every job
+               without a second scan. */
+            count(*) OVER ()::int AS _total
      FROM collector_job ORDER BY requested_at DESC LIMIT 40`);
+  /* The cap said nothing, and this is the page an operator opens to find out
+     whether a job ran. bin/cap-audit.mjs found it returning exactly 40 of a
+     larger set with no disclosure — the last silent cap in 49 handlers, the
+     other ten all declaring themselves. /api/sensor-health had the same fault
+     and printed its LIMIT as a fleet count; here it would read as "these are
+     all the jobs there have been", which is how a failure that scrolled off
+     the end becomes a failure nobody knows about.
+
+     pending and running stay counts over the WHOLE table rather than over the
+     returned page: "2 queued" must not become "2 queued that fit on this
+     page". */
+  const total = jobs.length ? jobs[0]._total : 0;
+  for (const j of jobs) delete j._total;
+  const [counts] = await q(
+    `SELECT count(*) FILTER (WHERE status = 'queued')::int AS pending,
+            count(*) FILTER (WHERE status = 'running')::int AS running
+       FROM collector_job`);
   res.json({
     jobs,
-    pending: jobs.filter((j) => j.status === 'queued').length,
-    running: jobs.filter((j) => j.status === 'running').length,
+    total, shown: jobs.length, truncated: total > jobs.length,
+    pending: counts?.pending ?? 0,
+    running: counts?.running ?? 0,
   });
 }));
 

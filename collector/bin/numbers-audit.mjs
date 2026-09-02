@@ -341,6 +341,13 @@ for (const route of routes) {
      becomes a figure, so the collision it causes was invisible. */
   const keysAt = new Map();
   const allIds = new Map();
+  /* …and WHICH identity field each endpoint's rows carry it in. A table that
+     labels its first column (`data-key="name"`, `data-key="driver_name"`) has
+     named the field its rows are drawn from, and an endpoint whose rows have
+     no such field cannot have drawn it — /api/platforms carries `platform`
+     and nothing else, so it can never be the source of a table of properties
+     however many property names happen to contain the word "hotel". */
+  const idFieldsAt = new Map();
   latest.forEach((body, u) => {
     const url = u.split('?')[0];
     const walk = (o) => {
@@ -354,6 +361,11 @@ for (const route of routes) {
            per row costs nothing worth bounding. */
         for (const r of o.slice(0, 5000)) {
           if (!r || typeof r !== 'object') continue;
+          const fields = idFieldsAt.get(url) || new Set();
+          for (const k of ID_KEYS) {
+            if (typeof r[k] === 'string' && r[k].trim().length > 1) fields.add(k);
+          }
+          if (fields.size) idFieldsAt.set(url, fields);
           /* Under every name the row could be drawn as, for the same reason
              identitiesOf returns them all: the table decides which of a row's
              names is its subject, and this side does not get to guess. */
@@ -387,6 +399,103 @@ for (const route of routes) {
      landing on a row that belongs to a different one. Built by the walk above,
      which sees every row rather than only the ones carrying a figure. */
   const idsByUrl = allIds;
+
+  /* ── what a drawn row is CALLED, and which endpoint drew it ──────────────
+     A page fetches several endpoints and draws several tables, and until now
+     nothing tied one to the other: any payload row whose identity turned up
+     in any table's first cell was demanded of that table. Both halves of that
+     went wrong on production on 2026-09-02, and neither page was at fault.
+
+     #corporate/properties draws one table, from /api/corporate/properties,
+     six properties over the chosen window. It also fetches /api/platforms for
+     the provenance line — the collector's inventory, one row per CHANNEL, all
+     time. The channel row `hotel` carries bookings 1632; the table has a
+     Bookings column; and "Le Meridien Dubai Hotel & Conference Centre"
+     contains the word "hotel". So a channel's all-time total was demanded of
+     a property's windowed row. The page was right twice over: its six rows
+     sum to 899, and the provenance line under them reads "Hotel 899", which
+     is /api/platforms' own window_bookings for that channel. 1632 is not a
+     number that belongs anywhere on that page.
+
+     #overview draws "Top drivers" — twelve rows of /api/drivers/leaderboard,
+     which returns a hundred. Rank 4 is Muhammad Khalid Gul (4d4eb2c1…,
+     L94178, 9,060 km, all correctly on screen) and further down, undrawn, is
+     a different man: Muhammad Khalid (76ede4ae…, L90721, 3,526 km). The
+     prefix guard below already knew about that pair — but it tested the whole
+     first cell against the endpoint's names, and the cell reads
+     "4Muhammad Khalid Gul": the rank sits in the same cell with no separator,
+     so the cell was not recognised as Gul's, and the undrawn man's kilometres
+     were demanded of the drawn man's row.
+
+     Both are the same mistake. So a row's subject is resolved to the identity
+     an endpoint actually knows it by — the name it LEADS with, longest where
+     several start together, which reads a rank off the front and a badge off
+     the end — and a table is only checked against the endpoints that name
+     its rows. */
+  const subjectAs = (subject, ids) => {
+    if (ids.has(subject)) return subject;              // the ordinary case, O(1)
+    let best = null, at = Infinity;
+    for (const id of ids) {
+      if (id.length < 2 || id.length > subject.length) continue;
+      const i = subject.indexOf(id);
+      /* Earliest, then longest. Earliest because a cell leads with what it is
+         about and trails with decoration; longest because "Muhammad Khalid"
+         and "Muhammad Khalid Gul" both start at the same offset in
+         "4Muhammad Khalid Gul" and only one of them is who the row is. */
+      if (i === -1 || i > at) continue;
+      if (i < at || id.length > best.length) { best = id; at = i; }
+    }
+    return best;
+  };
+  /* Resolved once per (table, endpoint), not once per figure.
+     The matcher asks this for every payload figure against every row of every
+     table: #drivers is 488 figures, three tables and 395 rows against a
+     directory naming 790 identities, which is a scan the audit would do
+     something like a billion times a page. Each answer depends only on the
+     row and the endpoint, so it is computed on first use and kept. */
+  const resolved = new Map();
+  const subjectsOf = (ti, url) => {
+    const k = `${ti}|${url}`;
+    let v = resolved.get(k);
+    if (!v) {
+      const ids = idsByUrl.get(url) || new Set();
+      v = dom.tables[ti].rows.map((r) => subjectAs(r.subject.trim(), ids));
+      resolved.set(k, v);
+    }
+    return v;
+  };
+  /* Which endpoints drew this table. Two questions, the exact one first:
+
+     1. The table's first column usually carries a data-key — the field its
+        subject is drawn from. Only endpoints whose rows have that field can
+        have drawn it. #corporate/properties' table says data-key="name" and
+        /api/platforms has no `name` on any row, so it is out on the spot.
+     2. Where no endpoint offers that field (an unlabelled table, or a column
+        named differently from the payload), fall back to a vote: how many of
+        the table's rows can this endpoint name at all. Measured on
+        #corporate/properties — /api/corporate/properties names 6 of 6,
+        /api/platforms names 2 by having "hotel" inside a property's name.
+        Half of the best coverage is the line: it keeps a second endpoint that
+        genuinely feeds the same table (ordinary) and drops one that merely
+        collides with a couple of rows.
+
+     The vote is over the whole table, because subjectsOf has resolved it
+     already and a half-count would only be a different kind of guess. */
+  const ownersOf = (t, ti) => {
+    const key0 = (t.keys || [])[0] || '';
+    const claims = key0 ? [...idFieldsAt].filter(([, fs]) => fs.has(key0)).map(([u]) => u) : [];
+    const pool = claims.length ? new Set(claims) : null;
+    const cover = new Map();
+    for (const url of idsByUrl.keys()) {
+      if (pool && !pool.has(url)) continue;
+      const c = subjectsOf(ti, url).filter(Boolean).length;
+      if (c) cover.set(url, c);
+    }
+    const best = Math.max(0, ...cover.values());
+    return new Set([...cover].filter(([, c]) => c * 2 >= best).map(([u]) => u));
+  };
+  const owners = dom.tables.map(ownersOf);
+
   /* How many payload rows one endpoint offers under the same identity. */
   const idCount = new Map();
   for (const f of pairs) {
@@ -414,14 +523,26 @@ for (const route of routes) {
      none compared, "0 findings" out — which is indistinguishable from a page
      that is correct. EXPLAIN=1 prints the funnel, so "nothing found" can be
      told apart from "nothing checked". */
-  const D = { col: 0, rows: 0, granular: 0, rival: 0, compared: 0 };
+  const D = { col: 0, foreign: 0, rows: 0, granular: 0, rival: 0, compared: 0 };
   for (const f of pairs) {
     if (STEM.test(f.key) && f.siblings.some((k) => k !== f.key
       && k.replace(STEM, '') === f.key.replace(STEM, ''))) continue;
-    for (const t of dom.tables) {
+    for (const [ti, t] of dom.tables.entries()) {
       const col = columnFor(t.heads, f.key, t.keys);
       if (!col) continue;
       D.col += 1;
+      /* A table this endpoint did not draw.
+         ─────────────────────────────────────────────────────────────────
+         #corporate/properties fetches /api/platforms for its provenance
+         line and draws one table, of properties. /api/platforms' `hotel`
+         row — the channel, 1632 bookings all time — landed in that table
+         because a property is called "Le Meridien Dubai Hotel & Conference
+         Centre" and the table has a Bookings column. The page's own figure
+         for that channel and window is 899: the six rows sum to it and the
+         provenance line prints it. A figure is only owed by the table its
+         own endpoint fed; continue, because another table on the page may
+         be that one. */
+      if (!owners[ti].has(f.url)) { D.foreign += 1; continue; }
       /* EVERY row carrying this identity, not the first.
          A platform name is not unique — /api/revenue has an `uber` row per
          fleet and per month, and /api/platforms one per fleet — so matching
@@ -429,33 +550,39 @@ for (const route of routes) {
          six perfectly displayed figures as missing. The claim being tested is
          "this value is nowhere in its own column", so all the candidate rows
          are searched. */
-      /* Exact first, substring only as a fallback.
-         ─────────────────────────────────────────────────────────────────
-         "Muhammad Khalid" is a prefix of "Muhammad Khalid Gul" — two
-         different drivers, both in /api/earnings/tips — so a substring
-         match handed the first man's figure to the second man's row and
-         called a correctly drawn table wrong. A row whose subject IS the
-         identity is the row; anything else is a guess. */
       /* Each name the row could be drawn under, in order, until one of them
          names a row this table is showing. A driver row from
          /api/drivers/directory carries both the person and their usual plate;
          the directory table is keyed on the person and the vehicle table on
          the plate, and neither side should have to guess which. */
-      let want = null, exact = [], rows = [];
+      /* RESOLVE the cell, do not test it.
+         ─────────────────────────────────────────────────────────────────
+         "Muhammad Khalid" is a prefix of "Muhammad Khalid Gul" — two
+         different drivers of this fleet, 76ede4ae… on L90721 and 4d4eb2c1…
+         on L94178, one account each — so a substring match hands the first
+         man's figure to the second man's row and calls a correctly drawn
+         table wrong. This was known: the rule was exact match first, and a
+         substring fallback that refused any cell the endpoint knew as
+         somebody else's name.
+
+         It refused on the WHOLE cell, and a cell carries more than the
+         identity — a rank in front of a name, a plate beside a badge. On
+         #overview the Top drivers cell reads "4Muhammad Khalid Gul", with
+         the rank in the same cell and no separator; "muhammad khalid gul" is
+         not equal to that string, so the guard did not fire, the prefix went
+         through, and the undrawn man's 3,526 km was demanded of the drawn
+         man's row — whose own 9,060 was on screen and correct.
+
+         So the cell is resolved to the name the endpoint knows it by
+         (subjectAs, above) and compared to that. "4Muhammad Khalid Gul"
+         resolves to Gul and to nobody else. When a man's own row is simply
+         not drawn — the table is sorted and cut to twelve of a hundred — the
+         honest answer is no row at all. */
+      let want = null, rows = [];
+      const as = subjectsOf(ti, f.url);
       for (const cand of (f.ids || [f.id])) {
         want = String(cand).toLowerCase().trim();
-        exact = t.rows.filter((r) => r.subject.trim() === want);
-        /* The fallback exists because a subject often carries more than the
-           identity — a plate beside a badge, a name beside a tag. It must not
-           reach a row that is somebody ELSE's exact match: "Muhammad Khalid"
-           is a prefix of "Muhammad Khalid Gul", both are drivers in
-           /api/earnings/tips, and the loose match handed one man's fare to
-           the other's row. When the man's own row is simply not drawn — the
-           table is sorted and cut — the honest answer is no row at all. */
-        const others = idsByUrl.get(f.url) || new Set();
-        rows = exact.length ? exact
-          : t.rows.filter((r) => r.subject.includes(want.slice(0, 18))
-            && !(others.has(r.subject.trim()) && r.subject.trim() !== want));
+        rows = t.rows.filter((r, ri) => as[ri] === want);
         if (rows.length) break;
       }
       if (!rows.length) continue;                          // this row is not drawn here
@@ -541,7 +668,8 @@ for (const route of routes) {
   if (process.env.EXPLAIN) {
     console.error(`\n  ${route}: ${pairs.length} payload figures → ${D.col} have a column`
       + ` → ${D.rows} sit in a drawn row → ${D.compared} compared`
-      + ` (${D.granular} more granular than the table, ${D.rival} claimed by two endpoints)`);
+      + ` (${D.foreign} in a table their endpoint did not draw,`
+      + ` ${D.granular} more granular than the table, ${D.rival} claimed by two endpoints)`);
   }
   if (missing.length) {
     findings.push({ route, code: 'unshown',

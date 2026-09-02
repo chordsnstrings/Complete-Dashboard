@@ -54,6 +54,49 @@ check('name case and double spaces fold to one driver',
 check('the import moved the data version (a collection run exists for it)',
   (await db.query(`SELECT count(*)::int n FROM collection_run WHERE source='ledger'`)).rows[0].n === 1);
 
+/* ── the importer writes into the money tables, so it checks what it writes ──
+   platform and company were lowercased and inserted with no allow-list, though
+   FLEETS is declared in the same file and validated elsewhere. Measured on
+   production 2026-09-02: a platform called `yay` — 22 rows, AED 881.98,
+   2026-02-14 to 2026-04-06, across both fleets — is in driver_statement_day
+   now, and therefore in money_event, so "Where the money came from" was
+   offering a misspelling as a revenue source. It did no further harm only
+   because every money read filters source='ledger' out, which is a coincidence
+   of this importer's other job rather than a defence. */
+console.log('\nthe importer refuses a platform or a fleet it does not know');
+
+{
+  const before = (await db.query('SELECT count(*)::int n FROM driver_statement_day')).rows[0].n;
+  const junk = await post('/api/import/statement-days', {
+    rows: [
+      { date: '2026-08-05', driver: 'Typo Person', company: 'Ecosine', platform: 'yay', net: 400 },
+      { date: '2026-08-05', driver: 'Typo Person', company: 'Ecosien', platform: 'Uber', net: 400 },
+    ],
+    source: 'ledger',
+  });
+  check('a misspelled platform is refused', junk.status === 200 && junk.body?.written === 0,
+    JSON.stringify(junk.body));
+  check('…and so is a misspelled fleet', junk.body?.rejected === 2, JSON.stringify(junk.body));
+  /* Refused, not silently dropped: an import that discards a row without
+     saying so is how somebody spends an afternoon looking for money they
+     believe they uploaded. */
+  check('…and the refusal is reported rather than swallowed',
+    Array.isArray(junk.body?.bad) ? junk.body.bad.length === 2 : junk.body?.rejected === 2,
+    JSON.stringify(junk.body));
+  const after = (await db.query('SELECT count(*)::int n FROM driver_statement_day').then((r) => r.rows))[0].n;
+  check('nothing reached the money table', after === before, `${before} → ${after}`);
+  check('and no invented platform is in it',
+    (await db.query(`SELECT count(*)::int n FROM driver_statement_day WHERE platform = 'yay'`))
+      .rows[0].n === 0);
+  /* And the gate must not have swallowed the good case with the bad. */
+  const good = await post('/api/import/statement-days', {
+    rows: [{ date: '2026-08-06', driver: 'Real Person', company: 'Ecosine', platform: 'Uber', net: 50 }],
+    source: 'ledger',
+  });
+  check('a platform and fleet it does know still import',
+    good.status === 200 && good.body?.written === 1, JSON.stringify(good.body));
+}
+
 console.log('\nthe ledger is reference, not display');
 
 /* The workbook was given to understand the calculation, not to be a source on

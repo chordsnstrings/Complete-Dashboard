@@ -118,6 +118,18 @@ export async function renderCorridors(root) {
      top five as a larger share of a smaller world. */
   const totalOrigin = named.reduce((a, o) => a + o.trips, 0);
   const t = c.totals || {};
+  /* EVERY PICKUP IN THE WINDOW — one expression, so "of every pickup" cannot
+     mean two things on one page.
+     ─────────────────────────────────────────────────────────────────────
+     The tile and the caption under the bars both describe the SAME unnamed
+     bucket, and they divided it by different denominators: on production
+     2026-09-02 over the last 30 days the tile said 2,112 was 15.6% of every
+     pickup (2,112 / 13,536 = totals.pickups_all) while the caption said 22.3%
+     of the window, which was 2,112 / (7,375 + 2,112) — 7,375 being the sum of
+     the 59 named origin rows the SERVER SENT out of 1,362 areas in the window.
+     The fallback is the same sum, used only when an older server sends no
+     totals at all; it is a floor, not a second definition. */
+  const pickupsAll = +t.pickups_all || (totalOrigin + (unrecorded?.trips || 0));
   kpiHost.innerHTML = '';
   /* This page rolls addresses into areas, and the fact that decides whether any
      of it can be trusted is how many pickups carry an address at all. */
@@ -126,25 +138,43 @@ export async function renderCorridors(root) {
        Checked against production before writing the sentence, having shipped
        three verdicts today that read a field name I had assumed. */
     const all = +t.pickups_all || 0;
+    /* Left as a bare read of the two fields rather than falling back to
+       `pickupsAll`: an older server sending neither would make `all` the
+       origins sum and `withArea` zero, and this block would announce that
+       100% of pickups have no area. Both fields or no verdict. */
     const withArea = +t.pickups_named || 0;
     const noArea = all ? ((all - withArea) / all) * 100 : 0;
     const top = named[0];
     const topPct = top && withArea ? Math.round((top.trips / withArea) * 100) : 0;
     verdict(kpiHost, {
-      /* Not escaped here: verdict() escapes the claim it is given, and doing it
-         twice renders an area called "Al Qouz 1 & 2" as "Al Qouz 1 &amp; 2". */
+      /* WHAT IS MISSING IS A PARSE, NOT AN ADDRESS.
+         ───────────────────────────────────────────────────────────────
+         This said "carry no usable address" over "11,424 of 13,536 pickups
+         carry an address", which reads as 2,112 bookings with the field
+         empty. None of them is. pickups_all is itself
+         count(*) FILTER (WHERE pickup_addr IS NOT NULL), and on production
+         2026-09-02 /api/kpis?days=1 returned 535 bookings against
+         pickups_all 535 — every booking has the text. What 2,112 of them
+         lack is a community inside it, which is what the "Pickups with no
+         area" tile 100px below has always said and this headline
+         contradicted.
+
+         Not escaped here: verdict() escapes the claim it is given, and doing
+         it twice renders an area called "Al Qouz 1 & 2" as "Al Qouz 1 &amp;
+         2". */
       claim: noArea >= 20
-        ? `${Math.round(noArea)}% of pickups carry no usable address`
+        ? `${Math.round(noArea)}% of pickup addresses name no area`
         : top
           ? `${top.area} is the busiest pickup area — ${topPct}% of addressed jobs`
           : 'No addressed pickup in this window',
       figure: noArea >= 20 ? `${Math.round(100 - noArea)}%` : fmt(t.corridors_3plus ?? c.corridors.length),
-      unit: noArea >= 20 ? 'addressed' : 'corridors seen 3+ times',
+      unit: noArea >= 20 ? 'resolve to an area' : 'corridors seen 3+ times',
       tone: noArea >= 40 ? 'bad' : noArea >= 20 ? 'warn' : null,
       meta: `${fmt(t.origins_all ?? named.length)} pickup areas`,
-      sub: `${fmt(withArea)} of ${fmt(all)} pickups carry an address. `
+      sub: `${fmt(withArea)} of ${fmt(all)} pickups resolve to an area. `
         + (noArea >= 20
-          ? 'Every share on this page is over those — a corridor is only as real as the addresses behind it.'
+          ? 'The rest carry an address the parse finds no community in. Every share on this page is '
+            + 'over the ones that resolve — a corridor is only as real as the addresses behind it.'
           : `They roll into ${fmt(t.origins_all ?? named.length)} areas and `
             + `${fmt(t.corridors_all ?? c.corridors.length)} origin–destination pairs.`),
     });
@@ -185,7 +215,7 @@ export async function renderCorridors(root) {
     unrecorded && unrecorded.trips
       ? { label: 'Pickups with no area', value: fmt(unrecorded.trips),
         tone: unrecorded.trips > (named[0]?.trips || 0) ? 'warn' : null,
-        sub: `${pct((unrecorded.trips / (t.pickups_all || (totalOrigin + unrecorded.trips))) * 100, 1)} of every pickup — `
+        sub: `${pct((unrecorded.trips / pickupsAll) * 100, 1)} of every pickup — `
           + 'the address text carried no community, so these are in none of the figures beside this one' }
       : null,
   ]));
@@ -194,11 +224,16 @@ export async function renderCorridors(root) {
      wants to open — the whole page had zero anchors on it. */
   hbars(b1, shownOrigins.map((o) => ({ label: o.area, n: o.trips })), { signed: false });
   if (unrecorded && unrecorded.trips) {
+    /* The tile above prints this same bucket as a share of every pickup in the
+       window; here it was a share of `totalOrigin + unrecorded`, the rows this
+       page happened to receive. Production 2026-09-02, last 30 days: 2,112
+       pickups, 15.6% on the tile and 22.3% in this sentence, two panels apart
+       and both about the same 2,112. */
     b1.append(el('p', 'cap', esc(
       `${countOf(unrecorded.trips, 'further pickup')} — `
-      + `${pct((unrecorded.trips / (totalOrigin + unrecorded.trips)) * 100, 1)} of the window — carry an `
-      + 'address with no community in it and are in none of these bars. Every share on this page is '
-      + 'over the addressed pickups only.')));
+      + `${pct((unrecorded.trips / pickupsAll) * 100, 1)} of the ${fmt(pickupsAll)} pickups in this `
+      + 'window — carry an address with no community in it and are in none of these bars. Every share '
+      + 'on this page is over the pickups that resolve to an area.')));
   }
   b1.append(el('p', 'cap', named.length > SHOWN
     ? `The ${fmt(SHOWN)} busiest of ${countOf(named.length, 'area')} the server returned`
@@ -278,10 +313,28 @@ export async function renderCorridors(root) {
     { label: 'To', key: 'to_area' },
     { label: 'Trips', key: 'trips', num: true },
     { label: 'Avg km', key: 'avg_km', num: true, render: (r) => fmt(r.avg_km, 1) },
+    /* THE DENOMINATOR IS PRINTED, NOT HOVERED.
+       ─────────────────────────────────────────────────────────────────────
+       This cell rendered "14 min" and hid `min_n` in a title attribute — a
+       tooltip is invisible in a screenshot, absent on touch, and unreachable
+       by keyboard, while the two money columns beside it state their coverage
+       inline ("205 of 357 · 57%") and mark a thin one with a visible asterisk.
+       On production 2026-09-02 that hid real spreads: Burj Khalifa → Burj
+       Khalifa averaged 19.4 min over 497 of 3,277 trips (15%) and Business Bay
+       → Business Bay 14.9 min over 1,211 of 2,693 (45%), both printed as a
+       bare number. Below half the whole cell is dimmed, the same withholding
+       Avg fare does, because an average over a seventh of a corridor is not
+       the corridor's average. */
     ...(anyMin ? [{ label: minsDerived ? 'Request → drop' : 'Avg minutes', key: 'avg_min', num: true,
-      render: (r) => (r.avg_min == null
-        ? '<span class="ent-off" title="no booking on this corridor records both a request and an end time">—</span>'
-        : `${fmt(r.avg_min, 0)}<span class="dim" title="over the ${r.min_n} of ${r.trips} trips on this corridor that record both times"> min</span>`) }] : []),
+      render: (r) => {
+        if (r.avg_min == null) return '<span class="ent-off" title="no booking on this corridor records both a request and an end time">—</span>';
+        const over = `${fmt(r.min_n)} of ${fmt(r.trips)}`;
+        const thin = r.trips ? (r.min_n / r.trips) < 0.5 : false;
+        return thin
+          ? `<span class="dim" title="over only ${over} trips on this corridor — the rest record no end time">${
+            fmt(r.avg_min, 0)} min · ${over}</span>`
+          : `${fmt(r.avg_min, 0)}<span class="dim" title="over the ${over} trips on this corridor that record both times"> min · ${over}</span>`;
+      } }] : []),
     /* An average over 2% of a corridor's trips is not the corridor's average.
        The denominator sits beside it and the tone is withheld below half. */
     { label: 'Avg fare', key: 'avg_fare', num: true,

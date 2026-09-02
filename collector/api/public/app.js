@@ -514,6 +514,16 @@ function setHeader(detail) {
       ? `<a href="${href(c.from)}">${esc(c.fromLabel)}</a><span>/</span><b>${esc(c.label)}</b>`
       : `<b>Who exactly?</b>`;
     crumb.style.display = 'flex';
+  } else if (state.view === 'notfound') {
+    /* Named here for the same reason #performer and #trip are, and for a
+       sharper one: the fall-through below takes VIEWS[0], so an address that
+       does not exist would announce itself as "Unit economics" in the largest
+       type on the screen — which is precisely the failure this state was added
+       to end. */
+    $('#viewTitle').textContent = 'Page not found';
+    $('#viewSub').textContent = `#${String(state.missing || '').split('?')[0]} is not a `
+      + 'destination in this product';
+    crumb.style.display = 'none';
   } else {
     const v = VIEWS.find((x) => x.id === state.view) || VIEWS[0];
     $('#viewTitle').textContent = v.label; $('#viewSub').textContent = v.sub;
@@ -539,13 +549,57 @@ function setHeader(detail) {
      the row took them off exactly the three pages that consist almost entirely
      of timestamps and whose subject is how current the data is. */
   const setDisp = (sel, hidden) => { const n = $(sel); if (n) n.style.display = hidden ? 'none' : ''; };
-  setDisp('#fRange', hidesRange(state.view));
-  setDisp('#fPlatform', hidesChannel(state.view));
-  setDisp('#fFleet', hidesChannel(state.view));
+  /* A window and two channel chips over "page not found" are controls for a
+     query nothing is running. NO_FILTER lives in data.js and lists real views;
+     this state is not one, so it is excluded here rather than there. */
+  const lost = state.view === 'notfound';
+  setDisp('#fRange', lost || hidesRange(state.view));
+  setDisp('#fPlatform', lost || hidesChannel(state.view));
+  setDisp('#fFleet', lost || hidesChannel(state.view));
+  /* The grain select has no hiding rule of its own — nothing else in the app
+     touches its display — so it is set both ways here rather than only hidden,
+     or a reader who passed through a bad address would lose the control on
+     every page afterwards. */
+  setDisp('#fGrain', lost);
   $('#filters').style.display = 'flex';
 }
 /* ─────────── views ─────────── */
 const V = {};
+
+/* An address that names no destination.
+   ─────────────────────────────────────────────────────────────────────────
+   applyRoute() used to send every unrecognised hash to `unit`, so #hotels and
+   #zzznotarealpage each drew the whole Unit economics page under the Unit
+   economics title with nothing saying the address had not been understood —
+   verified live on 2026-09-02, where that page leads on AED 56,437. A reader
+   following a stale money link therefore read a real figure off a page they
+   had not asked for. This one renders instead: no data, the address quoted
+   back, and the nearest real destinations. */
+V.notfound = async (root) => {
+  const addr = String(state.missing || '');
+  const typed = addr.split('?')[0].split('/')[0];
+  /* Cheap and good enough to catch the two cases that actually happen: a page
+     renamed since the link was written (#hotels → Corporate & hotels) and a
+     typo close to a real id. Matched on the LABEL as well as the id, which is
+     what gets #hotels to the page that holds the hotel channel. */
+  const needle = typed.toLowerCase();
+  const near = needle.length >= 3
+    ? VIEWS.filter((v) => v.id.includes(needle) || needle.includes(v.id)
+      || v.label.toLowerCase().includes(needle)).slice(0, 4)
+    : [];
+  const p = el('div', 'panel');
+  p.innerHTML = `<div class="note err"><b>#${esc(typed || '')}</b> is not a page in this `
+    + 'product, so there is nothing below to read. Nothing has been filtered out and no figure '
+    + 'here has been withheld — the address simply does not name a destination.</div>'
+    + (near.length
+      ? `<p class="cap">Closest ${near.length === 1 ? 'destination' : 'destinations'}: `
+        + near.map((v) => `<a class="ent" href="${href(v.id)}">${esc(v.label)}</a>`).join(' · ')
+        + '</p>'
+      : '')
+    + `<p class="cap">Or start at <a class="ent" href="${href('unit')}">Unit economics</a>, `
+    + 'or pick a page from the list on the left.</p>';
+  root.append(p);
+};
 
 /* The set behind a number. Reached from a tile or a verdict, never from the
    nav: it is a drill-down, and it only means anything with a key. */
@@ -2277,11 +2331,39 @@ V.finance = async (root) => {
        two tiles add to the one above them and the raw sums do not. */
     { label: 'Fares', value: money(k.accounted_fares), sub: coverage,
       tone: k.priced_pct != null && k.priced_pct < 40 ? 'warn' : null },
-    { label: 'Platform payouts', value: money(k.accounted_payouts),
-      sub: k.payout_days
-        ? `${(k.payout_platforms || []).map(sourceLabel).join(', ')} · ${countOf(k.payout_days, 'day')} of statements, `
-          + `${countOf(k.payout_drivers, 'driver')}`
-        : 'no payout statement covers this range' },
+    /* The caption named two platforms over a figure containing one.
+       ─────────────────────────────────────────────────────────────────────
+       `accounted_payouts` (api/income_sql.js:222) sums only the rows whose
+       chosen basis is payout or partial_payout. On production 2026-09-02,
+       /api/revenue?days=365 puts uber on basis partial_payout (AED
+       2,404,065.68) and yango on basis `fares` — yango's AED 17,611.22 payout
+       is deliberately left out, because yango is already counted on its AED
+       1,812 of fares and adding its payout beside them would count the same
+       work twice. That exclusion is correct. But `payout_platforms`,
+       `payout_days` and `payout_drivers` (api/server.js:506-508) are computed
+       over EVERY platform holding a payout row, so the tile read
+       "AED 2,404,066 — Uber, Yango · 209 days of statements, 246 drivers"
+       where 246 is uber's 234 plus yango's 12 and the figure is uber's alone.
+       Until the server reports the counted set separately (see the report),
+       the page can still be honest with what it has: those three fields
+       describe the STATEMENTS HELD, and the gap between the statements and the
+       figure is k.payouts − k.accounted_payouts, which is exactly the money
+       being counted somewhere else. */
+    (() => {
+      const held = k.payouts == null ? null : +k.payouts;
+      const counted = k.accounted_payouts == null ? null : +k.accounted_payouts;
+      const elsewhere = held != null && counted != null && held - counted >= 1
+        ? Math.round(held - counted) : 0;
+      return { label: 'Platform payouts', value: money(counted),
+        sub: k.payout_days
+          ? `statements held: ${(k.payout_platforms || []).map(sourceLabel).join(', ')} · `
+            + `${countOf(k.payout_days, 'day')}, ${countOf(k.payout_drivers, 'driver')}`
+            + (elsewhere
+              ? ` — ${money(elsewhere)} of those statements is not in this figure, on channels `
+                + 'counted on their fares instead, so their work is not counted twice'
+              : '')
+          : 'no payout statement covers this range' };
+    })(),
     /* The statement view beside the bank view. What the fleet EARNED on trip
        (gross minus commission, from the platform's statement reports) vs what
        REACHED the bank (the payout — net of the cash drivers already hold,
@@ -2812,6 +2894,25 @@ V.unauthorized = async (root) => {
     const human = +t.needs_a_human || 0;
     const segs = +t.segments || 0;
     const km = +t.unauth_km || 0;
+    /* `partial` is NOT a partial match. This sentence said it was, twelve
+       pixels above a tile reading "INCONCLUSIVE 71 — telemetry gaps — cannot
+       judge" built from the identical field, so one number carried two
+       incompatible meanings on one screen. The dictionary the product ships
+       settles it (api/public/segments.js VERDICT_MEANS.partial: "A telemetry
+       gap falls inside this window, so we cannot claim to have observed the
+       whole interval"), and so does the reconciler: src/reconcile.js
+       NON_CANDIDATE_REASON.partial is "the journey is cut off by the edge of
+       available telemetry", and classifySegment() returns `partial` BEFORE
+       findMatch() is ever called — so no booking was compared against these at
+       all, let alone one that covered part of the movement.
+       And their distance belongs beside the headline's: production
+       /api/unauthorized/summary?days=2 on 2026-09-02 answers unauth_km 154
+       against 2,227 km under the 71 partials, so the km the page led with was
+       6% of the km it could not account for. */
+    const partialN = +t.partial || 0;
+    const partialRow = (sum.byVerdict || []).find((v) => v.verdict === 'partial');
+    const partialKm = partialRow && partialRow.km != null && Number.isFinite(+partialRow.km)
+      ? +partialRow.km : null;
     verdict(vuHost, {
       claim: unauth
         ? `${countOf(unauth, 'journey')} moved a car with no booking behind it`
@@ -2824,14 +2925,34 @@ V.unauthorized = async (root) => {
       sub: `${fmt(km)} km ran under those journeys.`
         + (human ? ` ${fmt(human)} more ${plural(human, 'journey')} cannot be decided by the `
           + 'data alone and are waiting on a person.' : '')
-        + (+t.partial ? ` ${fmt(t.partial)} are partial matches — a booking covers some of the `
-          + 'movement and not all of it.' : ''),
+        + (partialN ? ` A further ${fmt(partialN)} ${plural(partialN, 'journey')}`
+          + (partialKm == null ? '' : ` carrying ${fmt(partialKm)} km, against the ${fmt(km)} above,`)
+          + ' had a telemetry gap fall inside the interval, so we cannot claim to have observed the '
+          + 'whole of it — no booking was compared against them either way.' : ''),
       recommend: unauth
         ? 'Each one opens its own segment page with the trace and the bookings it was compared against.'
         : null,
     });
   }
   const segTotal = (sum.byVerdict || []).reduce((a, r) => a + (+r.n || 0), 0);
+
+  /* The seat-pad verdicts are computed HERE rather than beside the table at the
+     bottom of this page, because the KPI row has to say what the table says.
+     ─────────────────────────────────────────────────────────────────────────
+     "NEVER TRIGGERS" needs enough fixes to be a claim. A plate with 0 occupied
+     of 2 fixes was tagged red beside one with 0 of 213 — the second is a
+     finding and the first is two samples. */
+  const FIX_FLOOR = 20;
+  /* {rows, total, shown, truncated} — tolerant of the old bare array, the same
+     read /api/unauthorized/by-vehicle already gets a few lines above. */
+  const sensorRows = sensors.rows || (Array.isArray(sensors) ? sensors : []);
+  const sensorTotal = sensors.total ?? sensorRows.length;
+  const flagged = sensorRows.map((s2) => ({ ...s2,
+    ratio: s2.total_fixes ? +(s2.occupied_fixes / s2.total_fixes * 100).toFixed(1) : null,
+    verdict: s2.sensor_suspect_segments > 0 ? 'suspect'
+      : s2.occupied_fixes > 0 ? 'ok'
+        : s2.total_fixes >= FIX_FLOOR ? 'never triggers' : 'too few fixes to judge' }));
+  const deadPads = flagged.filter((f) => f.verdict === 'never triggers').length;
   /* Five tiles accounted for 299 of 382 segments. `stationary` and
      `unverifiable` were in the donut beside them and had no tile, so the
      numbers on the page did not add up to the page — and `needs_a_human`, a
@@ -2845,12 +2966,32 @@ V.unauthorized = async (root) => {
       t.unauth_km == null ? 'no distance was measured on these segments' : 'distance carried off-book'],
     ['Matched to a booking', fmt(t.authorized || 0), 'legitimate, reconciled'],
     ['Occupied but stationary', fmt(t.stationary || 0), 'seat occupied, the vehicle never really moved'],
-    ['Sensor suspect', fmt(t.sensor_suspect || 0), 'excluded — likely hardware'],
+    /* Two counts, because one of them can never see the fault the tile is
+       captioned for. `sensor_suspect` counts occupancy SEGMENTS whose reading
+       was implausible — a pad stuck ON. A DEAD pad emits no occupancy segment
+       at all, so it can never be counted here: on production
+       /api/unauthorized/summary?days=2 (2026-09-02) sensor_suspect is 0 while
+       /api/sensor-health over the same window puts 12 of 33 trackers on "never
+       triggers". "0 — excluded, likely hardware" sat directly above that table.
+       The units differ — segments against trackers — so both are named.
+       data-count marks the figure countUp() may animate; see countUp(). */
+    ['Seat-pad faults',
+      `<span data-count>${fmt(t.sensor_suspect || 0)}</span> stuck · ${fmt(deadPads)} dead`,
+      `${fmt(t.sensor_suspect || 0)} occupancy ${plural(+t.sensor_suspect || 0, 'interval')} read as `
+        + `implausible and excluded; ${fmt(deadPads)} of ${fmt(flagged.length)} `
+        + `${plural(flagged.length, 'tracker')} below never reported an occupied seat — a dead pad `
+        + 'produces no interval to exclude'],
     ['Inconclusive', fmt(t.partial || 0), 'telemetry gaps — cannot judge'],
     ['Could not be verified', fmt(t.unverifiable || 0), 'a revenue channel was unreadable at the time'],
     ['Needs a human', fmt(t.needs_a_human ?? ((t.unverifiable || 0) + (t.partial || 0))),
       'segments no rule can settle — somebody has to look'],
-  ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
+  /* Same one-line rule kpiRow() applies, measured on the TEXT so a value
+     carrying markup is judged by what the reader sees. Without it .kpi .n's
+     white-space:nowrap clips "0 stuck · 12 dead" at the card edge — the tile
+     is overflow:hidden, so a cut figure gets not even an ellipsis. */
+  ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num${
+    String(n).replace(/<[^>]*>/g, '').trim().length > 12 ? ' long' : ''
+  }">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
 
   /* What the figures above actually cover.
      Seat occupancy comes from a five-minute realtime poll with no history
@@ -2923,19 +3064,6 @@ V.unauthorized = async (root) => {
   foldRows(list.body, segmentTable(rows), { shown: 8, total: rows.length, noun: 'segment', key: 'unauth-seg' });
 
   health.body.innerHTML = '';
-  /* "NEVER TRIGGERS" needs enough fixes to be a claim. A plate with 0 occupied
-     of 2 fixes was tagged red beside one with 0 of 213 — the second is a
-     finding and the first is two samples. */
-  const FIX_FLOOR = 20;
-  /* {rows, total, shown, truncated} — tolerant of the old bare array, the same
-     read /api/unauthorized/by-vehicle already gets a few lines above. */
-  const sensorRows = sensors.rows || (Array.isArray(sensors) ? sensors : []);
-  const sensorTotal = sensors.total ?? sensorRows.length;
-  const flagged = sensorRows.map((s2) => ({ ...s2,
-    ratio: s2.total_fixes ? +(s2.occupied_fixes / s2.total_fixes * 100).toFixed(1) : null,
-    verdict: s2.sensor_suspect_segments > 0 ? 'suspect'
-      : s2.occupied_fixes > 0 ? 'ok'
-        : s2.total_fixes >= FIX_FLOOR ? 'never triggers' : 'too few fixes to judge' }));
   const TONE = { ok: 'ok', suspect: 'warn', 'never triggers': 'bad', 'too few fixes to judge': 'dim' };
   health.body.append(tableFrom(flagged, [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
@@ -4901,7 +5029,16 @@ V.settings = async (root) => {
           render: (r) => (r.error
           ? `<span class="note err" title="${esc(String(r.error))}">${esc(String(r.error).slice(0, 110))}${
             String(r.error).length > 110 ? '…' : ''}</span>` : '') },
-      ], { sortable: true, sortId: 'jobs', defaultSort: { key: 'id', dir: 'desc' } }));
+      ], { sortable: true, sortId: 'jobs', defaultSort: { key: 'id', dir: 'desc' },
+        /* The endpoint returns the 40 most recent of however many there are.
+           Sorting this table re-orders those 40 and does not reach the rest —
+           which on the page an operator opens to ask "did that job run" is the
+           difference between "it is not here" and "it is not on this page". */
+        capped: d.truncated ? `all ${fmt(d.total)} jobs on record` : null }));
+      if (d.truncated) {
+        jp.body.append(el('p', 'cap', `Showing the ${fmt(d.shown)} most recently requested of `
+          + `${fmt(d.total)} jobs. Older ones are on record and not on this page.`));
+      }
       // `note` is a DOM element in this scope — the settings status line — so
       // the shared helper of the same name is unreachable here. Build the
       // element directly rather than shadowing something on purpose.
@@ -5092,6 +5229,10 @@ const NO_SOURCE_STAMP = new Set([
      health board that IS the source list, and the two pages whose whole
      subject is which collector is broken. */
   'settings', 'sources', 'providers', 'coverage',
+  /* …and an address that named no page. "Built from Uber 1,127 · Hotel 63 ·
+     Yango 7" under "Page not found" attributes figures that are not on the
+     screen to feeds that were never queried for it. */
+  'notfound',
 ]);
 
 async function stampSource(root, gen) {
@@ -5425,11 +5566,28 @@ $('#themeBtn').onclick = () => {
    An unknown view falls back to the overview rather than rendering nothing. */
 function applyRoute() {
   const r = parseHash();
-  const known = VIEWS.some((v) => v.id === r.view) || !!V[r.view];
-  /* An empty or unknown address lands on the ledger, not on the activity
-     page. This is the whole point of the reshuffle: somebody opening the
-     product with no address in mind should be looking at what earns. */
-  state.view = known ? r.view : 'unit';
+  /* `notfound` is a state, not an address: V.notfound exists, so without this
+     the `!!V[r.view]` test below would make #notfound a known destination and
+     the panel would have no address to quote back. */
+  const known = r.view !== 'notfound'
+    && (VIEWS.some((v) => v.id === r.view) || !!V[r.view]);
+  /* An EMPTY address lands on the ledger, not on the activity page. This is
+     the whole point of the reshuffle: somebody opening the product with no
+     address in mind should be looking at what earns.
+
+     An address that was typed and not recognised is a different event, and it
+     used to be indistinguishable from that landing: `known ? r.view : 'unit'`
+     rendered Unit economics under the Unit economics title with no banner and
+     nothing naming the address. Verified live on 2026-09-02: #hotels and
+     #zzznotarealpage both drew the full Unit economics page — and so did
+     `#unauthorized` typed with one hash too many, which is how a screenshot
+     run in this very session came back titled "Unit economics". A stale or
+     mistyped money link therefore landed a reader on a DIFFERENT money page
+     showing a real figure as though they had arrived at the one they asked
+     for. `notfound` keeps the address so the page can name it; the correct
+     destination for #hotels, for the record, is #corporate. */
+  state.view = known ? r.view : (r.view ? 'notfound' : 'unit');
+  state.missing = known || !r.view ? null : location.hash.replace(/^#/, '');
   state.param = r.param; state.sub = r.sub;
   // The address is the authority. A link with no filter in it means the
   // defaults, not "whatever the last page happened to be showing" — otherwise

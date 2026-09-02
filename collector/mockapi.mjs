@@ -1125,8 +1125,18 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
      the idle one carries neither, so all three empty states are reachable. */
   km: i === 6 ? null : 6100 - i * 420,
   revenue: i === 1 || i === 4 ? 15800 - i * 1100 : null,
+  /* `payout` is the CHOSEN payout and `attributed` the raw one, and on the two
+     cars that also carry a fare they differ — that is the Yango shape the
+     endpoint exists to keep out of two columns at once: a channel that prices
+     every booking AND pays out weekly is counted on its fares, so its payout
+     is in `attributed` and not in `payout`. A mock where the two are always
+     equal cannot render the asterisk the table puts on the difference. */
   payout: i === 6 ? null : 12400 - i * 900,
+  attributed: i === 6 ? null : (12400 - i * 900) + (i === 1 || i === 4 ? 640 : 0),
   payout_days: i === 6 ? 0 : Math.max(1, 27 - i),
+  attributed_days: i === 6 ? 0 : Math.max(1, 27 - i) + (i === 1 || i === 4 ? 1 : 0),
+  fares_platforms: i === 1 || i === 4 ? ['hotel', 'yango'] : [],
+  payout_platforms: i === 6 ? [] : ['uber'],
   payout_even_split: i === 3,
   drivers: i === 6 ? 0 : 1 + (i % 3), platforms: 1 + (i % 2),
   last_trip: i === 6 ? null : new Date(Date.now() - i * 72e5).toISOString(),
@@ -2652,7 +2662,15 @@ app.get('/api/geo/corridors', (_, r) => {
   const areas = ['Al Thanyah Fifth', 'Business Bay', 'Dubai Airport', 'Palm Jumeirah', 'Al Barsha 1',
     'Marsa Dubai', 'Downtown Dubai', 'Al Nahda First', 'Jumeirah 1', 'Deira'];
   r.json({
-  totals: { corridors_3plus: 47, corridors_all: 210, origins_all: 63 },
+  /* pickups_all / pickups_named are the two denominators every share on
+     #corridors divides by, and the fixture had neither — so the smoke run
+     rendered the page against a fallback (the sum of the rows it happened to
+     receive) and could not have shown the tile and the caption disagreeing
+     about the same bucket, which is what they did in production. Both count
+     the WHOLE window, so pickups_named (3,180 over 63 areas) is larger than
+     the 2,670 in the ten origin rows below. */
+  totals: { corridors_3plus: 47, corridors_all: 210, origins_all: 63,
+    pickups_all: 3780, pickups_named: 3180 },
   shown: 60, truncated: true, origins_shown: 40, origins_truncated: true,
     /* The tiles and the origins panel are a roll-up of the same aggregate the
        corridor list needs, so they can be asked for on their own — cold at 365
@@ -2678,13 +2696,29 @@ app.get('/api/geo/corridors', (_, r) => {
     note: 'Areas are parsed from the address text each provider returns, not from a place id. '
       + 'Bookings only — an FMS row is the tracker\'s own record of a journey a ride platform '
       + 'already reported, and counting it would chart the same trip twice.',
-    corridors: areas.flatMap((a, i) => areas.slice(0, 4).map((b, j) => ({
-      from_area: a, to_area: b, trips: Math.max(3, 90 - i * 6 - j * 9),
-      avg_km: 8 + j * 4, avg_min: 18 + j * 7, min_n: 18 + j, min_reported_n: 0,
-      priced: (i + j) % 3 ? 0 : 20, complimentary: (i + j) % 5 === 0 ? 1 : 0,
-      avg_fare: (i + j) % 3 ? null : 96 + j * 12, platforms: ['uber', 'fms'] }))).filter((c) => c.from_area !== c.to_area),
-    origins: areas.map((area, i) => ({ area, trips: 420 - i * 34, morning: 200 - i * 18,
-      evening: 180 - i * 12, avg_km: 11 + i * 0.5 })),
+    /* min_n is a SUBSET of trips — the rows on the corridor that record both a
+       request and an end. It was `18 + j` against a trip count that falls to
+       3, so the fixture asked the page to render "21 of 9"; the page prints
+       that denominator inline now (a tooltip is invisible in a screenshot),
+       and a fixture that cannot happen makes the smoke run lie about it.
+       Every fourth corridor is timed on under half its trips, which is the
+       case the page dims. */
+    corridors: areas.flatMap((a, i) => areas.slice(0, 4).map((b, j) => {
+      const trips = Math.max(3, 90 - i * 6 - j * 9);
+      return {
+        from_area: a, to_area: b, trips,
+        avg_km: 8 + j * 4, avg_min: 18 + j * 7,
+        min_n: Math.max(1, Math.round(trips * ((i + j) % 4 === 0 ? 0.2 : 0.8))), min_reported_n: 0,
+        priced: (i + j) % 3 ? 0 : 20, complimentary: (i + j) % 5 === 0 ? 1 : 0,
+        avg_fare: (i + j) % 3 ? null : 96 + j * 12, platforms: ['uber', 'fms'] };
+    })).filter((c) => c.from_area !== c.to_area),
+    /* The unnamed bucket is a real origin row on the live endpoint and the
+       largest one — 2,112 of 13,536 pickups on production — and the page has a
+       tile and a caption that exist only to state it. Without it here the
+       smoke run drew neither. */
+    origins: [{ area: '(unrecorded)', trips: 600, morning: 240, evening: 300, avg_km: 13.5 }]
+      .concat(areas.map((area, i) => ({ area, trips: 420 - i * 34, morning: 200 - i * 18,
+        evening: 180 - i * 12, avg_km: 11 + i * 0.5 }))),
   });
 });
 /* One row per driver, not one per overlapping report period — and the state
@@ -2944,6 +2978,11 @@ app.get('/api/settings/jobs', (_, r) => r.json({
       error: 'Error: 401 from the model endpoint — ARK_API_KEY rejected', seconds: 9 },
   ],
   pending: 0, running: 1,
+  /* The endpoint returns the 40 most recent of however many exist and now says
+     so. Truncated deliberately here, so the caption and the sort-cap notice
+     that exist to disclose it are exercised by a screenshot rather than only
+     by a unit test. */
+  total: 63, shown: 6, truncated: true,
 }));
 
 

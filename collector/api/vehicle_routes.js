@@ -145,6 +145,34 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          FROM by_account a
          GROUP BY a.plate
        ),
+       /* The same work again, one CHANNEL at a time, because the income rule
+          chooses between a fare and a payout one channel at a time and cannot
+          be applied to a plate total. Off by_account rather than off the trip
+          table: reading the window twice to ask the same question at a second
+          grain is exactly the cost this query was rewritten to remove, and a
+          CTE referenced by two aggregates is materialised once and read twice.
+          The identical shape /api/economics/assets uses.
+
+          Nested on the plate row rather than returned as a second result set,
+          so the two grains cannot arrive describing different windows. */
+       chan AS (
+         SELECT c.plate, jsonb_agg(jsonb_build_object(
+                  'platform', c.platform, 'bookings', c.bookings,
+                  'priced_bookings', c.priced_bookings, 'fares', c.fares,
+                  'booking_days', c.booking_days)) channels
+         FROM (
+           SELECT a.plate, a.platform,
+                  sum(a.trips)::int bookings,
+                  sum(a.priced_trips)::int priced_bookings,
+                  round(sum(a.revenue)::numeric,2) fares,
+                  count(DISTINCT a.local_day) FILTER (WHERE a.trips > 0)::int booking_days
+           FROM by_account a GROUP BY 1,2
+         ) c
+         /* An FMS row is a telematics twin, not a booking, and it carries no
+            fare — so it is not a money channel and must not become one. */
+         WHERE c.bookings > 0
+         GROUP BY 1
+       ),
        tel AS (
          SELECT DISTINCT ON (plate) plate, captured_at last_fix, polled_at, status, speed
          FROM telemetry_snapshot ORDER BY plate, captured_at DESC
@@ -175,13 +203,40 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
 
           Kept in its own column beside the fares: a fare is what a rider was
           charged for one trip and this is a share of a net weekly payout after
-          commission. Adding them would produce a number that is neither. */
+          commission. Adding them would produce a number that is neither.
+
+          This aggregate is the RAW attribution — every channel's payout,
+          including the channels whose money the Fares column already carries.
+          It ships under the name attributed, and the payout on the response is
+          the figure api/income_sql.js CHOOSES per channel, folded below. Note
+          the absence of back-ticks in this comment: it lives inside a JS
+          template literal, and one would end the query here. */
+       attr AS (
+         /* One evaluation of the attribution, read twice below — the plate
+            total and the per-channel split are two grains of the same rows,
+            and this is the expensive fragment in the statement. */
+         SELECT plate, platform, day, attributed, basis
+         FROM (${attributedEarnings()}) a
+       ),
        pay AS (
          SELECT att.plate,
                 round(sum(att.attributed)::numeric,2) payout,
                 count(DISTINCT att.day)::int payout_days,
                 bool_or(att.basis = 'even') AS payout_even_split
-         FROM (${attributedEarnings()}) att
+         FROM attr att
+         GROUP BY 1
+       ),
+       pay_chan AS (
+         SELECT c.plate, jsonb_agg(jsonb_build_object(
+                  'platform', c.platform, 'payouts', c.payouts,
+                  'payout_days', c.payout_days, 'even_split', c.even_split)) channels
+         FROM (
+           SELECT att.plate, att.platform,
+                  round(sum(att.attributed)::numeric,2) payouts,
+                  count(DISTINCT att.day)::int payout_days,
+                  bool_or(att.basis = 'even') even_split
+           FROM attr att GROUP BY 1,2
+         ) c
          GROUP BY 1
        )
        SELECT p.plate,
@@ -190,6 +245,9 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               coalesce(w.days,0) days, coalesce(w.days_moved,0) days_moved,
               w.km, w.telematics_km, w.revenue, coalesce(w.priced_trips,0) priced_trips,
               pay.payout, coalesce(pay.payout_days,0) payout_days, pay.payout_even_split,
+              /* The two grains that let api/income_sql.js choose per channel.
+                 Nested, so a reader of one row has the whole basis in hand. */
+              chan.channels fare_channels, pay_chan.channels payout_channels,
               coalesce(w.drivers,0) drivers, coalesce(w.platforms,0) platforms,
               w.last_trip, w.last_movement,
               coalesce(w.fleet_id, v.fleet_id, vp.fleet_id) fleet_id,
@@ -214,6 +272,8 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        FROM plates p
        LEFT JOIN work w ON w.plate = p.plate
        LEFT JOIN pay ON pay.plate = p.plate
+       LEFT JOIN chan ON chan.plate = p.plate
+       LEFT JOIN pay_chan ON pay_chan.plate = p.plate
        LEFT JOIN tel ON tel.plate = p.plate
        LEFT JOIN doc ON doc.plate = p.plate
        LEFT JOIN al  ON al.plate = p.plate
@@ -241,13 +301,139 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
           AND plate IS NOT NULL AND plate <> ''
         GROUP BY plate`, [from, to, cov.days]);
     const alertKm = new Map(km.map((r) => [r.plate, r.alert_km == null ? null : Number(r.alert_km)]));
+
+    /* ── the two kinds of money, per channel, so neither is counted twice ──
+       The Payout column was `pay.payout` above — sum(attributed) over EVERY
+       channel — while the Fares column beside it carried the fares of the
+       channels that price per trip. Yango does both: it reports a fare on
+       every booking AND pays the driver weekly. So the same money appeared in
+       both cells of the same row, which is the one thing api/income_sql.js
+       exists to prevent.
+
+       Measured on production 2026-09-02, the same plate in the same window on
+       two pages:
+
+         /api/vehicles/directory?days=2   L36397 payout 1,700.03 (1,899.58 by
+                                          the time the Dubai day had filled)
+         /api/economics/assets?days=2     L36397 payouts 1,601.17,
+                                          attributed 1,677.17, fares 66
+
+       and fleet-wide the directory's payout column summed to the economics
+       `attributed` total to the cent — 60,157.28 against 59,893.28 of chosen
+       payout, AED 264 of Yango money in two columns at once. Small only
+       because Yango is 7 of 1,003 bookings; the rule is not.
+
+       chooseBasis picks one figure per channel, exactly as
+       /api/economics/assets does per plate and /api/vehicle/kpis does for one
+       car. The channel rows ride nested on each plate's row (`fare_channels`
+       and `payout_channels` above) rather than arriving from statements of
+       their own: asking the window a second time to answer the same question
+       at a second grain is the cost this query was rewritten to remove. */
+    /* Whole Dubai days, inclusive — the denominator chooseBasis measures a
+       channel's payout coverage against. Date.parse on a bare 'YYYY-MM-DD' is
+       UTC midnight for both ends, so the subtraction is exact. String(aDate)
+       would give "Sat Aug 01 2026" and never reach this far. */
+    const windowDays = Math.max(1, Math.round(
+      (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1);
+    const num = (v) => (v == null ? null : Number(v));
+    const channelsOf = (r) => {
+      const m = new Map();
+      const at = (name) => {
+        if (!m.has(name)) {
+          m.set(name, { platform: name, bookings: 0, priced_bookings: 0, fares: null,
+            booking_days: 0, payouts: null, payout_days: 0, even_split: false });
+        }
+        return m.get(name);
+      };
+      for (const c of (r.fare_channels || [])) {
+        Object.assign(at(c.platform), { bookings: c.bookings, priced_bookings: c.priced_bookings,
+          fares: num(c.fares), booking_days: c.booking_days });
+      }
+      for (const c of (r.payout_channels || [])) {
+        Object.assign(at(c.platform), { payouts: num(c.payouts),
+          payout_days: c.payout_days ?? 0, even_split: !!c.even_split });
+      }
+      return [...m.values()];
+    };
+
+    /* `payout_days` has to describe the figure printed beside it, which is the
+       union of the days the CHOSEN channels paid over — not the sum of their
+       day counts, and not the raw all-channel count above. Two shapes give it
+       exactly for nothing: one chosen channel is its own day count, and every
+       paying channel chosen is the count `pay` already made. A mixed basis
+       across three or more paying channels on ONE plate is neither, and no
+       fleet here has produced it yet — so it is asked for rather than
+       estimated, once, for only the plates that need it. */
+    const basisOf = (r) => {
+      const pf = channelsOf(r);
+      const income = fleetIncome(pf, windowDays);
+      return {
+        income,
+        chosenPay: pf.filter((c) => c.basis === 'payout' || c.basis === 'partial_payout'),
+        chosenFare: pf.filter((c) => c.basis === 'fares' || c.basis === 'partial_fares'),
+        paying: pf.filter((c) => c.payouts != null),
+      };
+    };
+    const chosen = new Map(rows.map((r) => [r.plate, basisOf(r)]));
+    const mixed = rows.filter((r) => {
+      const b = chosen.get(r.plate);
+      return b.chosenPay.length >= 2 && b.chosenPay.length < b.paying.length;
+    });
+    const mixedDays = new Map();
+    if (mixed.length) {
+      const pairs = mixed.flatMap((r) => chosen.get(r.plate).chosenPay
+        .map((c) => [r.plate, c.platform]));
+      for (const d of await q(
+        `SELECT att.plate, count(DISTINCT att.day)::int payout_days
+         FROM (${attributedEarnings()}) att
+         JOIN unnest($3::text[], $4::text[]) AS k(plate, platform)
+           ON k.plate = att.plate AND k.platform = att.platform
+         GROUP BY 1`,
+        [from, to, pairs.map((x) => x[0]), pairs.map((x) => x[1])])) {
+        mixedDays.set(d.plate, d.payout_days);
+      }
+    }
+
     /* The rate, and enough beside it for the column to say which days it is
        about. The whole coverage record is not repeated onto 500 rows; the two
        counts it takes to write "22 of 30 days" are. */
-    res.json(rows.map((r) => {
+    res.json(rows.map((row) => {
+      /* The nested channel rows are the working, not the answer. Dropped here
+         rather than shipped: 500 plates carrying every channel's coverage
+         fields is a page of JSON nobody reads, and the two figures they decide
+         are on the row already. */
+      const { fare_channels: _f, payout_channels: _p, ...r } = row;
       const ak = alertKm.get(r.plate) ?? null;
+      const { income, chosenPay, chosenFare, paying } = chosen.get(r.plate);
+      const payDays = chosenPay.length === 0 ? 0
+        : chosenPay.length === 1 ? chosenPay[0].payout_days
+          : chosenPay.length === paying.length ? (r.payout_days || 0)
+            : (mixedDays.get(r.plate) ?? 0);
       return {
         ...r,
+        /* Both halves of the money, each counted on ONE basis. `revenue` is
+           the fares of the channels believed on their fares and `payout` the
+           attributed pay of the channels believed on their payout, so the two
+           cells of a row are disjoint and a reader may add them. They are the
+           identical fields /api/economics/assets returns for the same plate
+           and window, and test/vehicle_payout_basis.test.mjs requires that. */
+        revenue: income.accounted_fares,
+        /* Priced bookings BEHIND that figure, not every priced booking on the
+           car: the count annotates the money, and a channel whose fares were
+           dropped for its payout must not lend it bookings. */
+        priced_trips: chosenFare.reduce((a, c) => a + (c.priced_bookings || 0), 0),
+        payout: income.accounted_payouts,
+        payout_days: payDays,
+        payout_even_split: chosenPay.some((c) => c.even_split),
+        /* The raw attribution keeps its own name beside the chosen figure. It
+           is the only one that RECONCILES — every plate's attributed, plus the
+           periods that reached no plate, is what the platforms paid — and it
+           is what this column used to hold. */
+        attributed: r.payout,
+        attributed_days: r.payout_days || 0,
+        /* Which channels each half came from, so the column can say it. */
+        fares_platforms: chosenFare.map((c) => c.platform).sort(),
+        payout_platforms: chosenPay.map((c) => c.platform).sort(),
         alert_km: ak,
         alerts_per_100km: alertRate(r.alerts, ak, cov),
         alerts_per_100km_absent: alertRateReason(ak, cov),

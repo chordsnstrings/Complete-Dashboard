@@ -1194,10 +1194,17 @@ export async function renderVehicleDirectory(root) {
           ? `<span class="dim" title="the tracker saw ${fmt(Math.round((r.telematics_km / r.km - 1) * 100))}% more distance than the bookings account for"> · +${
             Math.round((r.telematics_km / r.km - 1) * 100)}%</span>` : ''}`;
       } },
+    /* The fares of the channels counted ON their fares, and the count of the
+       bookings behind exactly that figure. Both halves were wider than the
+       money they describe until the endpoint applied the income rule: a
+       channel believed on its payout lends neither its fares nor its priced
+       bookings to this cell. */
     { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
       render: (r) => (r.revenue
         ? `${money(r.revenue)}${r.priced_trips != null
-          ? `<span class="dim" title="bookings on this vehicle that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
+          ? `<span class="dim" title="bookings behind this figure${asList(r.fares_platforms).length
+            ? ` — the ones on ${asList(r.fares_platforms).map(sourceLabel).join(', ')}, the channel(s) counted on the fare they charge`
+            : ', on the channels counted on the fare they charge'}"> · ${fmt(r.priced_trips)}</span>` : ''}`
         : '<span class="ent-off" title="no booking on this vehicle reports a fare — Uber’s export has no fare column">—</span>') },
     /* The money column this page was missing. Fares alone left 108 of 140
        vehicles blank on production, because Uber's export has no fare column
@@ -1208,15 +1215,33 @@ export async function renderVehicleDirectory(root) {
 
        Its own column, never merged with the fares beside it: a fare is what a
        rider was charged for one trip, and this is a share of a net weekly
-       payout after commission. */
+       payout after commission.
+
+       And it is the CHOSEN payout, not the raw attribution. This cell held
+       sum(attributed) over every channel, including Yango — which prices every
+       booking it reports AND pays out weekly, so its money sat in this cell
+       and in the Fares cell of the same row. On production 2026-09-02 the two
+       readings of L36397 over the same two days were 1,899.58 here against the
+       1,823.58 #economics chose, and fleet-wide 60,157.28 against 59,893.28.
+       The raw figure is still worth having — it is the one that reconciles
+       against what the platforms paid — so it rides in the tooltip under its
+       own name rather than in the column. */
     { label: 'Payout', key: 'payout', num: true,
       absent: 'no payout period in this window reaches any of these vehicles',
       render: (r) => (r.payout == null
-        ? '<span class="ent-off" title="no driver payout in this window is attributable to this vehicle">—</span>'
+        ? `<span class="ent-off" title="${r.attributed != null
+          ? `every channel that paid for this vehicle prices its own bookings, so its money is in the Fares column — the raw attribution is ${money(r.attributed)}`
+          : 'no driver payout in this window is attributable to this vehicle'}">—</span>`
         : `${money(r.payout)}${r.payout_days
-          ? `<span class="dim" title="days of this window with a payout behind them"> · ${fmt(r.payout_days)}d</span>` : ''}`
+          ? `<span class="dim" title="days this payout covers${asList(r.payout_platforms).length
+            ? ` on ${asList(r.payout_platforms).map(sourceLabel).join(', ')}` : ''}"> · ${fmt(r.payout_days)}d</span>` : ''}`
           + (r.payout_even_split
             ? '<span class="dim" title="at least one period had no trip counts to weight by, so it was split evenly across the days the driver held cars"> ·&nbsp;~</span>'
+            : '')
+          /* Named only where it differs, which is where a reader comparing
+             this page with a payout statement would otherwise be short. */
+          + (r.attributed != null && Math.abs(Number(r.attributed) - Number(r.payout)) >= 0.01
+            ? `<span class="dim" title="every payout attributed to this vehicle is ${money(r.attributed)}; the difference is the pay of channels already counted on the fares beside this, which must not be added twice">&nbsp;*</span>`
             : '')) },
     { label: 'Alerts', key: 'alerts', num: true },
     /* A count beside a Km column and no rate between them: a car doing 6,000km
