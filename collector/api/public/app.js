@@ -2453,9 +2453,15 @@ V.finance = async (root) => {
   const withRev = byProd.filter((r) => perTrip(r) != null);
   if (!withRev.length) {
     tier.body.append(note('No fares attached to any product tier in this range. Uber\'s trip export names the tier but carries no fare column at all, so no Uber tier can appear here — this table fills from the hotel, Yango and Bolt channels.'));
+    /* The cut, said out loud. This is the one table on the page that sliced to
+       ten and disclosed nothing — bin/slice-audit.mjs found it as the last of
+       27 — and it is the branch a reader reaches precisely when the money is
+       missing, so a silently shortened list is the second thing withheld from
+       them in the same panel. */
     if (byProd.length) tier.body.append(tableFrom(byProd.slice(0, 10), [
       { label: 'Tier', key: 'label' }, { label: 'Trips', key: 'n', num: true, render: (r) => fmt(r.n) },
-    ], { compact: true, sortable: true, sortId: 'tiersnorev', defaultSort: { key: 'n', dir: 'desc' } }));
+    ], { compact: true, sortable: true, sortId: 'tiersnorev', defaultSort: { key: 'n', dir: 'desc' },
+      capped: byProd.length > 10 ? `all ${fmt(byProd.length)} tiers` : null }));
   } else {
     const totalTrips = withRev.reduce((a, r) => a + r.n, 0);
     const totalRev = withRev.reduce((a, r) => a + (+r.revenue || 0), 0);

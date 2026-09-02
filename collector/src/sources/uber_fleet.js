@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
-import { iso, weekChunks } from '../util.js';
+import { iso, dubaiIso, weekChunks } from '../util.js';
 import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
 import { log } from '../log.js';
@@ -242,12 +242,41 @@ async function pullEarningsComponents(from, to, o) {
      org of two is worth knowing about, and worth not being told twice. */
   const probed = o.fleet === config.uber.fleet;
   if (weeks && !earners) {
+    /* to_char in the SELECT, not the bare column — the probe time is read to be
+       PRINTED, and a bare TIMESTAMPTZ arrives here as a JS Date.
+       ─────────────────────────────────────────────────────────────────────
+       provider_probe.probed_at is TIMESTAMPTZ DEFAULT now() (sql/schema_v11.sql
+       line 26) and nothing in this repo calls setTypeParser, so node-postgres
+       parses it into a Date. Dropped into the template literal below, a Date
+       stringifies with toString. Measured, feeding this exact sentence a value
+       from pg-types.getTypeParser(1184, 'text')('2026-09-02 12:00:01.603+00'):
+
+         …probe of the same surface saw 412 at Wed Sep 02 2026 12:00:01 GMT+0000
+         (Coordinated Universal Time). The request, not the window, is wrong.
+
+       Fifty-five characters of JS toString in the one sentence whose job is to
+       tell an operator when the probe last looked — and it ships whole: the
+       message measures 204 characters, inside the 300-char slice in
+       collectOrg() below, and lands in collection_run.error as the named
+       uber_fleet failure on the Data-sources page. This is the same trap
+       src/sources/ledger.js:239 documents for a DATE ("covering days up to
+       Fri Aug 21", live on production while this was written); isoDay() is the
+       reader for that case, but the cheaper cure for a value that is only ever
+       printed is to make it a string before it leaves Postgres, where no later
+       String() or interpolation can turn it back into a Date.
+
+       Asia/Dubai because the fleet works that clock and every other day and
+       hour in this product is rendered on it. toISOString() would name the UTC
+       hour instead, which is four hours out — and after 20:00 local, the wrong
+       day as well. */
     const { rows: [probe] = [] } = await pool.query(
-      `SELECT record_count, probed_at FROM provider_probe
+      `SELECT record_count,
+              to_char(probed_at AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD HH24:MI') AS probed_at
+         FROM provider_probe
         WHERE provider = 'uber' AND surface = 'earner-payments' AND ok`).catch(() => ({ rows: [] }));
     if (probed && probe?.record_count > 0) {
       throw new Error(`earner payments returned no earners in any of ${weeks} week(s), but the `
-        + `probe of the same surface saw ${probe.record_count} at ${probe.probed_at}. `
+        + `probe of the same surface saw ${probe.record_count} at ${probe.probed_at} Dubai. `
         + 'The request, not the window, is wrong.');
     }
     if (!probed) {
@@ -288,6 +317,17 @@ async function pullEarningsWeek(token, from, to, until, o) {
   } while (pageToken && ++pages < EARNER_PAGES_MAX);
 
   const rows = [];
+  /* iso(), deliberately, and NOT dubaiIso(): `from`/`to` here are wk.start and
+     wk.end from weekChunks, which are built with Date.UTC and are therefore
+     already midnight UTC of the day meant. That is the single argument iso() is
+     defined for (src/util.js:86-95) — it is a clock, not an anchor, that iso()
+     misreads. dubaiIso() would return the identical string for a UTC-midnight
+     instant (+4h stays inside the same UTC day), so the swap would buy nothing
+     and would falsely advertise this key as Dubai-anchored. It is not: this
+     pair is the PRIMARY KEY of driver_earnings_component together with the
+     driver and the category, it is the UTC Monday..Sunday grid every other Uber
+     figure lives on, and schema_v26 prunes against it (period_end -
+     period_start > 6). Re-anchoring it by a day would fork the grid. */
   const ps = iso(new Date(from)), pe = iso(new Date(to));
   const skipped = [];
   for (const b of breakdowns) {
@@ -374,6 +414,11 @@ async function collectOrg({ from, to, mode }, o) {
     catch (e) {
       const err = String(e?.message || e).slice(0, 300);
       log.warn(SRC, `${name} failed`, { fleet: o.fleet, err });
+      /* iso(), not dubaiIso(), and this one is NOT an oversight — see the block
+         above logRun() below for the measurement that decided it. These two
+         dates are compared against this run's finished_at in the browser, on
+         the UTC clock, and must stay on the same clock as the thing they are
+         compared with. */
       failed.push({ from: iso(new Date(from)), to: iso(new Date(to)), error: `${name}: ${err}` });
       return null;
     }
@@ -383,8 +428,45 @@ async function collectOrg({ from, to, mode }, o) {
   recs = (await surface('recommendations', () => pullRecommendations(o))) || 0;
   earnings = (await surface('earnings components', () => pullEarningsComponents(from, to, o))) || 0;
 
+  /* The run window, on the clock the fleet works — and the failed-window dates
+     a few lines up deliberately NOT on it.
+     ────────────────────────────────────────────────────────────────────────
+     `from` and `to` here are CLOCKS, not day anchors: src/run.js:293 is
+     `catchUp = (days) => runWindow('catchup', daysAgo(days), new Date(), …)`
+     and src/util.js:80-81 builds daysAgo/monthsAgo by offsetting `new Date()`.
+     iso() on a clock is the UTC day, and between 20:00 and midnight Dubai the
+     UTC day is yesterday — so the window was recorded a day short at BOTH ends
+     on every scheduled catch-up, because src/index.js:98 runs it at
+     `cron.schedule('0 21 * * *')`, 21:00 UTC = 01:00 Dubai. Measured on
+     production /api/status, not inferred:
+
+       uber_fleet catchup ecosine | win 2026-08-02 -> 2026-09-01
+                                  | finished 2026-09-01T21:06:54.462Z
+
+     21:06:54Z is 02 Sep 01:06 in Dubai, and `to` was the `new Date()` made
+     seconds before that, so the run covered up to 2 Sep and the row says 1 Sep.
+     dubaiIso() (src/util.js:104) is the same question asked on Dubai's clock.
+
+     These two columns have no reader — checked every consumer: the only
+     window_start/window_end rendered in api/public/app.js (line 1623) belongs
+     to the `insight` table, not to collection_run — so this is an internal
+     honesty fix and there is nothing on a page to compare before and after.
+
+     The failed-window `from`/`to` in surface() above are a different question
+     with a different answer, and the difference is measured. Those two land in
+     `detail`, come back as failed_windows, and api/public/app.js compares them
+     against this run's own finished_at — `dayKey(h.to) > dayKey(h.finished_at)`
+     at lines 4098 and 4370 — where dayKey is String(v).slice(0, 10), i.e. the
+     UTC day of an ISO instant. Put a Dubai day on one side of that comparison
+     and the 21:00 UTC catch-up looks like a window running past its own run:
+     replaying production's 42 status rows through the real collectionDebt()
+     lifted `invented` from 8 to 10, dropped the debt from 1478 owed days to
+     1416, and made both uber_fleet groups vanish from "Windows that did not
+     land" — relabelling 62 days of a genuinely dead Uber web session as "not
+     yet due". A hole nobody can see is worse than a date a day early, so the
+     chunk dates stay on the clock the comparison uses. */
   await logRun({ source: SRC, fleet_id: o.fleet, mode,
-    window_start: iso(new Date(from)), window_end: iso(new Date(to)),
+    window_start: dubaiIso(from), window_end: dubaiIso(to),
     // Four surfaces: all four working is ok, some working is partial, none is
     // an error. "ok" used to cover three of the four being broken.
     status: failed.length === 0 ? 'ok' : (vehicles || recs || earnings) ? 'partial' : 'error',

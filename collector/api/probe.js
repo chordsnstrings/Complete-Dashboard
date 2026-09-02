@@ -23,6 +23,11 @@ import { pool } from '../src/db.js';
 import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../src/auth/uber.js';
 import { probeEarnerWindow, auditTripWindow, uberOrgs } from '../src/sources/uber.js';
 import { loadSettings } from '../src/settings.js';
+/* The fleet's clock, for the two default windows below. src/util.js owns the
+   +04:00 arithmetic and every other server-side day key already goes through
+   it or through Postgres's AT TIME ZONE 'Asia/Dubai'; a fourth private copy of
+   the offset here is how the two would eventually disagree. */
+import { dubaiIso } from '../src/util.js';
 import { log } from '../src/log.js';
 
 /* The org a probe asks about: the first with a full credential pair. The
@@ -257,8 +262,23 @@ export function probeRoutes(app, { wrap }) {
   app.get('/api/probe/uber/report-types', wrap(async (req, res) => {
     await loadSettings();
     if (!uberOrg().orgUuid) return res.status(400).json({ error: 'no Uber org configured' });
-    const to = req.query.to || new Date().toISOString().slice(0, 10);
-    const from = req.query.from || new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+    /* The last three days on the fleet's calendar, not on UTC's.
+       ────────────────────────────────────────────────────────────────────
+       These defaults were `new Date().toISOString().slice(0, 10)`, which is
+       the UTC day, and Dubai is UTC+4 all year: between midnight and 04:00
+       local the UTC day is still yesterday. Driven with the clock frozen at
+       2026-09-02T21:30:00Z — 01:30 on the 3rd in Dubai — this route printed
+       and asked Uber for `window: ["2026-08-30","2026-09-02"]`, a window
+       ending the day before the one the operator reading it was standing in.
+       Now ["2026-08-31","2026-09-03"]. See test/probe_window_dubai.test.mjs.
+
+       `to` is echoed to the reader in the response below, so the wrong day is
+       not merely internal — it is printed as the answer to "which window is
+       this?". A ?from/?to from the caller is already a string and is left
+       exactly as typed: somebody who names a window is asking for the days
+       they typed, not for the fleet's clock. */
+    const to = req.query.to || dubaiIso();
+    const from = req.query.from || dubaiIso(new Date(Date.now() - 3 * 864e5));
     const out = [];
     for (const reportType of CANDIDATE_REPORTS) {
       try {
@@ -294,8 +314,14 @@ export function probeRoutes(app, { wrap }) {
       });
     }
     const reportType = req.query.type ? String(req.query.type) : 'REPORT_TYPE_TRIP_ACTIVITY';
-    const to = req.query.to || new Date().toISOString().slice(0, 10);
-    const from = req.query.from || new Date(Date.now() - 3 * 864e5).toISOString().slice(0, 10);
+    /* The same UTC-day default as report-types above, and the same fix — but
+       here the dates are not only echoed as `window: [from, to]`, they decide
+       which rows the report CONTAINS, so a default run started at 01:00 Dubai
+       described the columns of a window that stops a day short of today.
+       Measured at the same frozen instant: ["2026-08-30","2026-09-02"] before,
+       ["2026-08-31","2026-09-03"] after. */
+    const to = req.query.to || dubaiIso();
+    const from = req.query.from || dubaiIso(new Date(Date.now() - 3 * 864e5));
     const { data: gen } = await http(`${REPORTS}/GenerateReport?localeCode=en-GB`, {
       method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(uberOrg()),
       body: JSON.stringify({

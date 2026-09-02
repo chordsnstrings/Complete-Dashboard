@@ -377,9 +377,24 @@ export async function renderCorridors(root) {
         ? `, of which ${fmt(minsReported)} carry a duration the channel filed itself`
         : ', and no channel here files a duration of its own'));
   }
+  /* The Avg fare column's own explanation, BESIDE the table rather than at the
+     foot of the page.
+     ─────────────────────────────────────────────────────────────────────────
+     This sentence existed and sat in the closing note, after everything else on
+     the view. Measured on production 2026-09-02, "Avg fare" is a dash in 34 of
+     42 corridor rows — a column that is empty five times in six, with its
+     reason two panels further down, past a fold on a phone. A reader who
+     reaches the dashes has to leave the table to find out they are not a bug.
+     bin/render-audit.mjs reported it as a sparse column for the same reason:
+     it reads the captions inside the panel, which is where a sentence about
+     this table's column belongs. */
+  const blankFare = c.corridors.filter((r) => !r.priced).length;
+  if (blankFare) {
+    caps.push(`Avg fare is blank on ${countOf(blankFare, 'corridor')} — those are mostly Uber, whose `
+      + 'export carries no fare column at all. The trip count on those rows is real; the money is '
+      + 'simply not there to report');
+  }
   if (caps.length) b3.append(el('p', 'cap', `${caps.join('. ')}.`));
 
-  root.append(note(`${c.note} Fares are blank on corridors that are mostly Uber, because that export `
-    + 'carries no fare column — the trip count on those rows is real and the money is simply not there '
-    + 'to report.'));
+  root.append(note(c.note));
 }

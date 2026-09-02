@@ -51,6 +51,12 @@ import { vehiclesOverWindow } from './custody_sql.js';
    safety rate and both were dividing a partial numerator by a whole-window
    denominator; the module says why, and what the covered-day rule assumes. */
 import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
+/* A pg DATE, as the day it holds. Imported rather than re-typed here because
+   this trap has already cost this product one production sentence and there
+   should be exactly one function that knows the answer. No cycle: ledger.js
+   reaches only src/db.js and src/log.js, and api/server.js and test/mount.mjs
+   already import it. */
+import { isoDay } from '../src/sources/ledger.js';
 
 /* A day as this product writes days everywhere else. */
 const dayLabel = (v) => (v == null ? '—'
@@ -917,7 +923,27 @@ export function economicsRoutes(app, { q, wrap, range }) {
          above is already grouped on the person fold, so this only ever adds
          the one row a person has" — was wrong: it groups on PK, the account.
          Anyone with two provider ids arrives here twice. */
-      (w.worked_days || []).forEach((d) => r.worked.add(String(d).slice(0, 10)));
+      /* isoDay, not String(d).slice(0, 10). `worked_days` is the
+         `array_agg(DISTINCT local_day)` above — a date[], OID 1182, never
+         wrapped in to_char — and node-postgres parses that into JS Dates:
+         getTypeParser(1182, 'text')('{2026-08-21,2026-08-22}') returns Dates
+         here, and String(thatDate).slice(0, 10) is "Fri Aug 21", the first ten
+         characters of a Date toString. That is the same failure that shipped
+         to production in src/sources/ledger.js and printed "covering days up
+         to Fri Aug 21" on the Data-sources page.
+
+         The COUNT this Set feeds (r.days_worked, below) was nonetheless right,
+         and it was right by luck rather than by construction: dropping the
+         year leaves (weekday, month, day), and that stays injective only while
+         the data is short enough. It is today — the 702 days this fleet holds,
+         2024-10-01..2026-09-02 per source_day_coverage, enumerate to 702
+         distinct keys, 0 collisions — but the first collision lands once the
+         span reaches 2192 days ("Tue Oct 01" is both 2024-10-01 and
+         2030-10-01), and api/window.js accepts `days` up to 3660. From that
+         day on, a person whose two accounts each worked one of the colliding
+         days would quietly lose a day worked. The Set is also one res.json
+         away from showing a reader "Fri Aug 21". */
+      (w.worked_days || []).forEach((d) => r.worked.add(isoDay(d)));
       r.km += Number(w.km || 0);
       r.alert_km += Number(w.alert_km || 0);
       r.fares = add(r.fares, w.fares) ?? 0;

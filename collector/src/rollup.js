@@ -28,6 +28,7 @@
 import { pool } from './db.js';
 import { personKey } from '../api/custody_sql.js';
 import { log } from './log.js';
+import { dubaiIso } from './util.js';
 
 const SRC = 'rollup';
 
@@ -436,9 +437,12 @@ async function refreshMoneyEvents(db) {
 
 async function refreshRollupsInner({ db = pool, days = null } = {}) {
   const t0 = Date.now();
-  const since = days
-    ? new Date(Date.now() - days * 864e5).toISOString().slice(0, 10)
-    : null;
+  /* The Dubai day, because every column this bound is compared against is a
+     Dubai day: rollup_day buckets n.local_day, which sql/schema_v18.sql builds
+     as (requested_at AT TIME ZONE 'Asia/Dubai')::date. Read as the UTC day it
+     was a day short between 20:00 and midnight Dubai — the four hours when the
+     collector is most likely to be running a nightly rebuild. */
+  const since = days ? dubaiIso(new Date(Date.now() - days * 864e5)) : null;
   const out = [];
   out.push(await runOne(db, 'rollup_day', () =>
     refreshGrain(db, { table: 'rollup_day', bucket: 'day', expr: 'n.local_day', since })));

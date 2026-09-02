@@ -18,6 +18,13 @@ import { fleetIncome } from './income_sql.js';
    to it. See api/alert_coverage_sql.js for the rule and its assumption. */
 import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
 import { areaOf } from './analytics_routes.js';
+/* A pg DATE, as the day it holds. Imported rather than re-typed: it is not a
+   cycle (src/sources/ledger.js reaches only src/db.js and src/log.js, and
+   nothing under src/ imports this file), api/day_routes.js and
+   api/economics_routes.js already read this same function, and a fourth local
+   copy of a rule this product has now got wrong in four places is a fourth
+   place to get it wrong. */
+import { isoDay } from '../src/sources/ledger.js';
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -612,7 +619,31 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         const person = idToPerson.get(d.driver_ext_id);
         if (!person) continue;
         const set = days.get(person) || new Set();
-        set.add(String(d.local_day).slice(0, 10));
+        /* isoDay, not String(d.local_day).slice(0, 10).
+           ───────────────────────────────────────────────────────────────
+           local_day is a bare DATE — sql/schema_v18.sql:67 builds it as
+           `(requested_at AT TIME ZONE 'Asia/Dubai')::date` and the SELECT
+           above does not wrap it in to_char — so node-postgres parses it into
+           a JS Date, and those ten characters are "Fri Aug 14": the head of a
+           Date toString, with the YEAR cut off. That exact string was measured
+           coming out of this very column on /api/day, and the identical
+           mistake shipped to production in src/sources/ledger.js and printed
+           "covering days up to Fri Aug 21" on the Data-sources page.
+
+           Nothing but the Set's SIZE escapes here — it becomes `days` on a
+           /api/drivers/directory row — so the figure was right while the key
+           was wrong, and right by luck rather than by construction: dropping
+           the year leaves (weekday, month, day), which stays injective only
+           while the window is short. Production on 2026-09-02 returned 395
+           rows, 52 of them multi-account, whose `days` read 28/29/30 inside a
+           30-day window — the correct counts, for the wrong reason. But
+           api/window.js accepts days up to 3660 and from/to are unclamped, so
+           "Tue Oct 01" is both 2019-10-01 and 2024-10-01 in a window a caller
+           can ask for TODAY, and a person who drove one of those days on Uber
+           and the other on Yango silently loses a day worked. Same trap and
+           same containment as api/economics_routes.js:920, which is where the
+           702-days-0-collisions count comes from. */
+        set.add(isoDay(d.local_day));
         days.set(person, set);
       }
       days.forEach((set, person) => { person.days = set.size; });
@@ -1847,8 +1878,42 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        FROM driver_performance
        WHERE driver_ext_id = ANY($3) AND period_end >= $1::date AND period_start <= $2::date
        GROUP BY 1,2,3`, p) : [];
-    const perfKey = (r) => `${r.platform}|${String(r.period_start).slice(0, 10)}`
-      + `|${String(r.period_end).slice(0, 10)}`;
+    /* isoDay on both halves of the key, not String(...).slice(0, 10).
+       ─────────────────────────────────────────────────────────────────────
+       Both queries select bare DATEs: driver_payout_day.period_start and
+       period_end (sql/schema_v23.sql:115-116), grouped above, and
+       driver_performance's own pair (sql/schema.sql:88-89). Neither is wrapped
+       in to_char, so node-postgres hands both sides JS Dates and String() made
+       the key "uber|Wed Sep 02|Wed Sep 02" — a Date toString with the year cut
+       off. The type is visible from outside: GET /api/driver/earnings for
+       driver 76ede4ae…&days=90 serialises period_start as
+       "2026-09-02T00:00:00.000Z", which is Express stringifying a Date, not a
+       to_char string.
+
+       It matched the right rows anyway, because BOTH sides lost the same year:
+       that response holds 40 periods and exactly 1 carries acceptance_rate 1
+       and rating 4.95, the 2026-08-03..08-09 week, which is the right answer —
+       30 daily payout rows cannot match a weekly performance period on any
+       key. Two distinct failures sat one edit away from that.
+
+       ASYMMETRY. Add to_char to either query alone and one side reads
+       "2026-08-03" while the other still reads "Mon Aug 03"; every key misses,
+       and the ACCEPT and RATING columns of the earnings table go null on every
+       row of every driver with no error to show for it. That is the case
+       api/performer_routes.js:203 documents: two Dates compare fine, but only
+       by luck.
+
+       COLLISION, and this one needs no future edit. Dropping the year makes
+       the key collide across years that align on the weekday: the weeks
+       2019-10-01..10-07 and 2024-10-01..10-07 are both
+       "uber|Tue Oct 01|Mon Oct 07". win() leaves from/to unclamped, so both
+       fit in one window a caller can request now, the Map keeps whichever
+       performance row it saw last, and the earnings table prints that week's
+       rating and acceptance rate against the other week as well — a wrong
+       number on the page, not merely a wrong key behind it.
+       test/driver_day_keys.test.mjs drives both periods through the route and
+       fails on the shared rating. */
+    const perfKey = (r) => `${r.platform}|${isoDay(r.period_start)}|${isoDay(r.period_end)}`;
     const byPeriod = new Map(perf.map((r) => [perfKey(r), r]));
     for (const r of periods) {
       const m = byPeriod.get(perfKey(r));

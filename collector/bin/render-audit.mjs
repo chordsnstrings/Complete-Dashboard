@@ -215,9 +215,16 @@ const PROBE = () => {
        DEFINING a column would otherwise silence the rule; requiring it of
        .tabsent as well reported five columns that were explaining themselves
        in the product's own words. */
+    /* .note as well as p.cap. A view that explains an empty column in a note
+       INSIDE the panel was reported anyway, because this only read captions —
+       and the two are the same kind of prose in the same place. The emptiness
+       test still applies to both, so a note that merely defines the column
+       does not silence the rule. A note OUTSIDE the panel is deliberately
+       still not counted: a sentence a reader has to leave the table to find is
+       not beside the column it is about. */
     const notes = [
       ...scopes.flatMap((sc) => [...sc.querySelectorAll('.tabsent')].map(txt)),
-      ...scopes.flatMap((sc) => [...sc.querySelectorAll('p.cap')].map(txt))
+      ...scopes.flatMap((sc) => [...sc.querySelectorAll('p.cap, .note')].map(txt))
         .filter((x) => EMPTINESS.test(x)),
     ];
     /* Without the sort indicator a sortable header carries: the sentence names

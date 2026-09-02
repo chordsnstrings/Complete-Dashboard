@@ -9,6 +9,13 @@ import { upsertMany, logRun, pool } from '../db.js';
 import { dateChunks, iso } from '../util.js';
 import { log } from '../log.js';
 import { stateRow } from '../roster.js';
+/* isoDay(), imported rather than re-written: it is the one reading of a day
+   this codebase has agreed on, and parseLicenceDate() below needs both of its
+   halves (a string passed through untouched, a Date read by its LOCAL
+   components). No cycle — ledger.js imports only ../db.js and ../log.js, both
+   of which this file already imports; api/day_routes.js and src/insights.js
+   reach for it the same way. */
+import { isoDay } from './ledger.js';
 import { noteCredential } from '../auth_state.js';
 
 const SRC = 'hotel';
@@ -43,16 +50,65 @@ const deadheadKm = (t) => legKm(t.driverStartLat, t.driverStartLon, t.startLat, 
    work is the expensive kind. */
 const returnDeadheadKm = (t) => legKm(t.endLat, t.endLon, t.driverEndLat, t.driverEndLon);
 
-// Hotel licence dates arrive as "1/1/26" or "01/01/2026" — day-first, two- or four-digit year.
+/* Hotel licence dates arrive as "1/1/26" or "01/01/2026" — day-first, two- or
+   four-digit year. That is the live shape: measured on production 2026-09-02,
+   /api/schema/raw-values?table=trip&platform=hotel&key=driver returns 19
+   distinct driver records for June–September and every one of them carries
+   licenseExpireDate "1/1/26", which is why all 94 dated hotel licences on
+   /api/compliance/drivers read 2026-01-01. The regex arm is what production
+   takes; the fallback is what a change of provider format falls into. */
 function parseLicenceDate(v) {
   if (!v) return null;
-  const m = String(v).trim().match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
-  if (!m) { const d = new Date(v); return isNaN(d) ? null : d.toISOString().slice(0, 10); }
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (!m) {
+    /* Free text this parser does not recognise, handed to the JS Date parser —
+       and WHICH CLOCK that parser used depends on the shape of the text, which
+       is what made the single toISOString() here wrong. Measured:
+
+         TZ=Asia/Dubai   new Date('Jan 1 2026').toISOString().slice(0,10)
+                           → '2025-12-31'
+         TZ=America/New_York
+                         new Date('2026-01-01') read by local components
+                           → '2025-12-31'
+
+       A non-ISO date-only string ('Jan 1 2026', '1 Jan 2026', '2026/01/01') is
+       parsed at LOCAL midnight, which east of UTC is the previous day in UTC —
+       so a licence expiring on the 1st was stored as having expired on 31
+       December, a day of false "expired" on a page that tells an operator to
+       stand a driver down. That is the same trap as the pg DATE in
+       src/sources/ledger.js, and isoDay()'s local-component reading is its fix.
+
+       But that reading is not right for the other shape: 'YYYY-MM-DD' and
+       'YYYY-MM-DDTHH:MM:SSZ' are parsed as UTC, so reading them locally under
+       any zone WEST of UTC — a developer's laptop, a US-region container —
+       loses a day in the other direction. Neither clock is right for both, so
+       the shape decides: ISO text already carries its day and is taken as
+       text, with no clock touching it at all. */
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return isoDay(s);
+    const d = new Date(s);
+    return isNaN(d) ? null : isoDay(d);
+  }
   let [, dd, mm, yy] = m;
   if (yy.length === 2) yy = String(2000 + Number(yy));
+  /* toISOString() is correct on THIS arm and should stay. The string being
+     parsed is one we just built in ISO date-only form, which JS parses as UTC
+     midnight, so the UTC day it prints back is the day that was written — no
+     local clock is involved, and the answer is the same under Asia/Dubai, UTC
+     and America/New_York (measured).
+
+     What the round trip does NOT do is check the calendar: measured, "31/02/2026"
+     comes back 2026-03-03 rather than null, because Date rolls an impossible day
+     over. That is a data-quality gap, not a clock one, and it is left exactly as
+     it was — this edit changes nothing on the arm production actually takes. */
   const d = new Date(`${yy}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`);
   return isNaN(d) ? null : d.toISOString().slice(0, 10);
 }
+
+/* Exported for test/hotel_licence_date.test.mjs, which drives the shapes above
+   under a non-Dubai process timezone as well as under Dubai — a fix for a
+   clock that is only ever exercised on one clock is not tested. */
+export { parseLicenceDate };
 
 /* The property list, fetched once per run.
    This used to keep the name and throw the rest away. The rest turns out to

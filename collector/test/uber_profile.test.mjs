@@ -90,8 +90,15 @@ check('a week we did not ask leaves no row, so a gap is not read as no change',
 check('the collector writes the history as well as the current row',
   /upsertMany\('driver_rating_history'/.test(code)
   && /upsertMany\('driver_platform_state'/.test(code));
+/* The Dubai day, asserted as the CALL rather than as the arithmetic.
+   This used to require the literal `Date.now() + 4 * 3600 * 1000` — the right
+   shift, hand-rolled — which pinned the spelling and not the meaning: it would
+   have passed a fifth private copy of the offset and failed the moment the
+   file started using the helper src/util.js exports for exactly this. */
 check('the history day is the Dubai day, not the UTC one',
-  /Date\.now\(\) \+ 4 \* 3600 \* 1000/.test(code));
+  /observed_on: day/.test(code) && /const day = dubaiIso\(\)/.test(code)
+  && /from '\.\.\/util\.js'/.test(code),
+  'the row is keyed on dubaiIso(), from the one module that owns the shift');
 check('the pull is weekly, on a Monday',
   /cron\.schedule\('20 0 \* \* 1'/.test(readFileSync('src/index.js', 'utf8')),
   'the rating moves by hundredths in a week; daily would write seven identical rows per movement');

@@ -14,6 +14,11 @@
    chart, and only this page can tell them apart. */
 import { custodyNames, custodyRefs } from './custody_sql.js';
 import { fleetIncome } from './income_sql.js';
+/* isoDay, for the neighbour days below. Imported rather than copied: it is not
+   a cycle (src/sources/ledger.js reaches only src/db.js and src/log.js, and
+   nothing under src/ imports this file), and a second local copy of a rule this
+   product has already got wrong twice is a second place to get it wrong. */
+import { isoDay } from '../src/sources/ledger.js';
 
 const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
   : Math.round(Number(v) * 10 ** d) / 10 ** d);
@@ -133,8 +138,14 @@ export function dayRoutes(app, { q, wrap }) {
          FROM (SELECT $1::date AS d) x
          LEFT JOIN weather_daily w ON w.day = x.d
          LEFT JOIN calendar_day  c ON c.day = x.d`, p),
-      // The seven days around it, so the day has something to be read against.
-      q(`SELECT local_day AS day, count(*) FILTER (WHERE is_booking)::int bookings
+      /* The seven days around it, so the day has something to be read against.
+         to_char rather than the bare `local_day` this used to select: the note
+         at `near` below records what that cost. This value is the address each
+         bar links to as well as its label, so it has to be an ISO day at the
+         source. ISO text sorts identically to the date, so ORDER BY 1 is
+         unchanged. */
+      q(`SELECT to_char(local_day, 'YYYY-MM-DD') AS day,
+                count(*) FILTER (WHERE is_booking)::int bookings
          FROM trip_ext WHERE local_day BETWEEN $1::date - 7 AND $1::date + 7
          GROUP BY 1 ORDER BY 1`, p),
       q(`SELECT coalesce(nullif(btrim(split_part(pickup_addr, ' - ', 2)), ''), '(unrecorded)') AS from_area,
@@ -152,7 +163,51 @@ export function dayRoutes(app, { q, wrap }) {
     const totals = totalsRow[0] || {};
 
     const h = headline[0] || {};
-    const near = neighbours.map((n) => ({ day: String(n.day).slice(0, 10), bookings: n.bookings }));
+    /* A neighbour day is an ISO day, and this line is where it stopped being one.
+       ─────────────────────────────────────────────────────────────────────
+       This read `String(n.day).slice(0, 10)` over a bare `local_day`, and
+       node-postgres parses a DATE into a JS Date — so that expression is the
+       first ten characters of Date.toString(): "Sun Aug 16", never
+       "2026-08-16". Measured on production 2026-09-02:
+       /api/day?day=2026-08-16 returned fifteen weekday labels, and three
+       separate things were wrong at once.
+
+       The median. The filter below compares against `day`, which is the
+       req.query string already validated to YYYY-MM-DD, so it matched nothing:
+       the fortnight median was taken over FIFTEEN values including the very
+       day it was measuring, which drags the deviation toward zero in both
+       directions. Published vs correct, read off production: 2026-06-15 median
+       325 / -25.8% against a true 354 / -31.9%; 2026-08-16 402 / -9.5% against
+       431 / -15.5%; 2026-08-26 498 / -2.0% against 529 / -7.8%; 2026-08-27 529
+       / +10.8% against 498 / +17.7%. The first of those matters most:
+       api/public/day.js tones the Bookings tile `critical` below -30 and
+       `warn` below -10, so 15 June published amber where it should have been
+       red, and 16 August published no tone at all where it should have been
+       amber.
+
+       The chart. api/public/day.js colours the day under inspection with
+       `r.day === day`, which could never be true — so the caption "This day is
+       highlighted" sat under fifteen identical grey bars, which is the exact
+       failure the comment above that line says the highlight exists to
+       prevent. The axis printed "Sun Aug 16" verbatim, year and all, because
+       charts.js only reformats labels matching /^\d{4}-\d{2}-\d{2}/.
+
+       The links. Each bar navigates to href('day', r.day) — #day/Sun%20Aug%2016
+       — which the page rejects with "That is not a date." and the API answers
+       400. Every bar in that chart was a dead link.
+
+       Fixed in SQL above, the remedy api/compare_routes.js already names for
+       this identical trap; isoDay stays here as the guard, because every one of
+       those symptoms is silent — the page still renders, just grey, unclickable
+       and against the wrong median — so an edit that dropped the to_char would
+       not announce itself. isoDay passes a string straight through and
+       otherwise reads a Date's LOCAL components, which are the date a DATE
+       column holds whatever zone the process runs in. toISOString() is not the
+       fix: it converts an instant, and east of UTC local midnight is the
+       previous day. */
+    const near = neighbours.map((n) => ({ day: isoDay(n.day), bookings: n.bookings }));
+    // Both sides are ISO now, so this drops exactly the day under inspection
+    // and the median is over the fourteen neighbours it was always meant to be.
     const others = near.filter((n) => n.day !== day).map((n) => n.bookings).sort((a, b) => a - b);
     const median = others.length ? others[Math.floor(others.length / 2)] : null;
 

@@ -6,6 +6,7 @@
 // one with the most trips is marked primary.
 import { pool } from './db.js';
 import { log } from './log.js';
+import { dubaiIso } from './util.js';
 
 /* `db` is injectable so a test can run the real rebuild against an in-process
    Postgres rather than reimplementing the fold beside it — a test that builds
@@ -13,8 +14,12 @@ import { log } from './log.js';
    pg's .query(text, params) fits, which PGlite does. */
 export async function rebuildCustody({ from, to, db = pool } = {}) {
   const q = (t, p) => db.query(t, p).then((r) => r.rows);
-  const start = from || new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10);
-  const end = to || new Date().toISOString().slice(0, 10);
+  /* Dubai days. custody_live folds on trip_norm.local_day, which is already
+     (requested_at AT TIME ZONE 'Asia/Dubai')::date, so a UTC end date leaves
+     today's evening work outside the rebuild whenever it runs after 20:00
+     Dubai — which is exactly when a nightly job runs. */
+  const start = from || dubaiIso(new Date(Date.now() - 400 * 864e5));
+  const end = to || dubaiIso();
 
   // Set-wise in Postgres — pulling 160k rows into Node to group them would be
   // slower and pointless.

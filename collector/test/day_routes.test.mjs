@@ -190,6 +190,75 @@ check('the comparison excludes the day itself',
 check('the delta is signed the way a reader expects',
   d.versus_neighbours.delta_pct < 0 === (d.headline.bookings < d.versus_neighbours.median_bookings));
 
+/* ── and the neighbour labels are days, not Date.toString() prefixes ──────
+   The series came back as `String(local_day).slice(0, 10)` over a bare DATE
+   column, which node-postgres parses into a JS Date — so every label was
+   "Sun Aug 16", not "2026-08-16". Measured on production 2026-09-02, that cost
+   three things at once, and each is checked below: the self-exclusion at the
+   median silently matched nothing (2026-06-15 published a median of 325 and
+   -25.8% against a true 354 and -31.9%, which is the difference between an
+   amber Bookings tile and a red one at api/public/day.js's -30 threshold); the
+   subject bar could never be highlighted, under a caption saying it was; and
+   every bar linked to #day/Sun%20Aug%2016, which this same endpoint answers
+   400 for.
+
+   The fortnight above cannot catch the median half — its neighbours are all
+   50, so including the day or not gives 50 either way, which is exactly why it
+   read clean. This fixture is built so the two answers differ: seven days at
+   10, the subject day at 1, seven days at 20. Over the fourteen true
+   neighbours the median is 20; let the day itself back in and it is 10. */
+{
+  const S = '2026-03-15';
+  await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, status)
+           SELECT 'uber', 'nb' || d || '-' || i, 'ecosine', 'L100',
+                  ('2026-03-' || lpad(d::text, 2, '0') || 'T12:00:00+04:00')::timestamptz,
+                  'completed'
+           FROM generate_series(8, 22) d,
+                generate_series(1, CASE WHEN d = 15 THEN 1
+                                        WHEN d < 15 THEN 10 ELSE 20 END) i`);
+  const sub = await get(`/api/day?day=${S}`);
+  const vs = sub.versus_neighbours;
+
+  check('every neighbour day is an ISO day, not a weekday label',
+    vs.series.length === 15 && vs.series.every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day)),
+    JSON.stringify(vs.series.map((r) => r.day)));
+  check('the fortnight is the fortnight around the day, in order',
+    vs.series[0].day === '2026-03-08' && vs.series[14].day === '2026-03-22',
+    `${vs.series[0].day}..${vs.series[14].day}`);
+
+  /* api/public/day.js colours the bar with `r.day === day` and links it with
+     href('day', r.day). Both compare against the ISO day this endpoint echoes
+     back, so if no bar matches it, the chart has no highlight and the caption
+     under it is false. */
+  check('the day under inspection is findable among its own neighbours',
+    vs.series.filter((r) => r.day === sub.day).length === 1,
+    `no bar equals ${sub.day}`);
+
+  check('the median excludes the day itself: 20 over fourteen, not 10 over fifteen',
+    vs.median_bookings === 20, String(vs.median_bookings));
+  check('so the delta is measured against the neighbours alone',
+    sub.headline.bookings === 1 && vs.delta_pct === -95, `${sub.headline.bookings} / ${vs.delta_pct}`);
+
+  /* Every bar is a link. #day/Sun%20Aug%2016 reached this endpoint as
+     ?day=Sun%20Aug%2016 and got a 400 — fifteen dead links per page. */
+  const codes = await Promise.all(vs.series.map(async (r) =>
+    (await fetch(`http://127.0.0.1:${port}/api/day?day=${encodeURIComponent(r.day)}`)).status));
+  check('every bar in the chart is an address this endpoint accepts',
+    codes.every((c) => c === 200), JSON.stringify(codes));
+
+  /* The form itself, so it cannot come back by a different route. A DATE
+     column reaching String() is the whole bug; api/public is exempt because
+     values arrive there as JSON strings, but nothing on the server side here
+     may do it. */
+  const code = readFileSync('api/day_routes.js', 'utf8')
+    // Comments only, so the note that QUOTES the broken expression in order to
+    // explain it does not read as the expression coming back.
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  check('no Date is turned into a day by String().slice() in this route',
+    !/String\([^)]*\)\s*\.slice\(\s*0\s*,\s*10\s*\)/.test(code),
+    'a pg DATE through String() is "Sun Aug 16"; use isoDay() or to_char in the SELECT');
+}
+
 /* ── a day that is not a day ──────────────────────────────────────────── */
 for (const bad of ['banana', '2026-13-45', '', '2026-8-1', "2026-08-14'; DROP TABLE trip; --"]) {
   const r = await fetch(`http://127.0.0.1:${port}/api/day?day=${encodeURIComponent(bad)}`);

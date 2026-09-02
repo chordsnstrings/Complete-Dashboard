@@ -31,6 +31,8 @@
       people. What we can measure is ON-TRIP, from the trips themselves, and
       that is what is returned — labelled as what it is, never as "online". */
 
+import { isoDay } from '../src/sources/ledger.js';
+
 export function performerRoutes(app, { q, wrap }) {
   const num = (v) => (v == null ? null : Number(v));
   const r2 = (v) => (v == null ? null : Math.round(v * 100) / 100);
@@ -262,15 +264,27 @@ export function performerRoutes(app, { q, wrap }) {
       cur = new Date(cur.getTime() - 7 * 864e5);
     }
     /* Named so the picker can say how far back it goes rather than making the
-       reader scroll to the end of the list to find out. A `date` column comes
-       back from pg as a Date and String(Date) is "Sat Apr 05 2025 …". */
-    const day = (v) => (v == null ? null
-      : (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10)));
+       reader scroll to the end of the list to find out.
+
+       isoDay(), not a helper of our own. min/max(local_day) select a bare
+       `date` — local_day is (requested_at AT TIME ZONE 'Asia/Dubai')::date,
+       sql/schema_v18.sql:67 — and node-postgres parses a DATE into a JS Date at
+       LOCAL midnight. Both wrong fixes for that have now been written on this
+       line. String(Date).slice(0, 10) is "Sat Apr 05", the shape that shipped
+       to production in src/sources/ledger.js and printed "covering days up to
+       Fri Aug 21" on the Data-sources page. toISOString() is the other one, and
+       it is why this line survived review: it converts an INSTANT, so it is
+       right only while the container happens to run UTC. Measured against pg's
+       own DATE parser (oid 1082) under TZ=Asia/Dubai — the zone this fleet
+       works in — it turned the wire value 2025-04-05 into "2025-04-04" and
+       2026-09-02 into "2026-09-01", so the picker would have named its first
+       and last booking a day early at both ends. isoDay() reads the LOCAL
+       components, which ARE the date the column holds, in either zone. */
     res.json({
       weeks: out,
       latest_complete: out[0]?.week || null,
-      first_booking: day(rows[0]?.first_day),
-      last_booking: day(rows[0]?.last_day),
+      first_booking: isoDay(rows[0]?.first_day),
+      last_booking: isoDay(rows[0]?.last_day),
     });
   }));
 }

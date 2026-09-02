@@ -306,6 +306,57 @@ app.get('/api/ready', wrap(async (_, res) => {
 }));
 
 /* ───────────────────────── overview ───────────────────────── */
+
+/* Two ways to get a date out of a row, and which one you need depends on what
+   the column IS. Both of them, because getting this wrong is silent.
+   ─────────────────────────────────────────────────────────────────────────
+   node-postgres parses a DATE into a Date at LOCAL midnight and a TIMESTAMPTZ
+   into a Date at the instant, and neither of those survives
+   `.toISOString().slice(0, 10)`:
+
+   • A DATE. Measured with the parser production actually runs
+     (`types.getTypeParser(1082)` from pg-types, which src/db.js's `pg` pulls
+     in) under TZ=Asia/Dubai: '2026-02-06' becomes `Fri Feb 06 2026 00:00:00
+     GMT+0400`, and .toISOString().slice(0, 10) is "2026-02-05" — the day
+     before. '2026-03-01' .slice(0, 7) is "2026-02" — the month before. The
+     local components ARE the date the column holds, whatever zone the process
+     runs in, so read those. Production has been right about this only by
+     accident: its container is UTC, which is visible in the responses —
+     /api/coverage returns from_day "2026-02-06T00:00:00.000Z", exact midnight
+     Z, the signature of a DATE parsed in a UTC process. One `TZ=` in the app
+     spec moves every one of these by a day.
+
+   • An INSTANT (TIMESTAMPTZ, or any real clock). Here toISOString() converts
+     correctly and gives the UTC day — which is the wrong QUESTION. The fleet
+     works Asia/Dubai and every other day figure in this product is
+     `AT TIME ZONE 'Asia/Dubai'`, so between 20:00 and midnight Dubai the UTC
+     day is yesterday's. Measured on production 2026-09-02: /api/coverage said
+     the Uber trip feed starts 2025-04-04 (from the instant 23:12:38Z) while
+     /api/performer/weeks, reading trip_norm.local_day, said the first booking
+     is 2025-04-05. One trip, two endpoints, two different days.
+
+   Local twins rather than imports, and NOT because of a cycle: test/mount.mjs
+   mounts this file by slicing the source between the section markers and
+   evaluating it with `new Function`, so a name bound by an import at the top
+   of the module is simply not in scope inside the slice. Measured — importing
+   isoDay and calling it in /api/trend/monthly made the route answer
+   `500 {"error":"internal","detail":"ReferenceError: isoDay is not defined"}`
+   in the harness while production was fine, which is the worst of both. These
+   sit INSIDE the slice, where both readers can see them.
+   test/server_day_keys.test.mjs pins them to the exported originals —
+   isoDay in src/sources/ledger.js, dubaiIso in src/util.js — so the copies
+   cannot drift from what they are copies of. */
+const isoDay = (v) => {
+  if (v == null) return null;
+  if (typeof v === 'string') return v.slice(0, 10);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${v.getFullYear()}-${p(v.getMonth() + 1)}-${p(v.getDate())}`;
+};
+// Dubai is UTC+4 all year and has observed no daylight saving since 1990, so
+// the shift is a constant and cannot disagree with Postgres's AT TIME ZONE.
+const dubaiIso = (d = new Date()) =>
+  new Date(new Date(d).getTime() + 4 * 3600e3).toISOString().slice(0, 10);
+
 app.get('/api/kpis', wrap(async (req, res) => {
   const p = range(req);
   /* Three populations live in the `trip` table and they must not be added
@@ -1416,7 +1467,14 @@ app.get('/api/map/days', wrap(async (req, res) => {
 app.get('/api/map/journey', wrap(async (req, res) => {
   if (!req.query.plate) return res.status(400).json({ error: 'plate required' });
   const plate = req.query.plate.toUpperCase().replace(/[\s-]+/g, '');
-  const day = req.query.day || new Date().toISOString().slice(0, 10);
+  /* The default day is TODAY IN DUBAI, not in UTC. The SQL three lines below
+     is explicitly Dubai-framed — it shifts the bound by four hours — so a UTC
+     default disagreed with the handler's own arithmetic between midnight and
+     04:00 Dubai and the vehicle map opened on yesterday's journey during the
+     airport wave, which is the shift this page is most used to watch.
+     ?day= is a query parameter and therefore already a string; it stays as
+     it is, and only the default changes. */
+  const day = req.query.day || dubaiIso();
   const fixes = await q(
     `SELECT captured_at, lat, lng, speed, status, seat_occupied, ignition
      FROM telemetry_snapshot
@@ -2308,8 +2366,26 @@ app.get('/api/coverage', wrap(async (req, res) => {
     .map((t) => {
       const e = byPlatform.get(t.platform);
       if (!e || !t.from_ts || !e.from_day) return null;
-      const tripFrom = new Date(t.from_ts).toISOString().slice(0, 10);
-      const payFrom = new Date(e.from_day).toISOString().slice(0, 10);
+      /* Two different columns, so two different readers — see the note above
+         the overview section. from_ts is `min(requested_at)` selected bare
+         from trip, and requested_at is TIMESTAMPTZ (sql/schema.sql:55), so it
+         arrives as an INSTANT and the Dubai day of it is the answer. from_day
+         is `min(day)` from driver_payout_day, and day is DATE
+         (sql/schema_v23.sql:115), so it arrives as a Date at local midnight
+         and its local components are the answer.
+
+         Both were `.toISOString().slice(0, 10)` and the trip half was wrong on
+         production the day this was written: the first Uber booking is
+         2025-04-04T23:12:38Z, which is 03:12 on the 5th in Dubai, and this
+         column read "2025-04-04" beside /api/performer/weeks reporting
+         first_booking 2025-04-05 off trip_norm.local_day. The money half was
+         right only because the container runs UTC.
+
+         payFrom is not just printed — it is bound as $2::date[] into the
+         bookings_before count below, so a day's drift there moves the
+         unpaid-bookings boundary with nothing failing. */
+      const tripFrom = dubaiIso(t.from_ts);
+      const payFrom = isoDay(e.from_day);
       return payFrom <= tripFrom ? null : { platform: t.platform, tripFrom, payFrom };
     })
     .filter(Boolean);
@@ -3063,7 +3139,27 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
      may simply hold no data for it. Treating the two the same produced a
      headline "-82%, drivers 102 → 0" for a stretch where nothing had been
      collected at all. Fill the calendar so the gap is visible as a gap. */
-  const key = (d) => new Date(d).toISOString().slice(0, 7);
+  /* isoDay, not toISOString: `month` is DATE (sql/schema_v21.sql:26) and the
+     SHAPE above selects it bare as `month AS m` — no to_char, no cast — so it
+     reaches here as a Date at LOCAL midnight. Under TZ=Asia/Dubai the pg DATE
+     '2026-03-01' parses to `Sun Mar 01 2026 00:00:00 GMT+0400` and
+     .toISOString().slice(0, 7) is "2026-02", so every key in byMonth and both
+     bounds of the gap-filler below would shift a month and the calendar would
+     be filled between the wrong ends. Latent only because this container runs
+     UTC; no test in this suite can catch it, because PGlite parses a DATE at
+     UTC midnight where node-postgres parses it at local midnight.
+
+     Spelled out here rather than calling the isoDay above it, and that is not
+     an oversight: test/trend_gaps.test.mjs mounts THIS ROUTE ALONE, slicing
+     the source from `app.get('/api/trend/monthly'` — so anything declared
+     earlier in the file is out of scope and the route answered
+     `500 ReferenceError: isoDay is not defined` in that harness while
+     production was fine. test/server_day_keys.test.mjs pins this to the same
+     answer isoDay gives, so the two cannot drift. */
+  const key = (d) => {
+    if (typeof d === 'string') return d.slice(0, 7);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  };
   const byMonth = new Map(observed.map((r) => [key(r.m), r]));
   const bounds = [...(observed.length ? [key(observed[0].m), key(observed[observed.length - 1].m)] : []),
     ...(stmtSpan[0]?.a ? [stmtSpan[0].a, stmtSpan[0].b] : [])].sort();

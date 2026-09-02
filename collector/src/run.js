@@ -17,7 +17,7 @@ import { probeAll } from './probe.js';
 import { rebuildCustody } from './custody.js';
 import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
-import { monthsAgo, daysAgo, iso } from './util.js';
+import { monthsAgo, daysAgo, iso, dubaiIso } from './util.js';
 import { setState, pool } from './db.js';
 import { log } from './log.js';
 import { loadCheckpoint, NO_CHECKPOINT } from './checkpoint.js';
@@ -109,9 +109,44 @@ export function heartbeat(mem = process.memoryUsage(), at = new Date()) {
   return { heartbeat_at: at.toISOString(), rss_mb: mb(mem.rss), heap_mb: mb(mem.heapUsed) };
 }
 
+/* ── which DAY a run is happening on ──────────────────────────────────────
+   Every window in this file arrives as a pair of CLOCKS, never as day anchors:
+   `to` is `new Date()` at all three entry points below, and `from` is
+   daysAgo()/monthsAgo(), which src/util.js:80-81 build by offsetting
+   `new Date()`. Turning a clock into a day with toISOString().slice(0, 10)
+   asks UTC what day it is — and the fleet works Dubai time, so between 20:00
+   and 24:00 UTC, which is 00:00-04:00 the NEXT day in Dubai, it answers
+   yesterday.
+
+   That is not a rare edge here; it is when this file runs. src/index.js:98
+   schedules the nightly catch-up at 21:00 UTC, and production /api/status read
+   on 2026-09-02 shows its eleven source rows finishing between 21:05:47.209Z
+   and 21:09:52.629Z on 2026-09-01 — 01:05 to 01:09 on the 2nd in Dubai — while
+   the bounds this function handed rebuildCustody and computeInsights read
+   "2026-09-01". So custody was materialised only up to the previous Dubai day
+   on every nightly pass: the day in progress had no vehicle_driver_day rows,
+   and its harsh-driving events and unauthorised segments could not name a
+   driver until the next run. The insight window has the same shape and is
+   PRINTED — api/public/app.js:1623 renders "over <start> → <end>" on the
+   finding panel — which is why computeInsights in src/insights.js already
+   corrected its own fallback window and named THIS call as the one still to
+   fix, since it is the only caller in the product and its bounds always win.
+
+   dubaiIso is src/util.js's shared answer, and it takes a clock, which is what
+   these are. isoDay() in src/sources/ledger.js is the reference for the OTHER
+   half of this bug class — a pg DATE that node-postgres hands back as a Date at
+   LOCAL midnight, where reading UTC components shifts it the other way. Nothing
+   here comes out of the database: these are instants this process made, so the
+   Dubai-offset reading is the correct one and isoDay would be the wrong tool.
+
+   One named pair for the log line, custody and insights, because they printed
+   and computed the same wrong day together and should be right together. */
+export const dubaiWindow = (from, to) => ({ from: dubaiIso(from), to: dubaiIso(to) });
+
 async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = null) {
   await loadSettings(true);   // pick up Settings-page credential changes without a redeploy
-  log.info('run', `${mode} ${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}`);
+  const day = dubaiWindow(from, to);
+  log.info('run', `${mode} ${day.from}..${day.to}`);
   const names = Object.keys(HISTORICAL);
   /* What this job already finished, if it is a job that has run before.
      ─────────────────────────────────────────────────────────────────────────
@@ -190,7 +225,9 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = 
   try { await reconcile({ from, to }); } catch (e) { log.error('run', 'reconcile', { err: String(e) }); }
   // Derive who was driving which vehicle each day, so vehicle facts can name a person.
   try {
-    await rebuildCustody({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
+    // Dubai days, not the UTC day of the run clock — see the note on
+    // dubaiWindow: the 21:00 UTC catch-up is already tomorrow in Dubai.
+    await rebuildCustody({ from: day.from, to: day.to });
   } catch (e) { log.error('run', 'custody', { err: String(e) }); }
   /* Precompute the aggregates that have no window. /api/trend/monthly,
      /api/forecast and /api/retention each group the ENTIRE trip history, so
@@ -208,22 +245,55 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = 
   } catch (e) { log.error('run', 'rollup', { err: String(e) }); }
   // Turn the freshly-landed data into ranked, actionable findings.
   try {
-    await computeInsights({ from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10) });
+    // The window every insight rule is evaluated over, and the one printed on
+    // the finding panel. Dubai days for both reasons — see dubaiWindow.
+    await computeInsights({ from: day.from, to: day.to });
   } catch (e) { log.error('run', 'insights', { err: String(e) }); }
   await setState('collector', '-', 'last_' + mode, new Date().toISOString());
 }
+
+/* The window one pass measures, as Dubai days.
+   ─────────────────────────────────────────────────────────────────────────
+   Separated from analystPass so the fix can be PROVEN: this is the only part
+   of the pass that can be asked a question without a database and a model
+   call, and the question is exactly "what window does a pass starting at this
+   instant cover". The instants the test uses are the real ones from
+   production.
+
+   What it replaces: `const iso = (d) => d.toISOString().slice(0, 10)`, a local
+   redefinition of src/util.js's iso() that shadowed the import — which is why
+   test/timezone.test.mjs did not catch it. Its ban is on the literal shape
+   `iso(new Date())`, and laundering the clock through a variable and a local
+   `iso` walked straight past it: the guard reported 17 passed, 0 failed with
+   this bug live in production.
+
+   And it WAS live. src/index.js:107 is `cron.schedule('10 23 * * *', () =>
+   analystPass())`. 23:10 UTC is 03:10 the next day in Dubai, so every pass ran
+   on Dubai day D and recorded — and measured — a window ending on D-1.
+   /api/analyst/findings on production says so five nights running: the run
+   created at 2026-09-01T23:10:13.008Z carries window 2026-08-02..2026-09-01,
+   the one at 2026-08-31T23:10:14.724Z carries 2026-08-01..2026-08-31, and so
+   back through 2026-08-30, 2026-08-29 and 2026-08-28. The day in progress
+   contributed to no claim, and the cost was paid downstream rather than fixed:
+   api/analytics_routes.js:1795 records that `window_start >= from` "hid every
+   finding at the exact range the page opens on — five confirmed claims on
+   production, invisible on the default view".
+
+   `days` back from the clock in whole days. UTC has no daylight saving, so
+   this is the same instant daysAgo(days) returns; it takes `now` because
+   daysAgo() cannot be given one. */
+export const analystWindow = (days, now = new Date()) =>
+  dubaiWindow(new Date(now.getTime() - days * 864e5), now);
 
 /* One analyst pass: build a brief of aggregates, ask the model for testable
    claims, measure each against the rest of the fleet, keep the verdicts. Runs
    on its own daily schedule rather than inside runWindow, because it costs a
    model call and its input barely moves between two afternoons. */
-export async function analystPass({ days = 30 } = {}) {
+export async function analystPass({ days = 30, now = new Date() } = {}) {
   await loadSettings(true);
-  const to = new Date();
-  const from = daysAgo(days);
-  const iso = (d) => d.toISOString().slice(0, 10);
+  const { from, to } = analystWindow(days, now);
   try {
-    const r = await runAnalyst({ from: iso(from), to: iso(to) });
+    const r = await runAnalyst({ from, to });
     log.info('analyst', 'pass complete', {
       run: r.run_id, proposed: r.proposed,
       confirmed: r.findings.filter((f) => f.verdict === 'confirmed').length,
@@ -244,7 +314,7 @@ export async function analystPass({ days = 30 } = {}) {
       `INSERT INTO analyst_run (run_id, window_start, window_end, outcome, error, finished_at)
        VALUES ($1,$2,$3,'failed',$4, now()) ON CONFLICT (run_id) DO UPDATE
          SET outcome='failed', error=EXCLUDED.error, finished_at=now()`,
-      [`an-${Date.now()}`, iso(from), iso(to), err])
+      [`an-${Date.now()}`, from, to, err])
       .catch(() => {});
     return null;
   }

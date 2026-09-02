@@ -25,6 +25,15 @@
    without a geocoder we do not run. It is a proxy, and it is named as one. */
 import { areaOf } from './analytics_routes.js';
 import { config } from '../src/config.js';
+/* A real import, not a copy: this module is loaded as an ES module by
+   api/server.js, so unlike the route bodies server.js evaluates inside its own
+   `new Function` slice (see the note above isoDay there) a top-level binding is
+   in scope here. src/util.js imports nothing, so there is no cycle.
+   isoDay() in src/sources/ledger.js is the sibling helper for a pg DATE, and it
+   is deliberately NOT what is used below: a DATE arrives as a Date at LOCAL
+   midnight and has no instant to convert, whereas every value converted here is
+   a real timestamptz instant, which has to be moved onto the Dubai clock. */
+import { dubaiIso } from '../src/util.js';
 
 /* ── charging ─────────────────────────────────────────────────────────────
    A car standing still for fifty minutes is not automatically waste. This
@@ -229,12 +238,37 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
          the reader picked. A page that prints a rate has to be able to say
          what it divided by. */
       measured: span && span.from_at ? {
-        from: iso(span.from_at).slice(0, 10),
-        to: iso(span.to_at).slice(0, 10),
+        /* Dubai days, not UTC days — the same clock `days` beside them counts on.
+           ─────────────────────────────────────────────────────────────────────
+           from_at/to_at are min(at)/max(at) over driver_timeline_event.at, a
+           bare timestamptz (sql/schema_v37.sql:29): no to_char, no ::text, so
+           node-postgres hands back a Date, and iso() above turns an INSTANT
+           into its UTC calendar day. `days` in the same row is
+           count(DISTINCT (at AT TIME ZONE 'Asia/Dubai')::date) — Dubai days.
+           Two clocks in one object, and production printed the contradiction:
+           GET /api/supply/balance?from=2026-07-28&to=2026-07-29 answered
+           {"from":"2026-07-28","to":"2026-07-28","days":2}, a span of one day
+           beside a count of two, and ?to=2026-08-01 answered 07-28 → 07-31
+           with days 5. Anything from 20:00 UTC onward is already tomorrow in
+           Dubai, which is where max(at) fell.
+           dubaiIso() applies src/util.js's constant +04:00 — the same shift
+           Postgres's AT TIME ZONE 'Asia/Dubai' applies, since Dubai has had no
+           daylight saving since 1990 — so the printed span and the count beside
+           it can no longer disagree. */
+        from: dubaiIso(span.from_at),
+        to: dubaiIso(span.to_at),
         days: span.days,
         /* True when the reader asked for more than the feed can answer, which
-           is the case the pages have to caption. */
-        narrower_than_window: iso(span.from_at).slice(0, 10) > iso(p[0]).slice(0, 10),
+           is the case the pages have to caption.
+           Both sides have to be on ONE clock. p[0] is a Dubai calendar date
+           string from winDays (api/server.js range → api/window.js), which
+           iso()'s String(v) branch passed through untouched, while the left
+           side was the UTC day of an instant — and the UTC day of an instant
+           is never LATER than its Dubai day, so the error could only bias this
+           flag toward false. That suppresses "Availability is only reported
+           from …" (api/public/supply.js:151-156, api/public/optimise.js:117)
+           in exactly the boundary case the caption exists for. */
+        narrower_than_window: dubaiIso(span.from_at) > String(p[0]).slice(0, 10),
       } : null,
       basis: 'Online hours are split across the hours they were actually online in, not attributed '
         + 'to the hour a shift started; time on a job is split the same way, so idle is a '

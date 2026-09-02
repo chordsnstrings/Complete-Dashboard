@@ -42,6 +42,7 @@ import { uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
 import { authFailure, saysAuth, noteCredential, credentialState } from '../auth_state.js';
 import { log } from '../log.js';
+import { dubaiIso } from '../util.js';
 
 const SRC = 'uber_profile';
 const URL_ = `${UBER_WEB_HOST}/graphql`;
@@ -203,7 +204,11 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
        own row, keyed on the day it was taken. A week we did not ask leaves no
        row rather than a repeated one, so a gap reads as unmeasured rather than
        unchanged. See sql/schema_v46.sql. */
-    const day = new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10);
+    /* dubaiIso(), not a hand-rolled +4h. The shift was right — this row is
+       keyed on the Dubai day the reading was taken — but written out inline it
+       was one more copy of arithmetic src/util.js already owns, and the one
+       place a future edit would not think to look. */
+    const day = dubaiIso();
     await upsertMany('driver_rating_history', rows.map((r) => ({
       platform: r.platform, driver_ext_id: r.driver_ext_id, observed_on: day,
       fleet_id: r.fleet_id, rating: r.rating, lifetime_trips: r.lifetime_trips,

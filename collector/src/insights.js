@@ -4,6 +4,8 @@
 // hand an operator a confident-sounding number we can't defend.
 import { pool } from './db.js';
 import { log } from './log.js';
+import { dubaiIso } from './util.js';
+import { isoDay } from './sources/ledger.js';
 
 const SRC = 'insights';
 const q = (t, p) => pool.query(t, p).then((r) => r.rows);
@@ -13,9 +15,69 @@ const money = (n) => (n == null ? null : Math.round(Number(n) * 100) / 100);
    Date interpolated into a template literal renders as
    "Fri Aug 01 2025 00:00:00 GMT+0000 (Coordinated Universal Time)". That string
    was being STORED as the user-facing title and detail of an insight. Every
-   date that reaches a sentence goes through one of these. */
-const day = (v) => (v == null ? null : new Date(v).toISOString().slice(0, 10));
-const minute = (v) => (v == null ? null : new Date(v).toISOString().slice(0, 16).replace('T', ' '));
+   date that reaches a sentence goes through one of these.
+
+   TWO KINDS OF COLUMN REACH THESE SENTENCES, AND ONE HELPER CANNOT SERVE BOTH.
+   ─────────────────────────────────────────────────────────────────────────
+   A DATE carries no instant. pg parses it into a Date at LOCAL midnight, so
+   the date it holds IS its local components, and toISOString() on it is the
+   day before under any zone east of UTC. isoDay() is that reading, imported
+   from src/sources/ledger.js where the failure was first measured — the
+   Data-sources page shipped "covering days up to Fri Aug 21" the hour that
+   module landed. Importing it is not a cycle: ledger.js imports only ./db.js
+   and ./log.js, both of which this module already imports.
+
+   A TIMESTAMPTZ is an INSTANT, and the calendar day of an instant depends on
+   whose clock you ask. The fleet works Asia/Dubai, so it is dubaiIso(): the
+   UTC day of an instant is YESTERDAY between 20:00 and midnight in Dubai.
+
+   That arm is not theoretical about the column it looks safest on. Measured
+   off production /api/compliance/vehicles on 2026-09-02: all 129
+   vehicle_document.expires_at values are stored at 19:59:59Z, which is
+   23:59:59 in Dubai — the last second of the day the document is valid to. So
+   the date the sentence wants IS the Dubai date, dubaiIso() returns exactly
+   what the board already prints ("valid until 2026-09-03" for L39421's
+   2026-09-03T19:59:59Z), and the UTC reading agreed only by one second. A
+   source that ever writes 20:00:00Z instead would have moved 129 compliance
+   dates back a day with nothing to notice it.
+
+   The single day() that used to serve both was toISOString().slice(0, 10) and
+   was therefore wrong for both. It read correctly on the board only because
+   the container runs UTC and the instants that reached it — licence expiries,
+   document expiries — happened to miss the 20:00–24:00Z band. Neither of those
+   is a property of the code, so neither is a reason to keep one helper.
+
+   Which arm each call site takes is decided by the SELECT, not by the name:
+     DATE        driver_compliance.licence_expires, weather_daily.day,
+                 platform_recommendation.period_start / period_end   → isoDay
+     TIMESTAMPTZ max(telemetry_snapshot.captured_at), max(trip.requested_at),
+                 vehicle_document.expires_at                         → dubaiIso */
+
+/* A tracker fix, printed on the clock the fleet actually works.
+   ─────────────────────────────────────────────────────────────────────────
+   This was toISOString().slice(0, 16) — the UTC clock — while the same feed's
+   fix time on the same screen is rendered in Dubai by api/public/ui.js
+   timeStr(), which test/timezone.test.mjs pins
+   (timeStr('2026-09-02T13:00:01.603Z') === '17:00'). One screen, one instant,
+   two answers four hours apart.
+
+   Measured on production /api/insights on 2026-09-02: all 41 of these strings
+   ran four hours behind the fleet, and four of them named the wrong DAY —
+
+     L91248  "Last fix from FMS telematics at 2026-08-25 20:09"  (Dubai 26th 00:09)
+     L70851  "Last fix from CABMAN at 2026-08-29 21:15"          (Dubai 30th 01:15)
+     L45249  "Last fix from FMS telematics at 2026-08-28 21:07"  (Dubai 29th 01:07)
+     L24522  "Last fix from CABMAN at 2026-08-30 22:46"          (Dubai 31st 02:46)
+
+   — which sends somebody to check a device against the wrong date in a log.
+
+   The date half is dubaiIso() so it cannot drift from every other Dubai date
+   in the product; the clock half is the same +4h shift, which is src/util.js's
+   DUBAI_OFFSET_MS. Arithmetic rather than Intl because Dubai is UTC+4 all year
+   and has observed no daylight saving since 1990. */
+const DUBAI_OFFSET_MS = 4 * 36e5;
+const dubaiMinute = (v) => (v == null ? null
+  : `${dubaiIso(v)} ${new Date(new Date(v).getTime() + DUBAI_OFFSET_MS).toISOString().slice(11, 16)}`);
 
 /* A feed's name as a person writes it, for the two feeds that carry a tracker.
    ─────────────────────────────────────────────────────────────────────────
@@ -188,7 +250,7 @@ async function idleVehicles() {
        old. Said only when it is recent enough to mean it. */
     const fixAgeH = (Date.now() - new Date(r.last_seen)) / 36e5;
     const lastTrip = r.last_trip
-      ? `Its last recorded trip was ${day(r.last_trip)}, ${n_(daysAgoFrom(r.last_trip), 'day')} ago`
+      ? `Its last recorded trip was ${dubaiIso(r.last_trip)}, ${n_(daysAgoFrom(r.last_trip), 'day')} ago`
         + ` (${r.lifetime} recorded in total).`
       : `No trip has ever been recorded for this plate in the collected data.`;
     await put({
@@ -196,8 +258,8 @@ async function idleVehicles() {
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} is reporting but has not earned in ${IDLE_LOOKBACK_DAYS} days`,
       detail: (fixAgeH <= 6
-        ? `The tracker reported as recently as ${minute(r.last_seen)}, so the vehicle is present and powered`
-        : `The tracker last reported ${minute(r.last_seen)}, ${Math.round(fixAgeH)}h ago — recent enough `
+        ? `The tracker reported as recently as ${dubaiMinute(r.last_seen)}, so the vehicle is present and powered`
+        : `The tracker last reported ${dubaiMinute(r.last_seen)}, ${Math.round(fixAgeH)}h ago — recent enough `
           + 'that the car is on the road, though not recent enough to say it is powered right now')
         + ` — but no booking on any platform in the last ${IDLE_LOOKBACK_DAYS} days. ${lastTrip}`,
       action: `Confirm it is not in workshop or reserve. If roadworthy, assign a driver — otherwise take it off the active cost base.`,
@@ -241,8 +303,8 @@ async function dormantVehicles() {
       /* "usually means the vehicle left the fleet" is a hedge worth making at
          forty days and worth dropping at eight hundred. */
       detail: gone
-        ? `Last position ${day(r.last_seen)}. Nothing is off the road for ${n_(days, 'day')} and coming back: this car has left the fleet or its tracker was removed, and it is still carried in the vehicle list, where it inflates every per-vehicle average.`
-        : `Last position ${day(r.last_seen)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is short enough to be a repair or a lay-up, so it is worth asking before retiring it.`,
+        ? `Last position ${dubaiIso(r.last_seen)}. Nothing is off the road for ${n_(days, 'day')} and coming back: this car has left the fleet or its tracker was removed, and it is still carried in the vehicle list, where it inflates every per-vehicle average.`
+        : `Last position ${dubaiIso(r.last_seen)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is short enough to be a repair or a lay-up, so it is worth asking before retiring it.`,
       action: gone
         ? `Retire it from the asset register, or refit the tracker if the car is still ours — either way it should stop counting as a vehicle in service.`
         : `Reconcile against the asset register: retire it, or refit the tracker if the car is still ours.`,
@@ -336,7 +398,7 @@ async function licenceRisk() {
       entity_type: 'fleet', entity_id: 'all',
       title: `Licence expiry dates look like a default, not real records`,
       detail: `${spread.common_n} of ${n_(spread.total, 'driver')} carry the identical expiry `
-        + `${day(spread.common_date)}. That pattern is a system default rather than `
+        + `${isoDay(spread.common_date)}. That pattern is a system default rather than `
         + `${n_(spread.common_n, 'genuine expiry', 'genuine expiries')}, so we are not raising `
         + 'individual compliance alerts against it.',
       action: `Get real licence dates into the source system — until then this fleet has no working licence-expiry check at all, which is the actual risk.`,
@@ -358,7 +420,7 @@ async function licenceRisk() {
       code: gone ? 'licence_expired' : 'licence_expiring',
       severity: gone ? 'critical' : 'warning', category: 'compliance',
       entity_type: 'driver', entity_id: r.driver_ext_id, fleet_id: r.fleet_id,
-      title: `${r.full_name || r.driver_ext_id}'s licence ${gone ? 'has expired' : 'expires soon'} (${day(r.licence_expires)})`,
+      title: `${r.full_name || r.driver_ext_id}'s licence ${gone ? 'has expired' : 'expires soon'} (${isoDay(r.licence_expires)})`,
       detail: `Licence ${r.licence_no || '—'} on ${r.platform}. ${gone
         ? 'Every trip driven on an expired licence is uninsured exposure for the company, not just the driver.'
         : 'Renewal windows in the UAE take days, not hours.'}`,
@@ -666,7 +728,7 @@ async function staleTelemetry() {
       entity_id: `${source}:${fleetId}:${String(at.toISOString ? at.toISOString() : at).slice(0, 13)}`,
       fleet_id: fleetId,
       title: `${plates.length} ${sourceName(source)} trackers stopped reporting within the same hour`,
-      detail: `All ${plates.length} last reported around ${minute(at)}, ${ageH}h ago — ${plates.slice(0, 8).join(', ')}${plates.length > 8 ? ` and ${plates.length - 8} more` : ''}. Vehicles do not fail together; a feed does.`,
+      detail: `All ${plates.length} last reported around ${dubaiMinute(at)}, ${ageH}h ago — ${plates.slice(0, 8).join(', ')}${plates.length > 8 ? ` and ${plates.length - 8} more` : ''}. Vehicles do not fail together; a feed does.`,
       action: `Check the ${sourceName(source)} integration — the account, its credential and its vehicle list — before checking any of the vehicles. Each of these cars is invisible to unauthorised-use detection while it is dark.`,
       impact_aed: null, metric: plates.length, window_start: null, window_end: null,
     });
@@ -699,7 +761,7 @@ async function staleTelemetry() {
       code: 'stale_tracker', severity: r.ageH > 72 ? 'critical' : 'warning', category: 'data',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} has not reported a position for ${Math.round(r.ageH)}h`,
-      detail: `Last fix from ${sourceName(r.source)} at ${minute(r.captured_at)}. ${feedEvidence(r)}`,
+      detail: `Last fix from ${sourceName(r.source)} at ${dubaiMinute(r.captured_at)}. ${feedEvidence(r)}`,
       action: live(r) > 0
         ? `Check the device. A dead tracker also disables unauthorised-use detection for this vehicle.`
         : `Check the ${sourceName(r.source)} integration first — the account, its credential and its vehicle list. Only if the feed is healthy is this the device.`,
@@ -772,8 +834,8 @@ async function weatherOutlook() {
       code: rain >= 1 ? 'weather_rain' : 'weather_heat',
       severity: 'info', category: 'demand', entity_type: 'fleet', entity_id: 'all',
       title: rain >= 1
-        ? `Rain forecast ${day(r.day)} (${rain}mm) — demand spikes, so do collisions`
-        : `Extreme heat ${day(r.day)} (${heat}°C) — EV range and AC load both suffer`,
+        ? `Rain forecast ${isoDay(r.day)} (${rain}mm) — demand spikes, so do collisions`
+        : `Extreme heat ${isoDay(r.day)} (${heat}°C) — EV range and AC load both suffer`,
       detail: rain >= 1
         ? `Dubai rain reliably lifts ride demand while cutting road grip. Both effects land in the same hours.`
         : `Sustained ${heat}°C drives continuous AC use, which cuts usable EV range and raises mid-shift charging stops.`,
@@ -836,7 +898,7 @@ async function vehicleDocuments() {
         ? `${r.plate}: ${r.doc_type} expired ${n_(Math.abs(days), 'day')} ago`
         : `${r.plate}: ${r.doc_type} expires in ${n_(days, 'day')}`,
       detail: `${r.make || ''} ${r.model || ''}`.trim()
-        + ` — ${r.doc_type} valid until ${day(r.expires_at)}.${who}`
+        + ` — ${r.doc_type} valid until ${dubaiIso(r.expires_at)}.${who}`
         + (gone ? ' A vehicle working on expired documents is uninsured and un-hireable if stopped.'
                 : ' Renewal in the UAE is not same-day; leaving it to the last week risks losing the car from service.'),
       action: gone ? `Take it off dispatch until the renewed document is on file.`
@@ -872,7 +934,7 @@ async function platformFlags() {
         entity_type: 'fleet', entity_id: 'all', fleet_id: r.fleet_id,
         title: `${n_(idle.length, 'driver')} ${s_(idle.length, 'was', 'were')} online but completed no trips`,
         detail: `Uber flagged ${n_(idle.length, 'driver')} logged in for about ${hours.toFixed(1)} `
-          + `hours in total with zero completed trips (${day(r.period_start)}). Paid-for supply `
+          + `hours in total with zero completed trips (${isoDay(r.period_start)}). Paid-for supply `
           + 'that produced nothing.',
         action: `Check whether they were genuinely available, sitting in a dead zone, or logged in without intending to work.`,
         impact_aed: null, metric: idle.length,
@@ -897,7 +959,7 @@ async function platformFlags() {
       title: isAcc
         ? `${n_(flagged.length, 'driver')} below Uber's acceptance target`
         : `${n_(flagged.length, 'driver')} above Uber's cancellation target`,
-      detail: `Fleet sits at ${pct(r.org_value)} against a target of ${pct(r.target_value)} for ${day(r.period_start)} → ${day(r.period_end)}. Uber names ${n_(flagged.length, 'driver')} on the wrong side of it — these are the accounts that drag dispatch priority for everyone.`,
+      detail: `Fleet sits at ${pct(r.org_value)} against a target of ${pct(r.target_value)} for ${isoDay(r.period_start)} → ${isoDay(r.period_end)}. Uber names ${n_(flagged.length, 'driver')} on the wrong side of it — these are the accounts that drag dispatch priority for everyone.`,
       action: isAcc
         ? `Review why they decline: vehicle mismatch, positioning, or app left on while unavailable.`
         : `Cancellations after acceptance hurt rider trust and cost the approach drive. Coach the named drivers.`,
@@ -952,8 +1014,24 @@ async function tipSignal() {
 
 /* ─────────────────── runner ─────────────────── */
 export async function computeInsights({ from, to } = {}) {
-  const end = to || new Date().toISOString().slice(0, 10);
-  const start = from || new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  /* The fallback window is Dubai days, because the window is PRINTED.
+     ─────────────────────────────────────────────────────────────────────────
+     api/public/app.js:1623 renders it on the finding panel — "over <start> →
+     <end>" — and every windowed rule uses these two strings as its SQL bounds.
+     They were toISOString().slice(0, 10), the UTC day of the clock, which
+     between 20:00 and midnight UTC is the day before in Dubai: the finding
+     would print a window ending yesterday and compute over one that stops
+     before the Dubai day in progress had started.
+
+     Honest scope: this is the FALLBACK. The only caller in the product,
+     src/run.js:211, passes its own from/to, so the windows on the production
+     board (2026-08-30 → 2026-09-02, read off /api/insights on 2026-09-02)
+     come from there and not from here — and run.js computes them with the
+     same toISOString().slice(0, 10) on its run clock, which is that file's bug
+     to fix, not this one's. Corrected here so a caller that omits the window
+     gets the fleet's days rather than the container's. */
+  const end = to || dubaiIso();
+  const start = from || dubaiIso(new Date(Date.now() - 30 * 864e5));
   /* Each job WITH THE CODES IT OWNS.
      ─────────────────────────────────────────────────────────────────────────
      A finding is resolved when the rule that emits it ran and did not emit it

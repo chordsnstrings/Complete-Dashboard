@@ -29,6 +29,7 @@ import { http } from './http.js';
 import { get, SETTING_DEFAULTS } from './settings.js';
 import { keyFor } from './credkit.js';
 import { UBER_WEB_HOST } from './auth/uber.js';
+import { dubaiIso } from './util.js';
 
 /* The same host the collector uses, from the same export. This checker kept
    its own copy of the URL, so when Uber moved supplier.uber.com to fleethub
@@ -36,7 +37,13 @@ import { UBER_WEB_HOST } from './auth/uber.js';
    session — the page telling an operator their credential was dead was the
    last thing standing between them and a working collector. */
 const REPORTS = `${UBER_WEB_HOST}/api/vs-sp-reports-management`;
-const day = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+/* The Dubai day. These bound a window asked of a provider whose reports are
+   filed on the fleet's own calendar, and read as the UTC day the window was a
+   day short for the four hours after 20:00 Dubai — the hours a credential
+   check run from a nightly job would most often land in. A check that asks for
+   the wrong day and is refused reports a working credential as dead, which is
+   the one outcome this file's own header calls worse than no check at all. */
+const day = (n) => dubaiIso(new Date(Date.now() - n * 864e5));
 
 /* A network failure is not a credential failure. */
 const unreachable = (e) => /ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ETIMEDOUT|abort|socket hang up|network/i
@@ -107,7 +114,7 @@ async function checkYango({ value }) {
      cookie the collector was using successfully at that moment — a false
      failure, which is the one outcome worse than no check: it tells an
      operator to go and re-capture a session that is fine. */
-  const day = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+  const day = (n) => dubaiIso(new Date(Date.now() - n * 864e5));
   /* Three credentials ride on every Yango request — the park id, the API key
      and the cookie — so a refusal names none of them. Asking once cannot tell
      them apart; asking twice can. */

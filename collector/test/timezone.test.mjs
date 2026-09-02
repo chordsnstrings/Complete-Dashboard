@@ -209,6 +209,57 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     offenders.length === 0, offenders.length ? `\n      ${offenders.join('\n      ')}` : '');
 }
 
+/* ── 2c. the same mistake, spelled out longhand ───────────────────────────
+   Rule 2b bans `iso(new Date())` — src/util.js's helper on a clock. It does not
+   ban the expression that helper IS, written out: `new Date().toISOString()
+   .slice(0, 10)`, which is the identical UTC day and was the actual spelling in
+   seven places under src/ and api/ when this rule was written. Two of them were
+   measured wrong on production the day the sweep ran:
+
+     api/probe.js:260-261  the /api/probe/uber/report-types window, echoed to the
+       reader AND sent to Uber as the report's startDate/endDate — driven with
+       the clock at 2026-09-02T21:30:00Z (01:30 on the 3rd in Dubai) it asked
+       for 2026-08-30..2026-09-02 instead of 08-31..09-03
+     src/custody.js:16-17  the custody rebuild's window, folded over
+       trip_norm.local_day, which is already a Dubai date — so an evening
+       rebuild left that evening's work outside itself
+
+   A fifth was correct and still wrong to keep: src/sources/uber_profile.js
+   wrote `new Date(Date.now() + 4 * 3600 * 1000).toISOString().slice(0, 10)`,
+   the right day by hand-rolled arithmetic src/util.js already owns.
+
+   Narrow on purpose. Only a CLOCK is banned — new Date() with no argument, or
+   Date.now() — because toISOString() on an instant that is ALREADY midnight UTC
+   of the day meant is correct and is what weekChunks and dubaiDayChunks hand
+   around. api/public is covered by rule 1's browser sweep and is excluded here
+   so a failure names one rule rather than two. */
+{
+  const offenders = [];
+  const files = [...walk('src', '.js'), ...walk('api', '.js')]
+    .filter((f) => !f.startsWith('api/public/'));
+  for (const path of files) {
+    const raw = readFileSync(path, 'utf8');
+    const src = raw
+      .replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
+      .replace(/(^|[^:])\/\/[^\n]*/g, (c, p1) => p1 + ' '.repeat(c.length - p1.length));
+    const lineOf = (idx) => src.slice(0, idx).split('\n').length;
+    const RE = /new Date\(\s*(?:\)|Date\.now\(\)[^)]*\))\s*\.toISOString\(\)\s*\.slice\(\s*0\s*,\s*(?:10|7)\s*\)/g;
+    for (const m of src.matchAll(RE)) {
+      offenders.push(`${path}:${lineOf(m.index)}  ${m[0].replace(/\s+/g, ' ')} is the UTC day of a `
+        + 'clock — use dubaiIso/dubaiMonth from src/util.js');
+    }
+  }
+  check('no server file takes the UTC day of the clock it is running on',
+    offenders.length === 0, offenders.length ? `\n      ${offenders.join('\n      ')}` : '');
+  /* The rule must still MATCH the thing it bans, or a clean sweep proves only
+     that the regex broke. Both shapes, checked against the pattern itself. */
+  const RE2 = /new Date\(\s*(?:\)|Date\.now\(\)[^)]*\))\s*\.toISOString\(\)\s*\.slice\(\s*0\s*,\s*(?:10|7)\s*\)/;
+  check('...and the rule still recognises both spellings it is written about',
+    RE2.test('new Date().toISOString().slice(0, 10)')
+    && RE2.test('new Date(Date.now() - 400 * 864e5).toISOString().slice(0, 10)')
+    && !RE2.test("dubaiIso(new Date(Date.now() - 400 * 864e5))"));
+}
+
 /* ── 3. the window the whole app shares is Dubai days ──────────────────── */
 {
   /* Run under a zone twelve hours from Dubai, so a UTC-day or local-day
