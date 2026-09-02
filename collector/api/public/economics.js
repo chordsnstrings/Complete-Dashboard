@@ -340,10 +340,23 @@ async function moneyTab(root) {
     { label: 'Money placed on assets', value: money(t.money),
       sub: `${money(t.fares || 0)} in fares · ${money(t.payouts || 0)} of platform payouts placed `
         + `on the days each driver actually drove · over ${fmt(A.window_days)} days`
+        /* The reason, not the aside. This clause used to offer unplaced_payouts
+           as the explanation for the whole difference, and on production
+           2026-09-02 that was AED 74 against a gap of AED 18,544 — 0.4% of it.
+           The real cause is the one the comment block above this array spends
+           twenty lines establishing: two honest ways to spread a weekly payout
+           over days, agreeing to 0.8% over a year and diverging 53% over a
+           week, because the difference is entirely at the window's edges. That
+           belongs in the sentence a reader actually sees, and the unplaced
+           figure belongs after it, at the size it is. */
         + (K?.accounted
-          ? ` · against ${money(K.accounted)} on Finance, which counts the same payouts without `
-            + 'walking them through custody to a vehicle — this page can only place what it can '
-            + `name a car for, and reports ${money(t.unplaced_payouts || 0)} it could not`
+          ? ` · against ${money(K.accounted)} on Finance, which spreads the same weekly payouts `
+            + 'evenly over all seven days of their period while this page places them on the days '
+            + 'a driver actually drove — so a window that cuts through an open period counts more '
+            + 'of it here. The two agree to about 1% over a year and diverge most over a few days.'
+            + (t.unplaced_payouts
+              ? ` A further ${money(t.unplaced_payouts)} could not be placed on any car at all.`
+              : '')
           : '') },
     { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day, 'AED', 0),
       sub: `${fmt(t.earning_vehicle_days)} vehicle-days actually earned` },

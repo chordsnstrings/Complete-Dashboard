@@ -159,8 +159,17 @@ check('a Dubai-aligned daily grid is asked for as well',
   /dubaiDayChunks\(dayFrom, to\)/.test(body), 'daily grid');
 check('a day row is stamped with the Dubai date, start and end the same day',
   /ps: d\.day, pe: d\.day/.test(body));
+/* Asserted on the BINDING, not on a literal. This required
+   `EARNER_DAY_HORIZON = <number>` — and that literal is now banned in
+   test/earner_horizon.test.mjs, because the same provider edge was written
+   down in this file and in api/reconcile_routes.js and the two had drifted
+   eight days apart. Two tests in direct opposition is worse than either fault:
+   whichever one a future reader satisfies, the other fails, and the usual
+   resolution is to weaken one of them. What this check is actually about is
+   that the daily grid stops where the endpoint stops answering. */
 check('the daily grid is bounded by the endpoint rolling horizon',
-  /EARNER_DAY_HORIZON/.test(body) && /EARNER_DAY_HORIZON = \d+/.test(uber));
+  /EARNER_DAY_HORIZON/.test(body)
+  && /const EARNER_DAY_HORIZON = UBER_EARNER_HORIZON_DAYS \+ UBER_EARNER_ASK_MARGIN_DAYS/.test(uber));
 check('the daily grid never starts before the window the run was given',
   /Math\.max\(new Date\(from\)\.getTime\(\), dayHorizon\.getTime\(\)\)/.test(body));
 /* Page mode pages now. The old comment said the response carried no token this

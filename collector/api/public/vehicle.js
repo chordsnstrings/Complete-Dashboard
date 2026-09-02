@@ -188,7 +188,8 @@ async function tabOverview(root, plate, prof) {
        "not measured" rather than an em-dash the reader has to interpret. */
     { label: 'Harsh events', value: fmt(k.alerts),
       sub: k.alerts_per_100km != null
-        ? `${fmt(k.alerts_per_100km, 1)} per 100 km · ${k.alert_coverage?.basis || ''}`
+        ? `${fmt(k.alerts_per_100km, 1)} per 100 km`
+          + (k.alert_coverage?.basis ? ` · ${k.alert_coverage.basis}` : '')
         : (k.alerts_per_100km_absent || 'no matched distance'),
       tone: k.alerts_per_100km == null ? null : k.alerts_per_100km <= 5 ? 'good' : k.alerts_per_100km <= 15 ? 'warn' : 'critical' },
     { label: 'Last fix', value: k.hours_since_fix != null ? `${fmt(k.hours_since_fix, 1)}h ago` : '—', sub: `${fmt(k.fixes)} fixes in range`,

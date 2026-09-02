@@ -1406,16 +1406,24 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
 
   /* ── THE WAVE, OVER DAYS THAT HAVE HAD ONE ────────────────────────────────
      "Morning wave or evening wave" asks which way an area leans, and it is a
-     RATIO of two hour windows — 05:00–09:00 against 16:00–21:00, Dubai. Both
+     RATIO of two hour windows — 05:00–09:59 against 16:00–21:59, Dubai (the
+     SQL is BETWEEN 5 AND 9 and BETWEEN 16 AND 21, so both run to :59; the page
+     said :00 in its tooltip and was an hour short in each direction). Both
      were counted over every day the window touches, today included, and today
-     has had a morning and (before 22:00) no evening at all.
+     has had a morning and, until 22:00, only part of an evening or none.
 
-     Measured on production 2026-09-02:
-       /api/geo/corridors?from=2026-09-02&to=2026-09-02 returned evening = 0
-       for EVERY area, and the page drew every one of them as morning-heavy.
-       Over Sep 1–2 it drew areas as morning-heavy that are evening-heavy on
-       the only complete day: Al Garhoud 17 morning / 21 evening on Sep 1
-       alone, Business Bay 2 / 8. The page printed the opposite of both.
+     Measured against /api/geo/corridors on production, 2026-09-02 at 18:07
+     Dubai — morning / evening per pickup area:
+
+       Sep 1 alone (whole)   Al Garhoud 17 / 21   Business Bay 2 / 8
+       Sep 2 alone (part)    Al Garhoud 11 /  6   Business Bay 9 / 1
+       Sep 1–2 together      Al Garhoud 28 / 27   Business Bay 11 / 9
+
+     Both areas are evening-heavy on the only day that finished, and both flip
+     to morning-heavy the moment the part-day is folded in. The page drew the
+     flipped version. Earlier the same day, at 15:17, the today-only window
+     returned evening = 0 for EVERY area and the page drew the whole fleet as
+     a morning fleet.
 
      An evening that has not happened is not a quiet evening. So a day enters
      BOTH halves or NEITHER, and it enters them once its evening window has
