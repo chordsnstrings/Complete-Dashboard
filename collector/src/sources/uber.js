@@ -8,7 +8,8 @@ import { config, normPlate } from '../config.js';
 import { http, qs, sleep } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
 import { dateChunks, weekChunks, dubaiDayChunks, iso, unixMs } from '../util.js';
-import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST,
+  UBER_EARNER_HORIZON_DAYS, UBER_EARNER_ASK_MARGIN_DAYS } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
 import { log } from '../log.js';
 import { authFailure, saysAuth, noteCredential, noteUberRest } from '../auth_state.js';
@@ -496,8 +497,30 @@ export function applyMisfiled(cmp, heldElsewhere) {
    August, and the fall happens in the SAME month, by the same three quarters,
    in two separate fleets holding two separate Uber orgs. Two unrelated
    businesses do not lose three quarters of their work on the same Sunday. That
-   is the shape of a collection that thinned, and no amount of counting our own
-   rows will ever say so.
+   looked like the shape of a collection that thinned, and no amount of
+   counting our own rows could ever have said so.
+
+   IT WAS NOT. This check has now answered its own founding question, and the
+   answer is recorded here because a suspicion left standing in a comment is a
+   suspicion every later reader inherits.
+
+   Read from /api/coverage/verified on 2026-09-02 — twelve monthly windows,
+   February to July 2026, both fleets, every one of them:
+
+     agreement 100%   uber_only 0   misfiled 0
+
+   March 2026 included, which is the month the fall happens in: Uber reports
+   4,190 Ecosine and 1,852 Egari against our 4,203 and 1,862. We hold
+   everything Uber still serves for every month it will still serve. The
+   collapse is real business — two fleets on one platform in one city meeting
+   the same market — and nothing on any page should imply otherwise.
+
+   The check keeps earning its place: it is the only thing that can tell a day
+   we collected completely from a day we collected a tenth of, and the next
+   time that question is asked it will answer in hours rather than in
+   speculation. (Six August windows currently error with `generate: "Not
+   Found"`, which is the report-path bounce off the moved supplier host, not a
+   gap — see reportBounce below.)
 
    The only thing that can is Uber. So this re-asks Uber for a window we
    already hold, on the same report pipeline the backfill uses, and compares
@@ -757,11 +780,17 @@ export async function probeEarnerWindow(from, to, limit = 10) {
    before: a wrong guess about an enum should cost the improvement, not the
    data. */
 const EARNER_BATCH = 10;
-/* How far back to ask day by day. The endpoint's own horizon measured 192 days
-   on 2026-08-26 and it rolls forward daily, so this sits a little past it:
-   overshooting costs a few empty calls, undershooting loses days that can
-   never be re-fetched. */
-const EARNER_DAY_HORIZON = 200;
+/* How far back to ask, day by day and week by week. The endpoint's own horizon
+   is measured — see UBER_EARNER_HORIZON_DAYS in src/auth/uber.js, where both
+   halves of this now live — and it rolls forward daily, so the ASK sits a
+   little past it: overshooting costs a few empty calls, undershooting loses
+   days that can never be re-fetched.
+
+   Derived rather than written down again. api/reconcile_routes.js had its own
+   copy of the measured edge and the two had already drifted eight days apart,
+   so the banner telling a reader where Uber stops answering and the grid
+   deciding what to ask could disagree about the same day. */
+const EARNER_DAY_HORIZON = UBER_EARNER_HORIZON_DAYS + UBER_EARNER_ASK_MARGIN_DAYS;
 
 async function pullEarnerBreakdowns(from, to, onStep, checkpoint = null) {
   let total = 0;

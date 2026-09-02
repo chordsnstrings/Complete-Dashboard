@@ -177,7 +177,19 @@ async function tabOverview(root, plate, prof) {
         : 'no platform on this vehicle reports an outcome',
       tone: k.completion_pct == null ? null
         : Number(k.completion_pct) >= 95 ? 'good' : Number(k.completion_pct) >= 85 ? 'warn' : 'critical' },
-    { label: 'Harsh events', value: fmt(k.alerts), sub: k.alerts_per_100km != null ? `${fmt(k.alerts_per_100km, 1)} per 100 km` : 'no matched distance',
+    /* The rate, and the days it was measured over.
+       ─────────────────────────────────────────────────────────────────────
+       The sub-label read "N per 100 km" with nothing to say which days that
+       covered, and it covered whichever ones the alert feed happened to be
+       running for. On production 2026-09-02 the identical arithmetic made the
+       fleet figure fall from 69.7 at 16 days to 41.5 at 30 across the feed's
+       73-day hole, so a reader widening the range watched safety improve.
+       The window is on the tile now, and a window the feed was dark for reads
+       "not measured" rather than an em-dash the reader has to interpret. */
+    { label: 'Harsh events', value: fmt(k.alerts),
+      sub: k.alerts_per_100km != null
+        ? `${fmt(k.alerts_per_100km, 1)} per 100 km · ${k.alert_coverage?.basis || ''}`
+        : (k.alerts_per_100km_absent || 'no matched distance'),
       tone: k.alerts_per_100km == null ? null : k.alerts_per_100km <= 5 ? 'good' : k.alerts_per_100km <= 15 ? 'warn' : 'critical' },
     { label: 'Last fix', value: k.hours_since_fix != null ? `${fmt(k.hours_since_fix, 1)}h ago` : '—', sub: `${fmt(k.fixes)} fixes in range`,
       tone: k.hours_since_fix == null ? null : k.hours_since_fix < 1 ? 'good' : k.hours_since_fix < 24 ? 'warn' : 'critical' },
@@ -648,8 +660,20 @@ async function tabSafety(root, plate) {
   const total = sf.by_type.reduce((a, r) => a + r.n, 0);
 
   kpiHost.replaceWith(kpiRow([
-    { label: 'Harsh events', value: fmt(total), sub: `over ${fmt(k.km)} km` },
-    { label: 'Per 100 km', value: k.alerts_per_100km != null ? fmt(k.alerts_per_100km, 1) : '—', sub: 'comparable across the fleet',
+    /* alert_km, not km. The events counted here happened on the days the alert
+       feed was up; the vehicle's km runs to the edge of the window whether the
+       feed was up or not, and "1,436 events over 12,400 km" put those two
+       populations in one sentence. */
+    { label: 'Harsh events', value: fmt(total),
+      sub: k.alert_km != null ? `over ${fmt(k.alert_km)} km the feed covered` : 'no matched distance' },
+    { label: 'Per 100 km',
+      value: k.alerts_per_100km != null ? fmt(k.alerts_per_100km, 1) : 'not measured',
+      /* Which days, because the number is meaningless without them: the same
+         car reads twice as safe over a window that reaches into a feed
+         outage. */
+      sub: k.alerts_per_100km != null
+        ? (k.alert_coverage?.basis || 'comparable across the fleet')
+        : (k.alerts_per_100km_absent || 'the alert feed covered none of this window'),
       tone: k.alerts_per_100km == null ? null : k.alerts_per_100km <= 5 ? 'good' : k.alerts_per_100km <= 15 ? 'warn' : 'critical' },
     { label: 'Worst type', value: sf.by_type[0]?.alert_type || '—', sub: sf.by_type[0] ? `${fmt(sf.by_type[0].n)} events` : null },
     { label: 'Most events', value: sf.by_driver[0]?.driver_name || '—', sub: sf.by_driver[0] ? `${fmt(sf.by_driver[0].n)} events` : null },
@@ -1196,12 +1220,23 @@ export async function renderVehicleDirectory(root) {
     { label: 'Alerts', key: 'alerts', num: true },
     /* A count beside a Km column and no rate between them: a car doing 6,000km
        with 40 events and one doing 400km with 12 read as the first being
-       worse. Computed from the two columns already on the row. */
-    { label: 'Per 100 km', key: '_p100', num: true,
-      sortValue: (r) => (r.km > 0 ? ((+r.alerts || 0) / r.km) * 100 : null),
-      render: (r) => (r.km > 0
-        ? fmt(((+r.alerts || 0) / r.km) * 100, 1)
-        : '<span class="ent-off" title="no booked distance to rate over">—</span>') },
+       worse.
+
+       Read from the endpoint now, not divided here. Computed in the browser as
+       alerts / km it was a numerator that stops at the alert feed's last good
+       day over a denominator that runs to the edge of the window — the same
+       arithmetic that made the fleet figure fall from 69.7 per 100 km at 16
+       days to 41.5 at 30 on production 2026-09-02, across the feed's 73-day
+       hole. The server measures it over the days the feed covered and says how
+       many of the window's days those were. */
+    { label: 'Per 100 km', key: 'alerts_per_100km', num: true,
+      sortValue: (r) => (r.alerts_per_100km == null ? null : +r.alerts_per_100km),
+      render: (r) => (r.alerts_per_100km == null
+        ? `<span class="ent-off" title="${r.alerts_per_100km_absent
+          || 'no booked distance to rate over'}">—</span>`
+        : `${fmt(r.alerts_per_100km, 1)}<span class="dim" title="the alert feed covered `
+          + `${r.alert_days} of the ${r.alert_window_days} days in this window; distance from a `
+          + `day the feed was dark is in neither half of the rate"> ·&nbsp;${r.alert_days}d</span>`) },
     { label: 'Drivers', key: 'drivers', num: true,
       render: (r) => (r.drivers == null ? '—' : fmt(r.drivers)) },
     /* The pill took its colour from staleness and its text from the provider's

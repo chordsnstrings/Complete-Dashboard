@@ -135,6 +135,10 @@ const q = async (text, params) => {
    which executes every route rather than grepping for it. */
 import { custodyOverWindow, custodyCountOverWindow, vehicleLatest, peopleCount, peopleCountStored, JOIN_TRIP, personFold } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
+/* The one place the alerts-per-distance rule lives. Every page that prints a
+   safety rate reads it from here, so the fleet headline and the per-vehicle
+   and per-driver tables cannot disagree about which days they measured. */
+import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
 import { makeWrap } from './wrap.js';
 /* Moved to api/wrap.js so the late-failure branch can be exercised by a test
    rather than reasoned about — see the comment there. */
@@ -402,12 +406,35 @@ app.get('/api/kpis', wrap(async (req, res) => {
         count(*)::int tracked_vehicles
       FROM (SELECT DISTINCT ON (plate) plate, captured_at
               FROM telemetry_snapshot ORDER BY plate, captured_at DESC) s`);
-  // Alerts take the same fleet filter as the trips beside them; without it a
-  // single-fleet view showed one fleet's trips next to both fleets' alerts.
+  /* Alerts, and the distance they are allowed to be divided by.
+     ─────────────────────────────────────────────────────────────────────────
+     Alerts take the same fleet filter as the trips beside them; without it a
+     single-fleet view showed one fleet's trips next to both fleets' alerts.
+
+     The rate is measured over the days the ALERT FEED covered, and no others.
+     Measured here on 2026-09-02 before that rule existed: days=16 and days=30
+     returned the identical 69,338 alerts while km rose from 99,538 to 166,923,
+     so the fleet's headline safety figure halved from 69.7 to 41.5 per 100 km
+     — and at days=90 it doubled back to 93.1. The feed had a 73-day hole
+     (2026-06-06 → 2026-08-17) and days 17–30 back from today sat inside it,
+     contributing distance and no alerts. api/alert_coverage_sql.js carries the
+     rule and the assumption it rests on; `alert_coverage` below states both on
+     the response so a page can say which days the number is about. */
+  const cov = await alertCoverage(q, p[0], p[1], { fleet: p[3] });
   const [a] = await q(
     `SELECT count(*)::int alerts FROM alert
-     WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
-       AND ($3::text IS NULL OR fleet_id = $3)`, [p[0], p[1], p[3]]);
+     WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($1::date[])
+       AND ($2::text IS NULL OR fleet_id = $2)`, [cov.days, p[3]]);
+  /* The denominator, narrowed to the same days. The BETWEEN in W('n') is
+     redundant beside the day set and is kept for the same reason the alert
+     join carries one: a day array is not a range the planner can use to narrow
+     trip_norm, and the bounded predicate beside it is. */
+  const [ak] = await q(
+    `SELECT round(sum(n.distance_km)
+              FILTER (WHERE n.is_booking AND n.has_distance)::numeric,0) alert_km,
+            count(*) FILTER (WHERE n.is_booking)::int alert_window_trips
+     FROM trip_norm n ${JOIN_TRIP}
+     WHERE ${W('n')} AND n.local_day = ANY($5::date[])`, [...p, cov.days]);
 
   /* The money the ride platforms say they PAID, which for this fleet is nearly
      all of it. `revenue` above is sum(price) over the trip table and the Uber
@@ -459,7 +486,17 @@ app.get('/api/kpis', wrap(async (req, res) => {
   const payoutDays = Math.max(0, ...payRows.map((r) => r.payout_days || 0));
   const workedDays = Math.max(0, ...fareRows.map((r) => r.booking_days || 0));
   res.json({
-    ...t, ...v, ...a,
+    ...t, ...v, ...a, ...ak,
+    /* The safety headline, computed here rather than left for a page to divide
+       `alerts` by `km` — which is how it came to be wrong: those two columns
+       describe different sets of days whenever the feed has a hole, and every
+       reader who divided them got 41.5 for a fleet running at 69.7.
+
+       Null, never 0, when the feed covered nothing: a window with no feed has
+       no safety rate, and a zero reads as a perfect one. */
+    alerts_per_100km: alertRate(a.alerts, ak.alert_km, cov),
+    alerts_per_100km_absent: alertRateReason(ak.alert_km, cov),
+    alert_coverage: cov,
     /* What the fleet took in, and the two kinds of money it is made of.
        `revenue` above is sum(price) over the trip table and the Uber export
        carries no fare column, so on a normal month it describes 651 of 7,356

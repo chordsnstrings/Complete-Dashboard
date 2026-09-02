@@ -187,8 +187,31 @@ export function fleetIncome(rows, windowDays) {
   for (const r of rows) chooseBasis(r, windowDays);
   const measured = rows.filter((r) => r.best != null);
   const bookings = rows.reduce((a, r) => a + n(r.bookings), 0);
-  const darkRows = rows.filter((r) => r.basis === 'none' || r.basis === 'partial_fares'
-    || r.basis === 'partial_payout');
+  /* DARK is money that is genuinely absent, and a partial_payout is not that.
+     ───────────────────────────────────────────────────────────────────────
+     This filter used to carry 'partial_payout' as well, which put the same
+     rows in the measured set (accounted_bookings, below) AND in the dark set,
+     so #revenue printed two tiles in one row that described the identical
+     bookings in opposite terms. Measured on production 2026-09-02T13:16Z,
+     /api/revenue?days=365: uber is basis partial_payout with 232,832 bookings
+     and a real net payout of AED 2,401,822.21 covering 209 of the 365 days it
+     worked. The page read "Accounted for AED 2,533,853 across 234,499 of
+     234,499 bookings" beside "Bookings with no money value 232,832 — 99.3% of
+     the window", both true of the same 232,832 rows.
+
+     A partial_payout row HAS money — `best` is set, it is inside `accounted`,
+     and it is what makes the fleet total what it is. What is wrong with it is
+     COVERAGE, and the row already reports that exactly, per channel, as
+     payout_coverage_days / payout_coverage_base / payout_coverage_pct. So the
+     under-covered bookings get their own pair of fields below rather than
+     being folded into a count that means "no money at all".
+
+     'none' and 'partial_fares' stay: a `none` channel has no figure of any
+     kind, and a partial_fares channel's unpriced bookings are money nothing
+     reports. Both are absent money. A part-window payout is present money
+     over a stated fraction of the days. */
+  const darkRows = rows.filter((r) => r.basis === 'none' || r.basis === 'partial_fares');
+  const underRows = rows.filter((r) => r.basis === 'partial_payout');
   return {
     accounted: sum(measured.map((r) => r.best)) || null,
     /* Both halves of it, so a reader can see which kind of money moved.
@@ -211,5 +234,18 @@ export function fleetIncome(rows, windowDays) {
     dark_bookings: darkRows.reduce((a, r) => a + n(r.bookings), 0),
     dark_pct: bookings
       ? Math.round((darkRows.reduce((a, r) => a + n(r.bookings), 0) / bookings) * 1000) / 10 : null,
+    /* The other half of the split: bookings on a channel we DO hold money for,
+       where that money covers only part of the days the channel worked. Not
+       dark — counted in `accounted` and in accounted_bookings — but not fully
+       covered either, and a page that prints the accounted total without this
+       is claiming a completeness it does not have. On production's 365-day
+       window this is uber's 232,832 bookings against a payout covering 209 of
+       365 days; on the same fleet's July window uber clears 80% coverage, goes
+       to basis `payout`, and this is 0. */
+    undercovered_bookings: underRows.reduce((a, r) => a + n(r.bookings), 0),
+    undercovered_pct: bookings
+      ? Math.round((underRows.reduce((a, r) => a + n(r.bookings), 0) / bookings) * 1000) / 10 : null,
+    undercovered_payouts: sum(underRows.map((r) => r.payouts)) || null,
+    undercovered_platforms: underRows.map((r) => r.platform).sort(),
   };
 }

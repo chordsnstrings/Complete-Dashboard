@@ -131,12 +131,60 @@ app.get('/api/status', (_, r) => r.json([
     window_start: '2026-08-14', window_end: '2026-08-21',
     error: 'bolt: refresh token rejected (401) — re-paste from the fleet portal' },
 ]));
+/* ── how much of a window the SAFETY ALERT FEED covered ───────────────────
+   Every response carrying an alerts-per-100 km rate carries this record too
+   (api/alert_coverage_sql.js), and the pages print it: "measured over 22 of the
+   30 days in this window".
+
+   The fixture is deliberately INCOMPLETE, with the dark days in the MIDDLE.
+   Production's alert feed had a 73-day hole (2026-06-06 to 2026-08-17) and the
+   rate it produced improved by two thirds when a reader widened the range; a
+   mock that always reported full coverage would leave the caption that exists
+   to say so unexercised on every page that prints it. */
+const ALERT_DARK = 8;                                   // consecutive dark days
+const alertDays = (windowDays) => {
+  const out = [];
+  for (let b = windowDays - 1; b >= 0; b--) {
+    // A run of dark days a third of the way in, so the covered set is not a range.
+    if (b <= windowDays - 9 && b > windowDays - 9 - ALERT_DARK) continue;
+    out.push(dayISO(b));
+  }
+  return out;
+};
+const alertCoverage = (windowDays = 30) => {
+  const days = alertDays(windowDays);
+  return {
+    from: dayISO(windowDays - 1), to: dayISO(0), fleet: null,
+    window_days: windowDays,
+    covered_days: days.length,
+    uncovered_days: windowDays - days.length,
+    days,
+    first_covered: days[0], last_covered: days[days.length - 1],
+    gaps: [{ from: dayISO(windowDays - 9), to: dayISO(windowDays - 8 - ALERT_DARK),
+      days: ALERT_DARK }],
+    complete: false, measured: true,
+    rule: 'a day counts as covered when the alert feed produced at least one row on it; '
+      + 'on a feed running thousands of rows a day, a day with none is an outage rather '
+      + 'than a calm day',
+    basis: `measured over ${days.length} of the ${windowDays} days in this window`,
+  };
+};
+
 app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03, completion_pct: 89,
   cancel_pct: 10.7, drivers: 56, drivers_seen: 58, vehicles: 52, vehicles_seen: 55, revenue: 41188, live_vehicles: 48, fresh: 44,
   /* Liveness is measured on the FIX, so a fleet always has trackers listed
      that have stopped answering — the mock carries some, or a page that
      renders them would never be exercised. */
   silent_vehicles: 6, tracked_vehicles: 61, alerts: 8863,
+  /* The safety headline, and the two things that make it readable: the
+     distance it was actually taken over, and which days those were. `km` above
+     runs to the edge of the window and alert_km stops at the feed's covered
+     days, so the two differ whenever the feed has a hole — which is the whole
+     reason this figure is computed on the server instead of by dividing. */
+  alert_km: 17040, alert_window_trips: 1498,
+  alerts_per_100km: +((8863 / 17040) * 100).toFixed(1),
+  alerts_per_100km_absent: null,
+  alert_coverage: alertCoverage(30),
   // The two fields that stop the Trips and Revenue tiles overstating themselves.
   telematics_journeys: 2657, telematics_km: 31840, priced_trips: 187, avg_fare: 220.3,
   bookable_trips: 2043, priced_km: 3990, revenue_per_km: 10.32,
@@ -158,6 +206,12 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
     statement_net: 96480, statement_platforms: ['bolt', 'hotel', 'uber', 'yango'],
   accounted_bookings: 2043, accounted_platforms: ['hotel', 'uber', 'yango'],
   dark_bookings: 0, dark_pct: 0,
+/* fleetIncome() also returns the under-covered pair beside the dark one —
+     a channel whose money we hold over only part of the days it worked. Zero
+     here: every channel in this fixture either reports fully or reports
+     nothing, and the partial_payout shape lives on /api/revenue above. */
+  undercovered_bookings: 0, undercovered_pct: 0,
+  undercovered_payouts: null, undercovered_platforms: [],
   window: { from: '2026-07-31', to: '2026-08-29', days: 30,
     period: PERIODS.includes(String(req.query.period || '')) ? String(req.query.period) : null,
     grain: grainOf(req),
@@ -812,6 +866,8 @@ app.get('/api/driver/kpis', (req, r) => {
     statement_fares: 4200 - i * 150, statement_fare_periods: 3 - (i % 2),
     statement_fare_from: '2026-08-03', statement_fare_to: '2026-08-23',
     dark_bookings: 0, dark_pct: 0,
+    undercovered_bookings: 0, undercovered_pct: 0,
+    undercovered_payouts: null, undercovered_platforms: [],
     trips_per_day: +(trips / d.length).toFixed(1), utilisation_pct: 58.2 - i * 2.4,
   });
 });
@@ -979,7 +1035,10 @@ app.get('/api/driver/quality', (req, r) => {
       { alert_type: 'Overspeed', n: 26 + i * 2, latest: new Date().toISOString() },
       { alert_type: 'Harsh Acceleration', n: 14, latest: new Date().toISOString() },
       { alert_type: 'Harsh Cornering', n: 6, latest: new Date().toISOString() }],
+    /* The distance on the days the alert feed was up — the only denominator
+       this rate may have. See api/alert_coverage_sql.js. */
     alert_km: 3410 - i * 240, alerts_per_100km: +(((87 + i * 5) / (3410 - i * 240)) * 100).toFixed(1),
+    alerts_per_100km_absent: null, alert_coverage: alertCoverage(30),
     /* What the fleet does, so a rate has something to be high AGAINST. The page
        painted this critical from a hardcoded 5/15 scale under a sub-label
        reading "comparable across drivers" — comparable to a constant. */
@@ -1077,7 +1136,17 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   status: i % 3 === 0 ? 'Engaged' : 'Active', speed: i % 3 ? Math.round(rnd(0, 70)) : 0, stale: i === 7,
   soonest_expiry: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
   doc_days_left: i === 1 ? -12 : 5 + i * 14,
-  alerts: 120 - i * 11, current_driver: i === 6 ? null : drivers[i],
+  /* The safety rate comes from the endpoint now, over the days the alert feed
+     covered — alert_km, not km. Divided in the browser it was a 16-day
+     numerator over a 30-day denominator whenever the feed had a hole. */
+  alerts: 120 - i * 11,
+  alert_km: i === 6 ? null : Math.round((6100 - i * 420) * 0.73),
+  alerts_per_100km: i === 6 ? null
+    : Math.round(((120 - i * 11) / Math.round((6100 - i * 420) * 0.73)) * 1000) / 10,
+  alerts_per_100km_absent: i === 6
+    ? 'no distance was measured on the days the alert feed covered' : null,
+  alert_days: 22, alert_window_days: 30,
+  current_driver: i === 6 ? null : drivers[i],
   driver_as_of: new Date().toISOString(),
 }))));
 
@@ -1256,6 +1325,8 @@ app.get('/api/vehicle/kpis', (req, r) => {
     accounted_fares: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
     accounted_payouts: 5082.65, accounted_platforms: ['hotel', 'uber'],
     accounted_bookings: trips, dark_bookings: 0, dark_pct: 0,
+    undercovered_bookings: 0, undercovered_pct: 0,
+    undercovered_payouts: null, undercovered_platforms: [],
     /* Bookings and telematics journeys are separate counts and never summed —
        an FMS row is the same physical journey a ride platform already reported.
        measured_trips and priced_trips are the denominators the distance and
@@ -1273,7 +1344,10 @@ app.get('/api/vehicle/kpis', (req, r) => {
     earnings_per_hour: 21.4, trips_per_online_hour: 0.41,
     alerts, hours_since_fix: i === 7 ? 38.2 : 0.3, fixes: d.reduce((a, x) => a + x.fixes, 0),
     idle_days: d.filter((x) => !x.trips).length,
-    alerts_per_100km: +((alerts / km) * 100).toFixed(1),
+    /* Over the feed's covered days, which is why alert_km is smaller than km. */
+    alert_km: Math.round(km * 0.73),
+    alerts_per_100km: +((alerts / Math.round(km * 0.73)) * 100).toFixed(1),
+    alerts_per_100km_absent: null, alert_coverage: alertCoverage(30),
     revenue_per_km: 2.7 });
 });
 
@@ -1502,6 +1576,8 @@ app.get('/api/trend/monthly', (_, r) => {
           accounted_bookings: i >= MONTH_KEYS.length - 6 ? row.trips : Math.round(row.trips * 0.35),
           dark_bookings: i >= MONTH_KEYS.length - 6 ? 0 : row.trips - Math.round(row.trips * 0.35),
           dark_pct: i >= MONTH_KEYS.length - 6 ? 0 : 65,
+          undercovered_bookings: 0, undercovered_pct: 0,
+          undercovered_payouts: null, undercovered_platforms: [],
           drivers_known: row.attributed_trips > 0 }
       : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0, earning_vehicles: 0,
           km: null, measured_trips: 0, revenue: null, priced_trips: 0, cancel_pct: null,
@@ -1969,19 +2045,29 @@ app.get('/api/revenue', (_, r) => {
       statement_net: 14200, statement_gross: 15800, statement_fees: 1600, statement_tips: 0,
       statement_salik: 0, statement_cash: 0, statement_bank: 14200, statement_days: 31,
       statement_drivers: 21 },
+    /* basis `partial_payout` — a real payout that reaches only part of the
+       days the channel worked. This is the shape production's uber row is in
+       on any window wider than the statements (209 of 365 days at
+       2026-09-02T13:16Z), and it is the row that separates the two counts
+       #revenue prints: it is MEASURED (its money is inside `accounted`) and it
+       is UNDER-COVERED (it is inside `undercovered_bookings`), and it must
+       never be inside `dark_bookings`. The fixture had no partial_payout row
+       at all, so neither branch of that split was reachable from the mock. */
     { platform: 'yango', bookings: 214, priced_bookings: 96, fares: 4180, priced_km: 1180,
       km: 2640, drivers: 9, vehicles: 11, payouts: 3210, cash: 640, payout_periods: 12,
       components: null, tips: null, fare_coverage_pct: 44.9, revenue_per_km: 1.22,
       per_km_basis: 'payout', per_km_km: 2640,
       first_at: dayISO(30), last_at: dayISO(0), best: 3210, payout_drivers: 9,
       first_period: dayISO(28).slice(0, 10), last_period: dayISO(0).slice(0, 10),
-      payout_days: 29, payout_coverage_pct: 93.5,
+      payout_days: 17, payout_coverage_pct: 54.8,
       /* Coverage is measured against the days the channel WORKED (booking_days),
          not the calendar window — see api/income_sql.js coverage(). */
-      booking_days: 31, payout_coverage_days: 29, payout_coverage_base: 31,
-      basis: 'payout', basis_note: 'net payout — only 44.9% of bookings report a fare',
-      statement_net: 980, statement_gross: 1220, statement_fees: 240, statement_tips: 0,
-      statement_salik: 40, statement_cash: 520, statement_bank: 460, statement_days: 29,
+      booking_days: 31, payout_coverage_days: 17, payout_coverage_base: 31,
+      basis: 'partial_payout',
+      basis_note: 'net payout covering only 17 of the 31 day(s) this channel worked (54.8%) '
+        + '— the rest of this channel’s money has not been collected yet',
+      statement_net: 3400, statement_gross: 4250, statement_fees: 850, statement_tips: 60,
+      statement_salik: 40, statement_cash: 480, statement_bank: 3020, statement_days: 17,
       statement_drivers: 9 },
     { platform: 'bolt', bookings: 618, priced_bookings: 121, fares: 5100, priced_km: 1490,
       km: 7300, drivers: 14, vehicles: 18, payouts: null, cash: null, payout_periods: 0,
@@ -2000,9 +2086,26 @@ app.get('/api/revenue', (_, r) => {
   r.json({
     window: [dayISO(30).slice(0, 10), dayISO(0).slice(0, 10)], window_days: 31,
     platforms, components,
+    /* Summed from the four rows above rather than typed, because the page
+       divides them by each other: `accounted` is the CHOSEN figure per channel
+       (hotel's fares 61,400 + yango's payout 3,210 + bolt's partial fares
+       5,100), accounted_bookings is the bookings on those three channels, and
+       dark_bookings is uber's 6,142 plus bolt's 618 — the two channels whose
+       money is absent rather than under-covered. accounted_fares,
+       accounted_payouts, accounted_platforms, statement_platforms and the
+       undercovered_* pair were all missing here while the real route returns
+       them; the shape check only compares top-level keys, so a fixture whose
+       `totals` lacked half of them stayed green while the page fell to its
+       fallback text. */
     totals: { bookings: 8241, priced_bookings: 1484, fares: 70680, payouts: 3210, cash: 640,
-      statement_net: 76380, statement_cash: 12920, statement_bank: 60860,
-      tips: 1840, accounted: 69790, accounted_bookings: 1481, dark_bookings: 6760, dark_pct: 82 },
+      statement_net: 78800, statement_cash: 12880, statement_bank: 63420,
+      tips: 1840,
+      accounted: 69710, accounted_fares: 66500, accounted_payouts: 3210,
+      accounted_bookings: 2099, accounted_platforms: ['bolt', 'hotel', 'yango'],
+      statement_platforms: ['hotel', 'uber', 'yango'],
+      dark_bookings: 6760, dark_pct: 82,
+      undercovered_bookings: 214, undercovered_pct: 2.6,
+      undercovered_payouts: 3210, undercovered_platforms: ['yango'] },
     caveat: 'uber, bolt account for 6760 of 8241 bookings in this window and report little or no money. '
       + 'Every fleet-wide revenue figure in this product is over what did land, so all of them understate '
       + 'what the fleet took.',
@@ -2563,6 +2666,15 @@ app.get('/api/geo/corridors', (_, r) => {
        rather than "Avg minutes". */
     duration_measured: 4120,
     duration_reported: 0,
+    /* What morning and evening on each origin are OVER. Added because the real
+       endpoint now returns it (api/analytics_routes.js) and a fixture without
+       it makes test/mockapi.test.mjs fail on shape — the page can only say
+       "05:00-09:00 against 16:00-21:00" without it, and has no way to tell a
+       reader that some of the window's days are in neither window.
+       days_seen is above days here on purpose: one day of the fixture window
+       is still running, which is the case live_day exists to name. */
+    wave: { morning: [5, 9], evening: [16, 21], days: 29, days_seen: 30,
+      live_day: null, closes: '22:00', as_of: '13:40' },
     note: 'Areas are parsed from the address text each provider returns, not from a place id. '
       + 'Bookings only — an FMS row is the tracker\'s own record of a journey a ride platform '
       + 'already reported, and counting it would chart the same trip twice.',
@@ -2856,6 +2968,8 @@ app.get('/api/day', (req, r) => {
       accounted: 10430, accounted_fares: 4180, accounted_payouts: 6250,
       accounted_platforms: ['hotel', 'uber'], accounted_bookings: 215,
       dark_bookings: 0, dark_pct: 0,
+      undercovered_bookings: 0, undercovered_pct: 0,
+      undercovered_payouts: null, undercovered_platforms: [],
       payout_basis: 'a share of each weekly platform statement, spread evenly across the days it covers',
       first_at: `${day}T02:14:00Z`, last_at: `${day}T20:41:00Z` },
     versus_neighbours: { median_bookings: 241, delta_pct: -10.8,
@@ -3895,6 +4009,14 @@ app.get('/api/capacity', (_, r) => {
     observed_bookings: cells.reduce((a, c) => a + c.observed_bookings, 0),
     cells, shortfall: short.slice(0, 20), surplus: spare.slice(0, 20),
     totals: { drivers_needed_peak: Math.max(...cells.map((c) => c.drivers_needed)).toFixed(1),
+      /* Smallest drivers-needed ÷ drivers-present over the grid. drivers_needed
+         is drivers_now × (projected ÷ measured), so above 1 everywhere no cell
+         can read spare and the page's "0 hours with people to spare" is
+         arithmetic rather than a finding — see api/capacity_routes.js. This
+         fixture keeps some hours below 1 so the ordinary wording is what the
+         mock exercises. */
+      min_need_ratio: +Math.min(...cells.filter((c) => c.drivers_per_occurrence > 0)
+        .map((c) => c.drivers_needed / c.drivers_per_occurrence)).toFixed(3),
       cells_short: short.length, cells_spare: spare.length, cells_thin: cells.filter((c) => c.thin).length },
     caveat: 'A driver’s throughput in an hour is a MEASUREMENT of what happened under whatever demand there '
       + 'was, not a capacity. A quiet hour makes its drivers look unproductive and a frantic one makes them '
@@ -3937,7 +4059,12 @@ const uAssets = plates.map((pl, i) => {
     aed_per_booking: rt(money, bookings),
     forgone_at_own_rate: daysEarning && money
       ? Math.round((money / daysEarning) * (uWindowDays - daysMoved)) : null,
-    alerts: 120 - i * 11, alerts_per_100km: rt((120 - i * 11) * 100, km),
+    /* alert_km, not km: the safety rate is measured over the days the alert
+       feed covered and the money rates over the whole window, so the two
+       denominators differ and both are on the row. */
+    alerts: 120 - i * 11, alert_km: Math.round(km * 0.73),
+    alerts_per_100km: rt((120 - i * 11) * 100, Math.round(km * 0.73)),
+    alerts_per_100km_absent: null,
     any_even_split: i === 2,
     soonest_expiry: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
     doc_days_left: i === 1 ? -12 : 5 + i * 14,
@@ -3971,6 +4098,7 @@ app.get('/api/economics/assets', (_, r) => {
   const bookings = uAssets.reduce((a, x) => a + x.bookings, 0);
   r.json({
     window: [dayISO(uWindowDays), dayISO(0)], window_days: uWindowDays,
+    alert_coverage: alertCoverage(uWindowDays),
     rows: uAssets,
     by_platform: [
       { platform: 'uber', bookings: Math.round(bookings * 0.92), priced_bookings: 0, booking_days: 30,
@@ -4052,7 +4180,11 @@ app.get('/api/economics/drivers', (_, r) => {
         measured_idle_h: i < 4 ? rt(148 - i * 11, 1) : null,
         availability_days: i < 4 ? 24 : 0,
         aed_per_measured_hour: i < 4 ? rt(money, 180 - i * 12) : null,
-        alerts: 40 - i * 3, alerts_per_100km: rt((40 - i * 3) * 100, km),
+        /* alert_km, not km: the safety rate is over the days the alert feed
+           covered and the money rates are over the whole window. */
+        alerts: 40 - i * 3, alert_km: Math.round(km * 0.73),
+        alerts_per_100km: rt((40 - i * 3) * 100, Math.round(km * 0.73)),
+        alerts_per_100km_absent: null,
         state: i === 3 ? 'suspended' : 'active',
         platform_state: i === 3 ? 'suspended' : 'active', can_earn: i !== 3,
         licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9,
@@ -4069,7 +4201,8 @@ app.get('/api/economics/drivers', (_, r) => {
       aed_per_day_worked: null, aed_per_booking: null, aed_per_km: null, bookings_per_day: null,
       aed_per_hour_online: null, hours_online: null,
       measured_hours_online: null, measured_idle_h: null, availability_days: 0,
-      aed_per_measured_hour: null, alerts: 0, alerts_per_100km: null,
+      aed_per_measured_hour: null, alerts: 0, alert_km: null, alerts_per_100km: null,
+      alerts_per_100km_absent: 'no distance was measured on the days the alert feed covered',
       state: 'active', platform_state: 'active', can_earn: true,
       licence_expires: '2026-06-01', licence_days_left: -81, last_trip: null, band: 'idle' },
   ].sort((a, b) => (b.money ?? 0) - (a.money ?? 0));
@@ -4078,7 +4211,8 @@ app.get('/api/economics/drivers', (_, r) => {
   const worked = rows.reduce((a, x) => a + x.days_worked, 0);
   const bookings = rows.reduce((a, x) => a + x.bookings, 0);
   r.json({
-    window: [dayISO(uWindowDays), dayISO(0)], window_days: uWindowDays, rows,
+    window: [dayISO(uWindowDays), dayISO(0)], window_days: uWindowDays,
+    alert_coverage: alertCoverage(uWindowDays), rows,
     totals: {
       people: rows.length,
       earning: rows.filter((x) => x.band === 'earning').length,

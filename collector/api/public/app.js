@@ -811,10 +811,134 @@ V.overview = async (root) => {
 
 V.supply = async (root) => renderSupply(root);
 
+/* ── A DAY THAT HAS NOT FINISHED IS NOT AN OBSERVATION ─────────────────────
+   ────────────────────────────────────────────────────────────────────────────
+   One root cause, four figures. Measured on production 2026-09-02, window
+   Sep 1–2, with Sep 2 stopped at 15:17 Dubai:
+
+     #demand headline  "The busiest hour is 08:00 — 9% of the day's work".
+        /api/trips/hourly sums the whole window, so 08:00's 91 is Tue 47 +
+        Wed 44 while 18:00's 59 is Tue 59 plus a Wednesday that has not
+        reached 18:00. The page then contradicted itself 1,400px lower, where
+        its own heatmap caption read "Busiest slots: Tue 18:00 59 ·
+        Tue 16:00 55 · Tue 17:00 50".
+     #demand figure    "502 bookings a day · over 2 days" — (662 + 341) / 2,
+        a 24-hour day averaged with a 15-hour one, 300px above a panel that
+        already drew that bar hollow and wrote "still being collected".
+     #demand tile      "Temp vs volume −1.00 · hotter days run quieter" —
+        Pearson's r over TWO points, one of them the part-day. r over n = 2 is
+        exactly ±1 for any two distinct points, so the magnitude carried no
+        information and the sign was set by the clock, not by the weather.
+     #corridors        fixed server-side; see api/analytics_routes.js.
+
+   The knowledge already existed in ONE place — gapBars() in charts.js draws
+   the last bar hollow when `isToday(d[x])` and captions it "still being
+   collected … as of HH:MM Dubai". These three figures now read the same rule
+   instead of each deciding for themselves, so a sentence and the chart under
+   it cannot disagree about which day is finished.
+
+   Both directions have to stay right: at 23:59 Dubai today is nearly whole and
+   is still excluded (it is 59 minutes short, and 59 minutes is what turned
+   08:00 into the busiest hour), and at 00:05 it is nearly empty and excluding
+   it is the only thing keeping the window's rate from halving. Where today IS
+   the subject — a today-only window — nothing is dropped: the figures re-label
+   themselves "so far today" and name the Dubai minute they stop at. */
+
+/* The Dubai wall clock, as {hour, minute}. Never the viewer's: a reader in
+   London opening this at 21:00 is being shown tomorrow in Dubai. */
+export const dubaiClock = (now = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: TZ,
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+  const at = (t) => Number(parts.find((x) => x.type === t)?.value);
+  return { hour: at('hour'), minute: at('minute'),
+    hhmm: `${String(at('hour')).padStart(2, '0')}:${String(at('minute')).padStart(2, '0')}` };
+};
+
+/* Split a day series into the rows that are whole observations and the one
+   that is not.
+
+   Two shapes of unfinished, because the series has two: at week or month grain
+   the SERVER says which bucket the window cut short (`partial`, with `days` of
+   `of_days`), and at day grain the unfinished row is today in Dubai. Both are
+   the same fact to a reader — this row covers less time than the ones beside
+   it — and charts.js already draws them identically.
+
+   `days` counts the days that both FINISHED and were collected: a day nobody
+   collected contributed no trips, so it must not sit in a denominator either. */
+export function splitLive(rows, { key = 'd', now = new Date() } = {}) {
+  const today = dubaiDay(now);
+  const day = (v) => String(v ?? '').slice(0, 10);
+  const bucket = (r) => +r.of_days > 1;
+  /* The day-grain test is charts.js's isToday(), which takes both the
+     "2026-09-02" the daily series sends and the ISO timestamp other callers
+     do. Not imported only because this one has to be answerable at a GIVEN
+     instant rather than at whatever instant the suite happens to run. */
+  const unfinished = (r) => (bucket(r)
+    ? r.partial === true && +r.days < +r.of_days
+    : day(r[key]) === today);
+  const live = rows.filter(unfinished);
+  const done = rows.filter((r) => !unfinished(r));
+  const last = live[live.length - 1] || null;
+  return {
+    done,
+    live: last,
+    /* Whether that unfinished row is TODAY or a week/month bucket the window
+       cut short. Both are incomplete and neither belongs in an average, but
+       only one of them can be described as "still being collected". */
+    liveIsToday: !!last && !bucket(last) && day(last[key]) === today,
+    /* Does the window run INTO today? That, and not the shape of the last row,
+       is what makes the hours after the current Dubai hour one day short — it
+       is true of a today row at day grain and of a month bucket whose last day
+       is today. */
+    runsIntoToday: rows.some((r) => (bucket(r) ? day(r.last_day) : day(r[key])) === today),
+    bookings: done.reduce((a, r) => a + (+r.trips || 0), 0),
+    /* Days that finished AND were collected. `uncollected_days` rather than the
+       row flag, because a bucket is only flagged uncollected when EVERY day in
+       it was — two silent days inside a seven-day week would otherwise sit in
+       the denominator having contributed nothing. */
+    days: done.reduce((a, r) => a + Math.max(0,
+      (Number.isFinite(+r.days) ? +r.days : 1)
+      - (Number.isFinite(+r.uncollected_days) ? +r.uncollected_days : (r.uncollected ? 1 : 0))), 0),
+  };
+}
+
+/* The hour-of-day shape, each hour over the days that actually reached it.
+   ──────────────────────────────────────────────────────────────────────────
+   A windowed sum gives every hour the same denominator, which is only true
+   when every day in the window finished. With today in it, hours before the
+   current Dubai hour have one more day of data than hours after it — 08:00 got
+   two Septembers and 18:00 got one — and comparing those sums is comparing a
+   two-day total with a one-day total. Divided by its own denominator each hour
+   is a rate on the same footing as every other, and no data is thrown away.
+
+   The hour IN PROGRESS is drawn but never ranked. Its total already contains
+   part of today and there is no way to subtract that back out of a windowed
+   sum, so calling it the busiest hour would be asserting something this
+   response cannot support. */
+export function hourProfile(hours, { days = 0, runsIntoToday = false, hour = 0 } = {}) {
+  const rows = (hours || []).map((r) => {
+    const h = +r.h;
+    const trips = +r.trips || 0;
+    const over = days + (runsIntoToday && h < hour ? 1 : 0);
+    return { h, trips, days: over, rate: over ? trips / over : null,
+      running: runsIntoToday && h === hour };
+  });
+  const ranked = rows.filter((r) => r.rate != null && !r.running);
+  const total = rows.reduce((a, r) => a + (r.rate || 0), 0);
+  const peak = ranked.length ? ranked.reduce((b, r) => (r.rate > b.rate ? r : b)) : null;
+  return { rows, ranked, peak, total,
+    share: peak && total ? Math.round((peak.rate / total) * 100) : 0 };
+}
+
 V.demand = async (root) => {
   const vdHost = el('div'); root.append(vdHost);
   const g = el('div', 'grid g2'); root.append(g);
-  const hourly = panel('Hourly demand curve', 'Trip requests by hour of day'); g.append(hourly.panel);
+  /* Not "trip requests by hour of day", which is what the panel said while the
+     curve was a windowed SUM: with today in the window that gave every hour
+     before now one more day of bookings than the hours after it. */
+  const hourly = panel('Hourly demand curve',
+    'Bookings an hour, each hour over the days that actually reached it');
+  g.append(hourly.panel);
   const daily = panel('Daily volume',
     'Bookings per Dubai-local day, with telematics journeys behind them. A day nobody collected is '
     + 'hatched rather than drawn as zero. Click a bar to open that day.');
@@ -851,6 +975,12 @@ V.demand = async (root) => {
      `?platform=bolt` said the same about a channel whose collector is refused
      at the door. Both are answers; neither is a missing month. */
   const bookings = d.reduce((a, r) => a + (+r.trips || 0), 0);
+  /* Read once, so every figure on this page is stated as of the same minute,
+     and split once, so the headline, the curve, the daily rate and the weather
+     correlation cannot disagree about which day is finished. */
+  const clock = dubaiClock();
+  const w = splitLive(d);
+  const prof = hourProfile(h, { ...w, hour: clock.hour });
   /* Fields are /api/trips/daily's: d, trips, completed, cancelled,
      telematics_journeys, km, revenue, uncollected, sources_silent. Demand is a
      shape question, so the headline is WHEN rather than how much — the busiest
@@ -862,24 +992,55 @@ V.demand = async (root) => {
     const spanDays = d.reduce((a, x) => a + (Number.isFinite(+x.days) ? +x.days : 1), 0);
     const uncollected = d.reduce((a, x) => a
       + (Number.isFinite(+x.uncollected_days) ? +x.uncollected_days : (x.uncollected ? 1 : 0)), 0);
-    const peak = (h || []).length ? [...h].sort((a, b) => (+b.trips || 0) - (+a.trips || 0))[0] : null;
-    const peakPct = peak && h.length
-      ? Math.round((peak.trips / h.reduce((a, x) => a + (+x.trips || 0), 0)) * 100) : 0;
-    const perDay = Math.round(bookings / Math.max(1, spanDays - uncollected));
+    /* The one place this page decides what a finished day is. Everything below
+       — the rate, the busiest hour, the weather correlation and the chart the
+       three of them sit beside — divides by the same answer. */
+    const peak = prof.peak;
+    const soFar = w.liveIsToday ? (+w.live.trips || 0) : (w.live ? (+w.live.trips || 0) : 0);
+    /* Today is not averaged in. Production printed "502 bookings a day · over
+       2 days" for (662 + 341) / 2 — a whole Tuesday and fifteen hours of a
+       Wednesday — while the panel 300px below it already said "still being
+       collected". When today is the ONLY day in the window it is not dropped,
+       because then it is the entire question: the figure becomes what it has
+       taken so far and says which minute it stopped at. */
+    const perDay = w.days ? Math.round(w.bookings / w.days) : null;
+    /* Only when there is something for today to be excluded FROM. On a
+       today-only window today is the entire answer, the figure says so, and
+       "today is not in it" beside a figure that is today is a contradiction of
+       exactly the kind this whole change exists to remove. */
+    const todayLine = !w.days ? ''
+      : w.liveIsToday
+      ? `Today is not in it: ${fmt(soFar)} ${plural(soFar, 'booking')} so far, `
+        + `as of ${clock.hhmm} Dubai, against whole days. It is still being `
+        + 'collected, and the daily panel below draws its bar hollow for the same reason.'
+      : w.live
+        ? `The last ${esc(w.live.grain || 'bucket')} is not in it either — the window cuts it to `
+          + `${countOf(+w.live.days || 0, 'day')} of ${fmt(w.live.of_days)}, and a part-week beside `
+          + 'whole ones is shorter for a reason that is the calendar, not the fleet.'
+        : '';
     verdict(vdHost, {
       claim: uncollected
         ? `${uncollected} of these ${spanDays} days were never collected`
         : peak
-          ? `The busiest hour is ${String(peak.h).padStart(2, '0')}:00 — ${peakPct}% of the day's work`
+          ? `The busiest hour ${w.days || !w.liveIsToday ? 'is' : 'so far today is'} `
+            + `${String(peak.h).padStart(2, '0')}:00 — ${prof.share}% of the day's work`
           : `${fmt(bookings)} bookings over ${spanDays} days`,
-      figure: fmt(perDay),
-      unit: 'bookings a day',
+      figure: perDay != null ? fmt(perDay) : fmt(soFar),
+      unit: perDay != null ? 'bookings a day'
+        : w.liveIsToday ? 'bookings so far today' : 'bookings in this bucket',
       tone: uncollected ? 'bad' : null,
-      meta: uncollected ? `over the ${spanDays - uncollected} days collected` : `over ${spanDays} days`,
+      meta: uncollected
+        ? `over the ${spanDays - uncollected} days collected`
+        : perDay != null
+          ? `over ${countOf(w.days, 'whole day')}`
+            + (w.liveIsToday ? ', today excluded' : w.live ? ', the clipped bucket excluded' : '')
+          : w.liveIsToday ? `today only, to ${clock.hhmm} Dubai`
+            : 'no whole day in this window',
       sub: uncollected
         ? 'The hourly curve and the heatmap below are over the days that WERE collected — a missing '
-          + 'day is drawn hatched rather than as zero.'
-        : 'The heatmap below splits this by weekday, which is what a rota is actually built against.',
+          + 'day is drawn hatched rather than as zero. ' + todayLine
+        : (todayLine ? `${todayLine} ` : '')
+          + 'The heatmap below splits this by weekday, which is what a rota is actually built against.',
     });
   }
   if (state.platform && !bookings) {
@@ -900,7 +1061,33 @@ V.demand = async (root) => {
     box.append(links);
     root.insertBefore(box, root.firstChild);
   }
-  if (h) areaChart(hourly.body, h.map((r) => ({ label: String(r.h).padStart(2, '0') + ':00', trips: r.trips })), { x: 'label', y: 'trips' });
+  /* Plotted as a RATE, not as a windowed sum.
+     ─────────────────────────────────────────────────────────────────────────
+     With today in the window the sum gives 08:00 two days of bookings and
+     18:00 one, so the curve's own peak moved to whichever hour today had
+     already had — and it would then have disagreed with the headline above it,
+     which is the contradiction this page was fixed for. Each hour over the
+     days that reached it is the same shape on one footing. */
+  if (h) {
+    areaChart(hourly.body, prof.rows.map((r) => ({
+      label: String(r.h).padStart(2, '0') + ':00', trips: r.rate == null ? 0 : +r.rate.toFixed(2) })),
+    { x: 'label', y: 'trips', valueFmt: (v) => fmt(v, 1) });
+    const running = prof.rows.find((r) => r.running);
+    hourly.body.append(el('p', 'cap',
+      (w.days
+        ? `Bookings an hour on an average day, over the ${countOf(w.days, 'whole day')} in this window`
+        : 'Bookings an hour, over the hours today has already had')
+      + (w.runsIntoToday
+        ? (w.days
+          ? ', plus today for the hours it has already had — so the curve is a rate rather than the '
+            + 'window\u2019s total, which would give every hour before now one more day of bookings '
+            + 'than the hours after it. '
+          : '. ')
+          + `${String(running ? running.h : clock.hour).padStart(2, '0')}:00 is the hour in progress `
+          + `(this window runs to ${clock.hhmm} Dubai): it is drawn, but it is never named the `
+          + 'busiest hour, because part of today is inside it and cannot be taken back out.'
+        : '.')));
+  }
   gapBars(daily.body, d, { x: 'd', y: 'trips', label: 'bookings', secondary: 'telematics_journeys',
     onClick: (r) => { location.hash = href('day', dayKey(r.d)); } });
   /* A chart handler is not a link: no middle-click, no new tab, no hover URL,
@@ -932,7 +1119,16 @@ V.demand = async (root) => {
      read as a statement about the year. And a day nobody collected has zero
      trips, which dragged every hot-versus-cool average toward whichever side
      the collection gap happened to fall on. */
-  const usable = rows.filter((r) => !r.uncollected && !r.sources_silent);
+  /* …and that FINISHED. A day still being collected has a day's weather
+     against a part-day's trips, which is not a point on this scatter: on
+     production 2026-09-02 the window held exactly two of them, Sep 1 whole at
+     662 bookings and 40.2°C and Sep 2 fifteen hours long at 341 and 44.1°C,
+     and the tile read "Temp vs volume −1.00 · hotter days run quieter". The
+     −1.00 is arithmetic — r over two distinct points is ±1 whatever they are —
+     and the sign was the clock, because the hotter day was the shorter one. */
+  const liveKey = w.live ? day(w.live.d) : null;
+  const settled = rows.filter((r) => day(r.d) !== liveKey);
+  const usable = settled.filter((r) => !r.uncollected && !r.sources_silent);
   const withWeather = usable.filter((r) => r.temp_max != null);
   const weatherDays = rows.filter((r) => r.temp_max != null).length;
   if (!withWeather.length) {
@@ -942,7 +1138,11 @@ V.demand = async (root) => {
       + `both weather and a complete collection, and everything below is over those days only`
       + (weatherDays < rows.length
         ? ` — weather is stored for about the last month, so a longer selection describes a shorter period than its title.`
-        : '.')));
+        : '.')
+      + (liveKey
+        ? ` Today (${dayStr(liveKey)}) is not one of them: it stops at ${clock.hhmm} Dubai, so a `
+          + 'day of weather would be sitting against a part-day of trips.'
+        : '')));
     // Correlation between temperature and volume, stated plainly with its own
     // caveat — a month of days is not enough to call this causal.
     const n = withWeather.length;
@@ -957,9 +1157,13 @@ V.demand = async (root) => {
     const hot = withWeather.filter((r) => r.temp_max >= 42);
     const mild = withWeather.filter((r) => r.temp_max < 42);
     const avg = (a) => (a.length ? a.reduce((s, r) => s + r.trips, 0) / a.length : null);
-    const wet = rows.filter((r) => r.precipitation > 0);
-    const hol = rows.filter((r) => r.is_holiday);
-    const ram = rows.filter((r) => r.is_ramadan);
+    /* Averages, so the part-day is out of these too — "averaging 341 trips" over
+       a rainy day that is fifteen hours old is the same fault in another
+       dress. `settled`, not `usable`: an uncollected day is a different
+       omission and the caption above already names it. */
+    const wet = settled.filter((r) => r.precipitation > 0);
+    const hol = settled.filter((r) => r.is_holiday);
+    const ram = settled.filter((r) => r.is_ramadan);
 
     ctxP.body.append(kpiRow([
       { label: 'Hottest day', value: `${Math.max(...withWeather.map((r) => r.temp_max)).toFixed(1)}°C`,
@@ -976,10 +1180,22 @@ V.demand = async (root) => {
       /* toFixed emits an ASCII hyphen; every other number on this page uses a
          true minus. A correlation is the one figure here whose sign is read
          first. */
-      { label: 'Temp vs volume', value: rho.toFixed(2).replace(/^-/, '\u2212'),
-        sub: Math.abs(rho) < 0.3 ? 'no meaningful relationship in this window'
-          : rho < 0 ? 'hotter days run quieter' : 'hotter days run busier',
-        tone: Math.abs(rho) < 0.3 ? null : 'warn' },
+      /* Two points are not a correlation. r over n = 2 is exactly ±1 for ANY
+         two distinct points — the line goes through both — so the magnitude
+         says nothing about the weather and the sign is decided by whichever
+         point happens to be higher. Production printed "−1.00 · hotter days
+         run quieter" over precisely that, and the point that made it negative
+         was a day fifteen hours long. Three is the smallest n at which the
+         figure can fail to be ±1, so it is the smallest n worth printing. */
+      n < 3
+        ? { label: 'Temp vs volume', value: '\u2014',
+          sub: `${countOf(n, 'complete day')} with weather in this window — a correlation over `
+            + 'fewer than three is \u00b11 whatever the days are, so there is no figure to give' }
+        : { label: 'Temp vs volume', value: rho.toFixed(2).replace(/^-/, '\u2212'),
+          sub: `over ${countOf(n, 'complete day')}. `
+            + (Math.abs(rho) < 0.3 ? 'No meaningful relationship in this window'
+              : rho < 0 ? 'Hotter days run quieter' : 'Hotter days run busier'),
+          tone: Math.abs(rho) < 0.3 ? null : 'warn' },
       { label: 'Days with rain', value: fmt(wet.length),
         sub: wet.length ? `averaging ${fmt(Math.round(avg(wet)))} trips` : 'none in this range' },
       hol.length ? { label: 'Holidays', value: fmt(hol.length),
@@ -1076,7 +1292,15 @@ V.demand = async (root) => {
     hm.body.append(el('p', 'cap',
       'A cell opens that hour as a rostering question — who holds it, how reliably it fires, '
       + 'and where the work starts. The shading is against this window’s own busiest hour, so the '
-      + 'same cell darkens when you narrow the range; the legend gives the scale it is on.'));
+      + 'same cell darkens when you narrow the range; the legend gives the scale it is on.'
+      /* Said here because the cells for today’s weekday after the current hour
+         are not quiet cells — they are cells a day short. Unlike the headline
+         above, an understated cell cannot be mistaken for the busiest one, so
+         they are still drawn rather than held back. */
+      + (w.runsIntoToday
+        ? ` Today is ${dayStr(dubaiDay())} and this window runs to ${clock.hhmm} Dubai, so that `
+          + 'weekday’s row is one day short from that hour on.'
+        : '')));
     /* The heatmap is a chart handler, so its cells cannot be middle-clicked,
        opened in a tab or reached from a keyboard. The busiest slots are listed
        as real addresses beneath it. */

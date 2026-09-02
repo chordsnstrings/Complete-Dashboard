@@ -64,6 +64,27 @@ export async function renderRevenue(root) {
 
   const t = d.totals;
 
+  /* What the accounted total is actually measured OVER, per channel.
+     ─────────────────────────────────────────────────────────────────────────
+     A fare is measured over BOOKINGS and a payout is measured over DAYS, and
+     "Accounted for" is a sum of both. Its sub-line read "across 234,499 of
+     234,499 bookings", which is true of the population and false about the
+     measurement: on production 2026-09-02T13:16Z, /api/revenue?days=365 puts
+     AED 2,401,822.21 of that AED 2,533,853.13 on uber's net payout, which was
+     never measured per booking at all and covers 209 of the 365 days uber
+     worked. So the tile names both bases, and each one's own denominator.
+
+     Built from the channel rows rather than from a total, because the
+     denominator differs per channel — payout_coverage_base is the days THAT
+     channel worked, not the length of the window (see api/income_sql.js
+     coverage()). */
+  const paidRows = live.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout');
+  const payoutSpan = paidRows
+    .map((r) => `${fmt(r.payout_coverage_days ?? r.payout_days ?? 0)} of the `
+      + `${fmt(r.payout_coverage_base ?? d.window_days)} days ${sourceLabel(r.platform)} worked`)
+    .join(', and ');
+  const underRows = live.filter((r) => r.basis === 'partial_payout');
+
   /* This page exists to say which channels report money and which do not, and
      it opened on six tiles of totals. The single most misread figure in the
      product is "money in", and the reason it is misread is DARK bookings — work
@@ -99,15 +120,37 @@ export async function renderRevenue(root) {
     verdict(host, {
       claim, figure, unit, tone, recommend,
       meta: `${fmt(t.bookings)} bookings`,
-      sub: `${fmt(t.accounted_bookings)} of ${fmt(t.bookings)} bookings have a price behind them`
-        + `${t.priced_bookings != null ? `, and ${fmt(t.priced_bookings)} carry a fare on the trip itself` : ''}.`,
+      /* "have a price behind them" was the same overclaim as the tile below:
+         accounted_bookings is every booking on a channel whose money we hold,
+         and on production 232,832 of those 234,499 are held as a weekly payout
+         with no per-booking price anywhere. The sentence now says which. */
+      sub: `${fmt(t.accounted_bookings)} of ${fmt(t.bookings)} bookings are on a channel whose money `
+        + 'we hold'
+        + `${t.priced_bookings != null
+          ? `, and ${fmt(t.priced_bookings)} of them carry a fare on the trip itself — the rest are `
+            + 'covered by a payout, which is measured over days'
+          : ''}.`,
     });
   }
 
   host.append(kpiRow([
     { label: 'Accounted for', value: t.accounted != null ? money(t.accounted) : '—',
-      sub: `across ${fmt(t.accounted_bookings)} of ${fmt(t.bookings)} bookings`,
-      tone: t.dark_pct == null ? null : t.dark_pct >= 50 ? 'critical' : t.dark_pct >= 10 ? 'warn' : 'good' },
+      sub: [
+        t.accounted_fares
+          ? `${money(t.accounted_fares)} in fares over ${fmt(t.priced_bookings)} priced bookings`
+          : null,
+        t.accounted_payouts
+          ? `${money(t.accounted_payouts)} in net payout over ${payoutSpan || 'the days it covers'}`
+          : null,
+      ].filter(Boolean).join(' · ')
+        || `across ${fmt(t.accounted_bookings)} of ${fmt(t.bookings)} bookings`,
+      /* An under-covered payout is not dark, so dark_pct alone now reads this
+         tile green on the 365-day window where 99.3% of the bookings sit on a
+         payout covering 57.3% of the days. The second clause keeps that amber
+         rather than letting the honest split quietly upgrade the tone. */
+      tone: t.dark_pct == null ? null
+        : t.dark_pct >= 50 ? 'critical'
+          : (t.dark_pct >= 10 || (t.undercovered_pct || 0) >= 10) ? 'warn' : 'good' },
     { label: 'Fares charged', value: t.fares != null ? money(t.fares) : '—',
       sub: `gross, over the ${fmt(t.priced_bookings)} bookings that report one` },
     { label: 'Bank reconciliation', value: t.payouts != null ? money(t.payouts) : '—',
@@ -132,27 +175,61 @@ export async function renderRevenue(root) {
         + ' — already in a driver’s hand. Cash in hand lists who holds it.' },
     { label: 'Tips', value: t.tips != null ? money(t.tips) : '—',
       sub: 'never appears in a trip feed — it comes from the channel’s own statement' },
-    /* The basis, not just the count. This tile reads 0 · 0.0% green at 7 and
-       30 days and 234,790 · 99.4% red at 365, and nothing moved in the fleet:
-       `chooseBasis` puts Uber on a payout basis while a payout covers the
-       window and on nothing once the window reaches past the statements. The
-       flip is the finding, so it is on the tile. */
+    /* Bookings with NO money, and separately bookings whose money does not
+       reach across the window. These were one number and it contradicted the
+       tile four places to its left.
+       ─────────────────────────────────────────────────────────────────────
+       Measured 2026-09-02T13:16Z on /api/revenue?days=365: this tile read
+       "232,832 — 99.3% of the window" while "Accounted for" read "AED
+       2,533,853 across 234,499 of 234,499 bookings". The same 232,832 uber
+       rows were in both, because fleetIncome counted a partial_payout channel
+       as measured AND as dark. They are not dark: uber's payout is AED
+       2,401,822.21 of real money, and what is wrong with it is that it covers
+       209 of the 365 days uber worked. api/income_sql.js now splits the two,
+       so this tile counts only absent money — basis `none` and the unpriced
+       half of `partial_fares` — and the under-covered channels get the second
+       clause instead of being reported as having nothing.
+
+       Which is why the tile no longer flips from 0 to 99% as the range widens
+       past the statements. The flip moves to the clause below, where it is
+       described rather than counted as darkness. */
     { label: 'Bookings with no money value', value: fmt(t.dark_bookings),
-      sub: (t.dark_pct != null ? `${pct(t.dark_pct, 1)} of the window · ` : '')
-        + `${countOf(live.filter((r) => r.basis === 'none').length, 'channel')} of `
-        + `${fmt(live.length)} report no money at all`,
-      tone: t.dark_bookings ? 'critical' : 'good' },
+      sub: [
+        (t.dark_pct != null ? `${pct(t.dark_pct, 1)} of the window · ` : '')
+          /* "1 channel of 4 report no money at all" — the verb agrees with the
+             count, not with the denominator. */
+          + `${countOf(live.filter((r) => r.basis === 'none').length, 'channel')} of `
+          + `${fmt(live.length)} ${plural(live.filter((r) => r.basis === 'none').length,
+            'reports', 'report')} no money at all`,
+        t.undercovered_bookings
+          ? `${fmt(t.undercovered_bookings)} more are covered by a payout that reaches `
+            + `${underRows.map((r) => `${fmt(r.payout_coverage_days)} of ${sourceLabel(r.platform)}’s `
+              + `${fmt(r.payout_coverage_base)} days`).join(', ')} — money we hold, not money missing`
+          : null,
+      ].filter(Boolean).join(' · '),
+      tone: t.dark_bookings ? 'critical' : t.undercovered_bookings ? 'warn' : 'good' },
   ]));
-  /* Why the tile above can be 0 one moment and 99% the next. */
+  /* What widening the range actually does to the tiles above.
+     ─────────────────────────────────────────────────────────────────────────
+     This paragraph used to end "widening the range past the statements we hold
+     flips those bookings from accounted to dark in one step — the 'no money
+     value' tile moves by tens of thousands without anything changing in the
+     fleet". That flip was the double-count in api/income_sql.js, and it is
+     gone: a part-window payout is measured money now, so widening the range
+     moves those bookings into the under-covered clause, not into darkness.
+     What still moves — and what a reader still has to compare across two
+     ranges before reading it as a trend — is the COVERAGE, because a payout
+     is measured over days and the window is not. */
   const flipped = live.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout');
   if (flipped.length) {
     host.append(el('p', 'cap',
       `${flipped.map((r) => sourceLabel(r.platform)).join(', ')} `
       + `${plural(flipped.length, 'carries', 'carry')} no fare per booking and `
-      + `${plural(flipped.length, 'is', 'are')} accounted for by payout instead. A payout covers DAYS, so `
-      + 'widening the range past the statements we hold flips those bookings from accounted to dark in one '
-      + 'step — the "no money value" tile moves by tens of thousands without anything changing in the '
-      + 'fleet. Compare it across two ranges before reading it as a trend.'));
+      + `${plural(flipped.length, 'is', 'are')} accounted for by payout instead. A payout covers DAYS, `
+      + 'not bookings, so widening the range past the statements we hold does not add money to the '
+      + 'total — it lowers the share of the window that total was measured over. The figure stays '
+      + 'right about the days it covers and silent about the others; compare the coverage across two '
+      + 'ranges before reading either number as a trend.'));
   }
 
   if (d.caveat) host.append(el('div', 'note err', esc(d.caveat)));
@@ -259,14 +336,71 @@ export async function renderRevenue(root) {
       render: (r) => pill(BASIS[r.basis]?.label || r.basis, BASIS[r.basis]?.tone) },
     { label: 'Why', key: 'basis_note', render: (r) => `<span class="wrap dim">${esc(r.basis_note)}</span>` },
   ], { sortable: true, sortId: 'chan', defaultSort: { key: 'bookings', dir: 'desc' } }));
+  /* The identity, and then the gap it actually leaves on THIS window.
+     ───────────────────────────────────────────────────────────────────────
+     This caption used to end "Reconciled on July 2026 these agree to 0.7%
+     once the cash is accounted for", printed under the two columns it named.
+     Those two columns do not agree to 0.7%. Measured 2026-09-02T13:16Z,
+     /api/revenue?from=2026-07-01&to=2026-07-31: uber statement_net 382,915.61
+     + tips 4,219.36 + salik 0 − statement_cash 75,805.92 = 311,329.05
+     expected, against payouts 355,419.78 — AED 44,090.73 apart, 14.2%. The
+     July row of /api/reconcile agrees to the fils (expected_payout
+     311,329.05, bank_covered 355,419.78, delta 44,090.73, delta_pct 14.2),
+     and August is 28.0%.
+
+     The 0.7% is real but it is a different comparison. It is the July 2026
+     reconciliation against the OPERATOR'S OWN LEDGER — the imported workbook
+     in driver_statement_day where source='ledger', which api/income_sql.js
+     platformStatements() deliberately excludes from everything this page
+     renders (see api/reconcile_routes.js, which carries the same provenance).
+     Naming a counterparty the page never shows, as though it were an
+     agreement between two columns the page does show, is the whole fault.
+
+     So the sentence is computed instead of written: the same identity, over
+     whatever window is on screen, using only the channels that report both
+     sides. The claim can then never be older than the figures beside it. */
+  const nn = (v) => (Number.isFinite(+v) ? +v : 0);
+  const bothSides = live.filter((r) => r.statement_net != null && r.payouts != null);
+  const round2 = (v) => Math.round(v * 100) / 100;
+  const expected = round2(bothSides.reduce((a, r) => a + nn(r.statement_net) + nn(r.statement_tips)
+    + nn(r.statement_salik) - nn(r.statement_cash), 0));
+  const wired = round2(bothSides.reduce((a, r) => a + nn(r.payouts), 0));
+  const gap = round2(wired - expected);
+  const gapPct = expected ? Math.abs(gap / expected) * 100 : null;
   p.body.append(el('p', 'cap',
     'Three views of the same money, never added together. A fare is what the rider was charged. '
     + 'On-trip revenue is gross minus the platform’s commission — what the fleet EARNED, from the '
     + 'platform’s own statement reports. The bank reconciliation is what actually reached the '
     + 'account: on-trip net minus cash the drivers already collected, plus tips and toll '
-    + 'reimbursements. Reconciled on July 2026 these agree to 0.7% once the cash is accounted for — '
-    + 'a payout below the on-trip figure is drivers holding cash, not missing money. '
+    + 'reimbursements. '
+    + (bothSides.length && expected
+      ? `On this window ${andList(bothSides.map((r) => sourceLabel(r.platform)))} `
+        + `${plural(bothSides.length, 'reports', 'report')} both sides: `
+        + `${money(expected)} expected against ${money(wired)} wired, `
+        + `${money(Math.abs(gap))} apart (${pct(gapPct, 1)}${gap > 0 ? ', the bank ahead' : ', the bank behind'})`
+        /* Both sides are sums over their own days, and on production they are
+           not the same days — 206 statement days against 209 payout days on
+           the 365-day window at 2026-09-02T13:16Z. A reader owed the gap is
+           owed the two denominators with it, or a coverage difference reads
+           as money. */
+        + `, over ${andList(bothSides.map((r) => `${fmt(r.statement_days ?? 0)} statement days and `
+          + `${fmt(r.payout_days ?? 0)} payout days on ${sourceLabel(r.platform)}`))}. `
+        + (gapPct >= 1
+          ? 'That is a gap to explain, not a rounding — '
+          : 'They close to within a percent here — ')
+        + 'Reconciliation breaks it down by month, and over the driver-days both sides actually '
+        + 'describe rather than over the whole window. '
+      : 'No channel on this window reports both an on-trip statement and a bank payout, so the two '
+        + 'cannot be compared here at all. ')
+    + 'A payout below the on-trip figure is drivers holding cash, not missing money. '
     + '"Accounted for" takes fares or payout per channel and says which.'));
+  /* And the way to the month-by-month version of the same subtraction, which
+     is the only place the gap above can be attributed to a period. */
+  const rl = el('p', 'cap');
+  rl.innerHTML = `<a class="lnk" href="${href('reconcile')}">Reconciliation</a>`
+    + ' puts the two sides in one row for every month on record, and states which driver-days '
+    + 'each side actually covers.';
+  p.body.append(rl);
   host.append(p.panel);
 
   /* ── what is missing, and what would fix it ──────────────────────────── */

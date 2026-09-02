@@ -54,6 +54,7 @@
 import { personKeyStored } from './custody_sql.js';
 
 import { dubaiDay } from './window.js';
+import { UBER_EARNER_HORIZON_DAYS } from '../src/auth/uber.js';
 
 export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
   const num = (v) => (v == null ? null : Number(v));
@@ -220,7 +221,14 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
        population difference and not an arithmetic fault: it is the provider
        declining to answer, and the fleet had no bad February. Nothing can
        re-fetch those statements, so the only correct fix is to say so. */
-    const HORIZON_DAYS = 192;
+    /* Imported, not written down again. This file held its own 192 while
+       src/sources/uber.js held 200, and nothing tied them together — so the
+       banner that tells a reader where Uber stops answering and the grid that
+       decides what to ask could disagree about the same day, with no way to
+       tell which of the two was wrong. Both halves now live at
+       UBER_EARNER_HORIZON_DAYS in src/auth/uber.js: a page states the MEASURED
+       edge, the collector asks a deliberate margin past it. */
+    const HORIZON_DAYS = UBER_EARNER_HORIZON_DAYS;
     const horizonEdge = dubaiDay(new Date(Date.now() - HORIZON_DAYS * 864e5));
 
     /* The report window each side's money was actually measured over, carried
@@ -550,22 +558,63 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
          on — so a reader can see at a glance how much of the money the
          reconciliation covers, and the Gap tile beside them is the difference
          of exactly these two numbers rather than of the two above. */
-      expected_covered: sumOf('expected_covered'),
-      bank_covered: sumOf('bank_covered'),
+      /* NOT sumOf: these two are the halves the Gap tile divides, so they must
+         cover exactly the rows the gap is measured over — see `comparable`
+         below. Summed over every settled row they disagreed with the very
+         percentage printed beside them. */
+      expected_covered: null,
+      bank_covered: null,
       matched_pairs: rows.reduce((a, r) => a + (r.matched_pairs || 0), 0),
     };
-    /* The headline gap is measured only where BOTH sides exist. Summing every
-       bank payout against only the months that have a statement would report
-       the statement surface's retention horizon as money the platform overpaid
-       — a gap that is entirely ours. */
-    const reconcilable = settled.filter((r) => r.delta != null);
+    /* The headline gap is measured only where BOTH sides exist AND where the
+       page has not already said the two sides are not comparable.
+       ─────────────────────────────────────────────────────────────────────
+       Summing every bank payout against only the months that have a statement
+       would report the statement surface's retention horizon as money the
+       platform overpaid — a gap that is entirely ours. That much was already
+       handled. What was not: a row can have both sides and still not be
+       comparable, and this endpoint marks exactly those rows itself.
+
+       statement_partial means Uber will no longer serve part of that month's
+       statement; period_cut means the compared span cuts an open report period
+       so one side is an average and the other a measurement. The page greys
+       both — and then the total at the top summed them anyway.
+
+       Measured on production 2026-09-02, after the backfill filled February's
+       bank side while its statement side stayed retention-limited:
+
+         headline as shipped   expected 1,856,354  bank 2,380,282  gap 28.2%
+         comparable months     expected 1,685,795  bank 1,975,176  gap 17.2%
+
+       Eleven points, from two rows the page had already told the reader not to
+       read as a discrepancy: February at a 139% "gap" that is the provider
+       declining to answer, and September's open week. An operator reading 28%
+       is reading our own collection horizon as the platform's error — which is
+       the exact fault this page exists to catch, in its own headline. */
+    const comparable = (r) => r.delta != null && !r.statement_partial && !r.period_cut;
+    const reconcilable = settled.filter(comparable);
     totals.reconciled_rows = reconcilable.length;
+    /* Shown, not silently dropped: a total that quietly excludes rows is the
+       same failure in the other direction. */
+    const notComparable = settled.filter((r) => r.delta != null && !comparable(r));
+    totals.not_comparable_rows = notComparable.length;
+    totals.not_comparable_reasons = [
+      ...new Set(notComparable.map((r) => (r.statement_partial
+        ? 'part of the month is outside Uber\u2019s statement window'
+        : 'the month is still inside an open report period'))),
+    ];
     /* Named so the page can say "five days of accrued payout are shown but not
        counted" rather than leaving a reader to notice that the rows and the
        tiles disagree. */
     totals.accrual_rows = rows.length - settled.length;
     totals.delta = reconcilable.length
       ? r2(reconcilable.reduce((a, r) => a + r.delta, 0)) : null;
+    const sumOver = (list, key) => {
+      const xs = list.map((r) => r[key]).filter((v) => v != null);
+      return xs.length ? r2(xs.reduce((a, b) => a + b, 0)) : null;
+    };
+    totals.expected_covered = sumOver(reconcilable, 'expected_covered');
+    totals.bank_covered = sumOver(reconcilable, 'bank_covered');
     const recExpected = reconcilable.reduce((a, r) => a + r.expected_covered, 0);
     totals.delta_pct = totals.delta != null && recExpected
       ? Math.round((totals.delta / Math.abs(recExpected)) * 1000) / 10 : null;

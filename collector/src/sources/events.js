@@ -282,9 +282,22 @@ export async function detectBreaks() {
          the search bound meant an event was only a candidate if it overlapped
          month A plus one single day — so nothing that happened after the 1st of
          the month whose numbers actually moved could ever be offered as a
-         cause. Eid al-Fitr 1447 falls on 2026-03-20: inside the March that
-         production reports uber dropping 76.2% into, and excluded from that
-         break's candidate list by one bound. */
+         cause.
+
+         MEASURED, production /api/breaks?platform=uber on 2026-09-02. The
+         largest real break the page shows, 2026-02-01 -> 2026-03-01, -76.2%,
+         carries exactly two candidates:
+
+           Ramadan 1447           2026-02-18..2026-03-19
+           Dubai high season      2025-11-01..2026-03-31
+
+         Eid al-Fitr 1447 — a multi-day UAE public holiday, written by this
+         same file, 2026-03-20..2026-03-22 — sits inside the very month the
+         trips collapsed into and was excluded by one bound. The news tier
+         above writes single-day rows (starts_on = ends_on = the seendate), so
+         by the same arithmetic none of them dated after the 1st of the later
+         month could ever have been a candidate either — that part is read off
+         the code rather than measured against a stored break. */
       const events = await q(
         `SELECT title, category, scope, starts_on, ends_on, expected_effect, confidence, summary
          FROM world_event

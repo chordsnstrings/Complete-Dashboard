@@ -822,6 +822,67 @@ console.log('\na month outside the statement window says so');
     JSON.stringify(drill.rows.filter((r) => r.statement_partial !== (r.d < edge)).slice(0, 3)));
 }
 
+/* ── the headline must not sum the rows the page greyed ──────────────────
+   This endpoint marks two kinds of row as not comparable and the page renders
+   both grey: statement_partial (Uber will no longer serve part of that month's
+   statement) and period_cut (the compared span cuts an open report period, so
+   one side is an average and the other a measurement). The total at the top
+   summed them anyway.
+
+   Measured on production 2026-09-02, after the backfill filled February's bank
+   side while its statement side stayed retention-limited:
+
+     headline as shipped   expected 1,856,354  bank 2,380,282  gap 28.2%
+     comparable months     expected 1,685,795  bank 1,975,176  gap 17.2%
+
+   Eleven points, from two rows the page had already told the reader not to
+   read as a discrepancy — February at a 139% gap that is the provider
+   declining to answer, and September's open week. */
+console.log('\nthe headline is measured over the rows it says are comparable');
+
+{
+  const all = (await get('/api/reconcile')).body;
+  const rows = all.rows.filter((r) => r.delta != null);
+  const grey = rows.filter((r) => r.statement_partial || r.period_cut);
+  const good = rows.filter((r) => !r.statement_partial && !r.period_cut);
+
+  check('the endpoint says how many rows it left out of the gap',
+    all.totals.not_comparable_rows === grey.length,
+    JSON.stringify([all.totals.not_comparable_rows, grey.length]));
+  check('…and why, rather than dropping them silently',
+    grey.length === 0 || (Array.isArray(all.totals.not_comparable_reasons)
+      && all.totals.not_comparable_reasons.length > 0),
+    JSON.stringify(all.totals.not_comparable_reasons));
+  check('the rows it counted are exactly the comparable ones',
+    all.totals.reconciled_rows === good.length,
+    JSON.stringify([all.totals.reconciled_rows, good.length]));
+
+  /* The load-bearing one: the two halves the Gap tile divides must cover the
+     same rows the gap is measured over, or the tile disagrees with the
+     percentage printed inside it. */
+  const sum = (list, k) => Math.round(list.reduce((a, r) => a + (Number(r[k]) || 0), 0) * 100) / 100;
+  check('expected_covered covers the comparable rows and no others',
+    Math.abs((all.totals.expected_covered || 0) - sum(good, 'expected_covered')) < 0.05,
+    JSON.stringify([all.totals.expected_covered, sum(good, 'expected_covered')]));
+  check('…and so does bank_covered',
+    Math.abs((all.totals.bank_covered || 0) - sum(good, 'bank_covered')) < 0.05,
+    JSON.stringify([all.totals.bank_covered, sum(good, 'bank_covered')]));
+  check('…so the gap is the difference of the two figures beside it',
+    all.totals.delta == null
+    || Math.abs(all.totals.delta - ((all.totals.bank_covered || 0) - (all.totals.expected_covered || 0))) < 0.05,
+    JSON.stringify([all.totals.delta, all.totals.bank_covered, all.totals.expected_covered]));
+
+  /* And a greyed row is still SHOWN — excluding it from the gap must not
+     delete the money it reported, which is real and was really wired. */
+  if (grey.length) {
+    check('a row left out of the gap still reports its own money',
+      grey.every((r) => r.bank_payout != null || r.expected_payout != null),
+      JSON.stringify(grey.map((r) => [r.m, r.bank_payout])));
+  } else {
+    check('no row is currently outside the comparison', true, 'nothing greyed today');
+  }
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

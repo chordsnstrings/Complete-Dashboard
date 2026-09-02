@@ -16,6 +16,31 @@
    documents. Four call sites had the old host written into them separately,
    which is why this is now one export: the next move is one line. */
 export const UBER_WEB_HOST = 'https://fleethub.uber.com';
+
+/* HOW FAR BACK the earner-payments surface answers, in one place — and the
+   margin the collector adds to it, expressed as a margin rather than as a
+   second number.
+   ─────────────────────────────────────────────────────────────────────────
+   Two constants described this one edge and had already drifted eight days
+   apart: EARNER_DAY_HORIZON = 200 in src/sources/uber.js decided how far back
+   to ASK, and HORIZON_DAYS = 192 in api/reconcile_routes.js decided where the
+   page tells a reader Uber stops answering. Nothing tied them together, so the
+   banner and the collector could disagree about the same day — and the reader
+   would have no way to tell which of the two was wrong.
+
+   They are not the same number by intent, and that is the point of naming both
+   halves. 192 is MEASURED: probing one week at a time on 2026-09-02, the week
+   ending 2026-02-22 returned 10 earner rows with money and the week ending
+   2026-02-15 returned nothing, and a second probe put the daily edge at the
+   same place. 8 is a deliberate overshoot on the ASK side only, for the reason
+   src/sources/uber.js gives where it uses it: the window rolls forward every
+   day, so overshooting costs a few empty calls while undershooting loses days
+   that can never be re-fetched.
+
+   So a page states MEASURED, a collector asks MEASURED + MARGIN, and moving
+   the edge is one edit rather than two that can be made separately. */
+export const UBER_EARNER_HORIZON_DAYS = 192;
+export const UBER_EARNER_ASK_MARGIN_DAYS = 8;
 import { config } from '../config.js';
 import { http } from '../http.js';
 import { log } from '../log.js';

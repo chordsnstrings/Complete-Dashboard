@@ -85,5 +85,58 @@ console.log('\nand the arithmetic it rests on');
     `${dropped} of ${weeks.length} = ${Math.round(100 * dropped / weeks.length)}%`);
 }
 
+console.log('\nand one edge is described by one number');
+
+{
+  /* Two constants described this single provider edge and had already drifted
+     eight days apart: EARNER_DAY_HORIZON = 200 decided how far back to ASK,
+     HORIZON_DAYS = 192 decided where #reconcile tells a reader Uber stops
+     answering. Nothing tied them together, so the banner and the grid could
+     disagree about the same day and a reader had no way to tell which was
+     wrong — the February payout basis is where that seam is visible.
+
+     They are not the same number by intent, which is why both halves are named
+     rather than merged: 192 is measured, 8 is a deliberate overshoot on the
+     ASK side only. What must not happen again is either being written down
+     twice. */
+  const auth = await import('../src/auth/uber.js');
+  check('the measured edge is exported once',
+    auth.UBER_EARNER_HORIZON_DAYS === 192, String(auth.UBER_EARNER_HORIZON_DAYS));
+  check('…and the collector\u2019s overshoot is named as a margin, not as a second edge',
+    auth.UBER_EARNER_ASK_MARGIN_DAYS > 0, String(auth.UBER_EARNER_ASK_MARGIN_DAYS));
+
+  const uber = readFileSync('src/sources/uber.js', 'utf8');
+  const rec = readFileSync('api/reconcile_routes.js', 'utf8');
+  check('the collector derives its ask rather than restating the number',
+    /const EARNER_DAY_HORIZON = UBER_EARNER_HORIZON_DAYS \+ UBER_EARNER_ASK_MARGIN_DAYS/.test(uber),
+    'a literal here is how the two drifted apart');
+  check('and the page derives the edge it prints',
+    /const HORIZON_DAYS = UBER_EARNER_HORIZON_DAYS/.test(rec));
+  /* The literals themselves, banned in CODE in both files. A future edit that
+     writes 192 or 200 back in is the regression, not a wrong value.
+
+     Comments are blanked first, length-preserving. Both files explain this
+     history in prose — src/auth/uber.js quotes both old constants by name —
+     and a lint that reads its own documentation as a violation is a lint
+     somebody switches off. test/timezone.test.mjs learned that already; this
+     is the same rule applied on the first attempt rather than the second. */
+  const code = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (c, p1) => p1 + ' '.repeat(c.length - p1.length));
+  const literal = /HORIZON[A-Z_]*\s*=\s*(192|200)\b/;
+  check('neither file carries a bare 192 or 200 as a horizon again',
+    !literal.test(code(uber)) && !literal.test(code(rec)),
+    'the edge is measured in one place or it is measured in none');
+  /* And the check has to be able to fail, or it proves nothing: the one file
+     that IS allowed to state the number must still trip the same pattern. */
+  check('…and the rule would catch one, because the definition itself trips it',
+    literal.test(code(readFileSync('src/auth/uber.js', 'utf8'))),
+    'if the definition does not match, the pattern matches nothing anywhere');
+  /* And the ask must actually reach past the edge, or the margin is a comment
+     rather than a behaviour. */
+  check('the ask reaches further back than the edge the page states',
+    auth.UBER_EARNER_HORIZON_DAYS + auth.UBER_EARNER_ASK_MARGIN_DAYS > auth.UBER_EARNER_HORIZON_DAYS);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

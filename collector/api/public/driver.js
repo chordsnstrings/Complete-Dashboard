@@ -1419,7 +1419,13 @@ async function tabQuality(root, id) {
        the platform rather than the dates. */
     ratingTrend(k) || { label: 'Rating', value: '\u2014',
       sub: 'not yet collected for this driver' },
-    { label: 'Harsh events', value: fmt(totalAlerts), sub: qy.alert_km ? `over ${fmt(qy.alert_km)} km` : 'no matched distance' },
+    /* alert_km is this person's custody distance on the days the ALERT FEED
+       was up, not their distance over the window. The two differ by every
+       kilometre driven while the feed was dark, and putting the window's
+       distance under a count of events the feed collected reads as one
+       population when it is two. */
+    { label: 'Harsh events', value: fmt(totalAlerts),
+      sub: qy.alert_km ? `over ${fmt(qy.alert_km)} km the feed covered` : 'no matched distance' },
     /* Against the FLEET, where the fleet figure exists, rather than against a
        hardcoded 5/15 scale. 29.5 per 100 km was painted critical under a
        sub-label reading "comparable across drivers" with nothing on the page
@@ -1429,16 +1435,33 @@ async function tabQuality(root, id) {
     (() => {
       const v = qy.alerts_per_100km;
       const base = qy.fleet_alerts_per_100km;
-      if (v == null) return { label: 'Per 100 km', value: '—', sub: 'no matched distance to rate over' };
+      const cov = qy.alert_coverage;
+      /* WHICH DAYS, on the tile. Both figures are measured over the days the
+         alert feed covered — a rate over 16 of a window's 30 days is a
+         different statement from one over all 30, and printed without saying
+         so it made a driver appear to improve whenever their window widened
+         across the feed's 73-day hole. */
+      const over = cov?.basis ? ` · ${cov.basis}` : '';
+      /* Not measured, in words. A window the feed was dark for the whole of
+         has no rate at all — not a dash the reader has to interpret, and
+         certainly not a zero. */
+      if (v == null) {
+        return { label: 'Per 100 km', value: 'not measured',
+          sub: qy.alerts_per_100km_absent || 'no matched distance to rate over' };
+      }
       if (base == null) {
         return { label: 'Per 100 km', value: fmt(v, 1),
-          sub: 'against a fixed 5 / 15 scale — the fleet\'s own rate is not published on this endpoint',
+          sub: 'against a fixed 5 / 15 scale — the fleet\'s own rate is not published on this endpoint'
+            + over,
           tone: v <= 5 ? 'good' : v <= 15 ? 'warn' : null };
       }
       const ratio = base > 0 ? v / base : null;
       return { label: 'Per 100 km', value: fmt(v, 1),
+        /* The baseline is measured over the same days as the driver — same
+           module, same day set — so the comparison is like against like. */
         sub: `fleet median ${fmt(base, 1)}`
-          + (ratio ? ` — ${ratio >= 1 ? `${fmt(ratio, 1)}x it` : `${fmt(1 / ratio, 1)}x better`}` : ''),
+          + (ratio ? ` — ${ratio >= 1 ? `${fmt(ratio, 1)}x it` : `${fmt(1 / ratio, 1)}x better`}` : '')
+          + over,
         tone: ratio == null ? null : ratio <= 0.7 ? 'good' : ratio <= 1.3 ? null : ratio <= 2 ? 'warn' : 'critical' };
     })(),
   ]));

@@ -24,8 +24,12 @@ const SHOWN = 14;
    spread fills the panel and looks like a landslide. Drawn against a fixed
    centre line, the same numbers show what they actually are — a fleet whose
    areas are mostly balanced, with two that are not. */
-function divergingWave(host, rows) {
+function divergingWave(host, rows, wave = {}) {
   host.innerHTML = '';
+  const span = (pair, dflt) => (Array.isArray(pair) && pair.length === 2
+    ? `${String(pair[0]).padStart(2, '0')}:00-${String(pair[1]).padStart(2, '0')}:59` : dflt);
+  const mLabel = span(wave.morning, '05:00-09:59');
+  const eLabel = span(wave.evening, '16:00-21:59');
   const wrap = el('div', 'wave');
   rows.forEach((r) => {
     const tot = r.morning + r.evening;
@@ -40,7 +44,11 @@ function divergingWave(host, rows) {
         <i class="${off >= 0 ? 'am' : 'pm'}" style="width:${w}%;${off >= 0 ? 'right' : 'left'}:50%"></i>
       </div>
       <div class="v num">${fmt(r.morning)} <span class="sep">/</span> ${fmt(r.evening)}</div>`;
-    row.title = `${r.area} — ${fmt(r.morning)} trips 05:00-09:00, ${fmt(r.evening)} trips 16:00-21:00`;
+    /* The hours come from the endpoint, which is the thing that applied them.
+       Hardcoded here they said 05:00-09:00 and 16:00-21:00 while the SQL used
+       BETWEEN, i.e. through :59 — an hour of the fleet's day per tooltip. */
+    row.title = `${r.area} — ${fmt(r.morning)} trips ${mLabel}, ${fmt(r.evening)} trips ${eLabel}`
+      + (wave.days ? `, over ${fmt(wave.days)} day${wave.days === 1 ? '' : 's'}` : '');
     wrap.append(row);
   });
   host.append(wrap);
@@ -198,15 +206,55 @@ export async function renderCorridors(root) {
         ? `, itself the busiest of ${fmt(t.origins_all)} in the window` : ''}.`
     : `Every one of the ${countOf(named.length, 'area')} with an addressed pickup.`));
 
+  /* WHICH DAYS THE RATIO IS OVER.
+     ─────────────────────────────────────────────────────────────────────────
+     This panel is a ratio of two hour windows, and it was being drawn over a
+     window whose last day had had one of them. On production 2026-09-02 at
+     15:17 Dubai the endpoint returned evening = 0 for every area on a
+     today-only window and this page printed "morning wave" over all of them;
+     over Sep 1–2 it drew Al Garhoud and Business Bay as morning-heavy when
+     Sep 1 alone — the only day that finished — is 17/21 and 2/8 the other way.
+
+     The endpoint now holds a day out of BOTH halves until its evening window
+     closes at 22:00 Dubai, and says which day and how many are left. The page
+     says it too, because a bar whose denominator excludes today is a different
+     claim from one that includes it. */
+  const wv = c.wave || {};
+  const hrs = (pair, dflt) => (Array.isArray(pair) && pair.length === 2
+    ? `${String(pair[0]).padStart(2, '0')}:00\u2013${String(pair[1]).padStart(2, '0')}:59` : dflt);
+  const waveHours = `${hrs(wv.morning, '05:00\u201309:59')} against ${hrs(wv.evening, '16:00\u201321:59')}`;
   const waves = named.map((o) => ({ area: o.area, morning: o.morning, evening: o.evening }))
     .filter((o) => o.morning + o.evening >= 3).slice(0, SHOWN);
   if (waves.length) {
-    divergingWave(b2, waves);
+    divergingWave(b2, waves, wv);
+    /* `wave` absent means an older server is answering — the front end deploys
+       ahead of the API often enough that "over 0 days in this window" would be
+       a number this page invented. The hours are still stated; the denominator
+       is only claimed when the server sent one. */
+    b2.append(el('p', 'cap',
+      waveHours
+      + (wv.days == null ? '.' : `, over ${countOf(wv.days, 'day')}`)
+      + (wv.days != null && wv.window_days && wv.window_days > wv.days
+        ? ` of the ${fmt(wv.window_days)} in this window` : (wv.days == null ? '' : ' in this window'))
+      + (wv.live_day
+        ? `. ${esc(wv.live_day)} is today and is in NEITHER half: it is ${esc(wv.as_of || '')} Dubai, `
+          + `its evening window does not close until ${esc(wv.closes || '22:00')}, and an evening that `
+          + 'has not happened is not a quiet evening — counted, its morning alone would turn an '
+          + 'evening-heavy area over.'
+        : (wv.days == null ? '' : '.'))));
     if (named.length > waves.length) {
       b2.append(el('p', 'cap',
         `${fmt(waves.length)} of ${countOf(named.length, 'area')} shown — an area with fewer than three `
         + 'trips across both waves is left out rather than drawn as a landslide in one direction.'));
     }
+  } else if (wv.live_day && !(wv.days ?? 0)) {
+    /* A today-only window. The honest answer is that the question cannot be
+       asked yet — not a chart of every area leaning whichever way the clock
+       is currently pointing. */
+    empty(b2, `Today is the only day in this window and its evening window (${
+      esc(hrs(wv.evening, '16:00\u201321:59'))}) does not close until ${esc(wv.closes || '22:00')} Dubai — `
+      + `it is ${esc(wv.as_of || '')} now. An area cannot be called morning- or evening-leaning from a `
+      + 'morning alone, so nothing is drawn here until a day in this window has had both.');
   } else empty(b2, 'Not enough addressed trips in either wave');
 
   b3.innerHTML = '';

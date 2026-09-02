@@ -369,13 +369,27 @@ export function revenueRoutes(app, { q, wrap, range }) {
     }
 
     const rows = [...byPlatform.values()].sort((a, b) => (b.bookings || 0) - (a.bookings || 0));
-    const measured = rows.filter((r) => r.basis === 'fares' || r.basis === 'payout');
+    /* partial_payout belongs here, with the measured. It is money we HOLD over
+       a window shorter than the one on screen, which the row already reports as
+       payout_coverage_pct — not money we are missing. Leaving it out made
+       measured_platforms omit Uber on a 365-day window while `accounted` counted
+       Uber's AED 2.4m. */
+    const measured = rows.filter((r) => r.basis === 'fares' || r.basis === 'payout'
+      || r.basis === 'partial_payout');
     /* A channel that delivered no booking at all is not "dark money" — it is a
        channel that did not run, and naming it in a sentence about how many
        bookings report no fare would read as "bolt accounts for 0 of 3,328
-       bookings", which is true and useless. It gets its own list. */
-    const dark = rows.filter((r) => (r.basis === 'none' || r.basis === 'partial_fares'
-      || r.basis === 'partial_payout') && r.bookings);
+       bookings", which is true and useless. It gets its own list.
+
+       And partial_payout is not dark either. This rule was the twin of the one
+       in api/income_sql.js that counted a channel as both fully accounted and
+       fully dark; that half is fixed, and leaving this half would put the
+       tiles and the page's own red note in direct contradiction. Measured on
+       production 2026-09-02T13:31Z the note read "uber account for 232,845 of
+       234,512 bookings in this window and report little or no money over it"
+       — about the channel whose collected net payout is AED 2,402,161. */
+    const dark = rows.filter((r) => (r.basis === 'none' || r.basis === 'partial_fares')
+      && r.bookings);
     const silent = rows.filter((r) => !r.bookings);
     const totalBookings = rows.reduce((a, r) => a + (r.bookings || 0), 0);
     const darkBookings = dark.reduce((a, r) => a + (r.bookings || 0), 0);

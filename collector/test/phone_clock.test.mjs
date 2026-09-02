@@ -155,15 +155,22 @@ const blank = (raw) => raw
     ];
 
     for (const c of CASES) {
-      let raw = null;
-      try {
-        const body = await (await fetch(`${BASE}${c.api}`, { signal: AbortSignal.timeout(20000) })).json();
-        raw = c.pick(body);
-      } catch { /* reported below */ }
-      if (!raw) { skipped(`${c.label} renders in Dubai`, `${c.api} carried no timestamp`); continue; }
-
+      /* The instant is taken from the response THE PAGE ITSELF used, not from a
+         second fetch of our own. /api/live is a realtime feed: fetched a beat
+         before the screen loads it answers with a newer poll, and the test then
+         demanded a minute the screen never saw. That is a flake, and a flaky
+         timezone guard is a guard people stop believing. */
+      let body = null;
+      const grab = async (r) => {
+        if (body || !r.url().includes(c.api)) return;
+        try { body = await r.json(); } catch { /* not the JSON we wanted */ }
+      };
+      page.on('response', grab);
       await page.goto(`${BASE}/?ui=phone#${c.route}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
       await page.waitForTimeout(4500);
+      page.off('response', grab);
+      const raw = body && c.pick(body);
+      if (!raw) { skipped(`${c.label} renders in Dubai`, `${c.api} carried no timestamp`); continue; }
       const seen = await page.evaluate(({ raw, opts, kind }) => {
         const d = new Date(raw);
         const f = (tz) => (kind === 'time'

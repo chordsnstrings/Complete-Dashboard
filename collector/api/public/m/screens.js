@@ -581,16 +581,16 @@ async function tripsScreen(deck, ctx) {
        half that is long. The right is when and on whose behalf, both short.
        Putting the route in the right column, beside a channel name, gave
        every card an ellipsis three words in. */
-    /* Was a fifth copy of ui.js's options object with the zone written out by
-       hand. It was CORRECT — this is the one phone clock that already said
-       Dubai — but a literal is not reachable from the constant that decides it,
-       and timeStr is the identical formatter (h23, 2-digit, timeZone: TZ). */
-    const clock = (t) => timeStr(t);
     rows(host, d.rows.map((r) => row({
       title: r.driver_name || r.driver_ext_id || 'Unnamed driver',
       sub: (r.has_fare ? `${money(r.price, r.currency || 'AED')} · ` : '')
         + `${r.plate || 'no vehicle'} · ${AREA(r.pickup_addr) || '—'} → ${AREA(r.dropoff_addr) || '—'}`,
-      value: clock(r.requested_at),
+      /* Was a local `clock` helper: ui.js's options object copied a fifth
+         time with 'Asia/Dubai' written out by hand. It was CORRECT — the one
+         phone clock that already said Dubai — but a literal is not reachable
+         from the constant that decides it, and timeStr is the same formatter
+         (2-digit, h23, timeZone: TZ) the other three now go through. */
+      value: timeStr(r.requested_at),
       note: `${dayStr(r.requested_at)} · ${sourceLabel(r.platform)}`
         + (r.outcome === 'not_completed' ? ' · cancelled' : ''),
       tone: r.outcome === 'not_completed' ? 'critical' : null,

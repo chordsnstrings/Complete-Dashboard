@@ -74,13 +74,31 @@ const body = (cells, spare) => ({
     cells_short: cells.filter((c) => c.driver_gap >= 0.5).length,
     cells_spare: spare.length,
     cells_thin: 0,
-    drivers_needed_peak: '10.0',
+    drivers_needed_peak: Math.max(...cells.map((c) => c.drivers_needed)).toFixed(1),
+    /* drivers_needed is drivers_now × (projected ÷ measured), so when this is
+       above 1 in every cell no cell CAN read spare and "0 hours have people to
+       spare" is arithmetic rather than a finding. Reported by the endpoint so
+       the page can tell the two apart. */
+    min_need_ratio: +Math.min(...cells.filter((c) => c.drivers_per_occurrence > 0)
+      .map((c) => c.drivers_needed / c.drivers_per_occurrence)).toFixed(3),
   },
   caveat: 'A driver’s throughput in an hour is a MEASUREMENT, not a capacity.',
 });
 
 const NO_SPARE = body([SHORT_A, SHORT_B, LEVEL_A, LEVEL_B], []);
 const WITH_SPARE = body([SHORT_A, SHORT_B, LEVEL_A, SPARE], [SPARE]);
+
+/* A fourth body for the two tiles, shaped so the busiest hour and the
+   hungriest hour are DIFFERENT hours — which is the whole fault. Thursday
+   19:00 takes 40 bookings each time it comes round, more than any other hour
+   here; Tuesday 18:00 takes 12, but its drivers manage half a booking each, so
+   it needs 24 people against Thursday's 20. Production printed the Tuesday
+   under the words "Busiest single hour". Every cell also needs more people
+   than turn up (smallest ratio 1.11), so no cell can read spare. */
+const BUSY = cell(4, 19, { expected: 40, have: 18, rate: 2, need: 20, seen: 25 });
+const HUNGRY = cell(2, 18, { expected: 12, have: 6, rate: 0.5, need: 24, seen: 8 });
+const MILD = cell(3, 9, { expected: 10, have: 8, rate: 1, need: 10, seen: 9 });
+const PEAK = body([BUSY, HUNGRY, MILD], []);
 
 /* The view, mounted on its own. The shell is not part of what is being
    checked and dragging it in would need every other endpoint stubbed too. */
@@ -122,6 +140,9 @@ const read = async () => {
       unit: t(document.querySelector('.vdct-fig i')),
       sub: t(document.querySelector('.vdct-sub')),
       notes: [...document.querySelectorAll('.note')].map(t),
+      kpis: [...document.querySelectorAll('.kpi')].map((k) => ({
+        label: t(k.querySelector('.l')), value: t(k.querySelector('.n')), sub: t(k.querySelector('.s')) })),
+      empties: [...document.querySelectorAll('.empty')].map(t),
     };
   });
   await ctx.close();
@@ -177,6 +198,46 @@ check('with one spare hour the sub names it',
 check('…and the figure is still the gap sum over the short hours',
   Number(b.figure) === Math.ceil(WITH_SPARE.cells.filter((c) => c.driver_gap >= 0.5)
     .reduce((s, c) => s + c.driver_gap, 0)), `${b.figure}`);
+
+/* ── 5. the tile labelled "busiest" names the busiest hour ──────────────── */
+/* Production on 2026-09-02 printed "Busiest single hour — Tuesday 18:00, 33.7
+   drivers needed". Tue 18:00 was 12th of 168 by bookings per occurrence
+   (25.83) behind Thu 19:00 (29.0), Thu 18:00 (28.5) and Fri 19:00 (28.5): the
+   tile sorted on drivers_needed and called the winner busy. Busy and
+   understaffed are different questions and the page has a panel for the
+   second one. */
+answer = PEAK;
+const c = await read();
+const kpi = (label) => c.kpis.find((k) => k.label.toLowerCase().startsWith(label.toLowerCase())) || {};
+check('the peak scenario rendered', c.title === 'rendered', c.title);
+const busiest = kpi('Busiest single hour');
+check('the busiest tile names the hour with the most bookings',
+  /Thursday 19:00/.test(busiest.value), `${busiest.value} — Thu 19:00 takes 40 a time, Tue 18:00 takes 12`);
+check('…not the hour that merely needs the most people',
+  !/Tuesday 18:00/.test(busiest.value), busiest.value);
+check('…and says how much work it is, in the unit the word "busiest" is about',
+  /\b40(\.0)? bookings/.test(busiest.sub), busiest.sub);
+
+/* ── 6. a zero that cannot be anything else says so ─────────────────────── */
+/* drivers_needed is drivers_now × (projected ÷ measured). Every cell here
+   needs at least 1.11× the people it gets, so no cell can be negative and the
+   spare tile is pinned at zero by arithmetic. Production sat at a smallest
+   ratio of 1.057 across all 168 cells, printing "Hours with people to spare 0
+   — covered beyond what the projection needs" beside a panel telling the
+   reader to move people out of hours that cannot exist. */
+const spareTile = kpi('Hours with people to spare');
+check('the spare tile is zero in this scenario', spareTile.value === '0', spareTile.value);
+check('…and its sub says the zero is arithmetic, not a finding',
+  /no hour can/i.test(spareTile.sub), spareTile.sub);
+check('…naming the smallest ratio that makes it impossible',
+  /1\.11/.test(spareTile.sub), spareTile.sub);
+check('…and the spare panel stops telling the reader to move people who cannot exist',
+  c.empties.some((e) => /no hour can/i.test(e)), JSON.stringify(c.empties));
+
+/* When spare cover IS reachable, the ordinary wording comes back. */
+const spareTileB = b.kpis.find((k) => k.label.startsWith('Hours with people to spare')) || {};
+check('with a reachable spare hour the tile keeps its plain sub',
+  !/no hour can/i.test(spareTileB.sub || ''), spareTileB.sub);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close(); server.close();

@@ -13,6 +13,10 @@
 
 import { win, winDays } from './window.js';
 import { fleetIncome } from './income_sql.js';
+/* The alerts-per-distance rule, shared with the fleet headline and both
+   economics ledgers so this page cannot disagree with the tables that link
+   to it. See api/alert_coverage_sql.js for the rule and its assumption. */
+import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
 import { areaOf } from './analytics_routes.js';
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
@@ -1948,9 +1952,25 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        FROM alert a JOIN days ON days.plate = a.plate
             AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = days.day
        GROUP BY 1 ORDER BY n DESC LIMIT 15`, p);
+    /* The days the alert feed covered, and both halves of the rate narrowed to
+       them.
+       ─────────────────────────────────────────────────────────────────────
+       The exposure below used to run to the edge of the window. Measured on
+       production 2026-09-02 the fleet figure this page paints a driver against
+       read 69.7 per 100 km over 16 days and 41.5 over 30 — the identical
+       69,338 alerts over 68% more distance — because the alert feed had a
+       73-day hole (2026-06-06 to 2026-08-17) and days 17 to 30 back from today
+       sat inside it. So a driver widening their own window watched themselves
+       improve, and the baseline they were painted against moved further.
+
+       Dubai calendar days: winDays, not the timestamp bounds in p, because a
+       covered day is a calendar day everywhere else in this product. */
+    const [covFrom, covTo] = winDays(req);
+    const cov = await alertCoverage(q, covFrom, covTo);
     const [exposure] = await q(
       `SELECT round(sum(km)::numeric,0) km FROM vehicle_driver_day
-       WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date`, p);
+       WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date
+         AND day = ANY($4::date[])`, [...p, cov.days]);
     /* What the fleet does, so 29.5 per 100 km has something to be high
        AGAINST. The page painted this figure critical from a hardcoded 5/15
        scale under a sub-label reading "comparable across drivers" — comparable
@@ -1958,20 +1978,29 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const [fleetRate] = await q(
       `WITH k AS (
          SELECT sum(km) km FROM vehicle_driver_day
-          WHERE day BETWEEN $1::date AND $2::date),
+          WHERE day BETWEEN $1::date AND $2::date AND day = ANY($3::date[])),
        a AS (
          SELECT count(*)::int n FROM alert
-          WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date)
-       SELECT round((a.n * 100.0 / nullif(k.km, 0))::numeric, 1) AS per_100km,
-              round(k.km::numeric, 0) AS km, a.n AS alerts
-         FROM k, a`, [p[0], p[1]]);
+          WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+            AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[]))
+       SELECT round(k.km::numeric, 0) AS km, a.n AS alerts
+         FROM k, a`, [p[0], p[1], cov.days]);
     const totalAlerts = alerts.reduce((a, r) => a + r.n, 0);
     res.json({ cancels, cancel_daily: cancelDaily, alerts,
+      /* The distance the rate was taken over: this person's custody kilometres
+         on the days the alert feed was up, and no others. */
       alert_km: exposure?.km ?? null,
-      alerts_per_100km: exposure?.km > 0 ? +((totalAlerts / exposure.km) * 100).toFixed(1) : null,
-      fleet_alerts_per_100km: fleetRate?.per_100km == null ? null : Number(fleetRate.per_100km),
+      /* Both figures through the same rule, so the driver and the baseline
+         they are painted against are measured over the identical days. Null
+         rather than 0 when the feed covered nothing in the window — a page
+         must render that as "not measured", not as a spotless record. */
+      alerts_per_100km: alertRate(totalAlerts, exposure?.km, cov),
+      alerts_per_100km_absent: alertRateReason(exposure?.km, cov),
+      fleet_alerts_per_100km: alertRate(fleetRate?.alerts, fleetRate?.km, cov),
       fleet_alert_km: fleetRate?.km == null ? null : Number(fleetRate.km),
-      fleet_alerts: fleetRate?.alerts ?? null });
+      fleet_alerts: fleetRate?.alerts ?? null,
+      /* Which days both figures are about, in words the page prints. */
+      alert_coverage: cov });
   }));
 
   /* ── the raw record, because eventually someone needs the trips ────── */

@@ -19,6 +19,7 @@
       is the only source that records where the driver set off from. Everywhere
       else it is unmeasured, and an unmeasured approach leg is never charted as
       a zero-kilometre one. */
+import { dubaiDay } from './window.js';
 import { custodyOverWindow, custodyCountOverWindow, peopleCount } from './custody_sql.js';
 import { spanGaps } from './coverage_gaps.js';
 
@@ -1403,8 +1404,43 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
           AND ended_at < requested_at + interval '6 hours'
          THEN extract(epoch FROM (ended_at - requested_at)) END)`;
 
+  /* ── THE WAVE, OVER DAYS THAT HAVE HAD ONE ────────────────────────────────
+     "Morning wave or evening wave" asks which way an area leans, and it is a
+     RATIO of two hour windows — 05:00–09:00 against 16:00–21:00, Dubai. Both
+     were counted over every day the window touches, today included, and today
+     has had a morning and (before 22:00) no evening at all.
+
+     Measured on production 2026-09-02:
+       /api/geo/corridors?from=2026-09-02&to=2026-09-02 returned evening = 0
+       for EVERY area, and the page drew every one of them as morning-heavy.
+       Over Sep 1–2 it drew areas as morning-heavy that are evening-heavy on
+       the only complete day: Al Garhoud 17 morning / 21 evening on Sep 1
+       alone, Business Bay 2 / 8. The page printed the opposite of both.
+
+     An evening that has not happened is not a quiet evening. So a day enters
+     BOTH halves or NEITHER, and it enters them once its evening window has
+     closed — 22:00 Dubai, one hour past the last evening hour. Before that the
+     day is held out of the wave entirely (its trips still count everywhere
+     else on the page) and the response names it, so the page can say which
+     days the ratio is over instead of implying it is over all of them.
+
+     Right at both ends of the clock by construction: at 23:59 Dubai today has
+     had its evening and is counted like any other day, and at 00:05 it is held
+     out — which is the only thing stopping four mornings and no evening from
+     turning an evening-heavy area over. */
+  const WAVE_M = [5, 9];
+  const WAVE_E = [16, 21];
+  const WAVE_CLOSES = 22;
+  /* Evaluated in Postgres against the Dubai clock rather than the session's
+     UTC one, for the same reason local_day is: at 02:00 Dubai the server's
+     date is still yesterday and the fleet works through that hour. */
+  const WAVE_DONE = `local_day < ((now() AT TIME ZONE 'Asia/Dubai')::date
+      + CASE WHEN (now() AT TIME ZONE 'Asia/Dubai')::time >= time '${WAVE_CLOSES}:00'
+             THEN 1 ELSE 0 END)`;
+
   app.get('/api/geo/corridors', wrap(async (req, res) => {
     const p = range(req);
+    const [winFrom, winTo] = p;
     /* Which half of the page is being asked for.
        ─────────────────────────────────────────────────────────────────────
        Cold at a 12-month window this endpoint measured 8.45s and the page 7.9
@@ -1472,8 +1508,10 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 -- distance average is kept as its two halves because an
                 -- average of averages is not an average.
                 count(*) FILTER (WHERE pickup_addr IS NOT NULL)::int AS from_trips,
-                count(*) FILTER (WHERE pickup_addr IS NOT NULL AND local_hour BETWEEN 5 AND 9)::int AS from_morning,
-                count(*) FILTER (WHERE pickup_addr IS NOT NULL AND local_hour BETWEEN 16 AND 21)::int AS from_evening,
+                count(*) FILTER (WHERE pickup_addr IS NOT NULL AND ${WAVE_DONE}
+                                   AND local_hour BETWEEN ${WAVE_M[0]} AND ${WAVE_M[1]})::int AS from_morning,
+                count(*) FILTER (WHERE pickup_addr IS NOT NULL AND ${WAVE_DONE}
+                                   AND local_hour BETWEEN ${WAVE_E[0]} AND ${WAVE_E[1]})::int AS from_evening,
                 sum(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km,
                 count(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km_n
            FROM trip_ext
@@ -1553,11 +1591,54 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       area: r.from_area, trips: r.trips, morning: r.morning, evening: r.evening, avg_km: r.avg_km,
     }));
     const shown = corridors.filter((r) => r.from_area !== '(unrecorded)' || r.to_area !== '(unrecorded)');
+    /* The day the wave cannot describe yet, named rather than silently
+       dropped. Null once 22:00 Dubai has passed, because from then on today
+       has had both of its windows and is counted like any other day.
+
+       Counted here rather than in SQL: this endpoint reads trip_ext exactly
+       once by design (it was 8.45s cold at a 12-month window and test/
+       aggregates.test.mjs pins the single scan), and how many days a date
+       range holds is arithmetic on two strings, not a question for the
+       database. Calendar days, so an unbounded ask reports null rather than
+       nine thousand — a sentence a reader would have to take on trust. */
+    const nowAt = new Date();
+    const today = dubaiDay(nowAt);
+    const hhmm = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Dubai',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(nowAt);
+    const waveOpen = hhmm < `${WAVE_CLOSES}:00`;
+    /* Anchored at noon so adding or subtracting a day cannot cross a midnight
+       and land on the wrong date. */
+    const shiftDay = (d, n) => {
+      const x = new Date(`${d}T12:00:00Z`);
+      x.setUTCDate(x.getUTCDate() + n);
+      return x.toISOString().slice(0, 10);
+    };
+    const spanDays = (a, b) => Math.round(
+      (Date.parse(`${b}T12:00:00Z`) - Date.parse(`${a}T12:00:00Z`)) / 864e5) + 1;
+    const bounded = winFrom > '2000-01-01' && winTo < '2100-01-01';
+    /* The last day whose evening window has closed, clipped to the window. */
+    const lastWave = (() => {
+      const cutoff = waveOpen ? today : shiftDay(today, 1);
+      const end = winTo < cutoff ? winTo : shiftDay(cutoff, -1);
+      return end >= winFrom ? end : null;
+    })();
     res.json({
       note: 'Areas are parsed from the address text each provider returns, not from a place id. '
         + 'Bookings only — an FMS row is the tracker\'s own record of a journey a ride platform '
         + 'already reported, and counting it would chart the same trip twice.',
       part: part || 'all',
+      /* What `morning` and `evening` on each origin are over. Without this the
+         page could only say "05:00–09:00 against 16:00–21:00" and had no way
+         to tell a reader that one of the days in the window is in neither. */
+      wave: {
+        morning: WAVE_M,
+        evening: WAVE_E,
+        days: bounded ? (lastWave ? spanDays(winFrom, lastWave) : 0) : null,
+        window_days: bounded ? spanDays(winFrom, winTo) : null,
+        live_day: waveOpen && (winFrom <= today && today <= winTo) ? today : null,
+        closes: `${WAVE_CLOSES}:00`,
+        as_of: hhmm,
+      },
       corridors: shown,
       origins,
       totals: t,

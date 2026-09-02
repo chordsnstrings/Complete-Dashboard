@@ -47,6 +47,10 @@
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome, chooseBasis } from './income_sql.js';
 import { vehiclesOverWindow } from './custody_sql.js';
+/* The alerts-per-distance rule, in one place. Both tables on this page carry a
+   safety rate and both were dividing a partial numerator by a whole-window
+   denominator; the module says why, and what the covered-day rule assumes. */
+import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
 
 /* A day as this product writes days everywhere else. */
 const dayLabel = (v) => (v == null ? '—'
@@ -139,6 +143,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
     const p = range(req);
     const [from, to] = p;
     const windowDays = spanDays(from, to);
+    /* Which days the ALERT FEED covered, asked before anything else because
+       both halves of alerts_per_100km are narrowed to them. Not filtered by
+       fleet: this endpoint counts alerts for every plate it lists regardless
+       of the fleet chip, and coverage has to match the numerator it divides.
+       See api/alert_coverage_sql.js for why this exists and what it assumes. */
+    const cov = await alertCoverage(q, from, to);
+    const pd = [...p, cov.days];
 
     const [work, attributed, decor, unatt, coverage] = await Promise.all([
       /* The work, at BOTH grains, from ONE scan of the trip table.
@@ -196,6 +207,16 @@ export function economicsRoutes(app, { q, wrap, range }) {
                   count(DISTINCT local_day) FILTER (WHERE is_booking)::int days_earning,
                   count(DISTINCT local_day)::int days_moved,
                   round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+                  /* The SAME distance, narrowed to the days the alert feed was
+                     up. It is the only denominator alerts_per_100km may have:
+                     dividing every alert this plate triggered by every km it
+                     drove made a car's safety improve whenever the window was
+                     widened over the feed's 73-day hole. Kept beside the km
+                     column rather than replacing it — money per km is a
+                     question about the whole window and must not be
+                     narrowed. */
+                  round(sum(distance_km) FILTER (WHERE is_booking AND has_distance
+                        AND local_day = ANY($5::date[]))::numeric,0) alert_km,
                   count(*) FILTER (WHERE is_booking AND has_distance)::int measured_bookings,
                   count(DISTINCT person)::int drivers,
                   max(requested_at) FILTER (WHERE is_booking) last_trip,
@@ -225,7 +246,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
             than as a second result set, so the two grains cannot arrive
             describing different windows. */
          SELECT p.*, a.channels
-         FROM per_plate p LEFT JOIN per_channel_agg a USING (plate)`, p),
+         FROM per_plate p LEFT JOIN per_channel_agg a USING (plate)`, pd),
 
       /* The other numerator: weekly driver payouts placed on the vehicle-days
          their driver was actually holding. Unbound this time — every plate at
@@ -282,8 +303,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
            FROM vehicle_document WHERE expires_at IS NOT NULL GROUP BY plate
          ),
          al AS (
+           /* Restricted to the covered days, which is a no-op on the count —
+              there are no alerts on a day with no alerts — and is written out
+              anyway so the numerator and the denominator name the same set of
+              days rather than agreeing by accident. */
            SELECT plate, count(*)::int alerts FROM alert
            WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+             AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[])
            GROUP BY plate
          )
          SELECT p.plate,
@@ -308,7 +334,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
          LEFT JOIN al  ON al.plate  = p.plate
          LEFT JOIN vehicle v ON v.plate = p.plate
          LEFT JOIN vehicle_profile vp ON vp.plate = p.plate
-         LEFT JOIN vehicle_current_driver cd ON cd.plate = p.plate`, [from, to]),
+         LEFT JOIN vehicle_current_driver cd ON cd.plate = p.plate`, [from, to, cov.days]),
 
       /* Payout periods that reach no vehicle at all, because their driver has
          no custody day inside the period. Reported rather than dropped: the
@@ -332,7 +358,8 @@ export function economicsRoutes(app, { q, wrap, range }) {
     const row = (plate) => {
       if (!byPlate.has(plate)) {
         byPlate.set(plate, { plate, platforms: new Map(), bookings: 0, telematics_journeys: 0,
-          days_earning: 0, days_moved: 0, km: null, measured_bookings: 0, drivers: 0,
+          days_earning: 0, days_moved: 0, km: null, alert_km: null,
+          measured_bookings: 0, drivers: 0,
           /* null, not 0: only the plates with no booking in the window are
              folded over the whole record, so a zero on a working car would be
              a measurement nobody took. */
@@ -346,7 +373,8 @@ export function economicsRoutes(app, { q, wrap, range }) {
       Object.assign(r, {
         bookings: w.bookings, telematics_journeys: w.telematics_journeys,
         days_earning: w.days_earning, days_moved: w.days_moved,
-        km: n(w.km), measured_bookings: w.measured_bookings, drivers: w.drivers,
+        km: n(w.km), alert_km: n(w.alert_km),
+        measured_bookings: w.measured_bookings, drivers: w.drivers,
         last_trip: w.last_trip, fleet_id: r.fleet_id || w.fleet_id,
       });
     }
@@ -447,6 +475,10 @@ export function economicsRoutes(app, { q, wrap, range }) {
         make: r.make || null, model: r.model || null, year: r.year ?? null,
         bookings: r.bookings, telematics_journeys: r.telematics_journeys,
         km: r.km, measured_bookings: r.measured_bookings,
+        /* The distance the safety rate was taken over, beside the distance the
+           money rates were: they differ by every kilometre driven on a day the
+           alert feed was dark, and a reader has to be able to see that. */
+        alert_km: r.alert_km ?? null,
         days_earning: r.days_earning, days_moved: r.days_moved, idle_days: idleDays,
         window_days: windowDays,
         drivers: r.drivers,
@@ -466,7 +498,18 @@ export function economicsRoutes(app, { q, wrap, range }) {
         forgone_at_own_rate: r.days_earning && money
           ? round((money / r.days_earning) * idleDays, 0) : null,
         alerts: r.alerts ?? 0,
-        alerts_per_100km: rate((r.alerts ?? 0) * 100, r.km, 1),
+        /* Over the days the ALERT FEED covered, not over the window.
+           ─────────────────────────────────────────────────────────────────
+           This was rate((r.alerts ?? 0) * 100, r.km, 1) — every alert divided
+           by every kilometre — and it made a car's safety improve whenever the
+           range was widened. On production 2026-09-02 the fleet figure this
+           column rolls up to read 69.7 per 100 km at 16 days and 41.5 at 30,
+           off the identical 69,338 alerts, because the feed's 73-day hole
+           (2026-06-06 → 2026-08-17) contributed distance and nothing else.
+           Null rather than 0 when the feed covered none of the window: see
+           `alert_coverage` on the response for which days those were. */
+        alerts_per_100km: alertRate(r.alerts ?? 0, r.alert_km, cov),
+        alerts_per_100km_absent: alertRateReason(r.alert_km, cov),
         any_even_split: !!r.any_even_split,
         soonest_expiry: r.soonest_expiry ?? null,
         doc_days_left: r.doc_days_left ?? null,
@@ -553,6 +596,10 @@ export function economicsRoutes(app, { q, wrap, range }) {
     res.json({
       window: [from, to],
       window_days: windowDays,
+      /* Which days the safety column was measured over, and the assumption
+         that decided them. The Alerts /100km column is about these days and
+         no others, and the page is expected to say so. */
+      alert_coverage: cov,
       rows,
       by_platform: byPlatform,
       totals: {
@@ -611,6 +658,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
     const p = range(req);
     const [from, to] = p;
     const windowDays = spanDays(from, to);
+    /* The days the alert feed covered, and therefore the only days this page's
+       Alerts /100km column may be measured over. Fleet-wide rather than per
+       person for the reason api/alert_coverage_sql.js gives: a careful driver
+       having a clean day is not the feed going dark, and reading it as one
+       would throw away exactly the distance that proves they were careful. */
+    const cov = await alertCoverage(q, from, to);
+    const pd = [...p, cov.days];
     /* The key rows are GROUPED by, and it must be an ADDRESS as well as a key.
        personKey() answers the folded NAME wherever there is one, which is the
        right thing to group on and the wrong thing to hand back: the driver
@@ -739,13 +793,19 @@ export function economicsRoutes(app, { q, wrap, range }) {
                    lists at once. A union cannot double-count; a sum can. */
                 array_agg(DISTINCT local_day) AS worked_days,
                 round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+                /* The same distance, narrowed to the days the alert feed was
+                   up — the only denominator alerts_per_100km may have. Beside
+                   the whole-window km, never instead of it: money per km is a
+                   question about the window and must not be narrowed. */
+                round(sum(distance_km) FILTER (WHERE is_booking AND has_distance
+                      AND local_day = ANY($5::date[]))::numeric,0) alert_km,
                 round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
                 count(*) FILTER (WHERE has_fare)::int priced_bookings,
                 count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL AND plate <> '')::int vehicles,
                 array_agg(DISTINCT platform) platforms,
                 min(fleet_id) fleet_id,
                 max(requested_at) last_trip
-         FROM w GROUP BY 1`, p),
+         FROM w GROUP BY 1`, pd),
 
       /* Standing, so a person earning nothing can be told apart from a person
          who is not ALLOWED to earn — opposite remedies, and the money column
@@ -779,12 +839,17 @@ export function economicsRoutes(app, { q, wrap, range }) {
             down, and alert was read whole at every window: rows=56,249
             identically at 7, 30, 90 and 365 days. Spelled out, it matches
             alert_local_day_idx (sql/schema_v27.sql:21) exactly. */
+         /* Narrowed to the covered days as well, which changes no count — a
+            day with no alerts contributes none — but keeps the numerator and
+            the denominator naming the same set of days explicitly rather than
+            by coincidence. */
          SELECT h.driver_ext_id, count(*)::int alerts
          FROM alert a
          JOIN held h ON h.plate = a.plate
           AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = h.day
          WHERE (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
-         GROUP BY 1`, [from, to]),
+           AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[])
+         GROUP BY 1`, [from, to, cov.days]),
 
       /* Which cars each person actually held, busiest first and capped at
          three. A ledger that names a driver and not their vehicle is the dead
@@ -830,7 +895,8 @@ export function economicsRoutes(app, { q, wrap, range }) {
       if (!people.has(k)) {
         people.set(k, { key: k, driver_name: name || id, driver_ext_id: id, ids: [],
           platforms: new Set(), payouts: null, cash: null, payout_days: 0,
-          bookings: 0, completed: 0, bookable: 0, days_worked: 0, worked: new Set(), km: 0, fares: 0,
+          bookings: 0, completed: 0, bookable: 0, days_worked: 0, worked: new Set(),
+          km: 0, alert_km: 0, fares: 0,
           priced_bookings: 0, vehicles: 0, plates: [], alerts: 0, reported_km: 0,
           hours_online: null,
           measured_hours_online: null, measured_idle_h: null, availability_days: 0,
@@ -853,6 +919,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
          Anyone with two provider ids arrives here twice. */
       (w.worked_days || []).forEach((d) => r.worked.add(String(d).slice(0, 10)));
       r.km += Number(w.km || 0);
+      r.alert_km += Number(w.alert_km || 0);
       r.fares = add(r.fares, w.fares) ?? 0;
       r.priced_bookings += w.priced_bookings;
       r.vehicles = Math.max(r.vehicles, w.vehicles);
@@ -918,6 +985,10 @@ export function economicsRoutes(app, { q, wrap, range }) {
         bookings: r.bookings, completed: r.completed,
         completion_pct: r.bookable ? round((r.completed / r.bookable) * 100, 0) : null,
         km: r.km || null, vehicles: r.vehicles,
+        /* The distance the safety rate was taken over. It is smaller than km
+           by every kilometre this person drove on a day the alert feed was
+           dark, and the page prints both so the difference is visible. */
+        alert_km: r.alert_km || null,
         /* The cars, named and openable, merged across the person's accounts
            and re-capped at three so a two-account driver does not get six. */
         plates: [...new Map(r.ids.flatMap((id) => plateRefs.get(id) || [])
@@ -945,7 +1016,17 @@ export function economicsRoutes(app, { q, wrap, range }) {
         measured_idle_h: r.measured_idle_h,
         availability_days: r.availability_days || 0,
         aed_per_measured_hour: rate(money, r.measured_hours_online),
-        alerts: r.alerts, alerts_per_100km: rate(r.alerts * 100, r.km, 1),
+        alerts: r.alerts,
+        /* Over the days the ALERT FEED covered, not over the window.
+           ─────────────────────────────────────────────────────────────────
+           This was rate(r.alerts * 100, r.km, 1): a numerator that stops at
+           the feed's last good day divided by a denominator that runs to the
+           edge of the window. On production 2026-09-02 that arithmetic made
+           the fleet roll-up of this column fall from 69.7 per 100 km at 16
+           days to 41.5 at 30 — off the identical 69,338 alerts — because the
+           feed's 73-day hole contributed distance and nothing else. */
+        alerts_per_100km: alertRate(r.alerts, r.alert_km, cov),
+        alerts_per_100km_absent: alertRateReason(r.alert_km, cov),
         state: st.state ?? null,
         platform_state: st.platform_state ?? null,
         can_earn: st.can_earn ?? null,
@@ -969,6 +1050,10 @@ export function economicsRoutes(app, { q, wrap, range }) {
     res.json({
       window: [from, to],
       window_days: windowDays,
+      /* Which days the Alerts /100km column was measured over, and the
+         assumption that decided them — the same record the vehicle ledger and
+         /api/kpis carry, from the same module. */
+      alert_coverage: cov,
       rows,
       totals: {
         people: rows.length,

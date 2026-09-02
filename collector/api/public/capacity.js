@@ -139,19 +139,44 @@ export async function renderCapacity(root) {
     { label: 'Hours needing more people', value: fmt(t.cells_short),
       sub: 'at the rate their own drivers currently work them',
       tone: t.cells_short ? 'warn' : 'good' },
+    /* A zero that could not have been anything else, said as one.
+       ─────────────────────────────────────────────────────────────────────
+       drivers_needed is drivers_now × (projected demand ÷ measured demand),
+       so a cell reads spare only when that ratio drops below 1. On production
+       at 13:15 UTC on 2026-09-02 the smallest ratio over all 168 cells was
+       1.057 — the Oct 26 projection sits 39% above the 84-day rate the shares
+       were measured at — so no cell COULD be negative, and this tile printed
+       "0 · covered beyond what the projection needs" as though it were a
+       finding about the rota. */
     { label: 'Hours with people to spare', value: fmt(t.cells_spare),
-      sub: 'covered beyond what the projection needs' },
+      sub: (!t.cells_spare && t.min_need_ratio != null && t.min_need_ratio > 1)
+        ? `no hour can be: every one needs at least ${fmt(t.min_need_ratio, 2)}× the people it gets`
+        : 'covered beyond what the projection needs' },
     /* The HOUR, on a tile labelled "Busiest single hour" that printed a
        headcount — and led nowhere, on a page where every other row naming an
-       hour opens it. */
+       hour opens it.
+
+       Ranked on demand, not on headcount. This sorted by drivers_needed and
+       called the winner busiest: on production at 13:15 UTC on 2026-09-02 it
+       printed "Tuesday 18:00 — 33.7 drivers needed", and Tue 18:00 was 12th of
+       168 by bookings per occurrence (25.83), behind Thu 19:00 (29.0), Thu
+       18:00 (28.5) and Fri 19:00 (28.5). Busy and understaffed are different
+       questions — an hour with modest demand whose drivers manage little each
+       needs more people without being busy — and the second question already
+       has a tile ("Hours needing more people") and a whole panel of its own.
+       So this one answers the first, in the unit the word is about. */
     (() => {
-      const peak = [...(d.cells || [])].sort((a, b) => (b.drivers_needed ?? -1) - (a.drivers_needed ?? -1))[0];
-      if (!peak || peak.drivers_needed == null) {
+      const rank = (r) => (r.bookings_per_occurrence ?? r.expected_per_occurrence ?? -1);
+      const peak = [...(d.cells || [])].sort((a, b) => rank(b) - rank(a))[0];
+      if (!peak || rank(peak) < 0) {
         return { label: 'Busiest single hour', value: '—', sub: 'no hour has enough history to size' };
       }
+      const need = peak.drivers_needed == null
+        ? 'too little history to size'
+        : `${fmt(peak.drivers_needed, 1)} drivers needed at the rate its own drivers work it`;
       return { label: 'Busiest single hour',
         html: `<a class="ent" href="${slotLink(peak)}">${DOW[peak.dow]} ${hhmm(peak.hour)}</a>`,
-        sub: `${fmt(peak.drivers_needed, 1)} drivers needed at the rate its own drivers currently work it` };
+        sub: `${fmt(rank(peak), 1)} bookings each time it comes round — ${need}` };
     })(),
     { label: 'Hours with too little history', value: fmt(t.cells_thin),
       sub: 'seen fewer than four times — shown, not planned on', tone: t.cells_thin ? 'warn' : null },
@@ -188,12 +213,30 @@ export async function renderCapacity(root) {
       + `${Math.ceil(worst.driver_gap)} more than turn up now.`));
   }
 
+  /* An instruction nobody can follow, withdrawn when it cannot be followed.
+     ─────────────────────────────────────────────────────────────────────
+     This panel told the reader to check for people to move before recruiting.
+     On production at 13:15 UTC on 2026-09-02 there was nobody to move and
+     there could not have been: totals.min_need_ratio was 1.057, so all 168
+     cells needed MORE people than they get and the panel was empty by
+     construction, under the heading "No hour is covered beyond its
+     projection" — which reads as a fact about the week when it was a fact
+     about the comparison. */
+  const spareImpossible = t.min_need_ratio != null && t.min_need_ratio > 1 && !t.cells_spare;
   const { panel: pp, body: pb } = panel('Cover to spare here',
-    'Hours covered beyond what the projection needs. Worth checking before adding people elsewhere — '
-    + 'moving somebody is cheaper than recruiting.');
+    spareImpossible
+      ? 'Hours covered beyond what the projection needs. None of them can be, at this projection — the '
+        + 'arithmetic below says why.'
+      : 'Hours covered beyond what the projection needs. Worth checking before adding people elsewhere — '
+        + 'moving somebody is cheaper than recruiting.');
   g.append(pp);
-  if (!d.surplus.length) empty(pb, 'No hour is covered beyond its projection.');
-  else {
+  if (!d.surplus.length) {
+    empty(pb, spareImpossible
+      ? 'No hour can be covered beyond its projection: the projection needs at least '
+        + `${fmt(t.min_need_ratio, 2)}× the drivers every hour currently gets, so nobody is free to move. `
+        + 'Nothing to redeploy here — this is recruitment, or a smaller projection.'
+      : 'No hour is covered beyond its projection.');
+  } else {
     foldRows(pb, gapTable(d.surplus, 'spare'),
       { shown: 10, total: d.surplus.length, noun: 'hour', key: 'cap-spare' });
     if (t.cells_spare > d.surplus.length) {
@@ -211,10 +254,23 @@ export async function renderCapacity(root) {
      is DRIVERS NEEDED, contradicting the caption directly beneath it. */
   heatmap(hb, grid, { unit: 'drivers needed', valueFmt: (v) => fmt(v, 1),
     onClick: (c) => { location.hash = href('slot', String(c.dow), String(c.h)); } });
+  /* The caption used to promise something this grid does not show: "an hour
+     with modest demand and nobody on it matters more to a rota than a busy
+     hour that is already staffed". It does not rank that way and cannot.
+     drivers_needed is projected demand divided by what this cell's own
+     drivers delivered against the demand the projection rescales, so the
+     demand cancels and drivers_needed is drivers-now times one constant —
+     1.32× to 1.35× in every one of production's 168 cells on 2026-09-02
+     (see the derivation in api/capacity_routes.js). So the shading IS the
+     current-headcount map, and saying otherwise sends a reader looking for
+     uncovered hours to a chart that cannot contain them. */
   hb.append(el('p', 'cap',
-    'The scale is drivers needed, not bookings — an hour with modest demand and nobody on it matters more '
-    + 'to a rota than a busy hour that is already staffed. Shading is against this grid\'s own busiest '
-    + 'cell, so it is a ranking within the week rather than an absolute level.'));
+    'The scale is drivers needed, not bookings. Because each hour is sized against what its OWN drivers '
+    + 'have delivered in it, the demand divides back out: drivers needed comes to the drivers already on '
+    + `that hour times ${t.min_need_ratio != null ? `about ${fmt(t.min_need_ratio, 2)}×` : 'one constant'}, `
+    + 'the same multiplier everywhere. So this ranks hours by the cover they already carry, and the hours '
+    + 'nobody works are the pale ones. Shading is against this grid\'s own busiest cell — a ranking within '
+    + 'the week, not an absolute level.'));
 
   /* ── the arithmetic, in full ──────────────────────────────────────────── */
   const { panel: ap, body: ab } = panel('Every hour, with the arithmetic',

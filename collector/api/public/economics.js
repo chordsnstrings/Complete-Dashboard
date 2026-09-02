@@ -368,11 +368,49 @@ async function moneyTab(root) {
       tone: t.idle_but_documented ? 'critical' : 'good',
       sub: 'earned nothing, papers still current',
       cohort: t.idle_but_documented ? 'unit-idle-documented' : null },
-    { label: 'Idle vehicle-days', value: fmt(t.idle_vehicle_days),
-      tone: 'warn',
-      sub: t.forgone_at_own_rate
-        ? `${money(t.forgone_at_own_rate)} at each asset’s own daily rate — unearned, not lost`
-        : 'no asset has a daily rate to price them at' },
+    /* The money and the days it was measured over are NOT the same population.
+       ─────────────────────────────────────────────────────────────────────
+       This tile paired a day count with a cost and invited the division.
+       Measured on production 2026-09-02T13:18Z, /api/economics/assets?days=2:
+       idle_vehicle_days 289 and forgone_at_own_rate AED 2,056 — and that 2,056
+       prices SEVEN of the 289 days. The other 282 belong to 141 vehicles in
+       band `still`, which have never earned and therefore have no daily rate
+       of their own; api/economics_routes.js sets forgone_at_own_rate null for
+       them, which is right — a car with no rate must not be given the fleet's,
+       or the tile becomes an invented loss. Dividing the two printed numbers
+       gave AED 7.11 a day, against the "Per earning vehicle-day AED 377" three
+       tiles above it on the same screen.
+
+       Not an artefact of a two-day window. Same endpoint at ?days=30,
+       2026-09-02T13:36Z: idle_vehicle_days 4,483 against
+       forgone_at_own_rate AED 119,882, of which 631 days are priced and 3,852
+       are not — AED 26.74 a day by the tile's own two numbers, AED 190 over
+       the base the money was actually measured on, beside a per-earning-day
+       figure of AED 239.
+
+       The rule was already correct and documented; the unqualified pairing was
+       the fault. So the sub-line names its base, the way "Per booking" and
+       "Money placed on assets" on this page already do.
+
+       Computed from the rows rather than added to the endpoint: the priceable
+       set is exactly the rows the server priced, which is the rows where
+       forgone_at_own_rate is not null. */
+    (() => {
+      const pricedIdle = A.rows.reduce((a, r) => a
+        + (r.forgone_at_own_rate != null ? (+r.idle_days || 0) : 0), 0);
+      const unpricedIdle = Math.max(0, (t.idle_vehicle_days || 0) - pricedIdle);
+      return { label: 'Idle vehicle-days', value: fmt(t.idle_vehicle_days),
+        tone: 'warn',
+        sub: t.forgone_at_own_rate
+          ? `${money(t.forgone_at_own_rate)} over the ${fmt(pricedIdle)} of them held by a car that `
+            + 'has earned, at that car’s own daily rate — unearned, not lost'
+            + (unpricedIdle
+              ? `; the other ${fmt(unpricedIdle)} belong to cars that have never earned, which have `
+                + 'no rate of their own to price at'
+              : '')
+          : `no asset has a daily rate to price them at, so none of the ${fmt(t.idle_vehicle_days)} `
+            + 'carries a figure' };
+    })(),
     t.unplaced_payouts
       ? { label: 'Money we cannot place', value: money(t.unplaced_payouts),
           tone: 'warn',

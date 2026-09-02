@@ -105,7 +105,16 @@ export function capacityRoutes(app, { q, wrap }) {
               round(avg(bookings)::numeric, 2) AS bookings_per_occurrence,
               round(avg(drivers)::numeric, 2) AS drivers_per_occurrence,
               max(drivers)::int AS most_drivers_seen,
-              round(avg(bookings::numeric / nullif(drivers, 0)), 2) AS bookings_per_driver
+              /* The POOLED rate, not the mean of the per-occurrence ratios.
+                 avg(bookings/drivers) is an average of ratios while the two
+                 columns printed either side of it on the page are means of
+                 their own numerator and denominator, so the row did not
+                 reconcile with itself: production on 2026-09-02 showed Sun
+                 03:00 with 7.67 bookings, 5.75 drivers and "each doing" 1.4,
+                 and 5.75 × 1.4 = 8.05, not 7.67. 26 of the 168 rows were out
+                 by more than 2%, always in the direction that an occurrence
+                 with few drivers pulls the mean of the ratios about. */
+              round(sum(bookings)::numeric / nullif(sum(drivers), 0), 2) AS bookings_per_driver
         FROM c GROUP BY 1,2 ORDER BY 1,2`, [WINDOW_DAYS, pl, fl]);
 
     if (!cells.length) return res.json({ ok: false, reason: 'No booking in the trailing window.' });
@@ -121,8 +130,43 @@ export function capacityRoutes(app, { q, wrap }) {
     for (let dd = 1; dd <= daysInTarget; dd++) {
       dowCount[new Date(Date.UTC(ty, tm - 1, dd)).getUTCDay()]++;
     }
-    // Weight of each cell in a month, given how often its weekday occurs.
-    const weightOf = (c) => (c.bookings / totalBookings) * 1;
+    /* Weight of each cell in a month, given how often its weekday occurs.
+       ─────────────────────────────────────────────────────────────────────
+       This was `(c.bookings / totalBookings) * 1` — dowCount was computed
+       above and then never used, so each cell kept its raw share of the
+       84-day WINDOW, in which every weekday occurs exactly twelve times, and
+       line 131 below then divided that fixed share by the TARGET month's
+       occurrence count. October 2026 has four Sun–Wed and five Thu–Sat, so
+       two hours with identical measured demand came out 5/4 apart per
+       occurrence purely by weekday.
+
+       Measured on production at 13:15 UTC on 2026-09-02 (target 2026-10,
+       15,500 bookings, 168 cells), expected_per_occurrence ÷ the cell's own
+       measured bookings_per_occurrence ran from 1.0997 to 1.4986 — a 36%
+       spread manufactured by the arithmetic. At 18:00: Tue 25.83 measured →
+       38.4 expected (×1.49) against Thu 28.50 → 33.9 (×1.19), so the BUSIER
+       hour was projected as the quieter one. Every one of the ten largest
+       gaps on "Add people here" was a Monday, Tuesday or Wednesday, and Thu
+       19:00 and Fri 19:00 — the fleet's two busiest hours at 29.0 and 28.5
+       bookings per occurrence — were pushed off it.
+
+       A per-occurrence rate times the number of times that weekday comes
+       round next month. The share is then a share of the TARGET month rather
+       than of a twelve-week window, and expectedPerOccurrence =
+       expectedMonth / occurrences collapses to (target × rate ÷ Σweights),
+       which is proportional to the measured rate and to nothing else.
+       Verified against the production body rather than assumed: reweighting
+       its 168 cells sums to 15,500.0000 against a 15,500 target, so the month
+       total is conserved exactly, and the multiplier becomes the same constant
+       in every cell.
+
+       c.occurrences is days that CARRIED a booking, not days the weekday came
+       round — 12 of production's 168 cells were seen 10 or 11 times out of 12.
+       That is the same conditioning drivers_per_occurrence is under, and
+       drivers_needed divides one by the other, so the two match; using a flat
+       12 here would put a rate over all occurrences on top of a rate over
+       occurrences with work in them. */
+    const weightOf = (c) => (c.bookings / c.occurrences) * (dowCount[c.dow] || 0);
     const totalWeighted = cells.reduce((a, c) => a + weightOf(c), 0);
 
     const rows = cells.map((c) => {
@@ -133,7 +177,33 @@ export function capacityRoutes(app, { q, wrap }) {
       const perDriver = Number(c.bookings_per_driver) || null;
       const haveDrivers = Number(c.drivers_per_occurrence) || 0;
       /* At the rate this cell's own drivers have actually worked it, how many
-         would serve the projected demand. Not a capacity claim — a division. */
+         would serve the projected demand. Not a capacity claim — a division.
+
+         With the two arithmetic corrections above in place, this division
+         CANCELS, and the page has to be read knowing that. Writing b and d for
+         the cell's mean bookings and mean drivers per occurrence:
+
+             perDriver             = Σbookings ÷ Σdrivers = b ÷ d
+             expectedPerOccurrence = target × b ÷ Σweights
+             needDrivers           = (target × b ÷ Σw) ÷ (b ÷ d)
+                                   = d × (target ÷ Σw)
+
+         so drivers_needed is the drivers already on the cell, multiplied by
+         one number that is the same in every cell. Measured on production's
+         2026-09-02 body re-derived through this code: needed ÷ present ran
+         1.3231 to 1.3458 across all 168 cells — the spread is 2-decimal
+         rounding of bookings_per_driver, nothing else.
+
+         That is not a defect introduced here; it is what the file's own
+         header warns about, followed to its end. Each cell's "throughput" is
+         measured from the same bookings the projection rescales, so it
+         divides straight back out and no per-hour productivity survives. The
+         old avg(bookings/drivers) hid this behind the gap between a mean of
+         ratios and a ratio of means — variation that came from unequal
+         turnout across occurrences, not from any hour being better worked.
+         The honest consequence is stated on the page rather than papered
+         over: at this grain the grid ranks hours by the headcount they
+         already carry, and min_need_ratio below is that same constant. */
       const needDrivers = perDriver && expectedPerOccurrence != null
         ? expectedPerOccurrence / perDriver : null;
       return {
@@ -191,6 +261,25 @@ export function capacityRoutes(app, { q, wrap }) {
       totals: {
         drivers_needed_peak: rows.length
           ? Math.max(...rows.map((r) => r.drivers_needed || 0)).toFixed(1) : null,
+        /* The smallest ratio of drivers needed to drivers present, across
+           every cell that has both.
+           ───────────────────────────────────────────────────────────────
+           drivers_needed is drivers_now × (projected demand ÷ measured
+           demand), so when that ratio is above 1 everywhere, driver_gap
+           cannot be negative in ANY cell and `cells_spare` is pinned at zero
+           by arithmetic rather than by the rota. On production at 13:15 UTC
+           on 2026-09-02 the smallest was 1.057 over all 168 cells — the
+           October projection sits 39% above the 84-day rate the shares were
+           measured at — and the page printed "Hours with people to spare: 0,
+           covered beyond what the projection needs" beside a panel inviting
+           the reader to move people out of hours that could not exist.
+           Reported so the page can tell an empty result from an impossible
+           one. */
+        min_need_ratio: (() => {
+          const r = rows.filter((x) => x.drivers_needed != null && x.drivers_per_occurrence > 0)
+            .map((x) => x.drivers_needed / x.drivers_per_occurrence);
+          return r.length ? +Math.min(...r).toFixed(3) : null;
+        })(),
         cells_short: short.length,
         cells_spare: spare.length,
         cells_thin: rows.filter((r) => r.thin).length,
