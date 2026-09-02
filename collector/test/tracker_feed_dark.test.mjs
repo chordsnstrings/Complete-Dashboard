@@ -72,10 +72,21 @@ check('…and listing the plates it is about',
 console.log('\nand a vehicle that stopped on its own is still its own finding');
 check('the straggler survives', single.some((r) => r.entity_id === 'L-ALONE'),
   JSON.stringify(single.map((r) => r.entity_id)));
-check('…and says so, rather than repeating the feed-level guess',
-  /No other vehicle on this feed stopped at the same time/.test(
-    single.find((r) => r.entity_id === 'L-ALONE')?.detail || ''),
-  single.find((r) => r.entity_id === 'L-ALONE')?.detail?.slice(0, 100));
+/* The straggler's detail has to carry the EVIDENCE, not the conclusion. It
+   used to read "No other vehicle on this feed stopped at the same time, so
+   this is the vehicle rather than the feed" — a sentence that is trivially
+   true on a feed where every vehicle is dark, and which production printed 85
+   times over one CABMAN outage. What separates a dead device from a dead
+   integration is how many cars on the same feed are still reporting, so that
+   is what the sentence now says. Here exactly one is (L-LIVE), and one is
+   thin: the finding is required to admit that rather than assert the device. */
+{
+  const d = single.find((r) => r.entity_id === 'L-ALONE')?.detail || '';
+  check('…and says what is still reporting on the same feed, rather than asserting the device',
+    /other vehicle/.test(d) && /still reporting/.test(d), d.slice(0, 120));
+  check('…and calls one survivor thin evidence rather than proof',
+    /thin evidence/.test(d), d.slice(0, 120));
+}
 check('nobody in the crowd is also reported individually',
   !single.some((r) => r.entity_id.startsWith('L-TOGETHER')),
   JSON.stringify(single.map((r) => r.entity_id)));
@@ -202,6 +213,31 @@ console.log('\ntwo fleets dark on the same feed in the same hour are two finding
     JSON.stringify(both));
   check('…and the key says which fleet, so neither can overwrite the other',
     both.every((r) => r.entity_id.includes(r.fleet_id)), JSON.stringify(both.map((r) => r.entity_id)));
+}
+
+/* And the case the old sentence got exactly backwards: a feed on which
+   NOTHING is reporting. Below FEED_DARK_MIN there is no tracker_feed_dark
+   finding to carry the news, so the per-vehicle findings are the only place it
+   can be said — and each of them used to say "this is the vehicle rather than
+   the feed" while the feed was the only thing it could be. */
+console.log('\nand a feed with nothing left reporting is not four broken devices');
+{
+  for (let i = 0; i < 4; i++) {
+    await q(`INSERT INTO telemetry_snapshot (source, fleet_id, plate, captured_at, polled_at, lat, lng, speed, status)
+             VALUES ('sixt', 'egari', $1, $2::timestamptz, $2::timestamptz, 25.2, 55.3, 0, 'Stopped')`,
+    [`L-ALLDARK-${i}`, new Date(Date.now() - (60 + i * 3) * H).toISOString()]);
+  }
+  await computeInsights({});
+  const dark = await q(
+    `SELECT entity_id, detail, action FROM insight
+      WHERE code = 'stale_tracker' AND entity_id LIKE 'L-ALLDARK%' ORDER BY entity_id`);
+  check('all four are still reported — silence is not an answer either', dark.length === 4,
+    String(dark.length));
+  check('…and none of them claims to be the vehicle rather than the feed',
+    dark.every((r) => /Every vehicle/.test(r.detail) && /more likely the integration/.test(r.detail)),
+    dark[0]?.detail?.slice(0, 140));
+  check('…and the action sends the operator to the integration first',
+    dark.every((r) => /integration first/.test(r.action)), dark[0]?.action?.slice(0, 120));
 }
 
 await db.close();

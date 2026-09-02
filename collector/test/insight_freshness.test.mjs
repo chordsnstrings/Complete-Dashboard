@@ -189,6 +189,57 @@ check('filtering by rule still hides what that rule has stopped finding',
     orphans.length === 0, `no job owns: ${orphans.join(', ')}`);
 }
 
+/* ── a finding's window has to be as fresh as its numbers ────────────────
+   put() holds back the columns its arbiter matched on, and for a fleet-level
+   row that arbiter is (code, entity_type, entity_id) — the window is not part
+   of the identity. It was held back anyway, so the window a fleet finding was
+   FIRST written with was the window it kept for ever while its metric, title
+   and severity all moved on.
+
+   Measured on production 2026-09-02: drivers_online_no_trips carried window
+   2026-08-24..2026-08-24 and computed_at 2026-09-02T08:44 — nine days between
+   the date the finding showed and the day its numbers came from, on a rule
+   whose entire content is "three drivers were online and took nothing". */
+{
+  const { pool } = await import('../src/db.js');
+  const realQ = pool.query;
+  pool.query = (t, p2) => db.query(t, p2);
+  const mod = await import('../src/insights.js');
+  /* put() is not exported, so this drives the module the way the rules do:
+     two computes over the same fleet-level code with different windows. */
+  const write = async (from, to, metric) => db.query(
+    `INSERT INTO insight (code, entity_type, entity_id, fleet_id, severity, category,
+       title, detail, action, metric, window_start, window_end, computed_at)
+     VALUES ('window_freeze_probe','fleet','ecosine','ecosine','warning','ops',
+       't','d','a',$3,$1::date,$2::date, now())
+     ON CONFLICT (code, entity_type, entity_id) WHERE entity_type = 'fleet'
+     DO UPDATE SET metric = EXCLUDED.metric, window_start = EXCLUDED.window_start,
+                   window_end = EXCLUDED.window_end, computed_at = EXCLUDED.computed_at`,
+    [from, to, metric]);
+  await write('2026-08-24', '2026-08-24', 3);
+  await write('2026-09-02', '2026-09-02', 5);
+  const [row] = (await db.query(
+    `SELECT window_start, metric FROM insight WHERE code = 'window_freeze_probe'`)).rows;
+  /* toISOString, not String(): String(Date) is "Wed Sep 02 2026 …" and an
+     assertion on its prefix passes for the wrong reasons. */
+  const day = (v) => (v instanceof Date ? v.toISOString() : String(v)).slice(0, 10);
+  check('the fleet arbiter permits the window to move, so a re-computed finding can be re-dated',
+    day(row.window_start) === '2026-09-02' && Number(row.metric) === 5,
+    JSON.stringify([day(row.window_start), row.metric]));
+  /* The probe above pins the DATABASE half — that this arbiter accepts a moved
+     window at all. The half that was actually broken is put()'s choice of what
+     to hold back, and put() is not exported, so it is asserted on the rule
+     itself: the held-back columns must be the arbiter's, not a fixed list, or
+     the next arbiter added reintroduces exactly this. */
+  const src2 = readFileSync('src/insights.js', 'utf8');
+  check('…because put() holds back the columns its arbiter matched on, not a fixed five',
+    /const KEY = new Set\(r\.entity_type === 'fleet' \|\| noWindow/.test(src2)
+    && /\['code', 'entity_type', 'entity_id'\]/.test(src2),
+    'a fixed KEY set is wrong for two of the three arbiters');
+  pool.query = realQ;
+  void mod;
+}
+
 server.close();
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);

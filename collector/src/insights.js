@@ -84,7 +84,21 @@ async function put(row) {
     : noWindow
       ? '(code, entity_type, entity_id) WHERE window_start IS NULL AND window_end IS NULL'
       : '(code, entity_type, entity_id, window_start, window_end)';
-  const KEY = new Set(['code', 'entity_type', 'entity_id', 'window_start', 'window_end']);
+  /* The columns held back from the UPDATE are the ones the ARBITER matched on,
+     and no others. A fixed five-column list was wrong for two of the three
+     arbiters above: they key on (code, entity_type, entity_id) alone, so the
+     window is not part of the row's identity — and holding it back meant the
+     window a fleet-level finding was FIRST written with is the window it keeps
+     for ever, while its title, detail, metric and severity all move on.
+     ─────────────────────────────────────────────────────────────────────────
+     Measured on production 2026-09-02: drivers_online_no_trips carried
+     window 2026-08-24..2026-08-24 and computed_at 2026-09-02T08:44. Nine days
+     between the dates the finding shows and the day its numbers are from, on a
+     rule whose whole content is "three drivers were online and took nothing"
+     — a sentence that means nothing without the day it is about. */
+  const KEY = new Set(r.entity_type === 'fleet' || noWindow
+    ? ['code', 'entity_type', 'entity_id']
+    : ['code', 'entity_type', 'entity_id', 'window_start', 'window_end']);
   const cols = Object.keys(r);
   const set = cols.filter((c) => !KEY.has(c)).map((c) => `${c}=EXCLUDED.${c}`);
   await pool.query(
@@ -585,6 +599,25 @@ async function staleTelemetry() {
     }
     flush();
   }
+  /* How many vehicles each feed carries, and how many of them are dark.
+     ─────────────────────────────────────────────────────────────────────
+     stale_tracker's detail claimed "No other vehicle on this feed stopped at
+     the same time, so this is the vehicle rather than the feed" — and that
+     sentence is evidence only if the feed HAS other vehicles that are still
+     reporting. On a feed carrying two cars, or on one where every car is dark
+     but the clusters fall under FEED_DARK_MIN, it is trivially true and proves
+     the opposite of what it says. Production carried 89 stale_tracker
+     findings, 85 of them CABMAN, each asserting it was the car. */
+  const feedTotal = new Map();
+  for (const r of rows) {
+    const k = `${r.source}|${r.fleet_id}`;
+    feedTotal.set(k, (feedTotal.get(k) || 0) + 1);
+  }
+  const feedStale = new Map();
+  for (const r of stale) {
+    const k = `${r.source}|${r.fleet_id}`;
+    feedStale.set(k, (feedStale.get(k) || 0) + 1);
+  }
   let n = 0;
   const covered = new Set();
   for (const [k, members] of groups) {
@@ -596,8 +629,6 @@ async function staleTelemetry() {
     const plates = members.map((r) => r.plate).sort();
     await put({
       code: 'tracker_feed_dark', severity: 'critical', category: 'data',
-      /* Keyed on the source and the hour, so a feed that goes quiet twice is
-         two findings and a feed that is STILL quiet is the same one. */
       /* Keyed on the feed, THE FLEET, and the moment the cluster begins — so a
          feed that is still dark is the same finding, a feed that goes quiet a
          second time is a second one, and two fleets are two.
@@ -619,14 +650,37 @@ async function staleTelemetry() {
     });
     n++;
   }
+  /* What is still reporting on this vehicle's feed, which is the only thing
+     that can distinguish a dead device from a dead integration. */
+  const live = (r) => {
+    const k = `${r.source}|${r.fleet_id}`;
+    return (feedTotal.get(k) || 0) - (feedStale.get(k) || 0);
+  };
+  const feedEvidence = (r) => {
+    const others = live(r);
+    if (others >= 2) {
+      return `${others} other vehicles on this feed are reporting normally, so this is the vehicle `
+        + 'rather than the feed — either it is off the road or the tracker has failed, and while it '
+        + 'is dark nothing about this car can be verified.';
+    }
+    if (others === 1) {
+      return 'One other vehicle on this feed is still reporting, which is thin evidence either way: '
+        + 'this may be the tracker or it may be the integration.';
+    }
+    return `Every vehicle ${sourceName(r.source)} carries for this fleet is dark, so this is more `
+      + 'likely the integration than the device — the cars cannot be told apart from the feed that '
+      + 'reports them.';
+  };
   for (const r of stale) {
     if (covered.has(r.plate)) continue;                    // reported as one feed outage
     await put({
       code: 'stale_tracker', severity: r.ageH > 72 ? 'critical' : 'warning', category: 'data',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} has not reported a position for ${Math.round(r.ageH)}h`,
-      detail: `Last fix from ${r.source} at ${minute(r.captured_at)}. No other vehicle on this feed stopped at the same time, so this is the vehicle rather than the feed — either it is off the road or the tracker has failed, and while it is dark nothing about this car can be verified.`,
-      action: `Check the device. A dead tracker also disables unauthorised-use detection for this vehicle.`,
+      detail: `Last fix from ${sourceName(r.source)} at ${minute(r.captured_at)}. ${feedEvidence(r)}`,
+      action: live(r) > 0
+        ? `Check the device. A dead tracker also disables unauthorised-use detection for this vehicle.`
+        : `Check the ${sourceName(r.source)} integration first — the account, its credential and its vehicle list. Only if the feed is healthy is this the device.`,
       impact_aed: null, metric: r.ageH, window_start: null, window_end: null,
     });
     n++;
