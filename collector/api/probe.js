@@ -20,7 +20,7 @@
 import { config } from '../src/config.js';
 import { http, qs } from '../src/http.js';
 import { pool } from '../src/db.js';
-import { uberOAuthToken, uberWebHeaders } from '../src/auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../src/auth/uber.js';
 import { probeEarnerWindow, auditTripWindow, uberOrgs } from '../src/sources/uber.js';
 import { loadSettings } from '../src/settings.js';
 import { log } from '../src/log.js';
@@ -31,7 +31,13 @@ import { log } from '../src/log.js';
    Ecosine uuid with the Egari cookie is a 401 wearing a confusing hat. */
 const uberOrg = () => config.uber.orgs?.[0] || config.uber;
 
-const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
+/* The API component had its OWN three copies of the host, and fixes 39 and 40
+   moved only the collector's. So every live Uber diagnostic on production went
+   on posting to a 301 and answering "Not Found" — and /api/probe/uber/tier
+   printed "Re-paste the supplier cookie", sending an operator to destroy a
+   session that was working at that moment. A diagnostic that is confidently
+   wrong is worse than no diagnostic. */
+const REPORTS = `${UBER_WEB_HOST}/api/vs-sp-reports-management`;
 
 /* Report types worth testing for existence. Uber answers an unknown name with
    REPORT_TYPE_INVALID, so this enumerates the surface cheaply — the report is
@@ -381,7 +387,7 @@ export function probeRoutes(app, { wrap }) {
         }
       }
     }`;
-    const { data } = await http('https://supplier.uber.com/graphql', {
+    const { data } = await http(`${UBER_WEB_HOST}/graphql`, {
       method: 'POST', timeoutMs: 30000, headers: uberWebHeaders(org),
       body: JSON.stringify({ operationName: 'GetDriver',
         variables: { orgUUID: org.orgUuid, driverUUID: uuid }, query }),
@@ -638,7 +644,7 @@ export function probeRoutes(app, { wrap }) {
     }
     if (!uuid) return res.json({ error: 'no uber driver uuid to ask about' });
 
-    const GQL = 'https://supplier.uber.com/graphql';
+    const GQL = `${UBER_WEB_HOST}/graphql`;
     const ask = async (query, variables) => {
       try {
         const { data } = await http(GQL, {

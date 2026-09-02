@@ -120,7 +120,31 @@ async function idleVehicles() {
         of the 23 had 1,039. */
      ever AS (
        SELECT plate, max(requested_at) last_trip, count(*) FILTER (WHERE platform <> 'fms')::int lifetime
-       FROM trip WHERE plate IS NOT NULL GROUP BY plate)
+       FROM trip WHERE plate IS NOT NULL GROUP BY plate),
+     /* Cars whose FEED died are not idle cars.
+        ──────────────────────────────────────────────────────────────────
+        The guard below asks only that a fix arrived in the last 48 hours,
+        and the sentence it licenses is "the vehicle is present and powered".
+        On production that sentence was printed 78 times, and 59 of those
+        plates last reported inside the same CABMAN outage this file already
+        reports as tracker_feed_dark — so one action list asserted, of the
+        same cars, that they were powered and that they were dark.
+
+        A plate is excluded when its last fix falls in a crowd: five or more
+        on one source inside the same hour, more than six hours ago. That is
+        the same shape staleTelemetry() clusters on, applied here to stop the
+        two rules contradicting each other. */
+     crowd AS (
+       SELECT source, date_trunc('hour', max_at) AS hr, count(*)::int n
+       FROM (SELECT plate, source, max(captured_at) AS max_at
+               FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, source) x
+       WHERE max_at < now() - interval '6 hours'
+       GROUP BY 1, 2 HAVING count(*) >= 5),
+     dark AS (
+       SELECT DISTINCT t.plate
+       FROM (SELECT plate, source, max(captured_at) AS max_at
+               FROM telemetry_snapshot WHERE plate IS NOT NULL GROUP BY plate, source) t
+       JOIN crowd c ON c.source = t.source AND c.hr = date_trunc('hour', t.max_at))
      SELECT s.plate, s.fleet_id, s.last_seen, coalesce(e.trips,0) trips,
             ev.last_trip, coalesce(ev.lifetime, 0) AS lifetime
      FROM seen s
@@ -128,8 +152,12 @@ async function idleVehicles() {
      LEFT JOIN ever ev USING (plate)
      WHERE coalesce(e.trips,0) = 0
        AND s.last_seen > now() - interval '48 hours'     -- tracker genuinely reporting
+       AND s.plate NOT IN (SELECT plate FROM dark)       -- the feed is what stopped, not the car
      ORDER BY s.last_seen DESC`, [String(IDLE_LOOKBACK_DAYS)]);
   for (const r of rows) {
+    /* "Present and powered" is a claim about NOW, and a fix can be two days
+       old. Said only when it is recent enough to mean it. */
+    const fixAgeH = (Date.now() - new Date(r.last_seen)) / 36e5;
     const lastTrip = r.last_trip
       ? `Its last recorded trip was ${day(r.last_trip)}, ${n_(daysAgoFrom(r.last_trip), 'day')} ago`
         + ` (${r.lifetime} recorded in total).`
@@ -138,8 +166,11 @@ async function idleVehicles() {
       code: 'idle_vehicle', severity: 'critical', category: 'utilisation',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} is reporting but has not earned in ${IDLE_LOOKBACK_DAYS} days`,
-      detail: `The tracker reported as recently as ${minute(r.last_seen)}, so the vehicle is present and `
-        + `powered — but no booking on any platform in the last ${IDLE_LOOKBACK_DAYS} days. ${lastTrip}`,
+      detail: (fixAgeH <= 6
+        ? `The tracker reported as recently as ${minute(r.last_seen)}, so the vehicle is present and powered`
+        : `The tracker last reported ${minute(r.last_seen)}, ${Math.round(fixAgeH)}h ago — recent enough `
+          + 'that the car is on the road, though not recent enough to say it is powered right now')
+        + ` — but no booking on any platform in the last ${IDLE_LOOKBACK_DAYS} days. ${lastTrip}`,
       action: `Confirm it is not in workshop or reserve. If roadworthy, assign a driver — otherwise take it off the active cost base.`,
       impact_aed: money(IDLE_LOOKBACK_DAYS * VEHICLE_DAY_COST_AED), metric: 0,
       window_start: null, window_end: null,
@@ -178,7 +209,40 @@ async function lowUtilisation(from, to) {
      FROM vehicle_utilisation
      WHERE period_start >= $1 AND period_end <= $2 AND utilisation IS NOT NULL AND hours_online > 5
      ORDER BY utilisation ASC LIMIT 40`, [from, to]);
-  if (!rows.length) return 0;
+  /* An empty answer here has never once meant "every vehicle earns well".
+     ─────────────────────────────────────────────────────────────────────
+     vehicle_utilisation has no writer anywhere in the collector — the only
+     INSERTs against it in this repository are in three test files. So this
+     rule has been declared, scheduled, and stamped as having run, and has
+     emitted nothing since it was written, while the page it feeds reports
+     nothing to do. That reads as a clean bill of health for a question
+     nobody has asked.
+
+     The table stays, because the shape is right and a feed may yet fill it.
+     What changes is that the silence is now stated: an absent measurement is
+     a fact about the fleet's instrumentation, and this product's whole rule
+     is that it must be said rather than left as an empty list. */
+  if (!rows.length) {
+    const [held] = await q('SELECT count(*)::int n FROM vehicle_utilisation');
+    if (!held || !held.n) {
+      await put({
+        code: 'utilisation_not_measured', severity: 'warning', category: 'data',
+        entity_type: 'fleet', entity_id: 'fleet',
+        title: 'No platform reports per-vehicle online hours, so utilisation cannot be measured',
+        detail: 'Utilisation is on-trip hours over online hours, per vehicle. Nothing this '
+          + 'collector reads publishes the online half: the trip feeds say when a car moved, '
+          + 'not when it was available and waiting. So no vehicle can be called under-used, and '
+          + 'an empty list here is a gap in what is collected rather than a fleet with nothing '
+          + 'to fix.',
+        action: 'Treat idle-vehicle findings as the closest available signal. A real utilisation '
+          + 'figure needs a per-vehicle online-hours feed — the driver timeline carries the '
+          + 'equivalent per PERSON, which is not the same question.',
+        impact_aed: null, metric: null, window_start: null, window_end: null,
+      });
+      return 0;
+    }
+    return 0;
+  }
   const med = rows.map((r) => r.utilisation).sort((a, b) => a - b)[Math.floor(rows.length / 2)];
   let n = 0;
   for (const r of rows) {
@@ -221,7 +285,7 @@ async function licenceRisk() {
       entity_type: 'fleet', entity_id: 'all',
       title: `Licence expiry dates look like a default, not real records`,
       detail: `${spread.common_n} of ${n_(spread.total, 'driver')} carry the identical expiry `
-        + `${spread.common_date}. That pattern is a system default rather than `
+        + `${day(spread.common_date)}. That pattern is a system default rather than `
         + `${n_(spread.common_n, 'genuine expiry', 'genuine expiries')}, so we are not raising `
         + 'individual compliance alerts against it.',
       action: `Get real licence dates into the source system — until then this fleet has no working licence-expiry check at all, which is the actual risk.`,
@@ -572,9 +636,22 @@ async function cancellations(from, to) {
       code: 'cancellation_rate', severity: r.rate > 0.15 ? 'critical' : 'warning', category: 'revenue',
       entity_type: 'platform', entity_id: r.platform, fleet_id: r.fleet_id,
       title: `${Math.round(r.rate * 100)}% of ${LABEL(r.platform)} jobs cancel (${r.cancels} of ${r.total})`,
-      detail: `Each cancellation still costs the approach drive and the driver's time. At an average fare of AED ${Number(r.avg_price || 0).toFixed(0)}, this is real money leaving before the meter starts.`,
+      /* An unpriced channel is not a channel whose fares are zero.
+         ─────────────────────────────────────────────────────────────────
+         Uber's trip export carries no fare, so avg_price is NULL for the
+         platform this rule fires on most — and `|| 0` turned that into "At
+         an average fare of AED 0", beside an impact of AED 0.00 that the
+         action page labels "as measured". A measurement of zero and the
+         absence of a measurement are opposite claims, and the second one is
+         the true one here. */
+      detail: `Each cancellation still costs the approach drive and the driver's time. `
+        + (r.avg_price == null
+          ? `${LABEL(r.platform)} reports no fare per trip, so the cash value of these `
+            + `${r.cancels} is not something this product can size — the count is the finding.`
+          : `At an average fare of ${money(Number(r.avg_price)) || 'AED 0'}, this is real money `
+            + 'leaving before the meter starts.'),
       action: `Split rider- vs driver-initiated cancels. Driver-side is a coaching problem; rider-side is usually ETA or vehicle-match.`,
-      impact_aed: money((r.cancels || 0) * Number(r.avg_price || 0) * 0.3),
+      impact_aed: r.avg_price == null ? null : money((r.cancels || 0) * Number(r.avg_price) * 0.3),
       metric: r.rate, window_start: from, window_end: to,
     });
     n++;
@@ -794,7 +871,8 @@ export async function computeInsights({ from, to } = {}) {
   const jobs = [
     ['idle_vehicle', ['idle_vehicle'], () => idleVehicles()],
     ['vehicle_dormant', ['vehicle_dormant'], () => dormantVehicles()],
-    ['low_utilisation', ['low_utilisation'], () => lowUtilisation(start, end)],
+    ['low_utilisation', ['low_utilisation', 'utilisation_not_measured'],
+      () => lowUtilisation(start, end)],
     ['licence', ['licence_data_unreliable', 'licence_expiring', 'licence_expired'],
       () => licenceRisk()],
     ['unsafe_driving', ['unsafe_driving'], () => unsafeDriving(start, end)],

@@ -135,6 +135,44 @@ check('…and a re-run adds nothing anywhere',
   JSON.stringify(before) === JSON.stringify(again),
   `${JSON.stringify(before)} → ${JSON.stringify(again)}`);
 
+/* ── and the idle rule must not call those same cars powered ──────────────
+   Production carried 78 idle_vehicle findings whose detail read "The tracker
+   reported as recently as 2026-08-31 06:49, so the vehicle is present and
+   powered" — and 59 of those plates are the CABMAN outage this file reports as
+   tracker_feed_dark. One action list, two rules, opposite claims about the
+   same cars on the same evidence. A car whose FEED stopped is not an idle car;
+   it is an invisible one, and the finding that covers it already exists. */
+console.log('\nthe idle rule leaves the dark ones to the feed finding');
+{
+  /* Seed the crowd fresh enough to pass the idle rule's 48h window but old
+     enough to be a dead feed: 40 hours, nine plates, one hour, one source —
+     and no trips at all, so idle_vehicle would otherwise take every one. */
+  const idle = await q(
+    `SELECT entity_id FROM insight WHERE code = 'idle_vehicle' ORDER BY entity_id`);
+  const names = idle.map((r) => r.entity_id);
+  check('no plate in the dark cluster is also reported as an idle vehicle',
+    !names.some((p2) => String(p2).startsWith('L-TOGETHER')),
+    JSON.stringify(names.slice(0, 12)));
+  /* And the exclusion has to be surgical. L-LIVE reported twelve minutes ago
+     and has never earned, which is exactly what an idle vehicle is — if the
+     dark-feed guard swallowed it too, the rule would have been silenced
+     rather than corrected. */
+  check('a car reporting now and earning nothing is still an idle vehicle',
+    names.includes('L-LIVE'), JSON.stringify(names.slice(0, 12)));
+  /* And the sentence: a fix hours old must not license a claim about now. */
+  const powered = await q(
+    `SELECT entity_id, detail FROM insight WHERE code = 'idle_vehicle'
+       AND detail LIKE '%present and powered%'`);
+  const stale = [];
+  for (const r of powered) {
+    const [t] = await q(
+      `SELECT max(captured_at) AS at FROM telemetry_snapshot WHERE plate = $1`, [r.entity_id]);
+    if (t && (Date.now() - new Date(t.at)) / 36e5 > 6) stale.push(r.entity_id);
+  }
+  check('“present and powered” is claimed only from a fix under six hours old',
+    stale.length === 0, JSON.stringify(stale.slice(0, 8)));
+}
+
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
