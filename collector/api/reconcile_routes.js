@@ -200,6 +200,28 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
        Dubai date, and a UTC "today" would let the last four hours of a Dubai
        day be classed as the future. */
     const TODAY = dubaiDay(new Date());
+    /* Where Uber stops answering about the on-trip side.
+       ─────────────────────────────────────────────────────────────────────
+       The earner-payments surface serves a ROLLING window measured at about
+       192 days (src/sources/uber.js:698, 725), so the statement half of this
+       page gets thinner the further back a row reaches and stops entirely
+       before it. The page already says "outside Uber's 192-day window" for a
+       month with NO statement; a month STRADDLING the edge said nothing, and
+       its gap was printed beside settled months as though it were comparable.
+
+       Measured on production 2026-09-02, where the edge falls on 2026-02-22 —
+       February's expected side steps at exactly that date:
+
+         9–15 Feb   expected 3,687/day   bank  3,800/day  (both partial)
+         16–22 Feb  expected 8,894/day   bank 25,000/day  → -64% expected
+         23–28 Feb  expected 19,571/day  bank 24,000/day  → inside the window
+
+       The same 216 drivers are on both sides throughout, so this is not a
+       population difference and not an arithmetic fault: it is the provider
+       declining to answer, and the fleet had no bad February. Nothing can
+       re-fetch those statements, so the only correct fix is to say so. */
+    const HORIZON_DAYS = 192;
+    const horizonEdge = dubaiDay(new Date(Date.now() - HORIZON_DAYS * 864e5));
 
     /* The report window each side's money was actually measured over, carried
        beside the money.
@@ -371,6 +393,17 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
     const tripsBy = byKey(tripRows); const stmtBy = byKey(stmtRows); const payBy = byKey(payRows);
     const covBy = new Map(covRows.map((r) => [r.k, r]));
 
+    /* Days of the key's span that Uber's rolling window still covers. */
+    const horizonOf = (k) => {
+      if (keyName === 'd') return { inside: k >= horizonEdge ? 1 : 0, total: 1 };
+      const [y, mo] = k.split('-').map(Number);
+      const total = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+      let inside = 0;
+      for (let i = 1; i <= total; i++) {
+        if (`${k}-${String(i).padStart(2, '0')}` >= horizonEdge) inside++;
+      }
+      return { inside, total };
+    };
     const rows = calendar.map((k) => {
       const t = tripsBy.get(k); const s = stmtBy.get(k); const p = payBy.get(k);
       const c = covBy.get(k);
@@ -421,6 +454,12 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
            matched_pairs 50 — and they inflated every month tile. They are an
            accrual, they are real, and they are not a measurement. */
         accrual: keyName === 'd' && k > TODAY,
+        /* How much of this row Uber can still be asked about. A day is in or
+           out; a month is a fraction, and February's 7-of-28 is the whole
+           reason its +81% is not a February problem. */
+        days_in_horizon: horizonOf(k).inside,
+        days_total: horizonOf(k).total,
+        statement_partial: horizonOf(k).inside < horizonOf(k).total,
         trips: t ? t.trips : null,
         ontrip_net: ontrip,
         tips,
@@ -528,6 +567,9 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
       trips_source: tripsSource,
       rows,
       totals,
+      /* The edge itself, so the page can name a date rather than repeat the
+         number 192 and leave the reader to do the arithmetic. */
+      statement_horizon: { days: HORIZON_DAYS, from: horizonEdge },
       note: NOTE,
     });
   }));

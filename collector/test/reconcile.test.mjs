@@ -620,6 +620,111 @@ console.log('\nthe repeat caption counts either side, not both');
     && /reports mixed/.test(uiSrc2));
 }
 
+/* ── a month the provider will no longer answer about is not a bad month ──
+   Uber's earner-payments surface serves a rolling window measured at about
+   192 days, so the statement half of this page gets thinner the further back a
+   row reaches. A month with NO statement already says "outside Uber's 192-day
+   window"; a month STRADDLING the edge said nothing, and its delta was printed
+   in the same red as a settled month's.
+
+   Measured on production 2026-09-02, where the edge falls on 22 February —
+   February's expected side steps at exactly that date:
+
+     9-15 Feb   expected  3,687/day   bank  3,800/day
+     16-22 Feb  expected  8,894/day   bank 25,000/day
+     23-28 Feb  expected 19,571/day   bank 24,000/day
+
+   with the SAME 216 drivers on both sides throughout, so it is not a
+   population difference and not an arithmetic fault. February read +81.4%
+   beside settled months at +13%, and an operator reading that would go looking
+   for AED 189,000 that was never missing. Nothing can re-fetch those
+   statements; the only honest fix is to stop calling it a discrepancy. */
+console.log('\na month outside the statement window says so');
+
+{
+  /* The fixture months all sit inside the rolling window, so the two branches
+     that matter — wholly outside, and straddling the edge — would never fire.
+     Seeded relative to the edge rather than at fixed dates, because the edge
+     moves forward every day and a hardcoded February stops being the straddler
+     the moment the calendar turns. */
+  const horizon = (await get('/api/reconcile')).body.statement_horizon;
+  const edgeDate = new Date(`${horizon.from}T12:00:00Z`);
+  const at = (offsetDays) => {
+    const d = new Date(edgeDate.getTime() + offsetDays * 864e5);
+    return d.toISOString().slice(0, 10);
+  };
+  /* Two days inside the edge's own month and two before it, so that month
+     straddles; and a month a good way behind it, which cannot. */
+  await stmt(at(2), 400, 0, 0, 0, 'uber_rest');
+  await pay(at(2), 420);
+  await stmt(at(-3), 100, 0, 0, 0, 'uber_rest');
+  await pay(at(-3), 380);
+  await stmt(at(-70), 90, 0, 0, 0, 'uber_rest');
+  await pay(at(-70), 350);
+
+  const all = (await get('/api/reconcile')).body;
+  const straddleMonth = horizon.from.slice(0, 7);
+  const outsideMonth = at(-70).slice(0, 7);
+  check('the month holding the edge is present to be judged',
+    all.rows.some((r) => r.m === straddleMonth), straddleMonth);
+  check('and a month behind it is too',
+    all.rows.some((r) => r.m === outsideMonth), outsideMonth);
+  check('the response names the edge rather than leaving 192 to be worked out',
+    all.statement_horizon && all.statement_horizon.days === 192
+    && /^\d{4}-\d{2}-\d{2}$/.test(String(all.statement_horizon.from)),
+    JSON.stringify(all.statement_horizon));
+
+  const edge = all.statement_horizon.from;
+  for (const r of all.rows) {
+    const first = `${r.m}-01`;
+    const last = `${r.m}-31`;
+    /* Entirely before the edge, entirely after, or straddling it — the flag
+       has to agree with the dates in all three cases, not just the easy two. */
+    if (last < edge) {
+      check(`${r.m} is wholly outside the window and says so`,
+        r.statement_partial === true && r.days_in_horizon === 0,
+        JSON.stringify([r.days_in_horizon, r.days_total, r.statement_partial]));
+    } else if (first >= edge) {
+      check(`${r.m} is wholly inside the window and claims nothing`,
+        r.statement_partial === false && r.days_in_horizon === r.days_total,
+        JSON.stringify([r.days_in_horizon, r.days_total, r.statement_partial]));
+    } else {
+      check(`${r.m} straddles the edge and reports the fraction`,
+        r.statement_partial === true
+        && r.days_in_horizon > 0 && r.days_in_horizon < r.days_total,
+        JSON.stringify([r.days_in_horizon, r.days_total, r.statement_partial]));
+    }
+  }
+
+  /* The count must be a real count of days, not the month length or a
+     constant: February's 7-of-28 is the entire content of the claim. */
+  const straddler = all.rows.find((r) => r.statement_partial
+    && r.days_in_horizon > 0 && r.days_in_horizon < r.days_total);
+  if (straddler) {
+    const [y, mo] = straddler.m.split('-').map(Number);
+    const len = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    let expect = 0;
+    for (let i = 1; i <= len; i++) {
+      if (`${straddler.m}-${String(i).padStart(2, '0')}` >= edge) expect++;
+    }
+    check('…and the fraction is the days themselves, counted',
+      straddler.days_in_horizon === expect && straddler.days_total === len,
+      JSON.stringify([straddler.m, straddler.days_in_horizon, expect, straddler.days_total, len]));
+  } else {
+    check('no month straddles the edge today, so there is nothing to count',
+      true, `edge ${edge}`);
+  }
+
+  /* A day is in or out; there is no fraction of a day. */
+  const drill = (await get(`/api/reconcile?month=${all.rows[all.rows.length - 1].m}`)).body;
+  check('a day is wholly in or wholly out, never a fraction',
+    drill.rows.every((r) => r.days_total === 1 && (r.days_in_horizon === 0 || r.days_in_horizon === 1)),
+    JSON.stringify(drill.rows.slice(0, 3).map((r) => [r.d, r.days_in_horizon, r.days_total])));
+  check('…and its flag agrees with the edge',
+    drill.rows.every((r) => r.statement_partial === (r.d < edge)),
+    JSON.stringify(drill.rows.filter((r) => r.statement_partial !== (r.d < edge)).slice(0, 3)));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -582,7 +582,13 @@ export const custodyAsOf = (ref) => (ref && ref.name
     + `${ref.day ? dayStr(`${String(ref.day).slice(0, 10)}T12:00:00`) : 'an unrecorded day'}</span>`
   : '<span class="dim">nobody on record</span>');
 
-export const pill = (text, tone) => `<span class="pill${tone ? ' ' + tone : ''}">${esc(text)}</span>`;
+/* `title` is optional and rarely the right answer — a fact a reader has to
+   hover to find is a fact most readers never see. It is here for the case
+   where the pill's TONE is the claim and the tone needs its reason: a delta
+   shown grey because the provider will no longer answer about half the month
+   would otherwise look like a delta nobody bothered to colour. */
+export const pill = (text, tone, title = null) => `<span class="pill${tone ? ` ${tone}` : ''}"${
+  title ? ` title="${esc(title)}"` : ''}>${esc(text)}</span>`;
 
 /* Every time and date in this product is Dubai time, stated explicitly.
    ─────────────────────────────────────────────────────────────────────────

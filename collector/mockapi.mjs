@@ -2061,6 +2061,13 @@ app.get('/api/reconcile', (req, r) => {
         ? row.bank_period_days_min : (row.bank_payout == null ? null : 7),
       bank_period_days: row.bank_period_days !== undefined
         ? row.bank_period_days : (row.bank_payout == null ? null : 7),
+      /* How much of the row Uber's rolling statement window still covers. A
+         month that straddles the edge is part of a month measured against a
+         whole one, and its delta is not a discrepancy. */
+      days_in_horizon: row.days_in_horizon !== undefined ? row.days_in_horizon
+        : (grain === 'm' ? 30 : 1),
+      days_total: row.days_total !== undefined ? row.days_total : (grain === 'm' ? 30 : 1),
+      statement_partial: row.statement_partial !== undefined ? row.statement_partial : false,
       delta_pct: delta == null || !expectedCovered
         ? null : Math.round((delta / Math.abs(expectedCovered)) * 1000) / 10 };
   };
@@ -2119,13 +2126,15 @@ app.get('/api/reconcile', (req, r) => {
     return r.json({ grain: 'day', month,
       scope: { kind: 'month', label: month, from: `${month}-01`, to: lastDayOf(month),
         rows: rows.length },
-      trips_source: 'rollup', rows, totals: totalsOf(rows), note });
+      trips_source: 'rollup', rows, totals: totalsOf(rows),
+      statement_horizon: { days: 192, from: '2026-02-22' }, note });
   }
 
   const rows = [
     // Work with no statement behind it: the surface does not reach March.
     { m: '2026-03', trips: 5820, ontrip_net: null, tips: null, salik: null, cash_collected: null,
-      ontrip_days: 0, ontrip_drivers: 0, bank_payout: 148200, payout_days: 31 },
+      ontrip_days: 0, ontrip_drivers: 0, bank_payout: 148200, payout_days: 31,
+      days_in_horizon: 0, days_total: 31, statement_partial: true },
     // A statement covering twelve days and two thirds of the drivers on them:
     // the shape that used to print as a 130% discrepancy.
     /* The seam: this month straddles today − EARNER_DAY_HORIZON, so part of it
@@ -2133,6 +2142,9 @@ app.get('/api/reconcile', (req, r) => {
        Carried in the fixture so the "1- and 7-day reports mixed" caption is
        exercised by a screenshot and not only by a unit test. */
     { m: '2026-04', bank_period_days_min: 1, bank_period_days: 7,
+      /* The straddling month: only part of it is still inside Uber's rolling
+         statement window, so its delta is grey rather than red. */
+      days_in_horizon: 8, days_total: 30, statement_partial: true,
       trips: 6240, ontrip_net: 171400, tips: 2110, salik: 5230, cash_collected: 34600,
       ontrip_days: 12, ontrip_drivers: 41, bank_payout: 143210, payout_days: 30,
       expected_covered: 38100, bank_covered: 40260, matched_pairs: 468, matched_drivers: 39,
@@ -2168,7 +2180,8 @@ app.get('/api/reconcile', (req, r) => {
   r.json({ grain: 'month', month: null,
     scope: { kind: 'all-time', label: 'every month on record',
       from: `${rows[0].m}-01`, to: lastDayOf(rows[rows.length - 1].m), rows: rows.length },
-    trips_source: 'rollup', rows, totals: totalsOf(rows), note });
+    trips_source: 'rollup', rows, totals: totalsOf(rows),
+    statement_horizon: { days: 192, from: '2026-02-22' }, note });
 });
 
 app.get('/api/recommendations', (_, r) => r.json({ shown: 3, truncated: false, history: 42, rows: [

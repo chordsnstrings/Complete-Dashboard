@@ -104,9 +104,26 @@ const orDash = (v, why) => (v == null
 const deltaPill = (r) => {
   if (r.delta == null) return '<span class="dim">—</span>';
   const off = r.delta_pct == null ? null : Math.abs(r.delta_pct);
-  const tone = off == null ? 'warn' : off <= 2 ? 'ok' : off <= 10 ? 'warn' : 'bad';
   const sign = r.delta > 0 ? '+' : r.delta < 0 ? '−' : '±';
-  return pill(`${sign}AED ${fmt(Math.abs(r.delta))}${off == null ? '' : ` · ${pct(off, 1)}`}`, tone);
+  const body = `${sign}AED ${fmt(Math.abs(r.delta))}${off == null ? '' : ` · ${pct(off, 1)}`}`;
+  /* A row Uber will no longer answer about in full is not a row with a
+     discrepancy — it is a row with half a measurement, and colouring it red
+     tells an operator to go and investigate a month that was fine.
+     ─────────────────────────────────────────────────────────────────────
+     The earner-payments surface serves a rolling ~192-day window. Measured on
+     production 2026-09-02, where that edge falls on 22 February, the expected
+     side steps at exactly that date: 3,687/day before the 15th, 8,894 for
+     16–22, 19,571 from the 23rd — against a bank side flat at ~25,000 and the
+     SAME 216 drivers throughout. February read +81.4% beside settled months
+     at +13%, and nothing said why. Nothing can re-fetch those statements, so
+     the only honest thing the page can do is stop calling it a discrepancy. */
+  if (r.statement_partial) {
+    return pill(body, 'dim', `${r.days_in_horizon} of ${r.days_total} days here are still inside `
+      + 'Uber\u2019s rolling statement window, so the expected side is part of a month measured '
+      + 'against a whole one — not a gap to investigate');
+  }
+  const tone = off == null ? 'warn' : off <= 2 ? 'ok' : off <= 10 ? 'warn' : 'bad';
+  return pill(body, tone);
 };
 
 /* The report window the money on this side was measured over.
