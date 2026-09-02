@@ -3775,8 +3775,17 @@ app.get('/api/coverage', (_, r) => r.json({
      on it and no money — permanently, since the provider will not serve those
      windows however many times they are asked for. */
   earnings: [
-    { platform: 'uber', n: 4158, from_day: '2026-02-09', to_day: '2026-08-21', days: 194, earnings: 1275353 },
-    { platform: 'yango', n: 62, from_day: '2026-08-01', to_day: '2026-08-21', days: 21, earnings: 8420 },
+    /* to_day is the last day STORED and to_day_settled the last that has
+       happened: an open payout period runs to the following Sunday, so this
+       table legitimately holds rows ahead of today. Production held four of
+       them and the coverage table printed the furthest as the end of the
+       record, on the page whose subject is what is missing from it. The uber
+       row carries an accrual here so the "+ N accrued to …" branch renders;
+       yango has none, so the plain case renders too. */
+    { platform: 'uber', n: 4158, from_day: '2026-02-09', to_day: '2026-08-25',
+      to_day_settled: '2026-08-21', days: 194, accrual_days: 4, earnings: 1275353 },
+    { platform: 'yango', n: 62, from_day: '2026-08-01', to_day: '2026-08-21',
+      to_day_settled: '2026-08-21', days: 21, accrual_days: 0, earnings: 8420 },
   ],
   earnings_gaps: [
     { platform: 'uber', trips_from: '2025-08-21', earnings_from: '2026-02-09', bookings_before: 131687 },

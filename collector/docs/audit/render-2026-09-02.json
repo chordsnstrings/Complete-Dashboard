@@ -1,19 +1,13 @@
 {
   "base": "http://127.0.0.1:8200",
-  "at": "2026-09-02T18:18:52.308Z",
+  "at": "2026-09-02T20:04:53.320Z",
   "widths": [
     1500,
+    1180,
     412
   ],
   "routes": 116,
   "findings": [
-    {
-      "route": "unit",
-      "width": 1500,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
-    },
     {
       "route": "unit",
       "width": 1500,
@@ -320,21 +314,21 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":57,\"empty_panels\":0,\"rows\":55,\"explained\":false,\"title\":\"Drivers with a driving event\",\"kpis\":424,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":58,\"empty_panels\":0,\"rows\":56,\"explained\":false,\"title\":\"Drivers with a driving event\",\"kpis\":434,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "cohort/settlement-cash",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":80,\"empty_panels\":0,\"rows\":78,\"explained\":false,\"title\":\"Holding cash\",\"kpis\":567,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":80,\"empty_panels\":0,\"rows\":78,\"explained\":false,\"title\":\"Holding cash\",\"kpis\":568,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "cohort/tiers-behind",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":15,\"empty_panels\":0,\"rows\":13,\"explained\":false,\"title\":\"Behind the best car of their own model\",\"kpis\":73,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":23,\"empty_panels\":0,\"rows\":21,\"explained\":false,\"title\":\"Behind the best car of their own model\",\"kpis\":119,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "platforms",
@@ -360,16 +354,9 @@
     {
       "route": "corridors",
       "width": 1500,
-      "sev": "w",
-      "code": "sparse-column",
-      "detail": "\"Avg fare\" is empty in 34 of 42 rows"
-    },
-    {
-      "route": "corridors",
-      "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":42,\"explained\":true,\"title\":\"Corridors\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":43,\"explained\":true,\"title\":\"Corridors\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "finance",
@@ -418,7 +405,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":69,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":70,\"explained\":true,\"title\":\"Corporate & hotels\",\"kpis\":4,\"tables\":2,\"charts\":0}"
     },
     {
       "route": "corporate/leakage",
@@ -460,7 +447,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":38,\"explained\":true,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":39,\"explained\":true,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "property/673dc94395448356a777f1ec/drivers",
@@ -509,7 +496,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":57,\"explained\":true,\"title\":\"To-do list\",\"kpis\":6,\"tables\":7,\"charts\":0}"
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":60,\"explained\":true,\"title\":\"To-do list\",\"kpis\":6,\"tables\":7,\"charts\":0}"
     },
     {
       "route": "capacity",
@@ -621,28 +608,28 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":215,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":217,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/verdict/unauthorized",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":16,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":17,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/verdict/authorized",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":95,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":93,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/plate/L36397",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":7,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":8,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
     },
     {
       "route": "segments/day/2026-09-01",
@@ -656,28 +643,28 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":7,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":8,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
     },
     {
       "route": "segments/nonsense/x",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":215,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":216,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
-      "route": "segment/L45227/2026-09-02T16:39:04.353Z",
+      "route": "segment/L64921/2026-09-02T19:08:40.877Z",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":1,\"rows\":20,\"explained\":true,\"title\":\"L45227\",\"kpis\":4,\"tables\":5,\"charts\":1}"
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":27,\"explained\":true,\"title\":\"L64921\",\"kpis\":4,\"tables\":6,\"charts\":1}"
     },
     {
-      "route": "segment/L45227/2026-09-02T16:39:04.353Z",
+      "route": "segment/L64921/2026-09-02T19:08:40.877Z",
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":1,\"rows\":20,\"explained\":true,\"title\":\"L45227\",\"kpis\":4,\"tables\":5,\"charts\":1}"
+      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":27,\"explained\":true,\"title\":\"L64921\",\"kpis\":4,\"tables\":6,\"charts\":1}"
     },
     {
       "route": "slot/2/19",
@@ -705,7 +692,7 @@
       "width": 1500,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":56,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":57,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "safety/vehicles",
@@ -734,13 +721,6 @@
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":0,\"empty_panels\":0,\"explained\":false,\"title\":\"Map & replay\",\"kpis\":4,\"tables\":0,\"charts\":2}"
-    },
-    {
-      "route": "sources",
-      "width": 1500,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
     },
     {
       "route": "sources",
@@ -808,13 +788,6 @@
     {
       "route": "overview?days=90&platform=uber",
       "width": 1500,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
-    },
-    {
-      "route": "overview?days=90&platform=uber",
-      "width": 1500,
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":12,\"explained\":false,\"title\":\"Fleet activity\",\"kpis\":6,\"tables\":1,\"charts\":4}"
@@ -825,13 +798,6 @@
       "sev": "i",
       "code": "stats",
       "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":419,\"explained\":true,\"title\":\"Drivers\",\"kpis\":0,\"tables\":2,\"charts\":1}"
-    },
-    {
-      "route": "unit?days=90&fleet=ecosine",
-      "width": 1500,
-      "sev": "w",
-      "code": "slow-panel",
-      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
     },
     {
       "route": "unit?days=90&fleet=ecosine",
@@ -855,11 +821,39 @@
       "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":83,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
-      "route": "corridors",
+      "route": "sources",
       "width": 412,
       "sev": "w",
-      "code": "sparse-column",
-      "detail": "\"Avg fare\" is empty in 34 of 42 rows"
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "overview?days=90&platform=uber",
+      "width": 412,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "drivers?days=7&fleet=egari",
+      "width": 412,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "unit?days=90&fleet=ecosine",
+      "width": 412,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
+    },
+    {
+      "route": "unit/assets?days=7&platform=uber",
+      "width": 412,
+      "sev": "w",
+      "code": "slow-panel",
+      "detail": "a panel needed more than 4500ms to fill — it renders, but a reader waits on a skeleton first"
     }
   ]
 }

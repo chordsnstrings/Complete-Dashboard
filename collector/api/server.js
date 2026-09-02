@@ -2268,10 +2268,29 @@ app.get('/api/coverage', wrap(async (req, res) => {
        backfill asked for those windows, every window returned ok, and every one
        of them returned nothing: a silence indistinguishable from a quiet week
        unless it is stated. This states it. */
+    /* Days that have HAPPENED, and the accrual named beside them.
+       ─────────────────────────────────────────────────────────────────────
+       driver_payout_day expands a payout period across period_start..period_end
+       and weekChunks runs an OPEN week to the following Sunday, so this table
+       legitimately holds rows for days that have not arrived yet. Unbounded,
+       max(day) reported them as the record's end: read off production
+       2026-09-02, `earnings uber to_day 2026-09-06, days 213` — four days that
+       had not happened, on the row of the table headed "what has actually
+       landed", on the page an operator opens to find out what is MISSING.
+       /api/coverage/calendar was bounded for exactly this reason; this
+       inventory is the other half of the same row and was not.
+
+       Not truncated: an accrual is real money and /api/reconcile names it, so
+       the future days are counted and labelled rather than dropped. */
     q(`SELECT platform,
               count(*)::int n,
               min(day) from_day, max(day) to_day,
-              count(DISTINCT day)::int days,
+              max(day) FILTER (WHERE day <= (now() AT TIME ZONE 'Asia/Dubai')::date)
+                AS to_day_settled,
+              count(DISTINCT day) FILTER (WHERE day <= (now() AT TIME ZONE 'Asia/Dubai')::date)::int
+                AS days,
+              count(DISTINCT day) FILTER (WHERE day > (now() AT TIME ZONE 'Asia/Dubai')::date)::int
+                AS accrual_days,
               round(sum(earnings)::numeric, 0) earnings
        FROM driver_payout_day
        WHERE earnings IS NOT NULL

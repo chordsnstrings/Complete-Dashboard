@@ -4431,10 +4431,20 @@ V.sources = async (root) => {
        driver_payout_day, whose column is `day`. Reading from_ts/first_period
        left both of these rows with no dates at all, on the two rows about the
        money. */
+    /* The LATEST day that has happened, not the latest row stored.
+       ─────────────────────────────────────────────────────────────────────
+       A payout period runs to the following Sunday, so driver_payout_day
+       legitimately holds rows for days ahead of today — production 2026-09-02
+       held four, and this cell printed "6 Sep 2026" as the end of the record
+       on the page whose subject is what is missing from it. The endpoint now
+       returns to_day_settled and accrual_days; the accrual is real money and
+       is named rather than dropped. */
     ...(coverage.earnings || []).map((r) => ({ what: `earnings · ${sourceLabel(r.platform || r.source)}`,
       key: `earnings:${r.platform || r.source}`, src: null, n: r.n,
       from: r.from_day || r.from_ts || r.first_period,
-      to: r.to_day || r.to_ts || r.last_period,
+      to: r.to_day_settled || r.to_day || r.to_ts || r.last_period,
+      accrual_days: r.accrual_days || 0,
+      accrual_to: r.accrual_days ? r.to_day : null,
       value: r.earnings ?? r.amount ?? r.total ?? null })),
     /* from_ts on all three now. The endpoint selected only a LAST timestamp
        for these, so seven of the eleven rows on a table headed "what has
@@ -4473,7 +4483,16 @@ V.sources = async (root) => {
         ? '<span class="ent-off" title="this dataset carries no money">—</span>'
         : money(r.value)) }] : []),
     { label: 'From', key: 'from', render: (r) => dateStr(r.from) },
-    { label: 'Latest', key: 'to', render: (r) => (r.to ? dtStr(r.to) : '—') },
+    /* The accrual, said beside the date rather than folded into it. A payout
+       period that has not closed carries days ahead of today; printing the
+       last of them as "Latest" claimed a record that runs into next week. */
+    { label: 'Latest', key: 'to',
+      render: (r) => (r.to
+        ? dtStr(r.to) + (r.accrual_days
+          ? `<span class="dim" title="a payout period that has not closed yet — the money is accrued, not collected on those days">`
+            + ` + ${fmt(r.accrual_days)} accrued to ${esc(dateStr(r.accrual_to))}</span>`
+          : '')
+        : '—') },
     { label: 'Days collected', key: '_d', render: (r) => (r.cal
       ? `${fmt(r.cal.days_with_data)} of ${fmt(r.cal.days_with_data + r.cal.missing_days)}`
       : '<span class="ent-off" title="this dataset has no per-day calendar behind it">not a dated source</span>') },

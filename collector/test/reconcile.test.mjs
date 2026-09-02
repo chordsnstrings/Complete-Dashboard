@@ -688,14 +688,33 @@ console.log('\nthe gap is not coloured as a fault inside the floor the page docu
    alike, and the page rendering the larger one as a quantity of days. */
 console.log('\nthe accrued days are days');
 {
-  const m = new Date().toISOString().slice(0, 7);
-  const ahead = new Date(Date.now() + 3 * 864e5).toISOString().slice(0, 10);
+  /* The DUBAI day, because /api/reconcile bounds its accrual on the Dubai day
+     and the block above seeds against the Dubai day too.
+     ─────────────────────────────────────────────────────────────────────────
+     This computed its month and its offsets in UTC. For twenty hours a day the
+     two calendars agree and it passed; for the four hours after 20:00 UTC the
+     Dubai date is a day ahead, so this block's "+3" and the earlier block's
+     "+3" stopped naming the same day and the union of accrued days went from
+     two to three. Measured at 2026-09-02 20:55Z: accrual_days 3, expected 2 —
+     a test that only holds while the process clock happens to agree with the
+     fleet's, in a file whose whole subject is which days count. */
+  const dubaiDay = (offset = 0) => {
+    const today = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
+    const d = new Date(`${today}T12:00:00Z`);
+    d.setUTCDate(d.getUTCDate() + offset);
+    return d.toISOString().slice(0, 10);
+  };
+  const m = dubaiDay().slice(0, 7);
+  const ahead = dubaiDay(3);
   if (ahead.slice(0, 7) === m) {
     /* Three drivers, two future days: six rows, two days. count(*) answers 6
-       and only a DISTINCT count answers 2. */
+       and only a DISTINCT count answers 2. The day three out is the one the
+       block above already seeded, so the union across both is still two. */
     for (const who of ['a', 'b', 'c']) {
       for (const off of [2, 3]) {
-        const d = new Date(Date.now() + off * 864e5).toISOString().slice(0, 10);
+        const d = dubaiDay(off);
         await db.query(
           `INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, driver_name, day,
              period_start, period_end, earnings, cash_earnings)
