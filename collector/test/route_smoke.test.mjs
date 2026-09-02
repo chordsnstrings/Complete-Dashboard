@@ -462,8 +462,13 @@ check('the trip table survived the injection attempt',
   // shape the collector has never written.
   const dbSrc = readFileSync('src/db.js', 'utf8');
   check('a run with a failed window cannot report ok',
-    /const status = run\.status === 'error' \? 'error'/.test(dbSrc)
+    /const status = run\.status === 'error' \|\| allFailed \? 'error'/.test(dbSrc)
     && /failed \? 'partial'/.test(dbSrc), 'logRun must downgrade to partial');
+  /* And one that failed EVERY window is not a partial either — there is no
+     part. Two production runs wore an amber pill on 44-of-44 failures; the
+     shape of that is driven in test/run_honesty.test.mjs. */
+  check('…and a run with no successful window at all reports error',
+    /const allFailed = /.test(dbSrc), 'logRun must escalate an all-failed run');
   check('the failed windows are stored, not just counted',
     /detail/.test(dbSrc) && /chunks\.map/.test(dbSrc));
   await q(`INSERT INTO collection_run (source,mode,status,rows_written,chunks_total,chunks_failed,detail,finished_at)

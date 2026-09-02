@@ -2,8 +2,9 @@
 // snapshots; running it on a schedule is how we build CABMAN history ourselves.
 import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
-import { upsertMany, logRun } from '../db.js';
+import { upsertMany, logRun, pool } from '../db.js';
 import { log } from '../log.js';
+import { noteCredential } from '../auth_state.js';
 
 const SRC = 'cabman';
 
@@ -43,10 +44,31 @@ const truthy = (v) => {
 export async function pullLive() {
   let total = 0;
   for (const f of config.cabman.fleets) {
-    if (!f.pass) { log.warn(SRC, `no password for ${f.fleet}, skipping`); continue; }
-    const { data } = await http(config.cabman.url, {
+    if (!f.pass) {
+      log.warn(SRC, `no password for ${f.fleet}, skipping`);
+      await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: 'CABMAN_PASSWORD',
+        state: 'missing', surface: 'IVDData',
+        detail: 'no password configured, so this fleet has no live tracker feed' });
+      continue;
+    }
+    const { data, status } = await http(config.cabman.url, {
       headers: { InterfaceUniqueId: f.interfaceId, InterfaceUserName: f.user, InterfacePassword: f.pass },
     });
+    /* A refused feed is not an empty feed.
+       ─────────────────────────────────────────────────────────────────────
+       http() resolves whatever the status, and this read `data?.IVDDataResult
+       || []` — so a 401 produced zero vehicles, the same as a quiet minute,
+       and the run said nothing. Downstream that is not quiet at all: the
+       insight rules read the absence as vehicles, and production carried 85
+       stale_tracker findings, of which 85 were CABMAN, each telling an
+       operator to "Check the device" on a device that was answering fine. One
+       credential, printed eighty-five times as eighty-five broken cars. */
+    if (status && status >= 400) {
+      log.error(SRC, `live feed refused for ${f.fleet}`, { status });
+      await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: 'CABMAN_PASSWORD',
+        state: 'invalid', surface: 'IVDData', detail: `HTTP ${status}` });
+      continue;
+    }
     const now = new Date().toISOString();
     const rows = (data?.IVDDataResult || []).map((v) => ({
       source: SRC, fleet_id: f.fleet, plate: normPlate(v.VehicleID),

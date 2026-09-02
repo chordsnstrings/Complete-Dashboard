@@ -598,10 +598,19 @@ async function staleTelemetry() {
       code: 'tracker_feed_dark', severity: 'critical', category: 'data',
       /* Keyed on the source and the hour, so a feed that goes quiet twice is
          two findings and a feed that is STILL quiet is the same one. */
-      /* Keyed on the feed and the moment the cluster begins, so a feed that is
-         still dark is the same finding and a feed that goes quiet a second
-         time is a second one. */
-      entity_type: 'source', entity_id: `${source}:${String(at.toISOString ? at.toISOString() : at).slice(0, 13)}`,
+      /* Keyed on the feed, THE FLEET, and the moment the cluster begins — so a
+         feed that is still dark is the same finding, a feed that goes quiet a
+         second time is a second one, and two fleets are two.
+         ─────────────────────────────────────────────────────────────────────
+         The fleet was missing, and put()'s arbiter is (code, entity_type,
+         entity_id, window_start, window_end) with fleet_id in the SET list. So
+         when both fleets' CABMAN vehicles fell dark inside the same hour —
+         which is what a single shared integration failing looks like — the
+         second cluster did not become a second finding. It overwrote the
+         first, flipped fleet_id to its own, and one fleet's outage left the
+         board entirely. Nine ecosine vehicles became seven egari ones. */
+      entity_type: 'source',
+      entity_id: `${source}:${fleetId}:${String(at.toISOString ? at.toISOString() : at).slice(0, 13)}`,
       fleet_id: fleetId,
       title: `${plates.length} ${sourceName(source)} trackers stopped reporting within the same hour`,
       detail: `All ${plates.length} last reported around ${minute(at)}, ${ageH}h ago — ${plates.slice(0, 8).join(', ')}${plates.length > 8 ? ` and ${plates.length - 8} more` : ''}. Vehicles do not fail together; a feed does.`,

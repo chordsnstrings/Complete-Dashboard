@@ -108,19 +108,44 @@ async function checkYango({ value }) {
      failure, which is the one outcome worse than no check: it tells an
      operator to go and re-capture a session that is fine. */
   const day = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
+  /* Three credentials ride on every Yango request — the park id, the API key
+     and the cookie — so a refusal names none of them. Asking once cannot tell
+     them apart; asking twice can. */
+  const ask = (cookie) => http(`${config.yango.base}/api/reports-api/v1/orders/list`, {
+    method: 'POST', timeoutMs: 30000, retries: 0,
+    headers: {
+      'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
+      'content-type': 'application/json', 'Accept-Language': 'en',
+      ...(cookie ? { cookie } : {}),
+    },
+    body: JSON.stringify({
+      date_type: 'booked_at',
+      date_from: `${day(1)}T00:00:00+04:00`, date_to: `${day(0)}T23:59:59+04:00`,
+    }),
+  });
   try {
-    const { data, status } = await http(`${config.yango.base}/api/reports-api/v1/orders/list`, {
-      method: 'POST', timeoutMs: 30000, retries: 0,
-      headers: {
-        'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
-        'content-type': 'application/json', 'Accept-Language': 'en', cookie: value,
-      },
-      body: JSON.stringify({
-        date_type: 'booked_at',
-        date_from: `${day(1)}T00:00:00+04:00`, date_to: `${day(0)}T23:59:59+04:00`,
-      }),
-    });
-    if (status === 401 || status === 403) return verdict(false, `the fleet portal refused this session (${status})`);
+    const { data, status } = await ask(value);
+    if (status === 401 || status === 403) {
+      /* The false failure this function's own header warns about, committed
+         one screen below it.
+         ───────────────────────────────────────────────────────────────────
+         Measured 2026-09-02: this endpoint answers 403 with a byte-identical
+         body when the cookie header is omitted ENTIRELY. So a 403 here is not
+         evidence about the cookie, and telling an operator to go back to a
+         logged-in fleet.yango.com tab and re-capture a session is telling them
+         to do work that cannot change the answer — which is exactly what the
+         product had been saying.
+
+         One extra request settles it: if the refusal is the same without the
+         cookie, the cookie is not what is being refused. */
+      const bare = await ask(null).catch(() => null);
+      if (bare && bare.status === status) {
+        return verdict(false, `the portal refuses this park with or without a session (${status}), `
+          + 'so the cookie is not what it is rejecting — check YANGO_PARK_ID and YANGO_API_KEY, '
+          + `whose park is ${config.yango.parkId}`);
+      }
+      return verdict(false, `the fleet portal refused this session (${status})`);
+    }
     /* `orders` present — even empty — is the portal answering as this park. */
     if (data && typeof data === 'object' && Array.isArray(data.orders)) {
       return verdict(true, `the fleet portal answered for park ${config.yango.parkId}`);

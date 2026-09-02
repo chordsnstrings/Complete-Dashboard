@@ -34,8 +34,10 @@ check('the collector asks Aladhan for a whole month, not one day',
   'the one-day gToH endpoint is why the table only ever held the days a run happened');
 check('and it writes them in one upsert rather than one row per run',
   /upsertMany\('calendar_day'/.test(code));
+/* Tolerant of extra arguments — the failure-reason accumulator was added
+   later and this is a rule about the WINDOW, not about the arity. */
 check('the range comes from the run window, so a backfill fills history',
-  /pullCalendar\(from \|\| back\(\d+\), to \|\| today\)/.test(code));
+  /pullCalendar\(from \|\| back\(\d+\), to \|\| today[,)]/.test(code));
 check('collect() takes the window it is given',
   /collect\(\{ mode = 'incremental', from = null, to = null \} = \{\} \)?/.test(code)
   || /collect\(\{ mode = 'incremental', from = null, to = null \} = \{\}\)/.test(code));
@@ -88,7 +90,7 @@ check('...and a string window still passes through untouched',
    coerces before calling it. A rule that forbade the slice would forbid the
    correct code along with the incorrect. */
 check('pullCalendar coerces its own arguments rather than trusting the caller',
-  /async function pullCalendar\(rawFrom, rawTo\)/.test(code)
+  /async function pullCalendar\(rawFrom, rawTo[,)]/.test(code)
   && /const from = dayOf\(rawFrom\);/.test(code) && /const to = dayOf\(rawTo\);/.test(code),
   'the coercion has to sit where the string is needed, or the next caller reintroduces the bug');
 check('...and refuses rather than throwing when it cannot get a day at all',

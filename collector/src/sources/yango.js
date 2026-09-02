@@ -4,10 +4,11 @@
 //  Ledger  : /api/v1/reports/transactions/park/list (cursor)
 import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
-import { upsertMany, logRun } from '../db.js';
+import { upsertMany, logRun, pool } from '../db.js';
 import { iso, weekChunks } from '../util.js';
 import { log } from '../log.js';
 import { stateRow } from '../roster.js';
+import { noteCredential } from '../auth_state.js';
 
 const SRC = 'yango';
 const headers = () => ({
@@ -33,9 +34,42 @@ const post = async (path, body) => {
     method: 'POST', headers: headers(), body: JSON.stringify(body),
   });
   if (r.status && r.status >= 400) {
-    const hint = r.status === 401 || r.status === 403
-      ? ' — the Yandex session has expired; re-paste YANGO_COOKIE from a logged-in fleet.yango.com tab'
-      : '';
+    let hint = '';
+    if (r.status === 401 || r.status === 403) {
+      /* Which of the three credentials is being refused.
+         ─────────────────────────────────────────────────────────────────
+         Every request carries the park id, the API key AND the cookie, so
+         the refusal on its own names none of them. This used to name the
+         cookie regardless: "the Yandex session has expired; re-paste
+         YANGO_COOKIE". Measured 2026-09-02, the endpoint answers the same
+         403 with the cookie header omitted entirely — so that sentence sent
+         an operator to re-capture a session that was never the question,
+         and the real suspect went unnamed for as long as they believed it.
+
+         One extra request settles it, and it is worth one request: this
+         path is only reached when the run is already lost. */
+      const bare = await http(`${config.yango.base}${path}`, {
+        method: 'POST', body: JSON.stringify(body),
+        headers: { 'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
+          'content-type': 'application/json', 'Accept-Language': 'en' },
+      }).catch(() => null);
+      const cookieIsNotIt = bare && bare.status === r.status;
+      hint = cookieIsNotIt
+        ? ` — the same refusal arrives with no cookie at all, so the session is not what is being rejected;`
+          + ` check YANGO_PARK_ID (${config.yango.parkId}) and YANGO_API_KEY`
+        : ' — the Yandex session has expired; re-paste YANGO_COOKIE from a logged-in fleet.yango.com tab';
+      /* Recorded, not only thrown: a thrown error dies with the run, and the
+         credential panel is where somebody goes to find out what to re-paste.
+         Uber has done this since the OAuth work; the other five sources never
+         did, so their refusals reached the operator as a source that had
+         simply gone quiet. */
+      await noteCredential(pool, {
+        provider: SRC, fleet: config.yango.fleet || '*',
+        credential: cookieIsNotIt ? 'YANGO_API_KEY' : 'YANGO_COOKIE',
+        state: 'invalid', surface: path,
+        detail: `HTTP ${r.status}${cookieIsNotIt ? ' with or without a cookie' : ''}`,
+      });
+    }
     throw new Error(`yango ${path} refused: HTTP ${r.status}${hint}`);
   }
   return r;

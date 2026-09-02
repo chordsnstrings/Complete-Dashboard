@@ -10,13 +10,13 @@ const SRC = 'external';
 const LAT = 25.2048, LON = 55.2708;              // Dubai
 
 // Past 30 days + 7-day forecast in one call (open-meteo serves both from the forecast endpoint).
-async function pullWeather() {
+async function pullWeather(failed = []) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}`
     + `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max`
     + `&past_days=30&forecast_days=7&timezone=Asia%2FDubai`;
   const { data } = await http(url, { timeoutMs: 45000, retries: 3 });
   const d = data?.daily;
-  if (!d?.time) return 0;
+  if (!d?.time) { failed.push('weather: open-meteo answered without a daily block'); return 0; }
   /* The Dubai day, not the UTC one. open-meteo was asked for Asia/Dubai days,
      so between 20:00 and midnight Dubai a UTC "today" marked the current day
      as a forecast — and everything that reads is_forecast then treats a
@@ -99,14 +99,14 @@ function monthsBetween(from, to) {
    The times come back without an offset because the request names the zone, so
    the offset is appended: bound into a timestamptz column by a collector
    running in UTC, a bare local time would land four hours early. */
-async function pullSun(from, to) {
+async function pullSun(from, to, failed = []) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${LAT}&longitude=${LON}`
     + `&daily=sunrise,sunset&start_date=${from}&end_date=${to}&timezone=Asia%2FDubai`;
   const out = new Map();
   try {
     const { data } = await http(url, { timeoutMs: 45000, retries: 2 });
     const d = data?.daily;
-    if (!d?.time) return out;
+    if (!d?.time) { failed.push('sun: open-meteo answered without a daily block'); return out; }
     d.time.forEach((day, i) => {
       const rise = d.sunrise?.[i]; const set = d.sunset?.[i];
       if (rise || set) out.set(day, { sunrise: rise ? `${rise}:00+04:00` : null, sunset: set ? `${set}:00+04:00` : null });
@@ -115,11 +115,12 @@ async function pullSun(from, to) {
     /* A missing sunrise is a missing sunrise. The Hijri half of this row is
        the half anything reads, and it is not worth losing to this. */
     log.warn(SRC, 'sun lookup failed for the range', { from, to, err: String(e).slice(0, 100) });
+    failed.push(`sun ${from}..${to}: ${String(e).slice(0, 120)}`);
   }
   return out;
 }
 
-async function pullCalendar(rawFrom, rawTo) {
+async function pullCalendar(rawFrom, rawTo, failed = []) {
   const from = dayOf(rawFrom);
   const to = dayOf(rawTo);
   if (!from || !to) return 0;
@@ -129,7 +130,7 @@ async function pullCalendar(rawFrom, rawTo) {
   const end = to > today ? today : to;
   if (from > end) return 0;
 
-  const sun = await pullSun(from, end);
+  const sun = await pullSun(from, end, failed);
   const rows = [];
   for (const [y, m] of monthsBetween(from, end)) {
     let days = null;
@@ -139,8 +140,9 @@ async function pullCalendar(rawFrom, rawTo) {
       days = Array.isArray(data?.data) ? data.data : null;
     } catch (e) {
       log.warn(SRC, 'hijri month lookup failed', { y, m, err: String(e).slice(0, 100) });
+      failed.push(`hijri ${y}-${String(m).padStart(2, '0')}: ${String(e).slice(0, 120)}`);
     }
-    if (!days) continue;
+    if (!days) { if (!failed.some((f) => f.startsWith(`hijri ${y}-`))) failed.push(`hijri ${y}-${String(m).padStart(2, '0')}: answered without a calendar`); continue; }
     for (const entry of days) {
       // "DD-MM-YYYY", the provider's own format for the Gregorian side.
       const g = String(entry?.gregorian?.date || '');
@@ -162,13 +164,42 @@ async function pullCalendar(rawFrom, rawTo) {
       rows.push(row);
     }
   }
-  if (!rows.length) return 0;
+  /* A range with days in it that yields no rows is a failure, whichever step
+     swallowed it — the provider answering 200 with a calendar this code cannot
+     read looks, from here, exactly like the provider being down. Production
+     wrote zero calendar rows on a backfill spanning 25 months and reported ok.
+     This is the line that stops that being possible. */
+  if (!rows.length) {
+    failed.push(`calendar ${from}..${end}: asked for `
+      + `${monthsBetween(from, end).length} month(s) and wrote no day`);
+    return 0;
+  }
   return upsertMany('calendar_day', rows, ['day']);
 }
 
 export async function collect({ mode = 'incremental', from = null, to = null } = {}) {
+  /* Why this source cannot simply say 'ok'.
+     ───────────────────────────────────────────────────────────────────────
+     Every fetch under here swallows: pullWeather returns 0 on a body with no
+     daily block, the Hijri lookup catches into log.warn and `continue`, and
+     pullCalendar returns 0 if nothing accumulated. The run status was the
+     literal 'ok', so the only outcomes this source could ever report were
+     'ok' and a thrown error.
+
+     Measured on production 2026-09-02: all three latest runs — backfill,
+     catch-up and incremental — reported ok with rows_written 37, and 37 is
+     exactly past_days 30 + forecast_days 7. The calendar half had written
+     nothing on any of them, including a backfill spanning 25 months and 25
+     Aladhan calls. calendar_day stopped dead at 2026-08-31; every day since,
+     today included, carried hijri_month NULL and is_holiday NULL, on a
+     product that prints Ramadan and public holidays beside every trip and
+     feeds them to the forecaster. Nothing anywhere said so.
+
+     uber_fleet.js:359-392 already carries this treatment; it was never
+     brought here. */
+  const failed = [];
   try {
-    const w = await pullWeather();
+    const w = await pullWeather(failed);
     /* The range the run asked for, and a fortnight either way on an
        incremental — cheap (one Aladhan call per month), and it repairs the
        history that the one-row-per-run version never wrote. */
@@ -178,9 +209,14 @@ export async function collect({ mode = 'incremental', from = null, to = null } =
       d.setUTCDate(d.getUTCDate() - days);
       return d.toISOString().slice(0, 10);
     };
-    const c = await pullCalendar(from || back(45), to || today);
-    await logRun({ source: SRC, fleet_id: null, mode, status: 'ok', rows_written: w + c });
-    log.info(SRC, 'done', { weather_days: w, calendar: c });
+    const c = await pullCalendar(from || back(45), to || today, failed);
+    /* A run that wrote the weather and none of the calendar is 'partial': half
+       the product's context landed. One that wrote neither is an error however
+       quietly each half failed. */
+    await logRun({ source: SRC, fleet_id: null, mode, rows_written: w + c,
+      status: !failed.length ? 'ok' : (w + c > 0 ? 'partial' : 'error'),
+      error: failed.length ? failed.slice(0, 4).join('; ').slice(0, 400) : null });
+    log.info(SRC, 'done', { weather_days: w, calendar: c, failed: failed.length });
   } catch (e) {
     await logRun({ source: SRC, fleet_id: null, mode, status: 'error', error: String(e) });
     log.error(SRC, 'failed', { err: String(e) });

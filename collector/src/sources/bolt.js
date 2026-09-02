@@ -5,11 +5,12 @@
 //                                 and the supervisor must re-capture one.
 import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
-import { upsertMany, logRun } from '../db.js';
+import { upsertMany, logRun, pool } from '../db.js';
 import { unixS, iso, jwtPayload, jwtExpiry } from '../util.js';
 import { log } from '../log.js';
 import { stateRow } from '../roster.js';
 import { get, setSetting } from '../settings.js';
+import { noteCredential } from '../auth_state.js';
 
 const SRC = 'bolt';
 
@@ -186,6 +187,12 @@ async function pullPortalTrips(from, to, fails) {
     if (!rt) {
       log.warn(SRC, `portal skipped for ${c.fleet} — no refresh token (trips/earnings unavailable)`);
       fails.push(`portal ${c.fleet}: no refresh token configured`);
+      /* A credential that was never supplied is a different problem from one
+         that stopped working, and the panel an operator opens to find out what
+         to re-paste has to be able to say which. Both were silence before. */
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
+        state: 'missing', surface: 'orderHistory',
+        detail: 'no refresh token configured, so trips and earnings are not collected for this fleet' });
       continue;
     }
 
@@ -203,6 +210,16 @@ async function pullPortalTrips(from, to, fails) {
         expires_at: m?.expires_at || 'unknown',
       });
       fails.push(`portal ${c.fleet}: ${err}`);
+      /* Bolt refresh tokens last about seven days, so this is the routine
+         end of one rather than a fault — but it is only routine to somebody
+         who is told. It reached the operator as a source that had quietly
+         stopped carrying trips. The owner mismatch is recorded separately
+         because re-pasting cannot fix a token minted for the other fleet. */
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
+        state: 'invalid', surface: 'orderHistory',
+        detail: m?.fleet_owner_id != null && m.fleet_owner_id !== c.userId
+          ? `the token belongs to owner ${m.fleet_owner_id}, not ${c.userId} — it is the wrong fleet's token, not an expired one`
+          : `${String(err).slice(0, 150)}${m?.expires_at ? ` (expired ${m.expires_at})` : ''}` });
       continue;
     }
     const url = `${config.bolt.portalBase}/orderHistory/getTable?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`;

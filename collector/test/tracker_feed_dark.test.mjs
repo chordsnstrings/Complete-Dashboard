@@ -173,6 +173,37 @@ console.log('\nthe idle rule leaves the dark ones to the feed finding');
     stale.length === 0, JSON.stringify(stale.slice(0, 8)));
 }
 
+/* One integration, two fleets, one hour.
+   ─────────────────────────────────────────────────────────────────────────
+   CABMAN serves both fleets, so the ordinary shape of it failing is both
+   fleets going dark at the same moment. entity_id was `${source}:${hour}` and
+   put()'s arbiter is (code, entity_type, entity_id, window_start, window_end)
+   with fleet_id in the SET list — so the second cluster did not become a
+   second finding. It overwrote the first and flipped fleet_id to its own, and
+   one fleet's outage left the board. The block above only caught it on the
+   days the clock happened to put both clusters in the same hour, which is why
+   this seeds the collision deliberately rather than waiting for it. */
+console.log('\ntwo fleets dark on the same feed in the same hour are two findings');
+{
+  const at = new Date(Date.now() - 50 * H);
+  at.setUTCMinutes(10, 0, 0);
+  const seed = (fleet, i) => q(
+    `INSERT INTO telemetry_snapshot (source, fleet_id, plate, captured_at, polled_at, lat, lng, speed, status)
+     VALUES ('cabman', $1, $2, $3::timestamptz, $3::timestamptz, 25.2, 55.3, 0, 'Stopped')`,
+    [fleet, `L-${fleet.toUpperCase()}-PAIR-${i}`, new Date(at.getTime() + i * 60000).toISOString()]);
+  for (let i = 0; i < 6; i++) { await seed('ecosine', i); await seed('egari', i + 20); }
+  await computeInsights({});
+  const both = await q(
+    `SELECT fleet_id, entity_id, metric FROM insight
+      WHERE code = 'tracker_feed_dark' AND entity_id LIKE '%${at.toISOString().slice(0, 13)}%'
+      ORDER BY fleet_id`);
+  check('both fleets are reported, not just whichever was written last',
+    both.length === 2 && both[0].fleet_id === 'ecosine' && both[1].fleet_id === 'egari',
+    JSON.stringify(both));
+  check('…and the key says which fleet, so neither can overwrite the other',
+    both.every((r) => r.entity_id.includes(r.fleet_id)), JSON.stringify(both.map((r) => r.entity_id)));
+}
+
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

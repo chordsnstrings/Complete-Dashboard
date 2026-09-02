@@ -5,10 +5,11 @@
 // driver, pick/drop locations + lat/lon, totalDistance, cost, paymentMethod, status, tripZone.
 import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
-import { upsertMany, logRun } from '../db.js';
+import { upsertMany, logRun, pool } from '../db.js';
 import { dateChunks, iso } from '../util.js';
 import { log } from '../log.js';
 import { stateRow } from '../roster.js';
+import { noteCredential } from '../auth_state.js';
 
 const SRC = 'hotel';
 
@@ -62,10 +63,22 @@ function parseLicenceDate(v) {
 const hotelNames = new Map();
 async function loadHotels(c) {
   try {
-    const { data } = await http(`${c.base}/api/operation-managers/hotels`, {
+    const { data, status } = await http(`${c.base}/api/operation-managers/hotels`, {
       timeoutMs: 30000, headers: { authorization: `Bearer ${c.token}`, 'x-domain': c.domain },
     });
-    const list = (data?.data || data || []).filter((h) => h?._id);
+    /* The same swallow, one function above the one that mattered: a 401 body is
+       an object, `.filter` is not a function on it, and the TypeError landed in
+       the catch below as "hotel list failed" — a warning about this code rather
+       than about the credential, on a run that then reported ok with no
+       property names. */
+    if (status && status >= 400) {
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
+        credential: 'HOTEL_TOKEN', state: 'invalid', surface: 'hotels',
+        detail: `HTTP ${status}` });
+      throw new Error(`hotel property list refused: HTTP ${status}`);
+    }
+    const list = (Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [])
+      .filter((h) => h?._id);
     for (const h of list) hotelNames.set(h._id, h.name || null);
     if (list.length) {
       await upsertMany('partner', list.map((h) => ({
@@ -96,10 +109,22 @@ export async function collect({ from, to, mode }) {
       let trips = [];
       try {
         const url = `${c.base}/api/operation-managers/report/get-trip-report?startDate=${iso(s)}&endDate=${iso(e)}`;
-        const { data } = await http(url, {
+        const { data, status } = await http(url, {
           timeoutMs: 120000,
           headers: { authorization: `Bearer ${c.token}`, 'x-domain': c.domain },
         });
+        /* http() resolves whatever the status, and this read `data?.data?.trips
+           || []` — so an expired bearer produced zero trips for a month, which
+           is indistinguishable from a month in which the corporate channel
+           carried nobody. The window has to refuse rather than answer empty,
+           and the credential has to be named where an operator looks for it. */
+        if (status && status >= 400) {
+          await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
+            credential: 'HOTEL_TOKEN', state: 'invalid', surface: 'get-trip-report',
+            detail: `HTTP ${status}` });
+          throw new Error(`hotel trip report refused: HTTP ${status}`
+            + ' — the corporate portal bearer is no longer accepted');
+        }
         trips = data?.data?.trips || [];
       } catch (err) {
         // One window failing must not abandon the rest — and must not be

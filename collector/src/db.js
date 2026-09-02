@@ -236,20 +236,46 @@ export async function upsertMany(table, rows, conflict, chunk = 200) {
 export async function logRun(run, db = pool) {
   const chunks = Array.isArray(run.chunks) ? run.chunks : null;
   const failed = chunks ? chunks.filter((c) => c.error).length : null;
-  // A source that succeeded on some windows and failed on others is not 'ok',
-  // whatever it managed to write.
-  const status = run.status === 'error' ? 'error'
+  /* A source that succeeded on some windows and failed on others is not 'ok',
+     whatever it managed to write. And one that failed on ALL of them is not
+     'partial' either — there is no part.
+     ─────────────────────────────────────────────────────────────────────────
+     Measured on production 2026-09-02: the two newest Uber catch-up runs read
+       uber catchup ecosine  partial  rows=0  chunks 44  failed 44
+       uber catchup egari    partial  rows=0  chunks 44  failed 44
+     with error NULL, because the per-window errors live only in `detail`. The
+     Data-sources page paints 'partial' amber and 'error' red, so the total
+     death of the supplier session — 74 of those 88 windows said "redirected to
+     auth.uber.com — the session is no longer signed in" — wore the same colour
+     as a run that mostly worked, under a caption reading '"partial" means the
+     run wrote rows AND left windows unfetched'. Both halves of that sentence
+     were false for the loudest failure on the fleet. */
+  const allFailed = !!failed && failed === (chunks ? chunks.length : 0);
+  const status = run.status === 'error' || allFailed ? 'error'
     : (failed ? 'partial' : (run.status || 'ok'));
+  /* The red cell is driven by `error`, not by status, so a run whose only
+     account of itself is 44 identical window errors has to surface one of
+     them. A caller that gave its own error still wins. */
+  const error = run.error
+    || (allFailed ? String(chunks.find((c) => c.error).error).slice(0, 300) : null);
   const { rows } = await db.query(
     `INSERT INTO collection_run
        (source,fleet_id,mode,window_start,window_end,status,rows_written,finished_at,error,
         chunks_total,chunks_failed,detail)
      VALUES ($1,$2,$3,$4,$5,$6,$7,now(),$8,$9,$10,$11) RETURNING id`,
     [run.source, run.fleet_id, run.mode, run.window_start, run.window_end, status,
-     run.rows_written || 0, run.error || null,
+     run.rows_written || 0, error,
      chunks ? chunks.length : null, failed,
+     /* `kind` survives the projection because a source can collect more than
+        one surface in one run and the reader cannot otherwise tell them apart.
+        FMS is the case that forced it: the same 31-day window appears twice in
+        /api/status — once ok with 3,038 trips, once failed — and until this key
+        arrived nothing on screen said the failing one was the ALERT feed, so a
+        73-day alert hole read as a telematics outage that had plainly not
+        happened. Omitted where the source never sets it. */
      chunks ? JSON.stringify(chunks.map((c) => ({
        from: c.from, to: c.to, rows: c.rows ?? 0,
+       ...(c.kind ? { kind: c.kind } : {}),
        error: c.error ? String(c.error).slice(0, 300) : null,
      }))) : null]);
   return rows[0].id;

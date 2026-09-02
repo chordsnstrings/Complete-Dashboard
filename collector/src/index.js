@@ -264,7 +264,13 @@ async function main() {
       `UPDATE collector_job
        SET status = CASE WHEN coalesce(attempts, 0) >= 3 AND NOT ${ADVANCED}
                          THEN 'failed' ELSE 'queued' END,
-           started_at = NULL,
+           /* A requeued job has not started yet, so its clock is cleared. An
+              ABANDONED one has — and clearing it there made the Settings jobs
+              table print 'never started' in the Waited column of job 8, beside
+              'Restarts: 5' and '…35,829 rows so far'. Three cells of one row
+              contradicting each other, on the only row that mattered. */
+           started_at = CASE WHEN coalesce(attempts, 0) >= 3 AND NOT ${ADVANCED}
+                             THEN started_at ELSE NULL END,
            -- Reset to zero, not one, and NOT incremented here: the claim above
            -- already counts a restart when it picks the job up again. Counting
            -- it in both places meant one interruption read as two, so a job

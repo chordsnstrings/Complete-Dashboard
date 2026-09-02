@@ -39,7 +39,7 @@ function seasonalEvents(fromYear, toYear) {
 }
 
 /* ── 2. Ramadan / Eid from the Hijri calendar ──────────────────────────── */
-async function ramadanEvents(years) {
+async function ramadanEvents(years, failed = []) {
   const out = [];
   for (const y of years) {
     try {
@@ -59,7 +59,10 @@ async function ramadanEvents(years) {
       out.push({ source: 'calendar', code: 'eid_fitr', title: `Eid al-Fitr ${hy}`, category: 'holiday', scope: 'uae',
         starts_on: d(end), ends_on: d(eidEnd), expected_effect: 'demand_up', confidence: 0.7,
         summary: 'Multi-day public holiday: leisure, family visiting and airport demand spike together.' });
-    } catch (e) { log.warn(SRC, `ramadan ${y} lookup failed`, { err: String(e).slice(0, 80) }); }
+    } catch (e) {
+      log.warn(SRC, `ramadan ${y} lookup failed`, { err: String(e).slice(0, 80) });
+      failed.push(`ramadan ${y}: ${String(e).slice(0, 110)}`);
+    }
   }
   return out;
 }
@@ -75,18 +78,25 @@ const NEWS_QUERIES = [
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function fetchNews() {
+async function fetchNews(failed = []) {
   const arts = [];
   for (const nq of NEWS_QUERIES) {
     try {
       const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(nq.q)}`
         + `&mode=artlist&maxrecords=10&format=json&timespan=7d&sort=hybridrel`;
       const { data } = await http(url, { timeoutMs: 30000, retries: 1, expect: 'json' });
-      if (typeof data === 'string') { log.warn(SRC, `gdelt throttled for ${nq.code}`); await sleep(6000); continue; }
+      if (typeof data === 'string') {
+        log.warn(SRC, `gdelt throttled for ${nq.code}`);
+        failed.push(`news ${nq.code}: gdelt throttled`);
+        await sleep(6000); continue;
+      }
       for (const a of (data?.articles || [])) {
         arts.push({ ...nq, title: a.title, url: a.url, domain: a.domain, seendate: a.seendate });
       }
-    } catch (e) { log.warn(SRC, `news ${nq.code} failed`, { err: String(e).slice(0, 80) }); }
+    } catch (e) {
+      log.warn(SRC, `news ${nq.code} failed`, { err: String(e).slice(0, 80) });
+      failed.push(`news ${nq.code}: ${String(e).slice(0, 110)}`);
+    }
     await sleep(6000);                                   // respect the 1-per-5s limit
   }
   return arts;
@@ -94,7 +104,7 @@ async function fetchNews() {
 
 // Ask an LLM whether a headline plausibly affects Dubai ride demand, and how.
 // Conservative by design: default to "unknown / low confidence" rather than inventing a story.
-async function classifyNews(articles) {
+async function classifyNews(articles, failed = []) {
   if (!articles.length || !config.analystModel?.apiKey) return [];
   const list = articles.slice(0, 30).map((a, i) => `${i}. ${a.title}`).join('\n');
   const prompt = `You assess whether news affects a taxi/ride-hailing fleet operating in Dubai, UAE.
@@ -113,7 +123,11 @@ ${list}`;
     const m = txt.match(/\[[\s\S]*\]/);
     if (!m) return [];
     return JSON.parse(m[0]);
-  } catch (e) { log.warn(SRC, 'llm classify failed', { err: String(e).slice(0, 100) }); return []; }
+  } catch (e) {
+    log.warn(SRC, 'llm classify failed', { err: String(e).slice(0, 100) });
+    failed.push(`classifier: ${String(e).slice(0, 110)}`);
+    return [];
+  }
 }
 
 /* ── break detection + attribution ─────────────────────────────────────── */
@@ -212,17 +226,23 @@ export async function detectBreaks() {
 }
 
 export async function collect({ mode = 'incremental' } = {}) {
+  /* Three fetches under here swallow independently — the Hijri lookup, each
+     news query, and the classifier — and the run status was the literal 'ok'
+     above all of them, so this source could only ever report 'ok' or a thrown
+     error. It is the same construction that let external.js report ok for two
+     days with a dead calendar behind it; fixed here before it does. */
+  const failed = [];
   try {
     const yNow = new Date().getUTCFullYear();
     const seasonal = seasonalEvents(yNow - 2, yNow + 1);
-    const ramadan = await ramadanEvents([yNow - 1, yNow, yNow + 1]);
+    const ramadan = await ramadanEvents([yNow - 1, yNow, yNow + 1], failed);
     let rows = [...seasonal, ...ramadan];
 
     // news tier (best-effort; never blocks the rest)
     let newsRows = [];
     try {
-      const arts = await fetchNews();
-      const verdicts = await classifyNews(arts);
+      const arts = await fetchNews(failed);
+      const verdicts = await classifyNews(arts, failed);
       const byIdx = Object.fromEntries(verdicts.map((v) => [v.i, v]));
       newsRows = arts.slice(0, 30).map((a, i) => {
         const v = byIdx[i];
@@ -233,13 +253,19 @@ export async function collect({ mode = 'incremental' } = {}) {
           starts_on: day, ends_on: day, expected_effect: v.effect, confidence: v.confidence,
           url: a.url, summary: v.reason, raw: { domain: a.domain } };
       }).filter(Boolean);
-    } catch (e) { log.warn(SRC, 'news tier skipped', { err: String(e).slice(0, 80) }); }
+    } catch (e) {
+      log.warn(SRC, 'news tier skipped', { err: String(e).slice(0, 80) });
+      failed.push(`news tier: ${String(e).slice(0, 110)}`);
+    }
 
     rows = [...rows, ...newsRows];
     const written = rows.length ? await upsertMany('world_event', rows, ['source', 'code', 'starts_on', 'title']) : 0;
     const breaks = await detectBreaks();
-    await logRun({ source: SRC, fleet_id: null, mode, status: 'ok', rows_written: written + breaks });
-    log.info(SRC, 'done', { seasonal: seasonal.length, ramadan: ramadan.length, news: newsRows.length, breaks });
+    await logRun({ source: SRC, fleet_id: null, mode, rows_written: written + breaks,
+      status: !failed.length ? 'ok' : (written + breaks > 0 ? 'partial' : 'error'),
+      error: failed.length ? failed.slice(0, 4).join('; ').slice(0, 400) : null });
+    log.info(SRC, 'done', { seasonal: seasonal.length, ramadan: ramadan.length,
+      news: newsRows.length, breaks, failed: failed.length });
   } catch (e) {
     await logRun({ source: SRC, fleet_id: null, mode, status: 'error', error: String(e) });
     log.error(SRC, 'failed', { err: String(e) });
