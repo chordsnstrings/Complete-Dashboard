@@ -130,7 +130,25 @@ app.get('/api/status', (_, r) => r.json([
     rows_written: 0, chunks_total: 1, chunks_failed: 1, failed_windows: [], windows: [],
     window_start: '2026-08-14', window_end: '2026-08-21',
     error: 'bolt: refresh token rejected (401) — re-paste from the fleet portal' },
-]));
+  /* The source with no schedule. Nothing collects the operator's ledger — it
+     is a workbook somebody exports — so being the oldest row on this table is
+     its resting state, and the page printed "healthy" at a nine-day-old import
+     while naming it the stalest source on the fleet. `cadence` is the
+     declaration that lets the row say what its silence means instead. */
+  { source: 'ledger', mode: 'import', status: 'ok', fleet_id: 'ecosine',
+    finished_at: new Date(Date.now() - 9 * 864e5).toISOString(),
+    rows_written: 412, chunks_total: null, chunks_failed: null,
+    failed_windows: [], windows: [],
+    window_start: '2025-11-01', window_end: '2026-02-08', error: null,
+    cadence: { scheduled: false, kind: 'operator-import', expect_every_h: null,
+      runs_via: 'bin/import-ledger.mjs → POST /api/import/statement-days',
+      note: 'The ledger is an operator import, not a poll. Nothing schedules it, so an old '
+        + 'last-import date means nobody has imported one — not that the importer has stopped.' },
+    silence: { state: 'idle', age_h: 216,
+      sentence: 'The last statement ledger was imported 9 day(s) ago, covering days up to '
+        + '2026-02-08. Nothing schedules this: it is a workbook an operator exports, so an old '
+        + 'date means none has been exported since, not that the importer has stopped.' } },
+].map((r) => ({ cadence: null, silence: null, ...r }))));
 /* ── how much of a window the SAFETY ALERT FEED covered ───────────────────
    Every response carrying an alerts-per-100 km rate carries this record too
    (api/alert_coverage_sql.js), and the pages print it: "measured over 22 of the
@@ -1727,8 +1745,18 @@ app.get('/api/earnings/tips', (_, r) => {
     tips: +(420 - i * 44).toFixed(2), fare: 12800 - i * 900,
     tip_pct: +(((420 - i * 44) / (12800 - i * 900)) * 100).toFixed(2),
   }));
+  /* The FLEET's tips, deliberately larger than what these rows add up to: the
+     ranked list is floor-filtered and capped, and #finance printed its sum as
+     the fleet's tips until the endpoint started selecting the population
+     separately. A fixture whose two figures agreed could not exercise the
+     sentence that explains the gap. */
+  const rankedTips = +rows.reduce((a, x) => a + x.tips, 0).toFixed(2);
+  const rankedFare = rows.reduce((a, x) => a + x.fare, 0);
   r.json({ rows, fare_floor: 300, excluded_n: 11, total: rows.length,
-    shown: rows.length, truncated: false });
+    shown: rows.length, truncated: false,
+    totals: { tips: +(rankedTips + 1860.4).toFixed(2), fare: rankedFare + 96500,
+      drivers: rows.length + 11, tipped_drivers: rows.length + 4,
+      ranked_tips: rankedTips } });
 });
 
 app.get('/api/context', (_, r) => {
@@ -3280,9 +3308,20 @@ app.get('/api/auth', (_, r) => {
       detail: null, surface: 'fleet api', last_ok_at: dayISO(2), checked_at: dayISO(0),
       last_ok_age_h: 41, run_age_h: 41, stall_limit_h: 12, severity: 'at-risk' },
   ];
-  r.json({ rows, stopped: 1, at_risk: 1, missing: 0, observed: true,
+  /* A moved endpoint beside the expired cookie: same severity, different
+     errand. The banner tells one operator to re-capture a session and the
+     other to change a URL, and it had no way to draw the second until
+     credential_state learned the word. */
+  rows.push({ provider: 'uber_fleet', fleet_id: 'ecosine', credential: 'UBER_WEB_COOKIE',
+    state: 'moved',
+    detail: 'redirected to fleethub.uber.com — the endpoint has moved off supplier.uber.com; '
+      + 'the credential is not what is wrong, the URL is',
+    surface: 'supplier graphql GetVehicles', last_ok_at: dayISO(1), checked_at: dayISO(0),
+    last_ok_age_h: 20.1, run_age_h: 20.1, stall_limit_h: 6, severity: 'stopped' });
+  r.json({ rows, stopped: 2, at_risk: 1, missing: 0, moved: 1, observed: true,
     headline: 'A credential has stopped working: uber · Egari (UBER_WEB_COOKIE_EGARI) '
-      + '— redirected to auth.uber.com — the session is no longer signed in' });
+      + '— redirected to auth.uber.com — the session is no longer signed in; '
+      + '1 of them because the endpoint moved, not the credential' });
 });
 
 app.get('/api/trip', (req, r) => {

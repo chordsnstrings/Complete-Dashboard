@@ -144,6 +144,21 @@ export function saysAuth(message) {
   return !!message && AUTH_WORDS.test(String(message));
 }
 
+/** The credential_state word for what authFailure() found.
+    ─────────────────────────────────────────────────────────────────────────
+    authFailure() has told these two apart since fleethub: a bounce to a LOGIN
+    host means the session is gone, and a bounce anywhere else means the
+    endpoint moved and the credential is very probably fine. Every caller then
+    wrote 'expired' for both, because api/auth_routes.js's SEVERITY_OF had no
+    'moved' row and defaulted an unknown state to 'at-risk' — so the accurate
+    word would have taken a source collecting nothing from red down to amber.
+    SEVERITY_OF knows it now (as 'stopped': a move stops collection just as
+    completely), so the distinction can finally reach the row, and #credentials
+    can send somebody to change a URL rather than to re-capture a cookie they
+    already have. That mix-up cost days once; src/credcheck.js's header
+    records the other half of it. */
+export const credentialState = (bad) => (!bad ? 'ok' : bad.kind === 'moved' ? 'moved' : 'expired');
+
 /** Record what was observed. Never throws — a banner is not worth a run. */
 export async function noteCredential(db, { provider, fleet = '*', credential,
   state, detail = null, surface = null }) {
@@ -251,14 +266,9 @@ export async function noteUberRest(db, url, res, o, surface, token = null) {
   await noteCredential(db, {
     provider: 'uber', fleet: bad?.blames === 'token' ? (o?.oauth?.own ? fleet : '*') : fleet,
     credential: cred,
-    /* A moved endpoint is recorded as 'expired' ON PURPOSE, and the honest word
-       for it lives in `detail` instead. api/auth_routes.js SEVERITY_OF has no
-       'moved' row and its default for a state it has never seen is 'at-risk' —
-       so writing the accurate state here would take a source that is
-       collecting NOTHING from red down to amber, which is the exact class of
-       failure that map's comment was written about. Until it learns the word,
-       red with the right sentence beats amber with the right label. */
-    state: bad ? 'expired' : 'ok',
+    /* The accurate word, now that SEVERITY_OF knows 'moved' and scores it
+       'stopped'. See credentialState() above for what this used to cost. */
+    state: credentialState(bad),
     detail,
     surface: `oauth rest ${surface}`,
   });

@@ -48,6 +48,15 @@ const SEVERITY_OF = {
   expired: 'stopped',
   invalid: 'stopped',
   missing: 'missing',
+  /* An endpoint that moved. Scored 'stopped' because nothing is being
+     collected — the severity is identical — but it is a different STATE and
+     therefore a different errand: somebody changes a URL rather than
+     re-capturing a session that already works. src/auth_state.js wrote
+     'expired' for these on purpose while this map had no row for the word,
+     since an unknown state falls to 'at-risk' and would have taken a dead
+     surface from red to amber. supplier.uber.com → fleethub.uber.com is the
+     measured case; days went into re-pasting cookies that were fine. */
+  moved: 'stopped',
   /* A check that could not run is not a check that passed — the Yango
      cookie-free comparison records this when it cannot complete. */
   unknown: 'at-risk',
@@ -121,9 +130,17 @@ export function authRoutes(app, { q, wrap }) {
       missing: rows.filter((r) => r.severity === 'missing').length,
       /* One sentence the banner can print without the page having to compose
          it, so every surface that shows this says the same thing. */
+      /* A moved endpoint is counted here so the page can name the OTHER
+         errand: "stopped working" sends somebody to re-capture a credential,
+         and for these rows the credential is not what is wrong. */
+      moved: rows.filter((r) => r.state === 'moved').length,
       headline: bad.length
-        ? `${bad.length === 1 ? 'A credential has' : `${bad.length} credentials have`} stopped working: `
-          + bad.map((r) => `${label(r)} — ${r.detail || 'refused'}`).join('; ')
+        ? (bad.every((r) => r.state === 'moved')
+          ? `${bad.length === 1 ? 'An endpoint has' : `${bad.length} endpoints have`} moved — nothing is `
+            + 'being collected from them, and the credential is not what is wrong: '
+            + bad.map((r) => `${label(r)} — ${r.detail || 'redirected'}`).join('; ')
+          : `${bad.length === 1 ? 'A credential has' : `${bad.length} credentials have`} stopped working: `
+            + bad.map((r) => `${label(r)} — ${r.detail || 'refused'}`).join('; '))
         : warn.length
           ? `${warn.length === 1 ? 'A source has' : `${warn.length} sources have`} not collected recently: `
             + warn.map((r) => `${label(r)}, last run ${r.run_age_h}h ago`).join('; ')

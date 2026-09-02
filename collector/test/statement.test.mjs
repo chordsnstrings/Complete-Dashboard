@@ -51,8 +51,94 @@ check('four rows stored after two imports of overlapping batches', n === 4, Stri
 check('name case and double spaces fold to one driver',
   (await db.query(`SELECT count(DISTINCT name_key)::int n FROM driver_statement_day
                    WHERE NOT pseudo AND platform='uber'`)).rows[0].n === 1);
-check('the import moved the data version (a collection run exists for it)',
-  (await db.query(`SELECT count(*)::int n FROM collection_run WHERE source='ledger'`)).rows[0].n === 1);
+/* ── the run row the import writes about itself ────────────────────────────
+   It used to be
+     INSERT INTO collection_run (...)
+     SELECT $1,'ecosine','import','ok', count(*), now()
+       FROM driver_statement_day WHERE source = $1
+   — a count of the WHOLE table under a hard-coded fleet. On production that
+   read 39,797 rows against Ecosine nine days running, whatever the workbook
+   held and whichever companies it named; a number that can only grow cannot
+   say "this import landed nothing", which is the one failure a reader needs
+   to hear about. See src/sources/ledger.js. */
+{
+  const runs = (await db.query(
+    `SELECT fleet_id, mode, status, rows_written,
+            to_char(window_start,'YYYY-MM-DD') s, to_char(window_end,'YYYY-MM-DD') e
+       FROM collection_run WHERE source='ledger' ORDER BY fleet_id`)).rows;
+  check('the import moved the data version (a collection run exists for it)',
+    runs.length > 0);
+  check('one run per fleet the workbook actually named, not a hard-coded ecosine',
+    runs.map((r) => r.fleet_id).join(',') === 'ecosine,egari',
+    runs.map((r) => r.fleet_id).join(','));
+  check('carrying the rows THIS import wrote, not the size of the table',
+    runs[0].rows_written === 3 && runs[1].rows_written === 1,
+    runs.map((r) => `${r.fleet_id}:${r.rows_written}`).join(' '));
+  check('and the days it covered, so a reader can see which months it was for',
+    runs.every((r) => r.s === '2026-08-03' && r.e === '2026-08-04'),
+    runs.map((r) => `${r.s}..${r.e}`).join(' '));
+  check('the answer says the same thing the run row does',
+    imp.body?.fleets?.ecosine === 3 && imp.body?.fleets?.egari === 1,
+    JSON.stringify(imp.body?.fleets));
+}
+
+/* A batched import: only the last POST carries done:true, and the run must
+   still describe the whole workbook. The handler that records it sees 400 rows
+   of a 39,797-row import, which is exactly why the count(*) form was reached
+   for — so the tally is what makes the honest number available at all. */
+{
+  await db.query(`DELETE FROM collection_run WHERE source='batched'`);
+  const b1 = [
+    { date: '2026-07-01', driver: 'Batch One', company: 'Ecosine', platform: 'Uber', net: 10 },
+    { date: '2026-07-02', driver: 'Batch Two', company: 'Egari', platform: 'Bolt', net: 20 },
+  ];
+  const b2 = [
+    { date: '2026-07-09', driver: 'Batch Three', company: 'Ecosine', platform: 'Uber', net: 30 },
+  ];
+  await post('/api/import/statement-days', { rows: b1, source: 'batched', done: false });
+  const last = await post('/api/import/statement-days', { rows: b2, source: 'batched', done: true });
+  const runs = (await db.query(
+    `SELECT fleet_id, rows_written, to_char(window_start,'YYYY-MM-DD') s,
+            to_char(window_end,'YYYY-MM-DD') e
+       FROM collection_run WHERE source='batched' ORDER BY fleet_id`)).rows;
+  check('a batched import records every batch, not only the last one',
+    runs.length === 2 && runs[0].rows_written === 2 && runs[1].rows_written === 1,
+    runs.map((r) => `${r.fleet_id}:${r.rows_written}`).join(' '));
+  check('and its window spans the whole workbook, not the final batch',
+    runs.every((r) => r.s === '2026-07-01' && r.e === '2026-07-09'),
+    runs.map((r) => `${r.s}..${r.e}`).join(' '));
+  check('the tally is cleared once the run is recorded, so the next import '
+    + 'does not inherit this one\u2019s count',
+    (await db.query(`SELECT count(*)::int n FROM source_state
+                     WHERE source='batched' AND key='import_tally'`)).rows[0].n === 0);
+  check('the last batch answers with what the whole import landed',
+    last.body?.fleets?.ecosine === 2 && last.body?.fleets?.egari === 1,
+    JSON.stringify(last.body?.fleets));
+  /* Scaffolding out of the money table. These rows exist to prove the run row,
+     not to be revenue, and everything below this line counts what the ledger
+     and the API-derived statements hold. */
+  await db.query(`DELETE FROM driver_statement_day WHERE source='batched'`);
+}
+
+/* The case the count(*) form could never report: an import that RAN and landed
+   nothing. The table still holds everything the last import left, so the old
+   row said 39,797 and 'ok'. */
+{
+  const junk = await post('/api/import/statement-days', {
+    rows: [{ date: '2026-07-01', driver: 'Nobody', company: 'Ecosine', platform: 'yay', net: 5 }],
+    source: 'blankimport', done: true });
+  check('an import whose every row was rejected still records a run', junk.status === 200);
+  const r = (await db.query(
+    `SELECT fleet_id, status, rows_written, error FROM collection_run
+      WHERE source='blankimport'`)).rows;
+  check('...and that run says it wrote nothing, as an error rather than an ok',
+    r.length === 1 && r[0].rows_written === 0 && r[0].status === 'error',
+    JSON.stringify(r));
+  check('with no fleet attributed to it, because the workbook named none',
+    r[0].fleet_id === null, String(r[0].fleet_id));
+  check('and a reason a person can act on', /rejected|held none/.test(String(r[0].error)),
+    String(r[0].error));
+}
 
 /* ── the importer writes into the money tables, so it checks what it writes ──
    platform and company were lowercased and inserted with no allow-list, though

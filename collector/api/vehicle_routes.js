@@ -429,7 +429,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
            is the only one that RECONCILES — every plate's attributed, plus the
            periods that reached no plate, is what the platforms paid — and it
            is what this column used to hold. */
-        attributed: r.payout,
+        /* A number, like the chosen figure beside it: PG hands a NUMERIC back
+           as a string, and a column a reader may subtract from another must
+           not arrive as one of each. */
+        attributed: num(r.payout),
         attributed_days: r.payout_days || 0,
         /* Which channels each half came from, so the column can say it. */
         fares_platforms: chosenFare.map((c) => c.platform).sort(),

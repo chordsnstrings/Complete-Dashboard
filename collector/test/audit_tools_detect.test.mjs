@@ -27,7 +27,8 @@
 */
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readdirSync, statSync,
+  existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,9 +37,22 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n}  ${x}`)); };
 
+/* A throwaway report directory, for every tool spawned here.
+   ─────────────────────────────────────────────────────────────────────────
+   numbers-audit writes docs/audit/numbers-<today>.json at the end of every
+   run, and this file drives it against a one-route stub — so running the test
+   suite REPLACED the day's real production sweep with a stub's findings, and
+   did it silently, on the one artefact whose whole job is to be believed. The
+   tools take REPORT_DIR now; this is where it points while they are under
+   test. */
+const REPORTS = mkdtempSync(join(tmpdir(), 'audit-reports-'));
+/* Taken before any tool runs, so "the real report is older than this run" is
+   a fact rather than a hope. */
+const START_MS = Date.now();
+
 const run = (script, env = {}) => new Promise((resolve) => {
   const p = spawn(process.execPath, [join(ROOT, 'bin', script)],
-    { cwd: ROOT, env: { ...process.env, ...env } });
+    { cwd: ROOT, env: { ...process.env, REPORT_DIR: REPORTS, ...env } });
   let out = '';
   p.stdout.on('data', (d) => { out += d; });
   p.stderr.on('data', (d) => { out += d; });
@@ -283,6 +297,25 @@ fetch('/api/drivers/directory?from=2026-01-01&to=2026-01-31').then((r) => r.json
       out.split('\n').filter((l) => /route errors/.test(l)).join(' | ') || out.slice(-200));
   }
 }
+
+/* ── the tools under test must not overwrite the tools' own output ────────
+   Every run above went through `run`, which sets REPORT_DIR. If a tool ever
+   ignores it again, the day's production sweep is silently replaced by a
+   stub's findings — which is what happened, and it took a full re-run of the
+   116-route sweep to notice and undo. */
+{
+  const written = readdirSync(REPORTS);
+  check('the audit tools wrote their reports into the throwaway directory',
+    written.some((f) => /^numbers-\d{4}-\d{2}-\d{2}\.json$/.test(f)),
+    JSON.stringify(written));
+  const real = join(ROOT, 'docs', 'audit');
+  const before = statSync(real, { throwIfNoEntry: false });
+  check('and nothing in this file touched the real docs/audit report for today',
+    !before || !existsSync(join(real, written.find((f) => /^numbers-/.test(f)) || 'none'))
+      || statSync(join(real, written.find((f) => /^numbers-/.test(f)))).mtimeMs < START_MS,
+    'the production sweep was overwritten by a test stub');
+}
+rmSync(REPORTS, { recursive: true, force: true });
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

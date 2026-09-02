@@ -17,6 +17,12 @@ import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, platformStatements, fleetIncome } from './income_sql.js';
 import { startWarmer } from './warm.js';
 import { log } from '../src/log.js';
+/* The operator ledger's own module. The import route below is the only thing
+   that writes this source, and until now it recorded the run inline — a
+   count(*) over the whole table under a hard-coded fleet. src/sources/ledger.js
+   holds what a ledger run means; see its header. */
+import { recordImport, spanOf, tallyBatch, takeTally,
+  CADENCE as LEDGER_CADENCE, silence as ledgerSilence } from '../src/sources/ledger.js';
 import { economicsRoutes } from './economics_routes.js';
 import { driverRoutes } from './driver_routes.js';
 import { vehicleRoutes } from './vehicle_routes.js';
@@ -2130,14 +2136,31 @@ app.get('/api/platforms', wrap(async (req, res) => {
    read as whatever the other fleet did. That is the exact shape of the bug
    this page exists to expose, and it was hiding it: uber_fleet never ran for
    Egari for the collector's whole life and #sources showed uber_fleet ok. */
+/* A source with no schedule needs to say so on the row.
+   ─────────────────────────────────────────────────────────────────────────
+   Every reading of this table — the amber on this page, the "stalest source
+   last finished N h ago" line, STALL_HOURS in api/auth_routes.js — assumes a
+   source has a cadence to fall behind. The operator ledger has none: nothing
+   in src/index.js schedules it, and a workbook arrives when the operator
+   exports one. Read on production 2026-09-02 it was 218 hours old beside
+   incrementals fourteen minutes old, and the page printed "healthy" at it,
+   which is the wrong word for both halves — it is neither healthy nor
+   unhealthy, it is unscheduled. `cadence` carries that declaration and
+   `silence` the sentence to print in place of a verdict nobody can earn. */
+const CADENCE_BY_SOURCE = { ledger: LEDGER_CADENCE };
+const SILENCE_BY_SOURCE = { ledger: ledgerSilence };
 app.get('/api/status', wrap(async (_, res) => res.json((await q(
   `SELECT DISTINCT ON (source, mode, fleet_id) source, mode, fleet_id, status, rows_written,
           window_start, window_end, finished_at, error, chunks_total, chunks_failed, detail
    FROM collection_run ORDER BY source, mode, fleet_id, finished_at DESC`)).map((r) => {
   const detail = typeof r.detail === 'string' ? JSON.parse(r.detail) : r.detail;
+  const cadence = CADENCE_BY_SOURCE[r.source] || null;
+  const say = SILENCE_BY_SOURCE[r.source];
   return {
     ...r,
     detail: undefined,
+    cadence,
+    silence: say ? say(r) : null,
     failed_windows: (detail || []).filter((c) => c.error)
       .map((c) => ({ from: c.from, to: c.to, error: c.error })),
     windows: (detail || []).map((c) => ({ from: c.from, to: c.to, rows: c.rows, ok: !c.error })),
@@ -2570,6 +2593,8 @@ app.post('/api/import/statement-days', requireAdmin, wrap(async (req, res) => {
       source, Boolean(r.pseudo)]);
   }
   let written = 0;
+  const wrote = {};          // fleet_id -> rows THIS batch wrote
+  let span = { first: null, last: null };
   if (clean.length) {
     const vals = clean.map((_, i) => `($${i * 16 + 1},$${i * 16 + 2},$${i * 16 + 3},$${i * 16 + 4}::date,`
       + `$${i * 16 + 5},$${i * 16 + 6},$${i * 16 + 7},$${i * 16 + 8},$${i * 16 + 9},$${i * 16 + 10},`
@@ -2584,16 +2609,36 @@ app.post('/api/import/statement-days', requireAdmin, wrap(async (req, res) => {
          bank = EXCLUDED.bank, network_cash = EXCLUDED.network_cash,
          unremitted = EXCLUDED.unremitted, trips = EXCLUDED.trips,
          driver_name = EXCLUDED.driver_name, pseudo = EXCLUDED.pseudo,
-         ingested_at = now()`, clean.flat());
-    written = r2.rowCount ?? clean.length;
+         ingested_at = now()
+       RETURNING fleet_id, to_char(day, 'YYYY-MM-DD') AS day`, clean.flat());
+    /* RETURNING, not rowCount. The run row needs to know WHICH fleets this
+       import wrote for and which days it covered, and a count cannot say
+       either — that is half of why the old row was attributed to a hard-coded
+       Ecosine. */
+    const back = r2.rows || [];
+    written = back.length || (r2.rowCount ?? clean.length);
+    for (const row of back) wrote[row.fleet_id] = (wrote[row.fleet_id] || 0) + 1;
+    span = spanOf(back);
   }
+  /* Every batch folds into the tally, including this one; only the last batch
+     records the run. See src/sources/ledger.js for why the tally is in the
+     database rather than in a variable. */
+  const tally = await tallyBatch({ db: pool, source, fleets: wrote, days: span });
+  let runs = null;
   if (done) {
-    await pool.query(
-      `INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, finished_at)
-       SELECT $1, 'ecosine', 'import', 'ok', count(*), now() FROM driver_statement_day WHERE source = $1`,
-      [source]);
+    const final = await takeTally({ db: pool, source });
+    runs = await recordImport({
+      db: pool, source,
+      rows: final.fleets,
+      days: { first: final.first, last: final.last },
+    });
   }
-  res.json({ ok: true, written, rejected: bad.length, rejected_indexes: bad.slice(0, 10) });
+  res.json({ ok: true, written, rejected: bad.length, rejected_indexes: bad.slice(0, 10),
+    /* What the import has landed SO FAR, per fleet — so the importer's own
+       final line, and anyone reading one batch's answer, sees the same numbers
+       the run row will carry rather than a table size. */
+    imported: done ? null : tally.fleets,
+    ...(done ? { recorded: runs, fleets: tally.fleets, days: { first: tally.first, last: tally.last } } : {}) });
 }));
 
 /* Running the analyst needs no credential.
@@ -3562,8 +3607,32 @@ app.get('/api/earnings/tips', wrap(async (req, res) => {
      FROM (SELECT sum(net) fare ${STMT}
             GROUP BY name_key HAVING sum(net) > 0) d`,
     [...p, FARE_FLOOR]);
+  /* The FLEET's tips, over every driver and no floor at all.
+     ─────────────────────────────────────────────────────────────────────────
+     The #finance Tips tile added up the rows of `rows` — a list that is
+     ranked, capped at 200 and filtered to drivers with at least AED 300 of
+     fare — and printed the sum as the fleet's tips. Measured on production
+     2026-09-02 over 365 days that reported AED 12,204 against a real
+     AED 53,616: a 77% understatement, on a tile whose whole subject is a
+     number too small to sanity-check by eye. A ranking's total is not a
+     population's total, and the two must be selected separately. */
+  const [all] = await q(
+    `SELECT round(sum(tips)::numeric,2) tips, round(sum(net)::numeric,2) fare,
+            count(DISTINCT name_key)::int drivers,
+            count(DISTINCT name_key) FILTER (WHERE tips > 0)::int tipped_drivers
+     ${STMT}`, p);
   res.json({
     rows,
+    /* Not derived from `rows`: see above. `ranked_tips` is what the table
+       below the tile adds up to, kept so the page can say why the two differ
+       rather than leaving a reader to find the gap. */
+    totals: {
+      tips: all?.tips ?? null,
+      fare: all?.fare ?? null,
+      drivers: all?.drivers ?? 0,
+      tipped_drivers: all?.tipped_drivers ?? 0,
+      ranked_tips: rows.reduce((a, r) => a + Number(r.tips || 0), 0),
+    },
     fare_floor: FARE_FLOOR,
     /* Named so the page can say "11 drivers had less than AED 300 of fare in
        this window and are not ranked" rather than showing a short list with no

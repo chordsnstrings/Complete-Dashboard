@@ -487,8 +487,11 @@ console.log(`${checked} page-renders across ${WIDTHS.length} widths, ${byRoute.s
 console.log(Object.entries(counts).sort((a, b) => b[1] - a[1])
   .map(([k, v]) => `${k} ${v}`).join('  ·  '));
 
-mkdirSync('docs/audit', { recursive: true });
-const out = `docs/audit/render-${TODAY}.json`;
+/* REPORT_DIR for the same reason numbers-audit has one: a test that drives
+   this tool must not overwrite the production sweep it is named after. */
+const REPORT_DIR = process.env.REPORT_DIR || 'docs/audit';
+mkdirSync(REPORT_DIR, { recursive: true });
+const out = `${REPORT_DIR}/render-${TODAY}.json`;
 writeFileSync(out, JSON.stringify({ base: BASE, at: new Date().toISOString(),
   widths: WIDTHS, routes: routes.length, findings }, null, 2));
 console.log(`\nreport: ${out}`);

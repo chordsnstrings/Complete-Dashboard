@@ -40,7 +40,7 @@ import { http } from '../http.js';
 import { upsertMany, pool, logRun } from '../db.js';
 import { uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
-import { authFailure, saysAuth, noteCredential } from '../auth_state.js';
+import { authFailure, saysAuth, noteCredential, credentialState } from '../auth_state.js';
 import { log } from '../log.js';
 
 const SRC = 'uber_profile';
@@ -76,7 +76,9 @@ async function fetchOne(o, uuid) {
       variables: { orgUUID: o.orgUuid, driverUUID: uuid }, query: QUERY }),
   });
   const bad = authFailure(URL_, res);
-  if (bad) return { auth: true, err: bad.reason };
+  /* `kind` travels with the refusal so the caller can record the accurate
+     credential state — a moved endpoint is not an expired cookie. */
+  if (bad) return { auth: true, err: bad.reason, kind: bad.kind };
   const { data } = res;
   if (data?.errors?.length) {
     const e = data.errors[0];
@@ -170,7 +172,7 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
          src/sources/uber_fleet.js already writes under its own provider name
          with this same cookie. */
       await noteCredential(pool, { provider: SRC, fleet: o.fleet,
-        credential: credOf(o), state: 'expired', detail: out.err,
+        credential: credOf(o), state: credentialState(out), detail: out.err,
         surface: 'supplier graphql GetDriver' });
       throw new Error(`profile ${o.fleet}: ${out.err}`);
     }

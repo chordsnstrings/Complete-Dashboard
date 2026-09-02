@@ -11,7 +11,7 @@ import { iso, weekChunks } from '../util.js';
 import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
 import { log } from '../log.js';
-import { authFailure, saysAuth, noteCredential, noteUberRest } from '../auth_state.js';
+import { authFailure, saysAuth, noteCredential, noteUberRest, credentialState } from '../auth_state.js';
 
 const SRC = 'uber_fleet';
 // The real queries, captured verbatim from the portal. Hand-writing them against a
@@ -43,7 +43,10 @@ async function gql(operationName, query, variables, o) {
   const bad = authFailure(GQL, res);
   if (bad) {
     await noteCredential(pool, { provider: SRC, fleet: o.fleet, credential: cred,
-      state: 'expired', detail: bad.reason, surface: `supplier graphql ${operationName}` });
+      /* See credentialState(): a bounce off a login host is an expired
+         session, a bounce anywhere else is a moved endpoint. */
+      state: credentialState(bad), detail: bad.reason,
+      surface: `supplier graphql ${operationName}` });
     throw new Error(`${operationName}: web session — ${bad.reason}`);
   }
   if (data?.errors) {

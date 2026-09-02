@@ -2302,8 +2302,20 @@ V.finance = async (root) => {
      the audit were merged. Neither half was wrong on its own; nobody ran the
      smoke on the merge. */
   const tipList = Array.isArray(tipRows) ? tipRows : (tipRows?.rows || []);
-  const tipTotal = tipList.reduce((a, r) => a + (+r.tips || 0), 0);
-  const fareTotal = tipList.reduce((a, r) => a + (+r.fare || 0), 0);
+  /* The FLEET's tips, not the ranked list's.
+     ───────────────────────────────────────────────────────────────────────
+     These two lines added up `tipList`, which is /api/earnings/tips — ranked
+     by tip rate, capped at 200 rows and filtered to drivers with at least
+     AED 300 of net fare. The Tips tile then printed that sum as the fleet's
+     tips: AED 12,204 on production over 365 days against a real AED 53,616,
+     understating by 77%, and the tile is small enough that nobody would catch
+     it by eye. The endpoint now selects the population total separately;
+     `totals.ranked_tips` is what the table below still adds up to. */
+  const tipAll = tipRows?.totals || null;
+  const rankedTips = tipList.reduce((a, r) => a + (+r.tips || 0), 0);
+  const rankedFare = tipList.reduce((a, r) => a + (+r.fare || 0), 0);
+  const tipTotal = tipAll?.tips != null ? +tipAll.tips : rankedTips;
+  const fareTotal = tipAll?.fare != null ? +tipAll.fare : rankedFare;
 
   /* Every money figure here covers only the trips that carry a fare. The Uber
      trip export has no fare column at all and telematics trips have none
@@ -2399,7 +2411,13 @@ V.finance = async (root) => {
         : 'no cash booking in this range',
       tone: cash && cash.priced_trips < cash.trips ? 'warn' : null },
     { label: 'Tips', value: tipTotal ? money(tipTotal) : '—',
-      sub: fareTotal ? `${((tipTotal / fareTotal) * 100).toFixed(2)}% of net fare` : 'no tip data collected yet',
+      sub: fareTotal
+        ? `${((tipTotal / fareTotal) * 100).toFixed(2)}% of net fare`
+          + (tipAll?.drivers
+            ? `, over all ${fmt(tipAll.drivers)} drivers with a statement in this range`
+              + (tipAll.tipped_drivers ? ` — ${fmt(tipAll.tipped_drivers)} of them were tipped` : '')
+            : '')
+        : 'no tip data collected yet',
       tone: fareTotal ? (tipTotal / fareTotal >= 0.03 ? 'good' : 'warn') : null },
   ]);
   kh.replaceWith(kpis);
@@ -2567,6 +2585,14 @@ V.finance = async (root) => {
         ? ` ${countOf(excluded, 'driver')} took less than ${money(FARE_FLOOR)} of net fare in this `
           + `window and ${plural(excluded, 'is', 'are')} not ranked at all — the rate would be a `
           + 'ratio over a base too small to compare.'
+        : '')
+      /* Why this table adds up to less than the tile above it. It is the same
+         arithmetic that made the tile wrong for as long as it was derived from
+         these rows: a ranking's total is not the population's. */
+      + (tipAll?.tips != null && rankedTips < +tipAll.tips - 0.5
+        ? ` These rows carry ${money(rankedTips)} of the fleet's ${money(+tipAll.tips)} — the rest was `
+          + 'tipped to drivers below the floor or outside the top of the ranking, which is why the '
+          + 'tile above is the larger number.'
         : '')));
   }
 
@@ -4178,8 +4204,13 @@ V.sources = async (root) => {
        2026-09-02 — uber/catchup on each fleet, rows=0, 44 of 44 chunks failed
        — and the claim above called all fifteen runs that "wrote rows". */
     const blank = partial.filter((r) => !(+r.rows_written));
+    /* The stalest SCHEDULED source. The operator ledger has no schedule to be
+       behind — see its cadence — and being the oldest row on the table is its
+       normal resting state, so it won this line permanently and named a
+       non-fault as the headline age. It gets its own sentence below instead. */
+    const unscheduled = rows.filter((r) => r.cadence && r.cadence.scheduled === false);
     const oldest = rows
-      .filter((r) => r.finished_at)
+      .filter((r) => r.finished_at && !(r.cadence && r.cadence.scheduled === false))
       .sort((a, b) => new Date(a.finished_at) - new Date(b.finished_at))[0];
     const ageH = oldest ? Math.round((Date.now() - new Date(oldest.finished_at)) / 36e5) : null;
     verdict(vsHost, {
@@ -4203,7 +4234,10 @@ V.sources = async (root) => {
         + (blank.length
           ? `${fmt(blank.length)} of these wrote nothing whatever: every window refused, which is a dead `
             + 'source wearing the same amber as a run that mostly worked.'
-          : 'a partial that wrote nothing whatever is a dead source, not a run that mostly worked.'),
+          : 'a partial that wrote nothing whatever is a dead source, not a run that mostly worked.')
+        + (unscheduled.length
+          ? ` ${unscheduled.map((r) => `${sourceLabel(r.source)}: ${r.silence?.sentence || 'nothing schedules it'}`).join(' ')}`
+          : ''),
       recommend: bad.length || partial.length
         ? 'Collection gaps shows which DAYS each source actually covered, which a row count between '
           + 'two dates cannot.'
@@ -4299,12 +4333,21 @@ V.sources = async (root) => {
        failure — "COMPANIES_NOT_ALLOWED: the company is not…" — lost the half
        that says what to do about it, on the one page whose subject is why a
        collector is failing. */
+    /* "healthy" is a verdict about a source that has a schedule to keep. The
+       operator ledger has none — nothing schedules an import — so its row wore
+       a green word for being 218 hours old beside incrementals fourteen
+       minutes old. /api/status now carries the source's own declaration; where
+       there is one, print what its silence MEANS instead of a verdict it
+       cannot earn. See src/sources/ledger.js. */
     { label: 'Detail', key: 'error', render: (r) => (r.error
       ? `<span class="note err" title="${esc(String(r.error))}">${esc(String(r.error).slice(0, 90))}${
         String(r.error).length > 90 ? '…' : ''}</span>`
       : r.chunks_failed
         ? `<span class="note warn">${countOf(r.chunks_failed, 'window')} did not land — see below</span>`
-        : '<span class="note ok">healthy</span>') },
+        : r.cadence && r.cadence.scheduled === false
+          ? `<span class="note" title="${esc(String(r.cadence.note || ''))}">${
+            esc(r.silence?.sentence || 'nothing schedules this source')}</span>`
+          : '<span class="note ok">healthy</span>') },
   ], { sortable: true, sortId: 'status' }));
   /* The dates of the windows that failed. Without them a gap is visible but not
      fixable — you can see the hole and not know what to re-fetch. */
@@ -5391,10 +5434,20 @@ async function authBanner() {
       : h < 48 ? `last worked ${Math.round(h)}h ago`
         : `last worked ${Math.round(h / 24)} days ago`;
   };
+  /* A moved endpoint stops collection exactly as completely as a dead
+     credential and needs a completely different action: somebody changes a
+     URL. Telling them to replace a working cookie is what cost days when
+     supplier.uber.com became fleethub.uber.com. */
+  const moved = stopped.filter((r) => r.state === 'moved');
   const head = stopped.length
-    ? `${countOf(stopped.length, 'credential')} stopped working — `
-      + 'the surfaces behind ' + (stopped.length === 1 ? 'it are' : 'them are')
-      + ' collecting nothing until ' + (stopped.length === 1 ? 'it is' : 'they are') + ' replaced'
+    ? (moved.length === stopped.length
+      ? `${countOf(stopped.length, 'endpoint')} moved — `
+        + (stopped.length === 1 ? 'the surface behind it is' : 'the surfaces behind them are')
+        + ' collecting nothing, and the credential is not what is wrong: the URL is'
+      : `${countOf(stopped.length, 'credential')} stopped working — `
+        + 'the surfaces behind ' + (stopped.length === 1 ? 'it are' : 'them are')
+        + ' collecting nothing until ' + (stopped.length === 1 ? 'it is' : 'they are') + ' replaced'
+        + (moved.length ? `; ${fmt(moved.length)} of them because the endpoint moved, not the credential` : ''))
     : `${countOf(risk.length, 'source')} ${risk.length === 1 ? 'has' : 'have'} not collected recently`;
 
   host.className = `authbanner ${tone}`;

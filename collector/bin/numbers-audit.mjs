@@ -787,8 +787,17 @@ for (const [route, fs] of byRoute) {
 }
 console.log(`\n─────────────────────────────────────────────`);
 console.log(`${routes.length} routes at ${WIDTH}px, ${byRoute.size} with findings`);
-mkdirSync('docs/audit', { recursive: true });
-writeFileSync(`docs/audit/numbers-${TODAY}.json`,
+/* Where the report lands, overridable.
+   ─────────────────────────────────────────────────────────────────────────
+   test/audit_tools_detect.test.mjs drives this tool against a one-route stub
+   to prove it still catches an unshown figure, and it spawned it with the
+   repository as cwd — so every run of the test suite overwrote the real
+   production sweep at docs/audit/numbers-<today>.json with a stub's findings.
+   The audit and the test for the audit were writing to the same file, and the
+   test ran second. */
+const REPORT_DIR = process.env.REPORT_DIR || 'docs/audit';
+mkdirSync(REPORT_DIR, { recursive: true });
+writeFileSync(`${REPORT_DIR}/numbers-${TODAY}.json`,
   JSON.stringify({ base: BASE, width: WIDTH, at: new Date().toISOString(), findings }, null, 2));
-console.log(`report: docs/audit/numbers-${TODAY}.json`);
+console.log(`report: ${REPORT_DIR}/numbers-${TODAY}.json`);
 process.exit(findings.length ? 1 : 0);

@@ -12,7 +12,7 @@ import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST,
   UBER_EARNER_HORIZON_DAYS, UBER_EARNER_ASK_MARGIN_DAYS } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
 import { log } from '../log.js';
-import { authFailure, saysAuth, noteCredential, noteUberRest } from '../auth_state.js';
+import { authFailure, saysAuth, noteCredential, noteUberRest, credentialState } from '../auth_state.js';
 
 const SRC = 'uber';
 
@@ -680,7 +680,9 @@ async function earnerCall(s, e, variables) {
   if (bad) {
     await noteCredential(pool, { provider: SRC, fleet: org().fleet,
       credential: org().fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI',
-      state: 'expired', detail: bad.reason, surface: 'supplier graphql' });
+      /* 'moved' when the bounce was to something other than a login host —
+         see credentialState(). A cookie is not the fix for a renamed host. */
+      state: credentialState(bad), detail: bad.reason, surface: 'supplier graphql' });
     return { err: `web session: ${bad.reason}`, rows: [], auth: true };
   }
   if (data?.errors?.length) {

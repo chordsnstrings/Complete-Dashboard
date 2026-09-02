@@ -35,6 +35,13 @@ import { RAW_ALIASES } from '../src/probe.js';
    in that computation pass while the page silently went back to saying "not a
    dated source" about the longest feed the product holds. */
 import { spanGaps } from '../api/coverage_gaps.js';
+/* The ledger source's own module, real rather than stubbed for the same reason
+   spanGaps is: the statement-import route records its run through these, and a
+   stub here would let the count(*)-over-the-whole-table form come back without
+   a test noticing. Every call in the route passes db explicitly, so nothing
+   here reaches for the production pool. */
+import { recordImport, spanOf, tallyBatch, takeTally,
+  CADENCE as LEDGER_CADENCE, silence as ledgerSilence } from '../src/sources/ledger.js';
 
 export const START = "/* ───────────────────────── overview ───────────────────────── */";
 export const END = '/* ───────────────── per-driver detail pages ───────────────── */';
@@ -85,6 +92,8 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
     isAdmin, redactSettings, RAW_ALIASES, spanGaps,
+    recordImport, spanOf, tallyBatch, takeTally,
+    LEDGER_CADENCE, ledgerSilence,
     FIX_FRESH: "interval '30 minutes'",
     rollupGrainSql, rollupState: async () => [],
     /* The response cache object server.js closes over. The harness mounts a

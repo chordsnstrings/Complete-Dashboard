@@ -91,6 +91,79 @@ export function spanOf(rows = []) {
   return { first, last };
 }
 
+/* The tally an import keeps while it is running.
+   ──────────────────────────────────────────────────────────────────────────
+   The importer sends the workbook in batches of 400 — each one its own POST,
+   answered by its own process — and only the LAST batch carries done:true. So
+   the handler that records the run knows about 400 rows of a 39,797-row
+   import, which is exactly why the count(*)-over-the-table form was reached
+   for in the first place: it was the only number in scope that looked like the
+   whole import.
+
+   The tally is that missing number, accumulated in source_state rather than in
+   a module variable, because App Platform may answer two batches on two
+   instances and a variable would then hold half an import each. One row, read
+   and rewritten per batch; the importer is sequential, so there is no second
+   writer to race.
+
+   A tally older than TALLY_STALE_H belonged to an import that died before its
+   last batch. Folding those rows into the next import's count would report
+   work the next import did not do, so it is dropped and started again — the
+   dead import stays unrecorded, which is what "it never finished" means. */
+export const TALLY_KEY = 'import_tally';
+export const TALLY_STALE_H = 6;
+
+const emptyTally = (nowMs) => ({
+  started_at: new Date(nowMs).toISOString(), fleets: {}, first: null, last: null,
+});
+
+const readTally = async (db, source) => {
+  const { rows } = await db.query(
+    `SELECT value FROM source_state WHERE source = $1 AND fleet_id = '-' AND key = $2`,
+    [source, TALLY_KEY]);
+  if (!rows.length || !rows[0].value) return null;
+  try { return JSON.parse(rows[0].value); } catch { return null; }
+};
+
+/** Fold one batch into the running tally and return it.
+    @param fleets  { [fleet_id]: rows this batch wrote for that fleet }
+    @param days    { first, last } — the span this batch covered, from spanOf() */
+export async function tallyBatch({ db = pool, source = SOURCE, fleets = {},
+  days = {}, now = Date.now() } = {}) {
+  const held = await readTally(db, source);
+  const fresh = held && held.started_at
+    && (now - Date.parse(held.started_at)) < TALLY_STALE_H * 36e5;
+  const t = fresh ? { ...emptyTally(now), ...held, fleets: { ...(held.fleets || {}) } }
+    : emptyTally(now);
+  for (const [fleet, n] of Object.entries(fleets)) {
+    if (!fleet) continue;
+    t.fleets[fleet] = (Number(t.fleets[fleet]) || 0) + (Number(n) || 0);
+  }
+  /* ISO days compared as strings, for the reason spanOf() gives. */
+  if (days.first && (t.first === null || days.first < t.first)) t.first = days.first;
+  if (days.last && (t.last === null || days.last > t.last)) t.last = days.last;
+  await db.query(
+    `INSERT INTO source_state (source, fleet_id, key, value, updated_at)
+     VALUES ($1, '-', $2, $3, now())
+     ON CONFLICT (source, fleet_id, key)
+     DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [source, TALLY_KEY, JSON.stringify(t)]);
+  return t;
+}
+
+/** Read the tally and clear it, so the next import starts from nothing.
+    Returns an empty tally when there is none — an import whose only batch
+    carried done:true has already folded itself in, and one that wrote no rows
+    at all must still be recorded, as a failure. */
+export async function takeTally({ db = pool, source = SOURCE, now = Date.now() } = {}) {
+  const { rows } = await db.query(
+    `DELETE FROM source_state WHERE source = $1 AND fleet_id = '-' AND key = $2
+     RETURNING value`, [source, TALLY_KEY]);
+  if (!rows.length || !rows[0].value) return emptyTally(now);
+  try { return { ...emptyTally(now), ...JSON.parse(rows[0].value) }; }
+  catch { return emptyTally(now); }
+}
+
 /**
  * Record a finished statement import as a collection run.
  *

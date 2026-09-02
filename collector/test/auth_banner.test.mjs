@@ -114,6 +114,28 @@ check('a redirect to the login host is still expired, not moved',
     narrowed.length === 0, `${narrowed.join(', ')} would drop a moved endpoint`);
 }
 
+/* The word the credential row gets, which is where the whole distinction had
+   been stopping. authFailure told the two apart; every caller then wrote
+   'expired' anyway, because api/auth_routes.js had no 'moved' row and
+   defaulted an unknown state to at-risk — so the accurate word would have
+   turned a dead surface amber. Both halves land together or neither does. */
+check('credentialState is exported', typeof authState.credentialState === 'function');
+{
+  const cs = authState.credentialState;
+  check('a moved endpoint is recorded as moved, not as an expired session',
+    cs(authFailure(SENT, MOVED)) === 'moved', String(cs(authFailure(SENT, MOVED))));
+  check('a bounce to the login host is still expired',
+    cs(authFailure(SENT, { status: 404, data: 'Not Found',
+      finalUrl: 'https://auth.uber.com/v2/' })) === 'expired');
+  check('and no failure at all is ok', cs(null) === 'ok');
+  const fs2 = await import('node:fs');
+  const writers = ['src/sources/uber.js', 'src/sources/uber_fleet.js',
+    'src/sources/uber_profile.js', 'src/auth_state.js'];
+  const hardcoded = writers.filter((f) => /state: 'expired', detail: bad/.test(fs2.readFileSync(f, 'utf8')));
+  check('no writer hardcodes expired over a refusal it was handed',
+    hardcoded.length === 0, `${hardcoded.join(', ')} still flattens a move into an expiry`);
+}
+
 /* ── the provider's own words, said once ────────────────────────────────────
    Not exported, so anything else that needed the same vocabulary hand-rolled a
    subset of it: src/auth/uber.js:67 and src/credcheck.js:205 both read
@@ -222,6 +244,34 @@ check('a stopped credential is not also reported as merely at risk',
   d.rows.find((r) => r.provider === 'uber' && r.fleet_id === 'egari').severity === 'stopped');
 check('red outranks amber in the headline',
   /stopped working/.test(d.headline || ''), d.headline);
+
+/* ── a moved endpoint, all the way to the headline ────────────────────────
+   Severity 'stopped', because nothing is collected — but a different STATE, so
+   the page can send somebody to change a URL instead of to re-capture a cookie
+   that already works. That confusion is what cost days when supplier.uber.com
+   became fleethub.uber.com. */
+{
+  await db.query("DELETE FROM credential_state WHERE provider <> 'moveonly'");
+  await noteCredential(db, { provider: 'uber_fleet', fleet: 'ecosine',
+    credential: 'UBER_WEB_COOKIE', state: 'moved',
+    detail: 'redirected to fleethub.uber.com — the endpoint has moved off supplier.uber.com; '
+      + 'the credential is not what is wrong, the URL is',
+    surface: 'supplier graphql GetVehicles' });
+  const m = await get('/api/auth');
+  const row = m.rows.find((r) => r.state === 'moved');
+  check('a moved endpoint stops the source, exactly like a dead credential',
+    row?.severity === 'stopped' && m.stopped === 1, JSON.stringify(row));
+  check('...and is NOT downgraded to at-risk by an unknown-state default',
+    row?.severity !== 'at-risk', String(row?.severity));
+  check('it is counted separately, so a page can name the other errand',
+    m.moved === 1, String(m.moved));
+  check('and the headline sends somebody to the URL, not to the cookie',
+    /endpoint has moved|endpoints have moved/i.test(m.headline || '')
+    && !/stopped working/.test(m.headline || ''), m.headline);
+  check('naming where it went, which is the fix',
+    /fleethub\.uber\.com/.test(m.headline || ''), m.headline);
+  await db.query("DELETE FROM credential_state");
+}
 
 /* ── a fleet with no credential at all ──────────────────────────────────── */
 await noteCredential(db, { provider: 'cabman', fleet: 'egari', credential: 'CABMAN_EGARI_PASS',

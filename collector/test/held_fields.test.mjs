@@ -300,6 +300,30 @@ check('and the drivers below the floor are counted rather than dropped',
   tips.excluded_n === 1 && tips.fare_floor === 300,
   JSON.stringify([tips.excluded_n, tips.fare_floor]));
 
+/* The tile above the table is the FLEET's tips, and the table is a ranking.
+   ─────────────────────────────────────────────────────────────────────────
+   #finance computed the tile by adding up these rows — ranked, capped at 200,
+   and filtered to drivers with at least AED 300 of net fare — so every driver
+   the floor removed took their tips out of the fleet's total with them. On
+   production over 365 days that read AED 12,204 against a real AED 53,616.
+   Here it is the same shape at seed size: Tiny Base tipped 10 and is below the
+   floor, Real Base tipped 30 and is on the list. */
+const rankedTips = tips.rows.reduce((a, r) => a + Number(r.tips || 0), 0);
+check('the endpoint carries the fleet total, over every driver and no floor',
+  Number(tips.totals?.tips) === 40, JSON.stringify(tips.totals));
+check('...which is more than the ranked rows add up to',
+  rankedTips === 30 && Number(tips.totals.tips) > rankedTips,
+  `ranked ${rankedTips} vs fleet ${tips.totals?.tips}`);
+check('and it says what the ranking itself sums to, so the page can explain '
+  + 'why the two differ rather than leaving a reader to find the gap',
+  Number(tips.totals.ranked_tips) === rankedTips, String(tips.totals.ranked_tips));
+check('the fare denominator is the population\u2019s too — a rate over the '
+  + 'ranked fare alone would be tips of everybody over the fare of some',
+  Math.abs(Number(tips.totals.fare) - (63.49 + 506.41)) < 0.02, String(tips.totals.fare));
+check('with the driver counts that make the tile\u2019s base sayable',
+  tips.totals.drivers === 2 && tips.totals.tipped_drivers === 2,
+  JSON.stringify([tips.totals.drivers, tips.totals.tipped_drivers]));
+
 console.log('\nretention: a month nobody joined is a row, not an absence');
 
 const ret = await body('/api/retention');
