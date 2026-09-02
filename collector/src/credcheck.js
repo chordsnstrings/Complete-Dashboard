@@ -310,6 +310,19 @@ async function checkUberOAuth({ value, secret, said_fleet: said }) {
 }
 
 const CHECKS = { Uber: checkUber, Bolt: checkBolt, Yango: checkYango };
+/* Which check belongs to which KEY. The provider map above is the fallback for
+   a credential that named itself by shape; this is what a credential the
+   operator labelled is routed on, because "Yango" does not say whether the
+   thing in hand is a session or an API key and the two are tested nothing
+   alike. Only the keys whose check actually tests THAT credential appear. */
+const BY_KEY = {
+  YANGO_COOKIE: checkYango,
+  UBER_WEB_COOKIE: checkUber,
+  UBER_WEB_COOKIE_EGARI: checkUber,
+  BOLT_REFRESH_TOKEN: checkBolt,
+  BOLT_REFRESH_TOKEN_ECOSINE: checkBolt,
+  BOLT_REFRESH_TOKEN_EGARI: checkBolt,
+};
 
 /** Test one recognised candidate. Never stores, never mutates. */
 export async function checkCandidate(cand) {
@@ -323,8 +336,24 @@ export async function checkCandidate(cand) {
   if (!cand?.ok || !cand.key) {
     return { ...cand, verdict: 'fail', detail: cand?.why || 'this credential could not be named' };
   }
-  const fn = CHECKS[cand.provider];
-  if (!fn) return { ...cand, verdict: 'unknown', detail: `no live check exists for ${cand.provider}` };
+  /* Routed on the KEY where one exists, not only on the provider.
+     ─────────────────────────────────────────────────────────────────────
+     checkYango tests a COOKIE — it puts cand.value into the cookie header. So
+     any candidate whose provider is Yango went there, and a YANGO_API_KEY sent
+     through it would be pasted into a cookie jar and reported as a dead
+     session. The check that runs has to match the credential, and the
+     credential is the key.
+
+     A key with no check of its own is 'unknown', not 'fail': "we cannot test
+     this one" and "this one is broken" are different answers, and only one of
+     them should stop an operator from saving it. */
+  const fn = BY_KEY[cand.key] || (cand.labelled ? null : CHECKS[cand.provider]);
+  if (!fn) {
+    return { ...cand, verdict: 'unknown',
+      detail: cand.key && !BY_KEY[cand.key]
+        ? `no live check exists for ${cand.key} — it will be saved as given and tested by the next run`
+        : `no live check exists for ${cand.provider}` };
+  }
   const r = await fn(cand);
   return { ...cand, ...r };
 }

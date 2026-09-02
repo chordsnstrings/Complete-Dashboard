@@ -286,6 +286,44 @@ const RECOGNISERS = [
       why: `a Yandex fleet session for ${jar.yandex_login}`,
     };
   },
+
+  /* The credential the operator names.
+     ─────────────────────────────────────────────────────────────────────
+     The header above says a credential carrying no identity of its own is
+     "the one case a human still has to label" — and then there was nowhere to
+     put the label. An API key, a park id, an interface password: opaque
+     strings that no recogniser can name from their shape, and guessing at
+     shape is exactly what this file refuses to do.
+
+     So the operator writes the key. `YANGO_API_KEY=...`, `HOTEL_TOKEN: ...`
+     — the name is matched against the product's own catalogue and nothing
+     else, so this is a lookup rather than a heuristic. A name the catalogue
+     does not hold is declined, which is the same answer an unrecognised blob
+     already gets.
+
+     Reached only for pastes the shape recognisers above have declined, so it
+     can never relabel a credential that identified itself. That order matters:
+     an Uber jar pasted under the wrong name must still be read as the org it
+     actually belongs to. */
+  (raw) => {
+    const m = String(raw || '').trim()
+      .match(/^\s*(?:export\s+)?([A-Z][A-Z0-9_]{3,})\s*[=:]\s*([\s\S]+?)\s*$/);
+    if (!m) return null;
+    const key = m[1];
+    if (!KNOWN.has(key)) return null;
+    const value = m[2].replace(/^["']|["']$/g, '').trim();
+    if (!value) return null;
+    const def = SETTING_DEFS.find((d) => d.key === key);
+    /* The fleet comes from the key's own suffix, because that is the only
+       thing about it that is not the operator's word. */
+    const fleet = /_EGARI$/.test(key) ? 'egari' : /_ECOSINE$/.test(key) ? 'ecosine' : null;
+    return {
+      provider: def?.group || 'Settings',
+      key, fleet, value,
+      labelled: true,
+      why: `labelled ${key}${def?.label ? ` — ${def.label}` : ''}, so it is taken at its word`,
+    };
+  },
 ];
 
 /* A paste may hold several credentials, one per block. Blocks are separated by
