@@ -295,7 +295,14 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
   await q(`INSERT INTO telemetry_snapshot (plate, fleet_id, source, captured_at, polled_at, lat, lng, seat_occupied)
            SELECT 'L400','ecosine','cabman', ($1::date)::timestamptz + (g || ' minutes')::interval, now(),
                   25.1, 55.2, (g % 3 = 0) FROM generate_series(1,40) g`, [DAY]);
-  const health = await get(`/api/sensor-health?from=${DAY}&to=${DAY}`);
+  const raw = await get(`/api/sensor-health?from=${DAY}&to=${DAY}`);
+  /* {rows, total, shown, truncated} — the endpoint caps at 100 and now says
+     so, where it used to return a bare array and let the page print the LIMIT
+     as a fleet count. */
+  const health = raw.rows || raw;
+  check('the response says how many trackers there were, not only how many it sent',
+    raw.total === health.length && raw.shown === health.length && raw.truncated === false,
+    JSON.stringify({ total: raw.total, shown: raw.shown, truncated: raw.truncated }));
   check('a pad stuck on is at the top of the list, not the bottom',
     health[0].plate === 'L300', JSON.stringify(health.map((r) => [r.plate, r.occupied_pct])));
   check('a plausible pad ranks below both extremes',

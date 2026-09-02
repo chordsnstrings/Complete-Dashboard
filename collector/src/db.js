@@ -276,6 +276,11 @@ export async function logRun(run, db = pool) {
      chunks ? JSON.stringify(chunks.map((c) => ({
        from: c.from, to: c.to, rows: c.rows ?? 0,
        ...(c.kind ? { kind: c.kind } : {}),
+       /* A window a checkpoint says a previous attempt already finished. It is
+          not a window that was asked and answered empty, and stripped of this
+          key it arrives at /api/status as rows 0 with no error, which reads as
+          exactly that. A resumed FMS backfill carries about a hundred. */
+       ...(c.skipped ? { skipped: true } : {}),
        error: c.error ? String(c.error).slice(0, 300) : null,
      }))) : null]);
   return rows[0].id;

@@ -88,18 +88,70 @@ d = await dayOf('g2', '2026-08-20');
 check('an unnamed sibling of fare is still counted, because the root carries it',
   d.length === 1 && near(d[0].net, 103.00 / 7), JSON.stringify(d));
 
-/* ── both surfaces on one period: REST is the figure that was proven ────── */
-await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'earnings', null, 1379.19);
-await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'net_fare', 'earnings', 1372.22);
+/* ── both surfaces on one period, agreeing: neither is doubled ──────────── */
+/* The identity holds here, which is the case the vocabulary mapping was built
+   for: net_fare 2540.12 and your_earnings 2532.74 − tip 35.00 − taxes -42.38
+   are the same figure written twice. Whichever arm wins, the day is that
+   figure once — the fault this guards is adding them. */
+await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'earnings', null, 2532.74);
+await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'net_fare', 'earnings', 2540.12);
 await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'your_earnings', null, 2532.74);
 await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'fare', 'your_earnings', 3386.90);
 await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'service_fee', 'your_earnings', -846.78);
+await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'taxes_earnings', 'your_earnings', -42.38);
+await comp('ecosine', 'e1', '2026-08-17', '2026-08-23', 'tip', 'your_earnings', 35.00);
 await refreshStatements(db);
 d = await dayOf('e1', '2026-08-20');
-check('where both vocabularies describe one period, net_fare wins',
-  d.length === 1 && near(d[0].net, 1372.22 / 7), JSON.stringify(d));
+check('where both vocabularies agree, the day carries the figure once',
+  d.length === 1 && near(d[0].net, 2540.12 / 7), JSON.stringify(d));
 check('and the two readings are never added together',
-  d.length === 1 && !near(d[0].net, (1372.22 + 2540.12) / 7), JSON.stringify(d));
+  d.length === 1 && !near(d[0].net, (2540.12 + 2532.74) / 7), JSON.stringify(d));
+
+/* ── both surfaces on one period, disagreeing: the COMPLETE one wins ────── */
+/* The REST payments surface answers for the CURRENT payment period and only
+   for it, so on a period it has touched but not finished, its net_fare is a
+   fraction of the week while Uber's own GraphQL root describes the whole of
+   it. coalesce preferred net_fare — it tested non-null, not finished.
+
+   Measured on production 2026-09-02, the week of 24–30 August published this
+   on six consecutive days:
+
+     on-trip net 555.21 · cash collected 3947.42 · expected payout -3146.51
+     against a bank payout between 14,000 and 20,000 a day
+
+   A fleet does not earn AED 555 while its drivers bank 3,947 in cash. The
+   GraphQL root for that week carried 130,396.68 over 234 drivers against
+   net_fare's 3,746.66 over 81. The days either side read +1555% and +641%,
+   and the six in the middle showed no percentage at all — a negative
+   expectation divides into nothing — so the wrongest rows on the page were
+   the ones that looked emptiest.
+
+   The ratio here is the production one: a REST figure near a fifth of the
+   root, which no rounding or fee mapping explains. */
+await comp('ecosine', 'e6', '2026-08-17', '2026-08-23', 'earnings', null, 500.00);
+await comp('ecosine', 'e6', '2026-08-17', '2026-08-23', 'net_fare', 'earnings', 496.00);
+await comp('ecosine', 'e6', '2026-08-17', '2026-08-23', 'your_earnings', null, 2532.74);
+await comp('ecosine', 'e6', '2026-08-17', '2026-08-23', 'fare', 'your_earnings', 3386.90);
+await comp('ecosine', 'e6', '2026-08-17', '2026-08-23', 'service_fee', 'your_earnings', -846.78);
+await comp('ecosine', 'e6', '2026-08-17', '2026-08-23', 'taxes_earnings', 'your_earnings', -42.38);
+await comp('ecosine', 'e6', '2026-08-17', '2026-08-23', 'tip', 'your_earnings', 35.00);
+await refreshStatements(db);
+d = await dayOf('e6', '2026-08-20');
+check('a partial REST period does not displace the root that describes the whole week',
+  d.length === 1 && near(d[0].net, 2540.12 / 7), JSON.stringify(d));
+check('…and the collapsed figure is not what the day carries',
+  d.length === 1 && !near(d[0].net, 496.00 / 7), JSON.stringify(d));
+
+/* ── REST alone still works ─────────────────────────────────────────────── */
+/* Preferring the root must not mean ignoring the other surface: the open
+   period Uber has not yet described in GraphQL is exactly where REST is the
+   only account there is. */
+await comp('ecosine', 'e7', '2026-08-17', '2026-08-23', 'earnings', null, 1379.19);
+await comp('ecosine', 'e7', '2026-08-17', '2026-08-23', 'net_fare', 'earnings', 1372.22);
+await refreshStatements(db);
+d = await dayOf('e7', '2026-08-20');
+check('a period only the REST surface describes still becomes a statement day',
+  d.length === 1 && near(d[0].net, 1372.22 / 7), JSON.stringify(d));
 
 /* ── two surfaces, two grains, one day ──────────────────────────────────── */
 /* The REST feed answers on short periods and GraphQL on weeks. The finest

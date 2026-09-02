@@ -196,6 +196,35 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         FROM bank b LEFT JOIN stmt s USING (platform, person, day)
        GROUP BY 1`;
 
+    /* Dubai's calendar day, not the server's. Everything on this page is a
+       Dubai date, and a UTC "today" would let the last four hours of a Dubai
+       day be classed as the future. */
+    const TODAY = dubaiDay(new Date());
+
+    /* The report window each side's money was actually measured over, carried
+       beside the money.
+       ─────────────────────────────────────────────────────────────────────
+       Both tables spread a provider's report evenly across its days — see
+       sql/schema_v23.sql for the payout view and sql/schema_v44.sql for the
+       statement — and both record the divisor in period_days. Until now
+       neither reached this endpoint, and #reconcile's February 2026 row is
+       what that costs: the payout side there is a WEEKLY report over 9-14
+       February, AED 3,799.61 on each of six days, and then AED 25,998.71 on
+       the 15th, because src/sources/uber.js asks day by day only as far back
+       as EARNER_DAY_HORIZON = 200 days and 2026-09-02 minus 200 days is
+       2026-02-14 — the seam is the collector's grid, to the day.
+
+       That mixing is not cosmetic. The week of 9-15 February was reported
+       once as AED 26,597.27; the resolved days sum to AED 48,796.37, because
+       the 15th took its own daily measurement while the other six kept their
+       seventh of the week. The fix belongs to the resolution in
+       sql/schema_v23.sql, which is another writer's file. What belongs here
+       is that a row stops presenting the two bases as one: min and max of
+       period_days per row, so a reader can see a 7-day report spread across
+       its days, and a row that mixes a 1-day report with a 7-day one. */
+    const BASIS = (a) => `min(${a}.period_days)::int AS basis_min,`
+      + ` max(${a}.period_days)::int AS basis_max`;
+
     let tripRows; let stmtRows; let payRows; let covRows; let keyName; let calendar;
     let tripsSource = 'rollup';
 
@@ -220,7 +249,8 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
                 round(sum(s.salik)::numeric, 2) AS salik,
                 round(sum(s.cash)::numeric, 2) AS cash_collected,
                 count(DISTINCT s.day)::int AS ontrip_days,
-                count(DISTINCT ${personKeyStored('s')})::int AS ontrip_drivers
+                count(DISTINCT ${personKeyStored('s')})::int AS ontrip_drivers,
+                ${BASIS('s')}
          FROM driver_statement_day s
          WHERE s.source <> 'ledger' AND ${sideWhere('s')}
          GROUP BY 1`, [platform, fleet]);
@@ -243,12 +273,33 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
                 round(sum(p.earnings)::numeric, 2) AS bank_payout,
                 round(sum(p.earnings) FILTER (WHERE p.day > $3::date)::numeric, 2) AS bank_accrued,
                 count(*) FILTER (WHERE p.day > $3::date)::int AS accrual_days,
-                count(DISTINCT p.day)::int AS payout_days
+                count(DISTINCT p.day)::int AS payout_days,
+                ${BASIS('p')}
          FROM driver_payout_day p
          WHERE ${sideWhere('p')}
-         GROUP BY 1`, [platform, fleet, dubaiDay(new Date())]);
-      covRows = await q(coveredSql(`to_char(date_trunc('month', b.day), 'YYYY-MM')`, null),
-        [platform, fleet]);
+         GROUP BY 1`, [platform, fleet, TODAY]);
+      /* Bounded to days that have HAPPENED, which the day grain already was
+         and the month grain never was.
+         ─────────────────────────────────────────────────────────────────
+         `accrual` above drops Uber's forward projection from a DAY row and
+         from the month tiles, and bank_accrued names the part of the month
+         column that is one. The covered figures — the two numbers the delta
+         beside them is the difference of — were computed over every row in
+         the month, future included. Measured on production 2026-09-02:
+         September's month row reported the gap over six days, four of which
+         had not happened, carrying AED 26,852.52 of bank_covered and AED
+         12,542.96 of expected_covered dated 3-6 September. Clicking the row
+         measured the same gap over two days, and the two views of one month
+         disagreed by AED 14,309.56 with nothing on screen to say why.
+
+         Both sides take the bound, not just the bank: the statement spreads
+         an OPEN weekly period across its future days too, so bounding one
+         side alone would compare two days of statement against six of
+         payout — the mismatch of scopes this endpoint exists to prevent. */
+      covRows = await q(
+        coveredSql(`to_char(date_trunc('month', b.day), 'YYYY-MM')`,
+          (a) => `${a}.day <= $3::date`),
+        [platform, fleet, TODAY]);
 
       /* Every month from the first any side knows about to the last, so a
          month none of them covers is a visible row of dashes rather than a
@@ -289,14 +340,16 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
                 round(sum(s.salik)::numeric, 2) AS salik,
                 round(sum(s.cash)::numeric, 2) AS cash_collected,
                 1::int AS ontrip_days,
-                count(DISTINCT ${personKeyStored('s')})::int AS ontrip_drivers
+                count(DISTINCT ${personKeyStored('s')})::int AS ontrip_drivers,
+                ${BASIS('s')}
          FROM driver_statement_day s
          WHERE s.source <> 'ledger' AND ${sideWhere('s')} AND ${dayBound('s')}
          GROUP BY 1`, P);
       payRows = await q(
         `SELECT to_char(p.day, 'YYYY-MM-DD') AS d,
                 round(sum(p.earnings)::numeric, 2) AS bank_payout,
-                1::int AS payout_days
+                1::int AS payout_days,
+                ${BASIS('p')}
          FROM driver_payout_day p
          WHERE ${sideWhere('p')} AND ${dayBound('p')}
          GROUP BY 1`, P);
@@ -314,10 +367,6 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         : [];
     }
 
-    /* Dubai's calendar day, not the server's. Everything on this page is a
-       Dubai date, and a UTC "today" would let the last four hours of a Dubai
-       day be classed as the future. */
-    const TODAY = dubaiDay(new Date());
     const byKey = (rows) => new Map(rows.map((r) => [r[keyName], r]));
     const tripsBy = byKey(tripRows); const stmtBy = byKey(stmtRows); const payBy = byKey(payRows);
     const covBy = new Map(covRows.map((r) => [r.k, r]));
@@ -380,7 +429,19 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         ontrip_days: s ? s.ontrip_days : 0,
         ontrip_drivers: s ? s.ontrip_drivers : 0,
         expected_payout: expected,
+        /* The provider report window behind each side's money, finest and
+           coarsest, so a figure that is an ALLOCATION cannot be read as a
+           measurement of the row it sits on. Equal and greater than 1 is one
+           report spread across its days; unequal is a row that mixes grids —
+           February 2026's payout column mixes a 7-day report (9-14 Feb, AED
+           3,799.61 a day) with 1-day ones (15 Feb onward, AED 26,000 a day),
+           and the seam is EARNER_DAY_HORIZON in src/sources/uber.js, not the
+           fleet's takings. Null where nothing on that side records a window. */
+        expected_period_days_min: num(s?.basis_min),
+        expected_period_days: num(s?.basis_max),
         bank_payout: bank,
+        bank_period_days_min: num(p?.basis_min),
+        bank_period_days: num(p?.basis_max),
         payout_days: p ? p.payout_days : 0,
         /* At month grain, the slice of bank_payout that is a forward
            projection of an open payout period rather than money already

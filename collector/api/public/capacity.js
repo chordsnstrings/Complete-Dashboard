@@ -26,6 +26,14 @@ const MONTH = (m) => {
 const slotLink = (r) => href('slot', String(r.dow), String(r.hour));
 const hhmm = (h) => `${String(h).padStart(2, '0')}:00`;
 
+/* The endpoint's own definition of a short hour — api/capacity_routes.js
+   filters `driver_gap >= 0.5 && !thin` to build totals.cells_short. Mirrored
+   here so the headline's FIGURE covers exactly the hours its CLAIM counts:
+   "166 hours are short" and the number beside it have to be about the same
+   166 hours, and there is no other way to reach that set from the response
+   (`shortfall` is the twenty largest, not the list). */
+const isShort = (r) => r.driver_gap != null && r.driver_gap >= 0.5 && !r.thin;
+
 export async function renderCapacity(root) {
   root.innerHTML = '';
   loading(root);
@@ -42,6 +50,23 @@ export async function renderCapacity(root) {
 
   const t = d.totals || {};
 
+  /* The rate the hourly shares were measured at, as a monthly figure, computed
+     once for the headline and for the paragraph at the foot of the page.
+     ─────────────────────────────────────────────────────────────────────────
+     The field is `observed_bookings` — capacity_routes.js has never sent
+     `trailing_bookings`, which is what this read — so trailingRate was null on
+     every load in production and the paragraph explaining WHY the week reads
+     short fell through to a coarser fallback that names no percentage and no
+     forecast interval. On 2026-09-02 the window carried 31,048 bookings over
+     84 days, an 11,089-a-month rate, against a 15,500 projection for Oct 26:
+     the projection is 40% above the rate every cell's share was measured at,
+     which is the whole reason 166 of 168 hours read short. */
+  const trailingBookings = d.trailing_bookings ?? d.observed_bookings ?? null;
+  const trailingRate = trailingBookings != null && d.window_days
+    ? (trailingBookings / d.window_days) * 30 : null;
+  const liftPct = trailingRate && d.target_bookings
+    ? Math.round(((d.target_bookings / trailingRate) - 1) * 100) : null;
+
   /* A rota page opened on four tiles and 188 rows of hours. The question it is
      open for is whether next month's work is covered — and by how much it is
      not, in people rather than in cells. */
@@ -50,18 +75,54 @@ export async function renderCapacity(root) {
     const spare = t.cells_spare || 0;
     const cells = (d.cells || []).length || (short + spare);
     const shortPct = cells ? Math.round((short / cells) * 100) : 0;
-    const heads = (d.shortfall || []).reduce((a, r) =>
-      a + Math.max(0, (+r.expected_per_occurrence || 0) - (+r.drivers_per_occurrence || 0)), 0);
+    const shortCells = (d.cells || []).filter(isShort);
+    /* Drivers minus drivers. This subtracted DRIVERS from BOOKINGS — Tuesday
+       18:00 contributed 38.7 bookings expected each time less 22.3 drivers on
+       it, and the difference of two different units was then printed under the
+       word "driver-shifts". Summed over the twenty rows of `shortfall` it read
+       301 on 2026-09-02, a number that is neither bookings nor people.
+       driver_gap is the same subtraction already done in ONE unit — drivers
+       needed at this cell's own measured rate, less the drivers who turn up —
+       and over the 166 hours the claim counts it is 763. Taken from `cells`
+       rather than `shortfall` for that reason: shortfall is the twenty largest
+       gaps, so the old sum described 20 hours under a headline about 166. */
+    const heads = shortCells.reduce((a, r) => a + (+r.driver_gap || 0), 0);
+    /* What the "most ever seen" column on the panel below already shows, said
+       in the headline instead of leaving a reader to notice it row by row:
+       149 of production's 166 short hours have carried at least as many
+       drivers as the projection needs, at some point in the trailing 84 days.
+       So "0 hours have people to spare" is a statement about the AVERAGE
+       turnout in each hour, not about a fleet with nobody left. */
+    const reached = shortCells.filter((r) => r.most_drivers_seen != null
+      && r.drivers_needed != null && r.most_drivers_seen >= r.drivers_needed).length;
     verdict(root, {
       claim: short
         ? `${fmt(short)} ${plural(short, 'hour')} of the week ${short === 1 ? 'is' : 'are'} short of people`
         : 'Every hour of the week is covered for the forecast',
       figure: short ? fmt(Math.ceil(heads)) : fmt(spare),
-      unit: short ? 'driver-shifts short' : 'hours with people to spare',
+      /* Driver-hours, because each cell is one hour of one weekday and its gap
+         is drivers-per-occurrence: summed across the week's cells the total is
+         what a single week of the projected month is short by. */
+      unit: short ? 'driver-hours short in a week' : 'hours with people to spare',
       tone: shortPct >= 25 ? 'bad' : short ? 'warn' : null,
       meta: `${fmt(d.target_bookings)} bookings expected in ${MONTH(d.target_month)}`,
-      sub: `${fmt(spare)} ${plural(spare, 'hour')} ${spare === 1 ? 'has' : 'have'} people to spare, so `
-        + 'some of this is a rota that can be moved rather than people who have to be hired.'
+      /* The old sentence was unconditional and read "0 hours have people to
+         spare, so some of this is a rota that can be moved rather than people
+         who have to be hired" — a conclusion drawn from a count of zero, on a
+         page whose spare-hours panel says in as many words that there are
+         none. When the count is zero the sentence now says what was actually
+         measured, and hands over the fact that does bear on moving people. */
+      sub: (spare
+        ? `${fmt(spare)} ${plural(spare, 'hour')} ${spare === 1 ? 'has' : 'have'} people to spare, so `
+          + 'some of this is a rota that can be moved rather than people who have to be hired.'
+        : 'No hour is covered beyond the projection, so this is measured against the average turnout in '
+          + 'each hour and not against spare cover.'
+          + (reached
+            ? ` ${fmt(reached)} of the ${fmt(short)} short hours ${plural(reached, 'has', 'have')} already `
+              + 'carried as many drivers as the projection needs, at some point in the trailing '
+              + `${fmt(d.window_days)} days — the "most ever seen" column below — so the gap is in the `
+              + 'average turnout rather than in the fleet\'s reach.'
+            : ''))
         + (d.forecast_kind === 'extrapolation'
           ? ' The forecast behind it is an extrapolation, not a fitted model — read the range, not the point.'
           : ''),
@@ -192,10 +253,8 @@ export async function renderCapacity(root) {
      shortfall in almost every cell before anything about the rota is
      considered — 93 hours short and exactly one spare is a property of the
      comparison, not a finding about the week. */
-  const trailingRate = d.trailing_bookings != null && d.window_days
-    ? (d.trailing_bookings / d.window_days) * 30 : null;
-  if (trailingRate && d.target_bookings) {
-    const lift = Math.round(((d.target_bookings / trailingRate) - 1) * 100);
+  if (trailingRate && liftPct != null) {
+    const lift = liftPct;
     if (Math.abs(lift) >= 5) {
       // Built with el(), not note(): note() escapes its text, and this sentence
       // carries the link to the page the comparison comes from.

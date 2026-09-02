@@ -68,6 +68,23 @@ const MONEY_FROM = 'these figures come from Uber\u2019s payout breakdown, and th
   + 'the platform can no longer be asked about, not one whose statement nobody pulled. Earlier '
   + 'months are unknowable rather than zero.';
 
+/* Counted here rather than inline so the rule can be checked directly: a
+   caption that under-fires is invisible in a rendered page and obvious in a
+   list of rows. `same` requires both values to exist — two days that are both
+   blank repeat nothing, they are two absences. */
+export function spreadRuns(rows) {
+  const same = (a, b) => a != null && b != null && Number(a) === Number(b);
+  let expected = 0; let bank = 0; let either = 0;
+  for (let i = 1; i < rows.length; i += 1) {
+    const e = same(rows[i].expected_payout, rows[i - 1].expected_payout);
+    const b = same(rows[i].bank_payout, rows[i - 1].bank_payout);
+    if (e) expected += 1;
+    if (b) bank += 1;
+    if (e || b) either += 1;
+  }
+  return { expected, bank, either };
+}
+
 const MONTH_LABEL = (m) => {
   const [y, mm] = String(m).split('-');
   return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+mm - 1]} ${y}`;
@@ -90,6 +107,33 @@ const deltaPill = (r) => {
   const tone = off == null ? 'warn' : off <= 2 ? 'ok' : off <= 10 ? 'warn' : 'bad';
   const sign = r.delta > 0 ? '+' : r.delta < 0 ? '−' : '±';
   return pill(`${sign}AED ${fmt(Math.abs(r.delta))}${off == null ? '' : ` · ${pct(off, 1)}`}`, tone);
+};
+
+/* The report window the money on this side was measured over.
+   ─────────────────────────────────────────────────────────────────────────
+   Both money tables spread a provider's report evenly across its days and
+   record the divisor (sql/schema_v23.sql, sql/schema_v44.sql), and until now
+   the page printed the quotient with nothing to say it was one. February 2026
+   is what that hides: the payout column there is a WEEKLY report over 9-14
+   February — AED 3,799.61 on each of six days — and then AED 25,998.71 on the
+   15th, because the collector asks day by day only as far back as
+   EARNER_DAY_HORIZON (src/sources/uber.js) and 2026-09-02 less 200 days is
+   2026-02-14. The seam is the collection grid, to the day, and the row that
+   straddles it was reading as a 194% overpayment.
+
+   So a row says which basis it used: one report spread across its days, or —
+   the case that matters — a column that mixes a measured day with a seventh
+   of a week and cannot be added up as if it were either. */
+const basis = (min, max, side) => {
+  if (max == null || max <= 1) return '';
+  const what = min !== max && min != null
+    ? `${fmt(min)}- and ${fmt(max)}-day reports mixed`
+    : `a ${fmt(max)}-day report spread`;
+  return `<span class="dim" title="The provider filed this ${side} money on a report `
+    + `window of ${min === max ? `${fmt(max)} days` : `${fmt(min)} to ${fmt(max)} days`}, `
+    + 'and the table spreads a report evenly across the days it covers, so a figure at this '
+    + 'grain is an allocation rather than a measurement of the row it sits on."> '
+    + `· ${what}</span>`;
 };
 
 /* A full-period figure, with the part of it the comparison actually used shown
@@ -124,7 +168,8 @@ const COLS = (keyCol) => [
     /* "needs the statement" read as a task somebody could do. For every month
        before the retention edge there is nothing to do. */
     render: (r) => withCompared(r.expected_payout, r.expected_covered,
-      'outside Uber\u2019s 192-day window') },
+      'outside Uber\u2019s 192-day window')
+      + basis(r.expected_period_days_min, r.expected_period_days, 'on-trip') },
   { label: 'Bank payout', key: 'bank_payout', num: true,
     /* The part of an open month that has not happened yet, named. Uber writes
        a whole weekly period's rows the moment the period opens, so the current
@@ -133,6 +178,7 @@ const COLS = (keyCol) => [
        half the money. The day view already excludes those days; the month row
        now says how much of itself they are. */
     render: (r) => withCompared(r.bank_payout, r.bank_covered, 'no payout reported')
+      + basis(r.bank_period_days_min, r.bank_period_days, 'bank')
       + (r.bank_accrued
         ? `<span class="dim" title="${fmt(r.accrual_days)} payout rows dated after today — Uber `
           + `writes a whole weekly period when it opens, so this much of the month is a forward `
@@ -285,20 +331,33 @@ export async function renderReconcile(root, month) {
   const rows = month ? d.rows : [...d.rows].reverse();
   mp.body.append(tableFrom(rows, COLS(keyCol),
     { sortable: true, sortId: month ? 'recon-days' : 'recon-months' }));
-  /* Why consecutive days are byte-identical. A payout period is weekly and the
-     day grain spreads it evenly across its days, so seven rows carrying the
-     same figures are ONE statement, not seven days that happened to match —
-     and a reader reconciling them one at a time is checking the same number
-     seven times. */
+  /* Why consecutive days are byte-identical, and why this used to say so far
+     too rarely.
+     ─────────────────────────────────────────────────────────────────────────
+     A report period is weekly and the day grain spreads it evenly across its
+     days, so seven rows carrying the same figures are ONE report, not seven
+     days that happened to match, and a reader reconciling them one at a time
+     is checking the same number seven times.
+
+     The test for that demanded the bank column AND the on-trip column repeat
+     together — and the two sides are collected on different grids, so the
+     moment the payout side gains a daily measurement the statement beside it
+     is still a seventh of a week and the caption goes silent on exactly the
+     rows that need it. Measured on production 2026-09-02: February 2026
+     carries seventeen days whose expected side repeats the day before and six
+     whose bank side does, eighteen days in all, and the caption said six;
+     September carries five and the caption said three. Either side repeating
+     is one report wearing several hats, so each is counted and named. */
   if (month) {
-    const dup = rows.filter((r, i) => i > 0
-      && r.bank_payout != null && r.bank_payout === rows[i - 1].bank_payout
-      && r.ontrip_net === rows[i - 1].ontrip_net).length;
-    if (dup) {
+    const runs = spreadRuns(rows);
+    if (runs.either) {
       mp.body.append(el('p', 'cap',
-        `${countOf(dup, 'day')} here ${plural(dup, 'repeats', 'repeat')} the figures of the day before. `
-        + 'That is not a coincidence: a platform pays by the WEEK, and a weekly statement spread across '
-        + 'its days gives every day in the period the same numbers. Reconcile a period, not a day.'));
+        `${countOf(runs.either, 'day')} here `
+        + `${plural(runs.either, 'repeats', 'repeat')} the figures of the day before — `
+        + `${fmt(runs.expected)} on the expected side, ${fmt(runs.bank)} on the bank side. `
+        + 'That is not a coincidence: a platform reports by the WEEK, and a weekly report spread '
+        + 'across its days gives every day in the period the same numbers. Reconcile a period, '
+        + 'not a day.'));
     }
   }
   host.append(mp.panel);

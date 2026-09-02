@@ -2683,7 +2683,11 @@ V.unauthorized = async (root) => {
      of 2 fixes was tagged red beside one with 0 of 213 — the second is a
      finding and the first is two samples. */
   const FIX_FLOOR = 20;
-  const flagged = sensors.map((s2) => ({ ...s2,
+  /* {rows, total, shown, truncated} — tolerant of the old bare array, the same
+     read /api/unauthorized/by-vehicle already gets a few lines above. */
+  const sensorRows = sensors.rows || (Array.isArray(sensors) ? sensors : []);
+  const sensorTotal = sensors.total ?? sensorRows.length;
+  const flagged = sensorRows.map((s2) => ({ ...s2,
     ratio: s2.total_fixes ? +(s2.occupied_fixes / s2.total_fixes * 100).toFixed(1) : null,
     verdict: s2.sensor_suspect_segments > 0 ? 'suspect'
       : s2.occupied_fixes > 0 ? 'ok'
@@ -2702,10 +2706,19 @@ V.unauthorized = async (root) => {
         r.verdict === 'too few fixes to judge'
           ? `only ${fmt(r.total_fixes)} fix(es) — under ${FIX_FLOOR} nothing can be concluded`
           : 'over this window'}">${esc(r.verdict)}</span>` },
-  ], { sortable: true, sortId: 'sensors', defaultSort: { key: 'total_fixes', dir: 'desc' } }));
+  ], { sortable: true, sortId: 'sensors', defaultSort: { key: 'total_fixes', dir: 'desc' },
+    /* The endpoint returns the hundred furthest from a plausible occupancy
+       band. Sorting this table re-orders those hundred and does not reach the
+       rest, which is the thing a reader has no way to know from the arrows. */
+    capped: sensorTotal > flagged.length
+      ? `all ${fmt(sensorTotal)} trackers that reported`
+      : null }));
   const unjudged = flagged.filter((r) => r.verdict === 'too few fixes to judge').length;
   health.body.append(el('p', 'cap',
-    `${countOf(flagged.length, 'tracker')} reported at all in this window`
+    (sensorTotal > flagged.length
+      ? `Showing ${fmt(flagged.length)} of ${fmt(sensorTotal)} trackers that reported in this window, `
+        + 'the furthest from a plausible occupancy band first'
+      : `${countOf(flagged.length, 'tracker')} reported at all in this window`)
     + (unjudged
       ? `, ${fmt(unjudged)} of them with fewer than ${FIX_FLOOR} fixes — those are shown as unjudged `
         + 'rather than as sensors that never fire.'
@@ -3619,6 +3632,111 @@ V.compliance = async (root) => {
     + '. The counts above are over all of them, not over this list. Every column here can be sorted.'));
 };
 
+/* ── what is actually still owed, in days ─────────────────────────────────
+   Both panels that talk about collection debt counted rows of
+   `failed_windows` and called the total "windows outstanding". Measured on
+   production 2026-09-02 that total was 111, and it was wrong in four
+   independent ways at once:
+
+     14 of the 111 are the same window asked again in a second mode — the
+        catch-up and the incremental both fail on 2026-08-30..2026-09-02, and
+        both rows were counted.
+      7 are past Uber's retention horizon (uber/backfill/egari,
+        2024-08-31 → 2025-04-04, "outside retention: … invalid date range").
+        The provider cannot serve those days to anybody, ever; they are re-asked
+        every Sunday and re-counted every time.
+      8 have a `to` LATER than the run's own finished_at — 2026-08-31..2026-09-06
+        against a run that finished on 2026-09-01. weekChunks widens to whole
+        weeks on purpose (src/util.js:37-55) and the provider answers
+        "endDate is too late". Nothing is missing from a future that has not
+        happened.
+     44 describe ONE cause, a dead Uber web session, over 31 distinct days, at
+        1-day, 7-day and 31-day granularity — because each retry re-asks at a
+        different chunk size and each attempt appends its own rows.
+
+   Meanwhile the largest real hole on the fleet, 113 days of FMS alerts per
+   fleet, is six rows. So the headline over-counted one dead session 44x and
+   under-counted the worst outage 19x, and re-sorting the list could not fix it
+   because the unit was wrong: a window is a RETRY, not a quantity of missing
+   data. The unit here is the distinct (source, fleet, day) — 362 of them, of
+   which 226 are the FMS alert hole.
+
+   `from` and `to` are bare ISO days, and they are stepped and compared as
+   such — anchored only to walk the calendar, and turned back into ISO days
+   before anything is counted. Comparing them as local instants would move
+   every boundary by the four hours of the Dubai offset, and the run that
+   finished at 19:25 on the 31st would stop owning the 31st.
+
+   The anchor is NOON, not midnight, which is the convention the rest of this
+   codebase uses and the one test/timezone.test.mjs enforces: 16:00 in Dubai is
+   far enough from both midnights that adding days and reading the UTC date
+   back cannot cross one. Midnight happens to be exact here — UTC has no DST
+   and the step is exactly 864e5 — but "happens to be exact" is the argument
+   every off-by-one day in this product was originally shipped with. */
+const dayMs = (d) => new Date(`${d}T12:00:00Z`).getTime();
+const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
+// Every calendar day a window covers, ends included. Bounded because a
+// malformed window must not spin the browser on the panel whose whole job is
+// to say what is broken.
+const daysIn = (from, to, into, key = (d) => d) => {
+  const end = dayMs(to);
+  for (let t = dayMs(from); t <= end && into.size < 4000; t += 864e5) into.add(key(dayOf(t)));
+  return into;
+};
+// A window nobody will ever be able to fetch again, whatever we do to the
+// credentials. Uber's own wording for it is the retention horizon.
+const UNSERVABLE = /outside retention/i;
+export function collectionDebt(status) {
+  const entries = (Array.isArray(status) ? status : []).flatMap((r) => (r.failed_windows || [])
+    .map((w) => ({ source: r.source, mode: r.mode, fleet: r.fleet_id, finished_at: r.finished_at, ...w })));
+  const unservable = entries.filter((e) => UNSERVABLE.test(String(e.error || '')));
+  /* Not a hole: the collector asked for days that did not exist yet. Compared
+     as ISO day strings so a run that finished at 19:25 Dubai still owns its own
+     last day. */
+  const invented = entries.filter((e) => !UNSERVABLE.test(String(e.error || ''))
+    && e.finished_at && dayKey(e.to) > dayKey(e.finished_at));
+  const set = new Set([...unservable, ...invented]);
+  const owed = entries.filter((e) => !set.has(e));
+  let duplicates = 0;
+  const seen = new Set();
+  const by = new Map();
+  for (const e of owed) {
+    const k = `${e.source}|${e.fleet}|${e.from}|${e.to}`;
+    if (seen.has(k)) duplicates++;
+    seen.add(k);
+    const g = by.get(`${e.source}|${e.fleet}`) || { source: e.source, fleet: e.fleet, days: new Set(), why: new Map() };
+    by.set(`${e.source}|${e.fleet}`, g);
+    g.why.set(String(e.error || ''), (g.why.get(String(e.error || '')) || 0) + 1);
+    daysIn(e.from, e.to, g.days);
+  }
+  const groups = [...by.values()].map((g) => {
+    const days = [...g.days].sort();
+    return { source: g.source, fleet: g.fleet, days: days.length, from: days[0], to: days[days.length - 1],
+      error: [...g.why.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '' };
+  }).sort((a, b) => b.days - a.days);
+  const lost = new Set();
+  for (const e of unservable) daysIn(e.from, e.to, lost, (d) => `${e.source}|${e.fleet}|${d}`);
+  return { entries: entries.length,
+    days: groups.reduce((s, g) => s + g.days, 0),
+    groups,
+    duplicates,
+    invented: invented.length,
+    unservable: unservable.length,
+    unservableDays: lost.size,
+    unservableFrom: unservable.map((e) => e.from).sort()[0] || null,
+    unservableTo: unservable.map((e) => e.to).sort().pop() || null };
+}
+/* "FMS telematics · Egari" — the fleet is half the identity of a hole. The live
+   sentence printed "FMS telematics 14 Aug 2026 → 31 Aug 2026" twice in a row
+   and read as a rendering bug; they are two different fleets.
+
+   `uber_fleet` is a collector /api/status reports; SOURCE_LABEL in ui.js had no
+   entry for it, so sourceLabel() fell through to the database key and this
+   sentence printed "uber_fleet · Ecosine" at a reader. It now sits in ui.js
+   beside the other seven, so the #sources tables pick it up too. */
+export const feedLabel = (source, fleet) => sourceLabel(source)
+  + (fleet ? ` · ${sourceLabel(fleet)}` : '');
+
 V.sources = async (root) => {
   const vsHost = el('div'); root.append(vsHost);
   /* Guarded like every other long view. This one was not, and it is the
@@ -3629,9 +3747,20 @@ V.sources = async (root) => {
      same page opened on its own resolves in under a second every time.
      See the comment on currentGen() in data.js for the whole hazard. */
   const gen = currentGen();
+  /* "partial" does NOT promise that rows were written.
+     ─────────────────────────────────────────────────────────────────────
+     This caption said '"partial" means the run wrote rows AND left windows
+     unfetched' — and on production 2026-09-02 two of the fifteen partials had
+     written nothing at all: uber/catchup on both fleets, rows=0, 44 of 44
+     chunks failed, 74 of those 88 windows saying the web session is no longer
+     signed in. A caption that guarantees rows painted the total death of the
+     supplier session as a run that mostly worked. Say what the status
+     actually means, and count the blank ones separately. */
   const st = panel('Collector health',
-    'Last run per source. "partial" means the run wrote rows AND left windows unfetched — which is how '
-    + 'a 299-day hole in the Uber trip history survived for months behind a run that said ok.');
+    'Last run per source. "partial" means the run left windows unfetched — usually beside rows it did '
+    + 'write, which is how a 299-day hole in the Uber trip history survived for months behind a run '
+    + 'that said ok. It does not promise rows were written: read the Rows column, because a partial '
+    + 'that wrote none is a dead source wearing the same amber as a run that mostly worked.');
   root.append(st.panel);
   const cv = panel('Data coverage',
     'What has actually landed — and, for each dated source, how many days of the window it covered. '
@@ -3673,6 +3802,10 @@ V.sources = async (root) => {
     const bad = rows.filter((r) => r.status === 'error' || r.error);
     const partial = rows.filter((r) => r.status === 'partial' || (+r.chunks_failed || 0) > 0);
     const quietOk = rows.filter((r) => r.status === 'ok' && !(+r.rows_written));
+    /* The partials that wrote NOTHING. Two of the fifteen on production
+       2026-09-02 — uber/catchup on each fleet, rows=0, 44 of 44 chunks failed
+       — and the claim above called all fifteen runs that "wrote rows". */
+    const blank = partial.filter((r) => !(+r.rows_written));
     const oldest = rows
       .filter((r) => r.finished_at)
       .sort((a, b) => new Date(a.finished_at) - new Date(b.finished_at))[0];
@@ -3681,7 +3814,8 @@ V.sources = async (root) => {
       claim: bad.length
         ? `${countOf(bad.length, 'collector')} failed on ${bad.length === 1 ? 'its' : 'their'} last run`
         : partial.length
-          ? `${countOf(partial.length, 'run')} wrote rows and left windows unfetched`
+          ? `${countOf(partial.length, 'run')} left windows unfetched`
+            + (blank.length ? `, ${fmt(blank.length)} of them writing nothing at all` : '')
           : quietOk.length
             ? `${countOf(quietOk.length, 'collector')} reported success and wrote nothing`
             : `All ${fmt(rows.length)} collectors last ran clean`,
@@ -3692,8 +3826,12 @@ V.sources = async (root) => {
       sub: (ageH != null
         ? `The stalest source last finished ${fmt(ageH)} h ago${oldest?.source ? ` (${sourceLabel(oldest.source)})` : ''}. `
         : '')
-        + 'A "partial" run is one that wrote rows AND left windows unfetched — which is how a '
-        + '299-day hole in the Uber trip history survived for months behind a run that said ok.',
+        + 'A "partial" run is one that left windows unfetched. Most also wrote rows — which is how a '
+        + '299-day hole in the Uber trip history survived for months behind a run that said ok — but '
+        + (blank.length
+          ? `${fmt(blank.length)} of these wrote nothing whatever: every window refused, which is a dead `
+            + 'source wearing the same amber as a run that mostly worked.'
+          : 'a partial that wrote nothing whatever is a dead source, not a run that mostly worked.'),
       recommend: bad.length || partial.length
         ? 'Collection gaps shows which DAYS each source actually covered, which a row count between '
           + 'two dates cannot.'
@@ -3799,12 +3937,29 @@ V.sources = async (root) => {
   /* The dates of the windows that failed. Without them a gap is visible but not
      fixable — you can see the hole and not know what to re-fetch. */
   const holes = status.flatMap((r) => (r.failed_windows || [])
-    .map((w) => ({ source: r.source, mode: r.mode, ...w })));
+    .map((w) => ({ source: r.source, mode: r.mode, fleet: r.fleet_id, finished_at: r.finished_at, ...w })));
   if (holes.length) {
+    const debt = collectionDebt(status);
     const hp = panel('Windows that did not land',
-      'Each of these is a range with no data behind it. Every rate computed across one is wrong.');
+      'Each of these is one ASK that was refused, not one hole. The same days appear here several times '
+      + 'over — a catch-up and an incremental refused on the same dates, and every retry re-asking at a '
+      + 'different chunk size. The count that matters is the distinct days, under the table.');
+    /* What this row is worth chasing FOR. Two of the three answers here mean
+       "do not bother": a range past the provider's retention will refuse for
+       ever, and a range ending after the run itself was never real. */
+    const standing = (h) => (UNSERVABLE.test(String(h.error || ''))
+      ? '<span class="tag bad" title="past the provider\u2019s retention horizon — it cannot serve these days to anybody, and every backfill re-asks and is refused again">gone for good</span>'
+      : h.finished_at && dayKey(h.to) > dayKey(h.finished_at)
+        ? '<span class="ent-off" title="the window runs past the moment the run finished — weekChunks widens to whole weeks on purpose, so this is a future that had not happened, not a hole">not yet due</span>'
+        : '<span class="tag warn" title="still owed — this one is worth re-running">outstanding</span>');
     hp.body.append(tableFrom(holes, [
       { label: 'Source', key: 'source', render: (r) => sourceLabel(r.source) },
+      /* The fleet, on the table as well as in the sentence. Ecosine and Egari
+         fail the same window separately and the two rows were identical. */
+      { label: 'Fleet', key: 'fleet',
+        absent: 'these runs cover the whole account rather than one fleet',
+        render: (r) => (r.fleet ? sourceLabel(r.fleet) : '—') },
+      { label: 'Standing', key: '_st', render: standing },
       { label: 'Mode', key: 'mode' },
       { label: 'From', key: 'from', render: (r) => dateStr(r.from) },
       { label: 'To', key: 'to', render: (r) => dateStr(r.to) },
@@ -3812,6 +3967,18 @@ V.sources = async (root) => {
         render: (h) => `<span class="wrap" title="${esc(String(h.error))}">${esc(String(h.error).slice(0, 140))}${
           String(h.error).length > 140 ? '…' : ''}</span>` },
     ], { sortable: true, sortId: 'holes' }));
+    /* The arithmetic between the two numbers, said out loud. 111 rows, 362
+       days: neither is the other's total and the page used to print only the
+       111 under the word "outstanding". */
+    hp.body.append(el('p', 'cap',
+      `${countOf(holes.length, 'refusal')} on record, describing ${countOf(debt.days, 'day')} still owed`
+      + (debt.duplicates ? `. ${countOf(debt.duplicates, 'row')} here ${plural(debt.duplicates, 'is', 'are')} the `
+        + 'same window asked again in another mode' : '')
+      + (debt.unservable ? `, ${countOf(debt.unservable, 'row')} cannot be served again at any point in `
+        + 'the future' : '')
+      + (debt.invented ? `, and ${countOf(debt.invented, 'row')} end after the run that asked for them had `
+        + 'already finished' : '')
+      + '.'));
     const fix = el('div', 'note');
     fix.innerHTML = 'Re-run a backfill from <a class="lnk" href="' + href('settings') + '">Settings</a> to '
       + 'attempt these again. If the same window keeps failing, the reason in this table is the thing to '
@@ -3932,10 +4099,21 @@ V.sources = async (root) => {
       + `${cov.length - priced.length === 1 ? 'other one records' : 'others record'} movement, events `
       + 'or documents, so a dash there is what those feeds are, not something missing from them.'));
   }
-  const holed = cov.filter((r) => r.cal && r.cal.missing_days);
+  /* The footnote has to agree with the column above it.
+     ───────────────────────────────────────────────────────────────────────
+     Two faults in one line. It counted every row with missing_days, including
+     the event-driven ones the Missing column had just labelled "not a daily
+     feed" — so the alerts row, 73 missing days on a dataset where a quiet day
+     is not a gap, was named as a hole four cells below the sentence saying it
+     was not one. And it printed sourceLabel(r.src) on rows whose `src` is
+     null: alerts, ledger and telemetry all carry their calendar under `key`,
+     not under a platform, and sourceLabel(null) returns '—'. The live footnote
+     read "— is missing 73 days". The row already carries the name the reader
+     saw in the first column; use that. */
+  const holed = cov.filter((r) => r.cal && r.cal.missing_days && !r.cal.event_driven);
   if (holed.length) {
     const h = el('div', 'note');
-    h.innerHTML = holed.map((r) => `${esc(sourceLabel(r.src))} is missing `
+    h.innerHTML = holed.map((r) => `${esc(r.what || sourceLabel(r.src))} is missing `
       + `${countOf(r.cal.missing_days, 'day')}`).join(', ')
       + '. A row count between two dates says nothing about what is in between — '
       + `<a class="lnk" href="${href('coverage', null, null, { days: 365 })}">Collection gaps</a> draws it `
@@ -4279,22 +4457,47 @@ V.settings = async (root) => {
      pages and neither named the other. */
   const holesHost = el('div'); credP.body.append(holesHost);
   api('/api/status').then((st2) => {
-    const holes = (st2 || []).flatMap((r) => (r.failed_windows || [])
-      .map((w) => ({ source: r.source, mode: r.mode, ...w })));
-    if (!holes.length) {
+    /* What a backfill would actually recover, and what it never will.
+       ──────────────────────────────────────────────────────────────────────
+       This counted rows of failed_windows: 111 on production 2026-09-02, under
+       the words "did not land and are still outstanding". See collectionDebt()
+       above for why that number was wrong four ways over. Two of them are
+       visible right here. The sentence listed the first six raw rows, which
+       printed "FMS telematics 14 Aug 2026 → 31 Aug 2026" twice in a row and
+       read as a rendering bug — they were two different fleets, and the fleet
+       was never printed. And seven of the 111 are past Uber's retention
+       horizon, so the button this sentence sits above cannot recover them
+       however many times it is pressed; they are re-asked every Sunday. */
+    const debt = collectionDebt(st2);
+    if (!debt.days && !debt.unservable) {
       holesHost.append(el('p', 'cap', 'Every collection window on record landed. A backfill now would '
         + 're-fetch what is already held.'));
       return;
     }
-    const box = el('div', 'note warn');
-    box.innerHTML = `${countOf(holes.length, 'window')} did not land and ${plural(holes.length, 'is', 'are')} `
-      /* The window bounds arrive as ISO days and were written into the
-         sentence unchanged: "FMS telematics 2026-01-27→2026-02-26". */
-      + `still outstanding: ${holes.slice(0, 6).map((h) => `${esc(sourceLabel(h.source))} `
-        + `${esc(dateStr(h.from))} → ${esc(dateStr(h.to))}`).join(', ')}`
-      + `${holes.length > 6 ? `, and ${fmt(holes.length - 6)} more` : ''}. `
-      + `<a class="lnk" href="${href('sources')}">What each one came back with</a>.`;
-    holesHost.append(box);
+    if (debt.days) {
+      const box = el('div', 'note warn');
+      box.innerHTML = `${countOf(debt.days, 'day')} of collection ${plural(debt.days, 'is', 'are')} `
+        + `outstanding across ${countOf(debt.groups.length, 'feed')}, `
+        + `asked for and refused ${countOf(debt.entries, 'time')}: `
+        /* Fleet and day count, largest first. The window bounds arrive as ISO
+           days and were written into the sentence unchanged, so this also read
+           "FMS telematics 2026-01-27→2026-02-26". */
+        + `${debt.groups.slice(0, 6).map((g) => `<b>${esc(feedLabel(g.source, g.fleet))}</b> `
+          + `${esc(fmt(g.days))} ${esc(plural(g.days, 'day'))} `
+          + `(${esc(dateStr(g.from))} → ${esc(dateStr(g.to))})`).join(', ')}`
+        + `${debt.groups.length > 6 ? `, and ${fmt(debt.groups.length - 6)} more` : ''}. `
+        + `<a class="lnk" href="${href('sources')}">What each one came back with</a>.`;
+      holesHost.append(box);
+    }
+    if (debt.unservable) {
+      const gone = el('div', 'note');
+      gone.innerHTML = `A further ${countOf(debt.unservableDays, 'day')} `
+        + `(${esc(dateStr(debt.unservableFrom))} → ${esc(dateStr(debt.unservableTo))}, `
+        + `${countOf(debt.unservable, 'window')}) ${plural(debt.unservable, 'is', 'are')} past the `
+        + 'provider’s retention horizon: the provider cannot serve these again, so no backfill started '
+        + 'here will recover them. They are re-asked on every run and refused every time.';
+      holesHost.append(gone);
+    }
   }).catch(() => { /* the panel is an aid, not the page */ });
 
   const actions = el('div', 'btnrow'); actions.style.marginTop = '16px';
@@ -4377,7 +4580,13 @@ V.settings = async (root) => {
               + `${esc(r.requested_by)}</span>`
             : '<span class="ent-off">not recorded</span>') },
         { label: 'Requested', key: 'requested_at', render: (r) => dtStr(r.requested_at) },
-        { label: 'Started', key: 'started_at', render: (r) => (r.started_at ? dtStr(r.started_at) : '—') },
+        /* '—' here means "not recorded", not "never". The requeue nulls
+           started_at on rows it marks failed — see the Waited cell below. */
+        { label: 'Started', key: 'started_at',
+          render: (r) => (r.started_at ? dtStr(r.started_at)
+            : `<span class="ent-off" title="${r.status === 'queued'
+              ? 'not claimed by the collector yet'
+              : 'no start time on this row \u2014 the requeue clears it when it abandons a job'}">—</span>`) },
         /* How long it sat in the queue before anything picked it up. One job
            here waited four hours and another seven; the row said "done" and
            gave no hint that the answer was that old. */
@@ -4386,10 +4595,28 @@ V.settings = async (root) => {
         render: (r) => {
           if (!r.requested_at) return '—';
           if (!r.started_at) {
-            return r.status === 'queued'
-              ? `<span class="dim" title="still waiting for the collector to claim it">${
-                fmt(Math.round((Date.now() - Date.parse(r.requested_at)) / 60000))} min so far</span>`
-              : '<span class="ent-off" title="this job never started">never started</span>';
+            if (r.status === 'queued') {
+              return `<span class="dim" title="still waiting for the collector to claim it">${
+                fmt(Math.round((Date.now() - Date.parse(r.requested_at)) / 60000))} min so far</span>`;
+            }
+            /* A null started_at is not proof that nothing ran.
+               ───────────────────────────────────────────────────────────────
+               The requeue clears started_at on rows it marks failed, so job 8
+               on production 2026-09-02 read "never started" in this cell beside
+               "Restarts: 5" and "uber … 35,829 rows so far" in the two cells to
+               its right — three cells of one row contradicting each other, and
+               the one a reader believes is the plain English one. Job 1 does
+               the same with 4 restarts. Where the row carries evidence of a
+               run, say the wait is unknown; only a row with no evidence at all
+               gets to claim it never started. */
+            const ran = (+r.attempts || 0) > 1 || r.progress?.current || (+r.progress?.done || 0) > 0
+              || (+r.progress?.steps || 0) > 0 || (+r.progress?.step?.rows_so_far || 0) > 0
+              || r.seconds != null || r.running_seconds != null || r.finished_at;
+            return ran
+              ? '<span class="ent-off" title="this run was claimed and made progress, but the requeue '
+                + 'cleared its start time when it marked the job failed, so how long it waited is not '
+                + 'recorded">not recorded</span>'
+              : '<span class="ent-off" title="nothing on this row shows it was ever claimed">never started</span>';
           }
           const m = Math.round((Date.parse(r.started_at) - Date.parse(r.requested_at)) / 60000);
           return m >= 60

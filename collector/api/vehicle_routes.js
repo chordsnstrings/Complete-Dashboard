@@ -392,8 +392,27 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        exactly this, and lines 314, 439 and 461 below already respect it.
        Both figures are returned, because "it moved 222 times without a
        booking" is its own fact and deleting it would be the opposite error. */
+    /* …and the ENDS of the span needed the same guard the counts got.
+       ─────────────────────────────────────────────────────────────────────
+       first_trip and last_trip were min/max over every row, so the last thing
+       the TRACKER saw was served under the name of the last thing a rider paid
+       for. Measured on production over 365 days: 46 of 227 plates carry an FMS
+       row after their last booking — L36395 last earned at 05:07 and this
+       endpoint reported 05:12, L44251 04:32 against 04:49, L36485 06:25
+       against 06:36 — and a car with no bookings at all in the window reported
+       a last_trip of whenever its tracker last reported. That is the same
+       widening of the word "trip" that made span.trips read 547 on a car that
+       took 325 bookings, and it put this page's "last trip" against idle days
+       and utilisation figures that count is_booking.
+
+       The unfiltered value is not deleted: it is the last time the car MOVED,
+       which is its own fact, and it keeps the name /api/vehicles/directory
+       already gives it (last_movement, beside its own is_booking-filtered
+       last_trip) so the two pages describing one car use one word per fact. */
     const [span] = await q(
-      `SELECT min(requested_at) first_trip, max(requested_at) last_trip,
+      `SELECT min(requested_at) FILTER (WHERE is_booking) first_trip,
+              max(requested_at) FILTER (WHERE is_booking) last_trip,
+              min(requested_at) first_movement, max(requested_at) last_movement,
               count(*) FILTER (WHERE is_booking)::int trips,
               count(*) FILTER (WHERE NOT is_booking)::int telematics_journeys,
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)

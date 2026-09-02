@@ -85,7 +85,14 @@ const FMS_MIN_SPLIT_DAYS = 2;
    a fixed fortnight would triple the request count on every quiet month and
    still break on a busy one. */
 async function collectTripWindow(fleet, s, e, chunks, depth = 0) {
-  const chunk = { from: iso(s), to: iso(e), rows: 0, error: null };
+  /* `kind` names the SURFACE this window was asked of. Both surfaces walk the
+     same calendar, so a run's chunk list held two windows reading
+     `2026-08-30..2026-09-02` — one with 732 rows and one with a 400 — and
+     nothing anywhere said which was trips and which was alerts. /api/status on
+     2026-09-02 shows exactly that pair for every FMS run on record, and it is
+     why the alert feed could be dark for 73 days while the page reported a
+     window that looked like a duplicate of one that worked. */
+  const chunk = { from: iso(s), to: iso(e), rows: 0, error: null, kind: 'trips' };
   chunks.push(chunk);
   if (depth) chunk.split_from_refusal = true;
   let data;
@@ -162,7 +169,7 @@ async function collectTripWindow(fleet, s, e, chunks, depth = 0) {
 
    Newest first, for the same reason Uber is: a backfill that dies partway
    should have landed the months anybody is actually looking at. */
-async function pullTrips(fleet, from, to, onStep) {
+async function pullTrips(fleet, from, to, onStep, checkpoint = null) {
   let total = 0;
   /* The longest step in the whole collection sequence: 130 vehicles across
      twelve monthly windows of five-minute telematics, four and a half hours
@@ -172,9 +179,38 @@ async function pullTrips(fleet, from, to, onStep) {
   const chunks = [];
   let wi = 0;
   for (const [s, e] of windows) {
-    await onStep?.({ window: `${dotDate(s)}..${dotDate(e)}`, index: wi++, of: windows.length,
+    const unit = `trips ${iso(s)}..${iso(e)}`;
+    const index = wi++;
+    /* Already collected by this job, on an attempt the worker did not survive.
+       ─────────────────────────────────────────────────────────────────────
+       src/run.js has built a checkpoint and handed it to every source since
+       the resume work landed, and this file was the only long source that
+       never took it — `grep -n checkpoint src/sources/fms.js` returned
+       nothing. FMS is LAST in the historical sequence and runs four and a half
+       hours, so it is the source most likely to be cut short by a deploy, and
+       the cost is on the record: job 37 reported steps_at_last_attempt 337
+       against a final 720, and every one of those 337 windows was asked for a
+       second time from the first window down.
+
+       Skipped windows are still RECORDED, as skipped. A window missing from
+       the chunk list reads as one nobody asked for, which is the opposite of
+       what happened to it. */
+    if (checkpoint?.has(unit)) {
+      chunks.push({ from: iso(s), to: iso(e), rows: 0, error: null, kind: 'trips', skipped: true });
+      continue;
+    }
+    await onStep?.({ window: `${dotDate(s)}..${dotDate(e)}`, index, of: windows.length,
       rows_so_far: total, fleet: fleet.fleet });
+    const before = chunks.length;
     total += await collectTripWindow(fleet, s, e, chunks);
+    /* Marked only when every window this one BECAME answered — itself, or the
+       halves it was split into. A window recorded as finished because it was
+       refused is a hole the next attempt would skip for ever, which is the one
+       way a resume can be worse than starting over. */
+    const landed = chunks.slice(before);
+    if (landed.length && !landed.some((c) => c.error)) {
+      await checkpoint?.mark(unit, landed.reduce((a, c) => a + c.rows, 0));
+    }
   }
   const failed = chunks.filter((c) => c.error).length;
   if (failed) {
@@ -189,44 +225,145 @@ async function pullTrips(fleet, from, to, onStep) {
 }
 
 // ---- historical driver-behaviour alerts ----
-async function pullAlerts(fleet, from, to) {
+/* One alert row. Extracted for the same reason fmsTripRows was: the window
+   below calls it from a month that answered and from a day of a month that was
+   refused, and a second copy of the key would drift from the first. */
+function fmsAlertRows(data, fleet) {
+  return (data?.Data || []).map((a) => {
+    const plate = normPlate(a['Plate No']);
+    const at = parseFmsTime(a['Alert Date Time']);
+    return {
+      // Same reason as the journey key above: these bytes are already in the table.
+      platform: SRC, external_id: `${plate ?? ''}|${a['Alert Name']}|${at}`, fleet_id: fleet.fleet,
+      plate, alert_type: a['Alert Name'], occurred_at: at, location: a['Start Location'], raw: a,
+    };
+  }).filter((r) => r.occurred_at);
+}
+
+/* A DAY. Not a fortnight, not two days — one.
+   ─────────────────────────────────────────────────────────────────────────
+   The alert feed has been dark since 2026-06-05: /api/coverage reports a
+   73-day hole, 2026-06-06 → 2026-08-17, on a dataset whose median is 3,758
+   rows a day when it works. Every FMS run on record is 'partial' and the
+   failing chunk is always the alert one — /api/status on 2026-09-02 shows the
+   incremental asking 2026-08-30..2026-09-02 twice: trips 200 with 732 rows,
+   alerts HTTP 400, on the same credentials, host and dates.
+
+   The pattern is not "fails after a date". Windows outside FMS's alert
+   retention answer 200-empty; windows with data in them are refused. It is the
+   same response-size ceiling collectTripWindow above was written for, and it
+   was measured again on 2026-09-02 through the live trip probe — the only
+   surface a probe route reaches — asking ecosine for windows ending
+   2026-09-01:
+
+     18 days   200, 3,364 rows        25 days   200, 4,434 rows
+     21 days   200, 3,867 rows        26 days   200, 4,581 rows
+     24 days   200, 4,288 rows        27 days   400
+
+   So the refusal arrives between 4,581 records and the ~4,750 a twenty-seventh
+   day would have added. Alerts run 3,758 a day. ONE day fits under that
+   ceiling with room to spare; two days is 7,500 and cannot.
+
+   That is why this is a floor of one day and not FMS_MIN_SPLIT_DAYS. The trip
+   splitter could never have rescued this surface: its floor of two days is
+   already ABOVE the alert ceiling, so every half it produced would have been
+   refused as well, all the way down, and the last refusal recorded as a hole. */
+const FMS_ALERT_MAX_DAYS = 1;
+
+/* Ask for a window; if it is refused for its size, ask for its days.
+   ─────────────────────────────────────────────────────────────────────────
+   The month is asked for FIRST, and that one request is the whole reason this
+   is not simply a per-day loop. FMS keeps roughly a hundred days of alerts, so
+   most of a two-year backfill lies outside retention and answers 200-empty:
+   walking it a day at a time would spend 730 requests per fleet to be told
+   nothing 630 times. Asked whole, a month outside retention costs one request,
+   and only a month that actually holds alerts pays for its days.
+
+   Refused days are recorded rather than skipped. `continue` is what this loop
+   used to do, and it is how a feed that had stopped entirely went on reporting
+   a run that had merely "left some windows unfetched". */
+async function collectAlertWindow(fleet, s, e, chunks, checkpoint = null, split = false) {
+  const unit = `alerts ${iso(s)}..${iso(e)}`;
+  if (checkpoint?.has(unit)) {
+    chunks.push({ from: iso(s), to: iso(e), rows: 0, error: null, kind: 'alerts', skipped: true });
+    return 0;
+  }
+  const chunk = { from: iso(s), to: iso(e), rows: 0, error: null, kind: 'alerts' };
+  chunks.push(chunk);
+  if (split) chunk.split_from_refusal = true;
+  let data;
+  try {
+    const r = await call('GetAlertData', {
+      username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
+      fromdate: dotDate(s), todate: dotDate(e),
+    });
+    /* Same check the trip loop makes, for the same reason: a refusal read
+       through `data?.Data || []` is indistinguishable from a quiet month. */
+    if (!r.ok) {
+      const days = Math.round((e - s) / 864e5) + 1;
+      if (days > FMS_ALERT_MAX_DAYS) {
+        /* Straight to days rather than halving. Halving is the right shape
+           when the largest window that works is unknown; here it is measured —
+           3,758 rows a day against a ceiling that refuses somewhere above
+           4,581 — so every intermediate half from a month down to two days is
+           a request already known to be refused. Sixty-three requests to
+           collect a month, where thirty-two do it. */
+        chunks.pop();
+        log.info(SRC, `alert window ${dotDate(s)}..${dotDate(e)} refused — asking day by day`,
+          { fleet: fleet.fleet, status: r.status, days });
+        let got = 0;
+        // Newest day first, for the same reason the windows are: a backfill
+        // that dies partway should have landed the days anyone is looking at.
+        for (let i = days - 1; i >= 0; i--) {
+          const d = new Date(s.getTime() + i * 864e5);
+          got += await collectAlertWindow(fleet, d, d, chunks, checkpoint, true);
+        }
+        return got;
+      }
+      /* A single day refused is the provider's answer, not our window: there is
+         nothing smaller to ask for. Recorded as this day's error so the
+         Collection gaps page names the day, which is the whole difference
+         between a feed that is known to be broken and one that is dark. */
+      chunk.error = `HTTP ${r.status}${r.data?.Message ? `: ${String(r.data.Message).slice(0, 120)}` : ''}`;
+      log.warn(SRC, `alert day ${dotDate(s)} refused`, { fleet: fleet.fleet, status: r.status });
+      return 0;
+    }
+    data = r.data;
+  } catch (err) {
+    chunk.error = String(err).slice(0, 300);
+    log.error(SRC, `alert window ${dotDate(s)}..${dotDate(e)} FAILED`,
+      { fleet: fleet.fleet, err: chunk.error });
+    return 0;
+  }
+  const rows = fmsAlertRows(data, fleet);
+  const written = rows.length ? await upsertMany('alert', rows, ['platform', 'external_id']) : 0;
+  chunk.rows = rows.length;
+  /* Marked per WINDOW, whatever size it turned out to be — a month that
+     answered whole, or one day of a month that did not. A run cut short in the
+     middle of a refused month resumes on the day it stopped, rather than
+     re-asking the ninety days it had already collected. */
+  await checkpoint?.mark(unit, rows.length);
+  return written;
+}
+
+async function pullAlerts(fleet, from, to, onStep, checkpoint = null) {
   let total = 0;
   const chunks = [];
-  for (const [s, e] of [...dateChunks(from, to, 31)].reverse()) {
-    const chunk = { from: iso(s), to: iso(e), rows: 0, error: null, kind: 'alerts' };
-    chunks.push(chunk);
-    let data;
-    try {
-      const r = await call('GetAlertData', {
-        username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
-        fromdate: dotDate(s), todate: dotDate(e),
-      });
-      /* Same check the trip loop makes, for the same reason: a refusal read
-         through `data?.Data || []` is indistinguishable from a quiet month. */
-      if (!r.ok) {
-        chunk.error = `HTTP ${r.status}${r.data?.Message ? `: ${String(r.data.Message).slice(0, 120)}` : ''}`;
-        log.warn(SRC, `alert window ${dotDate(s)}..${dotDate(e)} refused`,
-          { fleet: fleet.fleet, status: r.status });
-        continue;
-      }
-      data = r.data;
-    } catch (err) {
-      chunk.error = String(err).slice(0, 300);
-      log.error(SRC, `alert window ${dotDate(s)}..${dotDate(e)} FAILED`,
-        { fleet: fleet.fleet, err: chunk.error });
-      continue;
-    }
-    const rows = (data?.Data || []).map((a) => {
-      const plate = normPlate(a['Plate No']);
-      const at = parseFmsTime(a['Alert Date Time']);
-      return {
-        // Same reason as the journey key above: these bytes are already in the table.
-        platform: SRC, external_id: `${plate ?? ''}|${a['Alert Name']}|${at}`, fleet_id: fleet.fleet,
-        plate, alert_type: a['Alert Name'], occurred_at: at, location: a['Start Location'], raw: a,
-      };
-    }).filter((r) => r.occurred_at);
-    if (rows.length) total += await upsertMany('alert', rows, ['platform', 'external_id']);
-    chunk.rows = rows.length;
+  const windows = [...dateChunks(from, to, 31)].reverse();
+  let wi = 0;
+  for (const [s, e] of windows) {
+    /* Alerts report progress now too. A refused month becomes thirty-one
+       requests, so the months inside retention are no longer one step but a
+       hundred — and a source that reports nothing for that stretch is exactly
+       the shape the boot requeue mistakes for a wedged job. */
+    await onStep?.({ window: `alerts ${dotDate(s)}..${dotDate(e)}`, index: wi++, of: windows.length,
+      rows_so_far: total, fleet: fleet.fleet });
+    total += await collectAlertWindow(fleet, s, e, chunks, checkpoint);
+  }
+  const failed = chunks.filter((c) => c.error).length;
+  if (failed) {
+    log.error(SRC, 'alert backfill left holes', { fleet: fleet.fleet, failed, of: chunks.length,
+      windows: chunks.filter((c) => c.error).map((c) => `${c.from}..${c.to}`).join(', ') });
   }
   return { total, chunks };
 }
@@ -248,12 +385,21 @@ export async function pullLive(fleet) {
 }
 
 // backfill/incremental entry point
-export async function collect({ from, to, mode, onStep }) {
+export async function collect({ from, to, mode, onStep, checkpoint = null }) {
   for (const fleet of config.fms.fleets) {
     if (!fleet.password) { log.warn(SRC, `no password for ${fleet.fleet}, skipping`); continue; }
     try {
-      const trips = await pullTrips(fleet, from, to, onStep);
-      const alerts = await pullAlerts(fleet, from, to);
+      /* The checkpoint is per FLEET as well as per window and surface: both
+         fleets walk the same calendar against the same two operations, so a
+         bare window name would let Egari's month be skipped because Ecosine
+         had already done it — and the alert surface skipped because the trip
+         surface had. */
+      const ck = checkpoint && {
+        has: (u) => checkpoint.has(`${fleet.fleet}:${u}`),
+        mark: (u, n) => checkpoint.mark(`${fleet.fleet}:${u}`, n),
+      };
+      const trips = await pullTrips(fleet, from, to, onStep, ck);
+      const alerts = await pullAlerts(fleet, from, to, onStep, ck);
       // logRun downgrades a run to 'partial' when any chunk failed, so a run
       // that wrote rows AND left windows unfetched cannot report 'ok'.
       await logRun({ source: SRC, fleet_id: fleet.fleet, mode, window_start: from, window_end: to,

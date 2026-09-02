@@ -2048,6 +2048,19 @@ app.get('/api/reconcile', (req, r) => {
          question with `accrual` on the row itself. */
       bank_accrued: grain === 'm' ? (row.bank_accrued != null ? row.bank_accrued : null) : null,
       accrual_days: grain === 'm' ? (row.accrual_days || 0) : null,
+      /* The report window each side was measured over. Uber spreads a weekly
+         report across its days and also serves daily measurements for the
+         recent horizon, so a month can hold both — min and max differing is
+         what "1- and 7-day reports mixed" is printed from. A row nothing
+         reported a window for carries null, not 1. */
+      expected_period_days_min: row.expected_period_days_min !== undefined
+        ? row.expected_period_days_min : (row.ontrip_net == null ? null : 7),
+      expected_period_days: row.expected_period_days !== undefined
+        ? row.expected_period_days : (row.ontrip_net == null ? null : 7),
+      bank_period_days_min: row.bank_period_days_min !== undefined
+        ? row.bank_period_days_min : (row.bank_payout == null ? null : 7),
+      bank_period_days: row.bank_period_days !== undefined
+        ? row.bank_period_days : (row.bank_payout == null ? null : 7),
       delta_pct: delta == null || !expectedCovered
         ? null : Math.round((delta / Math.abs(expectedCovered)) * 1000) / 10 };
   };
@@ -2115,7 +2128,12 @@ app.get('/api/reconcile', (req, r) => {
       ontrip_days: 0, ontrip_drivers: 0, bank_payout: 148200, payout_days: 31 },
     // A statement covering twelve days and two thirds of the drivers on them:
     // the shape that used to print as a 130% discrepancy.
-    { m: '2026-04', trips: 6240, ontrip_net: 171400, tips: 2110, salik: 5230, cash_collected: 34600,
+    /* The seam: this month straddles today − EARNER_DAY_HORIZON, so part of it
+       is a weekly report spread over its days and part a daily measurement.
+       Carried in the fixture so the "1- and 7-day reports mixed" caption is
+       exercised by a screenshot and not only by a unit test. */
+    { m: '2026-04', bank_period_days_min: 1, bank_period_days: 7,
+      trips: 6240, ontrip_net: 171400, tips: 2110, salik: 5230, cash_collected: 34600,
       ontrip_days: 12, ontrip_drivers: 41, bank_payout: 143210, payout_days: 30,
       expected_covered: 38100, bank_covered: 40260, matched_pairs: 468, matched_drivers: 39,
       matched_days: 12, bank_drivers: 58 },
@@ -2706,6 +2724,18 @@ app.get('/api/roster', (_, r) => {
       platforms: i % 3 === 0 ? ['uber', 'bolt'] : i % 3 === 1 ? ['uber'] : ['uber', 'yango', 'bolt'],
       states: blocked ? ['suspended'] : pipeline ? ['waitlist'] : ['active'],
       can_earn_anywhere: !blocked && !pipeline, blocked_everywhere: blocked,
+      /* Three-valued on purpose: bool_and over NULL-skipping aggregates
+         answers null when no platform made a claim, which is what a person who
+         reached the roster through their trips alone looks like. */
+      cannot_earn_anywhere: blocked || pipeline ? true : false,
+      stopped_everywhere: blocked,
+      /* Which fleet's CREDENTIALS described them, as against which fleet they
+         actually worked for — the two are separate columns because a filtered
+         page has to say which of them put the row there. */
+      credential_fleets: [i % 2 ? 'ecosine' : 'egari'],
+      /* Whether anything at all is known about this person's activity, so
+         "no trips" and "we cannot see their trips" stay distinguishable. */
+      activity_known: true,
       score: 90 - i * 4, plates: blocked || i % 4 ? [plates[i % plates.length]] : [],
       observed_at: new Date().toISOString(),
       reason: blocked ? 'You can no longer take trips because your document expired.' : null,
@@ -3449,16 +3479,25 @@ app.get('/api/unauthorized/daily', (_, r) => r.json(
       segments, uncollected };
   })));
 
-app.get('/api/sensor-health', (_, r) => r.json(plates.map((p, i) => ({
-  plate: p, occupied_fixes: i === 2 ? 0 : 400 - i * 40,
-  unreported_fixes: i % 4 === 3 ? 900 : 0,
-  total_fixes: 2400 - i * 90,
-  occupied_pct: i === 2 ? 0 : +(18 - i).toFixed(1),
-  sensor_suspect_segments: i % 5 === 1 ? 4 : 0,
-  // Whether there is enough signal to judge the sensor at all — a car with
-  // forty fixes is not evidence of a broken seat sensor.
-  judgeable: i !== 5,
-}))));
+/* {rows, total, shown, truncated}. The endpoint caps at 100 and used to return
+   a bare array, so the page printed the LIMIT as a fleet count — "100 trackers
+   reported at all in this window" against a directory of 227. The mock carries
+   a truncated total so a screenshot exercises the disclosure rather than only
+   the happy path. */
+app.get('/api/sensor-health', (_, r) => {
+  const rows = plates.map((p, i) => ({
+    plate: p, occupied_fixes: i === 2 ? 0 : 400 - i * 40,
+    unreported_fixes: i % 4 === 3 ? 900 : 0,
+    total_fixes: 2400 - i * 90,
+    occupied_pct: i === 2 ? 0 : +(18 - i).toFixed(1),
+    sensor_suspect_segments: i % 5 === 1 ? 4 : 0,
+    // Whether there is enough signal to judge the sensor at all — a car with
+    // forty fixes is not evidence of a broken seat sensor.
+    judgeable: i !== 5,
+  }));
+  const total = rows.length + 118;
+  r.json({ rows, total, shown: rows.length, truncated: total > rows.length });
+});
 
 /* Bookings and raw rows are different counts and the coverage table conflated
    them: `trips` was count(*) over the trip table, which counts FMS telematics

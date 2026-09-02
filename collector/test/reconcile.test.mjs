@@ -455,6 +455,171 @@ console.log('\na percentage needs a base worth dividing by');
     `expected_covered ${before.expected_covered} → ${after?.expected_covered}`);
 }
 
+/* ── a month's gap is measured over days that have HAPPENED ───────────────
+   The day grain has excluded Uber's forward projection since the accrual flag
+   went in, and the month column names the accrued part beside itself. The two
+   COVERED figures — the ones the delta is the difference of — were computed
+   over every row in the month, future included, so a month row and the day
+   view it drills into measured the same gap over different spans.
+
+   Measured on production 2026-09-02: September's month row reported the gap
+   over six days, four of them dated 3-6 September, carrying AED 26,852.52 of
+   bank_covered and AED 12,542.96 of expected_covered that nobody had earned
+   yet. Clicking the row measured two days. The two views of one month
+   disagreed by AED 14,309.56 and neither said why. */
+console.log('\nthe month grain measures what has happened, like the day grain');
+
+{
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(new Date());
+  const month = today.slice(0, 7);
+  const d = new Date(`${today}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + 3);
+  const ahead = d.toISOString().slice(0, 10);
+  if (ahead.slice(0, 7) === month) {
+    /* The fixture the accrual block above already laid down: one driver, one
+       statement day and one payout row on today, and the same pair on a day
+       three days out — the forward projection of the open weekly period. */
+    const all = (await get('/api/reconcile')).body;
+    const row = all.rows.find((r) => r.m === month);
+    const day = (await get(`/api/reconcile?month=${month}`)).body;
+    const settled = day.rows.filter((r) => !r.accrual);
+    check('the month column still reports every dirham reported, future included',
+      Number(row.bank_payout) === 760 && row.expected_payout === 800,
+      JSON.stringify([row.bank_payout, row.expected_payout]));
+    check('but the two figures the gap is made of stop at today',
+      row.expected_covered === 400 && row.bank_covered === 380,
+      JSON.stringify([row.expected_covered, row.bank_covered]));
+    check('so the month row and the day view measure the same span',
+      row.matched_days === settled.filter((r) => r.matched_days).length
+      && row.matched_days === 1, JSON.stringify([row.matched_days,
+        settled.filter((r) => r.matched_days).length]));
+    check('and the month gap equals the settled days it drills into',
+      Math.abs(row.delta - settled.reduce((a2, r) => a2 + (r.delta || 0), 0)) < 0.01,
+      JSON.stringify([row.delta, settled.map((r) => [r.d, r.delta])]));
+    check('counting the projection would have inflated the gap by half again',
+      Math.abs((760 - 800) - row.delta) > 1,
+      'guard: whole-month covered figures really did include the future');
+  } else {
+    check('month-accrual check skipped — today is too near the month end', true, ahead);
+  }
+}
+
+/* ── which report window a figure was measured over ───────────────────────
+   Both money tables spread a provider's report evenly across the days it
+   covers and record the divisor (sql/schema_v23.sql, sql/schema_v44.sql). The
+   endpoint dropped that on the floor, so a seventh of a week and a measured
+   day printed identically.
+
+   That is not cosmetic. src/sources/uber.js asks the payout surface day by day
+   only as far back as EARNER_DAY_HORIZON = 200 days, and on 2026-09-02 that
+   lands on 2026-02-14: February's payout column carries AED 3,799.61 on each
+   of 9-14 February (one weekly report, spread) and AED 25,998.71 on the 15th
+   (that day, measured). The week was reported once as AED 26,597.27 and its
+   resolved days sum to AED 48,796.37. Until the resolution stops mixing the
+   two grids the least this page can do is say that the row does. */
+console.log('\nthe report window a figure was measured over');
+
+const stmtSpread = (day, net, days) => db.query(
+  `INSERT INTO driver_statement_day (platform, fleet_id, driver_name, driver_ext_id, day,
+     net, tips, salik, cash, source, pseudo, period_days)
+   VALUES ('uber', 'ecosine', 'Amina Rashid', 'u-amina', $1, $2, 0, 0, 0, 'uber_rest', false, $3)`,
+  [day, net, days]);
+const paySpread = (day, earnings, days) => db.query(
+  `INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, driver_name, day,
+     period_start, period_end, period_days, earnings, cash_earnings)
+   VALUES ('uber', 'ecosine', 'u-amina', 'Amina Rashid', $1, $1, $1, $3, $2, 0)`,
+  [day, earnings, days]);
+{
+  // A week of statement, filed as one 7-day report and spread across its days.
+  for (let i = 9; i <= 15; i += 1) {
+    await stmtSpread(`2026-03-${String(i).padStart(2, '0')}`, 100, 7);
+    // The payout side: six days of the same weekly report…
+    if (i < 15) await paySpread(`2026-03-${String(i).padStart(2, '0')}`, 110, 7);
+  }
+  // …and one day the collector's daily grid actually reached. This is the seam.
+  await paySpread('2026-03-15', 800, 1);
+
+  const mar = (await get('/api/reconcile')).body.rows.find((r) => r.m === '2026-03');
+  check('the on-trip side names the report window behind it',
+    mar.expected_period_days === 7 && mar.expected_period_days_min === 7,
+    JSON.stringify([mar.expected_period_days_min, mar.expected_period_days]));
+  check('and the bank side says it MIXES a measured day with a spread week',
+    mar.bank_period_days === 7 && mar.bank_period_days_min === 1,
+    JSON.stringify([mar.bank_period_days_min, mar.bank_period_days]));
+
+  const days = (await get('/api/reconcile?month=2026-03')).body.rows;
+  const spread = days.find((r) => r.d === '2026-03-14');
+  const measured = days.find((r) => r.d === '2026-03-15');
+  check('a day carries its own basis, not the month\u2019s',
+    spread.bank_period_days === 7 && measured.bank_period_days === 1,
+    JSON.stringify([spread.bank_period_days, measured.bank_period_days]));
+  check('the seam is visible as two bases on neighbouring days, not as a fault',
+    spread.bank_period_days !== measured.bank_period_days
+    && Number(measured.bank_payout) > Number(spread.bank_payout) * 5,
+    JSON.stringify([spread.bank_payout, measured.bank_payout]));
+  check('a row nothing reported a window for says so with null, not 1',
+    days.find((r) => r.d === '2026-03-20').bank_period_days === null,
+    JSON.stringify(days.find((r) => r.d === '2026-03-20')));
+}
+
+/* ── the caption that under-fired ─────────────────────────────────────────
+   "N days here repeat the figures of the day before" is the sentence that
+   stops a reader reconciling one seventh of a week seven times. It demanded
+   the bank column AND the on-trip column repeat together — and the two sides
+   are collected on different grids, so the moment the payout side gains a
+   daily measurement the statement beside it is still a seventh of a week and
+   the caption goes quiet on exactly the rows that need it.
+
+   The rows below are September 2026 as production served it on 2026-09-02:
+   one weekly statement across six days, with daily payout measurements on the
+   first two. Five days repeat the expected side; the caption said three. On
+   February 2026 the same rule counted six where eighteen days repeat. */
+console.log('\nthe repeat caption counts either side, not both');
+
+{
+  /* Imported rather than re-implemented: the caption is the page's rule, and a
+     test carrying its own copy would keep passing while the page under-fired.
+     Guarded so the run before the fix reports a missing rule as a failure
+     rather than an exception. */
+  const mod = await import('../api/public/reconcile.js');
+  const spreadRuns = typeof mod.spreadRuns === 'function' ? mod.spreadRuns
+    : () => ({ expected: 0, bank: 0, either: 0 });
+  const sep = [
+    { d: '2026-09-01', expected_payout: 3135.73, bank_payout: 19581.44 },
+    { d: '2026-09-02', expected_payout: 3135.73, bank_payout: 8902.19 },
+    { d: '2026-09-03', expected_payout: 3135.73, bank_payout: 6757.56 },
+    { d: '2026-09-04', expected_payout: 3135.73, bank_payout: 6757.56 },
+    { d: '2026-09-05', expected_payout: 3135.73, bank_payout: 6757.56 },
+    { d: '2026-09-06', expected_payout: 3135.73, bank_payout: 6757.56 },
+  ];
+  const runs = spreadRuns(sep);
+  const bothSides = sep.filter((r, i) => i > 0
+    && r.bank_payout === sep[i - 1].bank_payout
+    && r.expected_payout === sep[i - 1].expected_payout).length;
+  check('every day after the first repeats the expected side',
+    runs.expected === 5, String(runs.expected));
+  check('and the bank side repeats only where the daily grid has not reached',
+    runs.bank === 3, String(runs.bank));
+  check('so the caption fires on five days, not the three both sides share',
+    runs.either === 5 && bothSides === 3, JSON.stringify([runs.either, bothSides]));
+
+  const blanks = [
+    { d: '2026-04-01', expected_payout: null, bank_payout: null },
+    { d: '2026-04-02', expected_payout: null, bank_payout: null },
+  ];
+  check('two blank days repeat nothing — they are two absences, not one report',
+    spreadRuns(blanks).either === 0, JSON.stringify(spreadRuns(blanks)));
+
+  const uiSrc2 = readFileSync('api/public/reconcile.js', 'utf8');
+  check('and the sentence names which side repeated, since they can differ',
+    /on the expected side/.test(uiSrc2) && /on the bank side/.test(uiSrc2));
+  check('the page prints the report window beside the money it qualifies',
+    /bank_period_days/.test(uiSrc2) && /expected_period_days/.test(uiSrc2)
+    && /reports mixed/.test(uiSrc2));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

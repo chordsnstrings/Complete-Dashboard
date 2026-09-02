@@ -654,6 +654,11 @@ export const dtStr = (v) => (asDate(v) ? `${dayStr(v)} ${timeStr(v)}` : '—');
 export const SOURCE_LABEL = {
   uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel', fms: 'FMS telematics',
   cabman: 'CABMAN', ecosine: 'Ecosine', egari: 'Egari',
+  /* A collector /api/status reports and this map had no entry for, so
+     sourceLabel() fell through to the database key and "uber_fleet · Ecosine"
+     was printed at a reader — in the Settings collection-debt sentence and in
+     the #sources Source column. */
+  uber_fleet: 'Uber fleet',
 };
 /* An enum value written for a person. The rule engine stores `critical`,
    `compliance`, `vehicle`; printed as a tile's value they are the largest text

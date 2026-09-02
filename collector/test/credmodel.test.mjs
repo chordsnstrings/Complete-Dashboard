@@ -63,13 +63,27 @@ check('a model proposal is still tested against the provider before it is stored
   const server = readFileSync('api/server.js', 'utf8');
   const start = server.indexOf("app.post('/api/settings/paste'");
   const body = server.slice(start, server.indexOf('\napp.', start + 10));
-  const gate = body.indexOf("t.verdict !== 'pass'");
+  /* `admit` rather than the literal condition: 'unknown' is now let through
+     for a credential the OPERATOR labelled by name, for which no live check
+     exists — refusing that made the labelled-credential route pointless, since
+     such a key would be read correctly, routed correctly, reported as
+     untestable and then silently not written. What must remain true is
+     unchanged: the decision is made BEFORE any write, and 'fail' never
+     passes. */
+  const gate = body.indexOf('const admit =');
   const writes = [...body.matchAll(/await setSetting\(/g)].map((m) => m.index);
   check('nothing is stored unless the provider accepted it',
     gate > 0 && writes.length > 0 && writes.every((i) => i > gate),
     `gate at ${gate}, writes at ${writes.join(',')}`);
   check('…and the gate is a `continue`, so a refused candidate is skipped rather than caught later',
-    /t\.verdict !== 'pass'\) continue;/.test(body));
+    /if \(!admit\) continue;/.test(body));
+  check('…a passing verdict is admitted', /t\.verdict === 'pass'/.test(body));
+  check('…an untestable one only when the operator named the key themselves',
+    /t\.verdict === 'unknown' && t\.labelled === true/.test(body));
+  /* The one that would be a security hole rather than an inconvenience. */
+  check('…and a refused credential is never written on any branch',
+    !/verdict === 'fail'/.test(body.slice(gate, writes[writes.length - 1])),
+    'nothing between the gate and the last write may admit a fail');
 }
 /* The page must be able to SAY things.
    ─────────────────────────────────────────────────────────────────────────

@@ -414,6 +414,47 @@ check('a person who HAS driven keeps their real count',
     /credential/.test(ega.fleet_basis || ''), String(ega.fleet_basis));
 }
 
+/* ── the population is the people, not the accounts ──────────────────────
+   `s` was driver_platform_state alone and the whole query hangs off FROM s, so
+   somebody who took bookings in the window but has no standing row on any
+   platform was not on the roster at all.
+
+   Measured on production over 2026-08-01..08-31: /api/kpis counted 119 drivers
+   and this page listed 116, while /api/drivers/directory — whose population
+   comes from trips — held 395 people against the roster's 338.
+
+   Those three are not a rounding difference, and they are not a random three.
+   Uber drops a driver from the supplier roster when the account is
+   deactivated, so the credential feed goes quiet on exactly the people whose
+   last week of work is worth reading — and the page built to find people who
+   are not earning was blind to the one shape it most needed to show. */
+console.log('\na driver with trips and no account is still on the roster');
+{
+  await trip('Ghost Driver', 12, 88);
+  await trip('Ghost Driver', 13, 92);
+  const r = await get('/api/roster?from=2026-08-01&to=2026-08-31');
+  const ghost = (r.people || []).find((x) => /Ghost Driver/i.test(x.name || ''));
+  check('somebody the providers no longer describe is not missing from the roster',
+    !!ghost, JSON.stringify((r.people || []).map((x) => x.name).slice(0, 8)));
+  check('…and their work is theirs, not zeros',
+    ghost && ghost.trips === 2 && Number(ghost.revenue) === 180,
+    JSON.stringify(ghost && [ghost.trips, ghost.revenue]));
+  check('…while the account count stays a count of ACCOUNTS, which they have none of',
+    ghost && ghost.accounts === 0, JSON.stringify(ghost && ghost.accounts));
+  check('…and nothing is claimed about a state no platform reported',
+    ghost && Array.isArray(ghost.states) && ghost.states.length === 0
+      && ghost.can_earn_anywhere == null && ghost.stopped_everywhere == null,
+    JSON.stringify(ghost && [ghost.states, ghost.can_earn_anywhere, ghost.stopped_everywhere]));
+  /* And the person is not counted twice: somebody WITH an account who also
+     drove must still be one row, or the fix trades a missing driver for a
+     duplicated one. */
+  const asad = (r.people || []).filter((x) => /Asad Khan/i.test(x.name || ''));
+  check('a driver who has both an account and trips is still exactly one row',
+    asad.length === 1, JSON.stringify(asad.map((x) => [x.name, x.accounts, x.trips])));
+  check('…and still carries their account', asad[0]?.accounts >= 1,
+    JSON.stringify(asad[0] && asad[0].accounts));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -119,6 +119,33 @@ check('trip span counts bookings, not telematics twins', prof.span.trips === 24,
 check('and the twins are reported beside them rather than deleted',
   prof.span.telematics_journeys === 1, String(prof.span?.telematics_journeys));
 check('both drivers counted', prof.span.drivers === 2, String(prof.span?.drivers));
+/* The span's ENDS had the defect its counts were already fixed for.
+   ─────────────────────────────────────────────────────────────────────────
+   min/max(requested_at) were unfiltered, so the last thing the TRACKER saw
+   was served as the last thing a RIDER paid for. The fixture's last booking is
+   the Yango job at 21:00 on the 13th; the FMS twin at 07:00 on the 14th is a
+   GPS trace of a journey nobody was carried on, and it is 10 hours later.
+
+   Measured on production over 365 days: 46 of 227 plates carry a telematics
+   row after their last booking — L36395 last earned 05:07 and this endpoint
+   said 05:12, L44251 04:32 against 04:49 — so the vehicle page's "last trip"
+   disagreed with the idle and utilisation figures beside it, which count
+   is_booking. /api/vehicles/directory has answered both questions in two
+   columns since it shipped; this one had only the wrong one. */
+const ISO = (v) => (v == null ? null : new Date(v).toISOString());
+check('the span ends at the last BOOKING, not the last telematics twin',
+  ISO(prof.span.last_trip) === '2026-08-13T17:00:00.000Z', String(ISO(prof.span?.last_trip)));
+check('and starts at the first booking',
+  ISO(prof.span.first_trip) === '2026-08-10T04:00:00.000Z', String(ISO(prof.span?.first_trip)));
+/* Not deleted — moved to a column that says what it is, under the name
+   /api/vehicles/directory already gives it, so the two pages describing one
+   car use one word for one fact. It is the last time the car MOVED, from
+   either feed, which is why it is the FMS row here. */
+check('the tracker\'s own last sighting survives as last_movement',
+  ISO(prof.span.last_movement) === '2026-08-14T03:00:00.000Z', String(ISO(prof.span?.last_movement)));
+check('and last_movement is never earlier than last_trip',
+  prof.span.last_movement >= prof.span.last_trip,
+  `${ISO(prof.span?.last_movement)} < ${ISO(prof.span?.last_trip)}`);
 check('latest telemetry fix attached', prof.telemetry?.status === 'Idle', prof.telemetry?.status);
 check('documents sorted soonest-expiry first', prof.documents[0]?.doc_type === 'Vehicle Registration Form', prof.documents[0]?.doc_type);
 check('document days-left computed', typeof prof.documents[0]?.days_left === 'number');

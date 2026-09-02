@@ -68,12 +68,60 @@ export function rosterRoutes(app, { q, wrap, range }) {
          somebody with no trips at all — where it is the only thing we hold.
          The response says which of the two answered, because they are not the
          same claim. */
+      /* The roster's population is not only the people who have an account.
+         ─────────────────────────────────────────────────────────────────────
+         `s` was driver_platform_state alone, and the whole query hangs off
+         `FROM s`, so somebody who took bookings in the window but has no
+         standing row on any platform simply was not on the roster. Measured on
+         production over 2026-08-01..08-31: /api/kpis counts 119 drivers and
+         this page listed 116 of them, while /api/drivers/directory — which
+         builds its population from trips — held 395 people against the
+         roster's 338.
+
+         Those three are not a rounding difference. The roster exists to find
+         people who are not earning, and a driver the provider has stopped
+         describing is exactly the shape it should surface loudest; instead it
+         was the one shape it could not see. Uber drops a driver from the
+         supplier roster when their account is deactivated, so the credential
+         feed goes quiet on precisely the people whose last week of work is
+         worth looking at.
+
+         A worked-only person carries no state, score or can_earn — nothing
+         claimed any — and the aggregates below already skip NULL inputs, so
+         they contribute to nothing they cannot answer. `is_account` marks
+         which branch a row came from so `accounts` still counts accounts. */
       `WITH s AS (
          SELECT ${CANON} AS person, platform, driver_ext_id, full_name, state, state_raw,
-                state_reason, plate, vehicle_ext_id, score, can_earn, observed_at, fleet_id
+                state_reason, plate, vehicle_ext_id, score, can_earn, observed_at, fleet_id,
+                true AS is_account
          FROM driver_platform_state
          WHERE ($3::text IS NULL OR platform = $3)
            AND coalesce(btrim(full_name), '') <> ''
+         UNION ALL
+         SELECT person, platform, driver_ext_id, full_name,
+                NULL::text, NULL::text, NULL::text, plate, NULL::text,
+                NULL::numeric, NULL::boolean, NULL::timestamptz, fleet_id,
+                false AS is_account
+         FROM (
+           SELECT t.person_key AS person, n.platform,
+                  (array_agg(n.driver_ext_id ORDER BY n.requested_at DESC)
+                     FILTER (WHERE n.driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
+                  (array_agg(n.driver_name ORDER BY n.requested_at DESC)
+                     FILTER (WHERE coalesce(btrim(n.driver_name), '') <> ''))[1] AS full_name,
+                  (array_agg(n.plate ORDER BY n.requested_at DESC)
+                     FILTER (WHERE coalesce(n.plate, '') <> ''))[1] AS plate,
+                  max(n.fleet_id) AS fleet_id
+           FROM trip_ext n ${JOIN_TRIP}
+           WHERE n.local_day BETWEEN $1::date AND $2::date AND n.is_booking
+             AND t.person_key IS NOT NULL AND t.person_key <> ''
+             AND ($3::text IS NULL OR n.platform = $3)
+           GROUP BY 1, 2
+         ) wo
+         WHERE NOT EXISTS (
+           SELECT 1 FROM driver_platform_state d
+            WHERE ${personFold('d.full_name')} = wo.person
+              AND coalesce(btrim(d.full_name), '') <> ''
+              AND ($3::text IS NULL OR d.platform = $3))
        ),
        /* ONE pass over the window, answering both questions it was asked
           twice for.
@@ -204,9 +252,15 @@ export function rosterRoutes(app, { q, wrap, range }) {
                  array and max() is that array. */
               max(w.fleets_worked) AS fleets_worked,
               array_remove(array_agg(DISTINCT s.fleet_id), NULL) AS credential_fleets,
-              count(*)::int AS accounts,
+              /* Accounts, not rows: a person who reached this roster through
+                 their trips alone has none, and counting their trip row as one
+                 would report a standing account nobody holds. */
+              count(*) FILTER (WHERE s.is_account)::int AS accounts,
               array_agg(DISTINCT s.platform ORDER BY s.platform) AS platforms,
-              array_agg(DISTINCT s.state ORDER BY s.state) AS states,
+              /* NULL-removed, so "no platform reported a state" is an empty
+                 set rather than a list containing nothing. The page joins this
+                 with commas and a null renders as a stray separator. */
+              array_remove(array_agg(DISTINCT s.state ORDER BY s.state), NULL) AS states,
               bool_or(s.can_earn) AS can_earn_anywhere,
               -- NOT coalesce(can_earn, false): that reads "no provider said" as
               -- "every provider said no", which files a driver whose state we

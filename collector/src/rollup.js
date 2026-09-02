@@ -580,13 +580,46 @@ export async function refreshPayouts(db = pool) {
    the table's key is (platform, driver, period_start, period_end,
    category), so one period holds one row per category whichever
    surface wrote it, and there is nothing to double count. */
+/* WHICH ROOT WINS, AND WHY IT IS NOT THE ONE THAT ARRIVES FIRST.
+   ─────────────────────────────────────────────────────────────────────────
+   The identity above is real, and it holds — on a period BOTH surfaces have
+   finished describing. The coalesce below preferred net_fare, and net_fare is
+   the REST one: the OAuth payments surface answers for the CURRENT payment
+   period and only for it. So on every period that surface has touched but not
+   completed, a partial figure displaced a complete one, and the coalesce could
+   not tell — it tested non-null, not finished.
+
+   Measured on production 2026-09-02, on the week of 24–30 August:
+
+     day        on-trip net   cash collected   expected payout   bank paid
+     2026-08-25      555.21          3947.42          -3146.51    16993.04
+     2026-08-26      555.21          3947.42          -3146.51    15322.07
+       … identical for six days, the signature of one week spread evenly …
+
+   A fleet does not earn AED 555 on-trip in a day while its drivers bank 3,947
+   in cash and Uber wires 17,000. The expected side had collapsed to the REST
+   week's 3,886 while the GraphQL root for the same week carried 130,396 over
+   234 drivers against net_fare's 3,747 over 81. Six days published a NEGATIVE
+   expectation — the page suppressed the percentage, which is why it read as a
+   missing number rather than a wrong one — and the days either side read
+   +1555% and +641%.
+
+   So the arms are swapped: Uber's own root wins where it exists, and net_fare
+   is the fallback for the open period the GraphQL surface has not yet
+   described. The subtraction is unchanged and its reasoning is above — the
+   root already contains every child, including ones this mapping has never
+   seen, which is why it subtracts rather than adding fare and service_fee.
+
+   Single-driver check, 5f16534e over 2026-08-30..09-06: your_earnings 1583.26
+   against net_fare 802.45, with fare 2143.84 + service_fee -536.00 = 1607.84
+   confirming the GraphQL root is the one describing the whole period. */
 export const NET_FARE_SQL = `coalesce(
-    sum(amount) FILTER (WHERE category = 'net_fare'),
     sum(amount) FILTER (WHERE category = 'your_earnings')
       - coalesce(sum(amount) FILTER (WHERE category = 'tip'
                                        AND parent = 'your_earnings'), 0)
       - coalesce(sum(amount) FILTER (WHERE category = 'taxes_earnings'
-                                       AND parent = 'your_earnings'), 0))`;
+                                       AND parent = 'your_earnings'), 0),
+    sum(amount) FILTER (WHERE category = 'net_fare'))`;
 
 /* Derive the ON-TRIP statement days from the earnings components.
    ─────────────────────────────────────────────────────────────────────────

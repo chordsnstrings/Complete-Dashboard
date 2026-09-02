@@ -1220,7 +1220,17 @@ app.get('/api/vehicles', wrap(async (req, res) => {
           round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,0) revenue,
           count(*) FILTER (WHERE n.has_fare)::int priced_trips,
           ${peopleCountStored()}::int drivers,
-          count(distinct n.platform)::int platforms, max(n.requested_at) last_trip,
+          count(distinct n.platform)::int platforms,
+          /* The same defect /api/vehicle/profile carried: last_trip was a max
+             over EVERY row, telematics included, three lines below a trips
+             column that already filters on is_booking. So a car that has never
+             carried a passenger but whose tracker reported this morning showed
+             a last_trip of this morning, and the idle and utilisation views on
+             the same page disagreed with the ones fed by trip data. 46 of 227
+             production plates are affected. The movement is still shown — it
+             is worth knowing — under its own name. */
+          max(n.requested_at) FILTER (WHERE n.is_booking) last_trip,
+          max(n.requested_at) last_movement,
           cd.driver_name AS current_driver, cd.driver_ext_id AS current_driver_id,
           cd.as_of AS driver_as_of
    FROM trip_norm n ${JOIN_TRIP}
@@ -1938,10 +1948,25 @@ app.get('/api/unauthorized/daily', wrap(async (req, res) => {
    The suspect-segment count was also computed over all time, ignoring the
    page's window, and was 0 or NULL for every plate — so the client-side
    "suspect" verdict keyed on it could never fire. */
+/* The cap that read as a fleet count.
+   ─────────────────────────────────────────────────────────────────────────
+   This returned a bare array of exactly 100 rows at every window of a week or
+   more — measured 2026-09-02: days=1 → 32, days=3 → 96, days=7 → 100,
+   days=30 → 100, days=365 → 100 — against a directory holding 227 vehicles.
+   The ORDER BY sorts by distance from a plausible occupancy band, so the 100
+   that survive are the most anomalous pads and the tail is invisible. The page
+   then printed, in its own caption, "100 trackers reported at all in this
+   window" — the LIMIT reported as a fleet count. It only bites once a reader
+   widens the window past the default two days, which is exactly when they are
+   looking for the tail. The rows are still capped; what changes is that the
+   response says so. */
 app.get('/api/sensor-health', wrap(async (req, res) => {
   const [from, to, , fleet] = range(req);
-  res.json(await q(
+  const rows = await q(
     `SELECT t.plate,
+            -- A window over the grouped query counts the GROUPS, so the true
+            -- total costs no second pass over telemetry_snapshot.
+            count(*) OVER ()::int AS _total,
             count(*) FILTER (WHERE t.seat_occupied)::int occupied_fixes,
             count(*) FILTER (WHERE t.seat_occupied IS NULL)::int unreported_fixes,
             count(*)::int total_fixes,
@@ -1963,7 +1988,12 @@ app.get('/api/sensor-health', wrap(async (req, res) => {
      ORDER BY abs(coalesce(count(*) FILTER (WHERE t.seat_occupied)::float
                            / nullif(count(*) FILTER (WHERE t.seat_occupied IS NOT NULL), 0), 0.35) - 0.35) DESC,
               total_fixes DESC
-     LIMIT 100`, [from, to, fleet]));
+     LIMIT 100`, [from, to, fleet]);
+  const total = rows.length ? rows[0]._total : 0;
+  res.json({
+    rows: rows.map(({ _total, ...r }) => r),
+    total, shown: rows.length, truncated: total > rows.length,
+  });
 }));
 
 /* ───────────────────────── ops / meta ───────────────────────── */
@@ -2210,12 +2240,19 @@ app.get('/api/coverage', wrap(async (req, res) => {
   for (const rows of [telDays, alertDays, ledgerDays, earnDays]) {
     for (const r of rows) (calendars[r.dataset] ||= []).push({ day: r.day, rows: r.rows });
   }
-  /* A quiet day is not a gap on an EVENT-DRIVEN dataset. Safety alerts happen
-     when something happens, and the ledger arrives in batches when the
-     operator imports one — neither promises a row every day, so "78 days
-     missing" about them describes a calm fortnight as a collection failure.
-     They keep their span and their day count and say so instead. */
-  const EVENT_DRIVEN = new Set(['alerts', 'ledger']);
+  /* A quiet day is not a gap on an EVENT-DRIVEN dataset. The ledger arrives
+     when somebody imports one, so it promises no row on any particular day and
+     "78 days missing" about it would describe a quiet fortnight as a collection
+     failure. It keeps its span and its day count and says so instead.
+
+     Safety alerts USED to be in this set, on the same reasoning, and that was
+     wrong. /api/coverage measures the dataset at a median 3,758 rows a day for
+     every day it works — it is a daily feed by any measure the product has. Its
+     73-day hole (2026-06-06 → 2026-08-17) was a collection failure the whole
+     time: every FMS run on record refused the alert window with HTTP 400 while
+     the trip window beside it answered 200. Calling that a calm quarter turned
+     a fixable fault into a decision not to look. */
+  const EVENT_DRIVEN = new Set(['ledger']);
   const dataset_calendar = Object.fromEntries(
     Object.entries(calendars).map(([k, days]) => [k,
       { ...spanGaps(days), event_driven: EVENT_DRIVEN.has(k) }]));
@@ -2306,7 +2343,20 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
   const applied = [];
   if (apply) {
     for (const t of tested) {
-      if (t.verdict !== 'pass') continue;
+      /* 'pass' is the ordinary route in. 'unknown' is admitted for exactly one
+         case: a credential the OPERATOR labelled by name, for which no live
+         check exists.
+         ─────────────────────────────────────────────────────────────────────
+         Refusing it made the labelled-credential route pointless — an API key,
+         a park id, an interface password would be read correctly, routed
+         correctly, reported as untestable and then silently not written, which
+         is the same dead end as not recognising them at all. 'unknown' from a
+         SHAPE-recognised credential is still refused: there the product had a
+         check and could not reach the provider, and overwriting a working
+         credential on that basis is how a good session gets replaced during an
+         outage. And 'fail' is never applied, labelled or not. */
+      const admit = t.verdict === 'pass' || (t.verdict === 'unknown' && t.labelled === true);
+      if (!admit) continue;
       /* One credential, one key — except an OAuth application, which is a
          client id, its secret, and the organisation it turned out to be
          registered under. Writing two of those three leaves the third
@@ -2359,6 +2409,11 @@ app.post('/api/settings/paste', requireAdmin, wrap(async (req, res) => {
       applied: t.keys
         ? Object.keys(t.keys).every((k) => applied.includes(k))
         : applied.includes(t.key),
+      /* Written on the operator's word, with nothing confirming it works.
+         "Saved" and "saved and proven" are different promises and the page has
+         to be able to tell them apart — otherwise a labelled key that turns out
+         to be wrong looks exactly like one that was tested. */
+      saved_untested: t.verdict === 'unknown' && applied.includes(t.key),
     })),
   });
 }));
