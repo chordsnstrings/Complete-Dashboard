@@ -216,14 +216,36 @@ async function dormantVehicles() {
      GROUP BY plate, fleet_id
      HAVING max(captured_at) < now() - interval '30 days'
      ORDER BY 3 DESC`);
+  /* Two populations, not one.
+     ─────────────────────────────────────────────────────────────────────
+     Every one of these was 'warning' while the metric ran from 36 days to
+     869 — a car quiet since Ramadan and a car quiet since two summers ago,
+     filed identically and sorted by nothing an operator could act on.
+
+     The split is in the data rather than chosen: production 2026-09-02 held
+     twenty of these, at 36, 36, 37, 44, 45, 51, 71, 75, 103, 116 — and then
+     319, 437, 439, 668, 672, 707, 783, 801, 869, 869. Nothing between 116 and
+     319. Ten cars silent for one to four months, which is what a repair, a
+     seasonal lay-up or a contract gap looks like; and ten silent for eleven
+     months to two and a half years, which is not a gap in reporting. The
+     threshold sits inside that empty range, so where exactly it is put changes
+     nothing — that is the point of putting it there. */
+  const GONE_DAYS = 180;
   for (const r of rows) {
     const days = Math.round((Date.now() - new Date(r.last_seen)) / 864e5);
+    const gone = days >= GONE_DAYS;
     await put({
-      code: 'vehicle_dormant', severity: 'warning', category: 'data',
+      code: 'vehicle_dormant', severity: gone ? 'critical' : 'warning', category: 'data',
       entity_type: 'vehicle', entity_id: r.plate, fleet_id: r.fleet_id,
       title: `${r.plate} has sent no signal for ${n_(days, 'day')}`,
-      detail: `Last position ${day(r.last_seen)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is still carried in the vehicle list, so it quietly inflates every per-vehicle average.`,
-      action: `Reconcile against the asset register: retire it, or refit the tracker if the car is still ours.`,
+      /* "usually means the vehicle left the fleet" is a hedge worth making at
+         forty days and worth dropping at eight hundred. */
+      detail: gone
+        ? `Last position ${day(r.last_seen)}. Nothing is off the road for ${n_(days, 'day')} and coming back: this car has left the fleet or its tracker was removed, and it is still carried in the vehicle list, where it inflates every per-vehicle average.`
+        : `Last position ${day(r.last_seen)}. A gap this long usually means the vehicle left the fleet, or the tracker was removed — but it is short enough to be a repair or a lay-up, so it is worth asking before retiring it.`,
+      action: gone
+        ? `Retire it from the asset register, or refit the tracker if the car is still ours — either way it should stop counting as a vehicle in service.`
+        : `Reconcile against the asset register: retire it, or refit the tracker if the car is still ours.`,
       impact_aed: null, metric: days, window_start: null, window_end: null,
     });
   }
