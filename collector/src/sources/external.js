@@ -90,6 +90,121 @@ function monthsBetween(from, to) {
   return out;
 }
 
+/* The Hijri date, computed here instead of fetched.
+   ─────────────────────────────────────────────────────────────────────────
+   MEASURED, production, 2026-09-02:
+
+     external incremental partial
+       hijri 2026-08: TypeError: fetch failed (ETIMEDOUT) …/gToHCalendar/8/2026
+       hijri 2026-09: TypeError: fetch failed (ETIMEDOUT) …/gToHCalendar/9/2026
+       calendar 2026-08-30..2026-09-02: asked for 2 month(s) and wrote no day
+
+   calendar_day stopped dead at 2026-08-31 — /api/day says 2026-08-28 carries
+   15-03-1448 and 2026-09-01 carries nothing — while the same host answers that
+   exact URL with HTTP 200 in 0.81s from outside the app.
+
+   Four candidates were tested rather than guessed between, and three are ruled
+   out by measurement:
+
+   • "the timeout is too short". No. Measured on this Node: when THIS wrapper's
+     AbortController fires, fetch rejects with `AbortError: This operation was
+     aborted` and no err.cause — never `TypeError: fetch failed (ETIMEDOUT)`.
+     ETIMEDOUT is the socket reporting that the CONNECTION never came up, so
+     the endpoint is never reached and no timeoutMs saves it.
+   • "slow only for the calendar endpoints". No. hToG/01-09-1447 is a single
+     date conversion and it fails identically in events.js, same code, same
+     minute. Nothing is reached to be slow.
+   • "the retry policy gives up too early". No. http() already makes three
+     attempts with backoff per call, the 25-month backfill made 25 such calls
+     and the incremental made 2, and every attempt on every run since 08-31
+     ended the same way.
+   • "IPv6 first, blackholed". Plausible and NOT confirmed: api.aladhan.com
+     publishes an AAAA (2a01:4ff:f0:ab3::1) and api.open-meteo.com — which
+     answered in the SAME run, 37 weather days plus the whole sunrise range —
+     publishes none. But this image is node:20-slim, where autoSelectFamily is
+     on by default and falls back to IPv4 in 250ms, so that alone should not
+     produce this. Confirming it needs a measurement from inside the container,
+     which nothing outside can make. It is recorded as a hypothesis, not a
+     cause.
+
+   What is certain is that the app cannot open a connection to that host, and
+   nothing in this file can change that. So the calendar stops depending on it.
+
+   The Hijri calendar is deterministic and ICU already carries it. Aladhan's
+   gToHCalendar answers with method HJCoSA, and Intl's `islamic-umalqura`
+   agrees with it on ALL 1096 days of 2024-01-01..2026-12-31 — day, month and
+   year, zero mismatches — checked against the provider's own JSON. It also
+   reproduces every one of the 48 stored days sampled back through /api/day to
+   2025-09-01, which is as far as calendar_day goes.
+
+   The month NAMES are Aladhan's own transliterations rather than ICU's
+   ("Ṣafar", not "Safar"), because a year of rows already in the table spell
+   them that way and hijri_month is rendered as text and grouped on. */
+const HIJRI_MONTHS = ['Muḥarram', 'Ṣafar', 'Rabīʿ al-awwal', 'Rabīʿ al-thānī',
+  'Jumādá al-ūlá', 'Jumādá al-ākhirah', 'Rajab', 'Shaʿbān', 'Ramaḍān',
+  'Shawwāl', 'Dhū al-Qaʿdah', 'Dhū al-Ḥijjah'];
+
+// UTC, deliberately: the argument is already a Dubai calendar day, and asking
+// the formatter to re-zone it would shift it back off that day.
+const hijriFmt = new Intl.DateTimeFormat('en-u-ca-islamic-umalqura',
+  { day: 'numeric', month: 'numeric', year: 'numeric', timeZone: 'UTC' });
+
+const pad2 = (n) => String(n).padStart(2, '0');
+
+// The Hijri date of a 'YYYY-MM-DD' Gregorian day, or null if it is not one.
+export function hijriOf(day) {
+  const t = Date.parse(`${String(day).slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(t)) return null;
+  const p = Object.fromEntries(hijriFmt.formatToParts(new Date(t)).map((x) => [x.type, x.value]));
+  const d = Number(p.day);
+  const m = Number(p.month);
+  // Some ICU locales append the era to the year part ("1448 AH"); the digits
+  // are the year either way.
+  const y = Number(String(p.year).replace(/\D/g, ''));
+  if (!(d >= 1 && d <= 30) || !(m >= 1 && m <= 12) || !(y > 0)) return null;
+  return { day: d, month: m, year: y, month_en: HIJRI_MONTHS[m - 1],
+    date: `${pad2(d)}-${pad2(m)}-${y}` };
+}
+
+/* And the other direction, for events.js: which Gregorian day is 1 Ramaḍān?
+   Intl converts one way only, so this estimates from the Hijri epoch — 1
+   Muḥarram 1 AH, and a mean year of 354.36707 days — and then walks outward
+   until hijriOf() agrees. The estimate is never more than a couple of days out
+   over the range this product cares about; ±45 is slack, not a guess. Verified
+   both ways: every day of 2020-01-01..2030-12-31 round-trips, 4018 for 4018. */
+const HIJRI_EPOCH_UTC = Date.UTC(622, 6, 19);
+
+export function gregorianOfHijri(hy, hm, hd) {
+  const guess = HIJRI_EPOCH_UTC
+    + Math.round(((hy - 1) * 354.36707 + (hm - 1) * 29.530589 + (hd - 1)) * 864e5);
+  for (let off = 0; off <= 45; off++) {
+    for (const s of (off ? [off, -off] : [0])) {
+      const iso = new Date(guess + s * 864e5).toISOString().slice(0, 10);
+      const h = hijriOf(iso);
+      if (h && h.year === hy && h.month === hm && h.day === hd) return iso;
+    }
+  }
+  return null;
+}
+
+const nextDay = (d) => new Date(Date.parse(`${d}T00:00:00Z`) + 864e5).toISOString().slice(0, 10);
+
+/* Every day of the range, with no hole possible.
+   ─────────────────────────────────────────────────────────────────────────
+   Pure and exported so the calendar can be tested without a network or a
+   database — the previous shape could only be exercised by reaching two public
+   APIs, which is why "wrote no day" was never caught by a test. */
+export function calendarDays(from, to) {
+  const rows = [];
+  if (!from || !to || from > to) return rows;
+  for (let d = from, guard = 0; d <= to && guard < 4000; d = nextDay(d), guard++) {
+    const h = hijriOf(d);
+    if (!h) continue;
+    rows.push({ day: d, hijri_date: h.date, hijri_month: h.month_en, is_ramadan: h.month === 9 });
+  }
+  return rows;
+}
+
 /* Sunrise and sunset for a range, from the API this file already trusts for
    weather. The previous code asked sunrise-sunset.org, which answers one day
    per call — fine for a single row, hopeless for a month, and the reason the
@@ -120,6 +235,53 @@ async function pullSun(from, to, failed = []) {
   return out;
 }
 
+/* One live call per run, to keep the local table honest — not to fill it.
+   ─────────────────────────────────────────────────────────────────────────
+   The rows above no longer need this. But a computed calendar that silently
+   drifts from the provider would be a new way to be quietly wrong, and the
+   whole point of this file is not being quietly wrong. So one month is asked
+   for, and only DISAGREEMENT is reported: a run whose data is complete does
+   not get to say 'partial' because a cross-check could not reach a host.
+
+   Bounded on purpose. The old shape asked for a month per month of window,
+   with retries:2 and timeoutMs:30000 — on the 25-month backfill that is 75
+   connection attempts that each have to time out, and it is why the external
+   run has been taking tens of minutes to write nothing. One call, no retry,
+   eight seconds. */
+async function crossCheckHijri(rows, failed = []) {
+  if (!rows.length) return;
+  const [y, m] = [Number(rows[rows.length - 1].day.slice(0, 4)),
+    Number(rows[rows.length - 1].day.slice(5, 7))];
+  let days = null;
+  try {
+    const { data } = await http(`https://api.aladhan.com/v1/gToHCalendar/${m}/${y}`,
+      { timeoutMs: 8000, retries: 0 });
+    days = Array.isArray(data?.data) ? data.data : null;
+  } catch (e) {
+    // Exactly the ETIMEDOUT this fix exists for. Recorded, not escalated.
+    log.warn(SRC, 'hijri cross-check unreachable', { y, m, err: String(e).slice(0, 120) });
+    return;
+  }
+  if (!days) { log.warn(SRC, 'hijri cross-check answered without a calendar', { y, m }); return; }
+  const mine = new Map(rows.map((r) => [r.day, r.hijri_date]));
+  const off = [];
+  for (const entry of days) {
+    // "DD-MM-YYYY", the provider's own format for the Gregorian side.
+    const parts = String(entry?.gregorian?.date || '').split('-');
+    if (parts.length !== 3) continue;
+    const day = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    const theirs = entry?.hijri?.date;
+    if (!mine.has(day) || !theirs) continue;
+    if (mine.get(day) !== theirs) off.push(`${day} local=${mine.get(day)} aladhan=${theirs}`);
+  }
+  if (off.length) {
+    failed.push(`hijri cross-check ${y}-${pad2(m)}: ${off.length} day(s) disagree — ${off[0]}`);
+    log.warn(SRC, 'hijri cross-check disagrees', { y, m, n: off.length, first: off[0] });
+  } else {
+    log.info(SRC, 'hijri cross-check agrees', { y, m, days: mine.size });
+  }
+}
+
 async function pullCalendar(rawFrom, rawTo, failed = []) {
   const from = dayOf(rawFrom);
   const to = dayOf(rawTo);
@@ -131,44 +293,27 @@ async function pullCalendar(rawFrom, rawTo, failed = []) {
   if (from > end) return 0;
 
   const sun = await pullSun(from, end, failed);
-  const rows = [];
-  for (const [y, m] of monthsBetween(from, end)) {
-    let days = null;
-    try {
-      const { data } = await http(`https://api.aladhan.com/v1/gToHCalendar/${m}/${y}`,
-        { timeoutMs: 30000, retries: 2 });
-      days = Array.isArray(data?.data) ? data.data : null;
-    } catch (e) {
-      log.warn(SRC, 'hijri month lookup failed', { y, m, err: String(e).slice(0, 100) });
-      failed.push(`hijri ${y}-${String(m).padStart(2, '0')}: ${String(e).slice(0, 120)}`);
-    }
-    if (!days) { if (!failed.some((f) => f.startsWith(`hijri ${y}-`))) failed.push(`hijri ${y}-${String(m).padStart(2, '0')}: answered without a calendar`); continue; }
-    for (const entry of days) {
-      // "DD-MM-YYYY", the provider's own format for the Gregorian side.
-      const g = String(entry?.gregorian?.date || '');
-      const parts = g.split('-');
-      if (parts.length !== 3) continue;
-      const day = `${parts[2]}-${parts[1]}-${parts[0]}`;
-      if (day < from || day > end) continue;
-      const h = entry?.hijri;
-      const row = {
-        day,
-        hijri_date: h?.date || null,
-        hijri_month: h?.month?.en || null,
-        is_ramadan: Number(h?.month?.number) === 9,
-      };
-      const s = sun.get(day);
-      // Only where it is known: upsertMany updates the columns it is given, so
-      // omitting them leaves an earlier value alone rather than nulling it.
-      if (s) { row.sunrise = s.sunrise; row.sunset = s.sunset; }
-      rows.push(row);
-    }
+  /* Computed first, and unconditionally. This is the line that changes: the
+     Hijri half of the row no longer has a network call between the range and
+     the table, so "asked for 2 month(s) and wrote no day" cannot happen
+     because a host was unreachable. */
+  const rows = calendarDays(from, end);
+  for (const row of rows) {
+    const s = sun.get(row.day);
+    // Only where it is known: upsertMany updates the columns it is given, so
+    // omitting them leaves an earlier value alone rather than nulling it.
+    if (s) { row.sunrise = s.sunrise; row.sunset = s.sunset; }
   }
+
+  await crossCheckHijri(rows, failed);
+
   /* A range with days in it that yields no rows is a failure, whichever step
      swallowed it — the provider answering 200 with a calendar this code cannot
      read looks, from here, exactly like the provider being down. Production
      wrote zero calendar rows on a backfill spanning 25 months and reported ok.
-     This is the line that stops that being possible. */
+     This is the line that stops that being possible. It should now be
+     unreachable for any real window, and it stays because "should" is not
+     "is". */
   if (!rows.length) {
     failed.push(`calendar ${from}..${end}: asked for `
       + `${monthsBetween(from, end).length} month(s) and wrote no day`);
@@ -181,10 +326,10 @@ export async function collect({ mode = 'incremental', from = null, to = null } =
   /* Why this source cannot simply say 'ok'.
      ───────────────────────────────────────────────────────────────────────
      Every fetch under here swallows: pullWeather returns 0 on a body with no
-     daily block, the Hijri lookup catches into log.warn and `continue`, and
-     pullCalendar returns 0 if nothing accumulated. The run status was the
-     literal 'ok', so the only outcomes this source could ever report were
-     'ok' and a thrown error.
+     daily block, the sun lookup catches into log.warn, and pullCalendar
+     returns 0 if nothing accumulated. The run status was the literal 'ok', so
+     the only outcomes this source could ever report were 'ok' and a thrown
+     error.
 
      Measured on production 2026-09-02: all three latest runs — backfill,
      catch-up and incremental — reported ok with rows_written 37, and 37 is
@@ -200,9 +345,11 @@ export async function collect({ mode = 'incremental', from = null, to = null } =
   const failed = [];
   try {
     const w = await pullWeather(failed);
-    /* The range the run asked for, and a fortnight either way on an
-       incremental — cheap (one Aladhan call per month), and it repairs the
-       history that the one-row-per-run version never wrote. */
+    /* The range the run asked for, and a month and a half back on an
+       incremental. That used to cost one Aladhan call per month of window;
+       it now costs nothing but arithmetic, so the reach-back also repairs
+       whatever the outage left NULL — 2026-09-01 onward on production — the
+       first time this runs after a deploy. */
     const today = dubaiDay();
     const back = (days) => {
       const d = new Date(`${today}T12:00:00Z`);

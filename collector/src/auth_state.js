@@ -27,7 +27,10 @@
 
    What is left is honest and observable: a response that redirected off the
    host it was sent to, a 401 or 403, or a body that is not the JSON the caller
-   asked for, is an authentication failure and not an empty window. */
+   asked for, is a failure and not an empty window. Not always the SAME
+   failure — a bounce to a login host is an expired session, a bounce to any
+   other host is an endpoint that moved — which is what authFailure's `kind`
+   is for. */
 
 import { http } from './http.js';
 import { get, SETTING_DEFAULTS } from './settings.js';
@@ -48,11 +51,32 @@ export function authFailure(url, res, { expectJson = true } = {}) {
 
   /* Redirected somewhere else entirely. fetch follows redirects by default, so
      by the time a caller sees this the 302 is long gone and only the final URL
-     records that it happened — which is why http() has to hand it back. */
+     records that it happened — which is why http() has to hand it back.
+
+     WHERE it landed is two different faults, and this called both of them
+     'expired'. A LOGIN host — auth.uber.com, the case measured on 2026-08-26
+     with `sid` dropped — means the session is gone and somebody has to
+     re-capture a cookie. Any OTHER host means the endpoint has moved, and the
+     credential is very probably fine.
+
+     That second case is not hypothetical: supplier.uber.com became
+     fleethub.uber.com. The old rule was `LOGIN_HOST.test(landed) ||
+     /uber\.com$/.test(landed)`, and the second clause swept the new host into
+     the first meaning — so every bounce to fleethub answered "the session is
+     no longer signed in" about a cookie that worked. Days went into
+     re-capturing sessions that were never the problem; src/credcheck.js's
+     header records the other half of the same episode, where the paste box
+     kept probing the old host and REFUSED the good sessions pasted into it.
+     No amount of re-pasting moves a URL.
+
+     A move is still a failure — nothing is being collected either way — so
+     this still returns an object and every caller still stops. It is a
+     different ERRAND, and that is what `kind` now says. */
   if (landed && sent && landed !== sent) {
-    return { reason: LOGIN_HOST.test(landed) || /uber\.com$/.test(landed)
-      ? `redirected to ${landed} — the session is no longer signed in`
-      : `redirected to ${landed}`, kind: 'expired' };
+    return LOGIN_HOST.test(landed)
+      ? { reason: `redirected to ${landed} — the session is no longer signed in`, kind: 'expired' }
+      : { reason: `redirected to ${landed} — the endpoint has moved off ${sent}; `
+          + 'the credential is not what is wrong, the URL is', kind: 'moved' };
   }
   /* The provider's own words, where it gave any. "403 from api.uber.com" sends
      somebody to read a log; "403 — bad key" tells them which credential. */
@@ -80,8 +104,17 @@ export function authFailure(url, res, { expectJson = true } = {}) {
   return null;
 }
 
-/** Whatever the provider said, from the shapes these APIs actually use. */
-function providerWords(data) {
+/* Whatever the provider said, from the shapes these APIs actually use.
+   ─────────────────────────────────────────────────────────────────────────
+   Exported because two other places need the same reading and each wrote its
+   own, smaller, version: src/auth/uber.js:67 and src/credcheck.js:205 both do
+   `String(data?.error_description || data?.error || …)` and nothing else, so
+   they are blind to `message`, `error.message`, `detail` and
+   `errors[0].message` — shapes the very same providers use elsewhere in this
+   repo (Uber's REST 403 is `{code, message}`, and its GraphQL errors are
+   `errors[0].message`). Neither of those files is editable from here; the
+   export is what makes the fix a one-line import when they are. */
+export function providerWords(data) {
   if (!data) return null;
   if (typeof data === 'string') return data.trim().slice(0, 120) || null;
   const m = data.message || data.error_description || data.error?.message
@@ -96,7 +129,15 @@ function providerWords(data) {
    is the problem. Kept narrow on purpose: a pattern that also matches ordinary
    refusals would turn every rate limit into a red banner, and a banner that is
    sometimes wrong is one nobody reads. */
-const AUTH_WORDS = /unauthenticated|unauthorized|not.?authorized|invalid.token|token.(has )?expired|session.expired|expired.(token|session)|permission.denied|forbidden|login.required|credentials/i;
+/* `authentication.failed` and `invalid <username|password|…>` are here because
+   of FMS, and they are the only refusal that source has ever been seen to
+   produce: src/probe.js records it verbatim — FMS answers
+   `{"error":"Authentication failed"}` with HTTP **200**. Without these two the
+   one measured FMS refusal read as an ordinary message and the collector went
+   on treating a rejected password as a window with no journeys in it. Both stay
+   narrow enough to leave the negatives alone: INVALID_DATE_RANGE (Bolt's FI
+   gateway, the 31-day limit) and "Invalid GraphQL query" still do not match. */
+const AUTH_WORDS = /unauthenticated|unauthorized|not.?authorized|invalid.token|token.(has )?expired|session.expired|expired.(token|session)|permission.denied|forbidden|login.required|credentials|authentication.failed|login.failed|invalid.(username|password|login|credential)/i;
 
 /** Does a provider's own error message say the credential is at fault? */
 export function saysAuth(message) {
@@ -210,6 +251,13 @@ export async function noteUberRest(db, url, res, o, surface, token = null) {
   await noteCredential(db, {
     provider: 'uber', fleet: bad?.blames === 'token' ? (o?.oauth?.own ? fleet : '*') : fleet,
     credential: cred,
+    /* A moved endpoint is recorded as 'expired' ON PURPOSE, and the honest word
+       for it lives in `detail` instead. api/auth_routes.js SEVERITY_OF has no
+       'moved' row and its default for a state it has never seen is 'at-risk' —
+       so writing the accurate state here would take a source that is
+       collecting NOTHING from red down to amber, which is the exact class of
+       failure that map's comment was written about. Until it learns the word,
+       red with the right sentence beats amber with the right label. */
     state: bad ? 'expired' : 'ok',
     detail,
     surface: `oauth rest ${surface}`,

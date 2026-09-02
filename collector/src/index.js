@@ -176,9 +176,25 @@ async function main() {
            while a job killed BEFORE its first progress write kept the stale
            baselines, compared equal, and was abandoned for it. Both of the
            failed rows on production are the second case. */
+        /* The heartbeat's peak, kept in the same statement.
+           ─────────────────────────────────────────────────────────────────
+           src/run.js stamps rss_mb / heap_mb / heartbeat_at onto every report
+           it makes. The LAST reading is not the largest the process got — RSS
+           falls back after a GC — and the largest is the number an OOM is
+           about, so the running maximum is carried in the document. Computed
+           here rather than in the process, because it must survive the process
+           dying: a job restarted four times is one job, and the peak that
+           matters is the peak across all four attempts.
+
+           greatest() with coalesce(..., 0) on both sides, so a report that
+           carries no rss_mb leaves the peak where it was instead of resetting
+           it to nothing. */
         const progress = (p2) => pool.query(
           `UPDATE collector_job
               SET progress = coalesce(progress, '{}'::jsonb) || $2::jsonb
+                             || jsonb_build_object('rss_peak_mb',
+                                  greatest(coalesce((progress ->> 'rss_peak_mb')::int, 0),
+                                           coalesce(($2::jsonb ->> 'rss_mb')::int, 0)))
             WHERE id = $1`, [job.id, JSON.stringify(p2)])
           .catch((e) => log.warn('scheduler', 'progress write failed', { err: String(e).slice(0, 80) }));
         try {
@@ -283,19 +299,66 @@ async function main() {
            progress = coalesce(progress, '{}'::jsonb)
                       || jsonb_build_object(
                            'done_at_last_attempt', coalesce((progress ->> 'done')::int, 0),
-                           'steps_at_last_attempt', coalesce((progress ->> 'steps')::int, 0)),
+                           'steps_at_last_attempt', coalesce((progress ->> 'steps')::int, 0))
+                      /* Where THIS attempt stopped, snapshotted before the next
+                         one starts overwriting the live heartbeat. Same
+                         statement, so it costs nothing, and without it a job
+                         that is requeued rather than abandoned loses the only
+                         record of the death that caused the requeue. */
+                      || CASE WHEN progress ->> 'heartbeat_at' IS NULL THEN '{}'::jsonb
+                              ELSE jsonb_build_object(
+                                'died_at', progress ->> 'heartbeat_at',
+                                'died_on', coalesce(progress -> 'step' ->> 'window',
+                                                    progress ->> 'current'),
+                                /* ::int, so the Settings table reads a number
+                                   rather than the string "402" beside the
+                                   number 402 in rss_mb. */
+                                'died_rss_mb', (progress ->> 'rss_mb')::int,
+                                'died_rss_peak_mb', coalesce((progress ->> 'rss_peak_mb')::int,
+                                                             (progress ->> 'rss_mb')::int)) END,
+           /* …and what the heartbeat saw, appended.
+              ────────────────────────────────────────────────────────────
+              This sentence used to be the whole of what the product could
+              say about a dead run: production job 8 carries it five attempts
+              in, and nothing anywhere records an exit code, a signal or a
+              memory reading. It is an inference and it still reads as one —
+              but the reading beside it is measured, so the next abandonment
+              names the window the job died on and how large the process had
+              got instead of leaving both to be guessed.
+
+              coalesce() around the whole appended clause, not around its
+              parts: concatenating anything with NULL is NULL in SQL, so a
+              job with no heartbeat — every row that predates this, and any
+              job killed before its first onStep — would otherwise have its
+              error erased rather than shortened. */
            error = CASE WHEN coalesce(attempts, 0) >= 3 AND NOT ${ADVANCED}
                         THEN 'abandoned: restarted three times without completing a single source '
                              || 'or collection window, so the job itself may be killing the collector'
+                             || coalesce('; last heartbeat ' || (progress ->> 'heartbeat_at')
+                                  || ' on ' || coalesce(progress -> 'step' ->> 'window',
+                                                        progress ->> 'current', 'no named window')
+                                  || ', rss ' || (progress ->> 'rss_mb') || ' MB (peak '
+                                  || coalesce(progress ->> 'rss_peak_mb', progress ->> 'rss_mb')
+                                  || ' MB)', '')
                         ELSE error END
        WHERE status = 'running'
        RETURNING id, mode, attempts, progress ->> 'current' AS was_on,
-                 coalesce((progress ->> 'steps')::int, 0) AS steps`)
+                 coalesce((progress ->> 'steps')::int, 0) AS steps,
+                 /* Read from the row AFTER the update, so this is the snapshot
+                    the statement just took of the attempt that died — the log
+                    line and the job row cannot disagree about it. */
+                 progress ->> 'died_on' AS died_on,
+                 progress ->> 'died_rss_peak_mb' AS died_rss`)
       .then(({ rows }) => {
         if (rows.length) {
           log.warn('scheduler', 'requeued jobs stranded by a restart',
+            /* The heartbeat in the log as well as in the row. The container
+               log is where anyone looks first after a restart, and until now
+               the most it could say was which source the job was on. */
             { jobs: rows.map((r) => `${r.mode}#${r.id} (attempt ${r.attempts}`
-              + `${r.was_on ? `, was on ${r.was_on}` : ''})`) });
+              + `${r.was_on ? `, was on ${r.was_on}` : ''}`
+              + `${r.died_on ? `, stopped at ${r.died_on}` : ''}`
+              + `${r.died_rss ? `, rss peak ${r.died_rss} MB` : ''})`) });
         }
       })
       .catch((e) => log.error('scheduler', 'requeue', { err: String(e) }));

@@ -2,13 +2,14 @@
 //
 // Three tiers, cheapest and most reliable first:
 //   1. seasonal  — computed from the calendar (Dubai summer, school terms). Zero API risk.
-//   2. calendar  — Ramadan/Eid from the Hijri API (these reshape demand every year).
+//   2. calendar  — Ramadan/Eid, computed from the Hijri calendar (these reshape demand every year).
 //   3. news      — GDELT headlines, classified by an LLM into "does this move a Dubai fleet?".
 //
 // Nothing here claims causation. It supplies candidates so a human can judge, and it
 // quantifies the coincidence so the judgement is informed.
 import { config } from '../config.js';
 import { http } from '../http.js';
+import { gregorianOfHijri } from './external.js';
 import { upsert, upsertMany, logRun, pool } from '../db.js';
 import { log } from '../log.js';
 
@@ -38,31 +39,55 @@ function seasonalEvents(fromYear, toYear) {
   return out;
 }
 
-/* ── 2. Ramadan / Eid from the Hijri calendar ──────────────────────────── */
-async function ramadanEvents(years, failed = []) {
+/* ── 2. Ramadan / Eid, computed rather than fetched ─────────────────────── */
+/* MEASURED, production /api/status, 2026-09-02:
+
+     events incremental partial
+       ramadan 2025: TypeError: fetch failed (ETIMEDOUT) …/hToG/01-09-1446
+       ramadan 2026: TypeError: fetch failed (ETIMEDOUT) …/hToG/01-09-1447
+       ramadan 2027: TypeError: fetch failed (ETIMEDOUT) …/hToG/01-09-1448
+
+   The same failure as external.js and the same host, on the simplest endpoint
+   Aladhan has — a single date conversion, which rules out "the calendar
+   endpoints are slow": nothing is reached to be slow. The full diagnosis, and
+   why the three other candidates were ruled out, is in external.js beside
+   hijriOf().
+
+   `hToG/01-09-<hy>` asks which Gregorian day is 1 Ramaḍān. That is arithmetic
+   on a deterministic calendar, so it is done here. gregorianOfHijri agrees
+   with the three rows this collector wrote WHEN Aladhan was still reachable —
+   /api/events today holds Ramadan 1446 → 2025-03-01, 1447 → 2026-02-18,
+   1448 → 2027-02-08, and it reproduces all three exactly.
+
+   And it fixes an off-by-one the network version could not see. Ramadan is 29
+   or 30 days depending on the year; `start + 29` assumed 30. Ramadan 1446 has
+   29, so production's stored row ends 2025-03-30 — which is 1 Shawwāl, the
+   Eid day, already claimed by the eid_fitr row beginning the same date. The
+   month now ends where Shawwāl begins, whichever length the year has. */
+export function ramadanEvents(years, failed = []) {
   const out = [];
+  const dayAfter = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
   for (const y of years) {
-    try {
-      // Hijri→Gregorian for 1 Ramadan (month 9) of the Hijri year overlapping y
-      const hy = Math.round((y - 622) * 1.0307);
-      const { data } = await http(`https://api.aladhan.com/v1/hToG/01-09-${hy}`, { timeoutMs: 20000, retries: 2 });
-      const g = data?.data?.gregorian?.date;                    // DD-MM-YYYY
-      if (!g) continue;
-      const [dd, mm, yyyy] = g.split('-');
-      const start = new Date(`${yyyy}-${mm}-${dd}`);
-      const end = new Date(start.getTime() + 29 * 864e5);
-      const eidEnd = new Date(end.getTime() + 3 * 864e5);
-      const d = (x) => x.toISOString().slice(0, 10);
-      out.push({ source: 'calendar', code: 'ramadan', title: `Ramadan ${hy}`, category: 'holiday', scope: 'uae',
-        starts_on: d(start), ends_on: d(end), expected_effect: 'demand_down', confidence: 0.85,
-        summary: 'Daytime demand collapses and shifts to a sharp post-iftar night peak. Working hours are shortened across the UAE.' });
-      out.push({ source: 'calendar', code: 'eid_fitr', title: `Eid al-Fitr ${hy}`, category: 'holiday', scope: 'uae',
-        starts_on: d(end), ends_on: d(eidEnd), expected_effect: 'demand_up', confidence: 0.7,
-        summary: 'Multi-day public holiday: leisure, family visiting and airport demand spike together.' });
-    } catch (e) {
-      log.warn(SRC, `ramadan ${y} lookup failed`, { err: String(e).slice(0, 80) });
-      failed.push(`ramadan ${y}: ${String(e).slice(0, 110)}`);
+    // The Hijri year overlapping Gregorian year y.
+    const hy = Math.round((y - 622) * 1.0307);
+    const start = gregorianOfHijri(hy, 9, 1);          // 1 Ramaḍān
+    const shawwal = gregorianOfHijri(hy, 10, 1);       // 1 Shawwāl — Eid al-Fitr
+    if (!start || !shawwal) {
+      /* Unreachable for any year this product asks about (ICU's Umm al-Qura
+         tables run 1300–1600 AH), and reported rather than skipped if it ever
+         is not: silence here is what put the collector two days behind. */
+      log.warn(SRC, `ramadan ${y} not convertible`, { hy });
+      failed.push(`ramadan ${y}: no Gregorian date for 01-09-${hy}`);
+      continue;
     }
+    const endOfRamadan = dayAfter(shawwal, -1);
+    const eidEnd = dayAfter(shawwal, 2);
+    out.push({ source: 'calendar', code: 'ramadan', title: `Ramadan ${hy}`, category: 'holiday', scope: 'uae',
+      starts_on: start, ends_on: endOfRamadan, expected_effect: 'demand_down', confidence: 0.85,
+      summary: 'Daytime demand collapses and shifts to a sharp post-iftar night peak. Working hours are shortened across the UAE.' });
+    out.push({ source: 'calendar', code: 'eid_fitr', title: `Eid al-Fitr ${hy}`, category: 'holiday', scope: 'uae',
+      starts_on: shawwal, ends_on: eidEnd, expected_effect: 'demand_up', confidence: 0.7,
+      summary: 'Multi-day public holiday: leisure, family visiting and airport demand spike together.' });
   }
   return out;
 }
@@ -235,7 +260,7 @@ export async function collect({ mode = 'incremental' } = {}) {
   try {
     const yNow = new Date().getUTCFullYear();
     const seasonal = seasonalEvents(yNow - 2, yNow + 1);
-    const ramadan = await ramadanEvents([yNow - 1, yNow, yNow + 1], failed);
+    const ramadan = ramadanEvents([yNow - 1, yNow, yNow + 1], failed);
     let rows = [...seasonal, ...ramadan];
 
     // news tier (best-effort; never blocks the rest)

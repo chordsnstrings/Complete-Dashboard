@@ -23,6 +23,9 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import express from 'express';
 import { authFailure, saysAuth, noteCredential, noteUberRest, uberOrgCredential } from '../src/auth_state.js';
+/* As a namespace, so a missing export is a failed check rather than a
+   SyntaxError that takes the other forty-nine down with it. */
+import * as authState from '../src/auth_state.js';
 import { authRoutes } from '../api/auth_routes.js';
 
 const db = new PGlite();
@@ -68,6 +71,67 @@ check('a redirect that stays on the same host is not a failure',
     finalUrl: 'https://supplier.uber.com/graphql?x=1' }) === null);
 check('no response at all is not an accusation', authFailure(SENT, null) === null);
 
+/* ── a moved endpoint is not an expired session ─────────────────────────────
+   This cost the product days. supplier.uber.com became fleethub.uber.com, and
+   every request to the old host answered by redirecting to the new one — a
+   cross-host redirect, which this classified as 'expired' with the words "the
+   session is no longer signed in". The banner then told an operator to
+   re-capture a cookie that was working, and the paste box (src/credcheck.js,
+   whose header records the same episode) refused the good session they pasted.
+   No amount of re-pasting can move a URL.
+
+   The discriminator is the host that was landed on, and it was already half
+   written here: LOGIN_HOST names the subdomains a provider bounces you to when
+   it wants a human to log in again. What the old code added to it — a bare
+   `/uber\.com$/` — is precisely what swept fleethub.uber.com into 'expired'. */
+const MOVED = { status: 200, ok: true, data: '<html>Redirecting</html>',
+  finalUrl: 'https://fleethub.uber.com/graphql' };
+check('a redirect to a different host that is not a login page is a MOVED endpoint',
+  authFailure(SENT, MOVED)?.kind === 'moved', JSON.stringify(authFailure(SENT, MOVED)));
+check('…and it is still a failure, because nothing is being collected',
+  authFailure(SENT, MOVED) !== null);
+check('…named as a move rather than as a dead session',
+  /moved/i.test(authFailure(SENT, MOVED)?.reason || '')
+  && !/no longer signed in/.test(authFailure(SENT, MOVED)?.reason || ''),
+  authFailure(SENT, MOVED)?.reason);
+check('…and it says where it went, which is the fix',
+  /fleethub\.uber\.com/.test(authFailure(SENT, MOVED)?.reason || ''),
+  authFailure(SENT, MOVED)?.reason);
+check('a redirect to the login host is still expired, not moved',
+  authFailure(SENT, { status: 404, data: 'Not Found',
+    finalUrl: 'https://auth.uber.com/v2/' })?.kind === 'expired');
+/* The other half of the item: a kind nobody switches on cannot start being
+   ignored. Every caller of authFailure acts on the object being truthy, so a
+   'moved' still stops the run and still reaches the credential panel — and if
+   one of them ever narrows to kind === 'expired', a moved endpoint would go
+   back to being silence, which is the failure this whole file exists for. */
+{
+  const fs = await import('node:fs');
+  const callers = ['src/sources/uber.js', 'src/sources/uber_fleet.js', 'src/sources/uber_profile.js',
+    'src/auth_state.js'];
+  const narrowed = callers.filter((f) => /kind === 'expired'/.test(fs.readFileSync(f, 'utf8')));
+  check('no caller of authFailure acts only on kind expired',
+    narrowed.length === 0, `${narrowed.join(', ')} would drop a moved endpoint`);
+}
+
+/* ── the provider's own words, said once ────────────────────────────────────
+   Not exported, so anything else that needed the same vocabulary hand-rolled a
+   subset of it: src/auth/uber.js:67 and src/credcheck.js:205 both read
+   `data?.error_description || data?.error` and nothing else, which is blind to
+   the `message` and `errors[0].message` shapes these same providers use. */
+check('providerWords is exported', typeof authState.providerWords === 'function');
+const pw = typeof authState.providerWords === 'function' ? authState.providerWords : () => undefined;
+check('…and reads the shapes these APIs actually use',
+  pw({ message: 'bad key' }) === 'bad key'
+  && pw({ error_description: 'client secret mismatch' }) === 'client secret mismatch'
+  && pw({ errors: [{ message: 'UNAUTHENTICATED' }] }) === 'UNAUTHENTICATED'
+  && pw(null) === null,
+  JSON.stringify([pw({ message: 'bad key' }),
+    pw({ error_description: 'client secret mismatch' })]));
+check('…and keeps the code beside the words, because "bad key" alone names no field',
+  pw({ code: 'rtapi.internal_server_error', message: 'bad key' })
+    === 'bad key (rtapi.internal_server_error)');
+
 /* ── the provider's own words ───────────────────────────────────────────── */
 check('an unauthenticated message is read as an auth failure', saysAuth('UNAUTHENTICATED'));
 check('so is an expired token', saysAuth('Code: invalid-argument, token has expired'));
@@ -79,6 +143,15 @@ check('a rate limit is not an auth failure', !saysAuth('429 too many requests, s
 check('a bad query is not an auth failure', !saysAuth('Invalid GraphQL query'));
 check('a page-size refusal is not an auth failure',
   !saysAuth('driver-uuids or page size cannot be more than 10'));
+/* FMS's own refusal, quoted from src/probe.js where it was measured: the
+   service answers `{"error":"Authentication failed"}` with HTTP 200. The
+   vocabulary above did not cover it, so the one FMS refusal anybody has
+   actually seen read as an ordinary message. */
+check('an authentication failure in the provider’s own words is one',
+  saysAuth('Authentication failed'));
+check('and a wrong password said plainly is too', saysAuth('Invalid username or password'));
+check('but a date range refusal still is not',
+  !saysAuth('INVALID_DATE_RANGE, maximum allowed date range is 31 days'));
 
 /* ── what gets recorded ─────────────────────────────────────────────────── */
 const app = express();

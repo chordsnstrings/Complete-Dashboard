@@ -76,6 +76,39 @@ export async function runWindow(mode, from, to, onProgress, fleet = null, jobId 
   return mine;
 }
 
+/* A pulse on every progress report: how big this process is, and when.
+   ─────────────────────────────────────────────────────────────────────────
+   Nothing recorded WHY the collector died. Production job 8 (read from
+   /api/settings/jobs on 2026-09-02) is a backfill that reached attempts:5 with
+   done:0 of 8, current 'uber', and the same step five times over —
+   window 2026-01-26..2026-02-25, index 6 of 12, 35,829 rows already landed.
+   Its error is the boot requeue's own inference, "the job itself may be
+   killing the collector", because collector_job carries no exit code, no
+   signal and no memory reading. The one hypothesis that shape suggests —
+   pullTrips holds a whole CSV report in memory and then upserts a raw JSONB
+   per row — could be neither confirmed nor refuted from the row.
+
+   RSS because that is what an OOM killer measures, and heapUsed beside it
+   because a report held as one string moves them differently: heap climbing
+   with RSS is JS objects, RSS climbing without heap is buffers and strings
+   outside it. Both in megabytes — a byte count read by a person at 2am is a
+   number they have to count the digits of.
+
+   It is the WHOLE process, not this job: this worker also runs the
+   five-minute CABMAN tick and the half-hourly incremental. That is the right
+   figure anyway, because the container is what gets killed.
+
+   ISO, not String(date), which is "Mon Jan 26 2026" — sorts wrong, and parses
+   differently in every reader.
+
+   Cost is one process.memoryUsage() per progress report, which fires per
+   collection window, i.e. minutes apart. It adds no query: the scheduler
+   merges these keys into the write it was already making. */
+export function heartbeat(mem = process.memoryUsage(), at = new Date()) {
+  const mb = (b) => Math.round((b || 0) / 1048576);
+  return { heartbeat_at: at.toISOString(), rss_mb: mb(mem.rss), heap_mb: mb(mem.heapUsed) };
+}
+
 async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = null) {
   await loadSettings(true);   // pick up Settings-page credential changes without a redeploy
   log.info('run', `${mode} ${from.toISOString().slice(0, 10)}..${to.toISOString().slice(0, 10)}`);
@@ -89,6 +122,13 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = 
      comparing one attempt against the last, correctly concluded that it was
      not advancing. Five attempts, window 7 of 12 every time, abandoned. */
   const ckpt = jobId ? await loadCheckpoint(jobId) : NO_CHECKPOINT;
+  /* The callback is decorated once, here, rather than at each of the three
+     places that report. Every report a run makes then carries a heartbeat —
+     including the per-window ones from onStep, which are the frequent ones and
+     the grain at which production job 8 kept dying. Attaching it at the call
+     sites instead would mean the next report added quietly has none. */
+  const beat = onProgress;
+  onProgress = (p) => beat?.({ ...p, ...heartbeat() });
   let done = 0;
   for (const [name, mod] of Object.entries(HISTORICAL)) {
     /* A source this job has already finished is skipped whole. `done` still

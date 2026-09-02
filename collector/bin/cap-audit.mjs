@@ -56,14 +56,35 @@ const listOf = (d) => {
   return { rows: null, envelope: d };
 };
 /* Does the answer state the size of the full set? The key differs by endpoint
-   — total, total_guests, driver_count — so this looks for any count that is
-   not simply the length of what came back, plus the row-level form
-   /api/map/days uses. */
+   — total, total_guests, driver_count — so the ENVELOPE is read loosely: any
+   count that is not simply the length of what came back.
+
+   A ROW is read strictly, and that is the correction. The loose test used to
+   run over rows[0] as well, and a row's own arithmetic is full of words like
+   total and count: /api/sensor-health's rows carry total_fixes (1 fix for the
+   first plate in the live response today), which satisfied /total/ and made
+   the endpoint read as disclosed no matter what the envelope said. When that
+   endpoint was a bare capped array of 100 rows with the set size nowhere —
+   130 plates exist, measured on production — this tool called it "100 of a
+   larger set, disclosed" and exited 0. The one shape it exists to catch was
+   the one shape it could not see.
+
+   The row-level form is still allowed, because /api/map/days really does
+   answer with a bare array and repeats the three set-size facts on every row
+   (measured: total 1355, shown 400, truncated true). But it has to be that
+   whole triple, by those exact names — a lone `total` on a row is a row's own
+   sum, not a statement about the set. */
 const discloses = (rows, env) => {
   const n = rows.length;
   const carries = (o) => Object.entries(o || {}).some(([k, v]) =>
     /total|count|truncated|shown/i.test(k) && (typeof v === 'boolean' || (typeof v === 'number' && v !== n)));
-  return carries(env) || carries(rows[0]);
+  const rowStatesTheSet = (r) => !!r && typeof r === 'object'
+    && typeof r.total === 'number' && typeof r.shown === 'number'
+    && typeof r.truncated === 'boolean';
+  /* An envelope answers for itself; only a bare array may speak through its
+     rows. Otherwise {rows:[…]} with nothing else on it borrows a disclosure
+     from a per-row field that was never about the set. */
+  return env ? carries(env) : rowStatesTheSet(rows[0]);
 };
 
 const biting = [], quiet = [], skipped = [];

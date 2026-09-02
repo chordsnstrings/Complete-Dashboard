@@ -5,11 +5,80 @@
 //   Login            -> userid; GetVehicleStatus?UserId= ; GetVehicleCurrentDetails (live)
 import { config, normPlate } from '../config.js';
 import { http, qs } from '../http.js';
-import { upsertMany, logRun } from '../db.js';
+import { upsertMany, logRun, pool } from '../db.js';
+import { noteCredential, saysAuth } from '../auth_state.js';
 import { dateChunks, dotDate, iso, parseFmsTime } from '../util.js';
 import { log } from '../log.js';
 
 const SRC = 'fms';
+
+/* The setting an operator would actually re-paste, per fleet. src/settings.js
+   registers FMS_ECOSINE_PASS and FMS_EGARI_PASS, and src/config.js reads
+   exactly those — a banner naming anything else names a box that does not
+   exist on the Settings page. */
+const FMS_PASS_KEY = (fleet) => `FMS_${String(fleet).toUpperCase()}_PASS`;
+
+/* Was this the CREDENTIAL, or was it the WINDOW?
+   ─────────────────────────────────────────────────────────────────────────
+   FMS is the only source in this deployment whose two refusals look nothing
+   like each other, and getting them the wrong way round is worse than saying
+   nothing at all.
+
+     the credential  HTTP **200**, body `{"error":"Authentication failed"}`.
+                     Recorded in src/probe.js, which watched this exact payload
+                     come back as {ok:true, record_count:0, top_keys:["error"]}
+                     and offer "error" as a field we were not storing. A 200,
+                     so the status guards these window loops already make sail
+                     straight past it, `data?.Data || []` yields nothing, and
+                     a rejected password is filed as a month in which nobody
+                     drove — the same silence the status check was added to
+                     end.
+
+     the window      HTTP 400, on a request that was simply too wide. The
+                     measurements are in the two headers below: trips refuse at
+                     21–31 days depending on the fleet, alerts above ~11,026
+                     records. Every backfill of a busy month produces one of
+                     these BY DESIGN — it is what the splitter is for.
+
+   So a 400 must never reach the credential panel. If it did, the banner would
+   go red and tell somebody to re-paste a working password on every busy month
+   of every backfill, which is a worse product than the silence this replaces:
+   a banner that is sometimes wrong is one nobody reads.
+
+   401/403 are included because any HTTP surface can answer them and they mean
+   only one thing. That part is INFERRED — no FMS response with either status
+   has been observed here; only the 200 above has. */
+const FMS_ERROR_KEYS = new Set(['error', 'message', 'errormessage', 'fault', 'errors', 'status_message']);
+function fmsAuthRefusal(r) {
+  if (!r) return null;
+  // The size ceiling, and nothing else. Checked FIRST so no later rule can
+  // reach a 400 by accident.
+  if (r.status === 400) return null;
+  if (r.status === 401 || r.status === 403) return `HTTP ${r.status}`;
+  const d = r.data;
+  if (!d || typeof d !== 'object' || Array.isArray(d)) return null;
+  /* A payload whose ONLY keys are error keys is a refusal whatever the status
+     said — the same reading src/probe.js's payloadError makes, for the same
+     measurement. A body that also carries `Data` is an answer with a note
+     attached, not a refusal. */
+  const keys = Object.keys(d);
+  if (!keys.length || !keys.every((k) => FMS_ERROR_KEYS.has(k.toLowerCase()))) return null;
+  const said = keys.map((k) => String(d[k])).filter((v) => v && v !== 'null').join('; ');
+  // And only when those words are about the credential. An error-only payload
+  // saying something else is a fault, but not one a new password would fix.
+  return said && saysAuth(said) ? said.slice(0, 200) : null;
+}
+
+/* Record it, and say which operation it was refused on. Failure-only, the way
+   bolt.js, cabman.js, hotel.js and yango.js do it — none of those write an
+   'ok' row either, and a source that recorded one here would be the only one
+   claiming a green light from a surface that answers 200 when it refuses. */
+async function noteFmsRefusal(fleet, op, said) {
+  await noteCredential(pool, {
+    provider: SRC, fleet: fleet.fleet, credential: FMS_PASS_KEY(fleet.fleet),
+    state: 'invalid', surface: op, detail: `${said} — the InfoTrack login for this fleet was refused`,
+  });
+}
 
 /* `ok` is part of the answer, not decoration.
    ─────────────────────────────────────────────────────────────────────────
@@ -114,6 +183,18 @@ async function collectTripWindow(fleet, s, e, chunks, depth = 0) {
       username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
       fromdate: dotDate(s), todate: dotDate(e),
     });
+    /* Before the size logic, because the size logic would answer a rejected
+       password by asking sixty-two more times — halving a month down to two
+       days to be told "Authentication failed" at every step, and then filing
+       the leaves as history FMS does not hold. */
+    const refused = fmsAuthRefusal(r);
+    if (refused) {
+      await noteFmsRefusal(fleet, 'GetTripPassenger', refused);
+      chunk.error = `refused: ${refused}`;
+      log.error(SRC, `trips ${dotDate(s)}..${dotDate(e)} — credential refused`,
+        { fleet: fleet.fleet, status: r.status, said: refused });
+      return 0;
+    }
     if (!r.ok) {
       const days = Math.round((e - s) / 864e5) + 1;
       if (days > FMS_MIN_SPLIT_DAYS) {
@@ -309,6 +390,17 @@ async function collectAlertWindow(fleet, s, e, chunks, checkpoint = null, split 
       username: fleet.username, Password: fleet.password, vehicleno: 'ALL',
       fromdate: dotDate(s), todate: dotDate(e),
     });
+    /* And the same credential check, first — otherwise a refused login turns a
+       month into thirty-one identical refusals, each recorded against a day
+       the Collection gaps page would then report as missing telematics. */
+    const refused = fmsAuthRefusal(r);
+    if (refused) {
+      await noteFmsRefusal(fleet, 'GetAlertData', refused);
+      chunk.error = `refused: ${refused}`;
+      log.error(SRC, `alerts ${dotDate(s)}..${dotDate(e)} — credential refused`,
+        { fleet: fleet.fleet, status: r.status, said: refused });
+      return 0;
+    }
     /* Same check the trip loop makes, for the same reason: a refusal read
        through `data?.Data || []` is indistinguishable from a quiet month. */
     if (!r.ok) {
@@ -382,8 +474,19 @@ async function pullAlerts(fleet, from, to, onStep, checkpoint = null) {
 
 // ---- live snapshot (also usable as a realtime poller) ----
 export async function pullLive(fleet) {
-  const { data: login } = await call('Login', { username: fleet.username, password: fleet.password });
-  const userid = login?.userid;
+  const login = await call('Login', { username: fleet.username, password: fleet.password });
+  /* The Login operation is where a bad password shows itself soonest, and this
+     read `login?.userid`, found nothing, and returned 0 — a live poller that
+     reports zero vehicles, which downstream is not "refused" but "the fleet is
+     parked". CABMAN's version of that mistake put 85 stale_tracker findings on
+     the dashboard, each naming a working device. */
+  const refused = fmsAuthRefusal(login);
+  if (refused) {
+    await noteFmsRefusal(fleet, 'Login', refused);
+    log.error(SRC, `live login refused for ${fleet.fleet}`, { said: refused });
+    return 0;
+  }
+  const userid = login.data?.userid;
   if (!userid) return 0;
   const { data } = await call('GetVehicleStatus', { UserId: userid });
   const rows = (data?.data || []).map((v) => ({
@@ -399,7 +502,22 @@ export async function pullLive(fleet) {
 // backfill/incremental entry point
 export async function collect({ from, to, mode, onStep, checkpoint = null }) {
   for (const fleet of config.fms.fleets) {
-    if (!fleet.password) { log.warn(SRC, `no password for ${fleet.fleet}, skipping`); continue; }
+    if (!fleet.password) {
+      log.warn(SRC, `no password for ${fleet.fleet}, skipping`);
+      /* A credential that was never supplied is a different problem from one
+         that stopped working, and the panel an operator opens to find out what
+         to re-paste has to be able to say which — bolt.js and cabman.js draw
+         the same line. Before this, a fleet with no InfoTrack password was a
+         `continue` and nothing else: no run row, no chunk, no note, and twelve
+         months of telematics simply absent with no record that anything had
+         been skipped. */
+      await noteCredential(pool, {
+        provider: SRC, fleet: fleet.fleet, credential: FMS_PASS_KEY(fleet.fleet),
+        state: 'missing', surface: 'ItlService',
+        detail: 'no InfoTrack password configured, so this fleet has no journeys or alerts',
+      });
+      continue;
+    }
     try {
       /* The checkpoint is per FLEET as well as per window and surface: both
          fleets walk the same calendar against the same two operations, so a
