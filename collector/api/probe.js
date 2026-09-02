@@ -855,9 +855,17 @@ export function probeRoutes(app, { wrap }) {
      different answer here would mean the collector is at fault, and an
      identical empty one means the data is not there.
 
-     Read-only: GetTripPassenger is a report endpoint, the operation name is
-     fixed here rather than taken from the caller, and only the shape is
-     returned. */
+     Read-only: both operations are report endpoints, the name comes from a
+     fixed allowlist rather than from the caller, and only the shape is
+     returned.
+
+     The alert operation is here because it is the one that fails. Every FMS
+     run on record refused its alert window with HTTP 400 while the trip window
+     beside it answered 200, and the fix — one-day windows, against a service
+     ceiling measured at roughly 5,000 records and an alert feed running 4,248
+     rows a day — could not be verified without a way to ask for a single
+     alert day. Sending a multi-hour backfill to find out is not verification;
+     it is hoping. */
   app.get('/api/probe/fms/window', wrap(async (req, res) => {
     await loadSettings();
     const from = String(req.query.from || '').slice(0, 10);
@@ -865,12 +873,19 @@ export function probeRoutes(app, { wrap }) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
       return res.status(400).json({ error: 'from and to are required as YYYY-MM-DD' });
     }
+    /* An allowlist, not a passthrough: the caller chooses BETWEEN two named
+       report operations and cannot name a third. */
+    const OPS = { trips: 'GetTripPassenger', alerts: 'GetAlertData' };
+    const op = OPS[String(req.query.op || 'trips')];
+    if (!op) {
+      return res.status(400).json({ error: `op must be one of ${Object.keys(OPS).join(', ')}` });
+    }
     const dot = (d) => d.replace(/-/g, '.');
     const out = [];
     for (const f of (config.fms.fleets || [])) {
       if (!f.username || !f.password) { out.push({ fleet: f.fleet, skipped: 'no credential' }); continue; }
       try {
-        const url = `${config.fms.base}/GetTripPassenger?${qs({
+        const url = `${config.fms.base}/${op}?${qs({
           username: f.username, Password: f.password, vehicleno: 'ALL',
           fromdate: dot(from), todate: dot(to),
         })}`;
@@ -890,7 +905,7 @@ export function probeRoutes(app, { wrap }) {
         });
       } catch (e) { out.push({ fleet: f.fleet, error: String(e).slice(0, 220) }); }
     }
-    res.json({ window: [from, to], operation: 'GetTripPassenger', fleets: out });
+    res.json({ window: [from, to], operation: op, fleets: out });
   }));
 
   log.info('api', 'probe routes mounted (read-only, allowlisted)');
