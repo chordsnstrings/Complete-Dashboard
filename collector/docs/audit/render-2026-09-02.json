@@ -1,33 +1,17 @@
 {
   "base": "http://localhost:8100",
-  "at": "2026-09-02T00:57:18.354Z",
+  "at": "2026-09-02T08:02:41.871Z",
   "widths": [
-    1500,
-    1180,
-    820
+    1440
   ],
-  "routes": 3,
+  "routes": 1,
   "findings": [
     {
-      "route": "cohort/roster-blocked",
-      "width": 1500,
+      "route": "reconcile",
+      "width": 1440,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":32,\"empty_panels\":0,\"rows\":30,\"explained\":false,\"title\":\"Stopped everywhere\",\"kpis\":32,\"tables\":1,\"charts\":0}"
-    },
-    {
-      "route": "cohort/settlement-cash",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":48,\"empty_panels\":0,\"rows\":46,\"explained\":false,\"title\":\"Holding cash\",\"kpis\":305,\"tables\":1,\"charts\":0}"
-    },
-    {
-      "route": "roster",
-      "width": 1500,
-      "sev": "i",
-      "code": "stats",
-      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":337,\"explained\":true,\"title\":\"Roster & supply\",\"kpis\":9,\"tables\":1,\"charts\":1}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":24,\"explained\":true,\"title\":\"Reconciliation\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     }
   ]
 }

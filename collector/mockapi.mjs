@@ -2029,7 +2029,7 @@ app.get('/api/reconcile', (req, r) => {
      (driver, day) pairs both sides describe — not of the two full columns. A
      fixture that subtracted the full ones would let the page ship the very bug
      it was built to show. */
-  const finish = (row) => {
+  const finish = (row, grain = 'm') => {
     const expected = row.ontrip_net == null ? null
       : round2(row.ontrip_net + (row.tips || 0) + (row.salik || 0) - (row.cash_collected || 0));
     const matched = row.matched_pairs || 0;
@@ -2044,6 +2044,10 @@ app.get('/api/reconcile', (req, r) => {
       matched_pairs: matched, matched_drivers: row.matched_drivers || 0,
       matched_days: row.matched_days || 0, bank_drivers: row.bank_drivers || 0,
       ontrip_drivers: row.ontrip_drivers || 0, delta,
+      /* Only a month row can hold an accrual: the day grain answers the same
+         question with `accrual` on the row itself. */
+      bank_accrued: grain === 'm' ? (row.bank_accrued != null ? row.bank_accrued : null) : null,
+      accrual_days: grain === 'm' ? (row.accrual_days || 0) : null,
       delta_pct: delta == null || !expectedCovered
         ? null : Math.round((delta / Math.abs(expectedCovered)) * 1000) / 10 };
   };
@@ -2077,7 +2081,7 @@ app.get('/api/reconcile', (req, r) => {
       // Beyond the 22nd nothing has landed yet; day 5 has no statement and
       // day 9 no payout, so the drill shows dashes where a source is silent.
       if (i >= 22) return finish({ d, trips: null, ontrip_net: null, tips: null, salik: null,
-        cash_collected: null, ontrip_days: 0, bank_payout: null, payout_days: 0 });
+        cash_collected: null, ontrip_days: 0, bank_payout: null, payout_days: 0 }, 'd');
       const net = 5800 + (i % 7) * 240;
       const stmt = i !== 4;
       const paid = i !== 8;
@@ -2097,7 +2101,7 @@ app.get('/api/reconcile', (req, r) => {
         expected_covered: expectedCovered,
         bank_covered: expectedCovered == null ? null : round2(expectedCovered * (1 + band / 100)),
         matched_pairs: matchedDrivers, matched_drivers: matchedDrivers,
-        matched_days: matchedDrivers ? 1 : 0, bank_drivers: paid ? 52 : 0 });
+        matched_days: matchedDrivers ? 1 : 0, bank_drivers: paid ? 52 : 0 }, 'd');
     });
     return r.json({ grain: 'day', month,
       scope: { kind: 'month', label: month, from: `${month}-01`, to: lastDayOf(month),
@@ -2132,7 +2136,17 @@ app.get('/api/reconcile', (req, r) => {
       ontrip_days: 22, ontrip_drivers: 49, bank_payout: 104300, payout_days: 21,
       expected_covered: 98300, bank_covered: 104300, matched_pairs: 1029, matched_drivers: 49,
       matched_days: 21, bank_drivers: 53 },
-  ].map(finish);
+    /* The month in progress. Uber's payout periods are weekly and are spread
+       evenly across their own days, so an open week writes rows onto days that
+       have not happened: AED 26,398 of this row's 54,227 is a projection. The
+       day drill excludes those rows, which is why clicking this row used to
+       halve every figure with nothing on screen to say why. */
+    { m: '2026-09', trips: 520, ontrip_net: 14200, tips: 180, salik: 430, cash_collected: 2900,
+      ontrip_days: 2, ontrip_drivers: 44, bank_payout: 54227, payout_days: 6,
+      bank_accrued: 26398, accrual_days: 4,
+      expected_covered: 11910, bank_covered: 12180, matched_pairs: 88, matched_drivers: 44,
+      matched_days: 2, bank_drivers: 51 },
+  ].map((row) => finish(row));
   r.json({ grain: 'month', month: null,
     scope: { kind: 'all-time', label: 'every month on record',
       from: `${rows[0].m}-01`, to: lastDayOf(rows[rows.length - 1].m), rows: rows.length },

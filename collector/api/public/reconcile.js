@@ -51,9 +51,22 @@ import { qChan, href } from './data.js';
    for seven, which is why the two sides disagree about how much history this
    page has — and why saying "the ledger starts in February" over a column
    that starts in August was worse than saying nothing. */
-const MONEY_FROM = 'the payout BREAKDOWN behind these figures has only been collected for August '
-  + '2026 — the bank column beside them goes back to 6 February, so a blank here is a month whose '
-  + 'statement was never pulled rather than a month in which nothing was paid';
+/* Two absences, opposite actions — and this sentence named the wrong one.
+   ─────────────────────────────────────────────────────────────────────────
+   It said a blank was "a month whose statement was never pulled", which reads
+   as a backfill somebody forgot to run. It is not: Uber's earnings surface
+   serves a ROLLING window of about 192 days that moves forward daily, so the
+   months before it can never be fetched again by anyone. The page already says
+   so correctly two hundred pixels further down; this sentence sat directly
+   under the table and contradicted it, and proximity wins.
+
+   It was also stale on its own terms — "collected for August 2026" while eight
+   months carry a statement. Written from the record's own edge instead, so it
+   cannot go out of date again. */
+const MONEY_FROM = 'these figures come from Uber\u2019s payout breakdown, and that surface serves a '
+  + 'rolling window of about 192 days which moves forward every day — so a blank here is a month '
+  + 'the platform can no longer be asked about, not one whose statement nobody pulled. Earlier '
+  + 'months are unknowable rather than zero.';
 
 const MONTH_LABEL = (m) => {
   const [y, mm] = String(m).split('-');
@@ -108,9 +121,23 @@ const COLS = (keyCol) => [
   { label: 'Cash collected', key: 'cash_collected', num: true, absent: MONEY_FROM,
     render: (r) => orDash(r.cash_collected, '') },
   { label: 'Expected payout', key: 'expected_payout', num: true,
-    render: (r) => withCompared(r.expected_payout, r.expected_covered, 'needs the statement') },
+    /* "needs the statement" read as a task somebody could do. For every month
+       before the retention edge there is nothing to do. */
+    render: (r) => withCompared(r.expected_payout, r.expected_covered,
+      'outside Uber\u2019s 192-day window') },
   { label: 'Bank payout', key: 'bank_payout', num: true,
-    render: (r) => withCompared(r.bank_payout, r.bank_covered, 'no payout reported') },
+    /* The part of an open month that has not happened yet, named. Uber writes
+       a whole weekly period's rows the moment the period opens, so the current
+       month's bank figure carries days still in the future — on production
+       AED 26,398 of September's 54,227, which is why clicking the row showed
+       half the money. The day view already excludes those days; the month row
+       now says how much of itself they are. */
+    render: (r) => withCompared(r.bank_payout, r.bank_covered, 'no payout reported')
+      + (r.bank_accrued
+        ? `<span class="dim" title="${fmt(r.accrual_days)} payout rows dated after today — Uber `
+          + `writes a whole weekly period when it opens, so this much of the month is a forward `
+          + `projection rather than money already wired"> · ${money(r.bank_accrued)} not yet paid</span>`
+        : '') },
   { label: 'Δ bank − expected', key: 'delta', num: true, absent: MONEY_FROM, render: deltaPill },
   /* The column that explains the one before it. A delta drawn over 53 of the
      189 drivers the bank paid that day is a different claim from one drawn
@@ -182,8 +209,26 @@ export async function renderReconcile(root, month) {
      statement and exists for seven. A page that leads with a variance computed
      over the overlap invites it to be read as the whole year's. */
   {
-    const both = d.rows.filter((r) => r.expected_payout != null && r.bank_payout != null);
-    const gap = both.reduce((a, r) => a + ((+r.bank_payout || 0) - (+r.expected_payout || 0)), 0);
+    /* Over the COVERED pairs, not the raw month columns.
+       ─────────────────────────────────────────────────────────────────────
+       bank_payout is a whole month; expected_payout only reaches the days the
+       statement covers. Subtracting one from the other is the exact failure
+       api/reconcile_routes.js:118 exists to prevent — "a whole-month statement
+       against a whole-month bank payout … reported the platform overpaying by
+       1,449%" — and the table row was fixed while this tile, the first and
+       largest number on the page, was not.
+
+       Measured on production: this tile read AED 664,898 against the Gap tile
+       a few hundred pixels away reading AED 625,589. The 39,309 difference is
+       exactly sum(bank_payout − bank_covered) — money wired on days with no
+       statement at all, counted here as "more wired than owed". February alone
+       contributed AED 21,520 from 6–8 February, three days the statement never
+       reached.
+
+       The endpoint already computes the honest figure over the driver-days
+       both sides describe, and the Gap tile already uses it. */
+    const both = d.rows.filter((r) => r.expected_covered != null && r.bank_covered != null);
+    const gap = both.reduce((a, r) => a + ((+r.bank_covered || 0) - (+r.expected_covered || 0)), 0);
     verdict(host, {
       claim: both.length
         ? `${countOf(both.length, unit)} of ${fmt(periods)} can be reconciled at all`

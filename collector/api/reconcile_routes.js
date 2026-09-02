@@ -225,12 +225,28 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
          WHERE s.source <> 'ledger' AND ${sideWhere('s')}
          GROUP BY 1`, [platform, fleet]);
       payRows = await q(
+        /* How much of the month has not happened yet.
+           ─────────────────────────────────────────────────────────────────
+           Uber's payout periods are weekly and driver_payout_day spreads a
+           period evenly across ITS days, so an open week writes rows for days
+           still in the future. The DAY grain already excludes them — see
+           `accrual` below — and the MONTH grain never did, because the guard
+           tested keyName. Measured on production: September's month row showed
+           a bank payout of AED 54,227 while the day view of the same month
+           totalled 27,830, because AED 26,398 of it sits on 3–6 September.
+           Clicking the row halved every figure and nothing said why.
+
+           A month is not simply an accrual — September holds real money too —
+           so the accrued part is carried separately rather than the whole row
+           being dropped. */
         `SELECT to_char(date_trunc('month', p.day), 'YYYY-MM') AS m,
                 round(sum(p.earnings)::numeric, 2) AS bank_payout,
+                round(sum(p.earnings) FILTER (WHERE p.day > $3::date)::numeric, 2) AS bank_accrued,
+                count(*) FILTER (WHERE p.day > $3::date)::int AS accrual_days,
                 count(DISTINCT p.day)::int AS payout_days
          FROM driver_payout_day p
          WHERE ${sideWhere('p')}
-         GROUP BY 1`, [platform, fleet]);
+         GROUP BY 1`, [platform, fleet, dubaiDay(new Date())]);
       covRows = await q(coveredSql(`to_char(date_trunc('month', b.day), 'YYYY-MM')`, null),
         [platform, fleet]);
 
@@ -366,6 +382,11 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         expected_payout: expected,
         bank_payout: bank,
         payout_days: p ? p.payout_days : 0,
+        /* At month grain, the slice of bank_payout that is a forward
+           projection of an open payout period rather than money already
+           wired. Null at day grain, where `accrual` above answers it. */
+        bank_accrued: keyName === 'm' ? num(p?.bank_accrued) : null,
+        accrual_days: keyName === 'm' ? (p?.accrual_days || 0) : null,
         /* Both sides of what was actually compared, so the delta beside them
            can be checked by subtraction rather than believed. */
         expected_covered: expectedCovered,
