@@ -19,7 +19,36 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+/* Every file, not every file in the top of a directory.
+   ─────────────────────────────────────────────────────────────────────────
+   Both halves of this guard used a flat readdirSync, so what it actually
+   checked was api/*.js and src/*.js — and the product's twelve collectors live
+   in src/sources/, its phone screens in api/public/m/, and its generated
+   calendar columns in sql/*.sql. None of those were ever scanned.
+
+   Measured 2026-09-02 by running the guard's own rules over the directories it
+   skips: four real offenders, none of which it could see. Three of them are on
+   the phone — a tracker fix time, a collector run time and the analyst's last
+   pass, each rendered on whatever clock the reader is holding — and the fourth
+   buckets trips into months by UTC, so a 01:00 Dubai booking on the 1st counts
+   against the previous month.
+
+   A lint whose reach is narrower than the thing it protects reports clean
+   forever, which is worse than not having it: this file's own header claims
+   "every calendar key the API computes goes through AT TIME ZONE 'Asia/Dubai'"
+   and that claim was only ever checked in two directories. */
+const walk = (dir, ext) => {
+  const out = [];
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) out.push(...walk(full, ext));
+    else if (name.endsWith(ext)) out.push(full);
+  }
+  return out;
+};
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -35,9 +64,14 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
     [new RegExp(`extract\\(\\s*(?:hour|dow|isodow|day|month|year)\\s+from\\s+[\\w.]*${TS}\\s*\\)`, 'gi'), 'extract'],
   ];
   const offenders = [];
-  for (const dir of ['api', 'src']) {
-    for (const f of readdirSync(dir).filter((x) => x.endsWith('.js'))) {
-      const src = readFileSync(`${dir}/${f}`, 'utf8');
+  {
+    /* .sql as well as .js: sql/schema_*.sql is where the generated local_day
+       and local_hour columns are declared, and a generated column computed on
+       the wrong clock is the one nothing downstream can correct. */
+    for (const path of [...walk('api', '.js'), ...walk('src', '.js'), ...walk('sql', '.sql')]) {
+      const dir = path.slice(0, path.lastIndexOf('/'));
+      const f = path.slice(path.lastIndexOf('/') + 1);
+      const src = readFileSync(path, 'utf8');
       for (const m of src.matchAll(/`([^`]*(?:SELECT|INSERT|UPDATE)[^`]*)`/gs)) {
         for (const [re, what] of DERIVATIONS) {
           for (const g of m[1].matchAll(re)) {
@@ -59,8 +93,9 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
 /* ── 2. the browser half: no formatter left on the viewer's clock ──────── */
 {
   const offenders = [];
-  for (const f of readdirSync('api/public').filter((x) => x.endsWith('.js'))) {
-    const raw = readFileSync(`api/public/${f}`, 'utf8');
+  for (const path of walk('api/public', '.js')) {
+    const f = path.replace(/^api\/public\//, '');
+    const raw = readFileSync(path, 'utf8');
     /* Comments blanked, length-preserving so line numbers survive. These files
        explain the trap in prose — tz.js's own header quotes
        `toISOString().slice(0, 10)` as the thing not to do — and a lint that
@@ -74,7 +109,22 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
        the next line — which is how every one of these is written once the
        timeZone option makes the line too long. It reported clean against the
        exact code it exists to check. */
-    for (const m of src.matchAll(/toLocale(?:Date|Time)String\s*\(([\s\S]{0,220}?)\)\s*[;,)]/g)) {
+    /* No trailing anchor. It used to require the call to be followed by `;`,
+       `,` or `)`, and the shape this product actually writes is a ternary —
+       `… .toLocaleTimeString([], {…}) : 'never'` — whose next character is a
+       colon. m/screens.js:515 rendered a collector run time on the reader's
+       clock and matched nothing for want of that one character. */
+    for (const m of src.matchAll(/toLocale(?:Date|Time)String\s*\(([\s\S]{0,220}?)\)/g)) {
+      if (/timeZone/.test(m[1])) continue;
+      offenders.push(`api/public/${f}:${lineOf(m.index)}  ${m[0].replace(/\s+/g, ' ').slice(0, 90)}`);
+    }
+    /* toLocaleString on a DATE. The bare name is not enough on its own —
+       Number(n).toLocaleString() is how every figure on every page is
+       formatted, and a lint that flags those is a lint nobody runs — so the
+       receiver has to be a date. m/screens.js:875 printed the analyst's last
+       pass as `new Date(d.last_run).toLocaleString()`: no options at all, the
+       worst of the three shapes and the only one the old rule could not name. */
+    for (const m of src.matchAll(/new Date\([^()]*\)\s*\.toLocaleString\s*\(([\s\S]{0,220}?)\)/g)) {
       if (/timeZone/.test(m[1])) continue;
       offenders.push(`api/public/${f}:${lineOf(m.index)}  ${m[0].replace(/\s+/g, ' ').slice(0, 90)}`);
     }

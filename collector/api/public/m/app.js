@@ -20,7 +20,9 @@
 import { state, api, parseHash, href, q, qAll, hidesRange, hidesChannel,
   applyWindow, setFilter } from '../data.js';
 import { rangePanel } from '../daterange.js';
-import { el, esc, sourceLine } from '../ui.js';
+/* timeStr, not a formatter of this file's own: it is the same function the
+   desktop shell renders every clock through, and it names timeZone: TZ. */
+import { el, esc, sourceLine, timeStr } from '../ui.js';
 import { SCREENS, TABS, titleFor } from './screens.js';
 
 const root = document.getElementById('m');
@@ -167,8 +169,14 @@ async function freshness() {
     if (staleBar) { staleBar.remove(); staleBar = null; }
     if (!cached) return;
     staleBar = el('div', 'm-stale');
+    /* The fleet's clock, not the phone's. sw.js stamps x-sw-cached-at as an
+       ISO instant, and `new Date(at).toLocaleTimeString()` rendered it wherever
+       the reader happens to be: the cache written at 13:00:01Z on 2026-09-02
+       (production /api/status, measured) read "17:00" in Dubai and "09:00" on a
+       New York phone — the offline bar disagreeing with every hour label on the
+       screen it sits above. */
     staleBar.textContent = at
-      ? `Offline — showing what was last collected at ${new Date(at).toLocaleTimeString()}`
+      ? `Offline — showing what was last collected at ${timeStr(at)}`
       : 'Offline — showing the last numbers this phone saw';
     deck.prepend(staleBar);
   } catch { /* the screen's own error state already says it */ }

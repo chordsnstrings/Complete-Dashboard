@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { http } from '../http.js';
 import { gregorianOfHijri } from './external.js';
 import { upsert, upsertMany, logRun, pool } from '../db.js';
+import { dubaiMonth } from '../util.js';
 import { log } from '../log.js';
 
 const SRC = 'events';
@@ -202,31 +203,93 @@ export function breakBetween(a, b, { minChange = 0.30, minTrips = 20 } = {}) {
   };
 }
 
+/* The last day of a YYYY-MM, by integer arithmetic. Date.UTC(y, m, 0) is the
+   zeroth day of the NEXT month, which is the last day of this one — and it
+   knows about February. No clock is read, so this cannot drift with the zone
+   the container happens to run in. */
+const lastDayOf = (m) => {
+  const [y, mm] = m.split('-').map(Number);
+  return new Date(Date.UTC(y, mm, 0)).toISOString().slice(0, 10);
+};
+
 export async function detectBreaks() {
   // `HAVING count(*) > 20` used to drop thin months from the series. Combined
   // with comparing adjacent ROWS rather than adjacent MONTHS, that let October
   // 2025 sit next to August 2026 and produce a confident "-91% break" spanning
   // ten months in which nothing had been collected at all.
+  /* AT TIME ZONE 'Asia/Dubai' before the truncation, not after it.
+     ─────────────────────────────────────────────────────────────────────────
+     requested_at is TIMESTAMPTZ and Postgres runs its session in UTC, so a
+     bare date_trunc('month', …) cut the year on the UTC clock. Dubai is UTC+4
+     with no daylight saving, so every month boundary leaked its first four
+     hours backwards: a booking taken at 01:00 Dubai on the 1st is 21:00 UTC on
+     the last day of the month before, and was counted against it.
+
+     MEASURED over the real Uber year on disk (160,915 trips, 2025-09..2026-08):
+     4.95% of all trips fall in Dubai hours 00:00-03:59 — hour 00 alone carries
+     3,434, more than 04, 05 and 06 together — and 495 of them sit on the 1st
+     of a month, which is what the old statement misfiled. The two bucketings
+     disagree by up to 209 trips a month (December 2025: 19,020 Dubai against
+     19,229 UTC, 1.1%). On that year it moved the reported size of a break
+     rather than the verdict — Feb→Mar 2026 is -75.8% either way — but
+     value_from/value_to are printed on #causes as the fleet's monthly trip
+     counts, and there is no year in which the UTC month is the right one.
+
+     Named by test/timezone.test.mjs at src/sources/events.js:211. */
   const rows = await q(
-    `SELECT to_char(date_trunc('month', requested_at), 'YYYY-MM') AS m, platform,
+    `SELECT to_char(date_trunc('month', requested_at AT TIME ZONE 'Asia/Dubai'), 'YYYY-MM') AS m,
+            platform,
             count(*)::int trips, count(distinct driver_ext_id)::int drivers,
             count(*) FILTER (WHERE driver_ext_id IS NOT NULL)::int attributed
      FROM trip GROUP BY 1,2 ORDER BY 2,1`);
   const byPlatform = {};
   for (const r of rows) (byPlatform[r.platform] ||= new Map()).set(r.m, r);
 
+  /* The month that has not finished is not a month you can compare.
+     ─────────────────────────────────────────────────────────────────────────
+     MEASURED, production /api/breaks on 2026-09-02. The four most recent rows
+     it serves — one per platform, every one with period_to 2026-09-01 and
+     detected_at 2026-09-01, against a September that was one day old:
+
+       uber   2026-08-01 -> 2026-09-01  12427 -> 1011  -91.9%  demand
+       fms    2026-08-01 -> 2026-09-01  11214 ->  889  -92.1%  unattributable
+       hotel  2026-08-01 -> 2026-09-01    920 ->   54  -94.1%  mixed
+       yango  2026-08-01 -> 2026-09-01     29 ->    7  -75.9%  mixed
+
+     None of those is a break. All four are the calendar, and they are the
+     four largest "collapses" the page has ever shown.
+
+     The running month is dropped rather than clipped or pro-rated. Comparing a
+     part-month against a whole one is the bug; comparing a pro-rated guess
+     against a measurement would be the same bug wearing arithmetic. The month
+     becomes comparable the day it ends, and the next run reports it then.
+
+     dubaiMonth(), not getUTCMonth(): between 20:00 and midnight UTC on the last
+     day of a month it is already the next month in Dubai, which is exactly when
+     the first trips of the new month arrive. */
+  const openMonth = dubaiMonth();
+
   let n = 0;
   for (const [platform, series] of Object.entries(byPlatform)) {
     for (const [m, b] of series) {
+      if (m >= openMonth) continue;                   // still running, or ahead of the clock
       const verdict = breakBetween(series.get(prevMonth(m)), b);
       if (!verdict) continue;
       const a = series.get(prevMonth(m));
       const fromDate = `${a.m}-01`, toDate = `${b.m}-01`;
+      /* The candidate window is both months IN FULL. period_to is the first of
+         the later month because it is the break's key, and passing that key as
+         the search bound meant an event was only a candidate if it overlapped
+         month A plus one single day — so nothing that happened after the 1st of
+         the month whose numbers actually moved could ever be offered as a
+         cause. Eid al-Fitr 1447 falls on 2026-03-20: inside the March that
+         production reports uber dropping 76.2% into, and excluded from that
+         break's candidate list by one bound. */
       const events = await q(
         `SELECT title, category, scope, starts_on, ends_on, expected_effect, confidence, summary
          FROM world_event
          WHERE starts_on <= $2 AND coalesce(ends_on, starts_on) >= $1
-         ORDER BY confidence DESC NULLS LAST LIMIT 8`, [fromDate, toDate]);
+         ORDER BY confidence DESC NULLS LAST LIMIT 8`, [fromDate, lastDayOf(b.m)]);
 
       await upsert('metric_break', {
         metric: 'trips', grain: 'month', platform, fleet_id: null,
@@ -247,6 +310,22 @@ export async function detectBreaks() {
        AND period_to <> (period_from + interval '1 month')::date`);
   if (rowCount) log.info(SRC, 'cleared breaks spanning unobserved months', { removed: rowCount });
 
+  /* And the ones written against a month that had not finished.
+     ─────────────────────────────────────────────────────────────────────────
+     Deleting is not tidiness, it is the only way these ever leave. The upsert
+     above only fires while a pair still qualifies as a break, so once September
+     finishes and Aug→Sep turns out to be an ordinary month-over-month move,
+     breakBetween returns null, nothing is written, and the -91.9% row inserted
+     on 1 September stays on #causes for ever with its partial value_to. The
+     four rows production serves today are all of that shape. */
+  const stale = await pool.query(
+    `DELETE FROM metric_break
+     WHERE grain = 'month' AND period_to >= $1::date`, [`${openMonth}-01`]);
+  if (stale.rowCount) {
+    log.info(SRC, 'cleared breaks measured against an unfinished month',
+      { removed: stale.rowCount, month: openMonth });
+  }
+
   return n;
 }
 
@@ -258,7 +337,13 @@ export async function collect({ mode = 'incremental' } = {}) {
      days with a dead calendar behind it; fixed here before it does. */
   const failed = [];
   try {
-    const yNow = new Date().getUTCFullYear();
+    /* The Dubai year, not the UTC one. Between 20:00 and midnight UTC on 31
+       December it is already next year in Dubai, and this is the number that
+       decides which years of seasonal and Ramadan rows get written. The window
+       is generous (yNow-2 .. yNow+1) so a slip would not have emptied the
+       table, but a calendar key taken off the wrong clock is the bug this file
+       is being audited for. */
+    const yNow = Number(dubaiMonth().slice(0, 4));
     const seasonal = seasonalEvents(yNow - 2, yNow + 1);
     const ramadan = ramadanEvents([yNow - 1, yNow, yNow + 1], failed);
     let rows = [...seasonal, ...ramadan];

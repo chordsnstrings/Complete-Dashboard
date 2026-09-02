@@ -82,6 +82,28 @@ export const daysAgo = (n) => { const d = new Date(); d.setUTCDate(d.getUTCDate(
 
 export const iso = (d) => d.toISOString().slice(0, 10);          // YYYY-MM-DD
 export const dotDate = (d) => iso(d).replace(/-/g, '.');          // YYYY.MM.DD (FMS)
+
+/* The same two questions, asked on the clock the fleet works.
+   ─────────────────────────────────────────────────────────────────────────
+   iso() above is the UTC date, and that is correct for exactly one kind of
+   argument: an instant that is ALREADY midnight UTC of the date meant, which
+   is what weekChunks and dubaiDayChunks hand it. Given a clock — `new Date()`,
+   or any real timestamp — it is the UTC day, and between 20:00 and midnight
+   Dubai that is yesterday. Every source that needed the Dubai answer has so
+   far written its own four-hour shift inline (src/sources/external.js has a
+   local `dubaiDay`, src/util.js's own dubaiDayChunks has a local `dayOf`,
+   api/public/tz.js has a third), and detectBreaks needed a fourth.
+
+   Arithmetic, not Intl: Dubai is UTC+4 all year and has observed no daylight
+   saving since 1990, so the offset is a constant and this cannot disagree with
+   Postgres's `AT TIME ZONE 'Asia/Dubai'` on any timestamp this product holds.
+
+   These are ADDITIVE. Nothing that already stores a key changes anchor here —
+   see the note on weekChunks above for why that matters. */
+const DUBAI_OFFSET_MS = 4 * 3600e3;
+export const dubaiIso = (d = new Date()) =>
+  new Date(new Date(d).getTime() + DUBAI_OFFSET_MS).toISOString().slice(0, 10);
+export const dubaiMonth = (d = new Date()) => dubaiIso(d).slice(0, 7);   // YYYY-MM
 export const unixMs = (d) => String(new Date(d).getTime());
 export const unixS = (d) => String(Math.floor(new Date(d).getTime() / 1000));
 

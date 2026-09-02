@@ -13,9 +13,12 @@
 import { state, q, qAll, api, href, windowLabel } from '../data.js';
 import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
   skeleton, empty, failed, spark, bars, unwrap, cut, splitToday } from './ui.js';
-/* The one place a channel key becomes a word a person reads. Shared with the
-   desktop rather than copied, so 'fms' is "FMS telematics" on both. */
-import { sourceLabel } from '../ui.js';
+/* The one place a channel key becomes a word a person reads — and the one
+   place an instant becomes a clock. Both shared with the desktop rather than
+   copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
+   both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
+   collector-health times equal the ones on the desktop page beside them. */
+import { sourceLabel, timeStr, dtStr } from '../ui.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -406,7 +409,12 @@ async function live(deck, ctx) {
     .map((v) => row({
       title: v.plate,
       sub: `${v.source || 'feed'} · ${v.seat_occupied ? 'occupied' : 'empty'}`
-        + (v.polled_at ? ` · ${new Date(v.polled_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''),
+        /* The fix time in Dubai. Left on the reader's clock this printed
+           L12615's 2026-09-02T13:00:01.603Z fix (production /api/live,
+           measured) as 09:00 in New York and 14:00 in London, against 17:00
+           in Dubai — beside a fleet whose every other hour comes from SQL
+           already converted. */
+        + (v.polled_at ? ` · ${timeStr(v.polled_at)}` : ''),
       value: v.stale ? 'stale' : (v.speed || 0) > 3 ? `${Math.round(v.speed)}` : 'stopped',
       note: v.stale ? '' : (v.speed || 0) > 3 ? 'km/h' : '',
       tone: v.stale ? 'warn' : null,
@@ -512,7 +520,11 @@ async function sources(deck, ctx) {
   rows(deck, all.map((r) => row({
     title: r.source + (r.fleet_id ? ` · ${r.fleet_id}` : ''),
     sub: r.error ? String(r.error).slice(0, 70)
-      : `${r.mode || 'run'} · ${r.finished_at ? new Date(r.finished_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'never'}`,
+      /* The same field the desktop's Sources table renders through dtStr, so
+         the two now agree: bolt/backfill finished_at 2026-09-02T12:40:13.916Z
+         (production /api/status, measured) is 16:40, which is what the desktop
+         showed while the phone said 08:40 in New York. */
+      : `${r.mode || 'run'} · ${r.finished_at ? timeStr(r.finished_at) : 'never'}`,
     value: r.status === 'ok' ? 'ok' : r.status,
     note: `${fmt(r.rows_written)} rows`,
     tone: r.status === 'ok' ? 'good' : r.status === 'partial' ? 'warn' : 'critical',
@@ -569,8 +581,11 @@ async function tripsScreen(deck, ctx) {
        half that is long. The right is when and on whose behalf, both short.
        Putting the route in the right column, beside a channel name, gave
        every card an ellipsis three words in. */
-    const clock = (t) => new Date(t).toLocaleTimeString([],
-      { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Dubai' });
+    /* Was a fifth copy of ui.js's options object with the zone written out by
+       hand. It was CORRECT — this is the one phone clock that already said
+       Dubai — but a literal is not reachable from the constant that decides it,
+       and timeStr is the identical formatter (h23, 2-digit, timeZone: TZ). */
+    const clock = (t) => timeStr(t);
     rows(host, d.rows.map((r) => row({
       title: r.driver_name || r.driver_ext_id || 'Unnamed driver',
       sub: (r.has_fare ? `${money(r.price, r.currency || 'AED')} · ` : '')
@@ -872,7 +887,12 @@ async function analyst(deck, ctx) {
   if (d.last_run) {
     const p = el('p', 'm-cap');
     p.style.cssText = 'margin:4px 2px 0;text-align:center';
-    p.textContent = `Last pass ${new Date(d.last_run).toLocaleString()}`
+    /* dtStr, because this one crosses a DAY. last_run
+       2026-09-01T23:10:13.470Z (production /api/analyst/findings, measured) is
+       "Sep 2 03:10" in Dubai and "9/1/2026, 7:10:13 PM" on a New York phone —
+       not a few hours out, the wrong date, telling a reader the analyst had not
+       run today when it had. */
+    p.textContent = `Last pass ${dtStr(d.last_run)}`
       + (d.model ? ` \u00b7 ${d.model}` : '');
     deck.append(p);
   }

@@ -1,0 +1,1209 @@
+<title>Seven Providers, One Dataset</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Karla:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+/* ============================================================================
+   Data-flow audit — visual system inherited from api/public/app.css.
+   Same paper, same ink, same six-series scale, same three faces, so this page
+   reads as a document from inside the product rather than about it.
+   ========================================================================== */
+:root{
+  color-scheme: light;
+  --paper:#f4f2ed; --paper-2:#efece5; --surface:#fbfaf7; --surface-2:#eeebe4; --surface-3:#e6e2d9;
+  --rule:#e2ded4; --rule-strong:#cbc6b8;
+  --ink:#1f2225; --ink-2:#5b6165; --ink-3:#8b9095;
+  --accent:#2f6f9f; --accent-ink:#255b83; --accent-soft:#2f6f9f14; --accent-line:#2f6f9f33;
+  --s1:#2f6f9f; --s2:#c2683a; --s3:#2f8f6f; --s4:#4a4e8c; --s5:#8a6a12; --s6:#8b5a7a; --s7:#5f7d4f;
+  --good:#4a7c59; --warn:#a8791f; --serious:#b5714a; --critical:#a94f3d;
+  --good-bg:#4a7c5926; --warn-bg:#a8791f2b; --serious-bg:#b5714a26; --critical-bg:#a94f3d2b;
+  --r:10px; --r-sm:7px; --r-lg:16px;
+  --shadow-1:0 1px 2px rgba(31,34,37,.04);
+  --shadow-2:0 2px 6px rgba(31,34,37,.05), 0 12px 28px rgba(31,34,37,.05);
+  --ease:cubic-bezier(.22,.68,.36,1);
+  --ease-out:cubic-bezier(.16,1,.3,1);
+  --col:min(1120px, 100% - 3rem);
+  --read:min(68ch, 100% - 3rem);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --paper:#14171a; --paper-2:#171b1e; --surface:#1c2024; --surface-2:#22272c; --surface-3:#2a3036;
+    --rule:#2a3036; --rule-strong:#3c444b;
+    --ink:#f0eee9; --ink-2:#a9afb5; --ink-3:#7b8288;
+    --accent:#5c9dcc; --accent-ink:#8bbde4; --accent-soft:#5c9dcc1c; --accent-line:#5c9dcc3d;
+    --s1:#3f83bb; --s2:#c46b40; --s3:#309876; --s4:#6f73bb; --s5:#a88824; --s6:#a06d8c; --s7:#7d9c6a;
+    --good:#63a074; --warn:#c99b3a; --serious:#c98a63; --critical:#c46a55;
+    --good-bg:#63a07420; --warn-bg:#c99b3a20; --serious-bg:#c98a6320; --critical-bg:#c46a5520;
+    --shadow-1:0 1px 2px rgba(0,0,0,.3);
+    --shadow-2:0 2px 6px rgba(0,0,0,.35), 0 14px 32px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --paper:#14171a; --paper-2:#171b1e; --surface:#1c2024; --surface-2:#22272c; --surface-3:#2a3036;
+  --rule:#2a3036; --rule-strong:#3c444b;
+  --ink:#f0eee9; --ink-2:#a9afb5; --ink-3:#7b8288;
+  --accent:#5c9dcc; --accent-ink:#8bbde4; --accent-soft:#5c9dcc1c; --accent-line:#5c9dcc3d;
+  --s1:#3f83bb; --s2:#c46b40; --s3:#309876; --s4:#6f73bb; --s5:#a88824; --s6:#a06d8c; --s7:#7d9c6a;
+  --good:#63a074; --warn:#c99b3a; --serious:#c98a63; --critical:#c46a55;
+  --good-bg:#63a07420; --warn-bg:#c99b3a20; --serious-bg:#c98a6320; --critical-bg:#c46a5520;
+  --shadow-1:0 1px 2px rgba(0,0,0,.3);
+  --shadow-2:0 2px 6px rgba(0,0,0,.35), 0 14px 32px rgba(0,0,0,.4);
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Karla","Helvetica Neue",system-ui,sans-serif;
+  font-size:15.5px; line-height:1.6; -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+h1,h2,h3,h4{font-family:"Fraunces","Iowan Old Style",Georgia,serif;margin:0;font-weight:600;letter-spacing:-.012em;text-wrap:balance}
+.mono,code,.num,kbd{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,monospace;font-variant-numeric:tabular-nums}
+code{font-size:.87em;background:var(--surface-2);padding:.08em .34em;border-radius:4px;color:var(--ink)}
+a{color:var(--accent-ink);text-underline-offset:2px}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+p{margin:0 0 1rem}
+
+/* ── page rhythm ─────────────────────────────────────────────────────────── */
+.wrap{width:var(--col);margin-inline:auto}
+.read{width:var(--read);margin-inline:auto}
+section{padding-block:3.25rem;border-top:1px solid var(--rule)}
+section:first-of-type{border-top:0}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.10em;
+  text-transform:uppercase;color:var(--ink-3);display:flex;gap:.6rem;align-items:baseline;
+  margin-bottom:.55rem;flex-wrap:wrap;
+}
+.eyebrow b{color:var(--accent-ink);font-weight:500;letter-spacing:.06em;text-transform:none}
+h2{font-size:clamp(1.5rem,1.15rem + 1.5vw,2.15rem);line-height:1.15;margin-bottom:.7rem}
+h3{font-size:1.12rem;margin-bottom:.4rem}
+.lede{font-size:1.06rem;color:var(--ink-2);max-width:66ch}
+.note{font-size:13.5px;color:var(--ink-3);max-width:74ch}
+.note b{color:var(--ink-2);font-weight:600}
+
+/* ── masthead ────────────────────────────────────────────────────────────── */
+header.mast{padding:3.5rem 0 2.5rem;background:
+  radial-gradient(120% 90% at 12% 0%, var(--accent-soft), transparent 60%);}
+.mast h1{font-size:clamp(2.1rem,1.3rem + 3.4vw,3.5rem);line-height:1.03;font-weight:600;max-width:16ch}
+.mast .sub{font-size:1.1rem;color:var(--ink-2);max-width:60ch;margin-top:1rem}
+.stamp{
+  display:inline-flex;gap:.5rem;align-items:center;font-family:"IBM Plex Mono",monospace;
+  font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);
+  border:1px solid var(--rule-strong);border-radius:100px;padding:.3rem .75rem;margin-bottom:1.4rem;
+}
+.stamp i{width:6px;height:6px;border-radius:50%;background:var(--good);font-style:normal;flex:none}
+
+.ledger{
+  display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:var(--r);
+  grid-template-columns:repeat(auto-fit,minmax(140px,1fr));margin-top:2.2rem;overflow:hidden;
+}
+.ledger div{background:var(--surface);padding:.85rem 1rem}
+.ledger .k{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-3)}
+.ledger .v{font-family:"IBM Plex Mono",monospace;font-size:1.32rem;font-weight:500;font-variant-numeric:tabular-nums;margin-top:.15rem;line-height:1.15}
+.ledger .u{font-size:12px;color:var(--ink-3)}
+
+/* ── the five stations, the page's own spine ─────────────────────────────── */
+.spine{display:flex;gap:.4rem;flex-wrap:wrap;margin:1.6rem 0 0;align-items:center}
+.spine span{
+  font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--rule-strong);border-radius:100px;padding:.22rem .6rem;color:var(--ink-2);
+  background:var(--surface);
+}
+.spine b{color:var(--ink-3);font-weight:400}
+
+/* ── source rail ─────────────────────────────────────────────────────────── */
+.chips{display:flex;flex-wrap:wrap;gap:.5rem;margin:1.4rem 0 1.6rem}
+.chip{
+  font-family:"IBM Plex Mono",monospace;font-size:12.5px;letter-spacing:.02em;
+  border:1px solid var(--rule-strong);background:var(--surface);color:var(--ink-2);
+  border-radius:100px;padding:.36rem .82rem .36rem .62rem;cursor:pointer;
+  display:inline-flex;align-items:center;gap:.45rem;
+  transition:border-color .2s var(--ease),color .2s var(--ease),background .2s var(--ease);
+}
+.chip i{width:9px;height:9px;border-radius:2px;background:var(--dot);flex:none;font-style:normal}
+.chip:hover{border-color:var(--dot);color:var(--ink)}
+.chip[aria-pressed="true"]{border-color:var(--dot);color:var(--ink);background:var(--surface-3);box-shadow:inset 0 0 0 1px var(--dot)}
+.chip small{color:var(--ink-3);font-size:11px}
+
+.track{overflow-x:auto;padding-bottom:.4rem;-webkit-overflow-scrolling:touch}
+.stations{display:grid;grid-template-columns:repeat(5,minmax(206px,1fr));gap:0;min-width:1060px;align-items:stretch}
+.st{position:relative;padding:0 .95rem 0 0}
+.st:last-child{padding-right:0}
+.st .card{
+  background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);
+  padding:.85rem .9rem;height:100%;box-shadow:var(--shadow-1);
+  opacity:0;transform:translateY(7px);
+  transition:opacity .45s var(--ease-out),transform .45s var(--ease-out);
+  transition-delay:calc(var(--i) * 150ms);
+}
+.stations.on .st .card{opacity:1;transform:none}
+.st .conn{
+  position:absolute;top:2.15rem;right:.14rem;width:.68rem;height:2px;background:var(--dot);
+  transform:scaleX(0);transform-origin:left center;
+  transition:transform .3s var(--ease-out);transition-delay:calc(var(--i) * 150ms + 300ms);
+}
+.stations.on .st .conn{transform:scaleX(1)}
+.st:last-child .conn{display:none}
+.st h4{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--dot);margin-bottom:.45rem;
+}
+.st .ttl{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.45;color:var(--ink);word-break:break-word}
+.st ul{margin:.5rem 0 0;padding-left:.95rem;font-size:12.8px;color:var(--ink-2);line-height:1.5}
+.st li{margin-bottom:.22rem}
+.st li b{font-weight:600;color:var(--ink)}
+.key{
+  display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:11.5px;
+  background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--accent-ink);
+  border-radius:5px;padding:.05rem .38rem;margin-top:.15rem;
+}
+.verdict{
+  margin-top:.8rem;font-size:12.6px;line-height:1.5;border-left:2px solid var(--bar,var(--rule-strong));
+  padding-left:.6rem;color:var(--ink-2);
+}
+.verdict b{color:var(--ink)}
+
+/* ── mechanism stages ────────────────────────────────────────────────────── */
+.stage{
+  background:var(--surface);border:1px solid var(--rule);border-radius:var(--r-lg);
+  padding:1.4rem;margin-top:1.5rem;box-shadow:var(--shadow-1);
+}
+.stagehead{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
+.stagehead h3{font-size:1.05rem}
+.stagehead p{margin:.2rem 0 0;font-size:13.4px;color:var(--ink-3);max-width:62ch}
+.ctrl{display:flex;gap:.35rem;align-items:center;flex:none}
+.btn{
+  font-family:"IBM Plex Mono",monospace;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;
+  border:1px solid var(--rule-strong);background:var(--paper);color:var(--ink-2);
+  border-radius:var(--r-sm);padding:.34rem .62rem;cursor:pointer;
+  transition:border-color .18s,color .18s,background .18s;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent-ink)}
+.btn[disabled]{opacity:.4;cursor:default}
+.btn.primary{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent-ink)}
+.steps{display:flex;gap:.3rem;align-items:center;margin-left:.35rem}
+.steps b{width:6px;height:6px;border-radius:50%;background:var(--rule-strong);display:block;transition:background .25s,transform .25s}
+.steps b.on{background:var(--accent);transform:scale(1.45)}
+
+.caption{font-size:12.8px;color:var(--ink-3);margin-top:1rem;line-height:1.55;max-width:78ch}
+.caption b{color:var(--ink-2);font-weight:600}
+.caption code{font-size:.94em}
+
+/* twin */
+.twin{display:grid;gap:.5rem;min-height:238px;align-content:start}
+.trow{
+  display:grid;grid-template-columns:70px 1fr auto;gap:.75rem;align-items:center;
+  border:1px solid var(--rule);border-radius:var(--r-sm);background:var(--paper);
+  padding:.5rem .7rem;font-family:"IBM Plex Mono",monospace;font-size:12.4px;
+  transition:transform .6s var(--ease-out),opacity .5s var(--ease),border-color .5s,background .5s,margin .6s var(--ease-out);
+}
+.trow .pl{font-weight:600;letter-spacing:.05em;text-transform:uppercase;font-size:10.5px}
+.trow[data-p="uber"] .pl{color:var(--s1)}
+.trow[data-p="fms"] .pl{color:var(--s2)}
+.trow .meta{color:var(--ink-2);display:flex;gap:1rem;flex-wrap:wrap}
+.trow .tag{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3);opacity:0;transition:opacity .4s}
+.twin[data-step="1"] .trow[data-p="fms"]{transform:translateX(26px);border-color:var(--s2)}
+.twin[data-step="1"] .trow .tag,.twin[data-step="2"] .trow .tag,.twin[data-step="3"] .trow .tag{opacity:1}
+.twin[data-step="2"] .trow[data-p="fms"],.twin[data-step="3"] .trow[data-p="fms"]{
+  transform:translateX(26px);opacity:.42;border-style:dashed;background:transparent;
+}
+.tallies{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.8rem;opacity:0;transform:translateY(6px);transition:opacity .5s var(--ease),transform .5s var(--ease-out)}
+.twin[data-step="3"] ~ .tallies{opacity:1;transform:none}
+.tally{border:1px solid var(--rule);border-radius:var(--r-sm);padding:.6rem .75rem;background:var(--paper)}
+.tally .k{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3)}
+.tally .v{font-family:"IBM Plex Mono",monospace;font-size:1.32rem;font-weight:500}
+
+/* person fold */
+.fold{display:grid;gap:.85rem;min-height:238px;align-content:start}
+.frow{display:grid;grid-template-columns:118px 1fr;gap:.8rem;align-items:center}
+.frow .who{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-3);text-align:right}
+.frow .val{
+  font-family:"IBM Plex Mono",monospace;font-size:14.5px;padding:.44rem .7rem;
+  border:1px solid var(--rule);border-radius:var(--r-sm);background:var(--paper);
+  transition:background .4s var(--ease),border-color .4s var(--ease),color .4s;
+  overflow-wrap:anywhere;
+}
+.frow.merged .val{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-ink)}
+.foldop{
+  font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-3);
+  border-left:2px solid var(--accent-line);padding-left:.6rem;margin:.15rem 0 .15rem 118px;
+  min-height:1.4em;
+}
+.foldop b{color:var(--accent-ink);font-weight:500}
+.merge{
+  margin-left:118px;font-size:12.8px;color:var(--ink-2);opacity:0;transform:translateY(5px);
+  transition:opacity .45s,transform .45s var(--ease-out);
+  border:1px solid var(--rule);border-left:3px solid var(--accent);border-radius:var(--r-sm);
+  padding:.55rem .75rem;background:var(--paper);
+}
+.merge.on{opacity:1;transform:none}
+.merge b{color:var(--ink);font-weight:600}
+
+/* week spread */
+.week{min-height:238px}
+.weekbar{
+  height:54px;border-radius:var(--r-sm);background:var(--s1);position:relative;
+  display:flex;align-items:center;justify-content:center;color:#fff;
+  font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:500;
+  transition:opacity .5s var(--ease);
+}
+.days{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-top:.55rem}
+.day{
+  border-radius:5px;background:var(--s1);color:#fff;padding:.4rem .3rem;text-align:center;
+  font-family:"IBM Plex Mono",monospace;font-size:11px;line-height:1.35;
+  opacity:0;transform:scaleY(.25);transform-origin:top center;
+  transition:opacity .4s var(--ease),transform .45s var(--ease-out),background .5s var(--ease);
+  transition-delay:calc(var(--d) * 55ms);
+}
+.day .amt{display:block;font-size:12.5px;font-weight:500;margin-top:.15rem}
+.day .basis{display:block;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;opacity:.72;margin-top:.1rem}
+.week[data-step="1"] .day,.week[data-step="2"] .day,.week[data-step="3"] .day{opacity:1;transform:none}
+.week[data-step="0"] .weekbar{opacity:1}
+.week[data-step="2"] .weekbar,.week[data-step="3"] .weekbar{opacity:.32}
+.week[data-step="2"] .day[data-d="6"],.week[data-step="3"] .day[data-d="6"]{background:var(--s3);transform:translateY(-3px);box-shadow:var(--shadow-2)}
+.wtotal{
+  margin-top:.75rem;display:flex;gap:1.4rem;flex-wrap:wrap;font-family:"IBM Plex Mono",monospace;font-size:12.5px;
+  opacity:0;transition:opacity .5s var(--ease);
+}
+.week[data-step="3"] .wtotal{opacity:1}
+.wtotal em{font-style:normal;color:var(--ink-3);letter-spacing:.06em;text-transform:uppercase;font-size:10.5px;display:block}
+.wtotal s{color:var(--ink-3)}
+
+/* retention */
+.hz{margin-top:1.1rem;overflow-x:auto;padding-bottom:.3rem}
+.hzbar{
+  position:relative;height:104px;min-width:780px;border:1px solid var(--rule);border-radius:var(--r-sm);
+  background:linear-gradient(90deg,var(--surface-3),var(--surface-3));overflow:hidden;
+}
+.hzfill{
+  position:absolute;inset:0 0 0 auto;width:0%;background:var(--accent-soft);
+  border-left:2px solid var(--accent);transition:width 1.1s var(--ease-out);
+}
+.hz.on .hzfill{width:var(--w)}
+.hzmark{position:absolute;top:0;bottom:0;width:1px;background:var(--rule-strong)}
+.hzmark span{
+  position:absolute;top:6px;left:5px;font-family:"IBM Plex Mono",monospace;font-size:10px;
+  letter-spacing:.05em;color:var(--ink-3);white-space:nowrap;
+}
+.hzmark.edge{background:var(--critical);width:2px}
+.hzmark.edge span{color:var(--critical);font-weight:500;top:auto;bottom:6px}
+.hzprobe{
+  position:absolute;top:38px;font-family:"IBM Plex Mono",monospace;font-size:10.5px;
+  padding:.1rem .35rem;border-radius:4px;white-space:nowrap;
+  opacity:0;transform:translateY(4px);transition:opacity .5s var(--ease),transform .5s var(--ease-out);
+  transition-delay:.9s;
+}
+.hz.on .hzprobe{opacity:1;transform:none}
+.hzprobe.yes{background:var(--good-bg);color:var(--good);border:1px solid var(--good)}
+.hzprobe.no{background:var(--critical-bg);color:var(--critical);border:1px solid var(--critical)}
+
+/* generic tables */
+.tbl{width:100%;overflow-x:auto;margin-top:1.1rem}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:13.2px}
+th,td{text-align:left;padding:.5rem .7rem;border-bottom:1px solid var(--rule);vertical-align:top}
+th{
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;
+  color:var(--ink-3);font-weight:500;border-bottom-color:var(--rule-strong);white-space:nowrap;
+}
+td.n{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;white-space:nowrap}
+td.m{font-family:"IBM Plex Mono",monospace;font-size:12.2px}
+tbody tr:last-child td{border-bottom:0}
+.pill{
+  display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.05em;
+  text-transform:uppercase;padding:.1rem .42rem;border-radius:100px;white-space:nowrap;
+}
+.pill.ok{background:var(--good-bg);color:var(--good)}
+.pill.warn{background:var(--warn-bg);color:var(--warn)}
+.pill.bad{background:var(--critical-bg);color:var(--critical)}
+.pill.off{background:var(--surface-3);color:var(--ink-3)}
+
+/* blanks */
+.blanks{display:grid;gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:var(--r);
+  grid-template-columns:repeat(auto-fit,minmax(235px,1fr));overflow:hidden;margin-top:1.3rem}
+.blank{background:var(--surface);padding:1rem}
+.blank .h{display:flex;gap:.5rem;align-items:center;margin-bottom:.4rem}
+.blank .sq{width:14px;height:14px;border-radius:3px;flex:none}
+.blank h4{font-size:.95rem;font-family:"Fraunces",Georgia,serif}
+.blank p{font-size:13px;color:var(--ink-2);margin:0 0 .55rem}
+.blank .ev{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--ink-3);line-height:1.5;border-top:1px dashed var(--rule);padding-top:.5rem}
+
+/* trace */
+.trace{border:1px solid var(--rule);border-radius:var(--r);background:var(--surface);margin-top:.75rem;overflow:hidden}
+.trace > summary{
+  cursor:pointer;list-style:none;padding:.9rem 1.1rem;display:flex;gap:.9rem;align-items:baseline;flex-wrap:wrap;
+}
+.trace > summary::-webkit-details-marker{display:none}
+.trace > summary::after{content:"›";margin-left:auto;color:var(--ink-3);font-size:1.3rem;line-height:1;transform:rotate(90deg);transition:transform .25s var(--ease)}
+.trace[open] > summary::after{transform:rotate(270deg)}
+.trace .fig{font-family:"IBM Plex Mono",monospace;font-size:1.18rem;font-weight:500;color:var(--ink)}
+.trace .where{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--accent-ink);border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:100px;padding:.12rem .5rem}
+.trace .what{font-size:13.4px;color:var(--ink-2)}
+.trace .body{padding:0 1.1rem 1.1rem;border-top:1px solid var(--rule)}
+.hops{list-style:none;margin:1rem 0 0;padding:0;display:grid;gap:0}
+.hops li{display:grid;grid-template-columns:104px 1fr;gap:.85rem;padding:.55rem 0;border-bottom:1px dashed var(--rule)}
+.hops li:last-child{border-bottom:0}
+.hops .lbl{font-family:"IBM Plex Mono",monospace;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);padding-top:.15rem}
+.hops .det{font-size:13.3px;color:var(--ink-2)}
+.hops .det .mono{font-size:12.3px;color:var(--ink)}
+.hops .det b{color:var(--ink);font-weight:600}
+
+/* findings */
+.find{border:1px solid var(--rule);border-left:3px solid var(--bar);border-radius:var(--r);
+  background:var(--surface);padding:1.05rem 1.15rem;margin-top:.85rem}
+.find h3{font-size:1rem;margin-bottom:.35rem;display:flex;gap:.6rem;align-items:baseline;flex-wrap:wrap}
+.find h3 .sev{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--bar);border:1px solid var(--bar);border-radius:100px;padding:.08rem .42rem;flex:none}
+.find p{font-size:13.6px;color:var(--ink-2);margin:.35rem 0 0}
+.find .ev{font-family:"IBM Plex Mono",monospace;font-size:11.8px;color:var(--ink-3);
+  border-top:1px dashed var(--rule);margin-top:.7rem;padding-top:.55rem;line-height:1.6;overflow-wrap:anywhere}
+.find .ev b{color:var(--ink-2);font-weight:500}
+
+footer{padding:2.5rem 0 3.5rem;border-top:1px solid var(--rule);color:var(--ink-3);font-size:12.8px}
+footer .wrap{display:grid;gap:.5rem}
+
+@media (max-width:720px){
+  .stations{grid-template-columns:repeat(5,minmax(196px,1fr))}
+  .frow{grid-template-columns:1fr}
+  .frow .who{text-align:left}
+  .foldop,.merge{margin-left:0}
+  .tallies{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;transition-duration:.001ms !important;transition-delay:0ms !important}
+}
+</style>
+
+<header class="mast">
+  <div class="wrap">
+    <div class="stamp"><i></i>Measured against production, 2 September 2026</div>
+    <h1>Seven providers, one dataset</h1>
+    <p class="sub">Twelve collectors, nine landing tables and four folds stand between an
+      Uber report and the figure on a dashboard tile. This is the whole path, with the
+      line of code behind every arrow and a live number at every stop.</p>
+
+    <div class="ledger">
+      <div><div class="k">bookings held</div><div class="v">313,795</div><div class="u">uber · hotel · yango</div></div>
+      <div><div class="k">telematics journeys</div><div class="v">218,838</div><div class="u">fms — never added to bookings</div></div>
+      <div><div class="k">gps fixes</div><div class="v">188,353</div><div class="u">cabman · fms · uber</div></div>
+      <div><div class="k">money rows</div><div class="v">50,250</div><div class="u">213 days of uber, 119 of yango</div></div>
+      <div><div class="k">verified vs uber</div><div class="v">100%</div><div class="u">12 months, 0 trips missing</div></div>
+    </div>
+
+    <div class="spine" aria-label="The five stations every figure passes through">
+      <span><b>station 1</b> &nbsp;Provider</span>
+      <span><b>2</b> &nbsp;Call &amp; window</span>
+      <span><b>3</b> &nbsp;Landing table + key</span>
+      <span><b>4</b> &nbsp;Fold</span>
+      <span><b>5</b> &nbsp;Page</span>
+    </div>
+  </div>
+</header>
+
+<section>
+  <div class="read">
+    <div class="eyebrow"><b>src/sources/</b> · twelve modules, seven providers</div>
+    <h2>Station 1 &amp; 2 — who is asked, and what they will answer</h2>
+    <p class="lede">Uber alone takes four collectors, because Uber is four unrelated surfaces
+      wearing one name: a CSV report pipeline, a supplier GraphQL endpoint, a chronicle
+      timeline and an OAuth REST API. Each has its own auth, its own maximum window and its
+      own memory. Pick a provider to follow it end to end.</p>
+  </div>
+
+  <div class="wrap">
+    <div class="chips" id="chips" role="tablist" aria-label="Providers"></div>
+    <div class="track">
+      <div class="stations" id="stations"></div>
+    </div>
+    <div class="verdict" id="verdict"></div>
+  </div>
+</section>
+
+<section>
+  <div class="read">
+    <div class="eyebrow"><b>src/run.js:40</b> · <b>src/index.js:39</b> · HISTORICAL, and the crons</div>
+    <h2>The order is not alphabetical — it is by outstanding need</h2>
+    <p>Eight sources run inside one window, sequentially, behind a queue that admits exactly
+      one collection at a time. FMS used to go first. An FMS year backfill walks 130 vehicles
+      through twelve monthly windows and takes four and a half hours; this deployment restarts
+      the container on every push, and a restart requeues the running job from the top. So the
+      backfill re-ran four hours of FMS on every deploy and reached Uber on none of them — while
+      the 299-day Uber hole it existed to fill survived weeks of attempts, each reporting no
+      failure at all.</p>
+    <p>Cheapest and most-broken first, then. A <code>collector_checkpoint</code> row is written
+      the moment a window finishes, so the next attempt continues rather than restarts —
+      marked <em>after</em> the write, never before, because every collector write is an upsert
+      and a lost checkpoint costs one repeated window and never correctness.</p>
+  </div>
+
+  <div class="wrap">
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Mode</th><th>Cron</th><th>Window</th><th>What it is for</th></tr></thead>
+        <tbody>
+          <tr><td class="m">incremental</td><td class="m">*/30 * * * *</td><td class="n">3 days</td><td>The steady state. Skips the Uber quality reports — two per week per fleet against a cap of three in flight would starve the trip and earnings pulls of their slots.</td></tr>
+          <tr><td class="m">catchup</td><td class="m">0 21 * * *</td><td class="n">30 days</td><td>Wide enough for any provider's settlement lag. Uber settles weekly, which is longer than the incremental window that would pick it up.</td></tr>
+          <tr><td class="m">backfill</td><td class="m">0 22 * * 0</td><td class="n">12 months</td><td>A re-collection that only ever looks at the last month cannot repair the year behind it.</td></tr>
+          <tr><td class="m">realtime</td><td class="m">*/5 * * * *</td><td class="n">now</td><td>CABMAN has no history parameter at all. Polling <em>is</em> the archive — every fix we hold, we created.</td></tr>
+          <tr><td class="m">timeline</td><td class="m">17 */3 * * *</td><td class="n">2 days</td><td>Driver availability, ~74 working drivers a run. On the half-hourly incremental that would be ten thousand requests a day.</td></tr>
+          <tr><td class="m">profile</td><td class="m">20 0 * * 1</td><td class="n">roster</td><td>One call per driver, ~320 across both fleets. A rating moves by hundredths in a week; daily would write seven identical rows per real movement.</td></tr>
+          <tr><td class="m">audit</td><td class="m">45 1 * * *</td><td class="n">13 months + 4 weeks</td><td>Re-asks Uber about windows we already hold and compares Trip UUIDs. Writes only to <code>uber_trip_audit</code> — a verification that repairs what it measures can never report a failure.</td></tr>
+          <tr><td class="m">import</td><td class="m"><span class="pill off">nothing schedules it</span></td><td class="n">—</td><td>The operator's ledger workbook, pushed through <code>POST /api/import/statement-days</code>. The only record of the months the provider APIs no longer serve.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">Windows are cut by three different rules and the choice matters.
+      <b>dateChunks</b> anchors to whatever <code>from</code> happens to be — fine for trips,
+      where the same trip upserts to the same row whichever window it arrives in.
+      <b>weekChunks</b> is pinned to the calendar Monday, because for a <em>report</em> the window
+      IS the key: one driver's twenty-eight weeks were once stored as sixty-seven overlapping rows
+      summing to AED 128,357 against a true AED 57,110.
+      <b>dubaiDayChunks</b> asks in instants and stamps the Dubai calendar date, because a
+      UTC-aligned day starts at 04:00 local and files four hours of every morning under the day before.</p>
+  </div>
+</section>
+
+<section>
+  <div class="read">
+    <div class="eyebrow"><b>src/db.js:168</b> · upsertMany(table, rows, conflict)</div>
+    <h2>Station 3 — the key is why two providers describing one trip stay one trip</h2>
+    <p>Every collector write is an upsert. The conflict key is always the provider's own
+      identifier, never ours — which is what makes re-collecting a day that is already correct
+      change nothing, and therefore makes the nightly catch-up safe to run unattended rather
+      than merely convenient.</p>
+  </div>
+  <div class="wrap">
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Landing table</th><th>Conflict key</th><th>Written by</th><th>Rows today</th></tr></thead>
+        <tbody>
+          <tr><td class="m">trip</td><td class="m"><span class="key">platform, external_id</span></td><td>uber · fms · hotel · yango · bolt</td><td class="n">532,633</td></tr>
+          <tr><td class="m">driver_performance</td><td class="m"><span class="key">platform, driver_ext_id, period_start, period_end</span></td><td>uber · yango · bolt</td><td class="n">50,250</td></tr>
+          <tr><td class="m">driver_earnings_component</td><td class="m"><span class="key">… + category</span></td><td>uber graphql · uber rest</td><td class="n">37,087</td></tr>
+          <tr><td class="m">telemetry_snapshot</td><td class="m"><span class="key">source, plate, captured_at</span></td><td>cabman · fms · uber</td><td class="n">188,353</td></tr>
+          <tr><td class="m">alert</td><td class="m"><span class="key">platform, external_id</span></td><td>fms</td><td class="n">118,826</td></tr>
+          <tr><td class="m">ledger_entry</td><td class="m"><span class="key">platform, external_id</span></td><td>yango</td><td class="n">213</td></tr>
+          <tr><td class="m">driver_timeline_event</td><td class="m"><span class="key">driver, instant, kind, state</span></td><td>uber chronicle</td><td class="n">—</td></tr>
+          <tr><td class="m">occupancy_segment</td><td class="m"><span class="key">plate, started_at</span></td><td>src/reconcile.js — derived</td><td class="n">2,638 <span class="pill off">30d</span></td></tr>
+          <tr><td class="m">world_event</td><td class="m"><span class="key">source, code, starts_on, title</span></td><td>events (seasonal · hijri · gdelt)</td><td class="n">39</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="caption">One statement per batch, not one per row: a year backfill writes about
+      165,000 trips and used to send 165,000 separate INSERTs to a managed database on another
+      host. Rows in a batch are grouped by column signature (collectors omit what a provider did
+      not send), de-duplicated on the conflict key so Postgres never sees
+      <em>"cannot affect row a second time"</em>, and batched to stay under the 65,535 bind
+      parameter ceiling.</p>
+  </div>
+</section>
+
+<section>
+  <div class="read">
+    <div class="eyebrow"><b>Station 4</b> · four folds, four different kinds of collision</div>
+    <h2>Where two records become one</h2>
+    <p class="lede">This is the whole of the work. Nothing else in the pipeline is hard: the
+      collectors ask and store. These four rules decide what counts as one trip, one person,
+      one car and one day — and each of them was written after the wrong answer had already
+      shipped.</p>
+  </div>
+
+  <div class="wrap">
+
+    <!-- FOLD 1: the twin -->
+    <div class="stage">
+      <div class="stagehead">
+        <div>
+          <h3>The twin — one physical journey, two feeds</h3>
+          <p>The FMS collector derives a journey from GPS whenever a vehicle moves. When a driver
+            completes an Uber ride, <em>both</em> sources record it.</p>
+        </div>
+        <div class="ctrl">
+          <button class="btn primary" id="twinPlay">▸ Play</button>
+          <div class="steps" id="twinDots" aria-hidden="true"></div>
+        </div>
+      </div>
+      <div class="twin" id="twin" data-step="0"></div>
+      <div class="tallies" id="twinTally"></div>
+      <p class="caption"><b>sql/schema_v7.sql</b> — checked on one plate for one day: every Uber trip
+        has an FMS twin two to five minutes later with near-identical distance. Summing them counted
+        one physical journey twice, so the fleet's headline trip count and total distance were both
+        roughly double the truth. <code>trip_norm.is_booking</code> = <code>platform &lt;&gt; 'fms'</code>
+        separates the two populations at the view, once, rather than in the nineteen queries that had each
+        rediscovered it. Telematics rows are not discarded — they are the only thing that can catch
+        movement with no booking behind it.</p>
+    </div>
+
+    <!-- FOLD 2: the person -->
+    <div class="stage">
+      <div class="stagehead">
+        <div>
+          <h3>The person — no provider shares an id with any other</h3>
+          <p>Uber issues a UUID, Yango a different id, Bolt a third, the hotel channel a fourth.
+            Counting <code>DISTINCT driver_ext_id</code> counts records, not people.</p>
+        </div>
+        <div class="ctrl">
+          <button class="btn primary" id="foldPlay">▸ Play</button>
+          <div class="steps" id="foldDots" aria-hidden="true"></div>
+        </div>
+      </div>
+      <div class="fold" id="fold"></div>
+      <p class="caption"><b>api/custody_sql.js:117 — personFold</b> is two nested regexes:
+        <code>lower</code>, collapse whitespace, <code>btrim</code>, then collapse an immediately
+        repeated word — <code>'(\m\w+)( \1)+' → '\1'</code>. It is byte-for-byte the CANON helper in
+        <code>api/server.js</code>, and <code>test/consistency.test.mjs</code> fails if the two strings
+        ever differ, so the vehicle page and the driver page cannot disagree about how many people there
+        are. Live over the last 90 days: <b>18 of 145</b> names carry a repeated surname, and
+        <b>5 people</b> hold two platform accounts each. Computing the fold per row cost
+        <code>/api/alerts/by-driver</code> 93 seconds over the whole record, so it is now a STORED
+        generated column on <code>trip</code>, <code>driver_statement_day</code> and four other tables —
+        the same expression, asserted identical by <code>test/person_key.test.mjs</code>.</p>
+    </div>
+
+    <!-- FOLD 3: the week -->
+    <div class="stage">
+      <div class="stagehead">
+        <div>
+          <h3>The week — a report spread over its days, finest window wins</h3>
+          <p><code>driver_performance</code> is a log of report <em>windows</em>, and its key is the
+            window. It was never a set of disjoint periods, and every query that summed it assumed it was.</p>
+        </div>
+        <div class="ctrl">
+          <button class="btn primary" id="weekPlay">▸ Play</button>
+          <div class="steps" id="weekDots" aria-hidden="true"></div>
+        </div>
+      </div>
+      <div class="week" id="week" data-step="0">
+        <div class="weekbar" id="weekbar">1 weekly report · 9–15 Feb 2026 · AED 26,597.27</div>
+        <div class="days" id="weekdays"></div>
+        <div class="wtotal">
+          <div><em>seven resolved days now sum to</em><span class="num" style="font-size:1.15rem">AED 48,796.37</span></div>
+          <div><em>the week alone said</em><span class="num" style="font-size:1.15rem"><s>AED 26,597.27</s></span></div>
+        </div>
+      </div>
+      <p class="caption"><b>sql/schema_v23.sql — driver_payout_day_live.</b> Every period is spread
+        evenly across the days it covers; each day then takes exactly one period — the SHORTEST one
+        covering it, ties broken by whichever was ingested most recently. No day is counted twice and no
+        day is dropped. Even spreading is an estimate and the product says so: a driver earns nothing on
+        a rest day. The seam above is not a provider boundary but <em>our own grid</em>:
+        <code>EARNER_DAY_HORIZON = 200</code> in <code>src/sources/uber.js</code>, and 2026-09-02 minus
+        200 days is 2026-02-14 — so 15 February took its own daily measurement while the six days before
+        it kept their seventh of a week. Computing this view live cost a one-vCPU database twenty seconds
+        a query, so <code>driver_payout_day</code> is a table refreshed by <code>src/rollup.js</code>
+        in one DELETE+INSERT transaction; readers never see a half-built answer.</p>
+    </div>
+
+    <!-- FOLD 4: the plate -->
+    <div class="stage">
+      <div class="stagehead">
+        <div>
+          <h3>The vehicle — a plate, or null, never the empty string</h3>
+          <p>The one function all seven collectors pass a plate through.</p>
+        </div>
+      </div>
+      <div class="tbl">
+        <table>
+          <thead><tr><th>Provider writes</th><th>normPlate returns</th><th>Why it matters</th></tr></thead>
+          <tbody>
+            <tr><td class="m">"L-46185" <span class="pill off">hotel</span></td><td class="m">L46185</td><td>The hotel channel hyphenates; Uber's CSV does not. Same car.</td></tr>
+            <tr><td class="m">"l 44251" <span class="pill off">fms</span></td><td class="m">L44251</td><td>Uppercased, spaces and dashes stripped — the cross-platform join key.</td></tr>
+            <tr><td class="m">" - " / "" / null</td><td class="m"><span class="pill warn">null</span></td><td>Used to return <code>''</code>. Measured over a year: 47 of 150 people carried <code>''</code> in their plate list, <code>array_agg(DISTINCT …)</code> sorted it FIRST so "the three cars they drove" was two cars and a blank, and <code>/api/kpis</code> guarded with <code>AND n.plate &lt;&gt; ''</code> while the rest did not — two endpoints answering the same question about the same day, differing by one, each looking right on its own page.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="caption"><b>src/config.js:170 — normPlate.</b> Fixed at the one function rather than at
+        the thirty aggregates that consume it; <code>sql/schema_v32.sql</code> cleans the rows already written.</p>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="read">
+    <div class="eyebrow"><b>Retention</b> · measured live, 2026-09-02</div>
+    <h2>Every surface forgets at a different rate. That is why pages have blanks.</h2>
+    <p class="lede">Uber's trip reports go back years. Uber's <em>money</em> is a rolling window of
+      about 192 days that moves forward every night, so a day that was never collected inside it can
+      never be collected at all. These two facts live behind one provider name, and confusing them is
+      how a fleet concludes it had a bad February.</p>
+  </div>
+
+  <div class="wrap">
+    <div class="stage">
+      <div class="stagehead">
+        <div>
+          <h3>The earner-payments horizon, probed live this morning</h3>
+          <p>Three identical requests to <code>getEarnerBreakdownsV2</code>, one week apart from each
+            other, ten drivers each. Only the date changed.</p>
+        </div>
+        <div class="ctrl"><button class="btn primary" id="hzPlay">▸ Play</button></div>
+      </div>
+      <div class="hz" id="hz" style="--w:57%">
+        <div class="hzbar">
+          <div class="hzfill"></div>
+          <div class="hzmark" style="left:0"><span>2025-04-05 · first trip on record · 516 days of trips</span></div>
+          <div class="hzmark edge" style="left:43%"><span>◂ 2026-02-22 · the money edge, as at today</span></div>
+          <div class="hzprobe no" style="left:26%">09–16 Feb → 0 rows</div>
+          <div class="hzprobe yes" style="left:44.5%">16–23 Feb → 10 rows, 7 with money</div>
+          <div class="hzprobe yes" style="right:6px">24–31 Aug → 10 rows, 5 with money</div>
+        </div>
+      </div>
+      <p class="caption">The edge rolls forward daily, so the collector's grid deliberately overshoots
+        it — <code>EARNER_DAY_HORIZON = 200</code>, because overshooting costs a few empty calls and
+        undershooting loses days that can never be re-fetched. Before this bound existed, a two-year
+        backfill spent <b>73 of 100 weekly windows per fleet</b> asking Uber for something it will never
+        serve, at 72 seconds a window — roughly three and a half hours of every backfill, every week,
+        spent being told nothing, while FMS waited behind it with a 73-day alert hole.</p>
+    </div>
+
+    <div class="read" style="margin-top:2.4rem">
+      <h3>A blank is not always a gap</h3>
+      <p class="note">Four different things render as an empty cell, and the product is required to
+        tell them apart — because three of them are facts about the world and one is a bug.</p>
+    </div>
+
+    <div class="blanks">
+      <div class="blank">
+        <div class="h"><span class="sq" style="background:var(--ink-3)"></span><h4>Never asked</h4></div>
+        <p>No collector calls this surface. Not a gap — a question nobody has put.</p>
+        <div class="ev">ACCEPTANCE was an em-dash on every driver's Quality tab for the product's whole life. Not a missing column: <code>REPORT_TYPE_DRIVER_QUALITY</code> was a report never requested.</div>
+      </div>
+      <div class="blank">
+        <div class="h"><span class="sq" style="background:var(--good)"></span><h4>Asked, answered empty</h4></div>
+        <p>The call succeeded and the provider had nothing. A genuinely quiet day.</p>
+        <div class="ev">Recorded per window in <code>collection_run.detail</code> with the driver count beside it — "10 of 85 drivers answered" is not a quiet week, and only that number tells the two apart.</div>
+      </div>
+      <div class="blank">
+        <div class="h"><span class="sq" style="background:var(--warn)"></span><h4>Window refused</h4></div>
+        <p>The request was too wide, or the credential was declined. Retryable.</p>
+        <div class="ev">FMS answers HTTP&nbsp;400 above ~11,026 alert records and HTTP&nbsp;200 with <code>{"error":"Authentication failed"}</code> for a bad password. A 400 must never reach the credential banner; a 200 must.</div>
+      </div>
+      <div class="blank">
+        <div class="h"><span class="sq" style="background:var(--critical)"></span><h4>No longer held</h4></div>
+        <p>Past the provider's retention. Permanent — asking again returns nothing, for ever.</p>
+        <div class="ev">Uber earnings before 2026-02-22. <b>236,078 bookings</b> sit on record with no money against them and no way to get it, which is what the imported ledger exists to cover.</div>
+      </div>
+    </div>
+
+    <div class="tbl">
+      <table>
+        <thead><tr><th>Dataset</th><th>Span held</th><th>Days with data</th><th>Missing</th><th>What the shape means</th></tr></thead>
+        <tbody>
+          <tr><td class="m">trip · uber</td><td class="n">2025-04-05 → 2026-09-02</td><td class="n">516</td><td class="n"><span class="pill ok">0</span></td><td>Report pipeline, ≤31-day windows, newest first. Uber's own audit agrees to 100% over 12 months.</td></tr>
+          <tr><td class="m">earnings · uber</td><td class="n">2026-02-06 → 2026-09-06</td><td class="n">213</td><td class="n"><span class="pill ok">0</span></td><td>The whole record. 192-day rolling window, and the last four days are a forward projection of the open week.</td></tr>
+          <tr><td class="m">earnings · yango</td><td class="n">2026-05-11 → 2026-09-06</td><td class="n">119</td><td class="n"><span class="pill ok">0</span></td><td>Weekly driver summaries; one 31-day backfill row still in the mix.</td></tr>
+          <tr><td class="m">alerts · fms</td><td class="n">2026-05-23 → 2026-09-02</td><td class="n">30</td><td class="n"><span class="pill bad">73</span></td><td>One hole, 2026-06-06 → 2026-08-17. Every FMS run refused the alert window with a 400 while the trip window beside it answered 200.</td></tr>
+          <tr><td class="m">telemetry · cabman</td><td class="n">2026-08-21 → 2026-09-02</td><td class="n">13</td><td class="n"><span class="pill ok">0</span></td><td>13 days is the whole archive. There is no history endpoint — the poll <em>is</em> the record.</td></tr>
+          <tr><td class="m">ledger · yango</td><td class="n">2026-08-14 → 2026-09-02</td><td class="n">18</td><td class="n"><span class="pill off">event-driven</span></td><td>Park transactions arrive when they arrive. Two quiet days are not a collection failure and are not counted as one.</td></tr>
+          <tr><td class="m">trip · bolt</td><td class="n">—</td><td class="n">0</td><td class="n"><span class="pill bad">all</span></td><td>Not a gap. <code>COMPANIES_NOT_ALLOWED</code> on Ecosine, an expired portal refresh token on Egari. The channel appears on every page anyway, so its absence is visible rather than silent.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="read">
+    <div class="eyebrow"><b>Station 5</b> · this number, on this page, from these calls</div>
+    <h2>Four figures, traced back to the request that produced them</h2>
+    <p class="lede">Each of these is on the live dashboard right now. Open one to see every hop.</p>
+  </div>
+  <div class="wrap" id="traces"></div>
+</section>
+
+<section>
+  <div class="read">
+    <div class="eyebrow"><b>Findings</b> · what reading it end to end turned up</div>
+    <h2>Six places where the code and the page disagree</h2>
+    <p class="lede">A pipeline read whole shows things no single page can. These are contradictions
+      between what the product renders and what the code behind it actually does — found by following
+      the same rows through both ends.</p>
+  </div>
+  <div class="wrap" id="findings"></div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Every figure on this page was read from <span class="mono">fleet-dashboard-wpeqb.ondigitalocean.app</span>
+      on 2026-09-02, or measured against the provider live on the same day. Nothing here is illustrative.</div>
+    <div>Source of record: <span class="mono">src/sources/</span> · <span class="mono">src/run.js</span> ·
+      <span class="mono">src/rollup.js</span> · <span class="mono">sql/schema_v7,v18,v23,v51</span> ·
+      <span class="mono">api/custody_sql.js</span> · <span class="mono">api/reconcile_routes.js</span></div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ─────────────────────────── station 1+2: the source rail ─────────────── */
+  var PROVIDERS = [
+    {
+      id:'uber', name:'Uber', dot:'var(--s1)', mods:'4 modules',
+      st:[
+        {h:'Provider', t:'Uber, two separate businesses', li:[
+          '<b>Ecosine</b> and <b>Egari</b> are two Uber orgs with two supplier sessions.',
+          'The OAuth client is registered <em>under</em> one org: <code>/orgs</code> returns exactly one, so every Egari REST call answers 403.',
+          'An org missing either its uuid or its cookie is not collected at all — a half-pasted credential cannot make a half-collected fleet.']},
+        {h:'Call &amp; window', t:'fleethub.uber.com — four surfaces', li:[
+          '<b>Reports:</b> GenerateReport → poll DownloadReport → signed CSV. ≤31 days, ≤3 in flight per org, minutes each.',
+          '<b>GraphQL:</b> getEarnerBreakdownsV2, half-open [s,e). Weeks by driver-list (21 calls), days by page (5–6 calls).',
+          '<b>Chronicle:</b> driver timeline, hard 31-day maximum, ~1,400 events per driver per month.',
+          '<b>OAuth:</b> login.uber.com → /drivers/actions, vehicle documents, payments.']},
+        {h:'Landing table', t:'ten tables', li:[
+          'trip <span class="key">platform, external_id</span>',
+          'driver_performance <span class="key">platform, driver, period_start, period_end</span>',
+          'driver_earnings_component <span class="key">… + category</span>',
+          'driver_platform_state · driver_rating_history · driver_timeline_event',
+          'vehicle_profile · vehicle_document · platform_recommendation · telemetry_snapshot']},
+        {h:'Fold', t:'all four apply', li:[
+          '<b>is_booking</b> keeps Uber trips separate from their FMS twins.',
+          '<b>personFold</b> merges an Uber UUID with a hotel account for the same human.',
+          '<b>driver_payout_day</b> spreads the weekly netOutstanding; the daily grid then displaces it.',
+          '<b>NET_FARE_SQL</b> rebuilds the statement from the itemised tree, so it can disagree with the payout.']},
+        {h:'Page', t:'#reconcile · #unit · #drivers · #supply', li:[
+          '312,129 bookings — 220,615 Ecosine, 91,514 Egari.',
+          '49,395 money rows over 213 days.',
+          'AED 5,720,187.58 of netOutstanding and AED 4,815,990.38 of itemised components in the last year.']}
+      ],
+      verdict:'<b>Verified.</b> The nightly audit re-asks Uber about 13 months and 4 weeks per fleet and compares Trip UUIDs. Twelve months measured: 67,475 rows at Uber, 67,622 held here, <b>0 trips Uber has that we never stored</b>, 0 filed under the wrong fleet, 100% agreement. Six windows could not be checked — the report host now answers <code>generate: "Not Found"</code>, which is a 301 a POST cannot survive.'
+    },
+    {
+      id:'fms', name:'FMS / InfoTrack', dot:'var(--s2)', mods:'telematics',
+      st:[
+        {h:'Provider', t:'InfoTrack ItlService.svc', li:[
+          'Both fleets, each with its own username and password.',
+          'Credentials travel in the query string; a bad one comes back HTTP <b>200</b> with <code>{"error":"Authentication failed"}</code>.',
+          'The deepest history of any source here — trips back to 2024-09-30.']},
+        {h:'Call &amp; window', t:'GetTripPassenger · GetAlertData · GetVehicleCurrentDetails', li:[
+          'Trips: monthly windows, halved on refusal. The ceiling is 21–31 days depending on the fleet.',
+          'Alerts: measured directly — 1 day 5,864–7,121 rows OK, 3 days 11,026 OK, 4 days refused. So <b>one day at a time</b>, with a whole month asked first because most of a backfill is outside retention and costs one request to learn that.',
+          'Alert retention is roughly 100 days. Trips are not.']},
+        {h:'Landing table', t:'three tables', li:[
+          'trip <span class="key">platform, external_id</span> — platform = <code>fms</code>',
+          'alert <span class="key">platform, external_id</span>',
+          'telemetry_snapshot <span class="key">source, plate, captured_at</span>']},
+        {h:'Fold', t:'is_booking = false', li:[
+          'Every FMS trip row is a journey, not a booking. <code>trip_norm.outcome</code> is NULL for them — "did this complete" is not a question about a GPS trace.',
+          'They are never added to bookings and never dropped: they are the only evidence of movement with no booking behind it.']},
+        {h:'Page', t:'#safety · #vehicles · #unauthorized', li:[
+          '218,838 journeys · 138,800 fixes · 118,826 alerts.',
+          'Over the last 30 days: 11,436 telematics journeys against 13,437 bookings.',
+          'Alerts: Sharp Turn 44,416 · Harsh Brake 21,767 · Main Power Lost 2,231.']}
+      ],
+      verdict:'<b>One hole, 73 days.</b> 2026-06-06 → 2026-08-17. Every FMS run on record shows the same 31-day window twice — trips 200 with rows, alerts 400 — and until <code>collection_run.detail</code> started carrying a <code>kind</code>, nothing on screen said which was which, so a dark alert feed read as a duplicate of a window that worked.'
+    },
+    {
+      id:'cabman', name:'CABMAN', dot:'var(--s4)', mods:'seat sensor',
+      st:[
+        {h:'Provider', t:'app.cabman.ae DT tracking', li:[
+          'Interface id + user + password, per fleet. Ecosine configured; Egari awaiting credentials.',
+          'The only source that reports whether a <b>seat is occupied</b>.']},
+        {h:'Call &amp; window', t:'GetIVDData — realtime only', li:[
+          '<b>There is no history parameter.</b> The endpoint answers "now" and nothing else.',
+          'Polled every 5 minutes on its own cron, outside the historical window entirely.',
+          'Its timestamp field is called <code>gmt</code> and is GMT — stamping it +04:00 moved every fix four hours into the past.']},
+        {h:'Landing table', t:'telemetry_snapshot', li:[
+          '<span class="key">source, plate, captured_at</span>',
+          '37,069 fixes, all of them ours: 13 days, 2026-08-21 → 2026-09-02, median 2,934 a day.',
+          '<code>polled_at</code> is kept beside <code>captured_at</code> — fifteen dead trackers drag min(captured_at) back to 2024 and would report 840 missing days.']},
+        {h:'Fold', t:'occupancy_segment', li:[
+          'Consecutive seat-occupied fixes group into a journey. A journey ends when telemetry <em>positively reports an empty seat</em>, not merely when fixes stop.',
+          'Bridging spans holes in the data (≤10 min) and never spans a fix that says the seat was empty.',
+          'Each segment is matched against every channel’s bookings on the same plate, ±15 minutes.']},
+        {h:'Page', t:'#unauthorized · #live · #map', li:[
+          '2,638 segments in 30 days: 881 authorized, 1,208 partial, 361 stationary, 115 unverifiable, <b>71 unauthorized</b> over 843 km.',
+          '94 vehicles fresh, 109 silent, 219 tracked.']}
+      ],
+      verdict:'<b>Refuses to judge rather than accuse.</b> A 240-minute clock skew once made every segment miss its own booking against a 15-minute tolerance and named nine drivers for trips they had genuinely run. The reconciler now measures its own clock skew, declines to issue verdicts above 60 minutes, and carries <code>boundary_gap_min</code> on every row so the reader can check the condition an accusation requires: bounded on both sides by observed fixes.'
+    },
+    {
+      id:'hotel', name:'Hotel / ecosine.ae', dot:'var(--s3)', mods:'corporate channel',
+      st:[
+        {h:'Provider', t:'The corporate and hotel booking channel', li:[
+          'Bearer token plus an <code>x-domain: hotel.ecosine.ae</code> header.',
+          'The only channel that reports a <b>cost</b>, a <b>property</b>, a <b>guest</b> and where the driver set off from.']},
+        {h:'Call &amp; window', t:'get-trip-report?startDate=&amp;endDate=', li:[
+          'Monthly chunks. 24 windows over two years, all answered.',
+          'Returns driver start and driver <em>end</em> position on 961 of 1,258 bookings.']},
+        {h:'Landing table', t:'trip + roster', li:[
+          'trip <span class="key">platform, external_id</span> — with <code>price</code>, <code>deadhead_km</code>, <code>return_deadhead_km</code>',
+          'partner · driver_compliance · driver_platform_state']},
+        {h:'Fold', t:'trip_ext, and the unpaid legs', li:[
+          '<b>settlement_class</b> maps room-charge, POS, cash-supervisor and eleven more into who settles and when.',
+          '<b>is_complimentary</b> — a free ride carries a price that is not a price; excluded from every money ratio.',
+          '<b>total_deadhead_pct</b> only where BOTH legs were measured: adding a measured approach to an unmeasured return and calling it a total is how a partial figure becomes a confident wrong one.']},
+        {h:'Page', t:'#corporate · #unit · #settlement', li:[
+          '1,630 bookings, AED 130,217.92 of fares in the last year.',
+          'The largest single source of priced trips in the product — Uber’s trip export has no fare column at all.']}
+      ],
+      verdict:'<b>Small and load-bearing.</b> 1,630 of 313,795 bookings — 0.5% of the rows and, on most days, the majority of the fares. When <code>/api/kpis</code> reports revenue over 921 priced trips out of 13,437, that ratio is very nearly this channel alone.'
+    },
+    {
+      id:'yango', name:'Yango', dot:'var(--s5)', mods:'park API',
+      st:[
+        {h:'Provider', t:'fleet.yango.com, Ecosine park', li:[
+          'Three credentials on every request: <code>X-Park-Id</code>, <code>X-API-Key</code> and a browser cookie.',
+          'A 403 names none of them, so the collector re-asks without the cookie: same status means the cookie is not the question.']},
+        {h:'Call &amp; window', t:'orders/list · summary/drivers · transactions/park', li:[
+          'Cursor pagination, 40 per page. ≥12 months of retention claimed.',
+          'Weekly windows for the driver summary; the park ledger arrives as it happens.']},
+        {h:'Landing table', t:'four tables', li:[
+          'trip · driver_performance · driver_platform_state',
+          'ledger_entry <span class="key">platform, external_id</span> — commissions, penalties, top-ups']},
+        {h:'Fold', t:'the same three as everyone', li:[
+          'Yango trips carry a price, so they reach the revenue headline where Uber’s cannot.',
+          'Its weekly driver summary lands in <code>driver_performance</code> beside Uber’s and is resolved by the same finest-window-wins rule.',
+          'The park ledger is neither a fare nor a payout — it is its own <code>kind</code> in <code>money_event</code>, added to nothing.']},
+        {h:'Page', t:'#platforms · #finance · #revenue', li:[
+          '36 trips · 855 earnings rows over 119 days · 213 ledger entries over 18 days.',
+          'Last trip collected 2026-09-01; the ledger still runs.']}
+      ],
+      verdict:'<b>Refused today.</b> <code>orders/list</code> answers HTTP&nbsp;403 with the API key and 401 without the cookie — so the session <em>is</em> being read and has expired. Before this refusal was raised rather than swallowed, the run logged <code>ok</code> on the rows the other two pulls had written off the API key, and the last Yango trip on record predated the source’s last healthy report by three days with nothing anywhere saying so.'
+    },
+    {
+      id:'bolt', name:'Bolt', dot:'var(--s6)', mods:'two gateways',
+      st:[
+        {h:'Provider', t:'Two doors, two different refusals', li:[
+          '<b>FI gateway:</b> OIDC client_credentials. Registered against one company.',
+          '<b>Fleet Owner Portal:</b> a refresh token that lasts about seven days.']},
+        {h:'Call &amp; window', t:'getDrivers / getVehicles · order history', li:[
+          'The FI gateway refuses any range longer than 31 days — a backfill asks for a year, so every backfill failed at this call for as long as backfill existed. Clamped now, which is right anyway: a roster is a snapshot.',
+          'The portal path carries trips and earnings for both fleets, and is skipped entirely when the refresh token has expired.']},
+        {h:'Landing table', t:'trip · driver_performance · driver_platform_state', li:[
+          '70 roster rows written per run. Zero trips, ever.']},
+        {h:'Fold', t:'—', li:[
+          'Nothing to fold. Bolt has produced no booking in the entire database.',
+          'It still appears in <code>/api/platforms</code> with a zero, because a channel missing from the inventory is a channel whose absence nobody notices.']},
+        {h:'Page', t:'#platforms · #roster', li:[
+          '<code>code: 503, message: NOT_AUTHORIZED, error_hint: COMPANIES_NOT_ALLOWED</code>',
+          'The 503 is not an HTTP status — the HTTP status is 200, and 503 is a number Bolt puts in its own JSON. So there is nothing to wait out and nothing to retry.']}
+      ],
+      verdict:'<b>Not a credential that expired; a client never scoped to the business.</b> Measured with one variable changed at a time: the same token is entitled to Egari’s company_id 142897 and refused Ecosine’s 142868. That distinction is the difference between "re-paste the secret" and "register a second application", and only a probe that changed one thing could tell them apart.'
+    },
+    {
+      id:'world', name:'World data', dot:'var(--s7)', mods:'no key at all',
+      st:[
+        {h:'Provider', t:'Three free, key-less APIs', li:[
+          '<b>open-meteo</b> — heat drives EV range and AC load; rain drives demand spikes and crash risk.',
+          '<b>aladhan</b> — the Hijri calendar, because Ramadan and Eid reshape demand every year.',
+          '<b>GDELT</b> — headlines, classified by a model into "could this plausibly move a Dubai fleet?"']},
+        {h:'Call &amp; window', t:'past 30 days + 7 forecast, in one call', li:[
+          'Weather is asked in <code>timezone=Asia/Dubai</code> and stamped with the Dubai day — a UTC "today" would mark a measured evening as a forecast.',
+          'Seasonal events are computed, not fetched: zero API risk.',
+          'GDELT is the least reliable link in the product and times out routinely; the run records it as partial rather than pretending.']},
+        {h:'Landing table', t:'three tables', li:[
+          'weather_daily <span class="key">day</span>',
+          'calendar_day <span class="key">day</span>',
+          'world_event <span class="key">source, code, starts_on, title</span>']},
+        {h:'Fold', t:'joined on the Dubai day', li:[
+          'The one join key everything in this product already shares: <code>local_day</code> from <code>trip_norm</code>, computed <code>AT TIME ZONE ‘Asia/Dubai’</code>.',
+          'Nothing here claims causation. It supplies candidates and quantifies the coincidence so a human judgement is an informed one.']},
+        {h:'Page', t:'#causes · #forecast · #playbook', li:[
+          '39 world events on record · 768 weather and calendar rows.',
+          'Structural breaks in the trip series are split into supply and demand and laid against what was happening that week.']}
+      ],
+      verdict:'<b>The only source with nothing to authenticate and nothing to expire.</b> It is also the only one whose failure costs nothing: a missing weather row makes a recommendation less well-founded, not a number wrong.'
+    }
+  ];
+
+  var chips = document.getElementById('chips');
+  var stations = document.getElementById('stations');
+  var verdict = document.getElementById('verdict');
+
+  PROVIDERS.forEach(function (p, idx) {
+    var b = document.createElement('button');
+    b.className = 'chip';
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-pressed', idx === 0 ? 'true' : 'false');
+    b.style.setProperty('--dot', p.dot);
+    b.innerHTML = '<i></i>' + p.name + ' <small>' + p.mods + '</small>';
+    b.addEventListener('click', function () { select(idx); });
+    chips.appendChild(b);
+  });
+
+  function select(idx) {
+    var p = PROVIDERS[idx];
+    Array.prototype.forEach.call(chips.children, function (c, i) {
+      c.setAttribute('aria-pressed', i === idx ? 'true' : 'false');
+    });
+    stations.classList.remove('on');
+    stations.innerHTML = '';
+    p.st.forEach(function (s, i) {
+      var d = document.createElement('div');
+      d.className = 'st';
+      d.style.setProperty('--i', i);
+      d.style.setProperty('--dot', p.dot);
+      d.innerHTML = '<div class="card"><h4>' + s.h + '</h4><div class="ttl">' + s.t + '</div>'
+        + '<ul>' + s.li.map(function (x) { return '<li>' + x + '</li>'; }).join('') + '</ul></div>'
+        + '<div class="conn"></div>';
+      stations.appendChild(d);
+    });
+    verdict.style.setProperty('--bar', p.dot);
+    verdict.innerHTML = p.verdict;
+    if (reduce) { stations.classList.add('on'); }
+    else { requestAnimationFrame(function () { requestAnimationFrame(function () { stations.classList.add('on'); }); }); }
+  }
+  select(0);
+
+  /* ─────────────────────────── fold 1: the twin ─────────────────────────── */
+  var TWINS = [
+    { u: ['00:53:53', '33.64 km'], f: ['00:59:29', '32.41 km'] },
+    { u: ['01:46:58', '33.88 km'], f: ['01:51:11', '33.63 km'] },
+    { u: ['04:48:23', '1.18 km'],  f: ['04:50:50', '1.17 km'] }
+  ];
+  var twin = document.getElementById('twin');
+  var twinTally = document.getElementById('twinTally');
+  TWINS.forEach(function (t) {
+    ['u', 'f'].forEach(function (k) {
+      var pl = k === 'u' ? 'uber' : 'fms';
+      var r = document.createElement('div');
+      r.className = 'trow';
+      r.setAttribute('data-p', pl);
+      r.innerHTML = '<span class="pl">' + pl + '</span>'
+        + '<span class="meta"><span>' + t[k][0] + '</span><span>' + t[k][1] + '</span>'
+        + '<span>one plate · one day</span></span>'
+        + '<span class="tag">' + (k === 'u' ? 'is_booking = true' : 'is_booking = false') + '</span>';
+      twin.appendChild(r);
+    });
+  });
+  twinTally.innerHTML =
+    '<div class="tally"><div class="k">bookings · last 30 days</div><div class="v">13,437</div></div>'
+    + '<div class="tally"><div class="k">telematics journeys · same 30 days</div><div class="v">11,436</div></div>';
+
+  var TWIN_STEPS = 4;
+  makePlayer('twin', 'twinPlay', 'twinDots', TWIN_STEPS, function (s) {
+    twin.setAttribute('data-step', String(s));
+    twinTally.style.opacity = s === 3 ? '1' : '0';
+    twinTally.style.transform = s === 3 ? 'none' : 'translateY(6px)';
+  });
+
+  /* ─────────────────────────── fold 2: the person ───────────────────────── */
+  var NAMES = [
+    { who: 'uber · ecosine', v: ['KASHIF ALI AYYUB KHAN', 'kashif ali ayyub khan', 'kashif ali ayyub khan', 'kashif ali ayyub khan'] },
+    { who: 'hotel',          v: ['Kashif  Ali Ayyub Khan', 'kashif  ali ayyub khan', 'kashif ali ayyub khan', 'kashif ali ayyub khan'] },
+    { who: 'uber · egari',   v: ['Wisal Muhammad Muhammad', 'wisal muhammad muhammad', 'wisal muhammad muhammad', 'wisal muhammad'] }
+  ];
+  var OPS = [
+    'the three records as the providers wrote them',
+    '<b>lower(driver_name)</b>',
+    "<b>regexp_replace(…, '\\s+', ' ', 'g')</b> then <b>btrim</b>",
+    "<b>regexp_replace(…, '(\\m\\w+)( \\1)+', '\\1', 'g')</b> — an immediately repeated word collapses"
+  ];
+  var fold = document.getElementById('fold');
+  fold.innerHTML =
+    NAMES.map(function (n, i) {
+      return '<div class="frow" data-r="' + i + '"><span class="who">' + n.who + '</span>'
+        + '<span class="val" data-v="' + i + '">' + n.v[0] + '</span></div>';
+    }).join('')
+    + '<div class="foldop" id="foldop">' + OPS[0] + '</div>'
+    + '<div class="merge" id="merge"><b>One person.</b> Kashif Ali Ayyub Khan holds two accounts on two '
+    + 'platforms — 541 Uber trips and 44 hotel bookings across three plates (L27045, L44284, L45235). '
+    + 'Counted by <code>driver_ext_id</code> he is two drivers; counted by <code>person_key</code> he is one, '
+    + 'and the vehicle page stops listing him twice with his work split between the rows.</div>';
+
+  makePlayer('fold', 'foldPlay', 'foldDots', 4, function (s) {
+    NAMES.forEach(function (n, i) {
+      var el = fold.querySelector('[data-v="' + i + '"]');
+      el.textContent = n.v[s];
+      el.parentNode.classList.toggle('merged', s >= 2 && (i < 2 || s === 3));
+    });
+    document.getElementById('foldop').innerHTML = OPS[s];
+    document.getElementById('merge').classList.toggle('on', s === 3);
+  });
+
+  /* ─────────────────────────── fold 3: the week spread ──────────────────── */
+  var DAY_LABELS = ['Mon 9', 'Tue 10', 'Wed 11', 'Thu 12', 'Fri 13', 'Sat 14', 'Sun 15'];
+  var weekdays = document.getElementById('weekdays');
+  DAY_LABELS.forEach(function (lbl, i) {
+    var d = document.createElement('div');
+    d.className = 'day';
+    d.setAttribute('data-d', String(i));
+    d.style.setProperty('--d', i);
+    d.innerHTML = '<span>' + lbl + '</span><span class="amt" data-amt="' + i + '">3,799.61</span>'
+      + '<span class="basis" data-basis="' + i + '">7-day</span>';
+    weekdays.appendChild(d);
+  });
+  var week = document.getElementById('week');
+  makePlayer('week', 'weekPlay', 'weekDots', 4, function (s) {
+    week.setAttribute('data-step', String(s));
+    var amt = week.querySelector('[data-amt="6"]');
+    var bas = week.querySelector('[data-basis="6"]');
+    if (s >= 2) { amt.textContent = '25,998.71'; bas.textContent = '1-day · wins'; }
+    else { amt.textContent = '3,799.61'; bas.textContent = '7-day'; }
+  });
+
+  /* ─────────────────────────── retention horizon ────────────────────────── */
+  var hz = document.getElementById('hz');
+  var hzBtn = document.getElementById('hzPlay');
+  function playHz() {
+    hz.classList.remove('on');
+    if (reduce) { hz.classList.add('on'); return; }
+    requestAnimationFrame(function () { requestAnimationFrame(function () { hz.classList.add('on'); }); });
+  }
+  hzBtn.addEventListener('click', playHz);
+  playHz();
+
+  /* ─────────────────────────── station 5: traces ────────────────────────── */
+  var TRACES = [
+    {
+      fig: 'AED 427,527.73',
+      where: '#reconcile · August 2026',
+      what: 'what Uber actually wired, over only the driver-days its own statement also describes',
+      hops: [
+        ['Provider call', 'One POST to <span class="mono">fleethub.uber.com/graphql</span>, operation <span class="mono">getEarnerBreakdownsV2</span>, per Monday-anchored week and per Dubai day, per org. Weeks are asked by explicit driver list, ten uuids at a time; days are asked in page mode, which costs one call per ten drivers who actually earned.'],
+        ['Landing', '<span class="mono">driver_performance</span> takes <span class="mono">netOutstanding.amountE5 / 1e5</span> keyed <span class="mono">(platform, driver_ext_id, period_start, period_end)</span>. <span class="mono">driver_earnings_component</span> takes the <span class="mono">earnings</span> and <span class="mono">payouts</span> trees walked to six levels, keyed on the same tuple plus <span class="mono">category</span>.'],
+        ['Spread', '<span class="mono">driver_payout_day_live</span> expands each period across its days and keeps, per day, the shortest period covering it — ties to whichever was ingested last. <span class="mono">src/rollup.js</span> materialises that into <span class="mono">driver_payout_day</span> in one DELETE+INSERT.'],
+        ['Statement side', '<span class="mono">refreshStatements</span> rebuilds the other half from the components: <b>your_earnings − tip − taxes_earnings</b>, falling back to <span class="mono">net_fare</span> only for the open period the GraphQL surface has not yet described. Subtracting from Uber’s own root rather than adding fare and service_fee is deliberate — the root already contains categories this mapping has never seen.'],
+        ['The fold', 'Both sides are cut down to the <b>(person, day) pairs they share</b>, joined on <span class="mono">person_key</span> rather than <span class="mono">driver_ext_id</span>, because the statement fold merges a person’s several accounts and keeps only one of their ids. Whole-month against whole-month once reported the platform overpaying by 1,449%; day-restricted but driver-unrestricted still compared AED 18,116 over 53 drivers with AED 35,858 over 189.'],
+        ['On the page', '<b>233 matched drivers of 233 on the bank side</b>, AED 333,896.06 expected against AED 427,527.73 paid — a 28% gap with a stated floor under it, because Uber’s supplier breakdown does not itemise the Salik and surcharge reimbursements the payout already contains.']
+      ]
+    },
+    {
+      fig: '71 unauthorized',
+      where: '#unauthorized · last 30 days',
+      what: '843 km of movement with an occupied seat and no booking on any channel',
+      hops: [
+        ['Provider call', '<span class="mono">app.cabman.ae … GetIVDData</span>, every five minutes, for ever. There is no window parameter to widen — 37,069 fixes over 13 days is the entire archive, and every one of them exists because a cron ran.'],
+        ['Landing', '<span class="mono">telemetry_snapshot</span> keyed <span class="mono">(source, plate, captured_at)</span>, with <span class="mono">seat_occupied</span>, <span class="mono">ignition</span>, speed, odometer and position. <span class="mono">polled_at</span> is stored beside <span class="mono">captured_at</span> so a dead tracker’s last 2024 fix cannot masquerade as a collection gap.'],
+        ['Segmenting', '<span class="mono">src/reconcile.js buildSegments</span> groups consecutive occupied fixes. Two consecutive empty readings close a journey; a data hole of ten minutes or less is bridged, a positive empty reading never is. Distance prefers the odometer delta over GPS displacement where it is plausible.'],
+        ['Matching', 'Each segment is compared against <span class="mono">trip_norm</span> bookings on the same plate, ±15 minutes, across every channel that produced a booking in the window — hotel, uber, yango today. The channel list is measured, not hardcoded: claiming Bolt had been consulted on a fleet with no Bolt booking is how a verdict becomes unfalsifiable.'],
+        ['Refusing to judge', 'Four separate escapes come before an accusation: a skewed telemetry clock, a journey ending within 120 minutes of the window edge, a journey running past the edge of available telemetry, and any channel that normally delivers and delivered nothing. 1,208 of 2,638 segments this month are <b>partial</b> and 115 <b>unverifiable</b> — declined, not accused.'],
+        ['On the page', 'L46706, 2 Sept 04:39–04:58, 10 km, top speed 91 km/h, 5 GPS fixes, boundary gap 5 min. Nearest booking is a hotel trip <b>35 minutes away</b>. Custody that day names two people, both clickable — because "L46706 carried a passenger with no booking" is an accusation nobody can act on.']
+      ]
+    },
+    {
+      fig: 'AED 5.22 / km',
+      where: '#unit · L46706, Toyota Highlander 2023',
+      what: 'AED 16,157 over 216 bookings and 3,096 km, 30 days worked out of 30',
+      hops: [
+        ['Provider call', 'One monthly <span class="mono">get-trip-report</span> against the hotel channel, Bearer token plus <span class="mono">x-domain: hotel.ecosine.ae</span>. This vehicle earns on that channel alone, which is why it has a fare at all — the Uber trip export carries no price column anywhere.'],
+        ['Landing', '<span class="mono">trip</span>, keyed <span class="mono">(platform, external_id)</span>, with <span class="mono">price</span>, <span class="mono">car.licenseNumber</span> passed through <span class="mono">normPlate</span> → <span class="mono">L46706</span>, and the whole payload kept in <span class="mono">raw</span>.'],
+        ['Money filter', '<span class="mono">trip_norm.has_fare</span> is <span class="mono">price IS NOT NULL</span> <b>and not complimentary</b> — a free ride carries a price that is not a price, and testing non-null alone once put rides given away into the revenue headline while the settlement page, which excluded them explicitly, reported a figure AED 320 smaller over the same window.'],
+        ['Joined to the asset', '<span class="mono">vehicle_profile</span> gives make, model and year from the Uber fleet GraphQL; <span class="mono">vehicle_document</span> gives the soonest expiry (19 Nov, 78 days); <span class="mono">vehicle_driver_day</span> gives custody, so the row can name Abusaad Siddiqui Akhlaque Ahmad as of 2 Sept rather than whoever holds the car now.'],
+        ['On the page', 'AED 538.57 per earning day, AED 74.80 per booking, 0 idle days, 0 alerts. The same plate appears on #unauthorized four rows up — the two pages read different tables about the same car on the same day, which is the point of holding both.']
+      ]
+    },
+    {
+      fig: '15,500 bookings',
+      where: '#capacity · October 2026',
+      what: 'next month’s projected work, laid against who currently covers each hour',
+      hops: [
+        ['Provider call', 'None. Every input is already collected — this is the one page that makes no request of anybody.'],
+        ['Demand', '<span class="mono">rollup_month.bookings</span>, refreshed by <span class="mono">src/rollup.js</span> from <span class="mono">trip_norm WHERE is_booking</span> — telematics twins excluded, or every forecast would be roughly double. <span class="mono">forecastMonths</span> returns 15,500 with a range of 11,800–19,200.'],
+        ['Shape', '84 days of history, 31,231 bookings, grouped by Dubai weekday and Dubai hour into 168 cells. Each cell’s share of the total is applied to the monthly point, then divided by how many times that weekday actually occurs in October — a month with five Fridays needs a different rota from one with four.'],
+        ['Supply', 'The same cells, counting <b>people</b> rather than records: <span class="mono">peopleCount()</span> applies personFold inside the group-by, so a driver working Uber and the hotel channel in the same hour is one driver.'],
+        ['The honest bit', '"Drivers needed" is projected bookings ÷ what this cell’s own drivers have actually delivered in it. That is a division, not a capacity: a quiet hour makes its drivers look unproductive and a frantic one makes them look heroic. Cells seen fewer than four times are flagged <span class="mono">thin</span> rather than dropped — an hour nobody has covered is exactly the hour worth looking at.']
+      ]
+    }
+  ];
+
+  var tw = document.getElementById('traces');
+  TRACES.forEach(function (t, i) {
+    var d = document.createElement('details');
+    d.className = 'trace';
+    if (i === 0) d.open = true;
+    d.innerHTML = '<summary><span class="fig">' + t.fig + '</span>'
+      + '<span class="where">' + t.where + '</span>'
+      + '<span class="what">' + t.what + '</span></summary>'
+      + '<div class="body"><ul class="hops">'
+      + t.hops.map(function (h) {
+          return '<li><span class="lbl">' + h[0] + '</span><span class="det">' + h[1] + '</span></li>';
+        }).join('')
+      + '</ul></div>';
+    tw.appendChild(d);
+  });
+
+  /* ─────────────────────────── findings ─────────────────────────────────── */
+  var FINDINGS = [
+    { sev: 'material', bar: 'var(--critical)',
+      h: 'The safety figures are a 16-day measurement labelled 30 days',
+      p: 'The FMS alert feed holds nothing between 2026-06-06 and 2026-08-17. The endpoints that report alerts do not know that, so they window the <code>alert</code> table and print whatever falls inside — which for any window wider than sixteen days is the same number every time.',
+      ev: '<b>Measured live:</b> <span class="mono">/api/kpis?days=16</span> → trips 8,022, alerts <b>69,338</b>. <span class="mono">/api/kpis?days=30</span> → trips 13,437, alerts <b>69,338</b>. The range control moves the trip count by 68% and the alert count by 0%. <span class="mono">/api/alerts/summary</span> answers identically at 16 and 30 days. Consequence: <span class="mono">alerts_per_100km</span> on #unit and #vehicles divides a 16-day numerator by a 30-day denominator — L36397 reads 56.5 where the covered-days rate is nearer 106.' },
+
+    { sev: 'material', bar: 'var(--critical)',
+      h: 'Collection gaps reports four days of Uber earnings that have not happened yet',
+      p: '<code>/api/coverage</code> builds its earnings calendar from <code>driver_payout_day</code>, whose days come from expanding <code>period_start … period_end</code>. Uber’s weekly grid runs to the following Sunday, so the open week contributes days in the future. The Reconciliation page handles this correctly and the Collection gaps page does not.',
+      ev: '<b>On 2026-09-02:</b> <span class="mono">earnings:uber</span> reports <span class="mono">first_day 2026-02-06, last_day 2026-09-06, days_with_data 213, missing_days 0</span>. Four of those days are in the future, each carrying a seventh of an incomplete week. <span class="mono">/api/reconcile</span> names the same rows honestly — the September row carries <span class="mono">accrual_days: 4, bank_accrued: 30,879.46, period_cut: true</span>. Two pages, one set of rows, two treatments.' },
+
+    { sev: 'caption', bar: 'var(--serious)',
+      h: '#reconcile’s two "independent" sides come from the same HTTP response',
+      p: 'The page states: <em>"The two sides come from two different Uber answers, on purpose."</em> They come from two different <em>fields</em> of one answer. In <code>pullEarnerBreakdowns</code> the identical <code>bd</code> array is handed to <code>write()</code>, which stores <code>netOutstanding</code> as the bank side, and to <code>writeComponents()</code>, which walks <code>earnings</code>/<code>payouts</code> as the expected side.',
+      ev: 'The claim behind the caption still holds — the itemised tree is reported separately by Uber and sums <em>below</em> netOutstanding, so it can disagree. But the check cannot detect a fault in the call itself, and on Egari that is not hypothetical: <span class="mono">uber_rest_payments</span> holds <b>51 rows from 2026-08-24 onward</b> for that fleet and nothing before, so for the whole of the record both sides of Egari’s reconciliation are one GraphQL response read twice.' },
+
+    { sev: 'stale', bar: 'var(--warn)',
+      h: 'The audit answered its own founding hypothesis and nothing retracted it',
+      p: '<code>src/sources/uber.js</code> introduces <code>auditTripWindow</code> with an open question: trips per active driver per day fall from 10.0 in February 2026 to 3.4 in March, in both fleets at once, and <em>"that is the shape of a collection that thinned."</em> The audit was built to settle it.',
+      ev: 'It has. <b>Twelve months verified, agreement 100%, <span class="mono">uber_only = 0</span>, <span class="mono">misfiled = 0</span></b> — including March 2026, where Uber itself reports 4,190 Ecosine and 1,852 Egari trips against our 4,203 and 1,862. The volume fall is real business, not lost collection. The comment still frames it as an open suspicion, and no page says otherwise.' },
+
+    { sev: 'plumbing', bar: 'var(--warn)',
+      h: 'The ledger import’s own run row describes something else entirely',
+      p: 'When an import finishes, <code>api/server.js</code> writes a <code>collection_run</code> whose <code>rows_written</code> is <code>count(*)</code> over the whole <code>driver_statement_day</code> table and whose <code>fleet_id</code> is the literal <code>‘ecosine’</code>. Two of the row’s three numbers are not about the import.',
+      ev: '<b>Live:</b> <span class="mono">ledger · ecosine · import · ok · 39,797 rows · finished 2026-08-24 09:00Z</span> — nine days stale on a page that paints it green, beside Uber and FMS runs that finished fourteen minutes earlier. 39,797 is the whole table across every fleet and platform. Nothing in <code>src/index.js</code> schedules an import; <code>/api/settings/jobs</code> holds forty jobs and not one has mode <span class="mono">import</span>. <code>src/sources/ledger.js</code> documents all of this; the writer is unchanged.' },
+
+    { sev: 'input', bar: 'var(--warn)',
+      h: 'The import accepts any platform name, and one typo is now a platform',
+      p: '<code>POST /api/import/statement-days</code> lowercases <code>r.platform</code> and <code>r.company</code> and inserts them. There is no allow-list, although <code>FLEETS</code> exists in the same file and is validated elsewhere.',
+      ev: '<b>Live on the provenance page:</b> a platform called <span class="mono">yay</span>, 22 rows, AED 881.98, spanning 2026-02-14 → 2026-04-06, split across both fleets. It reaches <code>driver_statement_day</code> and therefore <code>money_event</code>, so "Where the money came from" lists a source that is a misspelling. Every read filters <code>source = ‘ledger’</code> out of the money headlines, which is why it has cost nothing yet.' }
+  ];
+
+  var fw = document.getElementById('findings');
+  FINDINGS.forEach(function (f) {
+    var d = document.createElement('div');
+    d.className = 'find';
+    d.style.setProperty('--bar', f.bar);
+    d.innerHTML = '<h3><span class="sev">' + f.sev + '</span>' + f.h + '</h3>'
+      + '<p>' + f.p + '</p><div class="ev">' + f.ev + '</div>';
+    fw.appendChild(d);
+  });
+
+  /* ─────────────────────────── shared step player ───────────────────────── */
+  function makePlayer(stageId, btnId, dotsId, n, apply) {
+    var btn = document.getElementById(btnId);
+    var dots = document.getElementById(dotsId);
+    var step = 0, timer = null;
+    for (var i = 0; i < n; i++) dots.appendChild(document.createElement('b'));
+
+    function paint() {
+      apply(step);
+      Array.prototype.forEach.call(dots.children, function (b, i) { b.classList.toggle('on', i === step); });
+    }
+    function stop() { if (timer) { clearInterval(timer); timer = null; } btn.textContent = '▸ Play'; btn.classList.add('primary'); }
+    function play() {
+      if (timer) { stop(); return; }
+      step = 0; paint();
+      if (reduce) { step = n - 1; paint(); return; }
+      btn.textContent = '‖ Pause'; btn.classList.remove('primary');
+      timer = setInterval(function () {
+        step += 1;
+        if (step >= n) { step = n - 1; paint(); stop(); return; }
+        paint();
+      }, 1500);
+    }
+    btn.addEventListener('click', play);
+
+    /* Opens on step 0, which is fully readable: the raw records as the
+       providers wrote them. The transformation plays once when the panel is
+       first scrolled to, and can be replayed. Nothing is hidden waiting —
+       and where motion is refused the panel opens on the settled answer
+       instead, because nothing will ever animate it there. */
+    if (reduce) step = n - 1;
+    paint();
+    if (!reduce && 'IntersectionObserver' in window) {
+      var fired = false;
+      var start = function (delay) { if (fired) return; fired = true; setTimeout(play, delay); };
+      var io = new IntersectionObserver(function (es) {
+        es.forEach(function (e) { if (e.isIntersecting) { io.disconnect(); start(420); } });
+      }, { threshold: 0.25 });
+      io.observe(document.getElementById(stageId));
+      /* A panel already on screen at load never gets an intersection change,
+         and would sit on its first step for ever. */
+      var box = document.getElementById(stageId).getBoundingClientRect();
+      if (box.top < window.innerHeight && box.bottom > 0) { io.disconnect(); start(900); }
+    }
+  }
+})();
+</script>
