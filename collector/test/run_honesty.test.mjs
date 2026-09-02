@@ -123,15 +123,23 @@ console.log('\nand a network failure says what actually went wrong');
      for a host answering 200 in half a second from outside the app. */
   const { http } = await import('../src/http.js');
   let msg = '';
-  /* A port nothing is listening on: the failure is real and its cause is
-     knowable, which is the pair this assertion is about. */
+  /* A port nothing is listening on, obtained by listening on one and stopping.
+     A hardcoded port is not free: the suite runs files in parallel and any of
+     them may take the number for an ephemeral server, which turns a refusal
+     into a 404 and this assertion into a flake. Claiming a port and releasing
+     it is the only way to be sure it is closed. */
+  const { createServer } = await import('node:http');
+  const probe = createServer(() => {});
+  await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+  const port = probe.address().port;
+  await new Promise((r) => probe.close(r));
   try {
-    await http('http://127.0.0.1:45999/nothing', { retries: 0, timeoutMs: 3000 });
+    await http(`http://127.0.0.1:${port}/nothing`, { retries: 0, timeoutMs: 3000 });
   } catch (e) { msg = String(e.message || e); }
   check('the underlying reason is in the message, not only on err.cause',
     /ECONNREFUSED/i.test(msg), msg.slice(0, 140));
   check('…and so is the host it was talking to',
-    /127\.0\.0\.1:45999/.test(msg), msg.slice(0, 140));
+    msg.includes(`127.0.0.1:${port}`), msg.slice(0, 140));
 }
 
 await db.close();

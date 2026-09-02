@@ -101,7 +101,10 @@ const orDash = (v, why) => (v == null
    agreement the July reconciliation achieved, ±10% is worth a look (usually
    cash banked in a different month), beyond that something is actually wrong
    or missing. */
-const deltaPill = (r) => {
+/* Exported for the same reason spreadRuns is: the tone is a pure function of
+   one row, and a rule about colour that can only be checked by driving a
+   browser is a rule that goes unchecked. */
+export const deltaPill = (r) => {
   if (r.delta == null) return '<span class="dim">—</span>';
   const off = r.delta_pct == null ? null : Math.abs(r.delta_pct);
   const sign = r.delta > 0 ? '+' : r.delta < 0 ? '−' : '±';
@@ -122,8 +125,36 @@ const deltaPill = (r) => {
       + 'Uber\u2019s rolling statement window, so the expected side is part of a month measured '
       + 'against a whole one — not a gap to investigate');
   }
+  /* Where a known component of the gap could not be measured, the gap cannot
+     be judged at the ordinary thresholds.
+     ─────────────────────────────────────────────────────────────────────
+     The endpoint's own note states the floor: Uber's supplier breakdown does
+     not itemise the reimbursements — Salik, surcharges, airport fees — that
+     the payout already contains, so on a month served only by GraphQL the
+     expected side is missing money the bank side has, and the note puts that
+     at 12-14%. A row whose salik column is empty is exactly such a month.
+
+     Read from production 2026-09-02, every settled month was red: 12.8, 13.4,
+     14.0, 14.2, 21.2, 28.2 per cent. Four of those six sit inside the band the
+     page itself calls a floor, so red was carrying no information — the one
+     thing a colour has to do is separate rows.
+
+     The boundary sits just above the documented band rather than inside it, so
+     a month at the top of the floor is not coloured as a fault. Beyond it the
+     floor no longer explains the gap and the ordinary judgement resumes. */
+  const FLOOR_PCT = 15;
+  const floorApplies = r.salik == null;
+  if (floorApplies && off != null && off <= FLOOR_PCT) {
+    return pill(body, off <= 2 ? 'ok' : 'warn',
+      'This month has no salik figure, so the toll and surcharge reimbursements Uber pays but '
+      + 'does not itemise are missing from the expected side and present in the bank side. The '
+      + `note below puts that floor at 12-14%, and this gap is inside it.`);
+  }
   const tone = off == null ? 'warn' : off <= 2 ? 'ok' : off <= 10 ? 'warn' : 'bad';
-  return pill(body, tone);
+  return pill(body, tone, floorApplies && off != null
+    ? 'This month has no salik figure, so part of this gap is the reimbursement floor the note '
+      + 'below describes — but at this size the floor does not account for it.'
+    : null);
 };
 
 /* The report window the money on this side was measured over.

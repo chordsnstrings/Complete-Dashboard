@@ -620,6 +620,52 @@ console.log('\nthe repeat caption counts either side, not both');
     && /reports mixed/.test(uiSrc2));
 }
 
+/* ── a colour that never varies is not a colour ──────────────────────────
+   The endpoint's own note states a floor: Uber's supplier breakdown does not
+   itemise the reimbursements — Salik, surcharges, airport fees — that the
+   payout already contains, so on a month served only by GraphQL the expected
+   side is missing money the bank side has, and the note puts that at 12-14%.
+   A row whose salik column is empty is exactly such a month.
+
+   Read from production 2026-09-02, every settled month was red: 12.8, 13.4,
+   14.0, 14.2, 21.2, 28.2 per cent. Four of the six sat inside the band the
+   page itself calls a floor, so red separated nothing — which is the one thing
+   a colour has to do.
+
+   Asserted on the RULE, in the module, rather than through a browser: the
+   tone is a pure function of the row and testing it needs no DOM. */
+console.log('\nthe gap is not coloured as a fault inside the floor the page documents');
+{
+  const mod = await import('../api/public/reconcile.js');
+  const cls = (html) => (String(html).match(/class="pill([^"]*)"/) || [, ''])[1].trim();
+  const title = (html) => (String(html).match(/title="([^"]*)"/) || [, ''])[1];
+  const col = { render: mod.deltaPill };
+  {
+    const row = (delta_pct, salik) => ({ delta: 1000, delta_pct, salik, statement_partial: false });
+    check('a month with no salik at the top of the documented floor is not red',
+      cls(col.render(row(14.2, null))) === 'warn', cls(col.render(row(14.2, null))));
+    check('…and one just past it is',
+      cls(col.render(row(21.2, null))) === 'bad', cls(col.render(row(21.2, null))));
+    check('…and the amber one says why it is amber',
+      /floor at 12-14%/.test(title(col.render(row(14.2, null)))),
+      title(col.render(row(14.2, null))));
+    /* The floor is a consequence of salik being unseen. A month that HAS a
+       salik figure has no such excuse and is judged as before. */
+    check('a month that reports salik is judged at the ordinary thresholds',
+      cls(col.render(row(14.2, 1441))) === 'bad', cls(col.render(row(14.2, 1441))));
+    check('…and a month that agrees closely is still green either way',
+      cls(col.render(row(0.7, null))) === 'ok' && cls(col.render(row(0.7, 1441))) === 'ok',
+      `${cls(col.render(row(0.7, null)))} / ${cls(col.render(row(0.7, 1441)))}`);
+    /* And the horizon marking still wins: a month the provider will no longer
+       answer about is grey whatever its size, floor or no floor. */
+    check('a partial month stays grey rather than taking a floor colour',
+      cls(col.render({ delta: 1000, delta_pct: 81.4, salik: null, statement_partial: true,
+        days_in_horizon: 7, days_total: 28 })) === 'dim',
+      cls(col.render({ delta: 1000, delta_pct: 81.4, salik: null, statement_partial: true,
+        days_in_horizon: 7, days_total: 28 })));
+  }
+}
+
 /* ── the accrued slice is counted in days, like the column beside it ──────
    accrual_days was count(*) over driver_payout_day, which is one row per
    DRIVER per day. Production showed accrual_days 948 beside payout_days 6 —
