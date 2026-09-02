@@ -28,7 +28,7 @@
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, rmSync, readdirSync, statSync,
-  existsSync } from 'node:fs';
+  existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -296,6 +296,54 @@ fetch('/api/drivers/directory?from=2026-01-01&to=2026-01-31').then((r) => r.json
       /\/api\/reconcile → 500/.test(out),
       out.split('\n').filter((l) => /route errors/.test(l)).join(' | ') || out.slice(-200));
   }
+}
+
+/* ── page-audit must not blame the last view for the rest of the file ─────
+   Its range-honesty pass reads each view's source statically to learn which
+   endpoints that view asks for with a window. A view's body was taken as
+   everything up to the next `V.x = ` — which is right, because the helpers a
+   view delegates to sit directly beneath it, and bounding it more tightly
+   costs #platforms, #supply and #demand endpoints they really do call.
+
+   For the LAST view in the file there is no next `V.x`, so the slice ran to
+   the end and swallowed stampSource, whose branch names q('/api/platforms').
+   #settings does not take that branch — driven in a browser at ?days=7 and
+   again at ?days=365 it requests /api/settings, /api/status,
+   /api/settings/jobs and /api/auth and no platforms call at either — and the
+   audit reported it anyway, through three rounds of fixing the real findings
+   beside it. Both halves are asserted: the last view stops early, and every
+   other view still reaches the helpers below it. */
+{
+  const app = readFileSync(join(ROOT, 'api', 'public', 'app.js'), 'utf8');
+  const names = [...app.matchAll(/^V(?:\.([A-Za-z0-9_$]+)|\['([^']+)'\]) = /gm)]
+    .map((m) => m[1] || m[2]);
+  const declOf = (v) => app.search(new RegExp(`^V(?:\\.${v}|\\['${v}'\\]) = `, 'm'));
+  /* The tool's own rule, read out of the tool rather than copied, so a change
+     to one of the two fails here instead of drifting apart silently. */
+  const tool = readFileSync(join(ROOT, 'bin', 'page-audit.mjs'), 'utf8');
+  check('page-audit bounds the last view at the next top-level declaration',
+    /nextAt === -1\)? \{\s*\n\s*nextAt = rest\.search\(\s*\n?\s*\/\^\(\?:\(\?:async \)\?function/.test(tool)
+    || /if \(nextAt === -1\) \{[\s\S]{0,200}async \)\?function/.test(tool),
+    'the fallback search for a top-level declaration is gone');
+
+  const sliceOf = (v) => {
+    const start = declOf(v);
+    const rest = app.slice(start + 1);
+    let n = rest.search(/^V(?:\.[A-Za-z0-9_$]+|\['[^']+'\]) = /m);
+    if (n === -1) n = rest.search(/^(?:(?:async )?function [A-Za-z0-9_$]+\(|const [A-Za-z0-9_$]+ = )/m);
+    return n === -1 ? app.slice(start) : app.slice(start, start + 1 + n);
+  };
+  const windowed = (t) => new Set([...t.matchAll(/\bq(?:All)?\(\s*[`\'"](\/api\/[a-z0-9/_-]+)[`\'"]/gi)]
+    .map((m) => m[1]));
+  const last = names[names.length - 1];
+  check(`the last view (#${last}) does not inherit the file's trailing helpers`,
+    !windowed(sliceOf(last)).has('/api/platforms'),
+    'stampSource sits after it and mentions q(\'/api/platforms\')');
+  /* And the other half: a view that DOES delegate downward keeps its reach. */
+  check('a view that dispatches to helpers below it still finds their endpoints',
+    windowed(sliceOf('platforms')).has('/api/platforms')
+    && windowed(sliceOf('platforms')).has('/api/mix'),
+    'V.platforms is five lines dispatching to platformShare and two siblings');
 }
 
 /* ── an audit that could not REACH the site reports nothing ───────────────

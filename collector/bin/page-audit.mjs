@@ -472,11 +472,32 @@ if (NARROW !== WIDE) {
     const nextAt = from.search(/^(export )?(async )?(function|const) /m);
     return nextAt === -1 ? srcText.slice(m.index) : srcText.slice(m.index, m.index + 1 + nextAt);
   };
+  /* A view's body runs to the next view — and for the LAST view, to the next
+     top-level declaration instead of to the end of the file.
+     ─────────────────────────────────────────────────────────────────────────
+     The helpers a view delegates to sit directly beneath it in this file —
+     V.platforms is five lines dispatching to platformShare, platformTiers and
+     platformFunnel — so slicing to the next V.x is what reaches them, and
+     bounding every view more tightly costs three views their real endpoints.
+
+     But V.settings is the LAST view declared, so "the next V.x" found nothing
+     and its slice ran to the end of the file: countUp, animateView, render,
+     and stampSource, whose four-way branch names q('/api/platforms') and
+     qAll('/api/platforms') for the pages that DO take a window. #settings
+     takes neither branch. Driven in a browser at ?days=7 and again at
+     ?days=365 it requests /api/settings, /api/status, /api/settings/jobs and
+     /api/auth, and no platforms call at either window — yet the range-honesty
+     pass reported it, and went on reporting it after the three real findings
+     beside it were fixed. A static reader blaming the last page in a file for
+     every line that follows it. */
   const runSourceFor = (view) => {
     const start = declOf(view);
     if (start === -1) return '';
     const rest = app.slice(start + 1);
-    const nextAt = rest.search(/^V(?:\.[A-Za-z0-9_$]+|\['[^']+'\]) = /m);
+    let nextAt = rest.search(/^V(?:\.[A-Za-z0-9_$]+|\['[^']+'\]) = /m);
+    if (nextAt === -1) {
+      nextAt = rest.search(/^(?:(?:async )?function [A-Za-z0-9_$]+\(|const [A-Za-z0-9_$]+ = )/m);
+    }
     const slice = nextAt === -1 ? app.slice(start) : app.slice(start, start + 1 + nextAt);
     const parts = [slice];
     for (const m of slice.matchAll(/\b(render[A-Z][a-zA-Z]*)\(/g)) {
