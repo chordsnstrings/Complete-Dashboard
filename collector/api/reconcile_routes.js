@@ -464,6 +464,30 @@ export function reconcileRoutes(app, { q, wrap, rollupGrainSql }) {
         days_in_horizon: horizonOf(k).inside,
         days_total: horizonOf(k).total,
         statement_partial: horizonOf(k).inside < horizonOf(k).total,
+        /* True where the compared span cuts a report period in half, so one
+           side of the delta is an AVERAGE and the other is a MEASUREMENT.
+           ─────────────────────────────────────────────────────────────────
+           Both tables spread a provider's report evenly across its days. That
+           is fair over a whole month, where the spreads average out; it is not
+           fair over the elapsed part of an open week.
+
+           Measured on production 2026-09-02. The statement side for 1-6
+           September is one weekly report — an identical AED 8,395.24 on every
+           day of it — while the bank side has real daily measurements for the
+           1st and 2nd and a spread for the rest:
+
+             1 Sep  expected 7,144   bank 19,612
+             2 Sep  expected 7,144   bank 12,409
+             3-6    expected 7,144   bank  7,287 each (not yet happened)
+
+           The month tile compares the settled days only, which is right — but
+           that is 53% of the week's bank total against 2/7 = 29% of the same
+           week's statement. September read +111.2% on driver-days where both
+           sides describe the same 229 people. Nothing is missing and nothing
+           disagrees; the two halves are simply cut at a place only one of them
+           has a measurement for. */
+        period_cut: keyName === 'm' && k === TODAY.slice(0, 7)
+          && Math.max(num(s?.basis_max) || 1, num(p?.basis_max) || 1) > 1,
         trips: t ? t.trips : null,
         ontrip_net: ontrip,
         tips,

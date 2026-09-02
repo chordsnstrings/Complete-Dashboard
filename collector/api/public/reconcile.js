@@ -142,6 +142,23 @@ export const deltaPill = (r) => {
      The boundary sits just above the documented band rather than inside it, so
      a month at the top of the floor is not coloured as a fault. Beyond it the
      floor no longer explains the gap and the ordinary judgement resumes. */
+  /* The compared span cuts a report period, so one side of this delta is an
+     average and the other a measurement.
+     ─────────────────────────────────────────────────────────────────────
+     Measured on production 2026-09-02: the statement side for 1-6 September is
+     one weekly report spread evenly — an identical AED 7,144 expected on every
+     day — while the bank side measured 19,612 on the 1st and 12,409 on the
+     2nd. The month tile compares the settled days, which is right, but that is
+     53% of the week's bank total against two sevenths of the same week's
+     statement. It read +111.2% over driver-days where both sides describe the
+     same 229 people. Nothing is missing and nothing disagrees. */
+  if (r.period_cut) {
+    return pill(body, 'dim',
+      'This month is still inside an open report period. One side of it is a weekly report '
+      + 'spread evenly across its days and the other has measured the days that have happened, '
+      + 'so cutting both at today compares an average against a measurement. It settles when '
+      + 'the period closes.');
+  }
   const FLOOR_PCT = 15;
   const floorApplies = r.salik == null;
   if (floorApplies && off != null && off <= FLOOR_PCT) {

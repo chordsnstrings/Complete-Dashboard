@@ -656,6 +656,21 @@ console.log('\nthe gap is not coloured as a fault inside the floor the page docu
     check('…and a month that agrees closely is still green either way',
       cls(col.render(row(0.7, null))) === 'ok' && cls(col.render(row(0.7, 1441))) === 'ok',
       `${cls(col.render(row(0.7, null)))} / ${cls(col.render(row(0.7, 1441)))}`);
+    /* An open report period is the other reason a delta is not a discrepancy:
+       one side is a weekly report spread evenly and the other has measured the
+       days that happened, so cutting both at today compares an average against
+       a measurement. Production 2026-09-02 read +111.2% on driver-days where
+       both sides describe the same 229 people. */
+    check('a month still inside an open report period is grey, not red',
+      cls(col.render({ delta: 16431, delta_pct: 111.2, salik: 1262, period_cut: true })) === 'dim',
+      cls(col.render({ delta: 16431, delta_pct: 111.2, salik: 1262, period_cut: true })));
+    check('…and says the two halves were cut where only one has a measurement',
+      /average against a measurement/.test(
+        title(col.render({ delta: 16431, delta_pct: 111.2, salik: 1262, period_cut: true }))),
+      title(col.render({ delta: 16431, delta_pct: 111.2, salik: 1262, period_cut: true })));
+    check('…while a closed month with the same size is still judged',
+      cls(col.render({ delta: 16431, delta_pct: 111.2, salik: 1262, period_cut: false })) === 'bad',
+      cls(col.render({ delta: 16431, delta_pct: 111.2, salik: 1262, period_cut: false })));
     /* And the horizon marking still wins: a month the provider will no longer
        answer about is grey whatever its size, floor or no floor. */
     check('a partial month stays grey rather than taking a floor colour',

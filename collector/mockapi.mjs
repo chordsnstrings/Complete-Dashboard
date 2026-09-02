@@ -2068,6 +2068,9 @@ app.get('/api/reconcile', (req, r) => {
         : (grain === 'm' ? 30 : 1),
       days_total: row.days_total !== undefined ? row.days_total : (grain === 'm' ? 30 : 1),
       statement_partial: row.statement_partial !== undefined ? row.statement_partial : false,
+      /* True where the compared span cuts a report period, so one side is an
+         average and the other a measurement — the open-week case. */
+      period_cut: row.period_cut !== undefined ? row.period_cut : false,
       delta_pct: delta == null || !expectedCovered
         ? null : Math.round((delta / Math.abs(expectedCovered)) * 1000) / 10 };
   };
@@ -2171,7 +2174,8 @@ app.get('/api/reconcile', (req, r) => {
        have not happened: AED 26,398 of this row's 54,227 is a projection. The
        day drill excludes those rows, which is why clicking this row used to
        halve every figure with nothing on screen to say why. */
-    { m: '2026-09', trips: 520, ontrip_net: 14200, tips: 180, salik: 430, cash_collected: 2900,
+    { m: '2026-09', period_cut: true,
+      trips: 520, ontrip_net: 14200, tips: 180, salik: 430, cash_collected: 2900,
       ontrip_days: 2, ontrip_drivers: 44, bank_payout: 54227, payout_days: 6,
       bank_accrued: 26398, accrual_days: 4,
       expected_covered: 11910, bank_covered: 12180, matched_pairs: 88, matched_drivers: 44,
