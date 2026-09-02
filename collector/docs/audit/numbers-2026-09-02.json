@@ -1,6 +1,15 @@
 {
-  "base": "http://127.0.0.1:39841",
+  "base": "http://127.0.0.1:40479",
   "width": 412,
-  "at": "2026-09-02T11:59:54.823Z",
-  "findings": []
+  "at": "2026-09-02T12:21:10.277Z",
+  "findings": [
+    {
+      "route": "stub",
+      "code": "unshown",
+      "detail": "1 figure(s) have a column on this page, sit in a row it is showing, and are not in that row",
+      "examples": [
+        "aisha rahman · Km should be 3496 (/api/drivers/directory km)"
+      ]
+    }
+  ]
 }

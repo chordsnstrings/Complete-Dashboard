@@ -770,7 +770,35 @@ async function pullEarnerBreakdowns(from, to, onStep, checkpoint = null) {
   /* Whole calendar weeks, not seven days counted from whenever this run began
      — see weekChunks. The window is the primary key of what gets stored, so a
      grid that moves with the run stores the same week twice. */
-  const weekly = [...weekChunks(from, to)].map((w) => ({ ...w, ps: iso(w.start), pe: iso(w.end) }));
+  /* Bounded by the same rolling horizon the daily grid below is bounded by,
+     for the reason its own comment already gives: "Asking past the edge costs
+     calls and returns empty." That reasoning was applied to the days and not
+     to the weeks, three lines apart.
+
+     Measured against the live endpoint on 2026-09-02, one week per probe:
+
+       2026-08-10..08-16   10 rows,  4 with money
+       2026-03-02..03-08   10 rows,  7 with money
+       2026-02-16..02-22   10 rows,  7 with money   <- 192 days back, the edge
+       2026-02-09..02-15    0 rows
+       2026-02-02..02-08    0 rows
+       2025-12-15..12-21    0 rows
+       2025-06-16..06-22    0 rows
+
+     Over a two-year backfill that is 73 of 100 weekly windows per fleet asking
+     Uber for something it will never serve, and it is not free: backfill job
+     41 was measured at 72 seconds a window, so roughly three and a half hours
+     of every backfill, every week, spent being told nothing — while FMS, which
+     is last in the source order and holds a 73-day alert hole, waits behind it.
+
+     The margin is deliberate and points the same way as the daily grid's:
+     overshooting costs a few empty calls, undershooting loses weeks that can
+     never be re-fetched. A week is kept if any part of it reaches the
+     horizon. */
+  const weekHorizon = new Date(Date.now() - EARNER_DAY_HORIZON * 864e5);
+  const weekly = [...weekChunks(from, to)]
+    .filter((w) => w.end >= weekHorizon)
+    .map((w) => ({ ...w, ps: iso(w.start), pe: iso(w.end) }));
 
   /* And the same question asked one Dubai day at a time, for as far back as
      Uber will answer it.
