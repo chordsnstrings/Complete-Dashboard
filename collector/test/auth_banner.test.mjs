@@ -222,6 +222,54 @@ check('the two fleets carry their own org keys',
   d.rows.filter((r) => /UBER_ORG_ENCRYPTED/.test(r.credential)).length === 2,
   JSON.stringify(d.rows.filter((r) => /UBER_ORG/.test(r.credential)).map((r) => `${r.credential}=${r.severity}`)));
 
+/* ── every state a source can record has to reach the reader ─────────────
+   The severity map tested only for 'expired' and 'missing'. Every other state
+   fell through to the stall clock — which only fires for state 'ok' — and
+   landed on 'ok'. Measured on production 2026-09-02, minutes after the
+   collector first learned to record its refusals: two rows read state
+   'invalid' and severity 'ok', with stopped 0 and no headline. One was a Bolt
+   token minted for the wrong fleet's owner, the other a Yango session
+   answering 403. Both were shown as fine. */
+console.log('\nno recorded state is rendered as healthy');
+{
+  const { noteCredential } = await import('../src/auth_state.js');
+  await noteCredential(db, { provider: 'bolt', fleet: 'egari', credential: 'BOLT_REFRESH_TOKEN',
+    state: 'invalid', detail: 'the token belongs to owner 173999, not 174036' });
+  await noteCredential(db, { provider: 'yango', fleet: 'ecosine', credential: 'YANGO_API_KEY',
+    state: 'unknown', detail: 'the cookie-free comparison did not complete' });
+  const a = await get('/api/auth');
+  const bolt = a.rows.find((r) => r.credential === 'BOLT_REFRESH_TOKEN');
+  const yango = a.rows.find((r) => r.credential === 'YANGO_API_KEY');
+  check('a credential recorded invalid is stopped, not ok',
+    bolt?.severity === 'stopped', JSON.stringify(bolt && [bolt.state, bolt.severity]));
+  check('…and it reaches the headline, which is the only thing anyone reads',
+    /173999/.test(a.headline || ''), String(a.headline).slice(0, 120));
+  check('a check that could not run is at-risk, not ok',
+    yango?.severity === 'at-risk', JSON.stringify(yango && [yango.state, yango.severity]));
+  /* The rule, not just these two states: the failure was a state added by one
+     change and silently rendered healthy by another, so the default has to be
+     the safe answer for a state nobody has thought of yet. */
+  await noteCredential(db, { provider: 'fms', fleet: 'ecosine', credential: 'FMS_PASSWORD',
+    state: 'a-state-nobody-has-written-yet', detail: 'from the future' });
+  const b = await get('/api/auth');
+  check('…and a state this page has never seen is not assumed to be fine',
+    b.rows.find((r) => r.credential === 'FMS_PASSWORD')?.severity === 'at-risk',
+    JSON.stringify(b.rows.find((r) => r.credential === 'FMS_PASSWORD')));
+}
+
+console.log('\nand a run that wrote nothing does not reset the stall clock');
+{
+  /* lastOk counted any 'partial' as the source still collecting. A partial
+     that wrote no rows is not evidence that anything works — and it is what an
+     all-but-one-window failure looked like before logRun learned to escalate. */
+  const src = await import('node:fs').then((fs) => fs.readFileSync('api/auth_routes.js', 'utf8'));
+  check('a partial with no rows is skipped when measuring the last good run',
+    /r\.status === 'partial' && !\(Number\(r\.rows_written\) > 0\)/.test(src),
+    'the clock must not be reset by a run that produced nothing');
+  check('…and rows_written is actually selected, or the guard reads undefined',
+    /status, finished_at, rows_written/.test(src));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();
 process.exit(fail ? 1 : 0);

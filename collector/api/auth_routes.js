@@ -41,6 +41,18 @@ const STALL_HOURS = {
 };
 const DEFAULT_STALL_H = 12;
 
+/* What each recorded credential state means to a reader. 'ok' is absent on
+   purpose: a working credential's severity is decided by the stall clock, not
+   by this table. */
+const SEVERITY_OF = {
+  expired: 'stopped',
+  invalid: 'stopped',
+  missing: 'missing',
+  /* A check that could not run is not a check that passed — the Yango
+     cookie-free comparison records this when it cannot complete. */
+  unknown: 'at-risk',
+};
+
 export function authRoutes(app, { q, wrap }) {
   app.get('/api/auth', wrap(async (_req, res) => {
     const [creds, runs] = await Promise.all([
@@ -51,7 +63,7 @@ export function authRoutes(app, { q, wrap }) {
          against the thing that actually runs rather than against a source
          name that covers two fleets with different credentials. */
       q(`SELECT DISTINCT ON (source, coalesce(fleet_id,'*'))
-                source, coalesce(fleet_id,'*') AS fleet_id, status, finished_at
+                source, coalesce(fleet_id,'*') AS fleet_id, status, finished_at, rows_written
            FROM collection_run
           ORDER BY source, coalesce(fleet_id,'*'), finished_at DESC NULLS LAST`).catch(() => []),
     ]);
@@ -61,6 +73,10 @@ export function authRoutes(app, { q, wrap }) {
     const lastOk = new Map();
     for (const r of runs) {
       if (r.status !== 'ok' && r.status !== 'partial') continue;
+      /* A partial that wrote nothing is not evidence that anything works, and
+         this clock is the product's only measure of "the credential is still
+         collecting". Rows are what a working credential produces. */
+      if (r.status === 'partial' && !(Number(r.rows_written) > 0)) continue;
       lastOk.set(`${r.source}|${r.fleet_id}`, r.finished_at);
     }
 
@@ -77,9 +93,22 @@ export function authRoutes(app, { q, wrap }) {
         last_ok_age_h: ageH(c.last_ok_at),
         run_age_h: runAge == null ? null : Math.round(runAge * 10) / 10,
         stall_limit_h: limit,
-        severity: c.state === 'expired' ? 'stopped'
-          : c.state === 'missing' ? 'missing'
-            : stalled ? 'at-risk' : 'ok',
+        /* Exhaustive, and its default is NOT 'ok'.
+           ─────────────────────────────────────────────────────────────────
+           This tested only for 'expired' and 'missing', so every other state
+           fell through to the stall clock — which only fires for state 'ok'
+           — and landed on 'ok'. Measured on production 2026-09-02, minutes
+           after the collector first learned to record its refusals: two rows
+           read state 'invalid' and severity 'ok', with stopped 0 and no
+           headline at all. One of them was a Bolt token minted for the wrong
+           fleet's owner and the other a Yango session answering 403.
+
+           A state this does not know is at-risk rather than fine, because
+           that is the failure that just happened: a state added by one change
+           and silently rendered healthy by another. */
+        severity: c.state === 'ok'
+          ? (stalled ? 'at-risk' : 'ok')
+          : (SEVERITY_OF[c.state] || 'at-risk'),
       };
     });
 
