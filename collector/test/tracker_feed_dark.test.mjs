@@ -116,10 +116,24 @@ console.log('\nan outage that straddles the top of an hour is still one outage')
 }
 
 console.log('\nand it is still one finding on the next run');
+/* Counted per FLEET, because the boundary block above seeded a second, real
+   outage on egari — two feeds quiet at two different moments are two findings,
+   and an assertion counting every row in the table would call that the
+   duplication it is here to catch. What must not change on a re-run is the
+   count for the fleet whose outage is still the same outage. */
+const before = await q(
+  `SELECT fleet_id, count(*)::int n FROM insight WHERE code = 'tracker_feed_dark'
+    GROUP BY 1 ORDER BY 1`);
 await computeInsights({});
-const again = await q(`SELECT count(*)::int n FROM insight WHERE code = 'tracker_feed_dark'`);
-check('a feed that is still dark is the same finding, not a second one',
-  again[0].n === 1, String(again[0].n));
+const again = await q(
+  `SELECT fleet_id, count(*)::int n FROM insight WHERE code = 'tracker_feed_dark'
+    GROUP BY 1 ORDER BY 1`);
+check('the ecosine outage is one finding, not two',
+  again.find((r) => r.fleet_id === 'ecosine')?.n === 1,
+  JSON.stringify(again));
+check('…and a re-run adds nothing anywhere',
+  JSON.stringify(before) === JSON.stringify(again),
+  `${JSON.stringify(before)} → ${JSON.stringify(again)}`);
 
 await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);

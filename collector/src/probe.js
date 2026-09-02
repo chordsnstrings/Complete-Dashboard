@@ -27,7 +27,7 @@
 import { config, loadSettings } from './config.js';
 import { http, qs } from './http.js';
 import { upsert } from './db.js';
-import { uberOAuthToken, uberWebHeaders } from './auth/uber.js';
+import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from './auth/uber.js';
 import { fiToken } from './sources/bolt.js';
 import { dotDate, iso, daysAgo } from './util.js';
 import { log } from './log.js';
@@ -304,12 +304,12 @@ export function surfaces({ from, to }) {
     }
 
     add('uber', 'trip-report-session', null,
-      'The trip export needs a supplier.uber.com session cookie, which expires and has to be re-pasted',
+      'The trip export needs a fleethub.uber.com session cookie, which expires and has to be re-pasted',
       async () => {
         // Ask for a report over three days and read only whether the session
         // was accepted. Nothing is downloaded.
         const { data, status } = await http(
-          'https://supplier.uber.com/api/vs-sp-reports-management/GenerateReport?localeCode=en-GB', {
+          `${UBER_WEB_HOST}/api/vs-sp-reports-management/GenerateReport?localeCode=en-GB`, {
             method: 'POST', timeoutMs: 30000, retries: 0, headers: uberWebHeaders(),
             body: JSON.stringify({
               orgId: { uuid: { value: config.uber.orgUuid } }, reportType: 'REPORT_TYPE_TRIP_ACTIVITY',

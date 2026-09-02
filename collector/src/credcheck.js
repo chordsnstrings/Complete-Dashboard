@@ -28,8 +28,14 @@ import { config } from './config.js';
 import { http } from './http.js';
 import { get, SETTING_DEFAULTS } from './settings.js';
 import { keyFor } from './credkit.js';
+import { UBER_WEB_HOST } from './auth/uber.js';
 
-const REPORTS = 'https://supplier.uber.com/api/vs-sp-reports-management';
+/* The same host the collector uses, from the same export. This checker kept
+   its own copy of the URL, so when Uber moved supplier.uber.com to fleethub
+   the paste box went on probing the old host and REFUSED a perfectly good
+   session — the page telling an operator their credential was dead was the
+   last thing standing between them and a working collector. */
+const REPORTS = `${UBER_WEB_HOST}/api/vs-sp-reports-management`;
 const day = (n) => new Date(Date.now() - n * 864e5).toISOString().slice(0, 10);
 
 /* A network failure is not a credential failure. */
@@ -61,11 +67,11 @@ async function checkUber({ value, org_uuid }) {
     /* A redirect to the login page is what an expired session looks like from
        here — the status is 200 and the body is HTML. */
     if (typeof data === 'string' && /login|sign in/i.test(data)) {
-      return verdict(false, 'the session is no longer signed in — re-capture from a logged-in supplier.uber.com tab');
+      return verdict(false, 'the session is no longer signed in — re-capture from a logged-in fleethub.uber.com tab');
     }
     return verdict(false, String(JSON.stringify(data?.data?.meta?.details || data?.data || data || status)).slice(0, 200));
   } catch (e) {
-    if (unreachable(e)) return { verdict: 'unknown', detail: `supplier.uber.com could not be reached: ${String(e.message).slice(0, 120)}` };
+    if (unreachable(e)) return { verdict: 'unknown', detail: `${UBER_WEB_HOST.replace('https://', '')} could not be reached: ${String(e.message).slice(0, 120)}` };
     return verdict(false, String(e.message || e).slice(0, 200));
   }
 }
