@@ -251,23 +251,35 @@ function fmsAlertRows(data, fleet) {
 
    The pattern is not "fails after a date". Windows outside FMS's alert
    retention answer 200-empty; windows with data in them are refused. It is the
-   same response-size ceiling collectTripWindow above was written for, and it
-   was measured again on 2026-09-02 through the live trip probe — the only
-   surface a probe route reaches — asking ecosine for windows ending
-   2026-09-01:
+   same response-size ceiling collectTripWindow above was written for.
 
-     18 days   200, 3,364 rows        25 days   200, 4,434 rows
-     21 days   200, 3,867 rows        26 days   200, 4,581 rows
-     24 days   200, 4,288 rows        27 days   400
+   Measured on the ALERT operation itself, 2026-09-02, windows ending
+   2026-09-01. This was first argued from the TRIP probe — the only operation a
+   probe route could reach — which put the ceiling around 4,750 records and
+   concluded that two days at 7,500 could not fit. Asking the alert operation
+   directly disproved that, and the real numbers are worth having:
 
-   So the refusal arrives between 4,581 records and the ~4,750 a twenty-seventh
-   day would have added. Alerts run 3,758 a day. ONE day fits under that
-   ceiling with room to spare; two days is 7,500 and cannot.
+     1 day    ecosine 200,  5,864      egari 200, 7,121
+     2 days   ecosine 200,  8,832      egari 200, 10,490
+     3 days   ecosine 200, 11,026      egari 400
+     4 days   ecosine 400               egari 400
+     7 days   ecosine 400               egari 400
 
-   That is why this is a floor of one day and not FMS_MIN_SPLIT_DAYS. The trip
-   splitter could never have rescued this surface: its floor of two days is
-   already ABOVE the alert ceiling, so every half it produced would have been
-   refused as well, all the way down, and the last refusal recorded as a hole. */
+   So the ceiling is not five thousand records: 11,026 is accepted, and the
+   refusal arrives by the ~14,700 a fourth ecosine day would have added. The
+   estimate was low by more than a factor of two, and the conclusion it was
+   used to reach happened to be right for the wrong reason.
+
+   One day is still the correct window, and now for a reason that was measured
+   rather than inferred: the busiest single fleet-day observed is 7,121 against
+   a ceiling above 11,026, which is real headroom, while two days runs 8,832 to
+   10,490 — close enough to the ceiling that a busy pair would refuse and the
+   window size would become a source of intermittent holes.
+
+   That is also why this is a floor of one day and not FMS_MIN_SPLIT_DAYS. The
+   trip splitter could never have rescued this surface: its floor of two days
+   sits in exactly that unreliable band, so a busy fortnight would halve its
+   way down to two days, be refused there, and record the refusal as a hole. */
 const FMS_ALERT_MAX_DAYS = 1;
 
 /* Ask for a window; if it is refused for its size, ask for its days.
@@ -303,11 +315,11 @@ async function collectAlertWindow(fleet, s, e, chunks, checkpoint = null, split 
       const days = Math.round((e - s) / 864e5) + 1;
       if (days > FMS_ALERT_MAX_DAYS) {
         /* Straight to days rather than halving. Halving is the right shape
-           when the largest window that works is unknown; here it is measured —
-           3,758 rows a day against a ceiling that refuses somewhere above
-           4,581 — so every intermediate half from a month down to two days is
-           a request already known to be refused. Sixty-three requests to
-           collect a month, where thirty-two do it. */
+           when the largest window that works is unknown; here it is measured
+           on the alert operation itself — see FMS_ALERT_MAX_DAYS above — and a
+           window refused at its current size will be refused at every size
+           down to two days on a busy stretch. Sixty-three requests to collect
+           a month, where thirty-two do it. */
         chunks.pop();
         log.info(SRC, `alert window ${dotDate(s)}..${dotDate(e)} refused — asking day by day`,
           { fleet: fleet.fleet, status: r.status, days });

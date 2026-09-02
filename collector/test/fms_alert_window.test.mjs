@@ -262,10 +262,28 @@ console.log('\nthe trip splitter could never have rescued this surface');
 {
   const src = readFileSync('src/sources/fms.js', 'utf8');
   check('the trip floor is still two days', /const FMS_MIN_SPLIT_DAYS = 2/.test(src));
-  check('and the alert floor is one, because two days is 7,500 rows',
+  /* The reason, corrected by measuring the alert operation itself on
+     2026-09-02 rather than inferring it from the trip probe:
+
+       1 day    ecosine 200,  5,864     egari 200,  7,121
+       2 days   ecosine 200,  8,832     egari 200, 10,490
+       3 days   ecosine 200, 11,026     egari 400
+       4 days   ecosine 400             egari 400
+
+     The ceiling is not the ~4,750 records the trip probe suggested — 11,026 is
+     accepted — so "two days is 7,500 and cannot fit" was simply wrong, and the
+     right conclusion had been reached for the wrong reason. Two days DOES fit,
+     at 8,832–10,490, but only just: a busy pair would refuse, which is a
+     window size that produces intermittent holes rather than a working one.
+     One day peaks at 7,121 against a ceiling above 11,026, and that headroom
+     is the actual argument. */
+  check('and the alert floor is one, for the headroom rather than the arithmetic',
     /const FMS_ALERT_MAX_DAYS = 1/.test(src),
-    'a floor of two days sits ABOVE the alert ceiling, so every half it produced '
-    + 'would have been refused as well, down to the last one recorded as a hole');
+    'two days runs 8,832-10,490 against a ceiling that refuses by ~14,700 — close '
+    + 'enough that a busy pair refuses, which is how a window size becomes a hole');
+  check('…and the file records what was measured, not what was estimated',
+    /11,026 is accepted/.test(src) && /disproved/.test(src),
+    'the ~4,750 estimate is superseded and must not be left standing as the reason');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
