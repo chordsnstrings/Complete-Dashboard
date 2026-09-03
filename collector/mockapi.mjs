@@ -202,6 +202,8 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
   alert_km: 17040, alert_window_trips: 1498,
   alerts_per_100km: +((8863 / 17040) * 100).toFixed(1),
   alerts_per_100km_absent: null,
+  // The hardware half, beside the driving half it used to be folded into.
+  device_alerts: 604,
   alert_coverage: alertCoverage(30),
   // The two fields that stop the Trips and Revenue tiles overstating themselves.
   telematics_journeys: 2657, telematics_km: 31840, priced_trips: 187, avg_fare: 220.3,
@@ -1056,11 +1058,13 @@ app.get('/api/driver/quality', (req, r) => {
     /* The distance on the days the alert feed was up — the only denominator
        this rate may have. See api/alert_coverage_sql.js. */
     alert_km: 3410 - i * 240, alerts_per_100km: +(((87 + i * 5) / (3410 - i * 240)) * 100).toFixed(1),
-    alerts_per_100km_absent: null, alert_coverage: alertCoverage(30),
+    alerts_per_100km_absent: null, device_alerts: i === 1 ? 18 : 0,
+    alert_coverage: alertCoverage(30),
     /* What the fleet does, so a rate has something to be high AGAINST. The page
        painted this critical from a hardcoded 5/15 scale under a sub-label
        reading "comparable across drivers" — comparable to a constant. */
     fleet_alerts_per_100km: 2.6, fleet_alert_km: 184200, fleet_alerts: 4790,
+    fleet_device_alerts: 604,
   });
 });
 
@@ -1173,6 +1177,10 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
     : Math.round(((120 - i * 11) / Math.round((6100 - i * 420) * 0.73)) * 1000) / 10,
   alerts_per_100km_absent: i === 6
     ? 'no distance was measured on the days the alert feed covered' : null,
+  /* The hardware half. Car 4 has a box that keeps losing power, so the rate
+     beside it is visibly over the driving events alone rather than over
+     everything the tracker said. */
+  device_alerts: i === 4 ? 27 : 0,
   alert_days: 22, alert_window_days: 30,
   current_driver: i === 6 ? null : drivers[i],
   driver_as_of: new Date().toISOString(),
@@ -1375,7 +1383,8 @@ app.get('/api/vehicle/kpis', (req, r) => {
     /* Over the feed's covered days, which is why alert_km is smaller than km. */
     alert_km: Math.round(km * 0.73),
     alerts_per_100km: +((alerts / Math.round(km * 0.73)) * 100).toFixed(1),
-    alerts_per_100km_absent: null, alert_coverage: alertCoverage(30),
+    alerts_per_100km_absent: null, device_alerts: i === 3 ? 12 : 0,
+    alert_coverage: alertCoverage(30),
     revenue_per_km: 2.7 });
 });
 
@@ -3115,11 +3124,21 @@ app.get('/api/day', (req, r) => {
 app.get('/api/alerts/by-driver', (_, r) => r.json({ totals: { drivers: 74, alerts: 1904, unattributed: 212 }, shown: 8, truncated: true, rows: drivers.map((name, i) => {
   const brake = 22 - i * 2, accel = 12 - i, turn = i % 3, over = i % 2;
   const km = (900 - i * 90);
-  return { driver_name: name, driver_ext_id: `drv-${i}`, alerts: brake + accel + turn + over,
-    harsh_brake: brake, harsh_accel: accel, sharp_turn: turn, overspeed: over,
+  /* A tracker losing power is not a driving style. Row 2 carries a failing box
+     so the "+N dev" marker renders and the rate is visibly taken over the
+     driving half only; row 5 is ALL device fault, which must render as "not
+     measured" rather than as the cleanest driver on the page. */
+  const dev = i === 2 ? 31 : 0;
+  const drive = i === 5 ? 0 : brake + accel + turn + over;
+  const allDev = i === 5 ? brake + accel + turn + over + 7 : 0;
+  return { driver_name: name, driver_ext_id: `drv-${i}`,
+    alerts: drive + dev + allDev,
+    driving_alerts: drive, device_alerts: dev + allDev,
+    harsh_brake: i === 5 ? 0 : brake, harsh_accel: i === 5 ? 0 : accel,
+    sharp_turn: i === 5 ? 0 : turn, overspeed: i === 5 ? 0 : over,
     /* The residual: everything the four buckets do not catch. Without it the
        columns did not sum to the total on six of sixty live rows. */
-    other: 0,
+    other: dev + allDev,
     // WHICH cars, not just how many — "4 plates" is not something you can open.
     plates: 1 + (i % 2), plate_list: [plates[i % plates.length]].concat(
       i % 2 ? [plates[(i + 1) % plates.length]] : []),
@@ -3130,9 +3149,15 @@ app.get('/api/alerts/by-driver', (_, r) => r.json({ totals: { drivers: 74, alert
        label and its "thin" marker are all exercised against the distance the
        rate actually used rather than the whole window's. */
     alert_km: Math.round(km * 0.73),
-    per_100km: Math.round(((brake + accel + turn + over) * 100 / Math.round(km * 0.73)) * 100) / 100,
-    per_100km_absent: null };
-}).concat([{ driver_name: '(unattributed)', driver_ext_id: null, alerts: 9, harsh_brake: 6,
+    per_100km: drive === 0
+      ? null
+      : Math.round((drive * 100 / Math.round(km * 0.73)) * 100) / 100,
+    per_100km_absent: drive === 0
+      ? `not measured — all ${allDev} alerts on this vehicle are the tracker reporting its own `
+        + 'power loss, so nothing here measures driving'
+      : null };
+}).concat([{ driver_name: '(unattributed)', driver_ext_id: null, alerts: 9,
+  driving_alerts: 9, device_alerts: 0, harsh_brake: 6,
   harsh_accel: 2, sharp_turn: 1, overspeed: 0, other: 0, plates: 4,
   plate_list: plates.slice(0, 3), booked_km: null, alert_km: null, per_100km: null,
   per_100km_absent: 'no booked distance on the days the alert feed covered' }]),
@@ -4175,6 +4200,8 @@ const uAssets = plates.map((pl, i) => {
     alerts: 120 - i * 11, alert_km: Math.round(km * 0.73),
     alerts_per_100km: rt((120 - i * 11) * 100, Math.round(km * 0.73)),
     alerts_per_100km_absent: null,
+    /* The hardware half, kept out of the rate beside it. */
+    device_alerts: i === 4 ? 27 : 0,
     any_even_split: i === 2,
     soonest_expiry: new Date(Date.now() + (i === 1 ? -12 : 5 + i * 14) * 864e5).toISOString(),
     doc_days_left: i === 1 ? -12 : 5 + i * 14,
@@ -4294,6 +4321,7 @@ app.get('/api/economics/drivers', (_, r) => {
            covered and the money rates are over the whole window. */
         alerts: 40 - i * 3, alert_km: Math.round(km * 0.73),
         alerts_per_100km: rt((40 - i * 3) * 100, Math.round(km * 0.73)),
+        device_alerts: i === 2 ? 15 : 0,
         alerts_per_100km_absent: null,
         state: i === 3 ? 'suspended' : 'active',
         platform_state: i === 3 ? 'suspended' : 'active', can_earn: i !== 3,

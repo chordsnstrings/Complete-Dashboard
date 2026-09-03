@@ -332,6 +332,94 @@ async function portalToken(company) {
 
 // Portal trips (orderHistory) — the only Bolt surface carrying trips and fares;
 // the FI gateway is roster-only.
+/* ── the order table, as the portal actually serves it ────────────────────
+   Measured against the live endpoint on 2026-09-03 with verified tokens for
+   both fleets. Every constant here is a refusal boundary found by asking. */
+const PORTAL_PAGE = 100;      // 200 answers "limit: Integer is not in range"
+const PORTAL_MAX_DAYS = 30;   // 31 answers DATE_RANGE_TOO_BIG
+const PORTAL_STATES = ['finished', 'client_cancelled', 'driver_did_not_respond',
+  'driver_rejected', 'client_did_not_show', 'driver_cancelled_after_accept'];
+
+const url = (c) => `${config.bolt.portalBase}/orderHistory/getTable`
+  + `?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`;
+
+/* Half-open windows of at most n days, so a backfill of any length is asked
+   for in pieces the endpoint will accept. */
+function* dayChunks(from, to, n) {
+  const DAY = 864e5;
+  let s = new Date(`${iso(from)}T00:00:00Z`).getTime();
+  const end = new Date(`${iso(to)}T00:00:00Z`).getTime();
+  while (s <= end) {
+    const e = Math.min(s + (n - 1) * DAY, end);
+    yield { start: new Date(s), end: new Date(e) };
+    s = e + DAY;
+  }
+}
+
+/* COLUMN-oriented to row-oriented. The portal returns one object per column
+   carrying every value for it — data.columns[i].cells[n] is field i of row n —
+   which is why a reader looking for data.orders found nothing and reported an
+   empty window. Keyed on the column's own `key`, so a column added or moved
+   changes nothing here. */
+export function pivot(data) {
+  const cols = data?.columns;
+  if (!Array.isArray(cols) || !cols.length) return [];
+  const n = cols.reduce((m, c) => Math.max(m, c.cells?.length || 0), 0);
+  return Array.from({ length: n }, (_, i) =>
+    Object.fromEntries(cols.map((c) => [c.key || c.id || c.title, c.cells?.[i]])));
+}
+
+/* One order, in this product's words.
+   `created` and the other timestamps are unix SECONDS, and 0 is the portal's
+   way of writing "did not happen" — a cancelled ride has fare_finalised 0 —
+   so 0 becomes null rather than 1970. */
+const at = (v) => (Number(v) > 0 ? new Date(Number(v) * 1000).toISOString() : null);
+const num = (v) => (v == null || v === '' ? null : Number(v));
+
+export function portalRow(o, c) {
+  const route = Array.isArray(o.route) ? o.route : [];
+  const arrived = Array.isArray(o.arrived_to_destinations) ? o.arrived_to_destinations : [];
+  return {
+    platform: SRC,
+    /* THERE IS NO ORDER ID IN THIS RESPONSE. partner_identifier looks like one
+       — it is a uuid, one per row — and it is the DRIVER's: 50 rows carried 18
+       of them, 18 drivers, one uuid each, ten rides sharing the busiest. Using
+       it as the key would have collapsed 547 trips into 71 and called the rest
+       duplicates.
+
+       So the key is synthesised, the way the alert table already synthesises
+       one (sql/schema.sql: "alertId or synthetic"). A driver cannot begin two
+       rides in the same second, and `created` is second-granular: verified
+       unique over all 547 orders on both fleets, 2026-08-06..2026-09-03.
+       The plate is deliberately NOT in it — it adds no uniqueness there, and a
+       key holding a correctable field duplicates the row when it is
+       corrected. */
+    external_id: o.driver?.id != null && Number(o.created) > 0
+      ? `${o.driver.id}|${o.created}` : null,
+    fleet_id: c.fleet,
+    plate: normPlate(o.car_reg_number),
+    driver_ext_id: o.driver?.id != null ? String(o.driver.id) : null,
+    driver_name: o.driver?.name || null,
+    requested_at: at(o.created),
+    ended_at: at(arrived[arrived.length - 1]) || at(o.fare_finalised),
+    /* route is the full stop list, so the last entry is where the ride ended
+       however many stops it had. A cancelled ride can carry a route and no
+       arrival, which is why the two are read separately. */
+    pickup_addr: route[0] || null,
+    dropoff_addr: route.length > 1 ? route[route.length - 1] : null,
+    distance_km: num(o.distance),
+    status: o.status || null,
+    product: o.category || null,
+    payment_type: o.payment_method || null,
+    /* What the rider paid for the ride. The fees Bolt itemises beside it are
+       kept in raw rather than folded in: a booking fee added to the fare would
+       silently change what every per-trip figure in this product means. */
+    price: num(o.price),
+    currency: 'AED',
+    raw: o,
+  };
+}
+
 async function pullPortalTrips(from, to, fails) {
   let total = 0;
   for (const c of config.bolt.companies) {
@@ -386,23 +474,70 @@ async function pullPortalTrips(from, to, fails) {
           : `${String(err).slice(0, 150)}${m?.expires_at ? ` (expired ${m.expires_at})` : ''}` });
       continue;
     }
-    const url = `${config.bolt.portalBase}/orderHistory/getTable?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`;
-    const { data } = await http(url, {
-      method: 'POST', headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
-      body: JSON.stringify({ start_date: iso(from), end_date: iso(to),
-        order_states: ['finished', 'client_cancelled', 'driver_did_not_respond', 'driver_rejected', 'client_did_not_show', 'driver_cancelled_after_accept'] }),
-    });
-    const orders = data?.data?.orders || data?.orders || [];
-    // An authenticated call that comes back with no orders is worth a line: it
+    /* The token was good; the request never was.
+       ─────────────────────────────────────────────────────────────────────
+       This call has been made since the portal path was written and has never
+       once returned a row, and the reason was not the credential. Asked on
+       2026-09-03 with two freshly-minted, verified access tokens, the endpoint
+       answers, verbatim:
+
+         {"code":702,"message":"INVALID_REQUEST","validation_errors":[
+            {"error":"Is required","property":"limit"},
+            {"error":"Is required","property":"offset"}]}
+
+       It was telling us exactly what was missing, in a body nothing read. Fix
+       that and the next refusal is DATE_RANGE_TOO_BIG, and the one after that
+       is the real one: the response has no `orders` array at all. It is
+       COLUMN-oriented — data.columns[i].cells[n] is field i of row n, with
+       data.total_rows for the count — so `data?.data?.orders || []` could only
+       ever be empty, and the "authenticated, no orders in window" line below
+       reported a healthy empty window over 547 real trips.
+
+       Measured bounds, each by asking until it refused: limit max 100
+       (200 gives "Integer is not in range"), window max 30 days (31 gives
+       DATE_RANGE_TOO_BIG). Both are encoded as constants rather than as a
+       comment, because a limit nobody can see is a limit somebody raises. */
+    const rows = [];
+    let says = null;
+    for (const win of dayChunks(from, to, PORTAL_MAX_DAYS)) {
+      let offset = 0, guard = 0;
+      for (;;) {
+        const { data } = await http(url(c), {
+          method: 'POST', headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ start_date: iso(win.start), end_date: iso(win.end),
+            order_states: PORTAL_STATES, limit: PORTAL_PAGE, offset }),
+        });
+        if (data?.code) { says = says || `${data.message || 'refused'} (code ${data.code})`; break; }
+        const page = pivot(data?.data);
+        rows.push(...page.map((o) => portalRow(o, c)).filter((r) => r.external_id));
+        offset += PORTAL_PAGE;
+        /* total_rows is the count for the WHOLE window, not the page, so the
+           loop stops on it rather than on a short page — a short page is also
+           what the last page looks like, and the two are only the same when
+           the total divides exactly. */
+        if (page.length < PORTAL_PAGE || offset >= (data?.data?.total_rows || 0)) break;
+        if (++guard > 200) { log.warn(SRC, `portal ${c.fleet}: page guard hit`, { win: iso(win.start) }); break; }
+      }
+    }
+    if (says) {
+      fails.push(`portal ${c.fleet}: ${says}`);
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
+        state: 'invalid', surface: 'orderHistory', detail: says });
+      continue;
+    }
+    /* The token demonstrably worked, so say so. A credential that can only
+       ever be written 'invalid' or 'missing' keeps the last red row it was
+       given for ever — the same defect this codebase has already fixed twice,
+       in src/sources/fms.js and src/sources/yango.js. Production carried
+       "BOLT_REFRESH_TOKEN invalid — the token belongs to owner 173999" for
+       hours after a valid Egari token was in place, because nothing in this
+       function could clear it. */
+    await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
+      state: 'ok', surface: 'orderHistory', detail: null });
+    // An authenticated call that comes back with nothing is worth a line: it
     // separates "the token works and the window is empty" from "the token works
     // and we are reading the wrong field", which otherwise both read as zero.
-    if (!orders.length) log.info(SRC, `portal ${c.fleet}: authenticated, no orders in window`, { from: iso(from), to: iso(to) });
-    const rows = orders.map((o) => ({
-      platform: SRC, external_id: String(o.order_id || o.id), fleet_id: c.fleet,
-      plate: normPlate(o.car_reg_number || o.license_plate), driver_name: o.driver_name,
-      requested_at: o.order_created || o.created_at, status: o.order_state || o.state,
-      price: o.ride_price || o.price, currency: 'AED', raw: o,
-    })).filter((r) => r.external_id && r.external_id !== 'undefined');
+    if (!rows.length) log.info(SRC, `portal ${c.fleet}: authenticated, no orders in window`, { from: iso(from), to: iso(to) });
     if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
   }
   return total;
