@@ -264,6 +264,10 @@ console.log('\na rejected login is not answered by asking sixty-two more times')
     /will not change it/.test(branch));
   check('the account is read from the cookie so "sign in as somebody else" is actionable',
     /yandex_login=\(\[\^;\]\+\)/.test(y) && /const yangoAccount = /.test(y));
+  check('and a cookie that demonstrably authenticated is recorded as working',
+    /if \(bare && !cookieIsNotIt\) \{[\s\S]{0,220}credential: 'YANGO_COOKIE',[\s\S]{0,60}state: 'ok'/.test(y),
+    'ceasing to blame it does not clear the red row already against it — production carried '
+    + 'YANGO_PARK_ID invalid and YANGO_COOKIE invalid at the same time, minutes apart');
   check('and the credential blamed is not the cookie that just authenticated',
     /credential: cookieIsNotIt \|\| bare \? 'YANGO_PARK_ID' : 'YANGO_COOKIE'/.test(y),
     'a red row against a working credential sends somebody to replace it');

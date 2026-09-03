@@ -97,6 +97,26 @@ const post = async (path, body) => {
             + ' park it cannot see. Re-pasting the same account\u2019s cookie will not change it'
           : ' — and the cookie-free comparison did not complete, so which credential is being'
             + ' refused is not yet established';
+      /* The cookie is recorded as WORKING when it demonstrably worked.
+         ─────────────────────────────────────────────────────────────────
+         Blaming a different credential stops writing red rows against this
+         one; it does not clear the red row already there. Measured on
+         production 2026-09-03, minutes after the fix that stopped blaming the
+         cookie shipped: /api/auth carried BOTH `YANGO_PARK_ID invalid` from
+         the new code and `YANGO_COOKIE invalid` from the old, so the panel
+         accused a session that had just authenticated, for ever, because
+         nothing would ever overwrite it. Same shape as src/sources/fms.js
+         never writing 'ok' — a state only something can clear.
+
+         The evidence is the comparison itself: a 401 without the cookie and a
+         403 with it is the portal reading the session. That is a working
+         cookie whatever else is refused. */
+      if (bare && !cookieIsNotIt) {
+        await noteCredential(pool, {
+          provider: SRC, fleet: config.yango.fleet || '*', credential: 'YANGO_COOKIE',
+          state: 'ok', surface: path, detail: null,
+        });
+      }
       /* Recorded, not only thrown: a thrown error dies with the run, and the
          credential panel is where somebody goes to find out what to re-paste.
          Uber has done this since the OAuth work; the other five sources never
