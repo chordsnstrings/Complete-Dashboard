@@ -334,6 +334,10 @@ export function economicsRoutes(app, { q, wrap, range }) {
                 doc.soonest_expiry,
                 (doc.soonest_expiry::date - now()::date) doc_days_left,
                 coalesce(al.alerts,0) alerts,
+                /* Carried out, not merely computed: a row that reaches
+                   alertRate() with device undefined rates a hardware-only
+                   plate at 0.0 again. */
+                coalesce(al.device_alerts,0) device_alerts,
                 cd.driver_name current_driver, cd.driver_ext_id current_driver_id,
                 cd.as_of driver_as_of
          FROM plates p
@@ -881,6 +885,11 @@ export function economicsRoutes(app, { q, wrap, range }) {
     const canon = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
       .replace(/\b(\w+)( \1)+\b/g, '$1');
     const alerts = new Map(custody.map((a) => [a.driver_ext_id, a.alerts]));
+    /* The hardware half, folded onto the person exactly as the driving half is.
+       Without it every person reaches alertRate() with device undefined, and a
+       driver whose only alerts are their tracker losing power rates 0.0 — the
+       very number this change exists to stop printing. */
+    const devAlerts = new Map(custody.map((a) => [a.driver_ext_id, a.device_alerts]));
     const plateRefs = new Map(held.filter((h) => h.plates).map((h) => [h.driver_ext_id, h.plates]));
     /* One standing per person, merged across both tables and across a person's
        platform rows. The soonest licence expiry wins — a driver legal on one
@@ -969,6 +978,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
       (y.platforms || []).forEach((x) => r.platforms.add(x));
       r.fleet_id = r.fleet_id || y.fleet_id;
       r.alerts += alerts.get(y.driver_ext_id) || 0;
+      r.device_alerts = (r.device_alerts || 0) + (devAlerts.get(y.driver_ext_id) || 0);
     }
     /* Our own measurement, folded onto the same person.
        ─────────────────────────────────────────────────────────────────────
@@ -993,8 +1003,9 @@ export function economicsRoutes(app, { q, wrap, range }) {
 
     // Alerts for accounts that appear in the work set but took no payout.
     for (const r of people.values()) {
-      if (r.alerts) continue;
+      if (r.alerts || r.device_alerts) continue;
       r.alerts = r.ids.reduce((a, id) => a + (alerts.get(id) || 0), 0);
+      r.device_alerts = r.ids.reduce((a, id) => a + (devAlerts.get(id) || 0), 0);
     }
 
     const rows = [...people.values()].map((r) => {

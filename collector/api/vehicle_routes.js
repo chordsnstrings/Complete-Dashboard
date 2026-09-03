@@ -274,6 +274,11 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               round(extract(epoch FROM now() - tel.last_fix) / 60)::int fix_age_min,
               doc.soonest_expiry, (doc.soonest_expiry::date - now()::date) doc_days_left,
               coalesce(al.alerts,0) alerts,
+              /* Carried out of the CTE, not just computed in it. Without this
+                 the row reaches alertRate() with device undefined, and a plate
+                 whose alerts are 100% hardware rates 0.0 again — which is the
+                 exact bug, wearing the fix as a disguise. */
+              coalesce(al.device_alerts,0) device_alerts,
               -- The id as well as the name: the page names a person and could
               -- not link to them because the id was dropped here.
               cd.driver_name current_driver, cd.driver_ext_id current_driver_id, cd.as_of driver_as_of

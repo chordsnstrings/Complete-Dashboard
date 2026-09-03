@@ -136,6 +136,41 @@ for (const f of RANKERS) {
     reasons.filter((c) => !/device:/.test(c)).join(' | '));
 }
 
+/* ── the half that got away ──────────────────────────────────────────────
+   The first deploy of this change computed device_alerts in the CTE and never
+   selected it into the outer row, so every row reached alertRate() with
+   `device` undefined and the two hardware-only plates rated 0.0 again — the
+   original bug, wearing the fix as a disguise, and green on every assertion
+   above. A count is only useful where it is READ, so these check the whole
+   path: a query that computes the column, a projection that carries it, and a
+   response that returns it. */
+for (const [f, hint] of [
+  ['api/vehicle_routes.js', 'al.device_alerts'],
+  ['api/economics_routes.js', 'al.device_alerts'],
+]) {
+  const code = src(f);
+  const cte = (code.match(/\$\{deviceCount\(\)\}\s+device_alerts/g) || []).length;
+  const carried = (code.match(/coalesce\(al\.device_alerts,\s*0\)/g) || []).length;
+  check(`${f.split('/').pop()}: the CTE that counts it also projects it out`,
+    cte === 0 || carried > 0, `${cte} counted, ${carried} carried (looking for ${hint})`);
+}
+/* And on the driver fold, where the count travels through a Map rather than a
+   column — the same defect takes a different shape there. */
+const econ = src('api/economics_routes.js');
+check('the per-person fold accumulates the device half too',
+  /devAlerts/.test(econ) && (econ.match(/devAlerts\.get/g) || []).length >= 2,
+  `${(econ.match(/devAlerts\.get/g) || []).length} lookups`);
+/* Every endpoint that publishes a rate publishes the count behind its
+   absence, so a page can say "not measured, and here is why" rather than
+   leaving a reader to wonder at an em-dash. */
+for (const f of RANKERS) {
+  const code = src(f);
+  const rates = (code.match(/alerts_per_100km:|per_100km = /g) || []).length;
+  const emits = (code.match(/device_alerts:|fleet_device_alerts:/g) || []).length;
+  check(`${f.split('/').pop()}: every rate it returns comes with the device count`,
+    rates === 0 || emits >= 1, `${rates} rates, ${emits} counts emitted`);
+}
+
 /* The list the page prints is cut to a hundred rows. Cutting on the total let
    a driver whose tracker is failing take one of those places from a driver who
    actually brakes hard, on a page read to choose who to coach. */
