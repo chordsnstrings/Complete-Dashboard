@@ -18,7 +18,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
-import { sourceLabel, timeStr, dtStr } from '../ui.js';
+import { sourceLabel, timeStr, dtStr, custodyText } from '../ui.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -488,7 +488,10 @@ async function unauthorized(deck, ctx) {
     deck.append(el('p', 'm-sec', 'Every one of them'));
     rows(deck, items.slice(0, 40).map((r) => row({
       title: r.plate || '—',
-      sub: `${r.driver_name || 'no driver'}${r.started_at ? ` · ${dayStr(r.started_at)}` : ''}`,
+      /* custodyText, not r.driver_name — a field /api/segments has never
+         returned, so every row said "no driver" including the ones naming two
+         people. See its definition in ../ui.js for what the words mean. */
+      sub: `${custodyText(r)}${r.started_at ? ` · ${dayStr(r.started_at)}` : ''}`,
       value: r.distance_km != null ? `${n(r.distance_km)}` : '',
       note: r.distance_km != null ? 'km' : '',
       to: href('vehicle', r.plate),

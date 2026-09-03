@@ -565,6 +565,35 @@ export const custody = (r, { title = null, hrefFor = null } = {}) => {
     : names;
 };
 
+/* The same custodians, as plain text, for a surface that cannot take markup.
+   ─────────────────────────────────────────────────────────────────────────
+   The phone's #unauthorized list read `r.driver_name`, a field /api/segments
+   has never returned — it answers `drivers` (comma-joined) and `driver_refs`
+   (name and id pairs), which is what the desktop column above reads. So every
+   row on the phone said "no driver", including the ones naming two custodians:
+   measured on production 2026-09-03, L63960 on 2 Sept was held by Roy
+   Vellespen Ocdol and L45243 by two people, and the phone printed "no driver"
+   against all three.
+
+   And "no driver" was the wrong words even where the field really is null. An
+   unauthorised journey is a car that MOVED with nobody accounted for; saying
+   "no driver" reads as "nobody drove it", which is the opposite claim. The
+   desktop's custody() prints "unknown" for that case and the column is headed
+   "Driver that day" rather than "Driver", because whoever held the vehicle
+   that day is not the same assertion as whoever was at the wheel. This keeps
+   both: the same source fields, the same hedge, one definition. */
+export const custodyText = (r, { max = 1 } = {}) => {
+  const refs = r?.driver_refs || (r?.drivers
+    ? String(r.drivers).split(',').map((x) => ({ name: x.trim() })) : []);
+  const names = refs.map((d) => d && d.name).filter(Boolean);
+  if (!names.length) return 'custodian unknown';
+  /* A handover day names two people and a phone row has space for one. The
+     count is kept rather than dropped, because "+1" is the difference between
+     one person to ring and a question about which of two. */
+  const shown = names.slice(0, max).join(', ');
+  return names.length > max ? `${shown} +${names.length - max}` : shown;
+};
+
 /* The custodian as of the most recent day we hold custody for, for facts that
    are not about a particular day — a document expiring next month, a car that
    has not earned all quarter. The day is shown because "held by Kashif" means

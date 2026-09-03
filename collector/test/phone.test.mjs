@@ -150,6 +150,55 @@ check('a cached answer says when it was stored', /x-sw-cached-at/.test(sw));
 check('activate retires every cache that is not this version',
   /caches\.keys\(\)[\s\S]{0,120}caches\.delete/.test(sw));
 
+/* ── the phone names whoever held the car, or says it does not know ───────
+   The #unauthorized list read `r.driver_name`. /api/segments has never
+   returned that field — it answers `drivers`, a comma-joined string, and
+   `driver_refs`, name-and-id pairs, which is what the desktop's "Driver that
+   day" column reads. So every row on the phone said "no driver". Measured on
+   production 2026-09-03 over ?verdict=unauthorized&days=7: L63960 on 2 Sept
+   was held by Roy Vellespen Ocdol, L45243 by Waseem Abbas Nabi and Zain Hassan
+   Raja Nasrullah Khan, and the phone printed "no driver" against all of them.
+
+   The wording was wrong even where the field really is null. An unauthorised
+   journey is a car that MOVED with nobody accounted for; "no driver" reads as
+   "nobody drove it", which is the opposite claim. */
+{
+  const { custodyText } = await import('../api/public/ui.js');
+  /* The two shapes production actually returns, and the one that is genuinely
+     empty — L82907 on 1 Sept carries drivers: null. */
+  check('one custodian is named',
+    custodyText({ drivers: 'Roy Vellespen Ocdol',
+      driver_refs: [{ id: 'a', name: 'Roy Vellespen Ocdol' }] }) === 'Roy Vellespen Ocdol');
+  check('a handover day names one and counts the other, rather than dropping it',
+    custodyText({ drivers: 'Waseem Abbas Nabi, Zain Hassan Raja Nasrullah Khan',
+      driver_refs: [{ id: 'a', name: 'Waseem Abbas Nabi' },
+        { id: 'b', name: 'Zain Hassan Raja Nasrullah Khan' }] }) === 'Waseem Abbas Nabi +1',
+    'a phone row has space for one name; "+1" is the difference between one '
+    + 'person to ring and a question about which of two');
+  check('…and asked for both, it gives both',
+    custodyText({ driver_refs: [{ name: 'A One' }, { name: 'B Two' }] }, { max: 2 })
+      === 'A One, B Two');
+  check('a row with no custodian says the custodian is unknown, not that '
+    + 'nobody drove it',
+    custodyText({ drivers: null, driver_refs: null }) === 'custodian unknown'
+    && custodyText({}) === 'custodian unknown');
+  check('the comma-joined string alone is enough, without the ref pairs',
+    custodyText({ drivers: 'Solo Name Only' }) === 'Solo Name Only',
+    'older rows and the same-day table hand over drivers without driver_refs');
+
+  /* Comments blanked, or the rule matches the comment ABOVE the fix that
+     explains the bug by naming it — the same way the shell-file lint above
+     read an apostrophe in its own prose as a path. */
+  const seg = screensSrc
+    .slice(screensSrc.indexOf("deck.append(el('p', 'm-sec', 'Every one of them'))"))
+    .replace(/\/\*[\s\S]*?\*\//g, ' ');
+  check('the phone list reads the fields the endpoint returns',
+    /custodyText\(r\)/.test(seg.slice(0, 600)) && !/driver_name/.test(seg.slice(0, 600)),
+    'r.driver_name is not a field /api/segments has ever answered');
+  check('…and the words are not "no driver" anywhere on that screen',
+    !/no driver/.test(seg.slice(0, 600)));
+}
+
 /* ── the version has to CHANGE, or the shell cache is permanent ───────────
    The worker is cache-first for the shell and its version string is the
    cache's identity: activate() deletes every cache that is not the current
