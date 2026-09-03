@@ -19,6 +19,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
 import { sourceLabel, timeStr, dtStr, custodyText } from '../ui.js';
+import { dubaiClock } from '../tz.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -93,39 +94,80 @@ async function today(deck, ctx) {
   const { complete, today: partial } = splitToday(daily);
   const series = complete.map((d) => n(d.trips) || 0);
   const days = complete.length;
-  const perDay = days ? Math.round(series.reduce((a, b) => a + b, 0) / days) : 0;
+  /* NULL, NOT ZERO, when there is no complete day to average over.
+     ─────────────────────────────────────────────────────────────────────────
+     This read `days ? … : 0` and then printed that 0 unconditionally. On a
+     TODAY-ONLY window there are no complete days by construction — today is
+     excluded because it is still filling — so the screen led with "0 bookings
+     a day" and, underneath it, "0 a day over the 0 days that are complete",
+     directly above a tile reading 523. An operator sent a screenshot of a
+     fleet that had done 523 jobs and been told it had done none.
+
+     The desktop has answered this correctly since api/public/app.js:1072, in
+     the same words: when today is the only day in the window it is not
+     dropped, because then it is the entire question — the figure becomes what
+     today has taken so far and says which minute it stopped at. The phone was
+     ported without that rule. It has it now.
+
+     A rate with no denominator is absent, never zero. It is the same house
+     principle as alertRate in api/alert_coverage_sql.js, for the same reason:
+     zero is a measurement, and a measurement is exactly what there isn't. */
+  const perDay = days ? Math.round(series.reduce((a, b) => a + b, 0) / days) : null;
+  const soFar = partial ? (n(partial.trips) || 0) : null;
   const last = series[series.length - 1] ?? 0;
   const prev = series[series.length - 2] ?? 0;
   const drift = prev ? Math.round(((last - prev) / prev) * 100) : 0;
 
   lede(deck, {
-    claim: `${fmt(perDay)} bookings a day`,
+    claim: perDay != null
+      ? `${fmt(perDay)} bookings a day`
+      /* Today is the whole window, so today is the whole answer. */
+      : soFar != null ? `${fmt(soFar)} bookings so far today`
+        : `${fmt(k.trips)} bookings`,
     /* The TOTAL covers the whole window, today included; the RATE covers the
        complete days only. Pairing the two in one clause — "12,410 over 29
        days" — reads as a division that does not come out, so they are stated
        as the two different spans they are. */
     sub: `${fmt(k.trips)} across ${fmt(k.drivers)} drivers and ${fmt(k.vehicles)} vehicles. `
-      + `${fmt(perDay)} a day over the ${countOfDays(days)} that are complete. `
-      + (days >= 2
-        ? `${dayStr(complete[days - 1].d)} ran ${drift >= 0 ? 'up' : 'down'} `
-          + `${Math.abs(drift)}% on the day before it.`
-        : '')
-      + (partial ? ` Today has ${fmt(n(partial.trips) || 0)} so far and is still being collected.` : ''),
-    tone: drift < -25 ? 'warn' : null,
+      + (perDay != null
+        ? `${fmt(perDay)} a day over the ${countOfDays(days)} that are complete. `
+          + (days >= 2
+            ? `${dayStr(complete[days - 1].d)} ran ${drift >= 0 ? 'up' : 'down'} `
+              + `${Math.abs(drift)}% on the day before it.`
+            : '')
+          + (partial ? ` Today has ${fmt(soFar)} so far and is still being collected.` : '')
+        /* No complete day, so no daily rate exists — and saying which minute
+           the figure stopped at is what makes it usable instead of merely
+           unexplained. */
+        : `There is no whole day in this window yet, so there is no daily rate to give: `
+          + `this is today, still being collected as of ${dubaiClock().hhmm} Dubai. `
+          + 'Widen the range to compare it with days that finished.'),
+    tone: perDay != null && drift < -25 ? 'warn' : null,
   });
 
-  const trend = card('Bookings a day', `${days} complete ${days === 1 ? 'day' : 'days'}`
-    + (partial ? ', today excluded — it is still filling' : ' in this window'));
-  trend.body.append(spark(series, { h: 46 }));
-  const foot = el('p', 'm-cap');
-  foot.style.cssText = 'margin:8px 0 0;display:flex;justify-content:space-between';
-  foot.append(el('span', null, dayStr((complete[0] || {}).d) || ''),
-    el('span', null, dayStr((complete[days - 1] || {}).d) || ''));
-  trend.body.append(foot);
+  /* A chart of nothing, captioned "0 complete days", is a panel that looks
+     broken. When there is nothing to draw, the caption is the whole answer and
+     the empty axis is not drawn at all. */
+  const trend = card('Bookings a day', days
+    ? `${days} complete ${days === 1 ? 'day' : 'days'}`
+      + (partial ? ', today excluded — it is still filling' : ' in this window')
+    : 'nothing to chart yet — today is the only day in this window, and it is '
+      + 'still being collected');
+  if (days) {
+    trend.body.append(spark(series, { h: 46 }));
+    const foot = el('p', 'm-cap');
+    foot.style.cssText = 'margin:8px 0 0;display:flex;justify-content:space-between';
+    foot.append(el('span', null, dayStr((complete[0] || {}).d) || ''),
+      el('span', null, dayStr((complete[days - 1] || {}).d) || ''));
+    trend.body.append(foot);
+  }
   deck.append(trend.card);
 
   stats(deck, [
-    { label: 'Bookings', value: fmt(k.trips), sub: `${fmt(perDay)} a day` },
+    /* `${fmt(perDay)} a day` printed "0 a day" beside 523 bookings. The
+       sub-line says what the figure IS when there is no rate to give. */
+    { label: 'Bookings', value: fmt(k.trips),
+      sub: perDay != null ? `${fmt(perDay)} a day` : 'today so far' },
     /* MONEY IN, not fares.
        ─────────────────────────────────────────────────────────────────────
        `revenue` is sum(trip.price) and the Uber export carries no fare

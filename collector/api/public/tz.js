@@ -30,3 +30,19 @@ export const dubaiDay = (d = new Date()) => {
   return new Intl.DateTimeFormat('en-CA',
     { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt);
 };
+
+/* The Dubai wall clock, as {hour, minute}. Never the viewer's: a reader in
+   London opening this at 21:00 is being shown tomorrow in Dubai.
+
+   Lives here rather than in api/public/app.js because BOTH shells need it and
+   only one had it. The phone printed "0 bookings a day" on a today-only window
+   where the desktop printed "523 bookings so far today, as of 17:18 Dubai" —
+   the desktop had the rule and the clock to say it with, and the phone had
+   neither. A rule kept in one shell is a rule the other shell will contradict. */
+export const dubaiClock = (now = new Date()) => {
+  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: TZ,
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
+  const at = (t) => Number(parts.find((x) => x.type === t)?.value);
+  return { hour: at('hour'), minute: at('minute'),
+    hhmm: `${String(at('hour')).padStart(2, '0')}:${String(at('minute')).padStart(2, '0')}` };
+};

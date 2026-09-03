@@ -7,7 +7,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine } from './ui.js';
-import { dubaiDay, TZ, TZ_LABEL } from './tz.js';
+import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow } from './data.js';
@@ -904,16 +904,6 @@ V.supply = async (root) => renderSupply(root);
    away in either case: today's own hours still carry the curve, and where
    today IS the subject — a today-only window — the figures re-label themselves
    "so far today" and name the Dubai minute they stop at. */
-
-/* The Dubai wall clock, as {hour, minute}. Never the viewer's: a reader in
-   London opening this at 21:00 is being shown tomorrow in Dubai. */
-export const dubaiClock = (now = new Date()) => {
-  const parts = new Intl.DateTimeFormat('en-GB', { timeZone: TZ,
-    hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(now);
-  const at = (t) => Number(parts.find((x) => x.type === t)?.value);
-  return { hour: at('hour'), minute: at('minute'),
-    hhmm: `${String(at('hour')).padStart(2, '0')}:${String(at('minute')).padStart(2, '0')}` };
-};
 
 /* Split a day series into the rows that are whole observations and the one
    that is not.

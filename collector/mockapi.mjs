@@ -1803,7 +1803,22 @@ app.get('/api/trips/daily', (req, r) => {
       silent_sources: uncollected ? ['uber', 'fms', 'hotel', 'yango'] : partial ? ['uber'] : null,
       uncollected });
   }
-  r.json(foldGrain(out, grainOf(req)));
+  /* HONOUR THE WINDOW, so a today-only range can be tested at all.
+     ─────────────────────────────────────────────────────────────────────────
+     This served the same thirty days whatever from/to it was given, which is
+     why nothing caught the phone printing "0 bookings a day" over 523
+     bookings: the defect only appears when the window contains no COMPLETE
+     day, and the mock could not produce such a window. A fixture that cannot
+     express the shape a bug lives in is a fixture that certifies the bug.
+
+     Bounds are Dubai-local calendar dates, matched against the row's own `d`,
+     the same way api/server.js bounds against trip_norm.local_day. */
+  const from = String(req.query.from || '').slice(0, 10);
+  const to = String(req.query.to || '').slice(0, 10);
+  const win = (from || to)
+    ? out.filter((x) => (!from || x.d >= from) && (!to || x.d <= to))
+    : out;
+  r.json(foldGrain(win, grainOf(req)));
 });
 
 /* The CSV export, fixtured so the header row can be compared against the real
