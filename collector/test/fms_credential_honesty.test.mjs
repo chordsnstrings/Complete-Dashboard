@@ -219,5 +219,55 @@ console.log('\na rejected login is not answered by asking sixty-two more times')
     eco.length <= 2, `${eco.length} requests: ${JSON.stringify(eco.map((a) => a.days))}`);
 }
 
+/* ── a credential that can only ever go red is not a state ────────────────
+   This file wrote 'invalid' and 'missing' and never once 'ok', on purpose: the
+   comment above noteFmsRefusal argued that a provider answering 200 on a
+   refusal cannot prove itself by answering 200. True of the STATUS, and false
+   of the userid — FMS hands one back only when the password was accepted, so
+   it is the evidence a refusal cannot manufacture.
+
+   What the omission cost, measured on production 2026-09-03: both FMS
+   passwords were replaced, the collector immediately pulled 13,344 rows for
+   Ecosine and 16,269 for Egari and recorded ok on both runs — while /api/auth
+   went on reporting FMS_ECOSINE_PASS and FMS_EGARI_PASS invalid from the
+   previous day, and the banner counted two working credentials among five that
+   had "stopped working". */
+{
+  const src = readFileSync('src/sources/fms.js', 'utf8');
+  const code = src.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+  check('a working FMS login is recorded, not only a refused one',
+    /state: 'ok'/.test(code) && /surface: 'Login'/.test(code),
+    'nothing else ever cleared the red, so a fixed password stayed invalid for ever');
+  check('…and it is gated on the userid, not on the status',
+    /const userid = login\.data\?\.userid;[\s\S]{0,80}if \(!userid\) return 0;[\s\S]{0,600}state: 'ok'/.test(code),
+    'this provider answers 200 when it refuses, so a 200 proves nothing and a userid proves it');
+  check('the refusal path still records invalid',
+    /state: 'invalid'/.test(code) && /the InfoTrack login for this fleet was refused/.test(src));
+}
+
+/* ── and the Yango advice must not contradict its own finding ─────────────
+   A 401 with no cookie and a 403 with one is proof the session AUTHENTICATES.
+   The message in that branch said exactly that and then told the operator to
+   re-paste YANGO_COOKIE — work that cannot change the answer, since a fresh
+   cookie for the same account authenticates the same way and is refused the
+   same way. Measured on production 2026-09-03 against a cookie captured that
+   morning and verified live by src/credcheck.js as a real fleet session. */
+{
+  const y = readFileSync('src/sources/yango.js', 'utf8');
+  const branch = y.slice(y.indexOf('so the session IS'), y.indexOf('so the session IS') + 700);
+  check('the session-is-read branch no longer prescribes a re-paste',
+    !/re-paste YANGO_COOKIE from a logged-in/.test(branch),
+    'it had just proved the session works');
+  check('…it names entitlement, and the park it was refused for',
+    /entitlement/.test(branch) && /parkId/.test(branch));
+  check('…and says plainly that re-pasting will not change it',
+    /will not change it/.test(branch));
+  check('the account is read from the cookie so "sign in as somebody else" is actionable',
+    /yandex_login=\(\[\^;\]\+\)/.test(y) && /const yangoAccount = /.test(y));
+  check('and the credential blamed is not the cookie that just authenticated',
+    /credential: cookieIsNotIt \|\| bare \? 'YANGO_PARK_ID' : 'YANGO_COOKIE'/.test(y),
+    'a red row against a working credential sends somebody to replace it');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

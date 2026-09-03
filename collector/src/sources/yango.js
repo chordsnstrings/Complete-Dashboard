@@ -29,6 +29,15 @@ const headers = () => ({
    same endpoint with the same headers and got the 403 the collector had been
    swallowing. So the refusal is raised here, where the run can record it,
    which is the same fix fms.js already carries for the same reason. */
+/* Who the pasted session belongs to, read out of the cookie rather than
+   guessed. "Sign in as an account that owns this park" is not an instruction
+   somebody can follow without knowing which account they are currently signed
+   in as, and the cookie carries it. */
+const yangoAccount = () => {
+  const m = /(?:^|;\s*)yandex_login=([^;]+)/.exec(config.yango.cookie || '');
+  return m ? decodeURIComponent(m[1]).slice(0, 60) : null;
+};
+
 const post = async (path, body) => {
   const r = await http(`${config.yango.base}${path}`, {
     method: 'POST', headers: headers(), body: JSON.stringify(body),
@@ -64,8 +73,28 @@ const post = async (path, body) => {
         ? ` — the same refusal arrives with no cookie at all, so the session is not what is being rejected;`
           + ` check YANGO_PARK_ID (${config.yango.parkId}) and YANGO_API_KEY`
         : bare
-          ? ` — with no cookie this call answers HTTP ${bare.status} instead, so the session IS being read;`
-            + ' re-paste YANGO_COOKIE from a logged-in fleet.yango.com tab'
+          /* The sibling branch's advice was the very mistake this block was
+             written to end, one line further down.
+             ─────────────────────────────────────────────────────────────
+             A 401 without the cookie and a 403 with it is proof the session
+             AUTHENTICATES — that is what the sentence says — and the reply
+             was "re-paste YANGO_COOKIE", which is work that cannot change the
+             answer. A fresh cookie for the same account authenticates the same
+             way and is refused the same way. Measured on production
+             2026-09-03: a cookie captured that morning, verified live by
+             src/credcheck.js as a real fleet session for muzammil16075, and
+             still 403 on this park.
+             403 after authenticating is about ENTITLEMENT, so it names the
+             three things it can be: the account may not hold this park, the
+             park id may be another park's, or the API key may be. The account
+             is read out of the cookie because "sign in as somebody who owns
+             this park" is unactionable if the operator cannot see who they
+             are currently signed in as. */
+          ? ` — with no cookie this call answers HTTP ${bare.status} instead, so the session IS`
+            + ` being read and authenticates${yangoAccount() ? ` as ${yangoAccount()}` : ''};`
+            + ` a 403 after that is about entitlement, not the session — either this account is`
+            + ` not on park ${config.yango.parkId}, or YANGO_PARK_ID or YANGO_API_KEY names a`
+            + ' park it cannot see. Re-pasting the same account\u2019s cookie will not change it'
           : ' — and the cookie-free comparison did not complete, so which credential is being'
             + ' refused is not yet established';
       /* Recorded, not only thrown: a thrown error dies with the run, and the
@@ -75,7 +104,11 @@ const post = async (path, body) => {
          simply gone quiet. */
       await noteCredential(pool, {
         provider: SRC, fleet: config.yango.fleet || '*',
-        credential: cookieIsNotIt ? 'YANGO_API_KEY' : 'YANGO_COOKIE',
+        /* Not YANGO_COOKIE when the cookie authenticated. Blaming it puts a
+           red row against a credential that works and sends somebody to
+           replace it; the entitlement is what is refused, and the park id is
+           the field that names it. */
+        credential: cookieIsNotIt || bare ? 'YANGO_PARK_ID' : 'YANGO_COOKIE',
         state: cookieIsNotIt || bare ? 'invalid' : 'unknown', surface: path,
         detail: `HTTP ${r.status}; ${bareSays}`,
       });

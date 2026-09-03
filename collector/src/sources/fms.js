@@ -69,10 +69,7 @@ function fmsAuthRefusal(r) {
   return said && saysAuth(said) ? said.slice(0, 200) : null;
 }
 
-/* Record it, and say which operation it was refused on. Failure-only, the way
-   bolt.js, cabman.js, hotel.js and yango.js do it — none of those write an
-   'ok' row either, and a source that recorded one here would be the only one
-   claiming a green light from a surface that answers 200 when it refuses. */
+/* Record it, and say which operation it was refused on. */
 async function noteFmsRefusal(fleet, op, said) {
   await noteCredential(pool, {
     provider: SRC, fleet: fleet.fleet, credential: FMS_PASS_KEY(fleet.fleet),
@@ -488,6 +485,27 @@ export async function pullLive(fleet) {
   }
   const userid = login.data?.userid;
   if (!userid) return 0;
+  /* A working login, recorded — because nothing else ever cleared the red.
+     ─────────────────────────────────────────────────────────────────────
+     This file wrote 'invalid' and 'missing' and never once 'ok', deliberately:
+     the comment above noteFmsRefusal argued that a source answering 200 on a
+     refusal cannot prove itself by answering 200. That is true of the STATUS
+     and false of this: a refusal has no userid. FMS hands one back only when
+     the password was accepted, so a userid is exactly the evidence a refusal
+     cannot manufacture — the same standard src/sources/uber.js applies when it
+     says a well-formed answer IS the proof the credential works.
+
+     What the omission cost, measured on production 2026-09-03: both FMS
+     passwords were replaced and the collector immediately pulled 13,344 rows
+     for Ecosine and 16,269 for Egari, ok on both — while /api/auth went on
+     reporting FMS_ECOSINE_PASS and FMS_EGARI_PASS as invalid from the previous
+     day's failure, and the banner counted two working credentials among five
+     that had "stopped working". A state that can only ever go red is not a
+     state, and an operator who has just fixed something needs to see it. */
+  await noteCredential(pool, {
+    provider: SRC, fleet: fleet.fleet, credential: FMS_PASS_KEY(fleet.fleet),
+    state: 'ok', surface: 'Login', detail: null,
+  });
   const { data } = await call('GetVehicleStatus', { UserId: userid });
   const rows = (data?.data || []).map((v) => ({
     source: SRC, fleet_id: fleet.fleet, plate: normPlate(v.vehicleno),
