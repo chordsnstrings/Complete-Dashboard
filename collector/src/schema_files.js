@@ -29,4 +29,5 @@ export const SCHEMA_FILES = [
      record they duplicate. Last, so it replaces the expression v20/v42/v51
      installed rather than racing them. */
   'schema_v53.sql',
+  'schema_v54.sql',
 ];

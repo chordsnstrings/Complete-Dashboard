@@ -93,8 +93,32 @@ console.log('\nthe stored column is generated from that same list');
 check('sql/schema_v53.sql is byte-for-byte what bin/gen-schema-v53.mjs emits',
   readFileSync(new URL('../sql/schema_v53.sql', import.meta.url), 'utf8') === render(),
   'run: node bin/gen-schema-v53.mjs');
-check('and the migration is applied, last, after the files that defined the column',
-  SCHEMA_FILES[SCHEMA_FILES.length - 1] === 'schema_v53.sql');
+/* "Last" was how this read when v53 was the newest file, and that made the
+   assertion about the length of a list rather than about the dependency. What
+   it actually needs is that v53 runs AFTER every file that creates a
+   person_key column — it replaces that column, and replacing a column that
+   does not exist yet silently does nothing. A later migration is free to
+   exist; it just may not come between them. */
+const at = (f) => SCHEMA_FILES.indexOf(f);
+const body = (f) => readFileSync(new URL(`../sql/${f}`, import.meta.url), 'utf8')
+  .split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+/* Found, not listed. A hardcoded ['schema_v20.sql', …] is right until the day
+   a new file adds person_key to a seventh table and this assertion goes on
+   passing without having looked at it. */
+const DEFINES_KEY = SCHEMA_FILES.filter((f) => f !== 'schema_v53.sql'
+  && /person_key\s+text\s+GENERATED ALWAYS AS/i.test(body(f).replace(/\s+/g, ' ')));
+check('there is more than one file defining the column, so this found them',
+  DEFINES_KEY.length >= 3, DEFINES_KEY.join(' '));
+check('the register migration runs after every file that defines the column',
+  DEFINES_KEY.every((f) => at(f) < at('schema_v53.sql')),
+  DEFINES_KEY.map((f) => `${f}@${at(f)}`).join(' ') + ` v53@${at('schema_v53.sql')}`);
+/* And nothing may rebuild person_key after it, or the register's CASE is
+   dropped again by a later ADD COLUMN and the merge silently comes undone. */
+const REBUILDS = /ADD COLUMN person_key|GENERATED ALWAYS AS[\s\S]{0,200}?STORED/;
+const after53 = SCHEMA_FILES.slice(at('schema_v53.sql') + 1);
+check('and no migration after it rebuilds the column',
+  after53.every((f) => !REBUILDS.test(body(f))),
+  `checked ${after53.length}: ${after53.join(', ') || 'none'}`);
 /* The name fold itself is untouched. If personFold ever learns about ids, the
    rule has widened and every name in the fleet is exposed to it. */
 check('personFold is still the NAME rule and knows nothing about any id',

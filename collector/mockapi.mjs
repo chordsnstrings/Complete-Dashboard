@@ -3790,6 +3790,19 @@ app.get('/api/coverage', (_, r) => r.json({
   earnings_gaps: [
     { platform: 'uber', trips_from: '2025-08-21', earnings_from: '2026-02-09', bookings_before: 131687 },
   ],
+  /* Which rows carry a coordinate. The demand map keys its areas off a parsed
+     pickup ADDRESS, so this is the table that says how much of the record
+     could be keyed off geometry instead — and the three states all render:
+     a feed with coordinates on nearly every row (fms), one with none at all
+     (uber, whose trips arrive as text addresses and always will), and a
+     timeline whose lat/lon columns exist and may or may not be populated by
+     the provider, which is the open question this row exists to answer. */
+  geo: [
+    { dataset: 'timeline:uber', n: 84210, with_pickup: 0, with_dropoff: 0, pickup_pct: 0, dropoff_pct: 0 },
+    { dataset: 'trip:fms', n: 38970, with_pickup: 38512, with_dropoff: 38401, pickup_pct: 99, dropoff_pct: 99 },
+    { dataset: 'trip:hotel', n: 1256, with_pickup: 1256, with_dropoff: 1250, pickup_pct: 100, dropoff_pct: 100 },
+    { dataset: 'trip:uber', n: 30410, with_pickup: 0, with_dropoff: 0, pickup_pct: 0, dropoff_pct: 0 },
+  ],
 }));
 
 app.get('/api/product/by-vehicle', (_, r) => r.json(

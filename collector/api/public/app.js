@@ -4564,6 +4564,51 @@ V.sources = async (root) => {
     cv.body.append(h);
   }
 
+  /* ── which of those rows carry a coordinate ──────────────────────────────
+     The demand map keys its areas off a parsed pickup ADDRESS — split on
+     ' - ' — which is why a fifth of pickups belong to no area and why the
+     busiest area on the page can come out as the airport against itself. The
+     honest fix is geometry, and geometry is only available for the rows that
+     shipped with it.
+
+     So this says which those are, per feed, instead of leaving it to be
+     rediscovered. Uber and Yango send text addresses and always will; FMS and
+     the hotel channel send coordinates. The row that is genuinely open is
+     timeline:uber — driver_timeline_event has lat and lon columns and nothing
+     in this product has ever read them, so whether Uber populates them for
+     this organisation is a question only production can answer. It is on the
+     page rather than in somebody's notes so that the answer is visible on the
+     day it changes. */
+  if (Array.isArray(coverage.geo) && coverage.geo.length) {
+    const geo = coverage.geo.filter((g) => g.n > 0);
+    if (geo.length) {
+      const gp = panel('Coordinates on the record',
+        'Areas on the demand map are parsed out of address text. These are the feeds that '
+        + 'could be mapped by geometry instead.');
+      root.append(gp.panel);
+      const pct = (v) => (v >= 95 ? 'ok' : v > 0 ? 'warn' : 'ent-off');
+      gp.body.append(tableFrom(geo.map((g) => ({ ...g,
+        feed: g.dataset.replace(':', ' · ') })), [
+        { label: 'Feed', key: 'feed' },
+        { label: 'Rows', key: 'n', num: true, render: (r) => fmt(r.n) },
+        { label: 'With a start coordinate', key: 'pickup_pct', num: true,
+          render: (r) => `<span class="${pct(r.pickup_pct)}">${r.pickup_pct}%</span>`
+            + `<span class="dim"> ${fmt(r.with_pickup)}</span>` },
+        { label: 'With an end coordinate', key: 'dropoff_pct', num: true,
+          render: (r) => `<span class="${pct(r.dropoff_pct)}">${r.dropoff_pct}%</span>`
+            + `<span class="dim"> ${fmt(r.with_dropoff)}</span>` },
+      ], { sortable: true, sortId: 'geocov' }));
+      const none = geo.filter((g) => g.pickup_pct === 0);
+      gp.body.append(el('p', 'cap', none.length
+        ? `${none.map((g) => esc(g.dataset.split(':')[1] || g.dataset)).join(' and ')} `
+          + `${none.length === 1 ? 'sends' : 'send'} addresses as text and no coordinate, so `
+          + `${none.length === 1 ? 'its' : 'their'} pickups can only ever be grouped by parsing `
+          + 'the address. That parse is where the demand map\u2019s missing areas come from.'
+        : 'Every feed on the record carries a coordinate, so the demand map can be keyed off '
+          + 'geometry rather than parsed address text.'));
+    }
+  }
+
   /* What each provider actually sends, versus what we keep. Every collector
      stores the original record in `raw`; this reads it back, so "does Uber
      segregate business trips?" is answerable from the dashboard instead of by

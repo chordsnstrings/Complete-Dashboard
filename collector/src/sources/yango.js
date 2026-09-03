@@ -139,6 +139,57 @@ const post = async (path, body) => {
 };
 const dubai = (d, end) => `${iso(d)}T${end ? '23:59:59' : '00:00:00'}+04:00`;
 
+/* ── one name per Yango driver id ────────────────────────────────────────
+   Yango hands the same driver_id back under three different name
+   compositions, from three endpoints:
+
+     orders/list        driver_full_name        "Khalil Aliyan"
+     summary/drivers    first_name + last_name  "Aliyan Khalil"
+     transactions/list  driver_name             (a third, unverified, string)
+
+   The orders string puts the father's name first; the summary endpoint hands
+   the parts back decomposed and in natural order. person_key is a GENERATED
+   column folding each table's own name column (sql/schema_v20.sql for trip and
+   driver_platform_state, v42 for money_event), so one Yango driver arrived as
+   two people: their trips under one key and their roster row under another.
+   That is how "Khalil Aliyan" came to sit beside "Aliyan khalil" in a roster
+   of 395, and it is still live on at least two more accounts — Yango
+   69f7e655… reads "Tariq Afzal Said Afzal" on screen while storing the
+   person_key "said afzal tariq afzal", from one account, where two people is
+   impossible.
+
+   api/identity_map.js can only join the pairs a human has already verified,
+   one at a time, after the fact. This stops the split being written.
+
+   The decomposed name wins, because it is the one Yango gives us in parts and
+   the only one whose word order we can account for. The map is seeded from
+   what the roster already knows — so a run that pulls trips for a driver the
+   summary endpoint does not return this window still files them under the
+   name that driver's other rows carry — and pullDrivers overlays whatever it
+   learns as it goes. An id we have never seen decomposed keeps the endpoint's
+   own string: a name we cannot improve on is better than no name. */
+const nameById = new Map();
+
+/* The summary endpoint's decomposition, composed the same way everywhere and
+   remembered, so the two calls after this one file the driver identically. */
+function decomposed(d) {
+  const name = `${d?.first_name || ''} ${d?.last_name || ''}`.trim();
+  if (d?.id != null && name) nameById.set(String(d.id), name);
+  return name || null;
+}
+
+async function seedNames() {
+  nameById.clear();
+  const { rows } = await pool.query(
+    `SELECT driver_ext_id, full_name FROM driver_platform_state
+      WHERE platform = $1 AND full_name IS NOT NULL AND full_name <> ''`, [SRC]);
+  for (const r of rows) nameById.set(String(r.driver_ext_id), r.full_name);
+  return nameById.size;
+}
+
+/* The endpoint's own string is the fallback, never an empty one. */
+const nameFor = (id, given) => (id != null && nameById.get(String(id))) || given || null;
+
 async function pullTrips(from, to) {
   let cursor, total = 0, guard = 0;
   do {
@@ -147,7 +198,7 @@ async function pullTrips(from, to) {
     const orders = data?.orders || [];
     const rows = orders.map((o) => ({
       platform: SRC, external_id: o.id, fleet_id: config.yango.fleet, plate: normPlate(o.car_license_number),
-      driver_ext_id: o.driver_id, driver_name: o.driver_full_name,
+      driver_ext_id: o.driver_id, driver_name: nameFor(o.driver_id, o.driver_full_name),
       requested_at: o.booked_at, ended_at: o.ended_at,
       pickup_addr: o.address_from, dropoff_addr: o.address_to,
       distance_km: o.mileage != null ? Number(o.mileage) / 1000 : null,
@@ -177,7 +228,7 @@ async function pullDrivers(from, to) {
       { date_from: iso(start), date_to: iso(end), sort: { field: 'driver_id', direction: 'asc' } });
     const rows = (data?.items || []).map((it) => ({
       platform: SRC, fleet_id: config.yango.fleet, driver_ext_id: it.driver?.id,
-      driver_name: `${it.driver?.first_name || ''} ${it.driver?.last_name || ''}`.trim(),
+      driver_name: decomposed(it.driver),
       plate: normPlate(it.car?.callsign), period_start: iso(start), period_end: iso(end),
       trips: it.count_orders_completed, distance_km: it.sum_distance != null ? Number(it.sum_distance) / 1000 : null,
       hours_online: it.work_time_seconds != null ? it.work_time_seconds / 3600 : null,
@@ -201,7 +252,7 @@ async function pullDrivers(from, to) {
 async function maybeRoster(data) {
   const roster = (data?.items || []).map((it) => stateRow({
     platform: SRC, driverExtId: it.driver?.id, fleetId: config.yango.fleet,
-    name: `${it.driver?.first_name || ''} ${it.driver?.last_name || ''}`.trim(),
+    name: decomposed(it.driver),
     rawState: it.driver?.status || it.status || it.driver?.work_status,
     reason: it.driver?.status_reason,
     plate: it.car?.callsign ? normPlate(it.car.callsign) : null,
@@ -218,7 +269,7 @@ async function pullLedger(from, to) {
     const txns = data?.transactions || [];
     const rows = txns.map((t) => ({
       platform: SRC, external_id: t.id, fleet_id: config.yango.fleet, driver_ext_id: t.driver_id,
-      driver_name: t.driver_name, order_ref: t.order_id, event_at: t.event_at,
+      driver_name: nameFor(t.driver_id, t.driver_name), order_ref: t.order_id, event_at: t.event_at,
       category: t.category_id, amount: t.amount, currency: t.currency_code || 'AED', description: t.description, raw: t,
     })).filter((r) => r.external_id);
     if (rows.length) total += await upsertMany('ledger_entry', rows, ['platform', 'external_id']);
@@ -230,9 +281,15 @@ async function pullLedger(from, to) {
 
 export async function collect({ from, to, mode }) {
   try {
-    const trips = await pullTrips(from, to);
+    /* Order matters, and it is the only reason it is this way round. Trips and
+       ledger entries are filed under the name the summary endpoint decomposes,
+       so that endpoint is asked first; seedNames() covers the drivers it does
+       not return for this window from what the roster already holds. */
+    const known = await seedNames();
     const drivers = await pullDrivers(from, to);
+    const trips = await pullTrips(from, to);
     const ledger = await pullLedger(from, to);
+    log.info(SRC, 'names', { seeded: known, known: nameById.size });
     await logRun({ source: SRC, fleet_id: config.yango.fleet, mode, window_start: from, window_end: to, status: 'ok', rows_written: trips + drivers + ledger });
     log.info(SRC, 'done', { trips, drivers, ledger });
   } catch (e) {

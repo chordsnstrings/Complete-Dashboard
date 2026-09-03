@@ -2454,8 +2454,39 @@ app.get('/api/coverage', wrap(async (req, res) => {
   const dataset_calendar = Object.fromEntries(
     Object.entries(calendars).map(([k, days]) => [k,
       { ...spanGaps(days), event_driven: EVENT_DRIVEN.has(k) }]));
+  /* ── which rows carry a coordinate, and which carry only an address ─────
+     The demand map derives its area key by splitting a pickup ADDRESS on
+     ' - ' (api/analytics_routes.js). That is why 22.6% of pickups land in no
+     area at all and why the busiest "area" on the page is DXB against itself.
+     A coordinate would fix it — for the rows that have one.
+
+     So this says, per source, how many do. It is here rather than in a
+     one-off query because the answer changes: driver_timeline_event has lat
+     and lon columns (sql/schema_v37.sql) that Uber MAY populate for this org
+     and may not, nothing in this product has ever read them, and the only
+     captured fixture in the repo has them null on all 17 rows. Whether Uber
+     is sending coordinates today is a fact about production, and a fact about
+     production belongs on the page that reports what landed.
+
+     Counted, not sampled, and reported as a share so a source that is 3%
+     covered cannot read as a source that has coordinates. */
+  const geo = await q(
+    `SELECT 'trip:' || platform AS dataset, count(*)::int n,
+            count(pickup_lat)::int with_pickup, count(dropoff_lat)::int with_dropoff
+       FROM trip WHERE ($1::text IS NULL OR platform=$1)
+                   AND ($2::text IS NULL OR fleet_id=$2)
+      GROUP BY 1
+      UNION ALL
+     SELECT 'timeline:' || platform, count(*)::int, count(lat)::int, count(lat)::int
+       FROM driver_timeline_event
+      WHERE ($1::text IS NULL OR platform=$1) AND ($2::text IS NULL OR fleet_id=$2)
+      GROUP BY 1
+      ORDER BY 1`, P);
   res.json({ trips, telemetry, alerts, ledger, earnings, earnings_gaps: gaps,
-    dataset_calendar });
+    dataset_calendar,
+    geo: geo.map((r) => ({ ...r,
+      pickup_pct: r.n ? Math.round((r.with_pickup / r.n) * 100) : 0,
+      dropoff_pct: r.n ? Math.round((r.with_dropoff / r.n) * 100) : 0 })) });
 }));
 
 /* ───────────────────────── settings ───────────────────────── */
