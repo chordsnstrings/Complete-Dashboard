@@ -316,11 +316,27 @@ const get = async (p) => {
     const { personFold, personKey, peopleCount } = await import('../api/custody_sql.js');
     // The fold server.js now uses, under the name the rest of this block knows it by.
     const CANON = personFold;
+    /* The shape gained a layer in schema_v53, and the layer is named rather
+       than folded in. personKey WAS exactly coalesce(nullif(fold(name),''), id);
+       it is now that same expression wrapped in the verified merge register's
+       CASE (api/identity_map.js, generated into sql/schema_v53.sql). The
+       property these checks exist for is unchanged and is still asserted — the
+       rule prefers the folded NAME and falls back to the ID — with one added:
+       the ONLY ids that escape that rule are the three a human verified one at
+       a time. A fourth appearing here without an entry in the register is the
+       rule having widened, which is the failure this file is for. */
+    const { MERGES } = await import('../api/identity_map.js');
+    const pk = personKey('i', 'n');
     check('the person key prefers the name and falls back to the id',
-      personKey('i', 'n').includes('coalesce') && personKey('i', 'n').endsWith('i)'),
-      personKey('i', 'n'));
+      pk.includes("coalesce(nullif(regexp_replace") && pk.trimEnd().endsWith('i) END'), pk);
+    check('…and the only ids that escape that rule are the verified merges',
+      MERGES.every((m) => pk.includes(`'${m.merge.id}'`))
+      && (pk.match(/WHEN '/g) || []).length === MERGES.length,
+      `${(pk.match(/WHEN '/g) || []).length} exceptions against ${MERGES.length} in the register`);
     check('counting people counts distinct person keys, not distinct records',
-      peopleCount('i', 'n').startsWith('count(DISTINCT coalesce('), peopleCount('i', 'n'));
+      peopleCount('i', 'n').startsWith('count(DISTINCT ')
+      && peopleCount('i', 'n').includes("coalesce(nullif(regexp_replace"),
+      peopleCount('i', 'n'));
 
     /* And the JS fold must agree with the SQL one on real names.
        api/driver_routes.js folds people in Node for the directory; server.js

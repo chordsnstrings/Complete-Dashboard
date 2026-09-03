@@ -25,6 +25,14 @@ import { areaOf } from './analytics_routes.js';
    copy of a rule this product has now got wrong in four places is a fourth
    place to get it wrong. */
 import { isoDay } from '../src/sources/ledger.js';
+/* The three identities a human verified, id to id — see api/identity_map.js
+   for the measurement behind each and why this is a LIST and not a rule. The
+   stored person_key already carries them (sql/schema_v53.sql generates it from
+   the same module), so every aggregate here folds them together on its own.
+   These two helpers are for the parts of a driver page that are not an
+   aggregate: resolving the id in the URL, and the directory's per-row fold,
+   where a record with no work in the window has no stored key to fold on. */
+import { canonicalName, mergedIds, mergedNames, mergedPlatforms, ALIAS_KEY } from './identity_map.js';
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -105,9 +113,21 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       if (!seed) [seed] = await q(
         `SELECT driver_ext_id, driver_name, platform FROM trip
          WHERE driver_ext_id = $1 ORDER BY requested_at DESC LIMIT 1`, [id]);
-      if (!seed && !nameQ) return null;          // unknown id — say so rather than answering emptily
+      /* …unless the merge register knows it. The Bolt record in it holds no
+         trip, no compliance row and no performance row — a platform standing
+         is its whole existence — so every seed above misses it and the page
+         404s a person the directory links to. */
+      if (!seed && !nameQ && !canonicalName(id)) return null;   // unknown id — say so rather than answering emptily
     }
-    const name = seed?.driver_name || nameQ;
+    /* A verified duplicate answers under the name of the record it duplicates,
+       which is what makes the resolution symmetric: person_key on the trip
+       table is already the survivor's key for BOTH records, so folding the
+       requested id onto the survivor's name here means opening either one
+       finds both. Without it, opening the Yango record searched for "khalil
+       aliyan", matched no trip row (they now key as "aliyan khalil") and
+       showed a 429-day veteran as a 20-trip newcomer — which is exactly what
+       production does today. */
+    const name = canonicalName(id) || seed?.driver_name || nameQ;
     if (!name) return id
       ? { id, name: null, ids: [id], keys: [id], platforms: seed ? [seed.platform] : [] }
       : null;
@@ -137,8 +157,13 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 coalesce(nullif(btrim(driver_ext_id), ''), 'name:' || ${CANON('driver_name')}), driver_name
            FROM driver_performance WHERE ${CANON('driver_name')} = $1
        ) s WHERE coalesce(btrim(driver_name), '') <> ''`, [want]);
+    /* flatMap through the register, so the partner id is present whichever
+       side was asked for. It adds nothing at all for the other 392 records —
+       mergedIds returns the id it was given — and it is what carries a record
+       that has no row in ANY of the three tables above (the Bolt standing)
+       into the account list of the person it belongs to. */
     const ids = [...new Set([...alias.map((a) => a.driver_ext_id), ...(id ? [id] : [])]
-      .filter(Boolean))];
+      .filter(Boolean).flatMap(mergedIds))];
     if (!ids.length) return null;
 
     /* Two different lists, and conflating them was a bug in both directions.
@@ -154,11 +179,18 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        off their own page while the fleet totals still counted it. A key that
        matches nothing costs one comparison. */
     const keys = [...new Set([...ids,
-      ...alias.map((a) => nameKey(a.driver_name)), nameKey(name)].filter(Boolean))];
+      ...alias.map((a) => nameKey(a.driver_name)), nameKey(name),
+      /* Both spellings of a merged person, for rows the provider named
+         without numbering — a key that matches nothing costs one comparison. */
+      ...ids.flatMap(mergedNames).map(nameKey)].filter(Boolean))];
     // the longest spelling is usually the fullest one; prefer it for display
     const display = alias.map((a) => a.driver_name).sort((a, b) => b.length - a.length)[0] || name;
     return { id: id || ids[0], name: display, ids, keys,
-      platforms: [...new Set(alias.map((a) => a.platform))] };
+      /* The register's channels as well as the measured ones: the Bolt half of
+         one merged pair files no trips at all, so a list built from work alone
+         would omit the channel carrying the fact the operator needs — that the
+         fleet deactivated that account. */
+      platforms: [...new Set([...alias.map((a) => a.platform), ...ids.flatMap(mergedPlatforms)])] };
   }
 
   /* The person key: a provider id where there is one, the synthesised name: key
@@ -526,7 +558,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        over the same names and requires the same answer. */
     const byName = new Map();
     for (const r of rows) {
-      const k = r.person_key || canonName(r.driver_name);
+      /* The register first, then the stored fold, then the name.
+         ─────────────────────────────────────────────────────────────────
+         The stored key already carries the three verified merges, so for a
+         person the window measured this changes nothing. It is the OTHER
+         rows this is for: a record with no work in the window has no
+         w.person_key, falls through to the name — and two of the three merged
+         records are exactly that (a Bolt standing with no trips, and a hotel
+         record outside most windows), so without this the directory would
+         still list them as separate people while every aggregate in the
+         product counted them as one. */
+      const k = ALIAS_KEY.get(r.driver_ext_id) || r.person_key || canonName(r.driver_name);
       const cur = byName.get(k);
       if (!cur) {
         byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],

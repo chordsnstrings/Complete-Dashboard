@@ -24,4 +24,9 @@ export const SCHEMA_FILES = [
   'schema_v34.sql', 'schema_v35.sql', 'schema_v36.sql', 'schema_v37.sql',
   'schema_v38.sql', 'schema_v39.sql', 'schema_v40.sql',
   'schema_v41.sql', 'schema_v42.sql', 'schema_v43.sql', 'schema_v44.sql', 'schema_v45.sql', 'schema_v46.sql', 'schema_v47.sql', 'schema_v48.sql', 'schema_v49.sql', 'schema_v50.sql', 'schema_v51.sql', 'schema_v52.sql',
+  /* v53 is GENERATED from api/identity_map.js by bin/gen-schema-v53.mjs — it
+     rebuilds person_key so the three verified duplicate records fold onto the
+     record they duplicate. Last, so it replaces the expression v20/v42/v51
+     installed rather than racing them. */
+  'schema_v53.sql',
 ];

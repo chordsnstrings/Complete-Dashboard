@@ -35,6 +35,13 @@ const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
    sql/schema_v20.sql stores it as a generated column. Four definitions of "the
    same human" is how one person becomes two on a page nobody is looking at. */
 const CANON = personFold('full_name');
+/* The STORED fold, which is the same expression plus the three verified
+   merges (sql/schema_v53.sql generates driver_platform_state.person_key from
+   api/identity_map.js). Re-folding full_name here instead would leave the
+   roster the one page in the product that still reads a merged pair as two
+   people — and it is the page an operator counts heads on. coalesce keeps the
+   old behaviour for a row the generated column has nothing to say about. */
+const STANDING_PERSON = `coalesce(nullif(person_key, ''), ${CANON})`;
 
 export function rosterRoutes(app, { q, wrap, range }) {
   /* One row per person, with every platform standing they hold and what they
@@ -91,7 +98,7 @@ export function rosterRoutes(app, { q, wrap, range }) {
          they contribute to nothing they cannot answer. `is_account` marks
          which branch a row came from so `accounts` still counts accounts. */
       `WITH s AS (
-         SELECT ${CANON} AS person, platform, driver_ext_id, full_name, state, state_raw,
+         SELECT ${STANDING_PERSON} AS person, platform, driver_ext_id, full_name, state, state_raw,
                 state_reason, plate, vehicle_ext_id, score, can_earn, observed_at, fleet_id,
                 true AS is_account
          FROM driver_platform_state
@@ -119,7 +126,7 @@ export function rosterRoutes(app, { q, wrap, range }) {
          ) wo
          WHERE NOT EXISTS (
            SELECT 1 FROM driver_platform_state d
-            WHERE ${personFold('d.full_name')} = wo.person
+            WHERE coalesce(nullif(d.person_key, ''), ${personFold('d.full_name')}) = wo.person
               AND coalesce(btrim(d.full_name), '') <> ''
               AND ($3::text IS NULL OR d.platform = $3))
        ),

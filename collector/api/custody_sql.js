@@ -20,19 +20,42 @@
    (plate, day) — cheap per row and, unlike a join, they cannot multiply the
    row count of the query they are dropped into. */
 
+/* ── one custodian per PERSON, not per platform account ──────────────────
+   Everything below folds on the stored person key rather than on
+   driver_ext_id, because the question a vehicle page asks is "who held this
+   car", and one human holds several accounts. Counting ids answered seven for
+   a car five people drove; listing them printed two of the five twice, side by
+   side, with their days split between the rows — and a day on which the same
+   man's Uber account handed over to his own Yango account was booked as a
+   handover, with the idle hours between them charged to the vehicle.
+
+   vehicle_driver_day.person_key is that key: the folded name, plus the three
+   verified merges (sql/schema_v53.sql, from api/identity_map.js). Falling back
+   to the id keeps a row whose name is missing as its own person rather than
+   pooling every anonymous custody row into one very busy driver.
+
+   Defined here rather than as personKeyStored('v') so these helpers stay
+   readable at the call site; it is the same expression, and
+   test/person_key.test.mjs holds the two forms equal. */
+const PERSON_OF = (a) => `coalesce(nullif(${a}.person_key, ''), ${a}.driver_ext_id)`;
+
 /** Names, comma-joined, for the plate and day named by the caller's columns. */
 export const custodyNames = (plate, day) =>
-  `(SELECT string_agg(DISTINCT v.driver_name, ', ')
-      FROM vehicle_driver_day v
-     WHERE v.plate = ${plate} AND v.day = ${day}
-       AND v.driver_name IS NOT NULL)`;
+  `(SELECT string_agg(nm, ', ' ORDER BY nm) FROM (
+      SELECT DISTINCT ON (${PERSON_OF('v')}) v.driver_name AS nm
+        FROM vehicle_driver_day v
+       WHERE v.plate = ${plate} AND v.day = ${day}
+         AND v.driver_name IS NOT NULL
+       ORDER BY ${PERSON_OF('v')}, v.is_primary DESC, v.trips DESC) s)`;
 
 /** The same people as {name, id} pairs, so every one of them is clickable. */
 export const custodyRefs = (plate, day) =>
-  `(SELECT jsonb_agg(DISTINCT jsonb_build_object('name', v.driver_name, 'id', v.driver_ext_id))
-      FROM vehicle_driver_day v
-     WHERE v.plate = ${plate} AND v.day = ${day}
-       AND v.driver_name IS NOT NULL)`;
+  `(SELECT jsonb_agg(jsonb_build_object('name', nm, 'id', id) ORDER BY nm) FROM (
+      SELECT DISTINCT ON (${PERSON_OF('v')}) v.driver_name AS nm, v.driver_ext_id AS id
+        FROM vehicle_driver_day v
+       WHERE v.plate = ${plate} AND v.day = ${day}
+         AND v.driver_name IS NOT NULL
+       ORDER BY ${PERSON_OF('v')}, v.is_primary DESC, v.trips DESC) s)`;
 
 /* The custodian of a plate as of the most recent day we have custody for, for
    facts that are not about a day at all — a document expiring next month, a
@@ -58,17 +81,19 @@ export const custodyLatest = (plate) =>
    truncated list that does not admit it is a lie by omission. */
 export const custodyOverWindow = (plate, from = '$1', to = '$2') => `
   (SELECT jsonb_agg(x) FROM (
-     SELECT jsonb_build_object('name', v.driver_name, 'id', v.driver_ext_id,
-                               'days', count(DISTINCT v.day)::int) AS x
+     SELECT jsonb_build_object(
+              'name', (array_agg(v.driver_name ORDER BY v.is_primary DESC, v.trips DESC))[1],
+              'id',   (array_agg(v.driver_ext_id ORDER BY v.is_primary DESC, v.trips DESC))[1],
+              'days', count(DISTINCT v.day)::int) AS x
        FROM vehicle_driver_day v
       WHERE v.plate = ${plate} AND v.day BETWEEN ${from}::date AND ${to}::date
         AND v.driver_name IS NOT NULL
-      GROUP BY v.driver_name, v.driver_ext_id
-      ORDER BY count(DISTINCT v.day) DESC, v.driver_name
+      GROUP BY ${PERSON_OF('v')}
+      ORDER BY count(DISTINCT v.day) DESC, min(v.driver_name)
       LIMIT 3) s)`;
 
 export const custodyCountOverWindow = (plate, from = '$1', to = '$2') => `
-  (SELECT count(DISTINCT v.driver_ext_id)::int
+  (SELECT count(DISTINCT ${PERSON_OF('v')})::int
      FROM vehicle_driver_day v
     WHERE v.plate = ${plate} AND v.day BETWEEN ${from}::date AND ${to}::date
       AND v.driver_name IS NOT NULL)`;
@@ -113,9 +138,31 @@ export const personFold = (col) => `regexp_replace(
     btrim(regexp_replace(lower(${col}), '\\s+', ' ', 'g')),
     '(\\m\\w+)( \\1)+', '\\1', 'g')`;
 
-/** The name where there is one, the id where there is not — never both. */
+/* ── and the three records the fold is not allowed to see ────────────────
+   personFold above is the NAME rule and stays exactly what it was: a name it
+   has never met folds by its spelling and by nothing else. Three records on
+   this roster are a duplicate of another record that no safe spelling rule
+   reaches — two are the same names in the opposite order, one is a
+   transliterated vowel — and each was verified against production one at a
+   time, id to id. api/identity_map.js is that list, with the measurement that
+   decided each entry beside it; sql/schema_v53.sql is generated from the same
+   module so the stored column carries the same three ids.
+
+   It is applied HERE rather than inside personFold because the register is
+   keyed on the provider ID, not on a name. That is the whole safety property:
+   a rule keyed on a name fires on names nobody has looked at, including the
+   ones that arrive next month; a list keyed on an id fires on three records
+   and can never fire on a fourth. api/roster_routes.js still folds a bare name
+   with personFold, which is right — a name is all it has there. */
+import { identityCase } from './identity_map.js';
+
+/** The name where there is one, the id where there is not — never both;
+    except for the three ids in the verified merge register, which answer the
+    person they were verified to be. Character for character what
+    sql/schema_v53.sql stores, so the computed key and the stored key are the
+    same value — test/person_key.test.mjs compares them on every row. */
 export const personKey = (idCol = 'driver_ext_id', nameCol = 'driver_name') =>
-  `coalesce(nullif(${personFold(nameCol)}, ''), ${idCol})`;
+  identityCase(idCol, `coalesce(nullif(${personFold(nameCol)}, ''), ${idCol})`);
 
 /** personKey from a table that STORES the fold, rather than computing it.
     The same answer as personKey() and roughly a hundred times cheaper: the
@@ -125,6 +172,11 @@ export const personKey = (idCol = 'driver_ext_id', nameCol = 'driver_name') =>
     (v42), driver_statement_day and driver_payout_day (v51). */
 export const personKeyStored = (a) =>
   `coalesce(nullif(${a}.person_key, ''), ${a}.driver_ext_id)`;
+/* No identityCase here, deliberately: the stored column already carries the
+   register (sql/schema_v53.sql generates it), so wrapping it again would be a
+   second copy of the list to keep in step with the first. Every raw reference
+   to person_key elsewhere in this codebase — `GROUP BY t.person_key`,
+   `WHERE person_key = $1` — is correct for the same reason. */
 
 /** How many DISTINCT PEOPLE, as opposed to how many platform records. */
 /* Counting people from the STORED fold, for a query that can reach it.
