@@ -31,4 +31,5 @@ export const SCHEMA_FILES = [
   'schema_v53.sql',
   'schema_v54.sql',
   'schema_v55.sql',
+  'schema_v56.sql',
 ];

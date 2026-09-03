@@ -124,10 +124,18 @@ SELECT
     WHEN lower(t.payment_type) IN ('cash', 'cash-driver', 'cash-supervisor') THEN 'cash'
     WHEN lower(t.payment_type) IN ('pos-driver', 'pos-supervisor', 'braintree', 'zaakpay',
                                    'kcp_pg', 'card', 'credit_card') THEN 'card'
+    -- `in_app` is Bolt's word for a fare paid inside the app: the rider is
+    -- charged by the platform and the fleet is paid on the statement, which is
+    -- exactly what every other member of this bucket means. It was in no bucket
+    -- at all, so 12,722 of Bolt's 27,450 bookings — 46% with `business` — swept
+    -- into the "Everything else" tile on api/public/settlement.js, on the page
+    -- whose subject is which money the fleet already holds.
     WHEN lower(t.payment_type) IN ('apple_pay', 'google_pay', 'paypal', 'alipay2', 'digital',
-                                   'wallet', 'cashless') THEN 'wallet'
+                                   'wallet', 'cashless', 'in_app') THEN 'wallet'
+    -- `business` is Bolt Business: a company account settled by invoice, the
+    -- same arrangement as a room charge and a corporate booking.
     WHEN lower(t.payment_type) IN ('room-charge', 'hotel-charge', 'company', 'corporate',
-                                   'invoice') THEN 'on_account'
+                                   'invoice', 'business') THEN 'on_account'
     WHEN lower(t.payment_type) IN ('posted-for-salary', 'salary') THEN 'salary'
     WHEN lower(t.payment_type) IN ('foc-complimentary', 'foc', 'complimentary') THEN 'complimentary'
     WHEN lower(t.payment_type) IN ('offline') THEN 'off_platform'

@@ -194,8 +194,14 @@ console.log('\nproduct-by-vehicle resolves custody once per plate');
 {
   const F2 = "t.local_day BETWEEN $1::date AND $2::date"
     + " AND ($3::text IS NULL OR t.platform=$3) AND ($4::text IS NULL OR t.fleet_id=$4)";
+  /* The baseline carries the has_distance filter because the route does, and
+     the change was deliberate: Bolt files 0 km on a ride that never ran, and an
+     unguarded average read a third of the truth (/api/mix showed 3.97 km where
+     Bolt rides average 11.4). This comparison is about the CUSTODY rewrite
+     returning the same rows, so both sides measure distance the same way. */
   const oldSql = `SELECT t.plate, t.product, count(*)::int trips,
-        round(sum(t.distance_km)::numeric,0) km, round(avg(t.distance_km)::numeric,1) avg_km,
+        round(sum(t.distance_km)::numeric,0) km,
+        round(avg(t.distance_km) FILTER (WHERE t.has_distance)::numeric,1) avg_km,
         ${custodyOverWindow('t.plate')} AS driver_refs,
         ${custodyCountOverWindow('t.plate')} AS driver_n
    FROM trip_norm t WHERE ${F2} AND t.plate IS NOT NULL AND t.product IS NOT NULL

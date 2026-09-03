@@ -451,12 +451,36 @@ for (const f of ['uber.js', 'yango.js', 'bolt.js', 'fms.js', 'cabman.js', 'hotel
    hid a 299-day hole in the Uber trip history, and it is why Bolt read as a
    healthy source for the life of the project while writing nothing at all. */
 const bolt = src('bolt.js');
+/* The status is DERIVED now, not asserted, and that is the stronger version of
+   the same invariant. bolt hands logRun its per-window chunks and logRun works
+   out from them that all-failed is 'error' and some-failed is 'partial' —
+   src/db.js:236. Bolt was the only chunking source that never passed them, so a
+   harvest that lost fifteen of twenty-one months read exactly like one that
+   lost none. The literal expression this used to match is still here for the
+   case where there are no windows at all. */
 check('a bolt run that wrote nothing and failed everywhere is not "ok"',
-  /const status = fails\.length === 0 \? 'ok' : \(roster \+ trips > 0 \? 'partial' : 'error'\)/.test(bolt));
+  /\.\.\.\(chunks\.length \? \{ chunks \} : \{\}\)/.test(bolt)
+  && /fails\.length === 0 \? 'ok' : \(roster \+ trips > 0 \? 'partial' : 'error'\)/.test(bolt));
+check('and every window it attempted reaches the run row', /chunks\.push\(|allChunks\.push\(/.test(bolt));
 check('and the failing surfaces are named in the run, not only in the log',
   /error: fails\.length \? fails\.join/.test(bolt));
 check('a partial bolt run does not log at info, where nobody reads it',
-  /log\[status === 'ok' \? 'info' : 'warn'\]/.test(bolt));
+  /log\[fails\.length \? 'warn' : 'info'\]/.test(bolt));
+/* One surface must not take the other down with it. The roster is a snapshot of
+   who exists and the portal is every trip and every fare; they share this
+   function and nothing else, and a throw in the first used to skip the second
+   entirely. */
+/* Comments blanked before matching. These files explain their own defects in
+   prose that quotes the very code being searched for, and a lint that reads its
+   own explanation is a lint that passes on a file where the code is gone. */
+const code = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+const boltCode = code(bolt);
+check('the roster half cannot take the portal half with it',
+  /roster = await pullFiRoster[\s\S]{0,600}?\} catch[\s\S]{0,600}?trips = await pullPortalTrips/.test(boltCode),
+  'a throw in the roster used to skip every trip and every fare for both fleets');
+check('and one fleet cannot take the other',
+  /await oneFleet\([\s\S]{0,120}?\} catch/.test(boltCode),
+  'egari is walked first; its failure used to cost ecosine its whole harvest');
 // Two fleets came back with two different codes under one message we invented.
 check('the FI gateway rejection carries its own message rather than our verdict',
   /FI getDrivers rejected for/.test(bolt) && /data\?\.message/.test(bolt));

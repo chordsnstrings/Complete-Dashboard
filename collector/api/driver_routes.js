@@ -1702,7 +1702,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               count(*)::int trips,
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days,
               sum(distance_km) km, sum(price) revenue,
-              avg(distance_km) avg_km,
+              avg(distance_km) FILTER (WHERE has_distance) avg_km,
               100.0*count(*) FILTER (WHERE outcome='completed')
                    /nullif(count(*) FILTER (WHERE outcome IS NOT NULL),0) completion,
               100.0*count(*) FILTER (WHERE outcome='not_completed')
@@ -1779,7 +1779,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   app.get('/api/driver/territory', withDriver(async (req, res, d, p) => {
     const pickups = await q(
       `SELECT round(pickup_lat::numeric,4) lat, round(pickup_lng::numeric,4) lng,
-              count(*)::int n, max(pickup_addr) addr, round(avg(distance_km)::numeric,1) avg_km,
+              count(*)::int n, max(pickup_addr) addr,
+              -- Inline, because this reads trip and not trip_norm, so
+              -- has_distance is not in scope: the same three conditions the
+              -- view's column is made of.
+              round(avg(distance_km) FILTER (WHERE distance_km > 0 AND distance_km < 500)::numeric,1) avg_km,
               round(avg(price)::numeric,2) avg_fare
        FROM trip WHERE ${TW} AND pickup_lat IS NOT NULL AND pickup_lat <> 0
        GROUP BY 1,2 ORDER BY n DESC LIMIT 400`, p);
@@ -1799,7 +1803,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        copied so all three name a place the same way. */
     const areas = await q(
       `SELECT coalesce(${areaOf('pickup_addr')}, '(unparsed)') area, count(*)::int n,
-              round(avg(distance_km)::numeric,1) avg_km, round(avg(price)::numeric,2) avg_fare
+              round(avg(distance_km) FILTER (WHERE distance_km > 0 AND distance_km < 500)::numeric,1) avg_km,
+              round(avg(price)::numeric,2) avg_fare
        FROM trip WHERE ${TW} AND pickup_addr IS NOT NULL AND pickup_addr <> ''
        GROUP BY 1 ORDER BY n DESC LIMIT 25`, p);
     // Where the vehicle sat still between jobs — telemetry, not trips, so it is

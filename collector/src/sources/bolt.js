@@ -6,10 +6,10 @@
 //  Fleet Owner Portal (refresh) : trips + earnings for BOTH fleets — GUARDED on BOLT_REFRESH_TOKEN.
 //                                 Refresh tokens last ~7 days; when expired the portal path is skipped
 //                                 and the supervisor must re-capture one.
-import { config, normPlate } from '../config.js';
+import { config, normPlate, reconcilePlate } from '../config.js';
 import { http } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
-import { unixS, iso, jwtPayload, jwtExpiry } from '../util.js';
+import { unixS, iso, dubaiIso, jwtPayload, jwtExpiry } from '../util.js';
 import { log } from '../log.js';
 import { stateRow } from '../roster.js';
 import { get, setSetting } from '../settings.js';
@@ -355,6 +355,13 @@ const RETENTION_CODE = 25809;
    same request will succeed later, so skipping the window loses a month of
    trips for no reason. It is waited out, not recorded. */
 const RATE_LIMIT_CODE = 1005;
+/* The access token the portal mints is short-lived — measured at 900 s — and a
+   real harvest outlives it several times over. 503 on the READ path is that
+   token's age, never the refresh token's fault, so it re-mints and retries
+   rather than reaching the credential panel. */
+const ACCESS_TOKEN_MS = 900_000;
+const ACCESS_TOKEN_MARGIN_MS = 120_000;
+const STALE_TOKEN_CODE = 503;
 const RATE_LIMIT_TRIES = 5;
 const backoffMs = (n) => 2000 * (2 ** n);   // 2s, 4s, 8s, 16s, 32s
 /* Injectable, so the tests can drive five retries without waiting a minute. */
@@ -420,7 +427,7 @@ const at = (v) => (Number(v) > 0 ? new Date(Number(v) * 1000).toISOString() : nu
    zeros keeps the money the rider was actually charged. */
 const money = (v) => (Number(v) > 0 ? Number(v) : null);
 
-export function portalRow(o, c) {
+export function portalRow(o, c, plates = null) {
   const route = Array.isArray(o.route) ? o.route : [];
   const arrived = Array.isArray(o.arrived_to_destinations) ? o.arrived_to_destinations : [];
   return {
@@ -441,7 +448,7 @@ export function portalRow(o, c) {
     external_id: o.driver?.id != null && Number(o.created) > 0
       ? `${o.driver.id}|${o.created}` : null,
     fleet_id: c.fleet,
-    plate: normPlate(o.car_reg_number),
+    plate: reconcilePlate(o.car_reg_number, plates),
     driver_ext_id: o.driver?.id != null ? String(o.driver.id) : null,
     driver_name: o.driver?.name || null,
     requested_at: at(o.created),
@@ -491,51 +498,139 @@ export function portalRow(o, c) {
    asking, and asking newest-first means the first refusal IS the boundary and
    every older window would be refused too, so we stop rather than spend twenty
    more requests being told the same thing. */
-export async function harvestPortal({ from, to, ask, row, warn = () => {},
+export async function harvestPortal({ from, to, ask, row, sink = null, warn = () => {},
   page = PORTAL_PAGE, maxDays = PORTAL_MAX_DAYS, sleep = realSleep }) {
   const rows = [];
   /* Every refusal, not the first one. A single `refused` reported one window
      and hid the rest, which on a long backfill is the difference between "one
      window failed" and "a third of the history is missing". */
   const refusals = [];
-  let tooOld = null, asked = 0, limited = 0;
-  const chunks = [...dayChunks(from, to, maxDays)].reverse();
+  /* One entry per window attempted, in the shape logRun stores: {from, to,
+     rows, error}. Bolt was the only chunking source whose windows never
+     reached /api/status, so a run that lost fifteen of twenty-one months
+     looked exactly like one that lost none. */
+  const chunkLog = [];
+  let tooOld = null, asked = 0, limited = 0, dropped = 0, short = 0;
+  /* THE END DATE MAY NOT BE IN THE FUTURE, and the newest window is the one
+     that matters most.
+     ─────────────────────────────────────────────────────────────────────────
+     Measured against the live endpoint on 2026-09-03: end_date 2026-09-03
+     answers with 79 orders, 2026-09-04 answers `INVALID_REQUEST` (code 702).
+     A run whose window ends tomorrow — a backfill given a round upper bound, or
+     any caller working in UTC while the fleet works in Dubai — therefore loses
+     TODAY, silently in every version of this code before the one that reports
+     per-window refusals. Clamped here rather than at the caller, because it is
+     a fact about this provider and every caller would otherwise have to know
+     it. Dubai's day, like every other date in this product. */
+  const today = dubaiIso();
+  /* from/to reach this function as a Date from the scheduler and as a string
+     from a test or a hand-queued run, and midnight() already takes both.
+     midnight() has already fixed the value to a UTC midnight, so slicing its
+     ISO string back off is the same calendar day it went in as — this is not a
+     second timezone conversion. */
+  const day = (v) => new Date(midnight(v)).toISOString().slice(0, 10);
+  const end = day(to) > today ? today : day(to);
+  const chunks = [...dayChunks(from, end, maxDays)].reverse();
+  /* Attempted, not generated. The walk stops at the retention boundary, so the
+     generated list overstates what was actually asked — and a coverage figure
+     that overstates itself is the thing this whole review was about. */
+  let attempted = 0;
   for (const win of chunks) {
-    let offset = 0, guard = 0, stop = false;
+    attempted++;
+    let offset = 0, guard = 0, stop = false, before = rows.length;
+    let declared = null, err = null;
+    /* Keyed as they are collected, so a window can check itself against the
+       count the portal declared for it. */
+    const seen = new Set();
     for (;;) {
-      /* Ask, and wait out a rate limit rather than treating it as an answer.
-         The same request succeeds later; abandoning the window because the
-         provider asked us to slow down loses a month of trips to a delay. */
       let data = null;
-      for (let tryN = 0; ; tryN++) {
-        data = await ask(win, offset);
-        asked++;
-        if (Number(data?.code) !== RATE_LIMIT_CODE) break;
-        if (tryN >= RATE_LIMIT_TRIES - 1) break;
-        limited++;
-        warn('rate limited, waiting', { win: iso(win.start), offset, wait_ms: backoffMs(tryN) });
-        await sleep(backoffMs(tryN));
-      }
-      /* code 0 IS success — the portal says {"code":0,"message":"OK"} — so this
-         tests for a code that is PRESENT AND NON-ZERO, never for truthiness of
-         the field. `if (data.code)` on a falsy success code is how a working
-         response gets read as an error. */
-      if (data?.code != null && data.code !== 0) {
-        if (data.code === RETENTION_CODE) { tooOld = win; stop = true; break; }
-        refusals.push({ code: Number(data.code), window: iso(win.start),
-          says: `${data.message || 'refused'} (code ${data.code}) on ${iso(win.start)}..${iso(win.end)}` });
+      try {
+        /* Ask, and wait out a rate limit rather than treating it as an answer.
+           The same request succeeds later; abandoning the window because the
+           provider asked us to slow down loses a month of trips to a delay. */
+        for (let tryN = 0; ; tryN++) {
+          data = await ask(win, offset);
+          asked++;
+          if (Number(data?.code) !== RATE_LIMIT_CODE) break;
+          if (tryN >= RATE_LIMIT_TRIES - 1) break;
+          limited++;
+          warn('rate limited, waiting', { win: iso(win.start), offset, wait_ms: backoffMs(tryN) });
+          await sleep(backoffMs(tryN));
+        }
+      } catch (e) {
+        /* A THROWN REQUEST IS A WINDOW THAT DID NOT ANSWER, NOT A RUN THAT
+           FAILED. src/http.js re-throws after four retries, so one TCP reset on
+           page 200 of 357 used to unwind this whole function and take every row
+           from every window already collected with it — the same defect as the
+           single `says`, one level up. */
+        err = String(e && e.message ? e.message : e).slice(0, 200);
+        refusals.push({ code: null, window: iso(win.start), offset,
+          collected: rows.length - before, of: declared,
+          says: `${err} on ${iso(win.start)}..${iso(win.end)}`
+            + describeShortfall(rows.length - before, declared) });
         break;
       }
-      const got = pivot(data?.data);
-      rows.push(...got.map(row).filter((r) => r && r.external_id));
+      /* SUCCESS IS EXPLICIT, not the absence of a failure.
+         ─────────────────────────────────────────────────────────────────────
+         `data.code != null && data.code !== 0` reads anything WITHOUT a numeric
+         code as a good empty window — and an HTML error page from a CDN edge,
+         or a proxy's 403 body, is exactly that: no code, no columns, no rows,
+         no refusal, and the credential then written 'ok'. A silent zero is the
+         one outcome this file exists to stop producing, so a page counts only
+         when the portal actually said OK and actually sent columns. */
+      const code = Number(data?.code);
+      if (!(Number.isFinite(code) && code === 0 && Array.isArray(data?.data?.columns))) {
+        if (Number.isFinite(code) && code === RETENTION_CODE) { tooOld = win; stop = true; break; }
+        const says = Number.isFinite(code)
+          ? `${data.message || 'refused'} (code ${code})`
+          : `unrecognisable response (${typeof data}${data && typeof data === 'object' ? `, keys ${Object.keys(data).slice(0, 4).join()}` : ''})`;
+        refusals.push({ code: Number.isFinite(code) ? code : null, window: iso(win.start),
+          offset, collected: rows.length - before, of: declared,
+          says: `${says} on ${iso(win.start)}..${iso(win.end)}`
+            + describeShortfall(rows.length - before, declared) });
+        err = says;
+        break;
+      }
+      declared = Number(data.data.total_rows) || 0;
+      const got = pivot(data.data);
+      /* Rows that arrive and are DROPPED are counted. A renamed column makes
+         every row fail the key test, and the run then reports a healthy empty
+         window over a full one — the same silence, arrived at differently. */
+      const mapped = got.map(row);
+      const kept = mapped.filter((r) => r && r.external_id);
+      dropped += mapped.length - kept.length;
+      for (const r of kept) seen.add(r.external_id);
+      rows.push(...kept);
       offset += page;
       /* total_rows is the count for the WHOLE window, not the page, so the loop
          stops on it as well as on a short page — a short page is also what the
          last page looks like, and the two only coincide when the total does not
          divide exactly. */
-      if (got.length < page || offset >= (data?.data?.total_rows || 0)) break;
+      if (got.length < page || offset >= declared) break;
       if (++guard > 200) { warn('page guard hit', { win: iso(win.start) }); break; }
     }
+    /* OFFSET PAGING OVER A NON-UNIQUE SORT KEY LOSES ROWS. Orders are ordered
+       by `created`, which is second-granular and ties; when a tie straddles a
+       multiple of the page size the second row is never served, and no error
+       says so. There is no cursor to ask for instead, so the loss cannot be
+       prevented here — but it CAN be detected, because the portal declares the
+       window's total and a shortfall against it is arithmetic. Said out loud
+       rather than fixed, because a number quietly missing is worse than a
+       number known to be missing. */
+    const collected = rows.length - before;
+    if (!err && declared != null && seen.size < declared) {
+      short += declared - seen.size;
+      warn('window short of the count the portal declared', {
+        win: iso(win.start), collected: seen.size, declared,
+        missing: declared - seen.size });
+    }
+    chunkLog.push({ from: iso(win.start), to: iso(win.end), rows: collected,
+      error: err || (declared != null && seen.size < declared
+        ? `collected ${seen.size} of ${declared} declared` : null) });
+    /* Written per WINDOW, not once at the end. Everything above is about a
+       throw not costing the rows already collected; handing them over as they
+       are collected is what makes that true of a throw in the WRITE as well. */
+    if (sink && collected) await sink(rows.splice(before, collected), win);
     if (stop) break;
   }
   /* The first refusal is what the operator is shown, with a count beside it so
@@ -544,23 +639,81 @@ export async function harvestPortal({ from, to, ask, row, warn = () => {},
     ? { ...refusals[0], count: refusals.length,
         says: refusals[0].says + (refusals.length > 1 ? ` (and ${refusals.length - 1} more window${refusals.length > 2 ? 's' : ''})` : '') }
     : null;
-  return { rows, refused, refusals, tooOld, asked, limited, windows: chunks.length };
+  return { rows, refused, refusals, chunks: chunkLog, tooOld, asked, limited,
+    dropped, short, windows: attempted, generated: chunks.length,
+    /* Said out loud when it happens, so a caller asking for tomorrow is not
+       left wondering why its window came back a day short. */
+    clamped: day(to) > today ? { asked_to: day(to), served_to: today } : null };
 }
 
-async function pullPortalTrips(from, to, fails) {
+/* "after 100 of 4,624 rows" — the difference between a re-queue and a shrug. */
+function describeShortfall(collected, declared) {
+  if (!declared) return '';
+  return ` after ${collected} of ${declared} rows`;
+}
+
+/* Every plate this fleet is known to run, so a Bolt row that arrives without
+   its letter code can be reconciled to the car it belongs to. One query per
+   run, not per row. */
+async function knownPlates() {
+  const { rows } = await pool.query(
+    `SELECT DISTINCT plate FROM (
+       SELECT plate FROM vehicle
+       UNION SELECT plate FROM trip WHERE plate IS NOT NULL AND platform <> 'bolt'
+     ) v WHERE plate ~ '^[A-Z]+[0-9]+$'`);
+  return new Set(rows.map((r) => r.plate));
+}
+
+async function pullPortalTrips(from, to, fails, allChunks = []) {
   let total = 0;
+  /* Seeded from every OTHER channel's plates, deliberately: Bolt is the feed
+     that drops the letter, so letting its own rows vote would let a phantom
+     plate confirm itself. */
+  const plates = await knownPlates().catch((e) => {
+    log.warn(SRC, 'could not read the known plates; plates arrive as filed', { err: String(e).slice(0, 120) });
+    return null;
+  });
   for (const c of config.bolt.companies) {
+    /* ONE FLEET'S FAILURE IS NOT THE OTHER FLEET'S PROBLEM.
+       ─────────────────────────────────────────────────────────────────────
+       config.bolt.companies is ordered [egari, ecosine], and nothing in this
+       loop was guarded — so a dropped connection on egari's hundredth request
+       unwound the whole function and ecosine, with 34,699 orders waiting, was
+       never asked at all. Two separate businesses on two separate credentials
+       share this loop and nothing else. */
+    try {
+      total += await oneFleet(c, from, to, fails, allChunks, plates);
+    } catch (e) {
+      const why = String(e && e.message ? e.message : e).slice(0, 200);
+      log.error(SRC, `portal ${c.fleet} failed`, { err: why });
+      fails.push(`portal ${c.fleet}: ${why}`);
+      allChunks.push({ from: iso(from), to: iso(to), rows: 0, error: why, fleet: c.fleet });
+    }
+  }
+  return total;
+}
+
+async function oneFleet(c, from, to, fails, allChunks, plates) {
+  let total = 0;
+  {
     const rt = refreshTokenFor(c.fleet);
+    /* The key ACTUALLY in force, not the family name. A banner reading
+       "BOLT_REFRESH_TOKEN expired — re-capture from the portal" sends an
+       operator to overwrite the shared fallback, which is the OTHER fleet's
+       working credential; the key that was read is BOLT_REFRESH_TOKEN_EGARI
+       and only that one can fix it. */
+    const credKey = get(RT_KEY(c.fleet)) ? RT_KEY(c.fleet) : 'BOLT_REFRESH_TOKEN';
     if (!rt) {
       log.warn(SRC, `portal skipped for ${c.fleet} — no refresh token (trips/earnings unavailable)`);
       fails.push(`portal ${c.fleet}: no refresh token configured`);
       /* A credential that was never supplied is a different problem from one
          that stopped working, and the panel an operator opens to find out what
          to re-paste has to be able to say which. Both were silence before. */
-      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: RT_KEY(c.fleet),
         state: 'missing', surface: 'orderHistory',
-        detail: 'no refresh token configured, so trips and earnings are not collected for this fleet' });
-      continue;
+        detail: `no refresh token configured (neither ${RT_KEY(c.fleet)} nor BOLT_REFRESH_TOKEN), `
+          + 'so trips and earnings are not collected for this fleet' });
+      return total;
     }
 
     const { at, err, meta, wrongOwner } = await portalToken(c);
@@ -588,7 +741,7 @@ async function pullPortalTrips(from, to, fails) {
          who is told. It reached the operator as a source that had quietly
          stopped carrying trips. The owner mismatch is recorded separately
          because re-pasting cannot fix a token minted for the other fleet. */
-      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: credKey,
         state: 'invalid', surface: 'orderHistory',
         /* The remedy is part of the sentence now. "It is the wrong fleet's
            token" told an operator what NOT to do and left them without
@@ -599,7 +752,7 @@ async function pullPortalTrips(from, to, fails) {
             + ` not ${c.userId} — it is the wrong fleet's token, not an expired one.`
             + ` Capture ${RT_KEY(c.fleet)} from a Bolt portal session signed in as owner ${c.userId}.`
           : `${String(err).slice(0, 150)}${m?.expires_at ? ` (expired ${m.expires_at})` : ''}` });
-      continue;
+      return total;
     }
     /* The token was good; the request never was.
        ─────────────────────────────────────────────────────────────────────
@@ -624,25 +777,67 @@ async function pullPortalTrips(from, to, fails) {
        (200 gives "Integer is not in range"), window max 30 days (31 gives
        DATE_RANGE_TOO_BIG). Both are encoded as constants rather than as a
        comment, because a limit nobody can see is a limit somebody raises. */
-    const { rows, refused, tooOld } = await harvestPortal({
+    /* The access token dies at a measured 900 s, and a real harvest outlives it.
+       ─────────────────────────────────────────────────────────────────────────
+       Ecosine's full walk is ~357 requests over about seven minutes, and a
+       rate-limited stretch alone can spend fifteen minutes: the token minted
+       before the loop is dead long before the loop is. Every window after that
+       came back 503, and 503 is not the refresh token's fault — it is this
+       access token's age — so it must never reach the credential panel. Minted
+       inside `ask`, re-minted two minutes before expiry and once on a 503, and
+       the same (window, offset) retried before anything is recorded. */
+    let live = { at, until: Date.now() + ACCESS_TOKEN_MS };
+    const fresh = async () => {
+      if (Date.now() < live.until - ACCESS_TOKEN_MARGIN_MS) return live.at;
+      const again = await portalToken(c);
+      if (!again.at) throw new Error(`could not re-mint the access token: ${again.err}`);
+      live = { at: again.at, until: Date.now() + ACCESS_TOKEN_MS };
+      log.info(SRC, `portal ${c.fleet}: access token re-minted mid-harvest`);
+      return live.at;
+    };
+    const askOnce = async (win, offset, token) => http(url(c), {
+      method: 'POST',
+      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ start_date: iso(win.start), end_date: iso(win.end),
+        order_states: PORTAL_STATES, limit: PORTAL_PAGE, offset }),
+    }).then((r) => r.data);
+
+    const { rows, refused, refusals, chunks, tooOld, dropped, short } = await harvestPortal({
       from,
       to,
-      row: (o) => portalRow(o, c),
-      ask: (win, offset) => http(url(c), {
-        method: 'POST', headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ start_date: iso(win.start), end_date: iso(win.end),
-          order_states: PORTAL_STATES, limit: PORTAL_PAGE, offset }),
-      }).then((r) => r.data),
+      row: (o) => portalRow(o, c, plates),
+      /* Written per window rather than once at the end, so a throw costs the
+         window in flight and not the six months behind it. The upsert is
+         idempotent on (platform, external_id), so writing early costs nothing
+         and a re-run repairs a partial harvest rather than duplicating it. */
+      sink: async (batch) => { total += await upsertMany('trip', batch, ['platform', 'external_id']); },
+      ask: async (win, offset) => {
+        const first = await askOnce(win, offset, await fresh());
+        if (Number(first?.code) !== STALE_TOKEN_CODE) return first;
+        live.until = 0;                       // force the re-mint, then ask again
+        return askOnce(win, offset, await fresh());
+      },
       warn: (m, x) => log.warn(SRC, `portal ${c.fleet}: ${m}`, x),
     });
+    for (const ch of chunks) allChunks.push({ ...ch, fleet: c.fleet });
     /* Reaching the end of what the portal keeps is not a fault, and must not be
        reported as one — a backfill that asks for more history than exists will
        hit this every single time it runs. Said once, as a fact about the
        provider's retention, and the rows collected before it are kept. */
     if (tooOld) {
       log.info(SRC, `portal ${c.fleet}: reached the end of the portal's history`,
-        { refused_from: iso(tooOld.start), collected: rows.length });
+        { refused_from: iso(tooOld.start) });
     }
+    /* Rows the portal sent and this collector could not key. Zero is the normal
+       answer; anything else means a column was renamed and the trips are being
+       thrown away one page at a time, which otherwise looks exactly like an
+       empty window. */
+    if (dropped) {
+      log.warn(SRC, `portal ${c.fleet}: ${dropped} rows arrived that could not be keyed`,
+        { hint: 'driver.id or created is missing — has the portal renamed a column?' });
+      fails.push(`portal ${c.fleet}: ${dropped} unkeyable rows`);
+    }
+    if (short) fails.push(`portal ${c.fleet}: ${short} rows short of the counts the portal declared`);
     /* A refusal that is NOT the retention boundary is worth reporting — but it
        still does not throw away the windows that answered, and it only touches
        the credential when it is the credential being refused. A malformed
@@ -652,26 +847,33 @@ async function pullPortalTrips(from, to, fails) {
     if (refused) {
       fails.push(`portal ${c.fleet}: ${refused.says}`);
       if (AUTH_CODES.has(refused.code)) {
-        await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
+        await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: credKey,
           state: 'invalid', surface: 'orderHistory', detail: refused.says });
-        if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
-        continue;
+        return total;
       }
     }
-    /* The token demonstrably worked, so say so. A credential that can only
-       ever be written 'invalid' or 'missing' keeps the last red row it was
-       given for ever — the same defect this codebase has already fixed twice,
-       in src/sources/fms.js and src/sources/yango.js. Production carried
-       "BOLT_REFRESH_TOKEN invalid — the token belongs to owner 173999" for
-       hours after a valid Egari token was in place, because nothing in this
-       function could clear it. */
-    await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
-      state: 'ok', surface: 'orderHistory', detail: null });
+    /* 'ok' only when something actually ANSWERED.
+       ─────────────────────────────────────────────────────────────────────
+       A credential that can only ever be written 'invalid' keeps its last red
+       row for ever — the defect this codebase has fixed twice, in
+       src/sources/fms.js and src/sources/yango.js. But the opposite is just as
+       bad and this is where it lived: if every window refused, `rows` is empty
+       and nothing here distinguished that from a genuinely quiet week, so the
+       run wrote 'ok' and logged "authenticated, no orders in window" — the
+       exact sentence this file exists to stop printing. A token is working
+       when a window came back OK, not when nothing came back at all. */
+    const answered = chunks.some((ch) => !ch.error);
+    if (answered) {
+      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: credKey,
+        state: 'ok', surface: 'orderHistory', detail: null });
+    }
     // An authenticated call that comes back with nothing is worth a line: it
     // separates "the token works and the window is empty" from "the token works
     // and we are reading the wrong field", which otherwise both read as zero.
-    if (!rows.length) log.info(SRC, `portal ${c.fleet}: authenticated, no orders in window`, { from: iso(from), to: iso(to) });
-    if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
+    if (answered && !rows.length && !refusals.length) {
+      log.info(SRC, `portal ${c.fleet}: authenticated, no orders in window`,
+        { from: iso(from), to: iso(to) });
+    }
   }
   return total;
 }
@@ -687,16 +889,61 @@ export async function collect({ from, to, mode }) {
      which half of Bolt is dark instead of showing a green tick over an empty
      table. */
   const fails = [];
+  const chunks = [];
+  let roster = 0;
+  let trips = 0;
   try {
-    const roster = await pullFiRoster(from, to, fails);
-    const trips = await pullPortalTrips(from, to, fails);
-    const status = fails.length === 0 ? 'ok' : (roster + trips > 0 ? 'partial' : 'error');
+    /* EACH SURFACE ON ITS OWN. The roster is a snapshot of who exists; the portal
+       is every trip and every fare. They share nothing but this function, and a
+       throw in the first used to skip the second entirely — so a rotated
+       BOLT_CLIENT_SECRET, or one bad five minutes at oidc.bolt.eu, took the only
+       surface carrying money down with the one carrying names. */
+    try {
+      roster = await pullFiRoster(from, to, fails);
+    } catch (e) {
+      const why = String(e && e.message ? e.message : e).slice(0, 200);
+      log.error(SRC, 'FI roster failed', { err: why });
+      fails.push(`FI roster: ${why}`);
+      /* Named, so the run does not report a fault against no credential at all.
+         The roster's grant is BOLT_CLIENT_SECRET; the trips' is the portal
+         refresh token, and only one of them just broke. */
+      await noteCredential(pool, { provider: SRC, fleet: '*', credential: 'BOLT_CLIENT_SECRET',
+        state: 'unknown', surface: 'fiRoster', detail: why }).catch(() => {});
+    }
+
+    try {
+      trips = await pullPortalTrips(from, to, fails, chunks);
+    } catch (e) {
+      const why = String(e && e.message ? e.message : e).slice(0, 200);
+      log.error(SRC, 'portal failed', { err: why });
+      fails.push(`portal: ${why}`);
+    }
+
+    /* The windows go on the run. Bolt was the only chunking source whose windows
+       never reached /api/status, so a harvest that lost fifteen of twenty-one
+       months looked exactly like one that lost none — and the roster's row count
+       was enough to make a completely dark trip harvest read 'partial'. logRun
+       derives the honest status from these: all-failed is 'error', not 'partial'. */
+    const status = chunks.length
+      ? undefined                        // logRun computes it from the chunks
+      : (fails.length === 0 ? 'ok' : (roster + trips > 0 ? 'partial' : 'error'));
     await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to,
-      status, rows_written: roster + trips,
+      ...(status ? { status } : {}),
+      ...(chunks.length ? { chunks } : {}),
+      rows_written: roster + trips,
       error: fails.length ? fails.join('; ').slice(0, 500) : null });
-    log[status === 'ok' ? 'info' : 'warn'](SRC, `done (${status})`, { roster, trips, failed: fails.length || undefined });
+    const failedChunks = chunks.filter((c) => c.error).length;
+    log[fails.length ? 'warn' : 'info'](SRC, 'done',
+      { roster, trips, windows: chunks.length || undefined,
+        failed_windows: failedChunks || undefined, failed: fails.length || undefined });
   } catch (e) {
-    await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to, status: 'error',
+    /* Both surfaces are guarded above, so nothing ordinary reaches here — this
+       is the run row's own write, or something between them. It stays because a
+       source that throws WITHOUT a collection_run row does not show as broken
+       on the status page: it disappears from it, which is the one failure mode
+       worse than being broken. */
+    await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to,
+      status: 'error', rows_written: roster + trips,
       error: [String(e), ...fails].join('; ').slice(0, 500) });
     log.error(SRC, 'failed', { err: String(e) });
   }

@@ -114,7 +114,14 @@ check('the window bound is the measured maximum', /PORTAL_MAX_DAYS = 30\b/.test(
 check('both are sent on every request',
   /limit: PORTAL_PAGE, offset/.test(SRC), 'the request that started all this omitted them');
 check('the window is chunked rather than asked for whole',
-  /dayChunks\(from, to, maxDays\)/.test(SRC) && /maxDays = PORTAL_MAX_DAYS/.test(SRC));
+  /dayChunks\(from, end, maxDays\)/.test(SRC) && /maxDays = PORTAL_MAX_DAYS/.test(SRC));
+/* `end`, not `to`: an end_date in the FUTURE is refused outright — measured on
+   the live portal, 2026-09-03 answered with 79 orders and 2026-09-04 answered
+   INVALID_REQUEST (code 702) — so a run whose window ends tomorrow loses today,
+   the most valuable window there is. Clamped here because it is a fact about
+   this provider, not about any one caller. */
+check('and its end date is clamped to today, because the future is refused',
+  /const end = day\(to\) > today \? today : day\(to\)/.test(SRC));
 /* Newest-first is not a style choice: it is what makes the rolling retention
    edge cost one refused request instead of one per window past it. */
 check('and walked newest-window-first',
@@ -128,7 +135,11 @@ check('a refusal that IS about the credential is recorded against it',
 check('and one that is not about the credential does not touch it',
   /AUTH_CODES = new Set\(/.test(SRC) && !/state: 'invalid'[\s\S]{0,80}?detail: refused\.says[\s\S]{0,40}?\}\);\s*\n\s*\}\s*\n\s*await noteCredential/.test(SRC));
 check('the retention edge is a code, tested for equality, not a message match',
-  /RETENTION_CODE = 25809/.test(SRC) && /data\.code === RETENTION_CODE/.test(SRC));
+  /RETENTION_CODE = 25809/.test(SRC) && /code === RETENTION_CODE/.test(SRC));
+/* And the code is READ before it is compared, so a body carrying no numeric
+   code is never mistaken for a good empty window. */
+check('a response is a success only when it says so AND carries columns',
+  /Number\.isFinite\(code\) && code === 0 && Array\.isArray\(data\?\.data\?\.columns\)/.test(SRC));
 /* The third instance of this defect in this codebase — fms.js and yango.js
    both had it. A credential that can only be written 'invalid' keeps the last
    red row it was given for ever. */
@@ -193,8 +204,13 @@ check('the edge it names is the first window that would not answer',
    is 25 chunks and only about 15 of them are inside retention. Asking
    oldest-first would spend ten requests being refused before collecting
    anything. */
+/* `generated`, not `windows`. They used to be the same number and the
+   difference is the point: `windows` counts what was actually ASKED, so that a
+   coverage figure cannot include windows the walk stopped short of. Comparing
+   asked against attempted would now be comparing a number with itself. */
 check('it stops at the edge instead of asking for every older window',
-  deep.asked < deep.windows, `${deep.asked} requests over ${deep.windows} windows`);
+  deep.asked < deep.generated && deep.windows < deep.generated,
+  `${deep.asked} requests, ${deep.windows} windows attempted, ${deep.generated} generated`);
 
 /* A refusal that is NOT the retention edge keeps its rows too, and is reported. */
 const mid = await harvestPortal({ from: '2026-06-01', to: '2026-09-03',

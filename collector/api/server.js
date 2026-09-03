@@ -973,7 +973,15 @@ app.get('/api/mix', wrap(async (req, res) => {
             round(sum(price)::numeric,0) revenue,
             count(*) FILTER (WHERE price IS NOT NULL)::int priced_n,
             round(sum(distance_km) FILTER (WHERE price IS NOT NULL)::numeric,0) priced_km,
-            round(avg(distance_km)::numeric,1) avg_km
+            -- FILTER (WHERE has_distance), like every other average of this
+            -- column. has_distance is distance_km NOT NULL and > 0 and < 500:
+            -- the zero that means the ride never ran, and the FMS odometer
+            -- reading that means the tracker had a bad day. Unguarded, Bolt's
+            -- cancellations dragged this average to a third of the truth
+            -- (/api/mix showed 3.97 km against 11.36) until schema_v55 nulled
+            -- them; the outlier half of the guard is still unprotected without
+            -- this, and the guard already exists three lines away.
+            round(avg(distance_km) FILTER (WHERE has_distance)::numeric,1) avg_km
      -- FB, not F, for EVERY dimension including platform. The exception used
      -- to be here so the platform donut could show FMS as a slice — but FMS
      -- rows are telematics twins of journeys uber and hotel already report, so
@@ -3839,7 +3847,7 @@ app.get('/api/product/by-vehicle', wrap(async (req, res) => res.json(await q(
   `WITH agg AS (
      SELECT t.plate, t.product, count(*)::int trips,
             round(sum(t.distance_km)::numeric,0) km,
-            round(avg(t.distance_km)::numeric,1) avg_km
+            round(avg(t.distance_km) FILTER (WHERE t.has_distance)::numeric,1) avg_km
        FROM trip_norm t
       WHERE ${F} AND t.plate IS NOT NULL AND t.product IS NOT NULL
       GROUP BY t.plate, t.product

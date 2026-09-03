@@ -188,3 +188,23 @@ export const config = {
    rather than at the thirty aggregates that consume it. sql/schema_v32.sql
    cleans the rows already written. */
 export const normPlate = (p) => (p || '').toUpperCase().replace(/[\s-]+/g, '') || null;
+
+/* ── a plate that arrived without its letter code ────────────────────────────
+   Dubai plates are a letter code and a number — L36397 — and Bolt sometimes
+   files only the digits. normPlate cannot put the letter back, so the same car
+   becomes two vehicles: measured on production, 36397 (85 trips), 64009 (38)
+   and 46184 (27) sat beside L36397, L64009 and L46184 as separate rows in a
+   231-vehicle directory, splitting one car's utilisation, safety rate and
+   earnings across two records that never met.
+
+   Only ever resolved when the answer is UNAMBIGUOUS: a digits-only plate is
+   reconciled when exactly ONE known plate ends with those digits. Two
+   candidates is a guess, and a guess here silently moves one car's trips onto
+   another car. Anything already carrying a letter is left exactly as it is. */
+export const reconcilePlate = (p, known) => {
+  const v = normPlate(p);
+  if (!v || !/^\d+$/.test(v) || !known) return v;
+  const hit = [...known].filter((k) => k.length > v.length && k.endsWith(v)
+    && /^[A-Z]+\d+$/.test(k));
+  return hit.length === 1 ? hit[0] : v;
+};
