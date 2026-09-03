@@ -22,7 +22,7 @@
    The fixture below is a real captured response for the Egari fleet, 50 rows
    of a 156-row window. */
 import { readFileSync } from 'node:fs';
-import { pivot, portalRow } from '../src/sources/bolt.js';
+import { pivot, portalRow, harvestPortal } from '../src/sources/bolt.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -114,16 +114,211 @@ check('the window bound is the measured maximum', /PORTAL_MAX_DAYS = 30\b/.test(
 check('both are sent on every request',
   /limit: PORTAL_PAGE, offset/.test(SRC), 'the request that started all this omitted them');
 check('the window is chunked rather than asked for whole',
-  /dayChunks\(from, to, PORTAL_MAX_DAYS\)/.test(SRC));
+  /dayChunks\(from, to, maxDays\)/.test(SRC) && /maxDays = PORTAL_MAX_DAYS/.test(SRC));
+/* Newest-first is not a style choice: it is what makes the rolling retention
+   edge cost one refused request instead of one per window past it. */
+check('and walked newest-window-first',
+  /\[\.\.\.dayChunks\([^)]*\)\]\.reverse\(\)/.test(SRC));
 check('paging stops on total_rows, not on a short page alone',
   /total_rows/.test(SRC));
-check('a refusal is recorded against the credential rather than swallowed',
-  /state: 'invalid'[\s\S]{0,120}?detail: says|detail: says/.test(SRC));
+check('a refusal that IS about the credential is recorded against it',
+  /AUTH_CODES\.has\(refused\.code\)[\s\S]{0,240}?state: 'invalid'/.test(SRC));
+/* And one that is not stays off it. Filing "your date is too old" against a
+   token is what marked a working Egari credential invalid. */
+check('and one that is not about the credential does not touch it',
+  /AUTH_CODES = new Set\(/.test(SRC) && !/state: 'invalid'[\s\S]{0,80}?detail: refused\.says[\s\S]{0,40}?\}\);\s*\n\s*\}\s*\n\s*await noteCredential/.test(SRC));
+check('the retention edge is a code, tested for equality, not a message match',
+  /RETENTION_CODE = 25809/.test(SRC) && /data\.code === RETENTION_CODE/.test(SRC));
 /* The third instance of this defect in this codebase — fms.js and yango.js
    both had it. A credential that can only be written 'invalid' keeps the last
    red row it was given for ever. */
 check('and a working token is recorded as working, so the red row can clear',
   /state: 'ok', surface: 'orderHistory'/.test(SRC));
+
+/* ── the walk over windows and pages ─────────────────────────────────────
+   Everything above was green while the collector wrote 70 rows over a two-year
+   backfill and 182 over three days, because nothing here could reach the loop.
+   These drive it with a fake portal, which is the only way the defect was ever
+   going to be caught before production.
+
+   The fake answers the way the real one does: code 0 and message OK on success,
+   a non-zero code on refusal, column-oriented pages of at most 100. */
+console.log('\nbolt: the walk over windows and pages');
+
+const day = (d) => new Date(`${d}T00:00:00Z`);
+/* One synthetic order per day, so a window's row count IS its length in days
+   and a lost window is arithmetic rather than a judgement call. */
+const orderOn = (iso, n) => ({ driver: { id: String(1000 + n), name: `D${n}` },
+  created: Math.floor(day(iso).getTime() / 1000) + n, car_reg_number: 'L00001',
+  route: ['a', 'b'], status: 'finished', distance: 3, price: 20, category: 'Bolt',
+  arrived_to_destinations: [], payment_method: 'in_app' });
+const asColumns = (orders) => ({ code: 0, message: 'OK', data: {
+  total_rows: orders.length,
+  columns: Object.keys(orders[0] || { created: 0 }).map((k) => ({ key: k,
+    cells: orders.map((o) => o[k]) })) } });
+
+/* `since` is the portal's rolling retention edge. Anything starting before it
+   is refused with 25809, exactly as the live endpoint does. */
+function fakePortal({ since, perDay = 1, refuseWindowsStarting = null, code = 702 }) {
+  const seen = [];
+  return async (win, offset) => {
+    seen.push({ start: win.start.toISOString().slice(0, 10), offset });
+    if (win.start < day(since)) return { code: 25809, message: 'START_DATE_TOO_FAR_IN_THE_PAST' };
+    if (refuseWindowsStarting
+        && win.start.toISOString().slice(0, 10) === refuseWindowsStarting) {
+      return { code, message: 'INVALID_REQUEST' };
+    }
+    const orders = [];
+    for (let t = win.start.getTime(); t <= win.end.getTime(); t += 864e5) {
+      const d = new Date(t).toISOString().slice(0, 10);
+      for (let k = 0; k < perDay; k++) orders.push(orderOn(d, orders.length));
+    }
+    const slice = orders.slice(offset, offset + 100);
+    return { ...asColumns(slice), data: { ...asColumns(slice).data, total_rows: orders.length } };
+  };
+}
+const ROW = (o) => portalRow(o, C);
+
+/* THE BUG, as a test. Two years asked for, fifteen months retained. */
+const deep = await harvestPortal({ from: '2024-09-03', to: '2026-09-03',
+  ask: fakePortal({ since: '2025-06-01' }), row: ROW });
+check('a window older than the portal keeps does not discard the rest',
+  deep.rows.length > 400, `${deep.rows.length} rows survived`);
+check('and it is reported as the retention edge, not as a failure',
+  !!deep.tooOld && deep.refused === null,
+  `tooOld=${!!deep.tooOld} refused=${JSON.stringify(deep.refused)}`);
+check('the edge it names is the first window that would not answer',
+  deep.tooOld.start < day('2025-06-01'));
+/* Newest-first is what makes the boundary cheap: at 30-day windows, two years
+   is 25 chunks and only about 15 of them are inside retention. Asking
+   oldest-first would spend ten requests being refused before collecting
+   anything. */
+check('it stops at the edge instead of asking for every older window',
+  deep.asked < deep.windows, `${deep.asked} requests over ${deep.windows} windows`);
+
+/* A refusal that is NOT the retention edge keeps its rows too, and is reported. */
+const mid = await harvestPortal({ from: '2026-06-01', to: '2026-09-03',
+  ask: fakePortal({ since: '2020-01-01', refuseWindowsStarting: '2026-07-01' }), row: ROW });
+check('a mid-run refusal keeps everything already collected',
+  mid.rows.length > 0, `${mid.rows.length}`);
+check('and names the code and the window it happened on',
+  mid.refused?.code === 702 && /2026-07-01/.test(mid.refused.says), JSON.stringify(mid.refused));
+
+/* code 0 is SUCCESS. Testing the field for truthiness reads every good
+   response as an error and collects nothing — the failure mode that hid this
+   endpoint's real behaviour for a year. */
+const zero = await harvestPortal({ from: '2026-08-01', to: '2026-08-30',
+  ask: fakePortal({ since: '2020-01-01' }), row: ROW });
+check('a success code of 0 is not read as a refusal',
+  zero.rows.length === 30 && zero.refused === null, `${zero.rows.length} rows`);
+
+/* Paging. total_rows is the window total, so a full last page must not end the
+   walk early and an exact multiple must not loop for ever. */
+const many = await harvestPortal({ from: '2026-08-01', to: '2026-08-30',
+  ask: fakePortal({ since: '2020-01-01', perDay: 10 }), row: ROW });
+check('every page of a multi-page window is collected',
+  many.rows.length === 300, `${many.rows.length} of 300`);
+const exact = await harvestPortal({ from: '2026-08-01', to: '2026-08-10',
+  ask: fakePortal({ since: '2020-01-01', perDay: 10 }), row: ROW });
+check('a window whose total is an exact multiple of the page terminates',
+  exact.rows.length === 100, `${exact.rows.length}`);
+
+/* Windows tile the range with no gap and no overlap: a day counted twice is a
+   duplicate trip, a day skipped is a missing one, and the synthetic key makes
+   both silent. */
+const tiled = await harvestPortal({ from: '2026-01-01', to: '2026-03-31',
+  ask: fakePortal({ since: '2020-01-01' }), row: ROW });
+check('the windows tile the range exactly — one row per day, no gap, no overlap',
+  tiled.rows.length === 90, `${tiled.rows.length} of 90 days`);
+check('and every key is distinct across window boundaries',
+  new Set(tiled.rows.map((r) => r.external_id)).size === tiled.rows.length);
+
+/* An empty but valid window is not a refusal, and must not stop the walk. */
+const gap = await harvestPortal({ from: '2026-08-01', to: '2026-08-30',
+  ask: async (win, offset) => (offset > 0 ? { code: 0, message: 'OK', data: { columns: [], total_rows: 0 } }
+    : { code: 0, message: 'OK', data: { columns: [], total_rows: 0 } }), row: ROW });
+check('an empty window returns nothing and reports no fault',
+  gap.rows.length === 0 && gap.refused === null && !gap.tooOld);
+
+/* ── the rate limit, which only a live run could have found ──────────────
+   Running the real loop over two years against the live portal collected
+   19,239 Ecosine and 13,238 Egari orders — and answered code 1005
+   TOO_MANY_REQUESTS partway through, on 2026-07-25..2026-08-23. Two years is
+   25 windows but about 210 requests once paging is counted; January 2026 alone
+   is 3,932 orders, forty pages.
+
+   A rate limit is the one refusal that is not an answer ABOUT THE DATA. The
+   same request succeeds a moment later, so treating it like any other refusal
+   drops a month of trips because the provider asked us to slow down. The
+   fixture could never have shown this; only asking could. */
+console.log('\nbolt: being told to slow down');
+
+const nap = async () => {};   // the backoff itself is not what is under test
+
+/* Refuses the first two attempts on every request, then answers. */
+function rateLimited(n, inner) {
+  const seen = new Map();
+  return async (win, offset) => {
+    const k = `${win.start.toISOString().slice(0, 10)}|${offset}`;
+    const tries = (seen.get(k) || 0) + 1;
+    seen.set(k, tries);
+    if (tries <= n) return { code: 1005, message: 'TOO_MANY_REQUESTS' };
+    return inner(win, offset);
+  };
+}
+
+const slowed = await harvestPortal({ from: '2026-08-01', to: '2026-08-30',
+  ask: rateLimited(2, fakePortal({ since: '2020-01-01' })), row: ROW, sleep: nap });
+check('a rate limit is waited out, not counted as a refusal',
+  slowed.rows.length === 30 && slowed.refused === null,
+  `${slowed.rows.length} rows, refused=${JSON.stringify(slowed.refused)}`);
+check('and the waiting is reported, so a slow run is explicable',
+  slowed.limited > 0, `${slowed.limited}`);
+
+/* It gives up eventually rather than retrying for ever — and when it does, it
+   is a refusal like any other: reported, with its rows kept. */
+const stubborn = await harvestPortal({ from: '2026-08-01', to: '2026-08-30',
+  ask: rateLimited(99, fakePortal({ since: '2020-01-01' })), row: ROW, sleep: nap });
+check('a limit that never lifts is given up on rather than retried for ever',
+  stubborn.refused?.code === 1005, JSON.stringify(stubborn.refused));
+check('and the retries are bounded', stubborn.asked <= 6, `${stubborn.asked} requests`);
+
+/* A rate limit on ONE window must not cost the others. This is the same
+   family as the retention bug: a transient refusal is not a verdict on the run. */
+/* Refuses the Nth DISTINCT window it is shown, counting in the order the walk
+   visits them. Picking calendar dates instead would silently match nothing the
+   day the chunk arithmetic changes — which is exactly what it did. */
+function refuseNthWindow(ns, code, inner) {
+  const order = new Map();
+  return async (win, offset) => {
+    const k = win.start.toISOString().slice(0, 10);
+    if (!order.has(k)) order.set(k, order.size);
+    return ns.includes(order.get(k)) ? { code, message: 'REFUSED' } : inner(win, offset);
+  };
+}
+
+const partial = await harvestPortal({ from: '2026-06-01', to: '2026-08-30',
+  ask: refuseNthWindow([1], 1005, fakePortal({ since: '2020-01-01' })),
+  row: ROW, sleep: nap });
+check('one exhausted window does not cost the windows around it',
+  partial.rows.length > 50, `${partial.rows.length} rows`);
+
+/* Every bad window, not just the first. On a long backfill "one window failed"
+   and "a third of the history is missing" must not read identically. */
+const manyBad = await harvestPortal({ from: '2026-01-01', to: '2026-08-30',
+  ask: refuseNthWindow([1, 3, 5], 702, fakePortal({ since: '2020-01-01' })),
+  row: ROW, sleep: nap });
+check('every refused window is counted, not only the first',
+  manyBad.refusals.length === 3, `${manyBad.refusals.length}`);
+check('and the operator is told there were more than one',
+  /2 more windows/.test(manyBad.refused.says), manyBad.refused.says);
+
+/* The rate-limit code must be equality-tested, like the retention code — a
+   message match would break the day the provider rewords it. */
+check('the limit is recognised by code, not by message text',
+  /RATE_LIMIT_CODE = 1005/.test(SRC) && /!== RATE_LIMIT_CODE|=== RATE_LIMIT_CODE/.test(SRC));
+check('and it is NOT in the set that blames the credential',
+  !/AUTH_CODES = new Set\(\[[^\]]*1005/.test(SRC));
 
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -339,16 +339,39 @@ const PORTAL_PAGE = 100;      // 200 answers "limit: Integer is not in range"
 const PORTAL_MAX_DAYS = 30;   // 31 answers DATE_RANGE_TOO_BIG
 const PORTAL_STATES = ['finished', 'client_cancelled', 'driver_did_not_respond',
   'driver_rejected', 'client_did_not_show', 'driver_cancelled_after_accept'];
+/* "You asked for a day older than we keep." A fact about the provider's
+   retention, not about this fleet, this token or this run. */
+const RETENTION_CODE = 25809;
+/* "Slow down." Found by doing exactly that: a two-year harvest is 25 windows
+   but ~210 requests once paging is counted — January 2026 alone is 3,932
+   orders, forty pages — and the portal answered code 1005 partway through.
+   A rate limit is the one refusal that is not an answer about the data: the
+   same request will succeed later, so skipping the window loses a month of
+   trips for no reason. It is waited out, not recorded. */
+const RATE_LIMIT_CODE = 1005;
+const RATE_LIMIT_TRIES = 5;
+const backoffMs = (n) => 2000 * (2 ** n);   // 2s, 4s, 8s, 16s, 32s
+/* Injectable, so the tests can drive five retries without waiting a minute. */
+const realSleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
+/* The only codes that are about the CREDENTIAL. Everything else is about the
+   request, and filing it against the token sends somebody to re-paste a
+   credential that was never the problem. */
+const AUTH_CODES = new Set([700, 701, 703, 50003]);
 
 const url = (c) => `${config.bolt.portalBase}/orderHistory/getTable`
   + `?language=en-us&version=FO.3.856&company_id=${c.companyId}&user_id=${c.userId}&brand=bolt`;
 
 /* Half-open windows of at most n days, so a backfill of any length is asked
    for in pieces the endpoint will accept. */
+/* A Date or a 'YYYY-MM-DD' string, both to the same UTC midnight. The
+   collector hands these a Date and a queued job row hands them a string, and a
+   window boundary is not the place to find out which. */
+const midnight = (v) => new Date(`${typeof v === 'string' ? v.slice(0, 10) : iso(v)}T00:00:00Z`).getTime();
+
 function* dayChunks(from, to, n) {
   const DAY = 864e5;
-  let s = new Date(`${iso(from)}T00:00:00Z`).getTime();
-  const end = new Date(`${iso(to)}T00:00:00Z`).getTime();
+  let s = midnight(from);
+  const end = midnight(to);
   while (s <= end) {
     const e = Math.min(s + (n - 1) * DAY, end);
     yield { start: new Date(s), end: new Date(e) };
@@ -418,6 +441,89 @@ export function portalRow(o, c) {
     currency: 'AED',
     raw: o,
   };
+}
+
+/* ── the window-and-page walk, extracted so it can be tested ──────────────
+   NEWEST WINDOW FIRST, and a refusal on one window is not a refusal of the run.
+
+   The first shape of this loop lived inline, kept a single error variable, and
+   discarded EVERY row it had collected the moment any window refused. That is
+   not hypothetical. The two-year backfill queued on 2026-09-03 began at
+   2024-09-03, the portal answered
+
+     {"code":25809,"message":"START_DATE_TOO_FAR_IN_THE_PAST"}
+
+   on the very first chunk, and the whole fleet's harvest went in the bin — 70
+   rows written over two years while a three-day incremental beside it wrote
+   182. It then filed that against BOLT_REFRESH_TOKEN as `invalid`, which is
+   the mistake this codebase has already made twice and written essays about:
+   blaming a credential for a refusal that has nothing to do with it. The token
+   was fine. The DATE was too old.
+
+   It is a function now, taking its request as an argument, because the defect
+   survived a green test suite for exactly one reason — nothing could reach the
+   loop to drive a refusal through it.
+
+   The portal keeps a ROLLING window: binary-searched against the live endpoint
+   on 2026-09-03, 2024-11-26 answers and 2024-11-25 does not, so about 645 days.
+   That boundary MOVES, which is why it is not a constant here — it is found by
+   asking, and asking newest-first means the first refusal IS the boundary and
+   every older window would be refused too, so we stop rather than spend twenty
+   more requests being told the same thing. */
+export async function harvestPortal({ from, to, ask, row, warn = () => {},
+  page = PORTAL_PAGE, maxDays = PORTAL_MAX_DAYS, sleep = realSleep }) {
+  const rows = [];
+  /* Every refusal, not the first one. A single `refused` reported one window
+     and hid the rest, which on a long backfill is the difference between "one
+     window failed" and "a third of the history is missing". */
+  const refusals = [];
+  let tooOld = null, asked = 0, limited = 0;
+  const chunks = [...dayChunks(from, to, maxDays)].reverse();
+  for (const win of chunks) {
+    let offset = 0, guard = 0, stop = false;
+    for (;;) {
+      /* Ask, and wait out a rate limit rather than treating it as an answer.
+         The same request succeeds later; abandoning the window because the
+         provider asked us to slow down loses a month of trips to a delay. */
+      let data = null;
+      for (let tryN = 0; ; tryN++) {
+        data = await ask(win, offset);
+        asked++;
+        if (Number(data?.code) !== RATE_LIMIT_CODE) break;
+        if (tryN >= RATE_LIMIT_TRIES - 1) break;
+        limited++;
+        warn('rate limited, waiting', { win: iso(win.start), offset, wait_ms: backoffMs(tryN) });
+        await sleep(backoffMs(tryN));
+      }
+      /* code 0 IS success — the portal says {"code":0,"message":"OK"} — so this
+         tests for a code that is PRESENT AND NON-ZERO, never for truthiness of
+         the field. `if (data.code)` on a falsy success code is how a working
+         response gets read as an error. */
+      if (data?.code != null && data.code !== 0) {
+        if (data.code === RETENTION_CODE) { tooOld = win; stop = true; break; }
+        refusals.push({ code: Number(data.code), window: iso(win.start),
+          says: `${data.message || 'refused'} (code ${data.code}) on ${iso(win.start)}..${iso(win.end)}` });
+        break;
+      }
+      const got = pivot(data?.data);
+      rows.push(...got.map(row).filter((r) => r && r.external_id));
+      offset += page;
+      /* total_rows is the count for the WHOLE window, not the page, so the loop
+         stops on it as well as on a short page — a short page is also what the
+         last page looks like, and the two only coincide when the total does not
+         divide exactly. */
+      if (got.length < page || offset >= (data?.data?.total_rows || 0)) break;
+      if (++guard > 200) { warn('page guard hit', { win: iso(win.start) }); break; }
+    }
+    if (stop) break;
+  }
+  /* The first refusal is what the operator is shown, with a count beside it so
+     a single bad window and fifteen bad windows do not read identically. */
+  const refused = refusals.length
+    ? { ...refusals[0], count: refusals.length,
+        says: refusals[0].says + (refusals.length > 1 ? ` (and ${refusals.length - 1} more window${refusals.length > 2 ? 's' : ''})` : '') }
+    : null;
+  return { rows, refused, refusals, tooOld, asked, limited, windows: chunks.length };
 }
 
 async function pullPortalTrips(from, to, fails) {
@@ -497,33 +603,39 @@ async function pullPortalTrips(from, to, fails) {
        (200 gives "Integer is not in range"), window max 30 days (31 gives
        DATE_RANGE_TOO_BIG). Both are encoded as constants rather than as a
        comment, because a limit nobody can see is a limit somebody raises. */
-    const rows = [];
-    let says = null;
-    for (const win of dayChunks(from, to, PORTAL_MAX_DAYS)) {
-      let offset = 0, guard = 0;
-      for (;;) {
-        const { data } = await http(url(c), {
-          method: 'POST', headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
-          body: JSON.stringify({ start_date: iso(win.start), end_date: iso(win.end),
-            order_states: PORTAL_STATES, limit: PORTAL_PAGE, offset }),
-        });
-        if (data?.code) { says = says || `${data.message || 'refused'} (code ${data.code})`; break; }
-        const page = pivot(data?.data);
-        rows.push(...page.map((o) => portalRow(o, c)).filter((r) => r.external_id));
-        offset += PORTAL_PAGE;
-        /* total_rows is the count for the WHOLE window, not the page, so the
-           loop stops on it rather than on a short page — a short page is also
-           what the last page looks like, and the two are only the same when
-           the total divides exactly. */
-        if (page.length < PORTAL_PAGE || offset >= (data?.data?.total_rows || 0)) break;
-        if (++guard > 200) { log.warn(SRC, `portal ${c.fleet}: page guard hit`, { win: iso(win.start) }); break; }
-      }
+    const { rows, refused, tooOld } = await harvestPortal({
+      from,
+      to,
+      row: (o) => portalRow(o, c),
+      ask: (win, offset) => http(url(c), {
+        method: 'POST', headers: { authorization: `Bearer ${at}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ start_date: iso(win.start), end_date: iso(win.end),
+          order_states: PORTAL_STATES, limit: PORTAL_PAGE, offset }),
+      }).then((r) => r.data),
+      warn: (m, x) => log.warn(SRC, `portal ${c.fleet}: ${m}`, x),
+    });
+    /* Reaching the end of what the portal keeps is not a fault, and must not be
+       reported as one — a backfill that asks for more history than exists will
+       hit this every single time it runs. Said once, as a fact about the
+       provider's retention, and the rows collected before it are kept. */
+    if (tooOld) {
+      log.info(SRC, `portal ${c.fleet}: reached the end of the portal's history`,
+        { refused_from: iso(tooOld.start), collected: rows.length });
     }
-    if (says) {
-      fails.push(`portal ${c.fleet}: ${says}`);
-      await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
-        state: 'invalid', surface: 'orderHistory', detail: says });
-      continue;
+    /* A refusal that is NOT the retention boundary is worth reporting — but it
+       still does not throw away the windows that answered, and it only touches
+       the credential when it is the credential being refused. A malformed
+       request and a rejected token are different problems with different
+       remedies, and reading the first as the second is what cost this source a
+       year of empty tables. */
+    if (refused) {
+      fails.push(`portal ${c.fleet}: ${refused.says}`);
+      if (AUTH_CODES.has(refused.code)) {
+        await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: 'BOLT_REFRESH_TOKEN',
+          state: 'invalid', surface: 'orderHistory', detail: refused.says });
+        if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
+        continue;
+      }
     }
     /* The token demonstrably worked, so say so. A credential that can only
        ever be written 'invalid' or 'missing' keeps the last red row it was
