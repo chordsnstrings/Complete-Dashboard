@@ -29,6 +29,7 @@ import { seedFleet, DAY0, DAY1 } from './fixture.mjs';
 import { rebuildCustody } from '../src/custody.js';
 import { mountAll } from './mount.mjs';
 import { JOIN_TRIP } from '../api/custody_sql.js';
+import { drivingCount, deviceCount } from '../api/alert_coverage_sql.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -47,7 +48,12 @@ const route = src.slice(src.indexOf("app.get('/api/alerts/by-driver'"),
 if (!route || route.length < 500) throw new Error('could not find the by-driver route in api/server.js');
 const lit = route.slice(route.indexOf('`'), route.lastIndexOf('`') + 1);
 // eslint-disable-next-line no-new-func
-const NEW = new Function('DAYWIN', 'JOIN_TRIP', `return ${lit};`)(DAYWIN, JOIN_TRIP);
+/* The route's literal now interpolates the shared alert classifier as well, so
+   the same two helpers the route imports have to be in scope here — passed in,
+   not re-implemented, because a copy of the classifier in the test is exactly
+   the drift the classifier exists to prevent. */
+const NEW = new Function('DAYWIN', 'JOIN_TRIP', 'drivingCount', 'deviceCount',
+  `return ${lit};`)(DAYWIN, JOIN_TRIP, drivingCount, deviceCount);
 
 /* What shipped before: the list, and the population underneath it, as two
    separate round trips to the database. */
@@ -112,7 +118,13 @@ const CARRIED = ['_drivers', '_alerts', '_unattributed'];
    rather than as the 0 nullif produced. Both are excluded from the row-for-row
    equivalence and per_100km is then asserted directly, below, against the
    figure the old SQL produced. */
-const ADDED = ['other', 'alert_km', 'per_100km'];
+/* driving_alerts and device_alerts are new for the same reason `other` was:
+   the rewrite comparison is about the query producing the same ROWS, and these
+   two are a column the old query never had. What they are FOR — separating a
+   tracker losing power from a driver braking hard — is tested in
+   test/device_fault.test.mjs against its own fixtures, where a device fault
+   actually exists to be separated. */
+const ADDED = ['other', 'alert_km', 'per_100km', 'driving_alerts', 'device_alerts'];
 const uncap = (s) => s.replace('LIMIT 100', '');
 const bare = (r) => { const c = { ...r }; for (const k of [...CARRIED, ...ADDED]) delete c[k]; return c; };
 // Order within a tie is the planner's, on both sides. Compare the sets.

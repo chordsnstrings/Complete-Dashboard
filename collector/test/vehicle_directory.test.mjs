@@ -26,6 +26,7 @@ import { seedFleet, PLATES, WIDE_PLATES } from './fixture.mjs';
 import { rebuildCustody } from '../src/custody.js';
 import { peopleCountStored, personKey, JOIN_TRIP } from '../api/custody_sql.js';
 import { attributedEarnings } from '../api/attribution_sql.js';
+import { drivingCount, deviceCount } from '../api/alert_coverage_sql.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -110,6 +111,11 @@ NEW = NEW.replace("${personKey('a.driver_ext_id', 'a.driver_name')}",
 /* The payout attribution is a shared fragment, and substituting it here is
    what keeps this equivalence check honest as the route grows. */
 NEW = NEW.replace('${attributedEarnings()}', attributedEarnings());
+/* The alert halves come from the shared classifier too — substituted from the
+   same module the route imports, never re-spelled here, because two copies of
+   the definition of "device fault" is the drift the module exists to stop. */
+NEW = NEW.replace('${drivingCount()}', drivingCount())
+  .replace('${deviceCount()}', deviceCount());
 if (/\$\{/.test(NEW)) throw new Error(`the route interpolates something this test does not substitute: ${NEW.match(/\$\{[^}]*\}/g)}`);
 
 const WIN = ['2026-08-01', '2026-08-31'];

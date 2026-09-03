@@ -16,7 +16,8 @@ import { fleetIncome } from './income_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline and both
    economics ledgers so this page cannot disagree with the tables that link
    to it. See api/alert_coverage_sql.js for the rule and its assumption. */
-import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
+import { alertCoverage, alertRate, alertRateReason, drivingCount,
+  deviceCount, isDeviceFault } from './alert_coverage_sql.js';
 import { areaOf } from './analytics_routes.js';
 /* A pg DATE, as the day it holds. Imported rather than re-typed: it is not a
    cycle (src/sources/ledger.js reaches only src/db.js and src/log.js, and
@@ -2087,12 +2088,20 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          SELECT sum(km) km FROM vehicle_driver_day
           WHERE day BETWEEN $1::date AND $2::date AND day = ANY($3::date[])),
        a AS (
-         SELECT count(*)::int n FROM alert
+         SELECT ${drivingCount()} n, ${deviceCount()} device FROM alert
           WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
             AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[]))
-       SELECT round(k.km::numeric, 0) AS km, a.n AS alerts
+       SELECT round(k.km::numeric, 0) AS km, a.n AS alerts, a.device AS device_alerts
          FROM k, a`, [p[0], p[1], cov.days]);
-    const totalAlerts = alerts.reduce((a, r) => a + r.n, 0);
+    /* Split, not summed. Main Power Lost is the tracker reporting its own
+       power loss, and this rate is the one the page paints a person against —
+       so a driver whose car has a failing box was ranked as a hard driver.
+       The rows are already grouped by type here, so the shared classifier
+       applies directly rather than through a second query. */
+    const totalAlerts = alerts.filter((r) => !isDeviceFault(r.alert_type))
+      .reduce((a, r) => a + r.n, 0);
+    const deviceAlerts = alerts.filter((r) => isDeviceFault(r.alert_type))
+      .reduce((a, r) => a + r.n, 0);
     res.json({ cancels, cancel_daily: cancelDaily, alerts,
       /* The distance the rate was taken over: this person's custody kilometres
          on the days the alert feed was up, and no others. */
@@ -2101,9 +2110,14 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          they are painted against are measured over the identical days. Null
          rather than 0 when the feed covered nothing in the window — a page
          must render that as "not measured", not as a spotless record. */
-      alerts_per_100km: alertRate(totalAlerts, exposure?.km, cov),
-      alerts_per_100km_absent: alertRateReason(exposure?.km, cov),
-      fleet_alerts_per_100km: alertRate(fleetRate?.alerts, fleetRate?.km, cov),
+      alerts_per_100km: alertRate(totalAlerts, exposure?.km, cov, 1,
+        { device: deviceAlerts }),
+      alerts_per_100km_absent: alertRateReason(exposure?.km, cov,
+        { alerts: totalAlerts, device: deviceAlerts }),
+      device_alerts: deviceAlerts,
+      fleet_alerts_per_100km: alertRate(fleetRate?.alerts, fleetRate?.km, cov, 1,
+        { device: fleetRate?.device_alerts }),
+      fleet_device_alerts: fleetRate?.device_alerts ?? null,
       fleet_alert_km: fleetRate?.km == null ? null : Number(fleetRate.km),
       fleet_alerts: fleetRate?.alerts ?? null,
       /* Which days both figures are about, in words the page prints. */

@@ -157,6 +157,52 @@ export async function alertCoverage(q, from, to, { fleet = null } = {}) {
    window the feed never covered: no distance, and therefore no rate. */
 export const coveredDays = (col, n) => `${col} = ANY($${n}::date[])`;
 
+/* ── a tracker losing power is not a driving style ────────────────────────
+   The alert feed carries five types. Four of them are things a driver did:
+   Sharp Turn, Harsh Brake, Harsh Acceleration, OverSpeed. The fifth, Main
+   Power Lost, is the box on the car complaining about its own wiring.
+
+   api/public/app.js already separates them on the #safety donuts, with the
+   comment "charted together they were one number under a heading about harsh
+   driving". Every RANKING went on using the total. Measured on production over
+   the whole alert record: L26356 is 42.6% device fault and its rate falls from
+   530 to 304 per 100 km once the box leaves the numerator; L85082 687 -> 412;
+   L86970 344 -> 205. The people move too — the driver #safety named hardest
+   goes from 311 to 187 and out of the top three.
+
+   And the worst case is the opposite one. L38439 (56 alerts over 3,900 km) and
+   L39421 (23 over 518 km) are 100% device fault. They have no driving
+   measurement AT ALL, and the page ranked them as the two cleanest cars in the
+   fleet. That is why the driving count is carried separately rather than
+   simply subtracted: a plate with alerts and no driving events must render as
+   unmeasured, because the fix for a misleading low number is not a different
+   low number.
+
+   Matched on the type string, with the same words the client-side classifier
+   uses, so the two cannot disagree about what a device fault is. A type this
+   pattern has never seen counts as driving — the safe direction, since an
+   unrecognised type is far more likely to be a new behaviour event than a new
+   hardware fault, and a device fault wrongly counted as driving inflates one
+   car's rate while the reverse silently exonerates it. */
+export const DEVICE_FAULT_WORDS = ['power', 'battery', 'tamper', 'disconnect', 'gps'];
+const RE = new RegExp(DEVICE_FAULT_WORDS.join('|'), 'i');
+
+/** SQL: true for an alert that is the hardware complaining about itself. */
+export const DEVICE_FAULT_SQL = (col = 'alert_type') =>
+  `${col} ~* '${DEVICE_FAULT_WORDS.join('|')}'`;
+/** SQL: true for an alert that is something a driver did. NULL counts as driving. */
+export const DRIVING_EVENT_SQL = (col = 'alert_type') =>
+  `(${col} IS NULL OR ${col} !~* '${DEVICE_FAULT_WORDS.join('|')}')`;
+/** The same test in JS, for rows already fetched. */
+export const isDeviceFault = (t) => RE.test(String(t == null ? '' : t));
+
+/** A count expression for the driving half, for a SELECT list. */
+export const drivingCount = (col = 'alert_type') =>
+  `count(*) FILTER (WHERE ${DRIVING_EVENT_SQL(col)})::int`;
+/** And for the hardware half, so a page can say why a rate is absent. */
+export const deviceCount = (col = 'alert_type') =>
+  `count(*) FILTER (WHERE ${DEVICE_FAULT_SQL(col)})::int`;
+
 /**
  * alerts per 100 km, over the covered days only.
  *
@@ -168,20 +214,32 @@ export const coveredDays = (col, n) => `${col} = ANY($${n}::date[])`;
  * Null, never 0, when it cannot be measured: absence renders as an em-dash
  * with a reason, and a zero here would read as a perfect safety record.
  */
-export function alertRate(alerts, km, cov, digits = 1) {
+export function alertRate(alerts, km, cov, digits = 1, { device = 0 } = {}) {
   if (!cov || !cov.measured) return null;
   const d = Number(km);
   if (!(d > 0)) return null;
+  /* Every alert on this vehicle is the box complaining about its own power.
+     There is no driving measurement here, and 0.0 would rank it as the safest
+     car in the fleet — which is exactly what production did with L38439 and
+     L39421. Absent, with a reason, the same as any other unmeasured rate. */
+  if (!(Number(alerts) > 0) && Number(device) > 0) return null;
   return +(((Number(alerts) || 0) * 100) / d).toFixed(digits);
 }
 
 /** Why the rate is absent, in the words a page prints beside the em-dash. */
-export function alertRateReason(km, cov) {
+export function alertRateReason(km, cov, { alerts = null, device = 0 } = {}) {
   if (!cov || !cov.measured) {
     return 'not measured — the alert feed covered none of the days in this window';
   }
   if (!(Number(km) > 0)) {
     return 'no distance was measured on the days the alert feed covered';
+  }
+  /* Said in full, because "no driving events" alone reads as a clean record
+     and this is the opposite: the box reported, and everything it reported was
+     about itself. */
+  if (alerts != null && !(Number(alerts) > 0) && Number(device) > 0) {
+    return `not measured — all ${Number(device)} alerts on this vehicle are the tracker `
+      + 'reporting its own power loss, so nothing here measures driving';
   }
   return null;
 }

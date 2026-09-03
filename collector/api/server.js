@@ -146,7 +146,8 @@ import { spanGaps } from './coverage_gaps.js';
 /* The one place the alerts-per-distance rule lives. Every page that prints a
    safety rate reads it from here, so the fleet headline and the per-vehicle
    and per-driver tables cannot disagree about which days they measured. */
-import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
+import { alertCoverage, alertRate, alertRateReason, drivingCount, deviceCount,
+  DRIVING_EVENT_SQL, DEVICE_FAULT_SQL } from './alert_coverage_sql.js';
 import { makeWrap } from './wrap.js';
 /* Moved to api/wrap.js so the late-failure branch can be exercised by a test
    rather than reasoned about — see the comment there. */
@@ -480,8 +481,12 @@ app.get('/api/kpis', wrap(async (req, res) => {
      rule and the assumption it rests on; `alert_coverage` below states both on
      the response so a page can say which days the number is about. */
   const cov = await alertCoverage(q, p[0], p[1], { fleet: p[3] });
+  /* Driving events, not every alert. Main Power Lost is the tracker reporting
+     its own wiring, and it is 3.5% of this feed — see api/alert_coverage_sql.js
+     for the measurement. The device count comes back beside it so the rate can
+     say WHY it is absent when a fleet's whole alert record is hardware. */
   const [a] = await q(
-    `SELECT count(*)::int alerts FROM alert
+    `SELECT ${drivingCount()} alerts, ${deviceCount()} device_alerts FROM alert
      WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($1::date[])
        AND ($2::text IS NULL OR fleet_id = $2)`, [cov.days, p[3]]);
   /* The denominator, narrowed to the same days. The BETWEEN in W('n') is
@@ -553,8 +558,10 @@ app.get('/api/kpis', wrap(async (req, res) => {
 
        Null, never 0, when the feed covered nothing: a window with no feed has
        no safety rate, and a zero reads as a perfect one. */
-    alerts_per_100km: alertRate(a.alerts, ak.alert_km, cov),
-    alerts_per_100km_absent: alertRateReason(ak.alert_km, cov),
+    alerts_per_100km: alertRate(a.alerts, ak.alert_km, cov, 1, { device: a.device_alerts }),
+    alerts_per_100km_absent: alertRateReason(ak.alert_km, cov,
+      { alerts: a.alerts, device: a.device_alerts }),
+    device_alerts: a.device_alerts,
     alert_coverage: cov,
     /* What the fleet took in, and the two kinds of money it is made of.
        `revenue` above is sum(price) over the trip table and the Uber export
@@ -1670,6 +1677,14 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
                  choosing between identical values. */
               max(c.person_key) AS person,
               count(*)::int alerts,
+              /* The two halves, named rather than inferred. The "other"
+                 column below is the residual of four ILIKE buckets, and on
+                 today's five-type feed it happens to equal the device faults
+                 exactly — but that is a fact about today's vocabulary, not a
+                 definition, and the rate must not rest on a coincidence.
+                 These use the shared classifier in alert_coverage_sql.js. */
+              ${drivingCount('ev.alert_type')} driving_alerts,
+              ${deviceCount('ev.alert_type')} device_alerts,
               sum((ev.alert_type ILIKE '%brake%')::int)::int harsh_brake,
               sum((ev.alert_type ILIKE '%accel%')::int)::int harsh_accel,
               sum((ev.alert_type ILIKE '%turn%')::int)::int sharp_turn,
@@ -1711,7 +1726,11 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
               count(*) FILTER (WHERE named) OVER ()::int AS _drivers,
               sum(alerts) OVER ()::int AS _alerts,
               sum(nameless) OVER ()::int AS _unattributed
-       FROM people ORDER BY alerts DESC LIMIT 100
+       /* Ordered on DRIVING events. Ordering on the total let a driver whose
+          car has a failing tracker take one of the hundred places from a
+          driver who actually brakes hard, on a page whose whole job is
+          choosing who to coach. */
+       FROM people ORDER BY driving_alerts DESC, alerts DESC LIMIT 100
      ),
      /* Distance driven by that PERSON over the window, so a rate can be computed
         over bookings rather than over bookings plus their telematics twins.
@@ -1767,6 +1786,7 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
        GROUP BY 1
      )
      SELECT s.driver_name, s.driver_ext_id, s.alerts,
+            s.driving_alerts, s.device_alerts,
             s.harsh_brake, s.harsh_accel, s.sharp_turn, s.overspeed, s.other,
             s.plates, s.plate_list,
             round(km.km::numeric, 0) AS booked_km,
@@ -1787,8 +1807,10 @@ app.get('/api/alerts/by-driver', wrap(async (req, res) => {
        other five call sites use — instead of the 0 that SQL's nullif would
        have produced, which reads as a perfect safety record for a fleet nobody
        was watching. */
-    r.per_100km = alertRate(r.alerts, r.alert_km, cov, 2);
-    r.per_100km_absent = alertRateReason(r.alert_km, cov);
+    r.per_100km = alertRate(r.driving_alerts ?? r.alerts, r.alert_km, cov, 2,
+      { device: r.device_alerts });
+    r.per_100km_absent = alertRateReason(r.alert_km, cov,
+      { alerts: r.driving_alerts ?? r.alerts, device: r.device_alerts });
   }
   res.json({ rows, totals, shown: rows.length,
     alert_coverage: cov,

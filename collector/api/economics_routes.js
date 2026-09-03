@@ -50,7 +50,8 @@ import { vehiclesOverWindow } from './custody_sql.js';
 /* The alerts-per-distance rule, in one place. Both tables on this page carry a
    safety rate and both were dividing a partial numerator by a whole-window
    denominator; the module says why, and what the covered-day rule assumes. */
-import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
+import { alertCoverage, alertRate, alertRateReason, drivingCount,
+  deviceCount } from './alert_coverage_sql.js';
 /* A pg DATE, as the day it holds. Imported rather than re-typed here because
    this trap has already cost this product one production sentence and there
    should be exactly one function that knows the answer. No cycle: ledger.js
@@ -313,7 +314,8 @@ export function economicsRoutes(app, { q, wrap, range }) {
               there are no alerts on a day with no alerts — and is written out
               anyway so the numerator and the denominator name the same set of
               days rather than agreeing by accident. */
-           SELECT plate, count(*)::int alerts FROM alert
+           SELECT plate, ${drivingCount()} alerts, ${deviceCount()} device_alerts
+           FROM alert
            WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
              AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[])
            GROUP BY plate
@@ -514,8 +516,11 @@ export function economicsRoutes(app, { q, wrap, range }) {
            (2026-06-06 → 2026-08-17) contributed distance and nothing else.
            Null rather than 0 when the feed covered none of the window: see
            `alert_coverage` on the response for which days those were. */
-        alerts_per_100km: alertRate(r.alerts ?? 0, r.alert_km, cov),
-        alerts_per_100km_absent: alertRateReason(r.alert_km, cov),
+        alerts_per_100km: alertRate(r.alerts ?? 0, r.alert_km, cov, 1,
+          { device: r.device_alerts }),
+        alerts_per_100km_absent: alertRateReason(r.alert_km, cov,
+          { alerts: r.alerts ?? 0, device: r.device_alerts }),
+        device_alerts: r.device_alerts ?? 0,
         any_even_split: !!r.any_even_split,
         soonest_expiry: r.soonest_expiry ?? null,
         doc_days_left: r.doc_days_left ?? null,
@@ -849,7 +854,8 @@ export function economicsRoutes(app, { q, wrap, range }) {
             day with no alerts contributes none — but keeps the numerator and
             the denominator naming the same set of days explicitly rather than
             by coincidence. */
-         SELECT h.driver_ext_id, count(*)::int alerts
+         SELECT h.driver_ext_id, ${drivingCount('a.alert_type')} alerts,
+                ${deviceCount('a.alert_type')} device_alerts
          FROM alert a
          JOIN held h ON h.plate = a.plate
           AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = h.day
@@ -1051,8 +1057,11 @@ export function economicsRoutes(app, { q, wrap, range }) {
            the fleet roll-up of this column fall from 69.7 per 100 km at 16
            days to 41.5 at 30 — off the identical 69,338 alerts — because the
            feed's 73-day hole contributed distance and nothing else. */
-        alerts_per_100km: alertRate(r.alerts, r.alert_km, cov),
-        alerts_per_100km_absent: alertRateReason(r.alert_km, cov),
+        alerts_per_100km: alertRate(r.alerts, r.alert_km, cov, 1,
+          { device: r.device_alerts }),
+        alerts_per_100km_absent: alertRateReason(r.alert_km, cov,
+          { alerts: r.alerts, device: r.device_alerts }),
+        device_alerts: r.device_alerts ?? 0,
         state: st.state ?? null,
         platform_state: st.platform_state ?? null,
         can_earn: st.can_earn ?? null,

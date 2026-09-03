@@ -2849,7 +2849,22 @@ V.safety = async (root) => {
     { label: 'Driver', key: 'driver_name',
       render: (r) => (r.driver_ext_id ? entity('driver', r.driver_ext_id, r.driver_name)
         : `<span class="ent-off">${esc(r.driver_name)}</span>`) },
-    { label: 'Events', key: 'alerts', num: true },
+    /* Driving events, with the hardware said beside them rather than folded in.
+       This page is a coaching list: it is read to choose a person to sit down
+       with. A tracker losing power is not something you can coach, and on the
+       worst-affected cars it was a quarter to a half of the number the reader
+       was ranking on. The total is still there, in the tooltip and in the
+       Other column, so nothing is hidden — it is just no longer the figure
+       that decides the order. */
+    { label: 'Events', key: 'driving_alerts', num: true,
+      sortValue: (r) => +(r.driving_alerts ?? r.alerts) || 0,
+      render: (r) => {
+        const drive = r.driving_alerts != null ? +r.driving_alerts : +r.alerts || 0;
+        const dev = +r.device_alerts || 0;
+        return fmt(drive) + (dev
+          ? `<span class="dim" title="and ${fmt(dev)} device faults — the tracker reporting its own power loss, which is a workshop ticket rather than a driving style. ${fmt(drive + dev)} alerts in total."> ·&nbsp;+${fmt(dev)} dev</span>`
+          : '');
+      } },
     { label: 'Harsh brake', key: 'harsh_brake', num: true },
     { label: 'Harsh accel', key: 'harsh_accel', num: true },
     { label: 'Sharp turn', key: 'sharp_turn', num: true },
@@ -2883,7 +2898,7 @@ V.safety = async (root) => {
           || 'no booked distance on the days these events happened')}">not measured</span>`
         : `${fmt(r.per_100km, 2)}${+(r.alert_km ?? r.booked_km) < 200
           ? '<span class="dim" title="under 200 km on the days the alert feed covered — too small a base to compare on"> ·  thin</span>' : ''}`) },
-  ], { sortable: true, sortId: 'safetydrv', defaultSort: { key: 'alerts', dir: 'desc' },
+  ], { sortable: true, sortId: 'safetydrv', defaultSort: { key: 'driving_alerts', dir: 'desc' },
     capped: dTrunc ? `all ${fmt(dAll)} drivers with an event` : null }));
   if (dTrunc) {
     dtab.body.append(el('p', 'cap',

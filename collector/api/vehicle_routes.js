@@ -18,7 +18,8 @@ import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
 import { fleetIncome } from './income_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline, both economics
    ledgers and the driver page. See api/alert_coverage_sql.js. */
-import { alertCoverage, alertRate, alertRateReason } from './alert_coverage_sql.js';
+import { alertCoverage, alertRate, alertRateReason, drivingCount,
+  deviceCount } from './alert_coverage_sql.js';
 
 const normPlate = (s) => String(s || '').toUpperCase().replace(/[\s-]+/g, '');
 
@@ -181,8 +182,15 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          SELECT plate, min(expires_at) soonest_expiry, count(*)::int docs
          FROM vehicle_document WHERE expires_at IS NOT NULL GROUP BY plate
        ),
+       /* Driving events and hardware faults counted apart. Main Power Lost is
+          the tracker complaining about its own wiring, and ranking cars on the
+          total made L26356 look 74% worse than it drives (530 against 304 per
+          100 km) while L38439 and L39421 — whose alerts are 100% device fault
+          and who therefore have no driving measurement at all — sat at the top
+          of the page as the two cleanest cars in the fleet. */
        al AS (
-         SELECT plate, count(*)::int alerts FROM alert
+         SELECT plate, ${drivingCount()} alerts, ${deviceCount()} device_alerts
+         FROM alert
          WHERE (occurred_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
          GROUP BY plate
        ),
@@ -438,8 +446,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
         fares_platforms: chosenFare.map((c) => c.platform).sort(),
         payout_platforms: chosenPay.map((c) => c.platform).sort(),
         alert_km: ak,
-        alerts_per_100km: alertRate(r.alerts, ak, cov),
-        alerts_per_100km_absent: alertRateReason(ak, cov),
+        alerts_per_100km: alertRate(r.alerts, ak, cov, 1, { device: r.device_alerts }),
+        alerts_per_100km_absent: alertRateReason(ak, cov,
+          { alerts: r.alerts, device: r.device_alerts }),
+        device_alerts: r.device_alerts ?? 0,
         alert_days: cov.covered_days, alert_window_days: cov.window_days,
       };
     }));
@@ -741,7 +751,7 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        alerts contributes none — and is written out so the numerator and the
        denominator name the same day set explicitly rather than by luck. */
     const [a] = await q(
-      `SELECT count(*)::int alerts FROM alert
+      `SELECT ${drivingCount()} alerts, ${deviceCount()} device_alerts FROM alert
        WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2
          AND (occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($4::date[])`,
       [...p, cov.days]);
@@ -819,8 +829,10 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          handler for the production numbers this replaces. Null, never 0, for a
          window the feed was dark for: alert_coverage says which days those
          were and the page renders it as "not measured". */
-      alerts_per_100km: alertRate(a.alerts, t.alert_km, cov),
-      alerts_per_100km_absent: alertRateReason(t.alert_km, cov),
+      alerts_per_100km: alertRate(a.alerts, t.alert_km, cov, 1, { device: a.device_alerts }),
+      alerts_per_100km_absent: alertRateReason(t.alert_km, cov,
+        { alerts: a.alerts, device: a.device_alerts }),
+      device_alerts: a.device_alerts ?? 0,
       alert_coverage: cov,
       // Over the priced distance, and from the revenue of the same trips —
       // see priced_measured_revenue above.
