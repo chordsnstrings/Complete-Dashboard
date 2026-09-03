@@ -268,6 +268,12 @@ async function stampSource(g, id) {
 
 function refresh() {
   navigator.serviceWorker?.controller?.postMessage('skip-waiting');
+  /* And ASK whether there is a new one, rather than only telling the current
+     worker not to wait. skip-waiting is a message to the worker already
+     installed; if the browser has not yet re-fetched /sw.js there is nothing
+     waiting to skip, and a pull-to-refresh checks for new data while the code
+     drawing it stays whatever this phone first downloaded. */
+  navigator.serviceWorker?.getRegistration?.().then((r) => r?.update()).catch(() => {});
   render();
 }
 refreshBtn.onclick = () => { refreshBtn.classList.add('on'); refresh(); setTimeout(() => refreshBtn.classList.remove('on'), 600); };
@@ -281,6 +287,24 @@ render();
    Registered after first paint: a phone on a bad connection should spend its
    first second on the screen the reader asked for, not on priming a cache. */
 if ('serviceWorker' in navigator) {
+  /* A NEW worker taking over means the shell in the cache is new too, and the
+     modules this page is running are the old ones — a worker swap does not
+     re-evaluate scripts that have already loaded. So the page reloads once.
+     ─────────────────────────────────────────────────────────────────────
+     Without this, a deploy reaches the cache and stops there: the reader keeps
+     looking at the previous build until they happen to cold-start the app.
+     Measured on a real phone on 2026-09-03, though the version string never
+     changing (api/public/sw.js) meant nothing ever got this far.
+
+     Guarded, because controllerchange fires again for the worker that the
+     reload itself brings up, and an unguarded reload here is a boot loop on
+     the one screen a reader cannot escape. */
+  let reloading = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloading) return;
+    reloading = true;
+    location.reload();
+  });
   addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => { /* http, or blocked */ });
   });

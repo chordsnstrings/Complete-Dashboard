@@ -129,7 +129,13 @@ for (const s of manifest.shortcuts || []) {
 }
 
 const sw = readFileSync(`${PUB}/sw.js`, 'utf8');
+/* Comments blanked before the paths are read out. The array carries one
+   explaining why daterange.js, tz.js and swr.js are in it, and an apostrophe
+   in that prose ("the phone's three files") was read as the start of a path —
+   nine imaginary shell files, each reported as missing. A lint that parses
+   prose is a lint that fails on a comment. */
 const shell = [...sw.slice(sw.indexOf('const SHELL_FILES'), sw.indexOf('self.addEventListener'))
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
   .matchAll(/'([^']+)'/g)].map((m) => m[1]);
 check('the worker precaches a shell', shell.length >= 6);
 for (const f of shell) {
@@ -143,6 +149,81 @@ check('a failed response is not cached as if it were good', /if \(fresh\.ok\)/.t
 check('a cached answer says when it was stored', /x-sw-cached-at/.test(sw));
 check('activate retires every cache that is not this version',
   /caches\.keys\(\)[\s\S]{0,120}caches\.delete/.test(sw));
+
+/* ── the version has to CHANGE, or the shell cache is permanent ───────────
+   The worker is cache-first for the shell and its version string is the
+   cache's identity: activate() deletes every cache that is not the current
+   one, so bumping it is how a deploy reaches an installed phone. It was the
+   literal 'fleet-v1' and never once changed, which pinned every phone that had
+   opened the app to the bundle it first fetched, permanently.
+
+   Reported from a real phone on 2026-09-03: a window picker offering "7 days /
+   30 days / 90 days / 12 months" — the control replaced in fb24dbc — on a
+   deploy that had been serving the calendar picker for weeks. The deploy was
+   fine. Nothing could deliver it.
+
+   So the server substitutes a hash of every file the worker can cache, and
+   what is asserted here is that the mechanism exists, that it is derived from
+   the shell rather than from a deploy id, and that it actually moves when a
+   shell file does. */
+{
+  const srv = readFileSync('api/server.js', 'utf8');
+  check('the server serves /sw.js itself, ahead of the static middleware',
+    /app\.get\('\/sw\.js'/.test(srv)
+    && srv.indexOf("app.get('/sw.js'") < srv.indexOf("app.use(express.static(join(__dir, 'public')"),
+    'express.static would answer first and the literal would ship');
+  check('…and rewrites the VERSION line with a hash of the shell',
+    /const VERSION = '\[\^'\]\*';\/, `const VERSION = 'fleet-\$\{shellHash\}';`/.test(srv)
+    || /VERSION = '\[\^'\]\*';[\s\S]{0,80}fleet-\$\{shellHash\}/.test(srv),
+    'the substitution is what makes a deploy reach an installed phone');
+  check('the hash is over the shell\u2019s CONTENT, not a deploy id',
+    /h\.update\(readFileSync\(f\)\)/.test(srv) && !/DEPLOYMENT_ID/.test(srv),
+    'a deploy that changed only server code must not retire every phone\u2019s cache');
+  check('…and sw.js is excluded from its own hash',
+    /name\.name === 'sw\.js'\) continue/.test(srv));
+
+  /* Driven, not merely pattern-matched: the same computation over the real
+     tree, once as it stands and once with one shell byte changed. */
+  const { createHash } = await import('node:crypto');
+  const { readdirSync } = await import('node:fs');
+  const { join: j, extname } = await import('node:path');
+  const exts = new Set(['.js', '.css', '.html', '.webmanifest']);
+  const walk = (dir) => {
+    const out = [];
+    for (const n of readdirSync(dir, { withFileTypes: true })) {
+      const full = j(dir, n.name);
+      if (n.isDirectory()) { out.push(...walk(full)); continue; }
+      if (n.name === 'sw.js') continue;
+      if (exts.has(extname(n.name))) out.push(full);
+    }
+    return out;
+  };
+  const hashOf = (mutate) => {
+    const h = createHash('sha256');
+    for (const f of walk(PUB).sort()) {
+      h.update(f.slice(f.indexOf('/public/')));
+      h.update(mutate && f.endsWith('/m/app.js')
+        ? Buffer.concat([readFileSync(f), Buffer.from('//x')]) : readFileSync(f));
+    }
+    return h.digest('hex').slice(0, 12);
+  };
+  const a = hashOf(false), b = hashOf(true);
+  check('the version moves when a shell file changes by one byte', a !== b, `${a} vs ${b}`);
+  check('…and is stable when nothing does', a === hashOf(false), a);
+
+  /* Reaching the cache is not reaching the reader. A worker swap does not
+     re-evaluate modules the page has already run, so without a reload the new
+     shell sits in the cache until the reader cold-starts the app. */
+  const m = readFileSync(`${PUB}/m/app.js`, 'utf8');
+  check('the page reloads once when a new worker takes control',
+    /controllerchange[\s\S]{0,200}location\.reload\(\)/.test(m));
+  check('…guarded, because the reload brings up a worker that fires it again',
+    /let reloading = false;[\s\S]{0,260}if \(reloading\) return;/.test(m),
+    'an unguarded reload here is a boot loop on a screen a reader cannot leave');
+  check('and a pull-to-refresh ASKS for a new worker rather than only '
+    + 'telling the current one not to wait',
+    /getRegistration\?\.\(\)[\s\S]{0,60}update\(\)/.test(m));
+}
 
 /* ── the boot switch ────────────────────────────────────────────────────
    The one change to a file the desktop also reads. If this regresses, every

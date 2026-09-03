@@ -23,7 +23,22 @@
    The version string is the cache's identity. Bumping it is the deploy: the
    activate step deletes every cache that is not this one, so a shell can never
    be half old and half new. */
-const VERSION = 'fleet-v1';
+/* Substituted at serve time — see the /sw.js route in api/server.js.
+   ─────────────────────────────────────────────────────────────────────────
+   This was the literal 'fleet-v1' and it never once changed. The comment above
+   says bumping it IS the deploy, and nothing bumped it: every phone that had
+   opened the app was serving /m/app.js, /daterange.js and the rest from a
+   cache filled on its first visit, cache-first, for ever. Reported from a real
+   phone on 2026-09-03 — a window picker offering "7 days / 30 days / 90 days /
+   12 months", which is the control this app stopped shipping in fb24dbc, on a
+   deploy that had been serving the calendar picker for weeks. No amount of
+   deploying could reach it.
+
+   A human remembering to edit a string is not a mechanism. The server now
+   substitutes a hash of every shell asset it serves, so any change to any of
+   them retires the old cache on the next update check, and this literal is
+   only what runs if somebody opens the file directly. */
+const VERSION = 'fleet-dev';
 const SHELL = `${VERSION}-shell`;
 const DATA = `${VERSION}-data`;
 
@@ -34,7 +49,13 @@ const SHELL_FILES = [
   '/', '/index.html',
   '/app.css', '/m/m.css',
   '/m/app.js', '/m/ui.js', '/m/screens.js',
-  '/data.js', '/ui.js', '/charts.js',
+  /* Every module the phone's three files reach, followed by hand rather than
+     assumed: m/app.js imports ../daterange.js, and daterange.js imports
+     ./tz.js, and data.js imports ./swr.js. None of the three were listed, so a
+     cold open with no signal painted a shell whose scripts 404ed — they were
+     only ever in the cache because a previous online visit had put them there
+     one request at a time. */
+  '/data.js', '/ui.js', '/charts.js', '/daterange.js', '/tz.js', '/swr.js',
   '/icons/icon-192.png', '/icons/apple-touch-icon.png',
   '/manifest.webmanifest',
 ];

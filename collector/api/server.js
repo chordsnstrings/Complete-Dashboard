@@ -2,7 +2,9 @@
 import express from 'express';
 import compression from 'compression';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, extname } from 'node:path';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { pool, migrate } from '../src/db.js';
 import { config } from '../src/config.js';
 import { describeSettings, setSetting, deleteSetting, loadSettings, recordCredentialVisibility } from '../src/settings.js';
@@ -4117,6 +4119,76 @@ for (const dir of ['vendor', 'fonts', 'icons']) {
     maxAge: YEAR * 1000, immutable: true,
   }));
 }
+/* The service worker's cache version, computed from what it caches.
+   ─────────────────────────────────────────────────────────────────────────
+   api/public/sw.js is cache-FIRST for the shell — that is what makes a cold
+   open in a car park instant — and its version string is the cache's identity:
+   activate() deletes every cache that is not the current one, so bumping it is
+   how a deploy reaches an installed phone. The string was the literal
+   'fleet-v1' and had never changed since the worker shipped. Every phone that
+   had opened the app once was therefore pinned to the bundle it first fetched,
+   permanently, whatever we deployed.
+
+   Reported from a real phone on 2026-09-03: a window picker offering "7 days /
+   30 days / 90 days / 12 months", the control replaced in fb24dbc by the
+   calendar picker that has been live for weeks. The deploy was fine; nothing
+   could deliver it.
+
+   So the version is derived rather than remembered: a hash over every file the
+   worker can put in the shell cache. Change any of them and the next update
+   check sees a different worker, installs it, and the activate step drops the
+   old shell. Computed once at boot over a few dozen small files — it is the
+   same read express.static does on the first request for each.
+
+   Deliberately NOT the git SHA or the deploy id: a deploy that changes only
+   server code would retire every phone's cache for nothing, and a rebuild of
+   an unchanged tree would too. The content is the identity. */
+const shellHash = (() => {
+  const exts = new Set(['.js', '.css', '.html', '.webmanifest']);
+  const walk = (dir) => {
+    const out = [];
+    for (const name of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, name.name);
+      if (name.isDirectory()) { out.push(...walk(full)); continue; }
+      /* sw.js itself is excluded, or the hash would be an input to itself. */
+      if (name.name === 'sw.js') continue;
+      if (exts.has(extname(name.name))) out.push(full);
+    }
+    return out;
+  };
+  try {
+    const h = createHash('sha256');
+    for (const f of walk(join(__dir, 'public')).sort()) {
+      h.update(f.slice(f.indexOf('/public/')));
+      h.update(readFileSync(f));
+    }
+    return h.digest('hex').slice(0, 12);
+  } catch (e) {
+    /* A worker with no version would be worse than the old one: it would
+       churn the cache on every boot. Fall back to the literal in the file and
+       say so, loudly, because it means deploys stop reaching phones again. */
+    log.error('static', 'could not hash the shell — sw.js keeps its literal version',
+      { err: String(e).slice(0, 200) });
+    return null;
+  }
+})();
+
+/* Served by hand rather than by express.static, because the bytes are not the
+   bytes on disk: the VERSION line is replaced. Registered BEFORE the static
+   middleware, which would otherwise answer first. */
+app.get('/sw.js', (_req, res) => {
+  res.setHeader('Content-Type', 'application/javascript; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, max-age=0, must-revalidate');
+  res.setHeader('Service-Worker-Allowed', '/');
+  let src;
+  try { src = readFileSync(join(__dir, 'public', 'sw.js'), 'utf8'); }
+  catch { return res.status(404).end(); }
+  if (shellHash) {
+    src = src.replace(/const VERSION = '[^']*';/, `const VERSION = 'fleet-${shellHash}';`);
+  }
+  return res.send(src);
+});
+
 app.use(express.static(join(__dir, 'public'), {
   etag: true,
   setHeaders(res, path) {
