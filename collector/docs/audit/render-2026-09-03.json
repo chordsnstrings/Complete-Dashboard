@@ -1,6 +1,6 @@
 {
   "base": "http://127.0.0.1:8200",
-  "at": "2026-09-02T21:38:59.838Z",
+  "at": "2026-09-03T00:30:05.318Z",
   "widths": [
     1180
   ],
@@ -11,7 +11,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":86,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":7,\"tables\":6,\"charts\":3}"
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":86,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":8,\"tables\":6,\"charts\":3}"
     },
     {
       "route": "unit/assets",
@@ -32,7 +32,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":86,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":7,\"tables\":6,\"charts\":3}"
+      "detail": "{\"panels\":8,\"empty_panels\":0,\"rows\":86,\"explained\":true,\"title\":\"Unit economics\",\"kpis\":8,\"tables\":6,\"charts\":3}"
     },
     {
       "route": "top-performers",
@@ -102,21 +102,21 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":29,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":36,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-09-03",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":32,\"explained\":true,\"title\":\"September 3 vs the day before\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":36,\"explained\":true,\"title\":\"September 3 vs the day before\",\"kpis\":7,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-09-03/2026-09-02",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":32,\"explained\":true,\"title\":\"September 3 vs September 2\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":36,\"explained\":true,\"title\":\"September 3 vs September 2\",\"kpis\":7,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "compare/2026-09-03/2026-09-02?cut=full",
@@ -130,7 +130,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":32,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":36,\"explained\":true,\"title\":\"Today vs yesterday\",\"kpis\":7,\"tables\":3,\"charts\":2}"
     },
     {
       "route": "driver/76ede4ae-768b-4126-804b-0b5c88043682",
@@ -249,7 +249,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":60,\"explained\":false,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":4,\"empty_panels\":0,\"rows\":63,\"explained\":false,\"title\":\"L36397\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "vehicle/L36397/compliance",
@@ -263,7 +263,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":60,\"explained\":false,\"title\":\"L36397\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":1,\"empty_panels\":0,\"rows\":61,\"explained\":false,\"title\":\"L36397\",\"kpis\":0,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "cohort/unit-drove-unpaid",
@@ -312,21 +312,21 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":58,\"empty_panels\":0,\"rows\":56,\"explained\":false,\"title\":\"Drivers with a driving event\",\"kpis\":434,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":58,\"empty_panels\":0,\"rows\":56,\"explained\":false,\"title\":\"Drivers with a driving event\",\"kpis\":435,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "cohort/settlement-cash",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":81,\"empty_panels\":0,\"rows\":79,\"explained\":false,\"title\":\"Holding cash\",\"kpis\":574,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":81,\"empty_panels\":0,\"rows\":79,\"explained\":false,\"title\":\"Holding cash\",\"kpis\":577,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "cohort/tiers-behind",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":23,\"empty_panels\":0,\"rows\":21,\"explained\":false,\"title\":\"Behind the best car of their own model\",\"kpis\":119,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":24,\"empty_panels\":0,\"rows\":22,\"explained\":false,\"title\":\"Behind the best car of their own model\",\"kpis\":124,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "platforms",
@@ -445,7 +445,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":39,\"explained\":true,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":0,\"empty_panels\":0,\"rows\":40,\"explained\":true,\"title\":\"Le Meridien Dubai Hotel & Conference Centre\",\"kpis\":0,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "property/673dc94395448356a777f1ec/drivers",
@@ -480,7 +480,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":5,\"explained\":true,\"title\":\"Where the money came from\",\"kpis\":3,\"tables\":2,\"charts\":0}"
+      "detail": "{\"panels\":3,\"empty_panels\":0,\"rows\":51,\"explained\":true,\"title\":\"Where the money came from\",\"kpis\":3,\"tables\":3,\"charts\":0}"
     },
     {
       "route": "retention",
@@ -599,35 +599,35 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":42,\"explained\":true,\"title\":\"Unauthorized trips\",\"kpis\":8,\"tables\":2,\"charts\":2}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":42,\"explained\":false,\"title\":\"Unauthorized trips\",\"kpis\":8,\"tables\":2,\"charts\":2}"
     },
     {
       "route": "segments",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":216,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":218,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/verdict/unauthorized",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":16,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":17,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/verdict/authorized",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":91,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":92,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
       "route": "segments/plate/L36397",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":7,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":8,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
     },
     {
       "route": "segments/day/2026-09-02",
@@ -641,28 +641,28 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":7,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":1,\"rows\":8,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":1,\"charts\":1}"
     },
     {
       "route": "segments/nonsense/x",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":216,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":217,\"explained\":false,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     },
     {
-      "route": "segment/L64921/2026-09-02T19:08:40.877Z",
+      "route": "segment/L46706/2026-09-02T23:08:40.447Z",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":32,\"explained\":true,\"title\":\"L64921\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":15,\"explained\":true,\"title\":\"L46706\",\"kpis\":4,\"tables\":5,\"charts\":1}"
     },
     {
-      "route": "segment/L64921/2026-09-02T19:08:40.877Z",
+      "route": "segment/L46706/2026-09-02T23:08:40.447Z",
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":7,\"empty_panels\":0,\"rows\":32,\"explained\":true,\"title\":\"L64921\",\"kpis\":4,\"tables\":6,\"charts\":1}"
+      "detail": "{\"panels\":6,\"empty_panels\":0,\"rows\":15,\"explained\":true,\"title\":\"L46706\",\"kpis\":4,\"tables\":5,\"charts\":1}"
     },
     {
       "route": "slot/2/19",
@@ -690,7 +690,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":57,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
+      "detail": "{\"panels\":2,\"empty_panels\":0,\"rows\":58,\"explained\":true,\"title\":\"Safety\",\"kpis\":5,\"tables\":1,\"charts\":0}"
     },
     {
       "route": "safety/vehicles",
@@ -816,7 +816,7 @@
       "width": 1180,
       "sev": "i",
       "code": "stats",
-      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":83,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
+      "detail": "{\"panels\":5,\"empty_panels\":0,\"rows\":82,\"explained\":true,\"title\":\"Occupancy segments\",\"kpis\":4,\"tables\":2,\"charts\":1}"
     }
   ]
 }
