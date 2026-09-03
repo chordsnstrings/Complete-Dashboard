@@ -52,10 +52,18 @@ check('and so does the roster snapshot',
 
 /* The order is load-bearing: trips are filed under a name the summary endpoint
    has not been asked for yet unless it is asked first. */
-const seedAt = CODE.indexOf('await seedNames()');
-const driversAt = CODE.indexOf('await pullDrivers(');
-const tripsAt = CODE.indexOf('await pullTrips(');
-const ledgerAt = CODE.indexOf('await pullLedger(');
+/* Each pull is wrapped in surface() now, so that one refused endpoint cannot
+   cost the other two — but the ORDER is still load-bearing and still checked:
+   trips and ledger rows are filed under the name the summary endpoint
+   decomposes, so that endpoint has to be asked first. */
+/* Searched inside collect() only. indexOf over the whole file finds each
+   function's DECLARATION, which sits in source order rather than call order —
+   pullDrivers is declared after pullTrips and the assertion inverted. */
+const COLLECT = CODE.slice(CODE.indexOf('export async function collect('));
+const seedAt = COLLECT.indexOf("surface('names'");
+const driversAt = COLLECT.indexOf("surface('drivers'");
+const tripsAt = COLLECT.indexOf("surface('trips'");
+const ledgerAt = COLLECT.indexOf("surface('ledger'");
 check('collect() seeds the names before anything is pulled', seedAt > 0 && seedAt < driversAt);
 check('and pulls drivers before trips', driversAt > 0 && driversAt < tripsAt,
   `drivers@${driversAt} trips@${tripsAt}`);

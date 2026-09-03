@@ -122,7 +122,10 @@ console.log('\nthe driver-availability sweep, when the provider refuses some of 
      page's TAG map knows exactly ok/partial/error. */
   runs.length = 0; notes.length = 0;
   drivers = ['d1', 'd2'];
-  answer = () => ({ errors: [{ message: 'INTERNAL_SERVER_ERROR' }] });
+  /* AN AUTH-SHAPED refusal, deliberately. This case is about where the
+     credential row is written, so the refusal has to be one that implicates
+     the credential at all — see the next block for the other half. */
+  answer = () => ({ errors: [{ message: 'unauthorized: session expired' }] });
   const { collect } = await import('../src/sources/uber_timeline.js');
   await collect({ from: new Date('2026-08-31'), to: new Date('2026-09-02'), mode: 'timeline' });
 
@@ -137,6 +140,30 @@ console.log('\nthe driver-availability sweep, when the provider refuses some of 
     `provider=${n?.provider} surface=${n?.surface}`);
   check('…still naming the cookie a person would actually replace',
     n && n.credential === 'UBER_WEB_COOKIE', String(n?.credential));
+}
+
+{
+  /* AND THE OTHER HALF: every driver refused for a reason that is not the
+     cookie's fault.
+     ─────────────────────────────────────────────────────────────────────────
+     timelineFor returned one undifferentiated `err` string for a login
+     redirect, for any GraphQL error and for any transport throw, and collect()
+     expired the cookie whenever every driver failed — so an INTERNAL_SERVER_
+     ERROR, a renamed field or a run of dropped connections each sent somebody
+     to re-capture a session that was never refused. The run must still be an
+     error; the credential must be left alone. */
+  runs.length = 0; notes.length = 0;
+  drivers = ['d1', 'd2'];
+  answer = () => ({ errors: [{ message: 'INTERNAL_SERVER_ERROR' }] });
+  const { collect } = await import('../src/sources/uber_timeline.js');
+  await collect({ from: new Date('2026-08-31'), to: new Date('2026-09-02'), mode: 'timeline' });
+
+  const r = runs.find((x) => x.source === 'uber_timeline');
+  check('a sweep refused for a NON-auth reason is still an error run',
+    r && r.status === 'error', `status=${r?.status}`);
+  check('…but the cookie is not blamed for it',
+    !notes.some((n) => n.state === 'expired'),
+    JSON.stringify(notes.map((n) => `${n.credential}=${n.state}`)));
 }
 
 {

@@ -130,6 +130,32 @@ async function driverIdsFor(o) {
   return rows.map((r) => r.driver_ext_id);
 }
 
+/* The two writes that make a profile durable, so they can happen per batch
+   instead of once at the very end of a 160-driver pass. */
+async function writeProfiles(rows) {
+  if (!rows.length) return;
+  await upsertMany('driver_platform_state', rows, ['platform', 'driver_ext_id']);
+  /* And kept, as well as overwritten.
+     ─────────────────────────────────────────────────────────────────────
+     driver_platform_state answers "what is this driver rated"; it is
+     replaced on every pass and can never answer "is it going up". The second
+     question is the actionable one — 4.71 is a fact, 4.71 down from 4.86
+     over five weeks is a conversation — so every reading also lands as its
+     own row, keyed on the day it was taken. A week we did not ask leaves no
+     row rather than a repeated one, so a gap reads as unmeasured rather than
+     unchanged. See sql/schema_v46.sql. */
+  /* dubaiIso(), not a hand-rolled +4h. The shift was right — this row is
+     keyed on the Dubai day the reading was taken — but written out inline it
+     was one more copy of arithmetic src/util.js already owns, and the one
+     place a future edit would not think to look. */
+  const day = dubaiIso();
+  await upsertMany('driver_rating_history', rows.map((r) => ({
+    platform: r.platform, driver_ext_id: r.driver_ext_id, observed_on: day,
+    fleet_id: r.fleet_id, rating: r.rating, lifetime_trips: r.lifetime_trips,
+    is_banned: r.is_banned, compliance_status: r.compliance_status,
+  })), ['platform', 'driver_ext_id', 'observed_on']);
+}
+
 async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
   const ids = await driverIdsFor(o);
   if (!ids.length) {
@@ -150,6 +176,30 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
   const rows = [];
   const cars = new Map();
   let rated = 0, failed = 0, skipped = 0;
+
+  /* ── the checkpoint must not run ahead of the write ──────────────────────
+     checkpoint.mark said "this driver is done" as soon as the row was pushed
+     onto an in-memory array, and the array was not written until the loop
+     ended. So an auth refusal on driver 150 — which this function deliberately
+     THROWS on, four lines below — discarded all 149 profiles collected before
+     it, while the checkpoint recorded every one of them as collected. The
+     resumed job then skipped them, and the rows were lost until something
+     cleared the checkpoint. checkpoint.js's own contract is mark-after-write.
+
+     Flushed in batches rather than once at the end, because marking only after
+     the whole loop would trade the bug for its opposite: a run that dies at
+     driver 150 of 160 would restart at zero every time and never finish. A
+     batch is written, and only then are its drivers marked. */
+  const BATCH = 25;
+  let pending = [];
+  const flush = async () => {
+    if (!pending.length) return;
+    const batch = pending;
+    pending = [];
+    await writeProfiles(batch.map((b) => b.row));
+    for (const b of batch) await checkpoint?.mark(`profile ${o.fleet}`, b.uuid, 1);
+    rows.push(...batch.map((b) => b.row));
+  };
 
   for (const uuid of ids) {
     if (checkpoint?.has(`profile ${o.fleet}`, uuid)) { skipped += 1; continue; }
@@ -181,10 +231,10 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
       failed += 1;
       if (failed <= 3) log.warn(SRC, 'driver refused', { fleet: o.fleet, err: out.err });
     } else {
-      rows.push(out.row);
+      pending.push({ row: out.row, uuid });
       if (out.row.rating != null) rated += 1;
       for (const v of out.vehicles) cars.set(v.plate, v);
-      await checkpoint?.mark(`profile ${o.fleet}`, uuid, 1);
+      if (pending.length >= BATCH) await flush();
     }
     onStep?.();
     /* Paced. The portal is a browser surface and this is the only place in the
@@ -193,28 +243,7 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
     await new Promise((r) => setTimeout(r, 250));
   }
 
-  if (rows.length) {
-    await upsertMany('driver_platform_state', rows, ['platform', 'driver_ext_id']);
-    /* And kept, as well as overwritten.
-       ─────────────────────────────────────────────────────────────────────
-       driver_platform_state answers "what is this driver rated"; it is
-       replaced on every pass and can never answer "is it going up". The second
-       question is the actionable one — 4.71 is a fact, 4.71 down from 4.86
-       over five weeks is a conversation — so every reading also lands as its
-       own row, keyed on the day it was taken. A week we did not ask leaves no
-       row rather than a repeated one, so a gap reads as unmeasured rather than
-       unchanged. See sql/schema_v46.sql. */
-    /* dubaiIso(), not a hand-rolled +4h. The shift was right — this row is
-       keyed on the Dubai day the reading was taken — but written out inline it
-       was one more copy of arithmetic src/util.js already owns, and the one
-       place a future edit would not think to look. */
-    const day = dubaiIso();
-    await upsertMany('driver_rating_history', rows.map((r) => ({
-      platform: r.platform, driver_ext_id: r.driver_ext_id, observed_on: day,
-      fleet_id: r.fleet_id, rating: r.rating, lifetime_trips: r.lifetime_trips,
-      is_banned: r.is_banned, compliance_status: r.compliance_status,
-    })), ['platform', 'driver_ext_id', 'observed_on']);
-  }
+  await flush();
   if (cars.size) {
     /* Never overwrite a make, model or year that is already recorded with a
        null: a driver attached to no car must not blank the car's own record.

@@ -384,6 +384,29 @@ async function pullDriverQuality(from, to, onStep, checkpoint = null) {
         rated: rows.filter((r) => r.rating != null).length,
         with_acceptance: rows.filter((r) => r.acceptance_rate != null).length });
     } catch (err) {
+      /* WHAT THE FIRST REPORT PARSED IS NOT THE SECOND REPORT'S TO LOSE.
+         ─────────────────────────────────────────────────────────────────────
+         Both report types were inside one try and the write was after the
+         loop, so a bounce or a 600-second timeout on the SECOND report threw
+         away everything the first had already downloaded and parsed — a full
+         week of ratings discarded because the acceptance report was slow. The
+         two reports merge into one row per driver, so a half-filled row is a
+         real answer with columns missing, not a wrong one; and the chunk error
+         beside it says which report did not arrive. */
+      if (merged.size) {
+        const partial = [...merged.values()];
+        try {
+          total += await upsertMany('driver_performance', partial,
+            ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+          chunk.rows = partial.length;
+          chunk.partial = true;
+          log.warn(SRC, `quality ${ps}..${pe} kept what the first report gave`,
+            { drivers: partial.length });
+        } catch (e2) {
+          log.error(SRC, `quality ${ps}..${pe} could not keep its partial rows`,
+            { err: String(e2).slice(0, 200) });
+        }
+      }
       const msg = String(err?.message || err);
       const expected = /invalid date range|retention|out of range/i.test(msg);
       chunk.error = expected ? `outside retention: ${msg.slice(0, 160)}` : msg.slice(0, 300);
@@ -1188,6 +1211,9 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
      sessions share this process's connection pool and the API's patience. */
   for (const o of uberOrgs(fleet)) {
     cur = o;
+    /* What is already written and committed, so a throw reports it rather
+       than zero. */
+    let written = 0;
     try {
       /* The checkpoint is per ORG as well as per window: the two fleets walk
          the same calendar, so a bare window name would let Egari's run be
@@ -1197,7 +1223,9 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
         mark: (u, n) => checkpoint.mark(`${o.fleet}:${u}`, n),
       };
       const trips = await pullTrips(from, to, onStep, ck);
+      written += trips.total;
       const perf = await pullEarnerBreakdowns(from, to, onStep, ck);
+      written += perf.total;
       /* Quality LAST, and never on the half-hourly incremental.
          ─────────────────────────────────────────────────────────────────────
          Two reports per week per fleet, minutes each, against a cap of three
@@ -1214,6 +1242,7 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
       const qual = mode === 'incremental'
         ? { total: 0, chunks: [] }
         : await pullDriverQuality(from, to, onStep, ck);
+      written += qual.total;
       // Every sub-source's windows, so a run that fetched every trip and no
       // earnings reads as partial rather than as ok.
       const chunks = [...trips.chunks, ...perf.chunks, ...qual.chunks];
@@ -1227,7 +1256,13 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
       log.info(SRC, `done (${o.fleet})`, { trips: trips.total, perf, quality: qual.total,
         windows_failed: trips.chunks.filter((c) => c.error).length, of: trips.chunks.length });
     } catch (e) {
-      await logRun({ source: SRC, fleet_id: o.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
+      /* rows_written, not 0. src/db.js stores `run.rows_written || 0`, so
+         omitting it told the status page that a run which had already written
+         and committed thousands of rows wrote none — and "collected nothing"
+         is the sentence that sends somebody hunting a fault that is not
+         there. What landed, landed. */
+      await logRun({ source: SRC, fleet_id: o.fleet, mode, window_start: from, window_end: to,
+        status: 'error', rows_written: written, error: String(e) });
       log.error(SRC, `failed (${o.fleet})`, { err: String(e) });
     } finally {
       cur = null;

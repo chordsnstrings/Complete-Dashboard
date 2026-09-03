@@ -31,8 +31,19 @@ check('…naming the credential an operator has to replace',
   /YANGO_COOKIE/.test(yango));
 /* The run wrapper catches, so raising is what turns a refusal into a run
    marked `error` instead of one marked `ok` with nothing in it. */
+/* Each surface is caught on its own now, so a refusal no longer unwinds the
+   whole run — but it must still REACH the run as an error rather than an 'ok'
+   with nothing in it, which is the thing this file is about. Two paths carry
+   that: the status computed from `fails`, and the outer catch. */
 check('a raised refusal reaches the run log as an error',
-  /catch \(e\)[\s\S]{0,200}status: 'error'/.test(yango));
+  /fails\.length === 0 \? 'ok'[\s\S]{0,80}?'partial' : 'error'/.test(yango)
+  /* Comments blanked: the catch now carries a paragraph explaining why it is
+     still there, and a character window measured over prose is a window that
+     fails when somebody documents their code. */
+  && /catch \(e\)[\s\S]{0,200}status: 'error'/.test(
+    yango.replace(/\/\*[\s\S]*?\*\//g, '')));
+check('…and a refused surface does not take the other two with it',
+  /const surface = async \(name, fn\)/.test(yango));
 
 check('FMS still checks its own responses', /if \(!r\.ok\)/.test(fms));
 check('…and still says why it does', /asked and refused|indistinguishable from a quiet/.test(fms));

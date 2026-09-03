@@ -16,7 +16,7 @@ import { stateRow } from '../roster.js';
    of which this file already imports; api/day_routes.js and src/insights.js
    reach for it the same way. */
 import { isoDay } from './ledger.js';
-import { noteCredential } from '../auth_state.js';
+import { noteCredential, saysAuth } from '../auth_state.js';
 
 const SRC = 'hotel';
 
@@ -117,6 +117,16 @@ export { parseLicenceDate };
    with no authorisation on file" fired on 1,095 of 1,254 bookings, because most
    properties do not use the approval workflow at all. */
 const hotelNames = new Map();
+/* ── which statuses are the CREDENTIAL's fault ────────────────────────────
+   Both guards here were `status >= 400`, and src/http.js retries 429/500/502/
+   503/504 four times before returning — so a persistent gateway error, or a
+   404 from a path that moved, painted HOTEL_TOKEN red and sent somebody to
+   re-issue a bearer that was never refused. Only an authorization answer is an
+   authorization verdict; everything else is a source error with its own
+   message. The same discrimination uber.js and uber_fleet.js already apply. */
+const isAuthStatus = (status, data) => status === 401 || status === 403
+  || saysAuth(data?.message || data?.error || '');
+
 async function loadHotels(c) {
   try {
     const { data, status } = await http(`${c.base}/api/operation-managers/hotels`, {
@@ -128,9 +138,11 @@ async function loadHotels(c) {
        than about the credential, on a run that then reported ok with no
        property names. */
     if (status && status >= 400) {
-      await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
-        credential: 'HOTEL_TOKEN', state: 'invalid', surface: 'hotels',
-        detail: `HTTP ${status}` });
+      if (isAuthStatus(status, data)) {
+        await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
+          credential: 'HOTEL_TOKEN', state: 'invalid', surface: 'hotels',
+          detail: `HTTP ${status}` });
+      }
       throw new Error(`hotel property list refused: HTTP ${status}`);
     }
     const list = (Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [])
@@ -175,13 +187,30 @@ export async function collect({ from, to, mode }) {
            carried nobody. The window has to refuse rather than answer empty,
            and the credential has to be named where an operator looks for it. */
         if (status && status >= 400) {
-          await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
-            credential: 'HOTEL_TOKEN', state: 'invalid', surface: 'get-trip-report',
-            detail: `HTTP ${status}` });
+          if (isAuthStatus(status, data)) {
+            await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
+              credential: 'HOTEL_TOKEN', state: 'invalid', surface: 'get-trip-report',
+              detail: `HTTP ${status}` });
+          }
           throw new Error(`hotel trip report refused: HTTP ${status}`
-            + ' — the corporate portal bearer is no longer accepted');
+            + (isAuthStatus(status, data)
+              ? ' — the corporate portal bearer is no longer accepted' : ''));
         }
+        /* The bearer answered, so say so. HOTEL_TOKEN had no 'ok' writer
+           anywhere in this file and no entry in src/credcheck.js's BY_KEY, so
+           one bad gateway minute left it red for ever. */
+        await noteCredential(pool, { provider: SRC, fleet: c.fleet || '*',
+          credential: 'HOTEL_TOKEN', state: 'ok', surface: 'get-trip-report', detail: null });
         trips = data?.data?.trips || [];
+        /* The response counts its own trips, and nothing ever compared it with
+           what arrived. A truncated window is otherwise indistinguishable from
+           a quiet one — the failure this whole sweep is about. */
+        const declared = Number(data?.data?.totalTrips);
+        if (Number.isFinite(declared) && declared > trips.length) {
+          log.warn(SRC, 'trip report returned fewer trips than it declared', {
+            fleet: c.fleet, declared, received: trips.length,
+            hint: 'this endpoint may page, or the 31-day window may be over its limit' });
+        }
       } catch (err) {
         // One window failing must not abandon the rest — and must not be
         // invisible either. A run that skipped a month while succeeding on the
@@ -257,7 +286,11 @@ export async function collect({ from, to, mode }) {
     await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to,
       rows_written: total, chunks });
   } catch (e) {
-    await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
+    /* rows_written, not 0. src/db.js stores `run.rows_written || 0`, so
+       omitting it told the status page that a run which had already written
+       and committed rows wrote none. What landed, landed. */
+    await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to,
+      status: 'error', rows_written: total, error: String(e) });
     log.error(SRC, 'failed', { err: String(e) });
   }
 }

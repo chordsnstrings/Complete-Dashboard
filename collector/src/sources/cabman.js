@@ -4,7 +4,7 @@ import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
 import { log } from '../log.js';
-import { noteCredential } from '../auth_state.js';
+import { noteCredential, saysAuth } from '../auth_state.js';
 
 const SRC = 'cabman';
 
@@ -65,10 +65,25 @@ export async function pullLive() {
        credential, printed eighty-five times as eighty-five broken cars. */
     if (status && status >= 400) {
       log.error(SRC, `live feed refused for ${f.fleet}`, { status });
-      await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: 'CABMAN_PASSWORD',
-        state: 'invalid', surface: 'IVDData', detail: `HTTP ${status}` });
+      /* Only an authorization answer is an authorization verdict.
+         ─────────────────────────────────────────────────────────────────────
+         This was `status >= 400` and src/http.js retries 429/500/502/503/504
+         four times before returning, so a bad gateway minute painted
+         CABMAN_PASSWORD red — and this is the every-five-minute realtime poll,
+         the source most exposed to a transient status of anything in the
+         collector. There is no CABMAN_PASSWORD entry in src/credcheck.js
+         either, so nothing could turn it green again. */
+      if (status === 401 || status === 403 || saysAuth(data?.Message || data?.message || '')) {
+        await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: 'CABMAN_PASSWORD',
+          state: 'invalid', surface: 'IVDData', detail: `HTTP ${status}` });
+      }
       continue;
     }
+    /* The feed answered on this password, so say so — the row could only ever
+       go red before, and 'invalid' scores as "stopped" on the credential
+       panel for ever. */
+    await noteCredential(pool, { provider: SRC, fleet: f.fleet, credential: 'CABMAN_PASSWORD',
+      state: 'ok', surface: 'IVDData', detail: null });
     const now = new Date().toISOString();
     const rows = (data?.IVDDataResult || []).map((v) => ({
       source: SRC, fleet_id: f.fleet, plate: normPlate(v.VehicleID),

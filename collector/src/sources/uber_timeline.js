@@ -24,7 +24,7 @@ import { http } from '../http.js';
 import { log } from '../log.js';
 import { uberWebHeaders, UBER_WEB_HOST } from '../auth/uber.js';
 import { uberOrgs } from './uber.js';
-import { noteCredential } from '../auth_state.js';
+import { noteCredential, saysAuth } from '../auth_state.js';
 
 const SRC = 'uber';
 /* The name this surface answers to in collection_run AND in credential_state,
@@ -102,13 +102,34 @@ export async function timelineFor(o, driverUuid, s, e) {
      fetch follows it silently, so without checking `redirected` an expired
      session reads as a driver who did nothing. src/http.js returns it for
      exactly this class of lie. */
-  if (redirected || !data || typeof data !== 'object') {
-    return { events: [], err: `session redirected to login (${status}) — the supplier cookie has expired` };
+  /* THREE DIFFERENT FAILURES, and only one of them is the cookie's fault.
+     ─────────────────────────────────────────────────────────────────────────
+     This returned a single `err` string for a redirect, for any GraphQL error,
+     and (in the caller) for any thrown transport error — and the caller then
+     wrote UBER_WEB_COOKIE 'expired' whenever every driver failed, whatever the
+     reason. A maintenance page served with HTTP 200, a renamed field, a rate
+     limit: all of them painted a working session red and sent somebody to
+     re-capture a cookie that was never refused. uber.js and uber_fleet.js both
+     gate this exact write on authFailure()/saysAuth() with the same cookie on
+     the same host; this module imported neither.
+
+     `auth` now says whether the credential is implicated, and the caller may
+     only touch credential_state when it is true. */
+  if (redirected) {
+    return { events: [], auth: true,
+      err: `session redirected to login (${status}) — the supplier cookie has expired` };
+  }
+  if (!data || typeof data !== 'object') {
+    /* HTML where JSON was expected. An interstitial or maintenance page, often
+       with HTTP 200 — which is not a login bounce and must not be read as one. */
+    return { events: [], auth: false,
+      err: `non-JSON response (${status}) — an interstitial or maintenance page, not a login bounce` };
   }
   if (data.errors?.length) {
-    return { events: [], err: String(data.errors[0]?.message || data.errors[0]).slice(0, 200) };
+    const msg = String(data.errors[0]?.message || data.errors[0]).slice(0, 200);
+    return { events: [], auth: saysAuth(msg), err: msg };
   }
-  return { events: data?.data?.GetTimelineInfo?.timelineInfo || [], err: null };
+  return { events: data?.data?.GetTimelineInfo?.timelineInfo || [], err: null, auth: false };
 }
 
 /* One API event becomes one status row plus one row per job sub-state. Written
@@ -196,6 +217,9 @@ export async function collect({ from, to, mode, roster = false }) {
     const drivers = await driverIdsFor(o.fleet, from, to, { roster });
     const wins = windows(from, to);
     let rows = 0, failed = 0, empty = 0, firstErr = null;
+    /* Whether any refusal was actually auth-shaped. A transport throw is not:
+       a dropped connection says nothing about the cookie. */
+    let authFailed = 0;
     for (const driver of drivers) {
       for (const [s, e] of wins) {
         let r;
@@ -205,7 +229,7 @@ export async function collect({ from, to, mode, roster = false }) {
           failed++; firstErr ||= String(err.message || err);
           continue;
         }
-        if (r.err) { failed++; firstErr ||= r.err; continue; }
+        if (r.err) { failed++; if (r.auth) authFailed++; firstErr ||= r.err; continue; }
         if (!r.events.length) { empty++; continue; }
         rows += await upsertMany('driver_timeline_event', toRows(o, driver, r.events),
           ['platform', 'driver_ext_id', 'at', 'kind', 'state', 'status']);
@@ -216,12 +240,21 @@ export async function collect({ from, to, mode, roster = false }) {
        so, rather than the panel quietly drawing a month of nothing. */
     const asked = drivers.length * wins.length;
     const cred = o.fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI';
-    if (asked && failed === asked) {
+    /* Every request refused AND at least one of them said so in the words of an
+       authorization refusal. Without the second half this fired for a
+       maintenance page, a renamed GraphQL field or a run of dropped
+       connections — each of which painted a working cookie 'expired'. A
+       non-auth failure is a run error with its own message, which the logRun
+       below already carries. */
+    if (asked && failed === asked && authFailed) {
       await noteCredential(pool, {
         provider: RUN_SRC, fleet: o.fleet, credential: cred,
         state: 'expired', detail: `driver timeline refused for every driver — ${firstErr}`,
         surface: 'supplier chronicle timeline',
       });
+    } else if (asked && failed === asked) {
+      log.warn(SRC, 'every driver refused, but not for an auth reason — the cookie is not blamed',
+        { fleet: o.fleet, err: firstErr });
     } else if (asked) {
       /* Any answered ask is proof the session authenticated, so the green half
          keys on that rather than on rows. It used to key on `rows`, which meant

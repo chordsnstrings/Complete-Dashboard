@@ -135,6 +135,21 @@ const post = async (path, body) => {
     }
     throw new Error(`yango ${path} refused: HTTP ${r.status}${hint}`);
   }
+  /* ── the park id is entitled, and something has to be able to say so ──────
+     The "a state only something can clear" fix went in for YANGO_COOKIE and
+     stopped there — and it stopped one line above the call that made
+     YANGO_PARK_ID the new write-invalid-only key. There is no YANGO_PARK_ID
+     checker in src/credcheck.js either, so once that row went red nothing in
+     the product could ever turn it green again, and api/auth_routes.js scores
+     'invalid' as "stopped" for ever.
+
+     A 200 from a park-scoped endpoint is the proof: this park id and this API
+     key were accepted for this park. The same standard the cookie is held to
+     eleven lines up, and the same one fms.js and uber.js apply. */
+  await noteCredential(pool, {
+    provider: SRC, fleet: config.yango.fleet || '*', credential: 'YANGO_PARK_ID',
+    state: 'ok', surface: path, detail: null,
+  });
   return r;
 };
 const dubai = (d, end) => `${iso(d)}T${end ? '23:59:59' : '00:00:00'}+04:00`;
@@ -221,12 +236,48 @@ async function pullTrips(from, to) {
    help, because nothing finer existed for the days only the year-row covered.
    The window a report is asked for is the key it is stored under; a moving
    window is a duplicate and a huge one is a smear. */
-async function pullDrivers(from, to) {
+async function pullDrivers(from, to, chunks = []) {
   let total = 0;
   for (const { start, end } of weekChunks(from, to)) {
-    const { data } = await post('/api/reports-api/v2/summary/drivers/list',
-      { date_from: iso(start), date_to: iso(end), sort: { field: 'driver_id', direction: 'asc' } });
-    const rows = (data?.items || []).map((it) => ({
+    /* PER WEEK, like fms.js and uber.js already do.
+       ─────────────────────────────────────────────────────────────────────
+       post() throws on any status >= 400 and nothing stood between it and
+       collect()'s single catch, so one refused week abandoned every LATER week
+       — and, because collect() ran all three pulls in one try, the trips and
+       the ledger with them. weekChunks yields oldest-first, so a refusal on
+       the oldest week of a backfill cost the entire run: exactly the shape
+       that had Bolt writing 70 rows over two years.
+
+       A window that refused is a window, not a run. */
+    let data = null;
+    try {
+      ({ data } = await post('/api/reports-api/v2/summary/drivers/list',
+        { date_from: iso(start), date_to: iso(end), sort: { field: 'driver_id', direction: 'asc' } }));
+    } catch (e) {
+      const why = String(e && e.message ? e.message : e).slice(0, 200);
+      log.warn(SRC, 'driver week refused', { from: iso(start), to: iso(end), err: why });
+      chunks.push({ from: iso(start), to: iso(end), rows: 0, error: why });
+      continue;
+    }
+    const items = data?.items || [];
+    /* NO LIMIT IS SENT AND NO CURSOR IS READ, while both sibling endpoints in
+       this file page. uber.js:1115 records what that cost once already on the
+       identical shape — an API's default page of 50 against a 152-driver
+       fleet, so driver_platform_state held a third of the roster and every
+       "on the books but not earning" figure was computed over that third.
+
+       It is not fixed here because it cannot be measured here: this park
+       answers 403 (YANGO_PARK_ID is not entitled), so the page size and the
+       cursor's spelling are both unknown, and paging invented against an
+       endpoint nobody can call is a guess shipped as a fix. What IS possible
+       is noticing: a count sitting exactly on a round boundary is what a first
+       page looks like, and saying so beats discovering it a year later. */
+    if (items.length && items.length % 50 === 0) {
+      log.warn(SRC, 'driver week landed exactly on a page boundary — is this endpoint paged?',
+        { from: iso(start), to: iso(end), items: items.length,
+          hint: 'measure the page size and cursor once the park is entitled, then page it like pullTrips' });
+    }
+    const rows = items.map((it) => ({
       platform: SRC, fleet_id: config.yango.fleet, driver_ext_id: it.driver?.id,
       driver_name: decomposed(it.driver),
       plate: normPlate(it.car?.callsign), period_start: iso(start), period_end: iso(end),
@@ -243,6 +294,7 @@ async function pullDrivers(from, to) {
     if (rows.length) total += await upsertMany('driver_performance', rows,
       ['platform', 'driver_ext_id', 'period_start', 'period_end']);
     await maybeRoster(data);
+    chunks.push({ from: iso(start), to: iso(end), rows: rows.length, error: null });
   }
   return total;
 }
@@ -280,20 +332,53 @@ async function pullLedger(from, to) {
 }
 
 export async function collect({ from, to, mode }) {
+  const fails = [];
+  const chunks = [];
+  let drivers = 0, trips = 0, ledger = 0;
+  /* EACH SURFACE ON ITS OWN. Three endpoints — weekly driver summaries, the
+     order list, the transaction ledger — sharing one try meant the first one
+     to refuse took the other two with it, and this park refuses regularly.
+     They are three different questions and two of them answering is worth
+     having. */
+  const surface = async (name, fn) => {
+    try { return await fn(); } catch (e) {
+      const why = String(e && e.message ? e.message : e).slice(0, 200);
+      log.error(SRC, `${name} failed`, { err: why });
+      fails.push(`${name}: ${why}`);
+      return 0;
+    }
+  };
   try {
     /* Order matters, and it is the only reason it is this way round. Trips and
        ledger entries are filed under the name the summary endpoint decomposes,
        so that endpoint is asked first; seedNames() covers the drivers it does
        not return for this window from what the roster already holds. */
-    const known = await seedNames();
-    const drivers = await pullDrivers(from, to);
-    const trips = await pullTrips(from, to);
-    const ledger = await pullLedger(from, to);
+    const known = await surface('names', seedNames);
+    drivers = await surface('drivers', () => pullDrivers(from, to, chunks));
+    trips = await surface('trips', () => pullTrips(from, to));
+    ledger = await surface('ledger', () => pullLedger(from, to));
     log.info(SRC, 'names', { seeded: known, known: nameById.size });
-    await logRun({ source: SRC, fleet_id: config.yango.fleet, mode, window_start: from, window_end: to, status: 'ok', rows_written: trips + drivers + ledger });
-    log.info(SRC, 'done', { trips, drivers, ledger });
+    /* A floor the chunks can only worsen: logRun turns some-windows-failed into
+       'partial' and all-failed into 'error', but it cannot see that a whole
+       SURFACE was refused, because the driver weeks are the only windows here. */
+    const status = fails.length === 0 ? 'ok'
+      : (drivers + trips + ledger > 0 ? 'partial' : 'error');
+    await logRun({ source: SRC, fleet_id: config.yango.fleet, mode,
+      window_start: from, window_end: to, status,
+      ...(chunks.length ? { chunks } : {}),
+      rows_written: trips + drivers + ledger,
+      error: fails.length ? fails.join('; ').slice(0, 500) : null });
+    log[fails.length ? 'warn' : 'info'](SRC, 'done',
+      { trips, drivers, ledger, failed: fails.length || undefined });
   } catch (e) {
-    await logRun({ source: SRC, fleet_id: config.yango.fleet, mode, window_start: from, window_end: to, status: 'error', error: String(e) });
+    /* Every surface is guarded above, so this is the run row's own write. It
+       stays because a source that throws without one disappears from the
+       status page rather than showing as broken. rows_written carries what
+       actually landed rather than 0 — those rows are written and durable. */
+    await logRun({ source: SRC, fleet_id: config.yango.fleet, mode,
+      window_start: from, window_end: to, status: 'error',
+      rows_written: trips + drivers + ledger,
+      error: [String(e), ...fails].join('; ').slice(0, 500) });
     log.error(SRC, 'failed', { err: String(e) });
   }
 }

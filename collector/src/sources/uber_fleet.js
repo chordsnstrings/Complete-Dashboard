@@ -389,7 +389,25 @@ export async function collect({ from, to, mode }) {
   const orgs = uberOrgs();
   for (const o of orgs) {
     if (!o.orgUuid || !o.webCookie) {
-      log.info(SRC, `skipped ${o.fleet} — no org uuid or web session configured`);
+      /* A LOG LINE IS NOT A RECORD. This was a `continue` and nothing else: no
+         run row, no chunk, no credential note — so the fleet did not appear on
+         /api/status as broken, it simply was not there, which is the one
+         failure mode worse than being broken. bolt.js, fms.js and cabman.js
+         all write 'missing' in exactly this situation, and fms.js carries the
+         comment explaining why. */
+      const cred = o.fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI';
+      const why = !o.orgUuid
+        ? `no org uuid configured for ${o.fleet}`
+        : `no web session configured for ${o.fleet} — set ${cred}`;
+      log.warn(SRC, `skipped ${o.fleet}`, { reason: why });
+      if (!o.webCookie) {
+        await noteCredential(pool, { provider: SRC, fleet: o.fleet, credential: cred,
+          state: 'missing', surface: 'fleethub',
+          detail: `${why}, so this fleet's supplier surfaces are not collected` })
+          .catch(() => {});
+      }
+      await logRun({ source: SRC, fleet_id: o.fleet, mode, window_start: from, window_end: to,
+        status: 'error', rows_written: 0, error: why });
       continue;
     }
     total += await collectOrg({ from, to, mode }, o);

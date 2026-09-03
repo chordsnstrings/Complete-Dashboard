@@ -39,9 +39,16 @@ check('a driver is only asked of the org whose roster names them',
   'asking Ecosine about an Egari driver returns an error with an empty message — measured');
 check('the profile pull is its own pass, not folded into a collection window',
   /export async function collect\(\{ mode = 'profile'/.test(code));
+/* Still per driver, and still keyed on the uuid — but marked from the batch
+   AFTER that batch is written, not from the loop before it. Marking on push
+   meant an auth refusal on driver 150 discarded all 149 profiles collected
+   before it while recording every one as done, so the resumed job skipped
+   them. test/source_resilience.test.mjs pins the ordering. */
 check('it checkpoints per driver, so a deploy mid-sweep resumes',
   /checkpoint\?\.has\(`profile \$\{o\.fleet\}`, uuid\)/.test(code)
-  && /checkpoint\?\.mark\(`profile \$\{o\.fleet\}`, uuid/.test(code));
+  && /checkpoint\?\.mark\(`profile \$\{o\.fleet\}`, b\.uuid/.test(code));
+check('and the mark comes after the write, never before it',
+  code.indexOf('await writeProfiles(') < code.indexOf('checkpoint?.mark(`profile'));
 check('and it paces, because this is the one call-per-driver surface here',
   /setTimeout\(r, 250\)/.test(code));
 check('a dead cookie stops the pass rather than writing a fleet of nulls',
