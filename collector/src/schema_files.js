@@ -30,4 +30,5 @@ export const SCHEMA_FILES = [
      installed rather than racing them. */
   'schema_v53.sql',
   'schema_v54.sql',
+  'schema_v55.sql',
 ];

@@ -50,14 +50,31 @@ SELECT
   (t.platform <> 'fms') AS is_booking,
 
   -- Normalised outcome. NULL where the question does not apply.
+  --
+  -- Read off k.s, which is the status with Bolt's `optional_ride_` prefix
+  -- removed. That prefix marks a ride the driver was offered as a BACKUP —
+  -- it says how the offer was made, not how it ended — and leaving it on
+  -- meant three real Bolt statuses matched nothing and fell through to
+  -- 'other'. Measured on production 2026-09-03 over 365 days: 908
+  -- optional_ride_driver_did_not_respond, 626 optional_ride_driver_rejected
+  -- and 163 optional_ride_driver_cancelled_after_accept. The first two, 1,534
+  -- rows, were counted as neither completed nor cancelled, so Bolt's
+  -- cancellation rate read 55.8% where it is 61.4%. 'other' is not NULL, so
+  -- they sat in the denominator of every rate while being excluded from its
+  -- numerator — the worst of the three possible places to put them.
+  --
+  -- offer_rejected is here for the same reason, ahead of its arrival: the
+  -- portal serves it, this collector now asks for every state, and a status
+  -- nobody has mapped is a status that quietly dilutes a percentage.
   CASE
     WHEN t.platform = 'fms' THEN NULL
     WHEN t.status IS NULL THEN NULL
-    WHEN lower(btrim(t.status)) IN ('completed', 'finished', 'complete', 'closed', 'delivered')
+    WHEN k.s IN ('completed', 'finished', 'complete', 'closed', 'delivered')
       THEN 'completed'
-    WHEN t.status ILIKE '%cancel%'
-      OR lower(btrim(t.status)) IN ('client_did_not_show', 'driver_did_not_respond',
-                                    'driver_rejected', 'rejected', 'expired', 'failed', 'no_show')
+    WHEN k.s LIKE '%cancel%'
+      OR k.s IN ('client_did_not_show', 'driver_did_not_respond',
+                 'driver_rejected', 'rejected', 'offer_rejected',
+                 'expired', 'failed', 'no_show')
       THEN 'not_completed'
     ELSE 'other'
   END AS outcome,
@@ -86,7 +103,13 @@ SELECT
   -- FMS distances are odometer-derived and occasionally implausible. A trip
   -- distance is only comparable within a sane range.
   (t.distance_km IS NOT NULL AND t.distance_km > 0 AND t.distance_km < 500) AS has_distance
-FROM trip t;
+FROM trip t
+-- The status, lowercased and stripped of Bolt's backup-offer prefix. Computed
+-- once in a lateral rather than three times in the CASE above, so the three
+-- branches cannot come to disagree about what they are matching.
+LEFT JOIN LATERAL (
+  SELECT regexp_replace(lower(btrim(t.status)), '^optional_ride_', '') AS s
+) k ON true;
 
 COMMENT ON VIEW trip_norm IS
   'trip, with the platform differences resolved: is_booking separates bookings from telematics journeys, outcome normalises status across platforms, local_* are Dubai-local calendar keys, has_fare/has_distance mark which rows a money or distance ratio may be computed over. Rebuilt in v18 so that columns added to trip after v7 are actually visible.';

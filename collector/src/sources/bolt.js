@@ -337,8 +337,14 @@ async function portalToken(company) {
    both fleets. Every constant here is a refusal boundary found by asking. */
 const PORTAL_PAGE = 100;      // 200 answers "limit: Integer is not in range"
 const PORTAL_MAX_DAYS = 30;   // 31 answers DATE_RANGE_TOO_BIG
-const PORTAL_STATES = ['finished', 'client_cancelled', 'driver_did_not_respond',
-  'driver_rejected', 'client_did_not_show', 'driver_cancelled_after_accept'];
+/* EVERY state, which is what an empty list means here — measured, not assumed.
+   Over 2026-08-06..2026-09-03 the six-state list returned 401 orders and [] 
+   returned 402; the extra was a `driving_with_client`, a ride still in
+   progress. The list also silently omitted `offer_rejected` and all three
+   `optional_ride_*` variants, which the portal serves and which are real
+   orders with a driver, a plate and a route. A state list is a filter nobody
+   revisits, and the portal's vocabulary is the portal's to change. */
+const PORTAL_STATES = [];
 /* "You asked for a day older than we keep." A fact about the provider's
    retention, not about this fleet, this token or this run. */
 const RETENTION_CODE = 25809;
@@ -397,7 +403,22 @@ export function pivot(data) {
    way of writing "did not happen" — a cancelled ride has fare_finalised 0 —
    so 0 becomes null rather than 1970. */
 const at = (v) => (Number(v) > 0 ? new Date(Number(v) * 1000).toISOString() : null);
-const num = (v) => (v == null || v === '' ? null : Number(v));
+/* ZERO IS ABSENCE ON THIS FEED, NOT A MEASUREMENT.
+   ─────────────────────────────────────────────────────────────────────────
+   The portal writes 0 for a fare that was never charged and a distance never
+   driven, and 0 is not NULL: has_fare in sql/schema_v18.sql is `price IS NOT
+   NULL`, so every cancelled ride counted as a priced one. Measured on
+   production over 365 days: Bolt's average fare read AED 23.60 where its
+   completed rides average AED 60.67 — 61% low — because 16,846 of 27,440 rows
+   were cancellations at price 0 sitting in the denominator.
+
+   Safe because the feed is consistent about it, which I checked rather than
+   assumed: of 51 `finished` rows in a live window, none carries price 0 and
+   none carries distance 0, while every one of the 48 non-completions carries
+   both. A no-show is the interesting case and it works — client_did_not_show
+   comes back with a real price and a cancellation fee, so nulling only the
+   zeros keeps the money the rider was actually charged. */
+const money = (v) => (Number(v) > 0 ? Number(v) : null);
 
 export function portalRow(o, c) {
   const route = Array.isArray(o.route) ? o.route : [];
@@ -430,14 +451,14 @@ export function portalRow(o, c) {
        arrival, which is why the two are read separately. */
     pickup_addr: route[0] || null,
     dropoff_addr: route.length > 1 ? route[route.length - 1] : null,
-    distance_km: num(o.distance),
+    distance_km: money(o.distance),
     status: o.status || null,
     product: o.category || null,
     payment_type: o.payment_method || null,
     /* What the rider paid for the ride. The fees Bolt itemises beside it are
        kept in raw rather than folded in: a booking fee added to the fare would
        silently change what every per-trip figure in this product means. */
-    price: num(o.price),
+    price: money(o.price),
     currency: 'AED',
     raw: o,
   };
