@@ -461,6 +461,12 @@ const bolt = src('bolt.js');
 check('a bolt run that wrote nothing and failed everywhere is not "ok"',
   /\.\.\.\(chunks\.length \? \{ chunks \} : \{\}\)/.test(bolt)
   && /fails\.length === 0 \? 'ok' : \(roster \+ trips > 0 \? 'partial' : 'error'\)/.test(bolt));
+/* And the chunks may only make it WORSE. Handing logRun the windows and no
+   status let a run whose ROSTER half was refused report 'ok', because the
+   portal's windows knew nothing about the roster and every one of them
+   answered — seen on production minutes after the deploy. */
+check('the chunks refine the status, they do not replace it',
+  /status,\n\s*\.\.\.\(chunks\.length \? \{ chunks \} : \{\}\)/.test(bolt));
 check('and every window it attempted reaches the run row', /chunks\.push\(|allChunks\.push\(/.test(bolt));
 check('and the failing surfaces are named in the run, not only in the log',
   /error: fails\.length \? fails\.join/.test(bolt));

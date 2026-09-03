@@ -924,11 +924,18 @@ export async function collect({ from, to, mode }) {
        months looked exactly like one that lost none — and the roster's row count
        was enough to make a completely dark trip harvest read 'partial'. logRun
        derives the honest status from these: all-failed is 'error', not 'partial'. */
-    const status = chunks.length
-      ? undefined                        // logRun computes it from the chunks
-      : (fails.length === 0 ? 'ok' : (roster + trips > 0 ? 'partial' : 'error'));
+    /* A FLOOR, not a verdict. logRun reads the chunks and can only make this
+       WORSE — some windows failed is 'partial', all of them is 'error'
+       (src/db.js). But the portal's windows know nothing about the FI roster,
+       and passing nothing here let a run whose roster half was refused outright
+       report 'ok' because every window the portal DID answer answered. Measured
+       on production straight after the deploy: incremental, status ok, with
+       "FI roster ecosine: BOLT_CLIENT_ID is not entitled" sitting in its own
+       error column. A surface that failed has to reach the status the page
+       paints, which is the whole reason this file records surfaces at all. */
+    const status = fails.length === 0 ? 'ok' : (roster + trips > 0 ? 'partial' : 'error');
     await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to,
-      ...(status ? { status } : {}),
+      status,
       ...(chunks.length ? { chunks } : {}),
       rows_written: roster + trips,
       error: fails.length ? fails.join('; ').slice(0, 500) : null });
