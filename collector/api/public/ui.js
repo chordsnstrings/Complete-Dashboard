@@ -1278,3 +1278,43 @@ export function avatar(name, pictureUrl, cls = '') {
   return `<div class="${k} av-photo">${initials}<img src="${esc(pictureUrl)}" alt=""`
     + ' loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></div>';
 }
+
+/* ── what a driver earned, and which record says so ───────────────────────
+   Uber's trip export carries NO fare column — /api/revenue reports
+   priced_bookings 0 and fare_coverage_pct 0 for it in every period — so a
+   driver's `revenue` is null however much they made, and a tile that reads it
+   shows a dash over a working month. The phone did exactly that: FARES — for a
+   person with 48 bookings, AED 22,925 paid out and AED 27,761 of fares sitting
+   in the same response it had already fetched.
+
+   The desktop had solved this and the phone had not, which is the whole shape
+   of that defect, so the choosing lives here now and both shells call it. Three
+   answers in order of directness, and the third is a real dash: no fare on any
+   trip AND no statement reporting one is genuinely unmeasured, and says so. */
+export function moneyInTile(k, { label = 'Money in' } = {}) {
+  if (!k || !k.accounted) {
+    return { label, value: '\u2014',
+      sub: 'no fare and no payout statement covers this window' };
+  }
+  const parts = [
+    k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
+    k.accounted_payouts ? `${money(k.accounted_payouts)} paid out` : null,
+  ].filter(Boolean);
+  const from = (k.accounted_platforms || []).map(sourceLabel).join(', ');
+  return { label, value: money(k.accounted),
+    sub: `${parts.join(' \u00b7 ')}${from ? `, from ${from}` : ''}` };
+}
+
+export function faresTile(k) {
+  if (k && k.accounted_fares) {
+    return { label: 'Fares', value: money(k.accounted_fares),
+      sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' };
+  }
+  if (k && k.statement_fares) {
+    return { label: 'Fares', value: money(k.statement_fares),
+      sub: `the platform's own figure, over ${countOf(k.statement_fare_periods, 'weekly statement')}`
+        + ' \u2014 no trip here carries a fare, and the payout beside it came out of this' };
+  }
+  return { label: 'Fares', value: '\u2014',
+    sub: 'no trip carries a fare and no statement reports one' };
+}

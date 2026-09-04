@@ -18,7 +18,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
-import { sourceLabel, timeStr, dtStr, custodyText } from '../ui.js';
+import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile } from '../ui.js';
 import { dubaiClock } from '../tz.js';
 
 export const TABS = [
@@ -751,7 +751,14 @@ async function driver(deck, ctx) {
 
   stats(deck, [
     { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${k.days_worked} days worked` : null },
-    { label: 'Fares', value: money(n(k.revenue)), sub: k.avg_fare ? `${money(n(k.avg_fare))} a booking` : null },
+    /* NOT k.revenue. Uber's trip export carries no fare column, so `revenue` is
+       null for most of this fleet however much they earned — and this tile
+       printed a dash for a driver with 48 bookings, AED 22,925 paid out and
+       AED 27,761 of statement fares sitting in the very response it had
+       already fetched. The desktop had the chooser and the phone did not; it
+       is in ui.js now and both call it. */
+    moneyInTile(k),
+    faresTile(k),
     { label: 'Completed', value: k.completion_pct != null ? `${n(k.completion_pct)}%` : '\u2014',
       sub: k.not_completed != null ? `${fmt(k.not_completed)} did not` : null,
       tone: n(k.completion_pct) >= 90 ? 'good' : n(k.completion_pct) >= 80 ? null : 'warn' },

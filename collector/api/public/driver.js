@@ -18,7 +18,7 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './ch
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
   sourceLabel, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
-  avatar } from './ui.js';
+  avatar, moneyInTile, faresTile } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
@@ -647,13 +647,11 @@ async function tabOverview(root, id, prof) {
        same screen said AED 0 in fares and AED 15,738 in fares at the same
        time. The zero was never a measurement: it is the trip record having no
        fare column, which the Fares tile now says in words. */
-    { label: 'Money in', value: k.accounted ? money(k.accounted) : '—',
-      sub: k.accounted
-        ? `${[k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
-          k.accounted_payouts ? `${money(k.accounted_payouts)} paid out` : null]
-          .filter(Boolean).join(' · ')}, from `
-          + `${(k.accounted_platforms || []).map(sourceLabel).join(', ')}`
-        : 'no fare and no payout statement covers this window' },
+    /* Both choosers live in ui.js now, because the PHONE showed a dash over
+       this same driver's AED 22,925 while this tile showed the money. One
+       implementation is the only way the two shells cannot disagree about what
+       a person earned. */
+    moneyInTile(k),
     faresTile(k),
     /* The same renderer as the Quality tab, so the two tiles cannot drift into
        showing one driver two different ratings. */
@@ -1085,19 +1083,6 @@ async function tabTerritory(root, id) {
       figure as the platform's own and the sub-line says it already contains
       the payout rather than sitting beside it. /api/driver/kpis returns it
       under its own key for the same reason — fleetIncome() never sees it. */
-function faresTile(k) {
-  if (k.accounted_fares) {
-    return { label: 'Fares', value: money(k.accounted_fares),
-      sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' };
-  }
-  if (k.statement_fares) {
-    return { label: 'Fares', value: money(k.statement_fares),
-      sub: `the platform's own figure, over ${countOf(k.statement_fare_periods, 'weekly statement')}`
-        + ' — no trip here carries a fare, and the payout beside it came out of this' };
-  }
-  return { label: 'Fares', value: '—',
-    sub: 'no trip carries a fare and no statement reports one' };
-}
 
 /* ── tab: earnings ───────────────────────────────────────────────────────── */
 async function tabEarnings(root, id, prof) {
