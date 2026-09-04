@@ -148,6 +148,47 @@ export function tripRoutes(app, { q, wrap }) {
 
     res.json({
       trip: t,
+      /* THE BOOKING'S OWN MONEY, where the provider states it per booking.
+         ───────────────────────────────────────────────────────────────────
+         The panel this feeds is titled "What this trip earned" and for a long
+         time every row under it was a figure for the whole DAY, because Uber's
+         trip export carries no money. Its payments report does, and per
+         TRANSACTION: src/sources/uber.js writes the whole component set onto
+         the row it prices — fare, the base-fare leaf beneath it, the service
+         fee, the net, cash collected, tips and how many transactions were
+         folded into it. Only `fare` was ever promoted to a column, so six of
+         the seven sat in `raw` and nothing read them.
+
+         Named here rather than left for a page to dig out of `raw`, because
+         `raw` is provider-shaped: a client that reaches into it inherits
+         Uber's spelling and breaks silently when Uber changes it. Absent for
+         every other channel, which report a price and no breakdown — and
+         absent, not zeroed, so "this channel does not break a fare down" and
+         "it kept nothing" stay different facts. */
+      trip_money: (() => {
+        const m = t.raw && typeof t.raw === 'object' ? t.raw.uber_payments : null;
+        if (!m) return null;
+        const n = (v) => (v == null ? null : Number(v));
+        const fare = n(m.fare);
+        const fee = n(m.service_fee);
+        return {
+          fare,
+          /* The leaf under the fare branch, kept because comparing the two is
+             what caught the collector reading the wrong node. */
+          fare_base: n(m.fare_base),
+          earnings: n(m.earnings),
+          service_fee: fee,
+          /* Stated rather than left for a reader to divide, and only where
+             both halves are real — a percentage of nothing is not 0%. */
+          commission_pct: fare && fee != null && fare !== 0
+            ? Math.round((Math.abs(fee) / fare) * 1000) / 10 : null,
+          cash_collected: n(m.cash_collected),
+          tip: n(m.tip),
+          adjustment: n(m.adjustment),
+          transactions: m.transactions == null ? null : Number(m.transactions),
+          source: 'the platform’s payments report, one row per transaction',
+        };
+      })(),
       vehicle: vehicle[0] || null,
       custody,
       telemetry,

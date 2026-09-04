@@ -13,7 +13,7 @@
    nine times what it was. So the two sit in one panel that says which is
    which, and neither is shown without the other's caveat. */
 import { empty, fmt } from './charts.js';
-import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, money,
+import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, money, pct,
   dayStr, dtStr, timeStr, sourceLabel, tierLabel, countOf, plural, noneChosen,
   trackerState, trackerSpeed, UBER_FARE_WHY } from './ui.js';
 import { api, href } from './data.js';
@@ -90,9 +90,14 @@ export async function renderTrip(root, platform, id) {
   }
 
   /* ── the money ────────────────────────────────────────────────────────── */
+  const tm = d.trip_money;
   const mp = panel('What this trip earned',
-    `A fare is a measurement of THIS booking. A payout is a measurement of the whole DAY. ${UBER_FARE_WHY}, `
-    + 'so on an Uber trip whose week is not collected the payout is the only money there is.');
+    tm
+      ? 'The first rows are measurements of THIS booking, from the platform’s payments report. '
+        + 'The rest are measurements of the whole DAY, and the two must not be added.'
+      : `A fare is a measurement of THIS booking. A payout is a measurement of the whole DAY. `
+        + `${UBER_FARE_WHY}, so on an Uber trip whose week is not collected the payout is the only `
+        + 'money there is.');
   root.append(mp.panel);
   const pd = d.payout_day;
   const sd = d.statement_day;
@@ -107,9 +112,39 @@ export async function renderTrip(root, platform, id) {
   const cash = sd?.cash != null ? Number(sd.cash) : null;
   mp.body.append(tableFrom([
     { what: 'Fare on this booking', v: t.price != null ? money(t.price, t.currency || 'AED', 2) : null,
-      basis: t.price != null ? 'the channel priced this trip'
+      basis: t.price != null
+        ? (tm ? 'the gross the rider was charged, from the payments report'
+          : 'the channel priced this trip')
         : (n.platform_prices_trips ? 'this channel prices trips, and priced none for this one'
           : `${sourceLabel(t.platform)} reports no fare on any trip`) },
+    /* The booking's OWN breakdown, where the provider files one. This panel
+       used to jump from the fare straight to the day, so a reader asking what
+       a single ride made was answered with a figure for twelve of them — while
+       the commission, the net and the cash for this exact ride sat unread in
+       the row. Only rendered where trip_money exists; a channel that reports a
+       price and no breakdown shows the day rows alone, as before. */
+    ...(tm ? [
+      { what: 'What the platform kept on this booking',
+        v: tm.service_fee == null ? null : money(Math.abs(tm.service_fee), t.currency || 'AED', 2),
+        basis: tm.commission_pct != null
+          ? `its commission on this ride — ${pct(tm.commission_pct, 2)} of the fare above`
+          : 'its commission on this ride' },
+      { what: 'Earned on this booking',
+        v: tm.earnings == null ? null : money(tm.earnings, t.currency || 'AED', 2),
+        basis: 'the fare less the commission and the tax on it, plus any tip — '
+          + 'this ride’s share of what reaches the fleet' },
+      { what: 'Cash collected on this booking',
+        v: tm.cash_collected == null ? null : money(Math.abs(tm.cash_collected), t.currency || 'AED', 2),
+        basis: !tm.cash_collected
+          ? 'the rider paid in the app, so the driver held nothing'
+          : 'handed to the driver, so the platform keeps it back from the payout' },
+      ...(tm.tip ? [{ what: 'Tip on this booking',
+        v: money(tm.tip, t.currency || 'AED', 2),
+        basis: 'on top of the fare, and already inside the earnings above' }] : []),
+      ...(tm.adjustment ? [{ what: 'Adjusted afterwards',
+        v: money(tm.adjustment, t.currency || 'AED', 2),
+        basis: 'a correction filed against this ride after it ran, and not part of its fare' }] : []),
+    ] : []),
     { what: 'Paid to the driver that day', v: pd ? money(pd.earnings, 'AED', 2) : null,
       basis: pd
         ? `over ${countOf(pd.trips == null ? 0 : Math.round(Number(pd.trips)), 'trip')} that day`

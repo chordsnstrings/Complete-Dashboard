@@ -3572,6 +3572,17 @@ app.get('/api/trip', (req, r) => {
        invents a figure there hides the very gap the statement block fills. */
     payout_day: { day, platform: 'uber', earnings: 389.4, cash_earnings: null, trips: 5,
       period_start: day, period_end: day, period_days: 1, period_earnings: 389.4 },
+    /* The BOOKING'S own money, as api/trip_routes.js reads it out of the row
+       the payments report priced. Present only when this trip is priced,
+       because that is the only state in which the collector wrote it — and the
+       arithmetic closes the way the live report's does: the service fee is a
+       quarter of the fare, the tax on that fee is 5% of it, and the rest is
+       what the fleet earned. 88.50 - 22.13 - 1.11 = 65.26. */
+    trip_money: priced
+      ? { fare: 88.5, fare_base: 81.2, earnings: 65.26, service_fee: -22.13,
+          commission_pct: 25, cash_collected: 0, tip: 0, adjustment: null, transactions: 1,
+          source: 'the platform’s payments report, one row per transaction' }
+      : null,
     // The day as the channel breaks it down — the surface that does carry cash.
     statement_day: { net: 352.4, tips: 25, salik: 12, cash: 140, source: 'uber_rest' },
     same_day: [

@@ -636,9 +636,10 @@ export function playbookRoutes(app, { q, wrap, range, DAYWIN }) {
       assumption: rate
         ? { aed_per_trip: rate, note: 'Supplied by the caller. Every modelled figure is this rate times a ceiling.' }
         : { aed_per_trip: null,
-          note: 'No revenue-per-booking rate supplied, so nothing is converted to money. The Uber export '
-            + 'carries no fare column at all, so this fleet has no measured rate that covers most of its '
-            + 'volume — pass ?aed_per_trip= to model it, and read the result as an assumption.' },
+          note: 'No revenue-per-booking rate supplied, so nothing is converted to money. Uber\'s fares '
+            + 'come from a separate payments report collected a week at a time, so a measured rate covers '
+            + 'its volume only as far back as that walk has reached — pass ?aed_per_trip= to model it, and '
+            + 'read the result as an assumption.' },
     });
   }));
 }

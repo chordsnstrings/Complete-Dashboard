@@ -174,9 +174,17 @@ export function forecastRoutes(app, { q, wrap, DAYWIN }) {
         high: (fc.forecast || []).slice(0, 12).reduce((a, r) => a + (r.high ?? r.point), 0),
         forecast_months: (fc.forecast || []).slice(0, 12).filter((r) => r.kind === 'forecast').length,
       } : null,
-      /* Money, only where money exists. */
-      revenue_note: 'The Uber trip export carries no fare column at all, so every AED figure in this '
-        + 'product describes the hotel, Bolt and Yango rows only. A booking forecast is in bookings.',
+      /* Money, only where money exists — and where it exists has moved.
+         This read "every AED figure in this product describes the hotel, Bolt
+         and Yango rows only", which was true of the trip export and is no
+         longer true of the record: Uber's payments report prices its rides and
+         the collector walks it a week at a time. What stays true is that the
+         coverage is partial while that walk is behind, so the note reports the
+         state rather than asserting a permanent absence. */
+      revenue_note: 'The Uber trip export carries no fare column; Uber\'s fares come from its separate '
+        + 'payments report, which is collected a week at a time, so an AED figure here covers the hotel, '
+        + 'Bolt and Yango rows in full and the Uber rows only as far back as that walk has reached. '
+        + 'A booking forecast is in bookings and is unaffected.',
     });
   }));
 }
