@@ -3876,6 +3876,19 @@ app.get('/api/reconcile/periods', (req, r) => {
     grains: byGrain.map((g) => ({ period_days: g,
       periods: all.filter((x) => x.period_days === g).length,
       net: sum('net', all.filter((x) => x.period_days === g)) })),
+    /* What the RESOLVED table took from each span, which is a different
+       question from what the provider filed. The fixture makes the 7-day rows
+       contribute a MINORITY of the total — the shape production has, where the
+       daily grid wins most driver-days and the week only fills the gaps — so a
+       page cannot be built assuming the coarse grain is either everything or
+       nothing. */
+    current_by_grain: byGrain.map((g) => ({ period_days: g,
+      driver_days: all.filter((x) => x.period_days === g).length * 40,
+      drivers: g === 1 ? 44 : 136,
+      earnings: +(sum('net', all.filter((x) => x.period_days === g))
+        * (g === 1 ? 1 : 0.25)).toFixed(2) })),
+    current_total: +byGrain.reduce((a, g) => a + sum('net',
+      all.filter((x) => x.period_days === g)) * (g === 1 ? 1 : 0.25), 0).toFixed(2),
     finest_grain: finest,
     totals: { net: sum('net', inGrain), periods: inGrain.length,
       net_whole_periods: sum('net', whole), whole_periods: whole.length,

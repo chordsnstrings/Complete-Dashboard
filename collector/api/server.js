@@ -2242,6 +2242,36 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
        FROM per_driver
       GROUP BY 1, 2, 3, 4
       ORDER BY period_start, platform, fleet_id`, [from, to, platform, fleet]);
+  /* WHAT THE PRODUCT'S OWN FIGURE IS MADE OF, by grain.
+     ──────────────────────────────────────────────────────────────────────
+     Everything else on this route reads driver_performance — the raw window
+     log. This reads driver_payout_day, the RESOLVED table every money surface
+     actually sums, and splits it by the span of the report each day's money
+     came from.
+
+     It exists because the fix for the two-grain overstatement cannot be
+     designed without it. The daily rows alone reconcile to the August bank
+     statements at +0.06% (440,726.21 against 440,445.31) and the product
+     reports 465,924 for the same weeks, so something coarser is contributing
+     roughly 25,000 — but WHICH coarser spans, and how much each, was never
+     measured. Uber sends six of them (1, 2, 3, 4, 7 and 31 days) and an
+     estimate that assumes the intermediate grains contribute nothing is an
+     assumption, not a measurement. A change to the resolution rule that is not
+     preceded by this is a change whose result nobody can predict.
+
+     Read-only, and deliberately on this route rather than a new one: the
+     question "what is this total made of" belongs beside "what did each
+     statement say". */
+  const currentByGrain = await q(
+    `SELECT period_days,
+            count(*)::int AS driver_days,
+            count(DISTINCT driver_ext_id)::int AS drivers,
+            round(sum(earnings)::numeric, 2) AS earnings
+       FROM driver_payout_day
+      WHERE day BETWEEN $1::date AND $2::date
+        AND ($3::text IS NULL OR platform = $3)
+        AND ($4::text IS NULL OR fleet_id = $4)
+      GROUP BY 1 ORDER BY 1`, p);
   const n = (v) => (v == null ? 0 : Number(v));
   /* GRAINS DO NOT ADD, and the first version of this route added them.
      ────────────────────────────────────────────────────────────────────────
@@ -2274,6 +2304,12 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
        silently combined. */
     grains: grains.map((g) => ({ period_days: g, periods: byGrain.get(g).length,
       net: +byGrain.get(g).reduce((a, r) => a + n(r.net), 0).toFixed(2) })),
+    /* And what the RESOLVED table — the one every money page sums — actually
+       took from each span. The two lists answer different questions: `grains`
+       is what the provider filed, this is what the product counted. */
+    current_by_grain: currentByGrain.map((r) => ({ period_days: r.period_days,
+      driver_days: r.driver_days, drivers: r.drivers, earnings: n(r.earnings) })),
+    current_total: +currentByGrain.reduce((a, r) => a + n(r.earnings), 0).toFixed(2),
     finest_grain: finest,
     totals: {
       /* Over the finest grain ONLY. Summing every row would add the daily
