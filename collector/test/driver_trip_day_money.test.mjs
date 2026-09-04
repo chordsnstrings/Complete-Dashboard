@@ -173,6 +173,15 @@ check('the four trips of the day Uber priced by day say what they are part of',
   part.length === 4, `${part.length} cells: ${JSON.stringify(all.map((c) => c.text))}`);
 check('…and they say it to the cent',
   part.every((c) => /AED\s*73\.78/.test(c.text)), JSON.stringify(part.map((c) => c.text)));
+/* The column is headed Fare and the figure is a PAYOUT — net of the platform's
+   commission, which on Uber is a quarter. A cell that prints one under a
+   heading meaning the other invites exactly the misreading this product spends
+   its captions preventing, so the cell names it and the tooltip says why. */
+check('…and name it as earnings rather than letting it read as a fare',
+  part.every((c) => /earned that day/.test(c.text)), JSON.stringify(part.map((c) => c.text)));
+check('…and the tooltip says it is after the commission',
+  part.every((c) => /AFTER the platform.s commission/.test(c.title)),
+  JSON.stringify(part[0]?.title || '').slice(0, 160));
 
 /* THE ONE THAT MATTERS. 73.78 / 4 = 18.445. Any appearance of it — 18.45,
    18.44, 18 — means the product has invented a per-trip fare. */
@@ -182,8 +191,8 @@ check('the day is NEVER divided into a per-trip fare',
   JSON.stringify(all.filter((c) => quotient.test(c.text) || quotient.test(c.title))));
 
 check('the tooltip says why it cannot be divided',
-  part.every((c) => /not divisible into per-trip fares/.test(c.title)),
-  JSON.stringify(part[0]?.title || '').slice(0, 120));
+  part.every((c) => /not a share of one/.test(c.title) && /never stated a per-trip figure/.test(c.title)),
+  JSON.stringify(part[0]?.title || '').slice(0, 160));
 
 const dash = all.filter((c) => c.text === '—');
 check('the superseded day and the unreported day still show a dash',
@@ -236,7 +245,7 @@ const u = await fareCells(UNPRICED);
 check('a driver with no priced trip at all keeps the Fare column',
   u.hasFare, 'the column was pruned before its renderer could run');
 check('…and every cell says what the trip is part of',
-  u.cells.length === 3 && u.cells.every((c) => /part of AED 210\.50/.test(c)),
+  u.cells.length === 3 && u.cells.every((c) => /part of AED 210\.50 earned that day/.test(c)),
   JSON.stringify(u.cells));
 
 const none = await fareCells(NOTHING);

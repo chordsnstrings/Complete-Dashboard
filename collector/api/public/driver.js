@@ -1632,13 +1632,24 @@ async function tabTrips(root, id) {
           return `<span class="ent-off" title="${esc(own)}, and no statement covers this day either">—</span>`;
         }
         const n = d.trips || 1;
-        /* Two decimals, not the money() default of none. This is a figure a
+        /* NAMED, because it is not the same quantity as the column it sits in.
+           ─────────────────────────────────────────────────────────────────
+           driver_payout_day.earnings is what the platform PAID — net of its
+           commission. The Fare column is the GROSS a rider was charged, and on
+           Uber those differ by a quarter. This cell first read "part of AED
+           326.15" under a heading saying Fare, which invites the reader to
+           take a net figure for a gross one; the two words that fix it are
+           "earned that day", and the tooltip says the rest.
+
+           Two decimals, not the money() default of none. This is a figure a
            reader reconciles against a bank line, and AED 73.78 shown as
            AED 74 is a figure that can no longer be checked. */
-        return `<span class="ent-off" title="${esc(own)}. What this platform does report is the day: `
-          + `${esc(money(paid, r.currency, 2))} across ${fmt(n)} ${plural(n, 'trip')} on `
-          + `${esc(dateStr(r.local_day))}. It is not divisible into per-trip fares — the trips of a `
-          + `day are not equal, and Uber has never stated one.">part of ${money(paid, r.currency, 2)}</span>`;
+        return `<span class="ent-off" title="${esc(own)}. What this platform does report meanwhile `
+          + `is the day: it paid ${esc(money(paid, r.currency, 2))} for ${fmt(n)} `
+          + `${plural(n, 'trip')} on ${esc(dateStr(r.local_day))}. That is the money AFTER the `
+          + `platform's commission, so it is not this trip's fare and not a share of one — the `
+          + `trips of a day are not equal, and Uber has never stated a per-trip figure.`
+          + `">part of ${money(paid, r.currency, 2)} earned that day</span>`;
       } },
   ];
   const DRAW = 400;
