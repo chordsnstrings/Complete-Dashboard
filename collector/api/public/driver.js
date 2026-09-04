@@ -1532,6 +1532,12 @@ async function tabTrips(root, id) {
      Keyed on a real field, it also sorts by duration rather than by end time. */
   const rows = (res0.rows || []).map((r) => ({ ...r, minutes: tripMinutes(r) }));
   let total = res0.total ?? rows.length;
+  /* What an unpriced trip is nevertheless part of — see api/driver_routes.js.
+     Keyed the way each row keys itself, so a lookup either hits or misses and
+     never half-matches across platforms on the same date. */
+  const dayMoney = new Map();
+  const addDays = (r) => (r.days || []).forEach((d) => dayMoney.set(d.platform + '|' + d.day, d));
+  addDays(res0);
   p.body.innerHTML = '';
   if (!rows.length) {
     return empty(p.body, 'No trip on any channel for this driver in this window. Widen the range above '
@@ -1568,11 +1574,45 @@ async function tabTrips(root, id) {
        text stays the provider's own word. */
     { label: 'Status', key: 'status', render: (r) => pill(r.status || '—',
       r.outcome === 'completed' ? 'ok' : r.outcome === 'not_completed' ? 'warn' : null) },
+    /* A trip with no fare is not a trip with no money.
+       ──────────────────────────────────────────────────────────────────────
+       This cell was an em-dash on four rows in five, because Uber's trip
+       export carries no fare column — true, and the least useful true thing
+       available. Uber publishes the money per driver per DAY, and the row
+       already knows its own local day, so the cell can say what the trip was
+       part of instead of only what it is not.
+
+       Never divided by the day's trip count. A per-trip figure Uber has not
+       stated is a figure this product must not invent, and an eight-minute
+       ride and an airport run are not the same fraction of a day. The rule is
+       the one sql/schema_v58.sql turns on: a figure that cannot be measured at
+       this grain renders absent with a reason, and the reason here is a real
+       number at the grain that does exist. */
     { label: 'Fare', key: 'price', num: true, absent: UBER_FARE,
-      render: (r) => (r.price ? money(r.price, r.currency)
-        : `<span class="ent-off" title="${r.platform === 'uber'
-          ? 'Uber’s trip export carries no fare column at all — this driver was paid for it, weekly, under Earnings'
-          : 'no fare recorded on this booking'}">—</span>`) },
+      render: (r) => {
+        if (r.price) return money(r.price, r.currency);
+        const d = dayMoney.get(r.platform + '|' + r.local_day);
+        const own = r.platform === 'uber'
+          ? 'Uber’s trip export carries no fare column at all'
+          : 'no fare is recorded on this booking';
+        /* The day WAS reported, and superseded: a finer report already stated
+           this money, and the server wrote the sentence saying so. */
+        if (d && d.grain_reason) {
+          return `<span class="ent-off" title="${esc(own)} — ${esc(d.grain_reason)}">—</span>`;
+        }
+        const paid = d && d.earnings != null ? +d.earnings : null;
+        if (paid == null) {
+          return `<span class="ent-off" title="${esc(own)}, and no statement covers this day either">—</span>`;
+        }
+        const n = d.trips || 1;
+        /* Two decimals, not the money() default of none. This is a figure a
+           reader reconciles against a bank line, and AED 73.78 shown as
+           AED 74 is a figure that can no longer be checked. */
+        return `<span class="ent-off" title="${esc(own)}. What this platform does report is the day: `
+          + `${esc(money(paid, r.currency, 2))} across ${fmt(n)} ${plural(n, 'trip')} on `
+          + `${esc(dateStr(r.local_day))}. It is not divisible into per-trip fares — the trips of a `
+          + `day are not equal, and Uber has never stated one.">part of ${money(paid, r.currency, 2)}</span>`;
+      } },
   ];
   const DRAW = 400;
   /* The toolbar said 500 and the table drew 400 of them, out of roughly 1,200
@@ -1610,7 +1650,8 @@ async function tabTrips(root, id) {
         more.disabled = true; more.textContent = 'Loading…';
         try {
           const next = await qAll('/api/driver/trips', { id, limit: PAGE, offset: rows.length });
-          rows.push(...(next.rows || []));
+          rows.push(...(next.rows || []).map((r) => ({ ...r, minutes: tripMinutes(r) })));
+          addDays(next);
           total = next.total ?? total;
           const t = bar.querySelector('#tq').value.trim().toLowerCase();
           const l = t ? rows.filter((r) => JSON.stringify(r).toLowerCase().includes(t)) : rows;

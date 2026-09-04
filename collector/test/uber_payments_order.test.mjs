@@ -32,6 +32,10 @@ const check = (name, ok, detail = '') => {
 const HEAD = [
   'transaction UUID', 'Driver UUID', 'Trip UUID', 'Description',
   'Paid to you', 'Paid to you : Your earnings',
+  /* The BRANCH and the LEAF, in the order the live report writes them. They
+     carry different numbers whenever a ride was more than base fare, and the
+     branch is the fare. */
+  'Paid to you : Your earnings : Fare',
   'Paid to you:Your earnings:Fare:Fare',
   'Paid to you:Your earnings:Service fee',
   'Paid to you : Trip balance : Payouts : Cash collected',
@@ -39,7 +43,10 @@ const HEAD = [
   'Paid to you:Trip balance:Payouts:Transferred To Bank Account',
 ].join(',');
 
-const row = (o) => [o.txn, o.drv, o.trip, o.what, o.paid, o.earn, o.fare,
+/* `fare` is the branch; `base` the leaf beneath it. A row that does not say
+   otherwise has them equal, which is the ordinary ride. */
+const row = (o) => [o.txn, o.drv, o.trip, o.what, o.paid, o.earn,
+  o.fare, o.base ?? o.fare,
   o.fee, o.cash, o.tip, o.bank].map((v) => (v == null ? '' : `"${v}"`)).join(',');
 
 const CSV = [HEAD,
@@ -111,6 +118,64 @@ row({ txn: 't7', drv: 'd9', trip: 'TRIP-Z', what: 'trip completed order',
 const spaced = csvToPayments(SPACED);
 check('a header respelled with spaces round every colon still finds the fare',
   spaced.trips[0]?.fare === 12.34, JSON.stringify(spaced.trips[0]));
+
+console.log('\nthe fare is the branch, not the leaf beneath it');
+
+/* MEASURED, 29 priced Ecosine trips of 25-28 August 2026: Uber's service fee
+   is 25.00% of the fare BRANCH on every one of them, and the leaf agreed on 19
+   and was short on 10. These four are the shapes that differed, with the live
+   arithmetic — earnings = branch + fee + 5% VAT on the fee + tip — carried
+   into the fixture so the numbers can be checked rather than trusted. */
+const TREE = [HEAD,
+  // a surge ride: 49.41 branch, 41.28 leaf
+  row({ txn: 'x1', drv: 'd9', trip: 'SURGE', what: 'trip completed order',
+    paid: '36.44', earn: '36.44', fare: '49.41', base: '41.28', fee: '-12.35',
+    cash: '0', tip: '0', bank: '0' }),
+  // wait time and a reservation fee: 46.37 against 28.97
+  row({ txn: 'x2', drv: 'd9', trip: 'WAIT', what: 'trip completed order',
+    paid: '34.20', earn: '34.20', fare: '46.37', base: '28.97', fee: '-11.59',
+    cash: '0', tip: '0', bank: '0' }),
+  /* THE WORST CASE. A cancellation fee is entirely a child of the branch, so
+     the leaf is 0 — and a trip that earned AED 15 was on record as costing
+     nothing. That is not an absent figure a reader can see; it is a wrong one
+     they cannot. */
+  row({ txn: 'x3', drv: 'd9', trip: 'CANCEL', what: 'trip completed order',
+    paid: '11.06', earn: '11.06', fare: '15.00', base: '0', fee: '-3.75',
+    cash: '0', tip: '0', bank: '0' }),
+  // and the ordinary ride, where the two agree and nothing may move
+  row({ txn: 'x4', drv: 'd9', trip: 'PLAIN', what: 'trip completed order',
+    paid: '41.45', earn: '41.45', fare: '56.20', fee: '-14.05',
+    cash: '0', tip: '0', bank: '0' }),
+].join('\n');
+
+const tree = csvToPayments(TREE);
+const t = Object.fromEntries(tree.trips.map((x) => [x.external_id, x]));
+
+check('a surge ride takes the branch, not the base fare under it',
+  t.SURGE?.fare === 49.41, String(t.SURGE?.fare));
+check('so does a ride carrying wait time and a reservation fee',
+  t.WAIT?.fare === 46.37, String(t.WAIT?.fare));
+check('a cancellation fee is a fare, not a free ride',
+  t.CANCEL?.fare === 15, String(t.CANCEL?.fare));
+check('an ordinary ride is unchanged',
+  t.PLAIN?.fare === 56.2, String(t.PLAIN?.fare));
+
+/* The leaf is kept beside the branch rather than discarded: comparing the two
+   is how the short reading was found, and an auditor should be able to repeat
+   that from the record instead of from a report. */
+check('the leaf is kept beside it, for the audit that found this',
+  t.SURGE?.fare_base === 41.28 && t.CANCEL?.fare_base === 0,
+  `${t.SURGE?.fare_base} / ${t.CANCEL?.fare_base}`);
+
+/* The identity that pins the branch without needing the column at all. If a
+   future report renames it, this is the check that catches a wrong reading. */
+const implied = (x) => x.earnings - x.service_fee * 1.05 - (x.tip || 0);
+check('and the branch is what Uber’s own arithmetic implies, to the fils',
+  ['SURGE', 'WAIT', 'CANCEL', 'PLAIN'].every((k) => Math.abs(implied(t[k]) - t[k].fare) < 0.01),
+  JSON.stringify(['SURGE', 'WAIT', 'CANCEL', 'PLAIN'].map((k) => [k, +implied(t[k]).toFixed(2), t[k].fare])));
+check('…which is the same as saying the service fee is a quarter of it',
+  ['SURGE', 'WAIT', 'CANCEL', 'PLAIN'].every((k) => Math.abs(Math.abs(t[k].service_fee) / t[k].fare - 0.25) < 0.001),
+  JSON.stringify(['SURGE', 'WAIT', 'CANCEL', 'PLAIN'].map((k) => [k, +(Math.abs(t[k].service_fee) / t[k].fare).toFixed(4)])));
 
 console.log('\nabsence');
 const EMPTY = [HEAD, row({ txn: 't8', drv: 'd1', trip: 'TRIP-Q', what: 'trip completed order',

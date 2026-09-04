@@ -136,8 +136,12 @@ export async function renderRevenue(root) {
   host.append(kpiRow([
     { label: 'Accounted for', value: t.accounted != null ? money(t.accounted) : '—',
       sub: [
+        /* accounted_fare_bookings, not the fleet's priced_bookings: a channel
+           that prices every booking can still be counted on its payout, and
+           its bookings do not belong under a fares figure they are not in. */
         t.accounted_fares
-          ? `${money(t.accounted_fares)} in fares over ${fmt(t.priced_bookings)} priced bookings`
+          ? `${money(t.accounted_fares)} in fares over `
+            + `${fmt(t.accounted_fare_bookings ?? t.priced_bookings)} priced bookings`
           : null,
         t.accounted_payouts
           ? `${money(t.accounted_payouts)} in net payout over ${payoutSpan || 'the days it covers'}`

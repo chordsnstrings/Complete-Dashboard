@@ -122,19 +122,55 @@ export function coverage(r, windowDays) {
 }
 
 /* Which figure to believe for one platform, and why.
+   ──────────────────────────────────────────────────────────────────────────
+   THE PAYOUT WINS. A fare is what a rider was charged; a payout is what
+   reached the operator. On a commission channel they are the same money at
+   two different points and the difference is the platform's cut, so summing
+   fares as income states money the fleet never receives.
+
+   This rule used to run the other way — fares first, on the reasoning that a
+   payout is what is left of the same fares and the fuller figure is the better
+   one. Two measurements say otherwise, and both were taken on production.
+
+     UBER. Across 29 priced Ecosine trips of 25-28 August 2026, the service fee
+     is 25.00% of the fare on every single row: the fare is the payout divided
+     by three quarters, never an independent figure. And it is the PAYOUT that
+     reconciles — the daily-grain payouts over 27 July to 30 August come to
+     AED 440,726.21 against AED 440,445.31 actually credited across ten Uber
+     transfers into the operator's ENBD and ADCB accounts, +0.06%. The fares
+     over the same window do not, and cannot: they are gross of a quarter.
+
+     This was days away from landing on its own. Uber's per-trip fares are
+     being backfilled, fare coverage was 44.4% and climbing, and at 80% the
+     old rule would have flipped Uber's August from AED 428,083 to roughly
+     AED 640,000 with nothing on the page to mark the change.
+
+     YANGO, already wrong today. Fare coverage 100%, fares AED 1,566, payout
+     AED 5,846.06 for the same August window. The old rule read the 100% and
+     printed the smaller number, so the product stated a quarter of what Yango
+     says it paid.
+
+   A fare is still the right answer where a channel reports no payout at all —
+   the hotel channel invoices the fare and keeps it, and there is no commission
+   between the two. That is now the second branch rather than the first.
+
    Mutates the row, because both callers want the reasoning on it. */
 export function chooseBasis(r, windowDays) {
   Object.assign(r, coverage(r, windowDays));
-  if (r.priced_bookings && r.fare_coverage_pct >= 80) {
-    r.basis = 'fares';
-    r.best = r.fares;
-    r.basis_note = `fares reported on ${r.priced_bookings} of ${r.bookings} bookings`;
-  } else if (r.payouts != null && r.payout_coverage_pct >= 80) {
+  if (r.payouts != null && r.payout_coverage_pct >= 80) {
     r.basis = 'payout';
     r.best = r.payouts;
     r.basis_note = r.priced_bookings
-      ? `net payout — only ${r.fare_coverage_pct}% of bookings report a fare`
+      ? `net payout, after the platform’s commission — this is the money that `
+        + `arrived; the fares on ${r.priced_bookings} of ${r.bookings} bookings are `
+        + `the gross the riders paid, which is a larger and different figure`
       : 'net payout, after the platform’s commission — this channel reports no fare at all';
+  } else if (r.priced_bookings && r.fare_coverage_pct >= 80) {
+    r.basis = 'fares';
+    r.best = r.fares;
+    r.basis_note = `fares reported on ${r.priced_bookings} of ${r.bookings} bookings, `
+      + 'and this channel reports no payout covering the window — nothing takes a '
+      + 'commission out of this money between the booking and the bank';
   } else if (r.payouts != null) {
     /* The payout is real and covers a fraction of the window. Reporting it as
        the channel's revenue would understate the month by however much of it
@@ -221,6 +257,16 @@ export function fleetIncome(rows, windowDays) {
       .map((r) => r.fares)) || null,
     accounted_payouts: sum(rows.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout')
       .map((r) => r.payouts)) || null,
+    /* The denominator that belongs to accounted_fares, and only to it.
+       #revenue printed the fare half over the FLEET's priced_bookings, which
+       was the same number until a channel could report a fare on every booking
+       and still be counted on its payout. Yango is that channel: 36 priced
+       bookings of 36, none of whose money is in accounted_fares. Naming them
+       under a figure they contribute nothing to is a caption describing a
+       different measurement from the one above it. */
+    accounted_fare_bookings: rows
+      .filter((r) => r.basis === 'fares' || r.basis === 'partial_fares')
+      .reduce((a, r) => a + n(r.priced_bookings), 0) || null,
     accounted_bookings: measured.reduce((a, r) => a + n(r.bookings), 0),
     accounted_platforms: measured.map((r) => r.platform).sort(),
     /* The statement view rides beside the chosen basis, never inside it:

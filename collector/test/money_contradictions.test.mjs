@@ -81,9 +81,20 @@ const totalBookings = rows365.reduce((a, r) => a + r.bookings, 0);
 check('the window still puts uber on a part-window payout',
   uber.basis === 'partial_payout' && uber.payout_coverage_days === 209
   && uber.payout_coverage_base === 365, `basis=${uber.basis} ${uber.payout_coverage_days}/${uber.payout_coverage_base}`);
+/* 2,419,433.43 and not 2,401,822.21: Yango moved from fares to payout when
+   the basis rule was corrected, and its AED 17,611.22 is now in this half.
+   Yango prices 36 bookings of 36 and Yango's own statement says it paid
+   17,611.22 for the window — the old rule read the 100% coverage and printed
+   the 1,812 of fares instead, a quarter of what arrived. See chooseBasis. */
 check('…and still counts its AED 2.4m inside the accounted total',
-  t365.accounted > 2400000 && t365.accounted_payouts === 2401822.21,
+  t365.accounted > 2400000 && t365.accounted_payouts === 2419433.43,
   `accounted=${t365.accounted} payouts=${t365.accounted_payouts}`);
+check('…and Yango is counted on what it paid, not on the fares under it',
+  rows365.find((r) => r.platform === 'yango')?.basis === 'payout',
+  String(rows365.find((r) => r.platform === 'yango')?.basis));
+check('…so the fare half is the hotel channel alone, which takes no commission',
+  t365.accounted_fares === 130218.92 && t365.accounted_fare_bookings === 1616,
+  `${t365.accounted_fares} over ${t365.accounted_fare_bookings}`);
 
 /* THE failing assertion: the two counts partition the window's bookings, they
    do not both claim it. Before the fix this read 467331 against 234499. */
@@ -267,10 +278,14 @@ check('…and is amber rather than critical, because the money is held',
   darkTile.tone === 't-warn', `tone ${darkTile.tone}`);
 check('the accounted tile no longer says "across 234,499 of 234,499 bookings"',
   !/across 234,499 of 234,499 bookings/.test(accTile.sub), `sub was "${accTile.sub}"`);
+/* The denominator moves with the numerator. 1,616 and not 1,652: Yango's 36
+   priced bookings are counted on Yango's payout now, so naming them under a
+   fares figure they contribute nothing to would describe a different
+   measurement from the one above them. */
 check('…it names the fare base and its own denominator',
-  /AED 132,031 in fares over 1,652 priced bookings/.test(accTile.sub), `sub was "${accTile.sub}"`);
+  /AED 130,219 in fares over 1,616 priced bookings/.test(accTile.sub), `sub was "${accTile.sub}"`);
 check('…and the payout base and ITS denominator, which is days',
-  /AED 2,401,822 in net payout over 209 of the 365 days Uber worked/.test(accTile.sub),
+  /AED 2,419,433 in net payout over 209 of the 365 days Uber worked/.test(accTile.sub),
   `sub was "${accTile.sub}"`);
 check('…and stays amber while 99.3% of the work sits on a part-window payout',
   accTile.tone === 't-warn', `tone ${accTile.tone}`);

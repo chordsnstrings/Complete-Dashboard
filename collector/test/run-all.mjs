@@ -21,6 +21,53 @@ import { cpus } from 'node:os';
 const files = readdirSync('test').filter((f) => f.endsWith('.test.mjs')).sort();
 if (!files.length) { console.error('no test files found — is the cwd the collector root?'); process.exit(1); }
 
+/* The browser tests need a server, and this used to not be its problem.
+   ─────────────────────────────────────────────────────────────────────────
+   Four files — audit_tools_detect, phone_render, phone_today_only and
+   spacing — drive Chromium at http://localhost:8099, and each says in its
+   header to start `node mockapi.mjs &` first. Nothing enforced that, so a
+   run without it reported those files failing with `ERR_CONNECTION_REFUSED`,
+   or worse `0 of 116 routes measured`, which reads exactly like a real defect
+   in 116 routes rather than a missing server. Two consecutive runs of this
+   suite disagreed for no reason but whether a stray mockapi from an earlier
+   session happened to still be up.
+
+   So the suite starts one itself, and stops it at the end. If a server is
+   already listening — a developer's own, or a run against production through
+   bin/prod-mirror.mjs — it is left alone and used as it stands. */
+const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';
+const alive = async () => {
+  try {
+    const r = await fetch(`${BASE}/api/kpis?days=1`, { signal: AbortSignal.timeout(2000) });
+    return r.ok;
+  } catch { return false; }
+};
+
+let mock = null;
+if (await alive()) {
+  console.log(`using the server already on ${BASE}`);
+} else if (process.env.SMOKE_BASE) {
+  console.error(`SMOKE_BASE is ${BASE} and nothing is answering there.`);
+  process.exit(1);
+} else {
+  mock = spawn(process.execPath, ['mockapi.mjs'], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let why = '';
+  mock.stderr.on('data', (d) => { why += d; });
+  const deadline = Date.now() + 30_000;
+  while (!(await alive())) {
+    if (mock.exitCode !== null || Date.now() > deadline) {
+      console.error(`could not start mockapi.mjs on ${BASE} — the browser tests cannot run.`);
+      if (why) console.error(why.split('\n').slice(0, 8).join('\n'));
+      process.exit(1);
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  console.log(`started mockapi.mjs on ${BASE} for the browser tests`);
+}
+const stopMock = () => { if (mock && mock.exitCode === null) mock.kill('SIGTERM'); };
+process.on('exit', stopMock);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopMock(); process.exit(1); });
+
 const LIMIT = Math.max(1, Math.min(4, cpus().length - 1));
 const results = [];
 
@@ -66,4 +113,5 @@ results.sort((a, b) => a.file.localeCompare(b.file));
 const broken = results.filter((r) => r.code !== 0 || r.failed === null || r.failed > 0);
 const total = results.reduce((a, r) => a + r.passed, 0);
 console.log(`\n${results.length} files, ${total} assertions, ${broken.length} file(s) failing`);
+stopMock();
 process.exit(broken.length ? 1 : 0);

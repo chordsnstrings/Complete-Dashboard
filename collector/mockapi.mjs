@@ -441,6 +441,13 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
    without a database behind them. */
 const DAYS = 30;
 const dayISO = (back) => new Date(Date.now() - back * 864e5).toISOString().slice(0, 10);
+/* The Dubai calendar day of an instant. trip_norm.local_day is
+   (requested_at AT TIME ZONE 'Asia/Dubai')::date and the real route sends it
+   through to_char, so the mock has to agree on both the zone and the shape:
+   toISOString() here would put every trip between 20:00 and midnight Dubai on
+   the previous date, which is the exact off-by-one the day keys exist to
+   avoid. en-CA is the locale that formats as YYYY-MM-DD. */
+const dubaiDayOf = (d) => d.toLocaleDateString('en-CA', { timeZone: 'Asia/Dubai' });
 const driverIds = drivers.map((_, i) => `drv-${i}`);
 const idIndex = (id) => Math.max(0, driverIds.indexOf(id));
 
@@ -1142,9 +1149,32 @@ app.get('/api/driver/trips', (req, r) => {
     is_booking: true, has_fare: n % 5 !== 1,
     product: ['UberX', 'Comfort', 'Uber Black'][n % 3], payment_type: n % 5 === 0 ? 'cash' : 'card',
     price: n % 5 === 1 ? null : +rnd(18, 140).toFixed(2), currency: 'AED',
+    /* Formed in SQL on the real route (to_char), so it is a string here too —
+       a Date would let the client's join key differ between mock and live. */
+    local_day: dubaiDayOf(new Date(Date.now() - n * 27e5)),
   }));
   const rows = all.slice(offset, offset + limit);
-  r.json({ rows, total: TOTAL, shown: rows.length, offset, limit,
+  /* The money a day's unpriced trips are part of, as api/driver_routes.js
+     returns it. One entry per (platform, day) the ROWS SENT cover, because a
+     client that renders 400 rows must not have to guess at a 401st day.
+     Deliberately not every day: the last one carries a grain_reason and no
+     earnings, which is the third branch the Fare cell renders. */
+  const seen = new Map();
+  for (const t of rows) {
+    const k = `${t.platform}|${t.local_day}`;
+    const d = seen.get(k) || { platform: t.platform, day: t.local_day, trips: 0, priced: 0,
+      earnings: null, cash_earnings: null, grain_reason: null };
+    d.trips += 1; if (t.price != null) d.priced += 1;
+    seen.set(k, d);
+  }
+  const days = [...seen.values()].map((d, i) => (i % 11 === 10
+    ? { ...d, grain_reason: 'not counted here — 7-day report of 24 Aug to 30 Aug, and this provider '
+        + 'also filed a per-day report for this day. The daily one is what reconciles to the bank, '
+        + 'so counting both would state the same money twice.' }
+    : i % 7 === 6
+      ? d                                     // a day nothing reported at all
+      : { ...d, earnings: +(d.trips * rnd(38, 96)).toFixed(2), cash_earnings: +rnd(0, 60).toFixed(2) }));
+  r.json({ rows, total: TOTAL, shown: rows.length, offset, limit, days,
     truncated: offset + rows.length < TOTAL });
 });
 

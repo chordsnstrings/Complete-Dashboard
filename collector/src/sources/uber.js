@@ -209,8 +209,9 @@ export function csvToTrips(csv) {
      Description                            5 values, listed below
      Paid to you                            the transaction's total
      Paid to you : Your earnings            net of Uber's service fee
-     Paid to you:Your earnings:Fare:Fare    THE FARE
-     Paid to you:Your earnings:Service fee
+     Paid to you : Your earnings : Fare     THE FARE — a BRANCH, see PAY_COLS
+     Paid to you:Your earnings:Fare:Fare    the base-fare leaf beneath it
+     Paid to you:Your earnings:Service fee  exactly 25% of the branch
      Paid to you : Trip balance : Payouts : Cash collected
      Paid to you:Trip balance:Payouts:Transferred To Bank Account
 
@@ -259,6 +260,37 @@ const PAYMENTS_REPORT = 'REPORT_TYPE_PAYMENTS_ORDER';
    same header row. Keyed on the squeezed form so both find each other. */
 const pathKey = (s) => String(s || '').toLowerCase().replace(/\s*:\s*/g, ':').trim();
 
+/* The FARE is the parent node, and taking the leaf understates it.
+   ─────────────────────────────────────────────────────────────────────────
+   'Paid to you:Your earnings:Fare' is a branch. Its children in the live
+   report are Fare, Surge, Wait time at pick-up, Time at stop, Cancellation,
+   Additional cancellation fee for extended wait time, Reservation Fee,
+   Business trip premium and Adjustment — nine columns, of which the first is
+   also called Fare. This mapper read that leaf, so every ride whose money was
+   not purely base fare was written into `price` short.
+
+   MEASURED on production, 29 priced Ecosine trips of 25-28 August 2026. The
+   report is internally consistent to the fils on every one of them:
+
+       service fee = 25.00% of the fare BRANCH, on 29 rows of 29
+       earnings    = fare branch + service fee + 5% VAT on that fee + tip
+
+   which pins the branch total without needing the column at all, and lets the
+   leaf be checked against it. The leaf agreed on 19 rows and was short on 10:
+
+       41.28 against 49.41      a surge ride
+       28.97 against 46.37      wait time and a reservation fee
+       80.50 against 87.67
+        0.00 against 15.00      a cancellation — the whole fare is the fee,
+        0.00 against 15.00      and the leaf for it is zero
+
+   Two of those are the worst case in the product: a trip that earned AED 15
+   was on record as costing nothing, which is not a missing figure a reader
+   can see but a wrong one they cannot.
+
+   So the branch is read first and the leaf is the fallback, for a report old
+   enough not to carry the branch. The leaf is kept beside it in `raw` — an
+   auditor comparing the two is exactly how this was found. */
 const PAY_COLS = {
   txn: 'transaction uuid',
   trip: 'trip uuid',
@@ -266,8 +298,8 @@ const PAY_COLS = {
   what: 'description',
   paid: 'paid to you',
   earnings: 'paid to you:your earnings',
-  fare: 'paid to you:your earnings:fare:fare',
-  fare_total: 'paid to you:your earnings:fare',
+  fare: 'paid to you:your earnings:fare',
+  fare_base: 'paid to you:your earnings:fare:fare',
   service_fee: 'paid to you:your earnings:service fee',
   cash: 'paid to you:trip balance:payouts:cash collected',
   bank: 'paid to you:trip balance:payouts:transferred to bank account',
@@ -318,11 +350,17 @@ export function csvToPayments(csv) {
        adjustment days later, then a tip. They are folded here rather than
        upserted one after another, because two upserts on the same primary key
        would leave whichever arrived last, and the answer is the sum. */
-    const cur = trips.get(tripId) || { external_id: tripId, fare: null, adjustment: null,
-      earnings: null, service_fee: null, cash: null, tip: null, txns: 0 };
+    const cur = trips.get(tripId) || { external_id: tripId, fare: null, fare_base: null,
+      adjustment: null, earnings: null, service_fee: null, cash: null, tip: null, txns: 0 };
     const add = (field, v) => { if (v != null) cur[field] = (cur[field] ?? 0) + v; };
     if (kind === 'adjustment') add('adjustment', money(g[PAY_COLS.paid]));
-    else add('fare', money(g[PAY_COLS.fare]) ?? money(g[PAY_COLS.fare_total]));
+    else {
+      /* Branch first, leaf second — see PAY_COLS. `??` and not `||`, because
+         a genuine zero fare is a real answer and must not fall through to the
+         other column. */
+      add('fare', money(g[PAY_COLS.fare]) ?? money(g[PAY_COLS.fare_base]));
+      add('fare_base', money(g[PAY_COLS.fare_base]));
+    }
     add('earnings', money(g[PAY_COLS.earnings]));
     add('service_fee', money(g[PAY_COLS.service_fee]));
     add('cash', money(g[PAY_COLS.cash]));
@@ -362,7 +400,14 @@ async function pullTripFares(from, to, onStep, checkpoint = null) {
   for (const w of weeks) {
     const ps = iso(w.start), pe = iso(w.end);
     const chunk = { from: ps, to: pe, rows: 0, error: null };
-    if (checkpoint?.has(`fares ${ps}..${pe}`)) {
+    /* The key carries which fare column this pass writes, not just which week
+       it covers. Checkpoints live for the length of a job and a long backfill
+       survives several container restarts, so a job that already collected a
+       week under the old leaf-column reading would skip it forever and leave
+       those weeks understated. Changing what a window MEANS has to change its
+       key, or resuming silently keeps the old answer. */
+    const key = `fares:branch ${ps}..${pe}`;
+    if (checkpoint?.has(key)) {
       chunk.skipped = true; chunks.push(chunk); continue;
     }
     await onStep?.({ window: `fares ${ps}..${pe}`, index: chunks.length, of: weeks.length,
@@ -385,9 +430,9 @@ async function pullTripFares(from, to, onStep, checkpoint = null) {
              WHERE platform = 'uber' AND external_id = $2 AND fleet_id = $1`,
           [org().fleet, t.external_id, t.fare,
             JSON.stringify({ uber_payments: {
-              fare: t.fare, earnings: t.earnings, service_fee: t.service_fee,
-              cash_collected: t.cash, tip: t.tip, adjustment: t.adjustment,
-              transactions: t.txns } })]);
+              fare: t.fare, fare_base: t.fare_base, earnings: t.earnings,
+              service_fee: t.service_fee, cash_collected: t.cash, tip: t.tip,
+              adjustment: t.adjustment, transactions: t.txns } })]);
         priced += rowCount;
       }
       total += priced;
@@ -423,7 +468,7 @@ async function pullTripFares(from, to, onStep, checkpoint = null) {
       if (throttled) break;   // the cap is per run; the rest of the weeks will hit it too
     }
     chunks.push(chunk);
-    if (!chunk.error || chunk.expected) await checkpoint?.mark(`fares ${ps}..${pe}`, chunk.rows);
+    if (!chunk.error || chunk.expected) await checkpoint?.mark(key, chunk.rows);
     await sleep(consecutiveFailures ? 20000 : 8000);
   }
   return { total, chunks };

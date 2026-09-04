@@ -2205,9 +2205,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   app.get('/api/driver/trips', withDriver(async (req, res, d, p) => {
     const limit = Math.min(+req.query.limit || 200, 1000);
     const offset = Math.max(0, +req.query.offset || 0);
-    const [rows, [t]] = await Promise.all([
+    const [rows, [t], days] = await Promise.all([
       q(`SELECT platform, external_id, requested_at, ended_at, plate, pickup_addr, dropoff_addr,
                 distance_km, duration_s, status, product, payment_type, price, currency,
+                -- The Dubai calendar day this trip belongs to, as a string.
+                -- A bare DATE reaches node-postgres as a JS Date, and slicing
+                -- ten characters off its default string form yields "Sat Aug
+                -- 01" rather than a date — the trap driver_day_keys and
+                -- server_day_keys both grep this file for. The key the client
+                -- joins the day list on is formed here, once, in SQL.
+                to_char(local_day, 'YYYY-MM-DD') AS local_day,
                 -- The provider's own word stays in the status column; outcome is
                 -- what the UI may colour by, because the four platforms disagree
                 -- about which strings mean success.
@@ -2215,9 +2222,53 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          FROM trip_norm WHERE ${TW}
          ORDER BY requested_at DESC LIMIT ${limit} OFFSET ${offset}`, p),
       q(`SELECT count(*)::int n FROM trip_norm WHERE ${TW}`, p),
+      /* What a trip with no fare of its own is nevertheless part of.
+         ─────────────────────────────────────────────────────────────────
+         Uber's trip export carries no fare column, so four fifths of this
+         table's Fare cells were an em-dash under a caption explaining that
+         nothing prices these rides. That caption is true and it is not the
+         best answer available: Uber DOES publish the money, per driver per
+         day, and driver_payout_day holds it. A reader looking at a 2
+         September Uber ride can be told the driver earned AED 73.78 across
+         four Uber trips that day.
+
+         Per (platform, day), never per trip. Dividing the day by its trip
+         count would invent a per-trip fare Uber has never stated, and the
+         trips of a day are not equal — see sql/schema_v58.sql for what
+         happens when a coarser figure is allowed to stand in for a finer one.
+         The day is the finest grain that exists, so the day is what is shown.
+
+         Summed across the driver's keys and any fleet: one person may hold an
+         account in both fleets, and driver_payout_day is keyed per fleet. */
+      q(`WITH t AS (
+           SELECT platform, (requested_at AT TIME ZONE 'Asia/Dubai')::date AS day,
+                  count(*)::int                              AS trips,
+                  count(*) FILTER (WHERE has_fare)::int      AS priced
+             FROM trip_norm WHERE ${TW}
+            GROUP BY 1, 2)
+         SELECT t.platform, to_char(t.day, 'YYYY-MM-DD') AS day, t.trips, t.priced,
+                pd.earnings, pd.cash_earnings, pd.grain_reason
+           FROM t
+           LEFT JOIN LATERAL (
+             SELECT sum(pdd.earnings)      AS earnings,
+                    sum(pdd.cash_earnings) AS cash_earnings,
+                    /* Present only when the day carries no money BECAUSE a
+                       finer report already stated it — the sentence the
+                       server wrote on the row, printed rather than inferred
+                       from a NULL. */
+                    max(pdd.grain_reason)  AS grain_reason
+               FROM driver_payout_day pdd
+              WHERE pdd.driver_ext_id = ANY($3)
+                AND pdd.platform = t.platform
+                AND pdd.day = t.day) pd ON true`, p),
     ]);
     const total = t?.n ?? rows.length;
     res.json({ rows, total, shown: rows.length, offset, limit,
+      /* Keyed `platform|day`, matching each row's own platform and local_day.
+         A list rather than an object so the shape survives JSON with no key
+         ordering assumptions, and so a day with no money still appears with
+         its trip count instead of vanishing. */
+      days,
       /* Stated as a flag as well as derivable, so a renderer cannot get the
          comparison the wrong way round and claim a complete list. */
       truncated: offset + rows.length < total });
