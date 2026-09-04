@@ -266,6 +266,24 @@ const CONTACT_FIELDS = [
   ['driverInfo', 'phoneNumber'], ['driverInfo', 'email'],
 ];
 
+/* ── the sub-fields of the two objects the contact set found ──────────────
+   Measured 2026-09-04 against the live schema: user.email and user.pictureUrl
+   are scalars and answered outright; user.phone is an object of type
+   PhoneNumber and user.name an object of type UserName, both proved by a
+   { __typename } retry; and EVERY address spelling — address, homeAddress,
+   city, country, on all three parents — is named absent. So there is no
+   address on this surface, and the two objects need one more question. */
+const CONTACT_SUBFIELDS = [
+  ['user', 'phone', ' { countryCode }'], ['user', 'phone', ' { country }'],
+  ['user', 'phone', ' { countryIso2 }'], ['user', 'phone', ' { nationalNumber }'],
+  ['user', 'phone', ' { number }'], ['user', 'phone', ' { digits }'],
+  ['user', 'phone', ' { e164 }'], ['user', 'phone', ' { formatted }'],
+  ['user', 'phone', ' { phoneNumber }'], ['user', 'phone', ' { subscriberNumber }'],
+  ['user', 'name', ' { firstName }'], ['user', 'name', ' { lastName }'],
+  ['user', 'name', ' { fullName }'], ['user', 'name', ' { displayName }'],
+  ['user', 'name', ' { given }'], ['user', 'name', ' { family }'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -778,11 +796,11 @@ export function probeRoutes(app, { wrap }) {
     /* WHICH fixed list, never which field. The caller picks a set by name and
        the names in it are all in this file, so this stays what the header
        promises: not an open GraphQL proxy onto the fleet's session. */
-    const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS };
+    const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS, subfields: CONTACT_SUBFIELDS };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
-    for (const [parent, field] of (described || !sessionWorks ? [] : wanted)) {
-      const r = await probeField(parent, field);
+    for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {
+      const r = await probeField(parent, field, sel);
       await new Promise((r2) => setTimeout(r2, 80));
       /* A field the server would not name, on a server that names its
          absences, is the only interesting outcome on this surface — and the
@@ -797,7 +815,8 @@ export function probeRoutes(app, { wrap }) {
         r.retry_with_selection = await probeField(parent, field, ' { __typename }');
         await new Promise((r2) => setTimeout(r2, 80));
       }
-      fields.push({ ...r, exists: namesItsAbsences ? !r.named_absent : null });
+      fields.push({ ...r, selection: sel || null,
+        exists: namesItsAbsences ? !r.named_absent : null });
     }
 
     /* 3. Whole operations, against the same control. PERMISSION_DENIED is a
