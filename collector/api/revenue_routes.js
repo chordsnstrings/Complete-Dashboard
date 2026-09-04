@@ -292,6 +292,7 @@ export function revenueRoutes(app, { q, wrap, range }) {
     };
     for (const f of fares) Object.assign(row(f.platform), {
       bookings: f.bookings, booking_days: f.booking_days, priced_bookings: f.priced_bookings, fares: num(f.fares),
+      chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings,
       priced_km: num(f.priced_km), km: num(f.km), drivers: f.drivers, vehicles: f.vehicles,
       first_at: f.first_at, last_at: f.last_at,
     });

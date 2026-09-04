@@ -534,7 +534,12 @@ app.get('/api/kpis', wrap(async (req, res) => {
     return byPlat.get(name);
   };
   for (const f of fareRows) Object.assign(plat(f.platform), {
-    bookings: f.bookings, priced_bookings: f.priced_bookings, fares: num(f.fares) });
+    bookings: f.bookings, priced_bookings: f.priced_bookings, fares: num(f.fares),
+    /* The denominator fare coverage is taken over — see platformFares. Carried
+       explicitly rather than left to coverage()'s fallback, which divides by
+       every offer and made Bolt read 63.8% covered on a month where it priced
+       312 of its 313 completed rides. */
+    chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings });
   for (const y of payRows) Object.assign(plat(y.platform), {
     payouts: num(y.payouts), payout_days: y.payout_days ?? 0,
     payout_drivers: y.drivers, payout_cash: num(y.cash) });
@@ -2053,6 +2058,7 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
   };
   for (const f of fareRows) Object.assign(plat(f.platform), {
     bookings: f.bookings, priced_bookings: f.priced_bookings, fares: num(f.fares),
+    chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings,
     booking_days: f.booking_days });
   for (const y of payRows) Object.assign(plat(y.platform), {
     payouts: num(y.payouts), payout_days: y.payout_days ?? 0, payout_drivers: y.drivers });

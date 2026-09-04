@@ -823,7 +823,8 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     };
     const n = (v) => (v == null ? null : Number(v));
     for (const f of fareByPlat) Object.assign(plat(f.platform), {
-      bookings: f.bookings, priced_bookings: f.priced_bookings, fares: n(f.fares) });
+      bookings: f.bookings, priced_bookings: f.priced_bookings, fares: n(f.fares),
+      chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings });
     for (const y of attByPlat) Object.assign(plat(y.platform), {
       payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
     const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
