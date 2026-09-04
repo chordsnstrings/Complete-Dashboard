@@ -406,6 +406,42 @@ export function csvToPayments(csv) {
    newest first: a truncated run leaves the recent weeks collected rather than
    the oldest, and a report costs minutes at the provider.
 
+   ── the RUNNING week is asked for too, CLAMPED, and never checkpointed ───
+   This walked closedWeeks() alone, and the cost of that is the days a reader
+   actually looks at. Measured on Friday 4 September 2026: the week that began
+   Monday the 31st holds 3,252 Uber bookings against 3,321 in the week before
+   it, and not one of them could carry a fare until the week closed on Sunday.
+   A Monday trip waited seven days. Every other channel — Bolt, Yango, the
+   hotel desk — prices its bookings on the trip row itself, the same day; Uber
+   was the only one where a reader saw a dash, and the reason was ours.
+
+   The reason closedWeeks exists is real and is recorded in
+   test/earner_horizon.test.mjs: an open week's chunk ENDS on the coming
+   Sunday, and Uber refuses a range whose end is in the future outright —
+   "endDate is too late", measured on production on every mid-week run. That
+   is a refusal of a FUTURE date, not of a part week. pullTrips asks for
+   windows ending today on every pass and Uber serves them, which is why this
+   product holds Uber trips for this morning.
+
+   So the running week is asked for as Monday-to-`to` rather than
+   Monday-to-Sunday: entirely in the past, and the same shape of range the
+   trip report is answered for every half hour. If Uber refuses it anyway the
+   refusal lands in chunk.error, is classified expected, and costs one request
+   a night — which is worth spending to find out.
+
+   Never checkpointed, because it is not finished: asking again tomorrow
+   restates it with another day's trips in it, and asking once more after it
+   closes is what settles it. The write is an UPDATE of price on rows that
+   already exist, so re-asking is idempotent and a trip's fare only improves.
+
+   FIRST, not last, because the report-generation cap is freshest at the start
+   of a pass and because this is the only week whose data does not exist yet —
+   a closed week missed tonight is already collected and will be re-asked
+   tomorrow. The one thing that must not follow is a throttle here abandoning
+   the closed weeks, so a throttle on the running week continues rather than
+   breaking. Everywhere else it still breaks: the cap is per run, and the
+   remaining weeks would only hit it too.
+
    WEEKS and not months, because this report is rate-limited on a counter of
    its own — 'Payment report generation limit reached. Please wait for current
    reports to complete before generating a new one' — which is a different cap
@@ -423,11 +459,27 @@ export function csvToPayments(csv) {
 async function pullTripFares(from, to, onStep, checkpoint = null) {
   let total = 0;
   const chunks = [];
-  const weeks = [...closedWeeks(from, to)].reverse();
+  const closed = [...closedWeeks(from, to)].reverse();
+  /* The week the range reaches that has not ended. weekChunks yields every
+     week the range touches; closedWeeks yields the subset that has finished,
+     so the difference is at most one — and it is the one this walk used to
+     miss. Compared on the start instant rather than by identity, because the
+     two generators build their own Date objects.
+
+     CLAMPED to `to`. A running week's own `end` is the coming Sunday and Uber
+     refuses a future end date; asked as Monday-to-today it is an ordinary past
+     range. See the header. */
+  const done = new Set(closed.map((w) => +w.start));
+  const end = new Date(to);
+  const running = [...weekChunks(from, to)]
+    .filter((w) => !done.has(+w.start) && w.start <= end)
+    .map((w) => ({ ...w, end: w.end > end ? end : w.end }));
+  const weeks = [...running, ...closed];
   let consecutiveFailures = 0;
   for (const w of weeks) {
     const ps = iso(w.start), pe = iso(w.end);
-    const chunk = { from: ps, to: pe, rows: 0, error: null };
+    const isOpen = !done.has(+w.start);
+    const chunk = { from: ps, to: pe, rows: 0, error: null, open: isOpen || undefined };
     /* The key carries which fare column this pass writes, not just which week
        it covers. Checkpoints live for the length of a job and a long backfill
        survives several container restarts, so a job that already collected a
@@ -435,7 +487,9 @@ async function pullTripFares(from, to, onStep, checkpoint = null) {
        those weeks understated. Changing what a window MEANS has to change its
        key, or resuming silently keeps the old answer. */
     const key = `fares:branch ${ps}..${pe}`;
-    if (checkpoint?.has(key)) {
+    /* A running week is never checkpointed and so is never skipped — see the
+       header. It is asked again on every pass until it closes. */
+    if (!isOpen && checkpoint?.has(key)) {
       chunk.skipped = true; chunks.push(chunk); continue;
     }
     await onStep?.({ window: `fares ${ps}..${pe}`, index: chunks.length, of: weeks.length,
@@ -477,26 +531,39 @@ async function pullTripFares(from, to, onStep, checkpoint = null) {
       consecutiveFailures = 0;
     } catch (err) {
       const msg = String(err);
-      const expected = /invalid date range|retention|out of range/i.test(msg);
+      /* A RUNNING week is a speculative ask, so its refusal is never a hole.
+         Uber may not serve a payments report for a week it has not settled,
+         and if it does not, that is an answer rather than a failure — the
+         closed weeks are asked immediately after and would report any real
+         problem (an expired cookie, a dead endpoint) on their own. Held here
+         so a nightly ask for the current week cannot make every run read
+         partial for the life of the week. */
+      const expected = isOpen || /invalid date range|retention|out of range/i.test(msg);
       /* Rate limiting is its OWN case and is not a hole. This report has a
          generation cap separate from the three-in-flight one, and a run that
          hits it has not failed to collect the week — it has been told to come
          back. Recorded as an error so the run reads partial, but never
          checkpointed, so the next pass asks again. */
       const throttled = /rate-limit|generation limit|too many ongoing/i.test(msg);
-      chunk.error = expected ? `outside retention: ${msg.slice(0, 160)}`
-        : throttled ? `rate-limited, will retry next run: ${msg.slice(0, 120)}`
-          : msg.slice(0, 300);
+      chunk.error = isOpen ? `the week is still running: ${msg.slice(0, 140)}`
+        : expected ? `outside retention: ${msg.slice(0, 160)}`
+          : throttled ? `rate-limited, will retry next run: ${msg.slice(0, 120)}`
+            : msg.slice(0, 300);
       chunk.expected = expected;
       chunk.throttled = throttled;
       log[expected || throttled ? 'info' : 'error'](SRC,
-        `fare chunk ${ps}..${pe} ${expected ? 'outside retention' : throttled ? 'rate-limited' : 'FAILED'}`,
+        `fare chunk ${ps}..${pe} ${isOpen ? 'running week, not served' : expected ? 'outside retention' : throttled ? 'rate-limited' : 'FAILED'}`,
         { err: msg.slice(0, 200) });
       if (!expected && !throttled) consecutiveFailures++;
-      if (throttled) break;   // the cap is per run; the rest of the weeks will hit it too
+      /* A throttle on the RUNNING week must not cost the closed ones. It is
+         the first ask of the pass and the only speculative one; everywhere
+         else the cap is per run and the remaining weeks would hit it too. */
+      if (throttled && !isOpen) break;
     }
     chunks.push(chunk);
-    if (!chunk.error || chunk.expected) await checkpoint?.mark(key, chunk.rows);
+    /* Never for the running week: it is not finished, and marking it done
+       would freeze a part-week answer for the rest of the job. */
+    if (!isOpen && (!chunk.error || chunk.expected)) await checkpoint?.mark(key, chunk.rows);
     await sleep(consecutiveFailures ? 20000 : 8000);
   }
   return { total, chunks };

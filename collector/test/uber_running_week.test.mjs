@@ -1,0 +1,95 @@
+/* The days a reader looks at most had no fare, and the reason was ours.
+   ─────────────────────────────────────────────────────────────────────────
+   Every channel except Uber prices a booking on the trip row, the same day:
+   measured on production 2026-09-04, Bolt and the hotel desk priced to that
+   morning and Yango to the 2nd, while not one of the 400 newest Uber rows
+   carried a price. Uber's fares come from a second report on a weekly grid,
+   and pullTripFares walked closedWeeks() alone — so the week that began Monday
+   31 August, holding 3,252 Uber bookings against 3,321 in the week before it,
+   could not be priced until it closed on Sunday. A Monday trip waited seven
+   days.
+
+   The reason closedWeeks exists is real and is recorded in
+   test/earner_horizon.test.mjs: an open week's chunk ENDS on the coming
+   Sunday, and Uber refuses a range whose end is in the future — "endDate is
+   too late", measured on production on every mid-week run. That is a refusal
+   of a FUTURE date and not of a part week; pullTrips asks for windows ending
+   today every half hour and Uber answers them.
+
+   So the running week is asked for as Monday-to-`to`. This file holds down the
+   four properties that makes correct, on the source rather than on a live
+   provider — the walk is not exported and the report costs minutes at Uber.
+
+   The behavioural half of the same rule, the one a fixture CAN reach, is the
+   week arithmetic in src/util.js, which is asserted first. */
+import { readFileSync } from 'node:fs';
+import { closedWeeks, weekChunks, iso } from '../src/util.js';
+
+let pass = 0, fail = 0;
+const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
+
+/* Friday 4 September 2026, 09:00 UTC. The week began Monday the 31st and ends
+   Sunday the 6th, so exactly one week the range touches is still running. */
+const NOW = new Date('2026-09-04T09:00:00Z');
+const FROM = new Date('2026-08-05T00:00:00Z');
+
+console.log('\nthe week arithmetic this rests on');
+
+const all = [...weekChunks(FROM, NOW)];
+const closed = [...closedWeeks(FROM, NOW, NOW)];
+check('weekChunks reaches the running week and closedWeeks does not',
+  all.length === closed.length + 1, `${all.length} vs ${closed.length}`);
+
+const done = new Set(closed.map((w) => +w.start));
+const running = all.filter((w) => !done.has(+w.start));
+check('and the one it drops is the week that contains today',
+  running.length === 1 && iso(running[0].start) === '2026-08-31',
+  JSON.stringify(running.map((w) => [iso(w.start), iso(w.end)])));
+
+/* THE reason it was dropped, and the thing the clamp fixes. */
+check('whose own end is in the FUTURE — which is what Uber refuses',
+  running[0].end > NOW, `${iso(running[0].end)} against today ${iso(NOW)}`);
+
+const end = new Date(NOW);
+const clamped = running.map((w) => ({ ...w, end: w.end > end ? end : w.end }));
+check('clamped to the window, it becomes an ordinary past range',
+  clamped[0].end <= NOW && iso(clamped[0].end) === '2026-09-04',
+  `${iso(clamped[0].start)}..${iso(clamped[0].end)}`);
+check('…and the clamp leaves a CLOSED week alone',
+  closed.every((w) => (w.end > end ? end : w.end).getTime() === w.end.getTime()),
+  'a closed week already ends in the past and must not be shortened');
+
+console.log('\nwhat pullTripFares does with it');
+
+const src = readFileSync('src/sources/uber.js', 'utf8');
+const fn = src.slice(src.indexOf('async function pullTripFares'),
+  src.indexOf('async function pullTrips('));
+check('the fare walk is the part of this file being read',
+  fn.length > 500 && /PAYMENTS_REPORT/.test(fn), `${fn.length} chars`);
+
+check('it reaches the running week rather than only the closed ones',
+  /weekChunks\(from, to\)/.test(fn),
+  'closedWeeks alone leaves the current week unpriced until Sunday');
+check('…clamped to the window rather than to the coming Sunday',
+  /end: w\.end > end \? end : w\.end/.test(fn),
+  'an unclamped chunk ends in the future and Uber answers "endDate is too late"');
+check('…and asked FIRST, because it is the only week whose data does not exist yet',
+  /const weeks = \[\.\.\.running, \.\.\.closed\]/.test(fn),
+  'a closed week missed tonight is already collected; this one is not');
+
+/* The three that stop it doing harm. */
+check('a running week is never skipped by a checkpoint',
+  /if \(!isOpen && checkpoint\?\.has\(key\)\)/.test(fn),
+  'it is not finished, so a previous pass must not stand in for this one');
+check('…and never marked done',
+  /if \(!isOpen && \(!chunk\.error \|\| chunk\.expected\)\) await checkpoint\?\.mark/.test(fn),
+  'marking a part-week answer done would freeze it for the life of the job');
+check('a throttle on it continues rather than abandoning the closed weeks',
+  /if \(throttled && !isOpen\) break;/.test(fn),
+  'the speculative ask must not cost the weeks that are actually collectable');
+check('and a refusal of it is classified expected, not a hole',
+  /const expected = isOpen \|\|/.test(fn),
+  'a week Uber has not settled is an answer, not a failed collection');
+
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

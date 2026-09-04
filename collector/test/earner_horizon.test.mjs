@@ -35,9 +35,35 @@ check('the weekly grid is filtered by a horizon at all',
    calendar grid, which is what these assertions are about, is unchanged. */
   /closedWeeks\(from, to\)\]\s*\n?\s*\.filter\(\(w\) => w\.end >= weekHorizon\)/.test(src),
   'an unbounded walk asks for every week of the backfill span');
-check('and the open week is not asked for at all',
-  /closedWeeks/.test(src) && !/\bweekChunks\(from, to\)/.test(src),
-  'Uber answers "endDate is too late" for a week that has not closed');
+/* The invariant is about the END DATE, not about the open week.
+   ─────────────────────────────────────────────────────────────────────────
+   This read "the open week is not asked for at all" and enforced it by
+   forbidding weekChunks anywhere in the file. That is one step too strong,
+   and the step it takes past the evidence costs a reader the days they look
+   at most: on Friday 4 September 2026 the running week held 3,252 Uber
+   bookings against 3,321 in the week before it, and not one could carry a
+   per-trip fare until Sunday.
+
+   What Uber actually refuses is a FUTURE end date — "endDate is too late",
+   measured on production on every mid-week run. An open week's chunk ends on
+   the coming Sunday, which is why closedWeeks drops it. A range of Monday to
+   TODAY is not that: it is the same shape pullTrips asks for every half hour
+   and Uber serves, which is why this product holds Uber trips for this
+   morning.
+
+   So the rule enforced here is the measured one. The earner grid still walks
+   closed weeks only; the fare walk may reach the running week, and where it
+   does it must clamp the end to the window's own `to`. */
+check('the earner weekly grid still asks only for weeks that have closed',
+  /const weekly = \[\.\.\.closedWeeks\(from, to\)\]\s*\n?\s*\.filter\(\(w\) => w\.end >= weekHorizon\)/.test(src),
+  'the earner grid must not reach a week whose end is in the future');
+/* Every weekChunks caller in this file, checked for the clamp rather than
+   forbidden. A new one that forgets it reintroduces "endDate is too late". */
+const unclamped = [...src.matchAll(/weekChunks\(from, to\)([\s\S]{0,400})/g)]
+  .filter((m) => !/w\.end > end \? end : w\.end/.test(m[1]));
+check('and any walk that DOES reach the running week clamps its end to the window',
+  unclamped.length === 0,
+  `${unclamped.length} weekChunks caller(s) ask Uber for a window ending in the future`);
 
 /* The SAME constant as the daily grid, not a second number that can drift
    away from it. Two horizons for one endpoint is how they stop agreeing. */
