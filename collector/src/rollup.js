@@ -537,11 +537,18 @@ export async function refreshPayouts(db = pool) {
         (platform, fleet_id, driver_ext_id, driver_name, day,
          period_start, period_end, period_days, period_earnings,
          earnings, cash_earnings, trips, distance_km, hours_online, hours_on_trip,
-         acceptance_rate, cancellation_rate, completion_rate, rating, currency, ingested_at)
+         acceptance_rate, cancellation_rate, completion_rate, rating, currency, ingested_at,
+         /* Why a day carries hours and a scorecard but no money: its report
+            window is coarser than a day and the provider also filed a per-day
+            report for it. See sql/schema_v58.sql. Copied rather than derived,
+            so a page can print the server's own sentence instead of inferring
+            one from a NULL. */
+         grain_reason)
       SELECT platform, fleet_id, driver_ext_id, driver_name, day,
              period_start, period_end, period_days, period_earnings,
              earnings, cash_earnings, trips, distance_km, hours_online, hours_on_trip,
-             acceptance_rate, cancellation_rate, completion_rate, rating, currency, ingested_at
+             acceptance_rate, cancellation_rate, completion_rate, rating, currency, ingested_at,
+             grain_reason
       FROM driver_payout_day_live`);
     await db.query('COMMIT');
     return r.rowCount ?? 0;
