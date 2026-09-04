@@ -60,6 +60,22 @@
    that fleet's daily grid demonstrably ran. Outside the horizon nothing
    changes and every older month reads exactly as it does today.
 
+   ── why a new name, and not a replacement ────────────────────────────────
+   Both containers replay every file in sql/ on every boot, and schema_v23 runs
+   before this one. CREATE OR REPLACE VIEW may append a column but may never
+   remove one, so v23 replacing a view this file had already widened is
+   `cannot drop columns from view` — the boot after the deploy, not the deploy
+   itself. test/route_smoke.test.mjs replays the whole directory a second time
+   for exactly this, and caught it.
+
+   Editing v23 in place would fix the replay and buy a worse failure: the
+   migration ledger skips a file whose sha is unchanged, so the next edit to
+   v23 would re-run v23 alone, with this file skipped, and silently put the
+   21-column view back under a rollup that inserts 22. A new name cannot be
+   reverted by anything v23 does. The old view is dropped at the foot of this
+   file rather than left standing, so there is one view answering this question
+   and not two that disagree.
+
    ── scope ───────────────────────────────────────────────────────────────
    Every platform, by construction, because the rule is about grains and not
    about Uber. In practice only Uber files more than one: Bolt, the hotel
@@ -70,7 +86,7 @@ ALTER TABLE driver_payout_day ADD COLUMN IF NOT EXISTS grain_reason TEXT;
 COMMENT ON COLUMN driver_payout_day.grain_reason IS
   'Why this day carries no money although its report window does: the provider also filed a per-day report covering it, and that is the one that reconciles. NULL when the row''s money is its own.';
 
-CREATE OR REPLACE VIEW driver_payout_day_live AS
+CREATE OR REPLACE VIEW driver_payout_day_finest AS
 WITH
 /* The days each fleet's DAILY grid actually ran, which is what licenses a
    weekly row to be superseded. One row per (platform, fleet, day) rather than
@@ -140,5 +156,13 @@ SELECT e.platform, e.fleet_id, e.driver_ext_id, e.driver_name, e.day,
     AND g.fleet_id IS NOT DISTINCT FROM e.fleet_id
     AND g.day = e.day;
 
-COMMENT ON VIEW driver_payout_day_live IS
+COMMENT ON VIEW driver_payout_day_finest IS
   'Report windows expanded to days, one period per driver-day (the shortest covering it), with the money withheld from any window coarser than a day on a day the same fleet''s daily grid also reported. Measured against the August 2026 bank statements: daily-only is +0.06% of what was received, and counting the coarser windows as well was +5.78%. Hours and the scorecard are never withheld — they come from a different report.';
+
+/* schema_v23's view answered the same question without the supersession rule,
+   and every reader has moved to the one above. Dropped rather than kept so a
+   future query cannot pick the wrong one and quietly restate a week's money.
+   v23 recreates it on the next boot and this line removes it again; that is
+   the intended steady state, and it is why the two statements are ordered
+   create-then-drop rather than the other way round. */
+DROP VIEW IF EXISTS driver_payout_day_live;

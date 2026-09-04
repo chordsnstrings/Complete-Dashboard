@@ -1133,7 +1133,7 @@ async function pullEarnerBreakdowns(from, to, onStep, checkpoint = null) {
      Uber will answer it.
      ─────────────────────────────────────────────────────────────────────────
      A week stored as one row is spread across its seven days by
-     driver_payout_day_live, so #reconcile showed the same figure on three
+     driver_payout_day_finest, so #reconcile showed the same figure on three
      consecutive days. Measured against the live endpoint, seven daily calls
      and one weekly call over the identical span agree to the cent on trips and
      on netOutstanding — 842 trips and AED 30,280.53 for Egari, 1,862 and AED

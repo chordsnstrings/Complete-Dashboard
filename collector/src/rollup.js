@@ -501,7 +501,7 @@ async function refreshRollupsInner({ db = pool, days = null } = {}) {
 
 /* Materialise the payout-day resolution — see sql/schema_v23.sql.
    ─────────────────────────────────────────────────────────────────────────
-   driver_payout_day_live expands every report window into its days and picks a
+   driver_payout_day_finest expands every report window into its days and picks a
    winner per (platform, driver, day). Computing that on demand cost a one-vCPU
    database twenty seconds and more per query, and every page's money passes
    through it — so it runs here, once per collection cycle, and everything else
@@ -549,7 +549,7 @@ export async function refreshPayouts(db = pool) {
              earnings, cash_earnings, trips, distance_km, hours_online, hours_on_trip,
              acceptance_rate, cancellation_rate, completion_rate, rating, currency, ingested_at,
              grain_reason
-      FROM driver_payout_day_live`);
+      FROM driver_payout_day_finest`);
     await db.query('COMMIT');
     return r.rowCount ?? 0;
   } catch (e) {

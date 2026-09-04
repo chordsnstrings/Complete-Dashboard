@@ -1,5 +1,5 @@
 /* ── a day measured beats a week divided ───────────────────────────────────
-   driver_payout_day_live expands every report window across its days and
+   driver_payout_day_finest expands every report window across its days and
    divides the period's money by the number of them. That is the right answer
    when a week is all the provider will tell you, and it is why #reconcile
    showed AED 3,256.43 on three consecutive days: one weekly row, spread flat.
