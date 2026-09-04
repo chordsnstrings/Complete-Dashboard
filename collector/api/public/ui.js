@@ -1252,3 +1252,29 @@ export function foldRows(host, node, { shown = 10, total, noun = 'row', key = nu
   apply();
   host.append(btn);
 }
+
+/* ── a person's face, or their initials ───────────────────────────────────
+   The Uber supplier portal carries a photo for every driver it knows, and
+   src/sources/uber_profile.js stores it on driver_compliance. Three places
+   drew a person and all three drew two letters, so this is one implementation
+   rather than three that drift.
+
+   THE INITIALS STAY UNDERNEATH. The url is a remote CloudFront object that can
+   404 long after the row was written — the account is closed, the object is
+   aged out — and an avatar that fails to load must degrade to the thing it
+   replaced rather than to an empty box. The img sits on top and removes itself
+   on error, so the fallback is already painted before it is needed.
+
+   `referrerpolicy="no-referrer"` because this fleet's own hostname has no
+   business travelling to a CDN on every driver row, and `loading="lazy"`
+   because a directory draws a hundred of them at once. */
+export const initialsOf = (name) => String(name || '?')
+  .split(' ').filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase() || '?';
+
+export function avatar(name, pictureUrl, cls = '') {
+  const initials = esc(initialsOf(name));
+  const k = `av${cls ? ` ${cls}` : ''}`;
+  if (!pictureUrl) return `<div class="${k}">${initials}</div>`;
+  return `<div class="${k} av-photo">${initials}<img src="${esc(pictureUrl)}" alt=""`
+    + ' loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></div>';
+}

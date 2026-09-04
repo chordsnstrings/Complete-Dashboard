@@ -73,8 +73,45 @@ export const card = (title, cap) => {
 
 /* One sentence and the number it is about. The claim comes first because on a
    phone the first line is often the only line read. */
-export const lede = (host, { claim, sub, tone }) => {
+/* ── a person's face, or their initials ───────────────────────────────────
+   The initials stay UNDERNEATH the photo rather than being replaced by it: the
+   url is a remote CloudFront object that can 404 long after the row was
+   written, and an avatar that fails to load must degrade to the thing it
+   replaced rather than to an empty box. The img removes itself on error, so
+   the fallback is already painted before it is needed. Same rule as the
+   desktop's avatar() in api/public/ui.js. */
+export const initialsOf = (name) => String(name || '?')
+  .split(' ').filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase() || '?';
+
+export const avatar = (name, pictureUrl, cls = '') => {
+  const d = el('div', `m-av${cls ? ` ${cls}` : ''}`, esc(initialsOf(name)));
+  if (!pictureUrl) return d;
+  d.classList.add('has-photo');
+  const img = el('img');
+  img.src = pictureUrl;
+  img.alt = '';
+  img.loading = 'lazy';
+  img.referrerPolicy = 'no-referrer';
+  img.onerror = () => img.remove();
+  d.append(img);
+  return d;
+};
+
+export const lede = (host, { claim, sub, tone, name, photo }) => {
   const d = el('div', `m-lede${tone ? ` ${tone}` : ''}`);
+  /* A person's lede leads with their face. Everything else keeps the shape it
+     had, so this is additive rather than a second kind of lede. */
+  if (name !== undefined) {
+    const head = el('div', 'm-lede-head');
+    head.append(avatar(name, photo));
+    const t = el('div', 'm-lede-text');
+    t.append(el('b', null, esc(claim)));
+    if (sub) t.append(el('p', null, esc(sub)));
+    head.append(t);
+    d.append(head);
+    host.append(d);
+    return d;
+  }
   d.append(el('b', null, esc(claim)));
   if (sub) d.append(el('p', null, esc(sub)));
   host.append(d);
@@ -100,12 +137,15 @@ export const stats = (host, list, three = false) => {
 
 /* A row is an identity, a figure, and one line of why. `to` makes it a link,
    which is what a drill-down is here — an address, not a modal. */
-export const row = ({ title, sub, value, note, to, tone }) => {
+export const row = ({ title, sub, value, note, to, tone, name, photo }) => {
   /* A link gets a chevron in a slot of its own. Putting one in the figure
      column made it share the right edge with a tabular number, and the two
      took turns being clipped. */
   const r = el(to ? 'a' : 'div', `m-row${to ? ' go' : ''}`);
   if (to) r.href = to;
+  /* A person's row leads with their face, at the row's own size. Rows that are
+     not about a person pass no `name` and keep exactly the shape they had. */
+  if (name !== undefined) r.append(avatar(name, photo, 'sm'));
   const k = el('div', 'k');
   k.append(el('b', null, esc(title)));
   if (sub) k.append(el('span', null, esc(sub)));

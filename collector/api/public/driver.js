@@ -17,7 +17,8 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
-  sourceLabel, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows } from './ui.js';
+  sourceLabel, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
+  avatar } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
@@ -492,7 +493,6 @@ const isPlaceholderLicence = (c) => !!(c.licence_placeholder
 function identityCard(p) {
   const c = p.compliance?.[0] || {};
   const wrap = el('div', 'idcard');
-  const initials = (p.name || '?').split(' ').filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase();
   const lic = c.licence_days_left;
   const placeholder = isPlaceholderLicence(c);
   const licTone = placeholder ? null : lic == null ? null : lic < 0 ? 'bad' : lic < 30 ? 'warn' : 'ok';
@@ -531,15 +531,7 @@ function identityCard(p) {
   const lastEver = dates('last_trip').pop() || p.span?.last_trip;
 
   wrap.innerHTML = `
-    ${c.picture_url
-    /* The portal's own photo, with the initials left underneath it rather than
-       replaced: the URL is a remote CloudFront object that can 404 long after
-       the row was written, and an avatar that fails to load must degrade to
-       the thing it replaced rather than to an empty box. */
-    ? `<div class="av av-photo">${esc(initials)}<img src="${esc(c.picture_url)}" alt=""
-         loading="lazy" referrerpolicy="no-referrer"
-         onerror="this.remove()"></div>`
-    : `<div class="av">${esc(initials)}</div>`}
+    ${avatar(p.name, c.picture_url)}
     <div class="idmeta">
       <h2>${esc(p.name || 'Unnamed driver')}</h2>
       <div class="idsub">
@@ -1779,10 +1771,9 @@ export async function renderDriverDirectory(root) {
   active.slice(0, 6).forEach((r, i) => {
     const c = el('a', 'dircard');
     c.href = href('driver', r.driver_ext_id);
-    const initials = (r.driver_name || '?').split(' ').filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase();
     c.innerHTML = `
       <div class="rank">${i + 1}</div>
-      <div class="av sm">${esc(initials)}</div>
+      ${avatar(r.driver_name, r.picture_url, 'sm')}
       <div class="dc-meta">
         <b title="${esc(r.driver_name)}">${esc(r.driver_name)}</b>
         <div class="cap">${(r.platforms || []).map(sourceLabel).join(' · ')}${r.plate ? ' · ' + esc(r.plate) : ''}</div>

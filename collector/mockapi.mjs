@@ -689,6 +689,8 @@ app.get('/api/drivers/directory', (_, r) => r.json([
        measured would let a page stating an allocation as a fact still pass. */
     money: i === 7 ? null : 12400 - i * 780,
     money_days: i === 7 ? 0 : Math.max(1, 26 - i),
+    // The face on the directory card, absent on two rows.
+    picture_url: i % 4 === 3 ? null : `https://d1w2poirtb3as9.cloudfront.net/mock-d${i}.jpg`,
     money_period_days: i % 5 === 0 ? 1 : i === 6 ? null : 7,
     money_source: i % 5 === 0 ? 'fares' : i === 2 ? 'mixed' : 'statement',
     last_trip: new Date(Date.now() - i * 36e5).toISOString(),
@@ -3219,6 +3221,9 @@ app.get('/api/drivers/leaderboard', (_, r) => r.json({
   people: 74, shown: drivers.length, truncated: true,
   rows: drivers.map((name, i) => ({
     person: name.toLowerCase(), driver_name: name, driver_ext_id: `drv-${i}`,
+    /* The person's face. Two of the eight have none, so the initials fallback
+       renders beside the photos rather than only in a broken-image case. */
+    picture_url: i % 4 === 3 ? null : `https://d1w2poirtb3as9.cloudfront.net/mock-l${i}.jpg`,
     platforms: i % 3 ? ['uber'] : ['uber', 'hotel'], accounts: i % 3 ? 1 : 2,
     plate: plates[i % plates.length], trips: 180 - i * 14, km: (180 - i * 14) * 12,
     /* The column the ranking is actually over. This list is captioned with a

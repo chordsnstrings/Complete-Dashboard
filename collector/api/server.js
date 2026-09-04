@@ -1129,8 +1129,18 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
        FROM trip_norm n ${JOIN_TRIP}
        WHERE ${W('n')} AND coalesce(btrim(n.driver_name), '') <> ''
        GROUP BY t.person_key)
-     SELECT *, count(*) OVER ()::int AS _people
-       FROM people ORDER BY completed_trips DESC, trips DESC LIMIT 100`, p);
+     /* The person's face, joined on the id the row already carries. LEFT, and
+        DISTINCT ON, because a person with a hotel record and an Uber one has
+        two compliance rows and only Uber's carries a photo — so the one with a
+        picture wins rather than whichever the planner reached first. */
+     SELECT people.*, pic.picture_url, count(*) OVER ()::int AS _people
+       FROM people
+       LEFT JOIN LATERAL (
+         SELECT dc.picture_url FROM driver_compliance dc
+          WHERE dc.driver_ext_id = people.driver_ext_id
+            AND dc.picture_url IS NOT NULL
+          LIMIT 1) pic ON true
+       ORDER BY completed_trips DESC, trips DESC LIMIT 100`, p);
   const people = rows.length ? rows[0]._people : 0;
   for (const r of rows) delete r._people;
   res.json({ rows, people: people || rows.length, shown: rows.length,

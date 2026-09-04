@@ -503,6 +503,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 AS identity_from_history,
               ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
               dc.state, dc.licence_expires, dc.rating,
+              /* The portal's own photo, so every list that draws a person can
+                 draw their face rather than two letters. It rides on the row
+                 the compliance columns already come from. */
+              dc.picture_url,
               (dc.licence_expires - now()::date) AS licence_days_left,
               ($5::text IS NOT NULL
                AND to_char(dc.licence_expires,'YYYY-MM-DD') = $5) AS licence_placeholder,

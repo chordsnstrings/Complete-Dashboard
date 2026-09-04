@@ -361,6 +361,8 @@ async function people(deck, ctx) {
     if (!shown.length) { empty(list, 'Nobody matches that', 'Try part of a name.'); return; }
     rows(list, shown.map((d) => row({
       title: d.driver_name || d.person || d.driver_ext_id,
+      name: d.driver_name || d.person || '?',
+      photo: d.picture_url || null,
       sub: `${(d.platforms || []).join(', ') || 'no channel'} \u00b7 ${fmt(d.km)} km`
         + (d.accounts > 1 ? ` \u00b7 ${d.accounts} accounts` : ''),
       value: sort === 'revenue' ? money(n(d.revenue)) : fmt(n(d[sort])),
@@ -721,13 +723,31 @@ async function driver(deck, ctx) {
   if (!profile) { failed(deck, new Error('Nothing in the record matches this id.')); return; }
 
   const k = kpis || {};
+  /* The compliance row is where a person's face, phone and email live — see
+     sql/schema_v57.sql. The first row that carries a picture wins: a person
+     with a hotel record and an Uber one has two, and only Uber's has a photo. */
+  const cRows = profile.compliance || [];
+  const c = cRows.find((x) => x && x.picture_url) || cRows[0] || {};
   ctx.setTitle(profile.name || id, `${fmt(k.trips)} bookings in this window`);
   lede(deck, {
     claim: profile.name || id,
+    name: profile.name || id,
+    photo: c.picture_url || null,
     sub: `${(profile.platforms || []).join(', ') || 'no channel'}`
       + `${profile.span?.days_worked ? ` \u00b7 ${profile.span.days_worked} days worked` : ''}`
       + `${(profile.ids || []).length > 1 ? ` \u00b7 ${profile.ids.length} platform accounts` : ''}`,
   });
+
+  /* Reaching a driver is what a phone is FOR. On a desktop these sit in a row
+     of identity facts; here they are the two things somebody standing in a
+     yard actually wants, and they are tappable. */
+  const reach = [c.phone && { label: 'Call', v: c.phone, to: `tel:${c.phone}` },
+    c.email && { label: 'Email', v: c.email, to: `mailto:${c.email}` }].filter(Boolean);
+  if (reach.length) {
+    const rc = card('Contact', c.platform ? `from the ${sourceLabel(c.platform)} record` : null);
+    rows(rc.body, reach.map((x) => row({ title: x.v, sub: x.label, to: x.to })));
+    deck.append(rc.card);
+  }
 
   stats(deck, [
     { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${k.days_worked} days worked` : null },
