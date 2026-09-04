@@ -137,8 +137,48 @@ async function downloadReport(reportId, budgetMs = 600000) {
   throw new Error(`download timed out after ${Math.round(budgetMs / 1000)}s for report ${reportId}`);
 }
 
-function csvToTrips(csv) {
+/* The fifteen header strings this mapper is keyed on, asserted rather than
+   assumed.
+   ─────────────────────────────────────────────────────────────────────────
+   Every lookup below is an exact string match against Uber's header row, and
+   those strings are the localeCode=en-GB RENDERING — not the canonical field
+   names. Uber's own reference publishes the same fifteen fields, in the same
+   order, spelled differently on all of them: 'Trip Pickup Address' for
+   'Pick-up address', 'Vehicle License Number' for 'Number plate', 'Trip
+   DropOff Time' for 'Trip drop-off time'. Our spellings are the live ones —
+   plates, addresses and payment types all land — so they must not be
+   "corrected" to the documented ones, which would null every column at once.
+
+   But that means one locale flip or one header refresh turns every trip's
+   plate, driver, distance, addresses and payment type to NULL, silently,
+   while the run still reports the same row count. The payments report in this
+   same file already learned this the expensive way and got pathKey()
+   normalisation; the trip mapper, written first, got nothing.
+
+   Normalising is the wrong fix here — 'Pick-up address' and 'Trip Pickup
+   Address' do not normalise onto each other, and pretending they might would
+   hide the day Uber actually renames something. What is wanted is a LOUD
+   failure, so this asserts the header and throws. A run that fails is a hole
+   somebody fixes; a run that writes fifteen nulls per row and reports success
+   is a year of silent corruption. */
+const TRIP_COLUMNS = ['Trip UUID', 'Driver UUID', 'Number plate', 'Trip request time',
+  'Trip status', 'Payment type'];
+
+function assertTripHeader(recs) {
+  if (!recs.length) return;
+  const seen = new Set(Object.keys(recs[0]));
+  const missing = TRIP_COLUMNS.filter((c) => !seen.has(c));
+  if (!missing.length) return;
+  /* The observed header travels in the message. Without it the operator knows
+     only that something changed, and the whole cost of this class of failure
+     is the hours between "it broke" and "it is called this now". */
+  throw new Error(`trip report header changed — missing ${missing.join(', ')}; `
+    + `Uber sent: ${[...seen].slice(0, 20).join(' | ')}`);
+}
+
+export function csvToTrips(csv) {
   const recs = parse(csv, { columns: true, skip_empty_lines: true, bom: true });
+  assertTripHeader(recs);
   return recs.map((r) => ({
     platform: SRC, external_id: r['Trip UUID'], fleet_id: org().fleet,
     plate: normPlate(r['Number plate']),

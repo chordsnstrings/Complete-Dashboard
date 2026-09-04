@@ -147,17 +147,32 @@ export async function renderCorridors(root) {
     const top = named[0];
     const topPct = top && withArea ? Math.round((top.trips / withArea) * 100) : 0;
     verdict(kpiHost, {
-      /* WHAT IS MISSING IS A PARSE, NOT AN ADDRESS.
+      /* WHAT IS MISSING IS MOSTLY A PARSE. NOT ALL OF IT — corrected.
          ───────────────────────────────────────────────────────────────
          This said "carry no usable address" over "11,424 of 13,536 pickups
          carry an address", which reads as 2,112 bookings with the field
-         empty. None of them is. pickups_all is itself
-         count(*) FILTER (WHERE pickup_addr IS NOT NULL), and on production
-         2026-09-02 /api/kpis?days=1 returned 535 bookings against
-         pickups_all 535 — every booking has the text. What 2,112 of them
-         lack is a community inside it, which is what the "Pickups with no
-         area" tile 100px below has always said and this headline
-         contradicted.
+         empty. The correction written here claimed "None of them is", on the
+         evidence that /api/kpis?days=1 returned 535 bookings against
+         pickups_all 535 on production 2026-09-02 — every booking has the
+         text.
+
+         That test could not tell the two cases apart. pickups_all was
+         count(*) FILTER (WHERE pickup_addr IS NOT NULL), and an empty pickup
+         address arrives from csv-parse as '' rather than NULL, which
+         IS NOT NULL passes. 535 = 535 was consistent with every booking
+         having an address AND with any number of them having ''.
+
+         Measured properly since: Uber sends a BLANK pickup address on 23.0%
+         of the trips it marks settled offline, against 2.4% of every other
+         Uber trip, over 4,000 August 2026 bookings. So some of that 2,112 is
+         the field genuinely empty, and the confident "None of them is" was
+         wrong.
+
+         api/analytics_routes.js now tests coalesce(btrim(pickup_addr), '')
+         <> '' everywhere it counts an address, which is what AREA had always
+         done — so pickups_all excludes the blanks and the gap between it and
+         the addressed count is the parse failure it was always meant to be.
+         The headline is true again, for a different reason than it claimed.
 
          Not escaped here: verdict() escapes the claim it is given, and doing
          it twice renders an area called "Al Qouz 1 & 2" as "Al Qouz 1 &amp;

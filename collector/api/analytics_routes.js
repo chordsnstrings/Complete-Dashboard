@@ -839,7 +839,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 count(*) FILTER (WHERE return_deadhead_km > 15)::int over_15km,
                 round(avg(distance_km) FILTER (WHERE has_distance)::numeric, 1) avg_paid_km
            FROM trip_ext
-          WHERE ${F} AND platform = 'hotel' AND dropoff_addr IS NOT NULL
+          WHERE ${F} AND platform = 'hotel' AND coalesce(btrim(dropoff_addr), '') <> ''
           GROUP BY 1
          HAVING count(*) FILTER (WHERE return_deadhead_km IS NOT NULL) >= 3
        )
@@ -1515,13 +1515,32 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 -- origins panel is a roll-up rather than another scan. The
                 -- distance average is kept as its two halves because an
                 -- average of averages is not an average.
-                count(*) FILTER (WHERE pickup_addr IS NOT NULL)::int AS from_trips,
-                count(*) FILTER (WHERE pickup_addr IS NOT NULL AND ${WAVE_DONE}
+                /* AN EMPTY STRING IS NOT AN ADDRESS, and IS NOT NULL says it is.
+                    ──────────────────────────────────────────────────────────
+                    Uber sends a blank pickup address on 23.0% of the trips it
+                    marks settled offline, against 2.4% of every other Uber
+                    trip — measured over 4,000 August 2026 bookings. Those
+                    arrive as '' and not as NULL, because csv-parse hands an
+                    empty cell back as an empty string, so every FILTER here
+                    counted them as pickups that HAVE an address and then
+                    bucketed them into '(unrecorded)' — which is the one place
+                    a reader looks to find out how many are missing.
+
+                    AREA above already gets this right: it is
+                    nullif(btrim(...), ''), so the empty string was excluded
+                    from the numerator and counted in the denominator. Every
+                    share on this page was therefore taken over a base that
+                    included rows the page had already decided it could not
+                    place. */
+                count(*) FILTER (WHERE coalesce(btrim(pickup_addr), '') <> '')::int AS from_trips,
+                count(*) FILTER (WHERE coalesce(btrim(pickup_addr), '') <> '' AND ${WAVE_DONE}
                                    AND local_hour BETWEEN ${WAVE_M[0]} AND ${WAVE_M[1]})::int AS from_morning,
                 count(*) FILTER (WHERE pickup_addr IS NOT NULL AND ${WAVE_DONE}
                                    AND local_hour BETWEEN ${WAVE_E[0]} AND ${WAVE_E[1]})::int AS from_evening,
-                sum(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km,
-                count(distance_km) FILTER (WHERE has_distance AND pickup_addr IS NOT NULL) AS from_km_n
+                sum(distance_km) FILTER (WHERE has_distance
+                  AND coalesce(btrim(pickup_addr), '') <> '') AS from_km,
+                count(distance_km) FILTER (WHERE has_distance
+                  AND coalesce(btrim(pickup_addr), '') <> '') AS from_km_n
            FROM trip_ext
           /* FB, not F. Every other demand endpoint in this product counts
              bookings; this one counted raw trips, so FMS telematics twins —
@@ -1532,7 +1551,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
              62% of "corridors seen 3+ times". The list carried rows like
              "Dubai | United Arab Emirates, | 93 | fms", and the top origin
              "Dubai" was 985 trips of which 805 were twins. */
-          WHERE ${FB} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
+          WHERE ${FB} AND (coalesce(btrim(pickup_addr), '') <> ''
+                            OR coalesce(btrim(dropoff_addr), '') <> '')
           GROUP BY 1, 2),
        corridor AS (
          SELECT row_number() OVER () AS seq, c.*
