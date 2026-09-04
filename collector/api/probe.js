@@ -44,31 +44,48 @@ const uberOrg = () => config.uber.orgs?.[0] || config.uber;
    wrong is worse than no diagnostic. */
 const REPORTS = `${UBER_WEB_HOST}/api/vs-sp-reports-management`;
 
-/* Report types worth testing for existence. Uber answers an unknown name with
-   REPORT_TYPE_INVALID, so this enumerates the surface cheaply — the report is
-   never downloaded, only asked for. */
+/* Uber's OWN list, not a guess at it.
+   ──────────────────────────────────────────────────────────────────────────
+   This was sixteen invented names. Uber publishes sixteen real ones and only
+   four overlapped, so the probe reported "only four report types are valid for
+   this org" — true of what it asked, and read by everybody as a fact about
+   Uber. The twelve it never asked for include all three PAYMENTS_* reports,
+   and REPORT_TYPE_PAYMENTS_ORDER is one row per transaction carrying Trip
+   UUID, Earnings, Payouts, Cash Collected, Fare Details and Taxes: the
+   per-trip fare this product spent a day concluding did not exist.
+
+   Never guess a provider's enum when the provider publishes it.
+   https://developer.uber.com/docs/vehicles/references/api/v1/vehicle-suppliers/suppliers/generate-report
+
+   Kept as a fixed list rather than fetched, for the same reason every other
+   list here is fixed: nothing the caller sends decides what gets asked. */
 const CANDIDATE_REPORTS = [
+  /* Already collected. */
   'REPORT_TYPE_TRIP_ACTIVITY',
   'REPORT_TYPE_DRIVER_ACTIVITY',
-  /* The two the fleet actually wants if no tier exists: they are the INPUTS
-     Uber computes a tier from — confirmation, cancellation and completion
-     rates, ratings over the last 500 trips, earnings and trips per hour — and
-     unlike a tier they are per-driver, numeric, and not gated on a driver's
-     personal opt-in, so their coverage would be the whole roster. */
+  /* The INPUTS a tier is computed from — confirmation, cancellation and
+     completion rates, ratings over the last 500 trips, earnings and trips per
+     hour — per-driver, numeric, and not gated on a driver's personal opt-in. */
   'REPORT_TYPE_DRIVER_QUALITY',
   'REPORT_TYPE_DRIVER_PERFORMANCE',
-  'REPORT_TYPE_PAYMENT_DETAILS',
-  'REPORT_TYPE_PAYMENTS',
-  'REPORT_TYPE_EARNINGS',
-  'REPORT_TYPE_TRIP_DETAILS',
-  'REPORT_TYPE_VEHICLE_ACTIVITY',
-  'REPORT_TYPE_ORGANIZATION_TRIPS',
-  'REPORT_TYPE_BUSINESS_TRIPS',
-  'REPORT_TYPE_U4B_TRIPS',
-  'REPORT_TYPE_RIDER_ACTIVITY',
-  'REPORT_TYPE_INVOICE',
-  'REPORT_TYPE_TAX',
-  'REPORT_TYPE_FLEET_PERFORMANCE',
+  /* The money, at three grains. ORDER is the one that matters: one row per
+     transaction — trip completion, fare adjustment, tip, settlement — with a
+     Trip UUID that joins straight onto trip.external_id. */
+  'REPORT_TYPE_PAYMENTS_ORDER',
+  'REPORT_TYPE_PAYMENTS_DRIVER',
+  'REPORT_TYPE_PAYMENTS_ORGANIZATION',
+  /* Unknown to this collector and worth knowing about. */
+  'REPORT_TYPE_ORGANIZATION',
+  'REPORT_TYPE_DRIVER_STATUS',
+  'REPORT_TYPE_VEHICLE_PERFORMANCE',
+  'REPORT_TYPE_DRIVER_AUTO_POSITIONING',
+  'REPORT_TYPE_BACKFILL_REALTIME_DRIVER_STATUS_CHANGE_WEBHOOK_EVENTS',
+  /* Only meaningful if the fleet leases vehicles to its drivers, which this
+     one may: asked so the answer is on record either way. */
+  'REPORT_TYPE_RENTAL_PAYMENTS_TRANSACTION',
+  'REPORT_TYPE_RENTAL_PAYMENTS_CONTRACT',
+  'REPORT_TYPE_RENTAL_PAYMENTS_ORGANIZATION',
+  'REPORT_TYPE_RENTAL_PAYMENTS_TRANSACTION_STATUS',
 ];
 
 /* Reduce any JSON to a description of its shape. Values are only echoed for
@@ -238,9 +255,29 @@ const TIER_OPS = [
   'getDriverIncentives', 'getPerformanceReport', 'getFleetDrivers',
 ];
 
-/* ── SETTLED 2026-09-04: there is NO per-trip amount. ─────────────────────
-   Uber gives a fleet its money at DRIVER-DAY grain and no finer. Five
-   independent checks, all run live against production, none of them inference:
+/* ── WRONG, and corrected 2026-09-04. A per-trip amount DOES exist. ───────
+   Everything below was run honestly and concluded honestly and the conclusion
+   was still wrong, because every check shared one unstated assumption: that
+   CANDIDATE_REPORTS named the reports Uber has. It did not. It was sixteen
+   invented names, four of which happened to be real, and Uber documents
+   REPORT_TYPE_PAYMENTS_ORDER — one row per transaction, carrying Trip UUID,
+   Earnings, Payouts, Cash Collected, Fare Details and Taxes. That is the
+   per-trip fare, and this file spent thirty requests proving it absent from
+   the two surfaces that were asked instead.
+
+   The lesson is not about GraphQL. A probe is only ever evidence about the
+   question it asked, and "which report types exist" was answerable by reading
+   the provider's published list rather than by guessing at it. The list above
+   is Uber's now.
+
+   The GraphQL findings below still hold on their own terms — those operations
+   and fields really are absent, and the argument control really does prove the
+   generic refusals are not about arguments. They just never were the whole
+   surface. Kept for that reason, and because the reasoning is worth not
+   repeating.
+
+   ── what the GraphQL surface does NOT have ───────────────────────────────
+   Five checks, all run live against production, none of them inference:
 
      1. The trip export has 15 columns and no fare among them
         (/api/probe/uber/report-columns).
@@ -270,11 +307,10 @@ const TIER_OPS = [
    would have been told what they got wrong. They were not. The six do not
    exist, and no argument list will make them.
 
-   Keep this round rather than deleting it. The question comes back — the fleet
-   portal appears to show a per-ride figure and it is reasonable to assume the
-   API does too — and re-probing costs thirty requests against a live session.
-   The answer is here, with the evidence, and the control is what makes it an
-   answer instead of a guess.
+   Keep this round rather than deleting it: it is a true and useful map of what
+   the GraphQL surface holds, and re-probing costs thirty requests against a
+   live session. Read it as that and not as an answer about Uber, which is the
+   mistake it was written to support.
 
    ── is there a PER-TRIP amount anywhere? ─────────────────────────────────
    The operator is sure the fleet portal shows what each ride paid, and the
