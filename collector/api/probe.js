@@ -465,6 +465,48 @@ const COMPLIANCE_DOC_TYPE = [
   ['driver', 'complianceInfo', ' { status documents { __typename expiryDate { __typename } } }'],
 ];
 
+/* ── can a DriverDocument be NAMED? ──────────────────────────────────────
+   The identity question is settled and this round does not reopen it: on
+   DriverDocument, number, documentNumber, value, id, name, type, country and
+   issuedAt are all explicitly named absent, and the control is named absent
+   too, so that type does not scrub. Uber holds no document NUMBER of any kind,
+   Emirates ID included.
+
+   What is still open is worth more than the number was. DriverDocument answers
+   `status` (ACTIVE / MISSING) and `expiresAt` (2028-02-04T19:59:59Z on a live
+   driver) — real per-document expiry for a roster where our own compliance
+   page has 94 licence dates that are all the same never-filled-in placeholder
+   and 195 people with no date at all. But a list of expiry dates attached to
+   documents nobody can name is not something a compliance page can print: "one
+   of this driver's documents expires in six days" is not an instruction.
+
+   `documentType` refuses generically BOTH bare and with a selection, which is
+   neither the shape of a scalar (bare would answer) nor of an object (a
+   selection would answer) nor of an absent field (it would be named, as its
+   siblings are). So it is real and constrained some other way — an argument it
+   requires, or a type this role may not read — and no more guessing at its
+   shape is worth a round. These are the other spellings a schema uses for
+   "which document is this", asked the plain way that has settled every other
+   field here. */
+const DOC_NAMING = [
+  ['driver', 'complianceInfo', ' { status documents { __typename kind } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename category } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename docType } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename title } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentName } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename displayName } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename label } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename slug } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename requirementType } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename uuid } }'],
+  /* And the two that would make the expiry dates actionable even unnamed: is
+     this document the one blocking the driver, and when was it last checked. */
+  ['driver', 'complianceInfo', ' { status documents { __typename blocking } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename updatedAt } }'],
+  /* The control for this round, on the same type. */
+  ['driver', 'complianceInfo', ' { status documents { __typename zzNotARealFieldQx2 } }'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -985,7 +1027,7 @@ export function probeRoutes(app, { wrap }) {
     const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
       subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST,
       identity: IDENTITY_FIELDS, compliance: COMPLIANCE_SUB, documents: COMPLIANCE_DOCS,
-      doctype: COMPLIANCE_DOC_TYPE };
+      doctype: COMPLIANCE_DOC_TYPE, docnames: DOC_NAMING };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {

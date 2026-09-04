@@ -3749,6 +3749,24 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      )
      SELECT platform, c.driver_ext_id, full_name, phone, email, picture_url,
             licence_no, licence_expires,
+            /* The one government identity number this fleet actually holds.
+               ─────────────────────────────────────────────────────────────
+               src/sources/hotel.js:267 is the only writer of it in the whole
+               collector, and it fills 132 rows with real values. This page —
+               whose entire subject is driver documents — did not select the
+               column, so the only place an Emirates ID had ever appeared was
+               the desktop driver profile, one person at a time.
+
+               Uber cannot supply one: probed on 2026-09-04, emiratesId,
+               nationalId, passportNumber and licenseNumber are all named
+               absent on every parent type it exposes, and inside the
+               ComplianceInfo it does answer with, DriverDocument carries
+               status and expiresAt and no number of any kind. Bolt and Yango
+               write no compliance record at all. So an absence here is a fact
+               about which CHANNEL onboarded the person, never about the
+               person, and the response says so rather than leaving a page to
+               imply a missing document. */
+            emirates_id,
             c.fleet_id,
             (licence_expires - now()::date) AS days_left, state, suspension_reason, rating,
             /* IS THIS PERSON STILL DRIVING?
@@ -3816,8 +3834,17 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
             count(*) FILTER (WHERE licence_expires IS NOT NULL
                                AND $1::text IS NOT NULL
                                AND to_char(licence_expires,'YYYY-MM-DD') = $1)::int placeholder,
-            count(*) FILTER (WHERE licence_expires IS NULL)::int no_date_at_all
+            count(*) FILTER (WHERE licence_expires IS NULL)::int no_date_at_all,
+            /* Coverage for the identity number, and the channels behind it, so
+               the page states a fact about the sources rather than a count a
+               reader would read as missing paperwork. */
+            count(*) FILTER (WHERE coalesce(btrim(emirates_id), '') <> '')::int with_emirates_id
      FROM driver_compliance WHERE ($2::text IS NULL OR fleet_id = $2)`, [ph, fleet]);
+  const idBy = await q(
+    `SELECT platform, count(*) FILTER (WHERE coalesce(btrim(emirates_id), '') <> '')::int n,
+            count(*)::int of_n
+     FROM driver_compliance WHERE ($1::text IS NULL OR fleet_id = $1)
+     GROUP BY 1 HAVING count(*) > 0 ORDER BY 2 DESC`, [fleet]);
   res.json({
     drivers: rows,
     totals: t,
@@ -3827,6 +3854,18 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     placeholder_date: ph,
     placeholder_rows: placeholder ? mode.n : 0,
     rows_with_a_date: mode?.with_date ?? 0,
+    /* Which channels answer an Emirates ID and which do not, in figures. A
+       page that prints a blank identity column without this reads as a fleet
+       that lost its paperwork. */
+    emirates_id_by_platform: idBy,
+    emirates_id_caveat: (t?.with_emirates_id ?? 0) > 0
+      ? `${t.with_emirates_id} of ${t.total} people carry an Emirates ID. Every one of them `
+        + `comes from the ${idBy.filter((r) => r.n > 0).map((r) => r.platform).join(', ')} `
+        + 'channel, which is the only one that reports one. Uber names the field absent on '
+        + 'every type it exposes, and Bolt and Yango file no compliance record at all, so a '
+        + 'blank here is about which channel onboarded the person, not about their documents.'
+      : 'No channel on this fleet reports an Emirates ID, so this column is empty for '
+        + 'everyone — an absence about the sources, not about the drivers.',
     caveat: placeholder
       ? `${mode.n} of ${mode.with_date} licence dates are the identical value `
         + `${mode.licence_expires}, which is what this source writes when the field `

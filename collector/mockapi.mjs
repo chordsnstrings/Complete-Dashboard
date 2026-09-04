@@ -360,7 +360,8 @@ app.get('/api/compliance/vehicles', (_, r) => {
     shown: rows.length, truncated: true });
 });
 app.get('/api/compliance/drivers', (_, r) => r.json({
-  totals: { total: 148, with_date: 96, expired: 2, within_45: 5, no_date_at_all: 52 },
+  totals: { total: 148, with_date: 96, expired: 2, within_45: 5, no_date_at_all: 52,
+    with_emirates_id: 6 },
   shown: 8, truncated: false,
   drivers: [
     // Six rows carrying the identical placeholder the source writes when the
@@ -372,6 +373,11 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
          absent case renders as well as the present one. */
       email: i === 4 ? null : `${String(drivers[i]).toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`,
       picture_url: i > 3 ? null : `https://d1w2poirtb3as9.cloudfront.net/mock-${i}.jpg`,
+      /* The one government identity number this fleet holds. Only the hotel
+         channel reports it, so the bolt row below has none and one hotel row
+         is left blank too — a channel that answers for most of its people can
+         still miss one, and the column must render both. */
+      emirates_id: i === 3 ? null : `784-198${i}-${1000000 + i * 137}-${i % 10}`,
       licence_expires: '2026-01-01', days_left: -232, state: 'active',
       /* Not expired — never entered. The directory counted all 77 of these into
          "77 with an expired licence" and painted red pills, while this endpoint
@@ -391,12 +397,16 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
       vehicle: { plate: plates[i % plates.length], day: '2026-08-21' } })),
     { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', phone: '+9715000001',
       email: null, picture_url: null,
+      /* Bolt files no compliance record at all upstream, so this is null and
+         the dash must read as a fact about the channel. */
+      emirates_id: null,
       licence_no: 'AE1802580', licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
       fleet_id: 'egari', licence_placeholder: false,
       suspension_reason: 'documents under review', rating: 4.71,
       vehicle: { plate: plates[2], day: '2026-08-19' } },
     { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', phone: null,
       email: null, picture_url: null,
+      emirates_id: '784-1990-7766554-2',
       licence_no: 'AE9911', licence_expires: '2026-08-01', days_left: -20, state: 'active',
       fleet_id: 'ecosine', licence_placeholder: false,
       suspension_reason: null, rating: null,
@@ -404,6 +414,12 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
       vehicle: null },
   ],
   fleet: null, placeholder_date: '2026-01-01', placeholder_rows: 6, rows_with_a_date: 8,
+  emirates_id_by_platform: [{ platform: 'hotel', n: 6, of_n: 7 },
+    { platform: 'bolt', n: 0, of_n: 1 }],
+  emirates_id_caveat: '6 of 148 people carry an Emirates ID. Every one of them comes from the '
+    + 'hotel channel, which is the only one that reports one. Uber names the field absent on every '
+    + 'type it exposes, and Bolt and Yango file no compliance record at all, so a blank here is '
+    + 'about which channel onboarded the person, not about their documents.',
   caveat: '6 of 8 licence dates are the identical value 2026-01-01, which is what this source writes '
     + 'when the field was never filled in. They are a data-quality problem, not expired licences, and '
     + 'are counted separately below rather than as people who must stand down.',

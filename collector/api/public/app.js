@@ -3977,6 +3977,9 @@ V.compliance = async (root) => {
   ].map(([l, n, d, cls]) => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
 
   if (drvPage.caveat) root.append(note(drvPage.caveat));
+  /* Said once, above the table, so the Emirates ID column's dashes read as a
+     statement about the channels rather than as missing paperwork. */
+  if (drvPage.emirates_id_caveat) root.append(note(drvPage.emirates_id_caveat));
 
   // The data holds registration only; naming three document types implied a
   // completeness this page does not have.
@@ -4064,7 +4067,33 @@ V.compliance = async (root) => {
       render: (r) => (r.phone ? `<span class="plate">${esc(r.phone)}</span>`
         : '<span class="ent-off" title="this platform publishes no phone number">—</span>') },
     { label: 'Platform', key: 'platform', render: (r) => esc(sourceLabel(r.platform)) },
-    { label: 'Licence', key: 'licence_no', render: (r) => `<span class="plate">${esc(r.licence_no || '—')}</span>` },
+    { label: 'Licence', key: 'licence_no',
+      /* An em-dash with nothing behind it read as a licence nobody had filed.
+         The licence NUMBER comes from the same record as the expiry, so a
+         blank one is the same fact the Expires column is already saying. */
+      render: (r) => (r.licence_no ? `<span class="plate">${esc(r.licence_no)}</span>`
+        : '<span class="ent-off" title="this channel publishes no licence number">—</span>') },
+    /* The one government identity number this fleet holds.
+       ─────────────────────────────────────────────────────────────────────
+       132 of the roster carry a real Emirates ID and this page — whose whole
+       subject is driver documents — never showed one, because the endpoint
+       did not select the column. The only place it had ever appeared was the
+       desktop driver profile, one person at a time.
+
+       A blank is a fact about the CHANNEL, not the person: the hotel channel
+       is the only one that reports an identity number at all. Uber names
+       emiratesId, nationalId, passportNumber and licenseNumber absent on
+       every type it exposes — probed 2026-09-04 — and the ComplianceInfo it
+       does answer with carries a document's status and expiry and no number
+       of any kind. Bolt and Yango file no compliance record. So the title
+       says which channel would have had to supply it rather than leaving the
+       dash to imply missing paperwork. */
+    { label: 'Emirates ID', key: 'emirates_id',
+      render: (r) => (r.emirates_id
+        ? `<span class="plate">${esc(r.emirates_id)}</span>`
+        : `<span class="ent-off" title="${esc(sourceLabel(r.platform))} reports no identity `
+          + 'number — only the hotel channel does, so this is about which channel onboarded '
+          + 'this person and not about their documents">—</span>') },
     { label: 'Expires', key: 'licence_expires', render: (r) => {
       const d = String(r.licence_expires || '').slice(0, 10);
       if (!d) return '<span class="ent-off" title="this platform publishes no expiry date for the licence">—</span>';
