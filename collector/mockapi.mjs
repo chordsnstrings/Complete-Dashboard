@@ -223,6 +223,9 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
   /* accounted is the best figure PER PLATFORM summed, so it is not fares plus
      payouts: yango reports both here and is counted on its payout only. */
   accounted: 237366, accounted_fares: 41188, accounted_payouts: 196178,
+  /* Coverage is over the bookings that COULD carry a fare — a ride nobody
+     took has none and never will. See platformFares. */
+  chargeable_bookings: 1737, uncharged_bookings: 306,
   /* The fare half's own denominator — see fleetIncome. Not the fleet's
      priced_bookings, because a channel that prices every booking can still be
      counted on its payout. */
@@ -1559,8 +1562,11 @@ app.get('/api/vehicle/movement', (req, r) => {
 app.get('/api/vehicle/earnings', (req, r) => {
   const i = pIndex(req.query.plate);
   const byPlatform = [
-    { platform: 'uber', bookings: 240 + i, priced_bookings: 0, fares: null, km: 3400 },
-    { platform: 'hotel', bookings: 12, priced_bookings: 11, fares: 612.5, km: 190 },
+    /* An Uber row whose week the payments walk has not reached: chargeable
+       counts the rides that could carry a fare, priced counts none of them. */
+    { platform: 'uber', bookings: 240 + i, priced_bookings: 0,
+      chargeable_bookings: 212 + i, uncharged_bookings: 28, fares: null, km: 3400 },
+    { platform: 'hotel', bookings: 12, priced_bookings: 11, chargeable_bookings: 11, uncharged_bookings: 1, fares: 612.5, km: 190 },
   ];
   const attributed = [
     { platform: 'uber', driver_ext_id: `drv-${i}`, driver_name: drivers[i],
@@ -2223,7 +2229,7 @@ app.get('/api/revenue', (_, r) => {
       collection_error: 'FI roster ecosine: code=503 NOT_AUTHORIZED hint=COMPANIES_NOT_ALLOWED' },
   };
   const platforms = [
-    { platform: 'uber', bookings: 6142, priced_bookings: 0, fares: null, priced_km: null,
+    { platform: 'uber', bookings: 6142, priced_bookings: 0, chargeable_bookings: 4422, uncharged_bookings: 1720, fares: null, priced_km: null,
       km: 78400, drivers: 61, vehicles: 74, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 0, revenue_per_km: null,
       per_km_basis: null, per_km_km: null,
@@ -2234,7 +2240,7 @@ app.get('/api/revenue', (_, r) => {
       statement_net: 61200, statement_gross: 78400, statement_fees: 17200, statement_tips: 610,
       statement_salik: 2400, statement_cash: 12400, statement_bank: 46200, statement_days: 31,
       statement_drivers: 58 },
-    { platform: 'hotel', bookings: 1267, priced_bookings: 1267, fares: 61400, priced_km: 15600,
+    { platform: 'hotel', bookings: 1267, priced_bookings: 1267, chargeable_bookings: 1267, uncharged_bookings: 0, fares: 61400, priced_km: 15600,
       km: 15600, drivers: 22, vehicles: 31, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 100, revenue_per_km: 3.94,
       per_km_basis: 'fares', per_km_km: 15600,
@@ -2253,7 +2259,7 @@ app.get('/api/revenue', (_, r) => {
        is UNDER-COVERED (it is inside `undercovered_bookings`), and it must
        never be inside `dark_bookings`. The fixture had no partial_payout row
        at all, so neither branch of that split was reachable from the mock. */
-    { platform: 'yango', bookings: 214, priced_bookings: 96, fares: 4180, priced_km: 1180,
+    { platform: 'yango', bookings: 214, priced_bookings: 96, chargeable_bookings: 154, uncharged_bookings: 60, fares: 4180, priced_km: 1180,
       km: 2640, drivers: 9, vehicles: 11, payouts: 3210, cash: 640, payout_periods: 12,
       components: null, tips: null, fare_coverage_pct: 44.9, revenue_per_km: 1.22,
       per_km_basis: 'payout', per_km_km: 2640,
@@ -2269,7 +2275,7 @@ app.get('/api/revenue', (_, r) => {
       statement_net: 3400, statement_gross: 4250, statement_fees: 850, statement_tips: 60,
       statement_salik: 40, statement_cash: 480, statement_bank: 3020, statement_days: 17,
       statement_drivers: 9 },
-    { platform: 'bolt', bookings: 618, priced_bookings: 121, fares: 5100, priced_km: 1490,
+    { platform: 'bolt', bookings: 618, priced_bookings: 121, chargeable_bookings: 445, uncharged_bookings: 173, fares: 5100, priced_km: 1490,
       km: 7300, drivers: 14, vehicles: 18, payouts: null, cash: null, payout_periods: 0,
       components: null, tips: null, fare_coverage_pct: 19.6, revenue_per_km: 3.42,
       first_at: dayISO(30), last_at: dayISO(0), best: 5100, payout_drivers: 0,
@@ -2297,7 +2303,7 @@ app.get('/api/revenue', (_, r) => {
        them; the shape check only compares top-level keys, so a fixture whose
        `totals` lacked half of them stayed green while the page fell to its
        fallback text. */
-    totals: { bookings: 8241, priced_bookings: 1484, fares: 70680, payouts: 3210, cash: 640,
+    totals: { bookings: 8241, priced_bookings: 1484, chargeable_bookings: 5934, uncharged_bookings: 2307, fares: 70680, payouts: 3210, cash: 640,
       statement_net: 78800, statement_cash: 12880, statement_bank: 63420,
       tips: 1840,
       accounted: 69710, accounted_fares: 66500, accounted_payouts: 3210, accounted_fare_bookings: 812,
@@ -3803,6 +3809,12 @@ app.get('/api/trips/list', (req, r) => {
     rows: page, total: rows.length, shown: page.length, offset, limit,
     truncated: offset + page.length < rows.length,
     window: { from: dayISO(30).slice(0, 10), to: dayISO(0).slice(0, 10) },
+    /* Two reasons a fare cell is empty and they are not the same fact: a
+       cancellation that charged nothing never will have one, and a completed
+       ride without one is a week the payments walk has not reached. */
+    completed: rows.filter((r) => r.outcome === 'completed').length,
+    unpriced_cancelled: rows.filter((r) => !r.has_fare && r.outcome !== 'completed').length,
+    unpriced_completed: rows.filter((r) => !r.has_fare && r.outcome === 'completed').length,
     priced: page.filter((x) => x.has_fare).length,
     note: 'One row per booking. A price appears only where the channel publishes one — the Uber '
       + 'trip export carries no fare column at all.',
@@ -4590,6 +4602,7 @@ app.get('/api/economics/assets', (_, r) => {
     rows: uAssets,
     by_platform: [
       { platform: 'uber', bookings: Math.round(bookings * 0.92), priced_bookings: 0, booking_days: 30,
+        chargeable_bookings: Math.round(bookings * 0.82), uncharged_bookings: Math.round(bookings * 0.10),
         fares: null, km: Math.round(km * 0.94), payouts: sum((x) => x.payouts), payout_days: 30,
         vehicles: 6, basis: 'payout',
         basis_note: 'net payout, after the platform commission — this channel reports no fare at all',
@@ -4598,6 +4611,7 @@ app.get('/api/economics/assets', (_, r) => {
         payout_coverage_base: 30 },
       { platform: 'hotel', bookings: Math.round(bookings * 0.08),
         priced_bookings: Math.round(bookings * 0.08), booking_days: 22, fares: sum((x) => x.fares),
+        chargeable_bookings: Math.round(bookings * 0.08), uncharged_bookings: 0,
         km: Math.round(km * 0.06), payouts: null, payout_days: 0, vehicles: 3, basis: 'fares',
         basis_note: 'fares reported on every booking', money: sum((x) => x.fares), aed_per_km: 9.42,
         best: sum((x) => x.fares), fare_coverage_pct: 100, payout_coverage_pct: null,

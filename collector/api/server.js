@@ -750,13 +750,28 @@ app.get('/api/trips/list', wrap(async (req, res) => {
     rows, total, shown: rows.length, offset, limit,
     truncated: offset + rows.length < total,
     window: { from: p[0], to: p[1] },
-    /* The fare column is empty for most of this fleet and the reason is not
-       the fleet's: Uber publishes no per-trip price. Said here so a page
-       rendering a column of dashes can explain itself. */
+    /* Why a fare cell is empty, counted from the rows in hand rather than
+       asserted about the provider.
+       ─────────────────────────────────────────────────────────────────────
+       This note said "the Uber trip export carries no fare column at all, so
+       most rows here show none and that is the provider, not a gap in
+       collection" — in the same response that returns 369 priced Uber rows out
+       of 400. Uber does publish a per-trip fare, in its payments report, and
+       on any week the collector's walk has reached the product holds it for
+       100% of completed rides.
+
+       There are now two reasons a cell is empty and they are not the same
+       fact: the ride was cancelled and charged nothing, which is the correct
+       answer and will never change; or its week has not been collected yet,
+       which will. Counted separately so a page can say which. */
     priced: rows.filter((r) => r.has_fare).length,
-    note: 'One row per booking. A price appears only where the channel publishes one — the Uber '
-      + 'trip export carries no fare column at all, so most rows here show none and that is the '
-      + 'provider, not a gap in collection.',
+    completed: rows.filter((r) => r.outcome === 'completed').length,
+    unpriced_cancelled: rows.filter((r) => !r.has_fare && r.outcome !== 'completed').length,
+    unpriced_completed: rows.filter((r) => !r.has_fare && r.outcome === 'completed').length,
+    note: 'One row per booking. A price appears only where the channel publishes one. A cancelled '
+      + 'ride that charged nothing has no fare and never will; a completed ride with no fare is a '
+      + 'week the provider’s separate payments report has not been collected for yet — Uber files '
+      + 'its fares there rather than on the trip, and the collector walks it a week at a time.',
   });
 }));
 

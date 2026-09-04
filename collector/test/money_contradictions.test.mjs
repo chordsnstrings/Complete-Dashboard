@@ -122,10 +122,20 @@ const absent = [
 const tAbsent = fleetIncome(absent, 31);
 check('a channel with no figure at all is still dark',
   absent[0].basis === 'none' && tAbsent.dark_bookings >= 618, `dark=${tAbsent.dark_bookings}`);
-check('…and so is a channel pricing 80 of its 400 bookings',
-  absent[1].basis === 'partial_fares' && tAbsent.dark_bookings === 1018
+/* 938, not 1018. A partial_fares channel contributes only the bookings
+   NOTHING priced — 400 less the 80 that carry a fare — which is the rule the
+   comment above dark_bookings had described all along while the code counted
+   every booking on the channel. Measured on production over 365 days before
+   the fix: the tile read "Bookings with no money value 27,463" in critical
+   tone while 10,751 of those same Bolt bookings carried a fare the tile four
+   places to its left was counting as income. */
+check('…and so are the 320 of a partial channel’s 400 that nothing priced',
+  absent[1].basis === 'partial_fares' && tAbsent.dark_bookings === 938
   && tAbsent.undercovered_bookings === 0,
   `dark=${tAbsent.dark_bookings} undercovered=${tAbsent.undercovered_bookings}`);
+check('…and the 80 it DID price are not called money-less and income at once',
+  tAbsent.dark_bookings === 618 + (400 - 80) && tAbsent.accounted_fares === 5100,
+  `dark=${tAbsent.dark_bookings} fares=${tAbsent.accounted_fares}`);
 
 /* The July window, where the same channel clears 80% coverage, goes to basis
    `payout`, and is neither dark nor under-covered. The split has to be a

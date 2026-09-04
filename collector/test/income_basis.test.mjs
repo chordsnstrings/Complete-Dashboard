@@ -87,6 +87,38 @@ const nothing = chooseBasis(row({ platform: 'bolt', bookings: 0, booking_days: 0
 check('a channel with no bookings still blames the credential, not the money',
   nothing.basis === 'none' && /not entitled/.test(nothing.basis_note), nothing.basis_note);
 
+console.log('\ncoverage is over the bookings that could carry a fare');
+
+/* A ride nobody took has no fare and never will, so counting it as missing
+   coverage describes a collection hole that does not exist. Measured on
+   production for August 2026: Bolt priced 312 of its 313 COMPLETED rides —
+   99.7% — and the product reported 63.8% and filed the channel under
+   partial_fares, the same bucket as a channel reporting no money at all. */
+const bolt = chooseBasis(row({ platform: 'bolt', bookings: 560, chargeable_bookings: 313,
+  uncharged_bookings: 247, priced_bookings: 312, fares: 21340.4, booking_days: 31 }), 31);
+check('a channel that prices every ride it completed reads as covered',
+  bolt.fare_coverage_pct === 99.7, String(bolt.fare_coverage_pct));
+check('…and is counted on its fares rather than filed as partial',
+  bolt.basis === 'fares', `${bolt.basis} — 99.7% is not a partial channel`);
+check('the rides that were cancelled and charged nothing get their own count',
+  bolt.uncharged_bookings === 247 && bolt.chargeable_bookings === 313,
+  `${bolt.uncharged_bookings} / ${bolt.chargeable_bookings}`);
+
+/* A cancellation that DID charge a fee is chargeable and priced, so it counts
+   in both halves — the rule is about the fare existing, not the outcome. */
+const withFees = chooseBasis(row({ platform: 'bolt', bookings: 100, chargeable_bookings: 60,
+  uncharged_bookings: 40, priced_bookings: 60, fares: 3000, booking_days: 30 }), 30);
+check('a cancellation fee counts on both sides of the ratio, not one',
+  withFees.fare_coverage_pct === 100, String(withFees.fare_coverage_pct));
+
+/* And a row from a caller that has not been taught the finer denominator
+   divides the way it always did, rather than by undefined. */
+const old = chooseBasis(row({ platform: 'careem', bookings: 400, priced_bookings: 80,
+  fares: 5100, booking_days: 31 }), 31);
+check('a row with no chargeable count falls back to every booking',
+  old.fare_coverage_pct === 20 && old.basis === 'partial_fares',
+  `${old.fare_coverage_pct} / ${old.basis}`);
+
 console.log('\nthe fleet total, and the halves it names');
 
 const rows = [

@@ -33,6 +33,23 @@ export const platformFares = (windowPredicate) => `
   SELECT platform,
          count(*)::int bookings,
          count(*) FILTER (WHERE has_fare)::int priced_bookings,
+         /* The bookings that COULD carry a fare, which is not all of them.
+            ─────────────────────────────────────────────────────────────────
+            A ride nobody took has no fare and never will. Counting it as
+            missing coverage is how Bolt came to read 63.8% covered on a month
+            where it priced 312 of its 313 completed rides — 99.7% — and was
+            filed under partial_fares beside a channel that reports no money
+            at all. Measured on production 2026-08: hotel 100.0% of completed,
+            yango 100.0%, bolt 99.7%, and Uber 100.0% on any week its payments
+            walk has reached.
+
+            A cancellation that DID charge a fee is a booking that could carry
+            a fare and did, so it counts in both halves — the filter is on the
+            fare existing, not on the outcome. */
+         count(*) FILTER (WHERE outcome = 'completed' OR has_fare)::int chargeable_bookings,
+         /* And the rides that were cancelled and charged nothing, reported as
+            their own number rather than folded into a coverage shortfall. */
+         count(*) FILTER (WHERE outcome <> 'completed' AND NOT has_fare)::int uncharged_bookings,
          round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
          /* The days this channel actually worked inside the window. This is the
             denominator payout coverage needs — see coverage() below. */
@@ -111,9 +128,18 @@ export const platformStatements = () => `
 
 export function coverage(r, windowDays) {
   const base = r.booking_days > 0 ? r.booking_days : windowDays;
+  /* Over the bookings that could carry a fare, not over every offer. See
+     platformFares. Falls back to `bookings` for a caller that has not been
+     taught the finer denominator yet, so an old row reads as it always did
+     rather than dividing by undefined. */
+  const chargeable = r.chargeable_bookings ?? r.bookings;
   return {
-    fare_coverage_pct: r.bookings
-      ? Math.round((r.priced_bookings / r.bookings) * 1000) / 10 : null,
+    fare_coverage_pct: chargeable
+      ? Math.round((r.priced_bookings / chargeable) * 1000) / 10 : null,
+    /* Stated beside the percentage, because a reader who sees 99.7% is owed
+       the count it was taken over and the count that was left out of it. */
+    chargeable_bookings: chargeable,
+    uncharged_bookings: r.uncharged_bookings ?? null,
     payout_coverage_pct: r.payout_days
       ? Math.round((Math.min(r.payout_days, base) / base) * 1000) / 10 : null,
     payout_coverage_days: r.payout_days ? Math.min(r.payout_days, base) : null,
@@ -210,6 +236,14 @@ export function chooseBasis(r, windowDays) {
   return r;
 }
 
+/* The bookings a channel reports no money for. A `none` channel has no figure
+   at all, so every booking of its is dark; a partial_fares channel has priced
+   some of them, and only the rest are. See dark_bookings below. */
+const darkOf = (rows, n) => rows.reduce(
+  (a, r) => a + (r.basis === 'partial_fares'
+    ? Math.max(0, n(r.bookings) - n(r.priced_bookings))
+    : n(r.bookings)), 0);
+
 /* The fleet's income: the best figure per platform, summed, with the parts it
    is made of named. `rows` are platform rows already carrying bookings,
    priced_bookings, fares, payouts and payout_days. */
@@ -277,9 +311,23 @@ export function fleetIncome(rows, windowDays) {
       .map((r) => r.statement_net)) || null,
     statement_platforms: rows.filter((r) => r.statement_net != null)
       .map((r) => r.platform).sort(),
-    dark_bookings: darkRows.reduce((a, r) => a + n(r.bookings), 0),
-    dark_pct: bookings
-      ? Math.round((darkRows.reduce((a, r) => a + n(r.bookings), 0) / bookings) * 1000) / 10 : null,
+    /* DARK is the bookings with no money, not the channels with some.
+       ─────────────────────────────────────────────────────────────────────
+       This counted every booking on a partial_fares channel, including the
+       ones that carry a fare — which is the same double-description this file
+       already fixed once for partial_payout, and which its own comment above
+       already describes the right rule for: "a partial_fares channel's
+       UNPRICED bookings are money nothing reports". Measured on production
+       over 365 days, /api/revenue: the tile read "Bookings with no money
+       value 27,463, 10.5% of the window" in critical tone while 10,751 of
+       those same Bolt bookings carried a fare the tile four places to its left
+       was counting as income.
+
+       A `none` channel contributes all of its bookings, because it has no
+       figure of any kind. A partial_fares channel contributes only the ones
+       nothing priced. */
+    dark_bookings: darkOf(darkRows, n),
+    dark_pct: bookings ? Math.round((darkOf(darkRows, n) / bookings) * 1000) / 10 : null,
     /* The other half of the split: bookings on a channel we DO hold money for,
        where that money covers only part of the days the channel worked. Not
        dark — counted in `accounted` and in accounted_bookings — but not fully
