@@ -26,6 +26,19 @@
    test/consistency.test.mjs is what caught the drift and now requires they
    agree. */
 
+/* Which channels take a cut, and which invoice and keep it.
+   ─────────────────────────────────────────────────────────────────────────
+   Not derivable from the rows: a marketplace that does not publish its
+   commission looks, in the data, exactly like a channel that takes none. It
+   is a fact about the business and it is named rather than inferred.
+
+   Uber's is measured at exactly 25% on every priced trip. Yango's is filed as
+   price_platform_commission, around 23%, and is subtracted at collection.
+   Bolt's is real and this fleet has no surface that reports it — which is
+   precisely why the sentence must not claim otherwise. The hotel channel
+   bills the property and keeps the invoice. */
+export const COMMISSION_CHANNELS = new Set(['uber', 'bolt', 'yango', 'careem']);
+
 /* "did this ride complete", for a query that reads `trip` rather than the view.
    ─────────────────────────────────────────────────────────────────────────
    trip_norm derives `outcome` (sql/schema_v18.sql) and several hot queries
@@ -222,9 +235,22 @@ export function chooseBasis(r, windowDays) {
   } else if (r.priced_bookings && r.fare_coverage_pct >= 80) {
     r.basis = 'fares';
     r.best = r.fares;
-    r.basis_note = `fares reported on ${r.priced_bookings} of ${r.bookings} bookings, `
-      + 'and this channel reports no payout covering the window — nothing takes a '
-      + 'commission out of this money between the booking and the bank';
+    /* "nothing takes a commission out of this money" is a claim about the
+       CHANNEL, and it was made from the absence of a payout row. It is true of
+       the hotel desk, which invoices the property and keeps what it bills. It
+       is false of a marketplace that simply does not publish its cut — and
+       Bolt reached this branch the moment fare coverage was measured over the
+       rides that could carry a fare rather than over every offer, taking AED
+       647,558 of 365-day fares with it. What the product knows is which kind
+       of channel this is; what it does not know is Bolt's rate. Both are said,
+       and neither is guessed. */
+    r.basis_note = `fares reported on ${r.priced_bookings} of ${r.chargeable_bookings ?? r.bookings} `
+      + `bookings that could `
+      + `carry one, and this channel reports no payout covering the window — `
+      + (COMMISSION_CHANNELS.has(r.platform)
+        ? 'so this is the GROSS the rider was charged, and the commission this channel takes '
+          + 'out of it before the fleet is paid is not published to us'
+        : 'and nothing takes a commission out of this money between the booking and the bank');
   } else if (r.payouts != null) {
     /* The payout is real and covers a fraction of the window. Reporting it as
        the channel's revenue would understate the month by however much of it

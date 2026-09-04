@@ -104,6 +104,20 @@ check('the rides that were cancelled and charged nothing get their own count',
   bolt.uncharged_bookings === 247 && bolt.chargeable_bookings === 313,
   `${bolt.uncharged_bookings} / ${bolt.chargeable_bookings}`);
 
+/* And what the note may claim once a marketplace reaches this branch. Bolt
+   got here the moment coverage was measured properly, taking AED 647,558 of
+   365-day fares with it — under a sentence saying nothing takes a commission
+   out of the money, about a channel whose commission this fleet has no surface
+   for. What the product knows is which KIND of channel it is. */
+check('a marketplace on a fares basis is not told it keeps the whole fare',
+  /GROSS the rider was charged/.test(bolt.basis_note)
+  && /not published to us/.test(bolt.basis_note), bolt.basis_note);
+check('…while the channel that invoices and keeps it still says so',
+  /nothing takes a commission/.test(hotel.basis_note), hotel.basis_note);
+check('and the note counts over the chargeable bookings, not every offer',
+  /312 of 313 bookings/.test(bolt.basis_note), bolt.basis_note);
+
+
 /* A cancellation that DID charge a fee is chargeable and priced, so it counts
    in both halves — the rule is about the fare existing, not the outcome. */
 const withFees = chooseBasis(row({ platform: 'bolt', bookings: 100, chargeable_bookings: 60,
