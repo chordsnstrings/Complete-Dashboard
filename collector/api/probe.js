@@ -284,6 +284,28 @@ const CONTACT_SUBFIELDS = [
   ['user', 'name', ' { given }'], ['user', 'name', ' { family }'],
 ];
 
+/* ── the number itself ────────────────────────────────────────────────────
+   PhoneNumber.countryCode is real and answers "+971" — a dialling code, not a
+   number. nationalNumber and countryIso2 came back with the bare "Invalid
+   GraphQL query" that this file's NEAR_MISS_CONTROL exists to interpret: on
+   this gateway that string is what a near-miss produces, so it is ambiguous
+   rather than a no. The way to settle an ambiguous field is to ask for it
+   BESIDE a field known to be real — if the pair answers, both exist. */
+const CONTACT_PAIRS = [
+  ['user', 'phone', ' { countryCode nationalNumber }'],
+  ['user', 'phone', ' { countryCode countryIso2 }'],
+  ['user', 'phone', ' { countryCode national }'],
+  ['user', 'phone', ' { countryCode subscriber }'],
+  ['user', 'phone', ' { countryCode value }'],
+  ['user', 'phone', ' { countryCode rawNumber }'],
+  ['user', 'phone', ' { countryCode numberString }'],
+  ['user', 'phone', ' { countryCode phone }'],
+  ['user', 'name', ' { firstName lastName fullName }'],
+  /* And the whole selection this collector would actually send, so the answer
+     is the shape that would ship rather than a field at a time. */
+  ['user', 'phone', ' { countryCode nationalNumber countryIso2 }'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -796,7 +818,8 @@ export function probeRoutes(app, { wrap }) {
     /* WHICH fixed list, never which field. The caller picks a set by name and
        the names in it are all in this file, so this stays what the header
        promises: not an open GraphQL proxy onto the fleet's session. */
-    const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS, subfields: CONTACT_SUBFIELDS };
+    const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
+      subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {
