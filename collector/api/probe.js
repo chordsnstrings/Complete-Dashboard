@@ -386,6 +386,44 @@ const COMPLIANCE_SUB = [
   ['driver', 'complianceInfo', ' { status zzNotARealFieldQx }'],
 ];
 
+/* ── inside complianceInfo.documents ─────────────────────────────────────
+   The round above was decisive about ComplianceInfo: its control
+   (zzNotARealFieldQx) came back NAMED absent, so this type does not scrub, and
+   nine of the ten candidates were named absent for real. One was not.
+   `{ status documents }` answered "Invalid GraphQL query" — the generic
+   refusal — and on a type that demonstrably names what it does not have, a
+   generic refusal is the OTHER signature: a field of object type asked without
+   a sub-selection. It is the identical answer `driver.complianceInfo` itself
+   gives when asked bare, which the control records, and complianceInfo is
+   real.
+
+   So `documents` is asked properly here — with a selection — and the round
+   opens with `{ __typename }`, which every object type answers and no scalar
+   does. If that answers, `documents` exists and the following candidates are
+   asked inside it; if it refuses generically as well, `documents` is a scalar
+   or does not exist and nothing below can be read as evidence either way.
+
+   The pair rule still applies: `status` rides along as the known-real sibling,
+   and zzNotARealFieldQx is the control for this level. */
+const COMPLIANCE_DOCS = [
+  ['driver', 'complianceInfo', ' { status documents { __typename } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename zzNotARealFieldQx } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename type } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename name } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename number } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentNumber } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename id } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename status } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename expiresAt } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename expiryDate } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename issuedAt } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename country } }'],
+  /* The two shapes an Emirates ID could take if it is here at all: a value on
+     the document, or a document TYPE the fleet could then read a number off. */
+  ['driver', 'complianceInfo', ' { status documents { __typename value } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType } }'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -905,7 +943,7 @@ export function probeRoutes(app, { wrap }) {
        promises: not an open GraphQL proxy onto the fleet's session. */
     const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
       subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST,
-      identity: IDENTITY_FIELDS, compliance: COMPLIANCE_SUB };
+      identity: IDENTITY_FIELDS, compliance: COMPLIANCE_SUB, documents: COMPLIANCE_DOCS };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {
