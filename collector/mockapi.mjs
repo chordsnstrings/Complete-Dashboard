@@ -3844,17 +3844,43 @@ app.get('/api/reconcile/periods', (req, r) => {
     mk('2026-08-28', '2026-09-03', 7, 'ecosine', 51992.44, 14877.63, 162),
   ].filter((x) => x.period_end >= from && x.period_start <= to)
     .filter((x) => !req.query.fleet || x.fleet_id === req.query.fleet);
+  /* The same money at a second grain, which is what production actually sends:
+     Uber's supplier surface reports a per-DAY breakdown AND a per-WEEK
+     statement over the same drivers and days. A fixture with one grain cannot
+     exercise the branch that refuses to add them — and adding them is what
+     produced AED 832,911 against a bank month of AED 440,445. */
+  const daily = [];
+  for (const wk of rows.filter((x) => x.period_days === 7)) {
+    for (let i = 0; i < 7; i++) {
+      const day = new Date(Date.parse(wk.period_start) + i * 864e5).toISOString().slice(0, 10);
+      daily.push({ platform: 'uber', fleet_id: wk.fleet_id, period_start: day, period_end: day,
+        period_days: 1, drivers: Math.round(wk.drivers * 0.34),
+        net: +(wk.net / 7 * 1.06).toFixed(2), cash: +(wk.cash / 7).toFixed(2),
+        whole: day >= from && day <= to });
+    }
+  }
+  const all = [...rows, ...daily].filter((x) => x.period_end >= from && x.period_start <= to);
   const sum = (k, list) => +list.reduce((a, x) => a + (x[k] || 0), 0).toFixed(2);
-  const whole = rows.filter((x) => x.whole);
-  r.json({ rows,
-    totals: { net: sum('net', rows), cash: sum('cash', rows), periods: rows.length,
+  const byGrain = [...new Set(all.map((x) => x.period_days))].sort((a, b) => a - b);
+  const finest = byGrain[0];
+  const inGrain = all.filter((x) => x.period_days === finest);
+  const whole = inGrain.filter((x) => x.whole);
+  r.json({ rows: all,
+    grains: byGrain.map((g) => ({ period_days: g,
+      periods: all.filter((x) => x.period_days === g).length,
+      net: sum('net', all.filter((x) => x.period_days === g)) })),
+    finest_grain: finest,
+    totals: { net: sum('net', inGrain), periods: inGrain.length,
       net_whole_periods: sum('net', whole), whole_periods: whole.length,
-      cut_periods: rows.length - whole.length },
+      cut_periods: inGrain.length - whole.length,
+      all_grains_net: sum('net', all) },
     window: { from, to },
     platform: req.query.platform || null, fleet: req.query.fleet || null,
     note: 'period_earnings is the provider\u2019s own figure for the whole window, taken once '
-      + 'per driver and period rather than summed across the days it was spread over. Rows with '
-      + 'whole=false are cut by the window edge and cannot be matched against a bank line.' });
+      + 'per driver and period rather than summed across the days it was spread over. This '
+      + 'provider reports the same money at more than one grain, so the totals cover the FINEST '
+      + 'grain only \u2014 all_grains_net adds every row and is not a figure any bank statement '
+      + 'will match. Rows with whole=false are cut by the window edge.' });
 });
 app.get('/api/finance/daily', (req, r) => {
   /* Money per day, with the shape BOTH defects lived in.

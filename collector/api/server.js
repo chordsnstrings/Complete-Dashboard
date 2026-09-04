@@ -2227,22 +2227,56 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
       GROUP BY 1, 2, 3, 4
       ORDER BY period_start, platform, fleet_id`, [from, to, platform, fleet]);
   const n = (v) => (v == null ? 0 : Number(v));
-  const whole = rows.filter((r) => r.whole);
+  /* GRAINS DO NOT ADD, and the first version of this route added them.
+     ────────────────────────────────────────────────────────────────────────
+     Uber's supplier GraphQL surface reports the same money twice: a per-DAY
+     breakdown and a per-WEEK statement covering the same drivers and the same
+     days. driver_payout_day resolves that per driver-day by taking the
+     shortest period, so no day is counted twice there — but a route that
+     groups by period and sums every row puts both grains in one total.
+     Measured against the August 2026 bank statements, that total came to AED
+     832,911 over a window whose bank credits were AED 440,445.
+
+     So the rows are split by grain and only ONE grain is totalled: the finest
+     one present, which is the one driver_payout_day itself prefers and — on
+     the August statements — the one that reconciles. The other grain is
+     returned beside it, never added to it, because a caller looking at a
+     discrepancy needs to see both figures rather than a number that is
+     neither. */
+  const byGrain = new Map();
+  for (const r of rows) {
+    const k = r.period_days;
+    if (!byGrain.has(k)) byGrain.set(k, []);
+    byGrain.get(k).push(r);
+  }
+  const grains = [...byGrain.keys()].sort((a, b) => a - b);
+  const finest = grains[0] ?? null;
+  const inGrain = finest == null ? [] : byGrain.get(finest);
+  const whole = inGrain.filter((r) => r.whole);
   res.json({ rows,
+    /* What each grain says on its own, so the two can be compared rather than
+       silently combined. */
+    grains: grains.map((g) => ({ period_days: g, periods: byGrain.get(g).length,
+      net: +byGrain.get(g).reduce((a, r) => a + n(r.net), 0).toFixed(2) })),
+    finest_grain: finest,
     totals: {
-      net: +rows.reduce((a, r) => a + n(r.net), 0).toFixed(2),
-      cash: +rows.reduce((a, r) => a + n(r.cash), 0).toFixed(2),
-      periods: rows.length,
+      /* Over the finest grain ONLY. Summing every row would add the daily
+         breakdown to the weekly statement of the same days. */
+      net: +inGrain.reduce((a, r) => a + n(r.net), 0).toFixed(2),
+      periods: inGrain.length,
       /* The total a bank statement can actually be checked against: the
-         statements that fall entirely inside the window. */
+         statements at this grain that fall entirely inside the window. */
       net_whole_periods: +whole.reduce((a, r) => a + n(r.net), 0).toFixed(2),
       whole_periods: whole.length,
-      cut_periods: rows.length - whole.length,
+      cut_periods: inGrain.length - whole.length,
+      all_grains_net: +rows.reduce((a, r) => a + n(r.net), 0).toFixed(2),
     },
     window: { from, to }, platform, fleet,
     note: 'period_earnings is the provider\u2019s own figure for the whole window, taken once '
-      + 'per driver and period rather than summed across the days it was spread over. Rows with '
-      + 'whole=false are cut by the window edge and cannot be matched against a bank line.' });
+      + 'per driver and period rather than summed across the days it was spread over. This '
+      + 'provider reports the same money at more than one grain, so the totals cover the FINEST '
+      + 'grain only \u2014 all_grains_net adds every row and is not a figure any bank statement '
+      + 'will match. Rows with whole=false are cut by the window edge.' });
 }));
 
 /* ───────────────────────── unauthorized trips ───────────────────────── */

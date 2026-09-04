@@ -487,6 +487,19 @@ export async function renderReconcile(root, month) {
               + 'cut by the window</span>') },
       ], { compact: true, sortable: true, sortId: 'stmtperiods',
         defaultSort: { key: 'period_start', dir: 'desc' } }));
+      /* The provider reports the same money at more than one grain, and the
+         panel has to say which one the total is over — otherwise a reader
+         adds the two tables in their head, which is exactly the arithmetic
+         that produced AED 832,911 against a bank month of AED 440,445. */
+      if ((rp.grains || []).length > 1) {
+        sp.body.append(note(
+          `This channel reports the same money at ${countOf(rp.grains.length, 'grain')}: `
+          + rp.grains.map((g) => `${countOf(g.periods, 'period')} of `
+            + `${countOf(g.period_days, 'day')} totalling ${money(g.net)}`).join(', ')
+          + `. They describe the same drivers over the same days, so they do not add. `
+          + `Everything below is over the finest of them (${countOf(rp.finest_grain, 'day')}), `
+          + 'which is the one the payout tables themselves prefer.', 'warn'));
+      }
       sp.body.append(el('p', 'cap',
         `${countOf(rt.whole_periods || 0, 'pay period')} `
         + `${plural(rt.whole_periods || 0, 'falls', 'fall')} entirely inside this window and `
