@@ -424,6 +424,47 @@ const COMPLIANCE_DOCS = [
   ['driver', 'complianceInfo', ' { status documents { __typename documentType } }'],
 ];
 
+/* ── what KIND of document, and when it expires ──────────────────────────
+   The documents round settled the shape and found more than it went looking
+   for. driver.complianceInfo.documents is real: a list of DriverDocument, and
+   two of its fields answer outright —
+
+     status     ACTIVE / MISSING, per document
+     expiresAt  a real timestamp: 2028-02-04T19:59:59Z on this driver
+
+   — while type, name, number, documentNumber, id, issuedAt, country and value
+   are all NAMED absent, and the control on DriverDocument is named absent too,
+   so that type does not scrub either. Uber is therefore telling us that a
+   document exists, whether it is present, and when it runs out. It is not
+   telling us the number on it, which is the answer to the Emirates ID
+   question and is a No.
+
+   Two candidates came back with the generic refusal rather than a name:
+   `documentType` and `expiryDate`. On a type that names its absences that is
+   the object-needs-a-selection signature again, the same one that found
+   `documents` itself. `documentType` is the field that would say WHICH
+   document each of these rows is — and without it the expiry dates are a set
+   of dates belonging to nothing nameable, which is not usable on a compliance
+   page. So it is asked properly here.
+
+   This matters beyond the identity question. /api/compliance/drivers holds
+   289 people, 94 licence dates that are all the identical placeholder
+   2026-01-01, and 195 with no date at all — while Uber is answering real
+   per-document expiry for the same roster. */
+const COMPLIANCE_DOC_TYPE = [
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename } } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename zzNotARealFieldQx } } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename name } } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename id } } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename type } } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename key } } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename label } } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename displayName } } }'],
+  ['driver', 'complianceInfo', ' { status documents { __typename documentType { __typename description } } }'],
+  /* And the other generic one, asked the same way. */
+  ['driver', 'complianceInfo', ' { status documents { __typename expiryDate { __typename } } }'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -943,7 +984,8 @@ export function probeRoutes(app, { wrap }) {
        promises: not an open GraphQL proxy onto the fleet's session. */
     const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
       subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST,
-      identity: IDENTITY_FIELDS, compliance: COMPLIANCE_SUB, documents: COMPLIANCE_DOCS };
+      identity: IDENTITY_FIELDS, compliance: COMPLIANCE_SUB, documents: COMPLIANCE_DOCS,
+      doctype: COMPLIANCE_DOC_TYPE };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {
