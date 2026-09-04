@@ -17,7 +17,7 @@ import { barChart, gapBars, areaChart, donut, hbars, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
   custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, noneChosen, verdict, foldRows,
-  trackerState, trackerSpeed, stillNote } from './ui.js';
+  trackerState, trackerSpeed, stillNote, alertRateFigure, splitAlerts } from './ui.js';
 import { qAll, href, parseHash, currentGen, alive } from './data.js';
 import { membersOf } from './cohorts.js';
 import { dubaiDay } from './tz.js';
@@ -186,12 +186,19 @@ async function tabOverview(root, plate, prof) {
        73-day hole, so a reader widening the range watched safety improve.
        The window is on the tile now, and a window the feed was dark for reads
        "not measured" rather than an em-dash the reader has to interpret. */
-    { label: 'Harsh events', value: fmt(k.alerts),
-      sub: k.alerts_per_100km != null
-        ? `${fmt(k.alerts_per_100km, 1)} per 100 km`
-          + (k.alert_coverage?.basis ? ` · ${k.alert_coverage.basis}` : '')
-        : (k.alerts_per_100km_absent || 'no matched distance'),
-      tone: k.alerts_per_100km == null ? null : k.alerts_per_100km <= 5 ? 'good' : k.alerts_per_100km <= 15 ? 'warn' : 'critical' },
+    /* alertRateFigure, not fmt(v, 1). One alert over three thousand kilometres
+       is 0.033 per 100 km and prints as "0.0" at one decimal — the same false
+       clean sheet an unmeasured car used to show, arrived at from the other
+       side. It reads "<0.1" with the exact value in the tooltip. */
+    (() => {
+      const a = alertRateFigure(k);
+      return { label: 'Harsh events', value: fmt(k.alerts),
+        sub: a.measured
+          ? `${a.text} per 100 km`
+            + (k.alert_coverage?.basis ? ` · ${k.alert_coverage.basis}` : '')
+          : a.title,
+        tone: !a.measured ? null : a.value <= 5 ? 'good' : a.value <= 15 ? 'warn' : 'critical' };
+    })(),
     { label: 'Last fix', value: k.hours_since_fix != null ? `${fmt(k.hours_since_fix, 1)}h ago` : '—', sub: `${fmt(k.fixes)} fixes in range`,
       tone: k.hours_since_fix == null ? null : k.hours_since_fix < 1 ? 'good' : k.hours_since_fix < 24 ? 'warn' : 'critical' },
   ]));
@@ -658,31 +665,68 @@ async function tabSafety(root, plate) {
   [types.body, drv.body, line.body, recent.body].forEach(loading);
 
   const [sf, k] = await Promise.all([qAll('/api/vehicle/safety', { plate }), qAll('/api/vehicle/kpis', { plate })]);
-  const total = sf.by_type.reduce((a, r) => a + r.n, 0);
+  /* Split, not summed. See ui.js:splitAlerts — the server marks which types are
+     the tracker's own fault and this page must not count them as driving. */
+  const ev = splitAlerts(sf.by_type || []);
+  const total = ev.total;
 
   kpiHost.replaceWith(kpiRow([
     /* alert_km, not km. The events counted here happened on the days the alert
        feed was up; the vehicle's km runs to the edge of the window whether the
        feed was up or not, and "1,436 events over 12,400 km" put those two
        populations in one sentence. */
-    { label: 'Harsh events', value: fmt(total),
+    { label: 'Harsh events', value: fmt(ev.drivingN),
       sub: k.alert_km != null ? `over ${fmt(k.alert_km)} km the feed covered` : 'no matched distance' },
-    { label: 'Per 100 km',
-      value: k.alerts_per_100km != null ? fmt(k.alerts_per_100km, 1) : 'not measured',
-      /* Which days, because the number is meaningless without them: the same
-         car reads twice as safe over a window that reaches into a feed
-         outage. */
-      sub: k.alerts_per_100km != null
-        ? (k.alert_coverage?.basis || 'comparable across the fleet')
-        : (k.alerts_per_100km_absent || 'the alert feed covered none of this window'),
-      tone: k.alerts_per_100km == null ? null : k.alerts_per_100km <= 5 ? 'good' : k.alerts_per_100km <= 15 ? 'warn' : 'critical' },
-    { label: 'Worst type', value: sf.by_type[0]?.alert_type || '—', sub: sf.by_type[0] ? `${fmt(sf.by_type[0].n)} events` : null },
-    { label: 'Most events', value: sf.by_driver[0]?.driver_name || '—', sub: sf.by_driver[0] ? `${fmt(sf.by_driver[0].n)} events` : null },
+    (() => {
+      const a = alertRateFigure(k);
+      return { label: 'Per 100 km', value: a.measured ? a.text : 'not measured',
+        /* Which days, because the number is meaningless without them: the same
+           car reads twice as safe over a window that reaches into a feed
+           outage. */
+        sub: a.measured ? (k.alert_coverage?.basis || 'comparable across the fleet') : a.title,
+        tone: !a.measured ? null : a.value <= 5 ? 'good' : a.value <= 15 ? 'warn' : 'critical' };
+    })(),
+    /* The worst thing the DRIVER did. Main Power Lost is the tracker reporting
+       its own power loss, and on L38439 and L39421 — 100% device fault — it was
+       named here as the vehicle's worst kind of harsh driving. The server marks
+       each row now and splitAlerts reads the flag; when a car's only events are
+       device faults this tile says so instead of naming one. */
+    (ev.driving[0]
+      ? { label: 'Worst type', value: ev.driving[0].alert_type,
+          sub: `${fmt(ev.driving[0].n)} events` }
+      : { label: 'Worst type', value: '—',
+          sub: ev.deviceN ? `nothing a driver did — all ${fmt(ev.deviceN)} events on this `
+            + 'vehicle are its tracker reporting its own power loss'
+            : 'no harsh-driving event on this vehicle in this window' }),
+    /* The person who drove worst, not the person whose car has the worst
+       wiring. by_driver's `n` now counts only what somebody did; a row with
+       device_alerts and no driving events is not a candidate for this tile. */
+    (() => {
+      const worst = (sf.by_driver || []).find((r) => (+r.n || 0) > 0);
+      return { label: 'Most events', value: worst?.driver_name || '—',
+        sub: worst ? `${fmt(worst.n)} events`
+          : (ev.deviceN ? 'nobody — every event here is the tracker, not a driver'
+            : 'no harsh-driving event to attribute') };
+    })(),
   ]));
 
   types.body.innerHTML = '';
   if (!sf.by_type.length) types.body.append(note('No harsh-driving events for this vehicle in this window.'));
-  else hbars(types.body, sf.by_type.map((r) => ({ label: r.alert_type, n: r.n })), { label: 'label', value: 'n', seq: true });
+  else {
+    /* Marked in the bar's own label. This chart is headed "harsh driving" and
+       drew Main Power Lost as its longest bar on a car whose tracker was
+       dying — the biggest thing on the page being the one thing nobody did. */
+    hbars(types.body, sf.by_type.map((r) => ({
+      label: r.device === true ? `${r.alert_type} (tracker fault)` : r.alert_type, n: r.n,
+    })), { label: 'label', value: 'n', seq: true });
+    if (ev.deviceN) {
+      types.body.append(el('p', 'cap',
+        `${fmt(ev.deviceN)} of these ${fmt(ev.total)} events are the tracker reporting its own `
+        + 'power loss rather than anything done at the wheel. They are a wiring job, and the '
+        + 'rate above is taken over the other '
+        + `${fmt(ev.drivingN)}.`));
+    }
+  }
 
   drv.body.innerHTML = '';
   if (!sf.by_driver.length) drv.body.append(note('Nothing to attribute yet.'));
@@ -692,9 +736,16 @@ async function tabSafety(root, plate) {
        simply absent — under a caption explaining what "(unattributed)" means,
        on a table that never showed one. Synthesised here until the endpoint
        returns the bucket the fleet-level route already does. */
+    /* Over the DRIVING events, not over every row the box emitted. `total` now
+       includes the tracker's own power-loss events, and by_driver's `n` no
+       longer does — so subtracting one from the other on the all-device-fault
+       plates invented an "(unattributed)" row for 87 events that are perfectly
+       well attributed and simply are not driving. The residual this panel
+       exists to show is the one the LIMIT cut off, which is a driving figure on
+       both sides. */
     const attributed = sf.by_driver.reduce((a, r) => a + (+r.n || 0), 0);
     const rows = [...sf.by_driver];
-    const missing = total - attributed;
+    const missing = ev.drivingN - attributed;
     if (missing > 0 && !rows.some((r) => /unattributed/i.test(r.driver_name || ''))) {
       rows.push({ driver_name: '(unattributed)', driver_ext_id: null, n: missing, km: null });
     }
@@ -704,6 +755,13 @@ async function tabSafety(root, plate) {
           ? entity('driver', r.driver_ext_id, r.driver_name)
           : `<span class="ent-off" title="no custody record for this vehicle on the day of these events">${esc(r.driver_name)}</span>`) },
       { label: 'Events', key: 'n', num: true },
+      /* Beside the count, never inside it. A driver holding a car with a
+         failing tracker is not a hazard, and the two numbers under one heading
+         made them one. */
+      { label: 'Tracker faults', key: 'device_alerts', num: true,
+        render: (r) => (r.device_alerts == null
+          ? '<span class="ent-off" title="this feed does not mark which events are the tracker\u2019s own">—</span>'
+          : (r.device_alerts ? `<span class="dim">${fmt(r.device_alerts)}</span>` : '0')) },
       /* The driver's BOOKED km on this plate, which is what the fleet safety
          page divides by. This column used a different distance, so the same
          driver read 215.3 per 100 km here and 34 on the vehicle rate beside
@@ -714,12 +772,24 @@ async function tabSafety(root, plate) {
           ? fmt(r.booked_km ?? r.km)
           : '<span class="ent-off" title="no booking of theirs on this plate carries a distance">—</span>') },
       { label: 'Per 100 km', key: '_r', num: true,
-        sortValue: (r) => { const km = r.booked_km ?? r.km; return km > 0 ? (r.n / km) * 100 : null; },
+        /* The server computes and blanks this now — a person whose only events
+           were the tracker's own rated 0.00 here and sorted to the top as the
+           safest driver on the car. Falls back to the local divide only where
+           an older payload carries no rate at all. */
+        sortValue: (r) => {
+          if (r.per_100km != null) return +r.per_100km;
+          if (r.per_100km_absent) return null;
+          const km = r.booked_km ?? r.km;
+          return km > 0 ? (r.n / km) * 100 : null;
+        },
         render: (r) => {
+          if (r.per_100km_absent) return `<span class="ent-off" title="${esc(r.per_100km_absent)}">—</span>`;
           const km = r.booked_km ?? r.km;
           if (!(km > 0)) return '<span class="ent-off" title="no distance to rate over">—</span>';
-          const rate = (r.n / km) * 100;
-          return `${fmt(rate, 1)}${km < 200 ? '<span class="dim" title="under 200 km — too small a base to compare on"> · thin</span>' : ''}`;
+          const a = alertRateFigure({ alerts_per_100km: r.per_100km != null
+            ? +r.per_100km : (r.n / km) * 100 });
+          return `${a.text}${a.title ? '' : ''}`
+            + (km < 200 ? '<span class="dim" title="under 200 km — too small a base to compare on"> · thin</span>' : '');
         } },
     ], { compact: true, sortable: true, sortId: 'vsafe', defaultSort: { key: 'n', dir: 'desc' } }));
     drv.body.append(el('p', 'cap',
@@ -1256,13 +1326,18 @@ export async function renderVehicleDirectory(root) {
        hole. The server measures it over the days the feed covered and says how
        many of the window's days those were. */
     { label: 'Per 100 km', key: 'alerts_per_100km', num: true,
-      sortValue: (r) => (r.alerts_per_100km == null ? null : +r.alerts_per_100km),
-      render: (r) => (r.alerts_per_100km == null
-        ? `<span class="ent-off" title="${r.alerts_per_100km_absent
-          || 'no booked distance to rate over'}">—</span>`
-        : `${fmt(r.alerts_per_100km, 1)}<span class="dim" title="the alert feed covered `
-          + `${r.alert_days} of the ${r.alert_window_days} days in this window; distance from a `
-          + `day the feed was dark is in neither half of the rate"> ·&nbsp;${r.alert_days}d</span>`) },
+      sortValue: (r) => alertRateFigure(r).value,
+      render: (r) => {
+        const a = alertRateFigure(r);
+        /* The absence reason was unescaped straight into a title attribute — a
+           quote in a server sentence would have broken out of it. */
+        if (!a.measured) return `<span class="ent-off" title="${esc(a.title)}">—</span>`;
+        return `<span${a.title ? ` title="${esc(a.title)}"` : ''}>${a.text}</span>`
+          + `<span class="dim" title="the alert feed covered `
+          + `${esc(String(r.alert_days))} of the ${esc(String(r.alert_window_days))} days in this `
+          + 'window; distance from a day the feed was dark is in neither half of the rate">'
+          + ` ·&nbsp;${esc(String(r.alert_days))}d</span>`;
+      } },
     { label: 'Drivers', key: 'drivers', num: true,
       render: (r) => (r.drivers == null ? '—' : fmt(r.drivers)) },
     /* The pill took its colour from staleness and its text from the provider's

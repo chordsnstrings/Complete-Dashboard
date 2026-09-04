@@ -19,7 +19,7 @@ import { fleetIncome } from './income_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline, both economics
    ledgers and the driver page. See api/alert_coverage_sql.js. */
 import { alertCoverage, alertRate, alertRateReason, drivingCount,
-  deviceCount } from './alert_coverage_sql.js';
+  deviceCount, DEVICE_FAULT_SQL } from './alert_coverage_sql.js';
 
 const normPlate = (s) => String(s || '').toUpperCase().replace(/[\s-]+/g, '');
 
@@ -1048,8 +1048,18 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
 
   /* ── safety ───────────────────────────────────────────────────────────── */
   app.get('/api/vehicle/safety', withVehicle(async (req, res, plate, p) => {
+    /* Marked for what each type IS, the same way /api/driver/quality marks it.
+       ─────────────────────────────────────────────────────────────────────
+       Main Power Lost is the tracker complaining about its own wiring, not
+       something anybody did at the wheel, and this list is what the safety tab
+       sums into "Harsh events" and reads its "Worst type" off. On L38439 and
+       L39421 — 100% device fault — the worst type of harsh driving was the box
+       failing. The word list is the server's and lives in
+       api/alert_coverage_sql.js; the flag travels so no page carries a copy of
+       it. */
     const byType = await q(
-      `SELECT alert_type, count(*)::int n, max(occurred_at) latest
+      `SELECT alert_type, count(*)::int n, max(occurred_at) latest,
+              ${DEVICE_FAULT_SQL('alert_type')} AS device
        FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2
        GROUP BY 1 ORDER BY n DESC LIMIT 20`, p);
     // Attributed to whoever held the vehicle that day, so a harsh-driving
@@ -1079,13 +1089,25 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          WHERE plate = $3 AND day BETWEEN $1::date AND $2::date
          ORDER BY day, is_primary DESC, trips DESC NULLS LAST
        ),
+       /* Split at source, so the person's count is what they DID.
+          ─────────────────────────────────────────────────────────────────
+          Main Power Lost is the tracker reporting its own power loss. Summed
+          in here it made "most events" a ranking of whose car has the worst
+          wiring: on the plates whose every alert is a device fault, this
+          panel named a driver as the vehicle's worst offender for 87 events
+          none of which anybody caused. The word list is the server's, in
+          api/alert_coverage_sql.js, and both counts travel so the page can
+          say which is which rather than choosing for the reader. */
        per_day AS (
-         SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int n
+         SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day,
+                count(*) FILTER (WHERE NOT ${DEVICE_FAULT_SQL('alert_type')})::int n,
+                count(*) FILTER (WHERE ${DEVICE_FAULT_SQL('alert_type')})::int device
          FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2 GROUP BY 1
        ),
        ev AS (
          SELECT coalesce(c.driver_name,'unattributed') driver_name,
-                max(c.driver_ext_id) driver_ext_id, sum(pd.n)::int n
+                max(c.driver_ext_id) driver_ext_id, sum(pd.n)::int n,
+                sum(pd.device)::int device
          FROM per_day pd LEFT JOIN custody c ON c.day = pd.day
          GROUP BY 1
        ),
@@ -1100,16 +1122,27 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
           needs ride down on the rows, the way /api/alerts/by-driver carries
           its own population: a second query here would replay the alert scan
           and the custody fold to arrive at two numbers. */
-       SELECT ev.driver_name, ev.driver_ext_id, ev.n,
+       SELECT ev.driver_name, ev.driver_ext_id, ev.n, ev.device AS device_alerts,
               held.booked_km AS km, held.booked_km, held.days_held,
-              round((ev.n * 100.0 / nullif(held.booked_km, 0))::numeric, 2) AS per_100km,
+              /* NULL, not 0, when the person's only events were the tracker's
+                 own: a rate of 0.00 beside a count of 87 reads as a spotless
+                 record on the worst-instrumented car in the fleet. */
+              CASE WHEN ev.n = 0 AND ev.device > 0 THEN NULL
+                   ELSE round((ev.n * 100.0 / nullif(held.booked_km, 0))::numeric, 2) END AS per_100km,
+              CASE WHEN ev.n = 0 AND ev.device > 0
+                   THEN 'not measured — every event while this person held the vehicle is the '
+                        || 'tracker reporting its own power loss, so nothing here measures driving'
+                   ELSE NULL END AS per_100km_absent,
               count(*) OVER ()::int AS _drivers,
-              sum(ev.n) OVER ()::int AS _alerts
+              sum(ev.n) OVER ()::int AS _alerts,
+              sum(ev.device) OVER ()::int AS _device
        FROM ev LEFT JOIN held ON held.driver_name = ev.driver_name
-       ORDER BY ev.n DESC LIMIT 20`, p);
+       ORDER BY ev.n DESC, ev.device DESC LIMIT 20`, p);
     const drvTot = byDriver.length
-      ? { drivers: byDriver[0]._drivers, alerts: byDriver[0]._alerts } : { drivers: 0, alerts: 0 };
-    for (const r of byDriver) { delete r._drivers; delete r._alerts; }
+      ? { drivers: byDriver[0]._drivers, alerts: byDriver[0]._alerts,
+          device_alerts: byDriver[0]._device }
+      : { drivers: 0, alerts: 0, device_alerts: 0 };
+    for (const r of byDriver) { delete r._drivers; delete r._alerts; delete r._device; }
     const daily = await q(
       `SELECT (occurred_at AT TIME ZONE 'Asia/Dubai')::date AS day, count(*)::int alerts
        FROM alert WHERE plate = $3 AND occurred_at BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 1`, p);

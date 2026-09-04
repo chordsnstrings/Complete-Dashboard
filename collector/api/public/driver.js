@@ -18,7 +18,7 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './ch
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
   sourceLabel, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
-  avatar, moneyInTile, faresTile } from './ui.js';
+  avatar, moneyInTile, faresTile, alertRateFigure, splitAlerts } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
@@ -1378,7 +1378,12 @@ async function tabQuality(root, id) {
   [cx.body, ev.body, line.body].forEach(loading);
 
   const [qy, k] = await Promise.all([qAll('/api/driver/quality', { id }), qAll('/api/driver/kpis', { id })]);
-  const totalAlerts = qy.alerts.reduce((a, r) => a + r.n, 0);
+  /* Split, not summed. Main Power Lost is the tracker reporting its own power
+     loss, and summed into this total it reads on the tile as something the
+     driver did. The server marks each row; ui.js:splitAlerts reads the flag so
+     no page keeps a copy of the word list. */
+  const harsh = splitAlerts(qy.alerts || []);
+  const totalAlerts = harsh.drivingN;
 
   kpiHost.replaceWith(kpiRow([
     /* A null completion used to paint red. `null >= 95` is false, so every
@@ -1411,7 +1416,9 @@ async function tabQuality(root, id) {
        distance under a count of events the feed collected reads as one
        population when it is two. */
     { label: 'Harsh events', value: fmt(totalAlerts),
-      sub: qy.alert_km ? `over ${fmt(qy.alert_km)} km the feed covered` : 'no matched distance' },
+      sub: !harsh.classified && harsh.total
+        ? 'not split from tracker faults — this feed does not mark them'
+        : (qy.alert_km ? `over ${fmt(qy.alert_km)} km the feed covered` : 'no matched distance') },
     /* Against the FLEET, where the fleet figure exists, rather than against a
        hardcoded 5/15 scale. 29.5 per 100 km was painted critical under a
        sub-label reading "comparable across drivers" with nothing on the page
@@ -1419,7 +1426,12 @@ async function tabQuality(root, id) {
        wrong word for average. Falls back to the constant scale, saying so, so
        this reads correctly before the fleet baseline is returned. */
     (() => {
-      const v = qy.alerts_per_100km;
+      /* Through the shared figure, so a measured 0.033 prints "<0.1" rather
+         than the "0.0" an unmeasured rate would show, and so the absence
+         sentence is the server's — it knows which of its three reasons
+         applies and this page cannot. */
+      const a = alertRateFigure(qy);
+      const v = a.measured ? a.value : null;
       const base = qy.fleet_alerts_per_100km;
       const cov = qy.alert_coverage;
       /* WHICH DAYS, on the tile. Both figures are measured over the days the
@@ -1432,17 +1444,16 @@ async function tabQuality(root, id) {
          has no rate at all — not a dash the reader has to interpret, and
          certainly not a zero. */
       if (v == null) {
-        return { label: 'Per 100 km', value: 'not measured',
-          sub: qy.alerts_per_100km_absent || 'no matched distance to rate over' };
+        return { label: 'Per 100 km', value: 'not measured', sub: a.title };
       }
       if (base == null) {
-        return { label: 'Per 100 km', value: fmt(v, 1),
+        return { label: 'Per 100 km', value: a.text,
           sub: 'against a fixed 5 / 15 scale — the fleet\'s own rate is not published on this endpoint'
             + over,
           tone: v <= 5 ? 'good' : v <= 15 ? 'warn' : null };
       }
       const ratio = base > 0 ? v / base : null;
-      return { label: 'Per 100 km', value: fmt(v, 1),
+      return { label: 'Per 100 km', value: a.text,
         /* The baseline is measured over the same days as the driver — same
            module, same day set — so the comparison is like against like. */
         sub: `fleet median ${fmt(base, 1)}`
@@ -1471,10 +1482,25 @@ async function tabQuality(root, id) {
 
   ev.body.innerHTML = '';
   if (!qy.alerts.length) ev.body.append(note('No harsh-driving events on the vehicles this driver held. Attribution needs both a telematics alert and a custody record for the same day, so a gap in either shows as nothing here.'));
-  else ev.body.append(tableFrom(qy.alerts, [
-    { label: 'Event', key: 'alert_type' }, { label: 'Count', key: 'n', num: true },
-    { label: 'Most recent', key: 'latest', render: (r) => dtStr(r.latest) },
-  ]));
+  else {
+    ev.body.append(tableFrom(qy.alerts, [
+      /* The row says which of the two it is. A table headed by a tab called
+         Quality that lists Main Power Lost beside Harsh Braking, unmarked,
+         reads as five things this person did — and on a car with a failing
+         tracker the biggest row is the one they did not do. */
+      { label: 'Event', key: 'alert_type',
+        render: (r) => esc(r.alert_type)
+          + (r.device === true ? ` ${pill('tracker fault', 'warn')}` : '') },
+      { label: 'Count', key: 'n', num: true },
+      { label: 'Most recent', key: 'latest', render: (r) => dtStr(r.latest) },
+    ]));
+    if (harsh.deviceN) {
+      ev.body.append(el('p', 'cap',
+        `${fmt(harsh.deviceN)} of these ${fmt(harsh.total)} events are the tracker reporting its `
+        + 'own power loss rather than anything done at the wheel, so the tile above counts '
+        + `${fmt(harsh.drivingN)} and the rate is taken over those.`));
+    }
+  }
 
   line.body.innerHTML = '';
   const cd = qy.cancel_daily.filter((d) => d.trips > 0);

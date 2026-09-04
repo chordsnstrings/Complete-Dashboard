@@ -1210,16 +1210,25 @@ app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   /* The safety rate comes from the endpoint now, over the days the alert feed
      covered — alert_km, not km. Divided in the browser it was a 16-day
      numerator over a 30-day denominator whenever the feed had a hole. */
-  alerts: 120 - i * 11,
+  /* `alerts` is the DRIVING count. Car 2's every event is its own tracker
+     losing power — the shape of L38439 and L39421 on production, which were
+     ranked the fleet's two cleanest cars — so its rate is null with the
+     server's reason rather than the 0.0 that made them look spotless, and its
+     safety tab has to agree with that everywhere it draws a figure. */
+  alerts: i === 2 ? 0 : 120 - i * 11,
   alert_km: i === 6 ? null : Math.round((6100 - i * 420) * 0.73),
-  alerts_per_100km: i === 6 ? null
+  alerts_per_100km: (i === 6 || i === 2) ? null
     : Math.round(((120 - i * 11) / Math.round((6100 - i * 420) * 0.73)) * 1000) / 10,
   alerts_per_100km_absent: i === 6
-    ? 'no distance was measured on the days the alert feed covered' : null,
+    ? 'no distance was measured on the days the alert feed covered'
+    : i === 2
+      ? 'not measured — all 87 alerts on this vehicle are the tracker reporting its own power '
+        + 'loss, so nothing here measures driving'
+      : null,
   /* The hardware half. Car 4 has a box that keeps losing power, so the rate
      beside it is visibly over the driving events alone rather than over
-     everything the tracker said. */
-  device_alerts: i === 4 ? 27 : 0,
+     everything the tracker said; car 2 is the extreme of the same thing. */
+  device_alerts: i === 4 ? 27 : i === 2 ? 87 : 0,
   alert_days: 22, alert_window_days: 30,
   current_driver: i === 6 ? null : drivers[i],
   driver_as_of: new Date().toISOString(),
@@ -1417,12 +1426,25 @@ app.get('/api/vehicle/kpis', (req, r) => {
     completion_pct: 96.1, cancel_pct: 3.4, drivers: 1 + (i % 3), platforms: 1 + (i % 2),
     utilisation: 0.58 - i * 0.04, hours_online: 512.4, hours_on_trip: 297.2,
     earnings_per_hour: 21.4, trips_per_online_hour: 0.41,
-    alerts, hours_since_fix: i === 7 ? 38.2 : 0.3, fixes: d.reduce((a, x) => a + x.fixes, 0),
+    /* Car 2's every event is its tracker losing power — the shape L38439 and
+       L39421 have on production, where they were ranked the two cleanest cars
+       in the fleet. `alerts` is the DRIVING count, so it is 0, and the rate is
+       null with the server's own reason rather than the 0.0 that made them
+       look spotless. Its safety tab reads /api/vehicle/safety, and the two
+       fixtures have to agree or the page shows a rate over events it also says
+       nobody caused. */
+    alerts: i === 2 ? 0 : alerts,
+    hours_since_fix: i === 7 ? 38.2 : 0.3, fixes: d.reduce((a, x) => a + x.fixes, 0),
     idle_days: d.filter((x) => !x.trips).length,
     /* Over the feed's covered days, which is why alert_km is smaller than km. */
     alert_km: Math.round(km * 0.73),
-    alerts_per_100km: +((alerts / Math.round(km * 0.73)) * 100).toFixed(1),
-    alerts_per_100km_absent: null, device_alerts: i === 3 ? 12 : 0,
+    alerts_per_100km: i === 2 ? null
+      : +((alerts / Math.round(km * 0.73)) * 100).toFixed(1),
+    alerts_per_100km_absent: i === 2
+      ? 'not measured — all 87 alerts on this vehicle are the tracker reporting its own power '
+        + 'loss, so nothing here measures driving'
+      : null,
+    device_alerts: i === 3 ? 12 : i === 2 ? 87 : 0,
     alert_coverage: alertCoverage(30),
     revenue_per_km: 2.7 });
 });
@@ -1523,10 +1545,18 @@ app.get('/api/vehicle/earnings', (req, r) => {
 app.get('/api/vehicle/safety', (req, r) => {
   const i = pIndex(req.query.plate);
   r.json({
-    by_type: [{ alert_type: 'Overspeed', n: 61 - i * 4, latest: new Date().toISOString() },
-      { alert_type: 'Harsh Braking', n: 44 - i * 3, latest: new Date().toISOString() },
-      { alert_type: 'Harsh Acceleration', n: 18, latest: new Date().toISOString() },
-      { alert_type: 'Sharp Turn', n: 9, latest: new Date().toISOString() }],
+    /* Marked by the server, so the safety tab does not have to keep its own
+       copy of the word list. One plate is deliberately ALL device fault: on
+       production L38439 and L39421 are exactly that, and they were ranked the
+       fleet's cleanest cars and had "Main Power Lost" named as their worst
+       kind of harsh driving. */
+    by_type: (i === 2
+      ? [{ alert_type: 'Main Power Lost', n: 87, latest: new Date().toISOString(), device: true }]
+      : [{ alert_type: 'Overspeed', n: 61 - i * 4, latest: new Date().toISOString(), device: false },
+        { alert_type: 'Harsh Braking', n: 44 - i * 3, latest: new Date().toISOString(), device: false },
+        { alert_type: 'Harsh Acceleration', n: 18, latest: new Date().toISOString(), device: false },
+        { alert_type: 'Sharp Turn', n: 9, latest: new Date().toISOString(), device: false },
+        { alert_type: 'Main Power Lost', n: 12, latest: new Date().toISOString(), device: true }]),
     // With the id, because a harsh-driving count against a name you cannot
     // open is a statistic rather than a conversation.
     /* km is the driver's distance ON THIS PLATE over the WHOLE window. It used
@@ -1534,13 +1564,27 @@ app.get('/api/vehicle/safety', (req, r) => {
        distance driven on the days they triggered something — 322 events over
        459 km, printed as 215.3 per 100 km beside a vehicle rate of 34, while
        /api/vehicle/drivers-detail gave 2,459 km for the same person. */
-    by_driver: [{ driver_name: drivers[i], driver_ext_id: `drv-${i}`, n: 78,
-      km: 3400, booked_km: 3400, days_held: 21, per_100km: +((78 * 100) / 3400).toFixed(2) },
-      { driver_name: drivers[(i + 4) % drivers.length],
-        driver_ext_id: `drv-${(i + 4) % drivers.length}`, n: 41,
-        km: 2100, booked_km: 2100, days_held: 9, per_100km: +((41 * 100) / 2100).toFixed(2) },
-      { driver_name: 'unattributed', driver_ext_id: null, n: 13,
-        km: null, booked_km: null, days_held: null, per_100km: null }],
+    /* `n` is what the person DID; device_alerts rides beside it. On the plate
+       whose every event is the tracker's own, n is 0 for everybody and
+       per_100km is NULL with the server's reason — a 0.00 there sorted those
+       drivers to the top as the safest on the car. */
+    by_driver: (i === 2
+      ? [{ driver_name: drivers[i], driver_ext_id: `drv-${i}`, n: 0, device_alerts: 61,
+          km: 3400, booked_km: 3400, days_held: 21, per_100km: null,
+          per_100km_absent: 'not measured — every event while this person held the vehicle is '
+            + 'the tracker reporting its own power loss, so nothing here measures driving' },
+        { driver_name: drivers[(i + 4) % drivers.length],
+          driver_ext_id: `drv-${(i + 4) % drivers.length}`, n: 0, device_alerts: 26,
+          km: 2100, booked_km: 2100, days_held: 9, per_100km: null,
+          per_100km_absent: 'not measured — every event while this person held the vehicle is '
+            + 'the tracker reporting its own power loss, so nothing here measures driving' }]
+      : [{ driver_name: drivers[i], driver_ext_id: `drv-${i}`, n: 78, device_alerts: 7,
+          km: 3400, booked_km: 3400, days_held: 21, per_100km: +((78 * 100) / 3400).toFixed(2) },
+        { driver_name: drivers[(i + 4) % drivers.length],
+          driver_ext_id: `drv-${(i + 4) % drivers.length}`, n: 41, device_alerts: 5,
+          km: 2100, booked_km: 2100, days_held: 9, per_100km: +((41 * 100) / 2100).toFixed(2) },
+        { driver_name: 'unattributed', driver_ext_id: null, n: 13, device_alerts: 0,
+          km: null, booked_km: null, days_held: null, per_100km: null }]),
     by_driver_total: 3, by_driver_shown: 3, by_driver_truncated: false, by_driver_alerts: 132,
     recent_total: 40, recent_shown: 40, recent_truncated: false,
     daily: vDaily(req.query.plate).map((d) => ({ day: d.day, alerts: d.alerts })),
