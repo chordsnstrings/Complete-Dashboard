@@ -158,6 +158,237 @@ function csvToTrips(csv) {
   })).filter((t) => t.external_id);
 }
 
+
+/* ── the per-trip fare, which Uber does publish after all ─────────────────
+   REPORT_TYPE_PAYMENTS_ORDER is one row per TRANSACTION, and unlike
+   TRIP_ACTIVITY it carries money. Probed live on the Ecosine org for the week
+   of 24-30 August 2026, 399 rows:
+
+     transaction UUID                       399 distinct
+     Trip UUID                              379 distinct
+     Description                            5 values, listed below
+     Paid to you                            the transaction's total
+     Paid to you : Your earnings            net of Uber's service fee
+     Paid to you:Your earnings:Fare:Fare    THE FARE
+     Paid to you:Your earnings:Service fee
+     Paid to you : Trip balance : Payouts : Cash collected
+     Paid to you:Trip balance:Payouts:Transferred To Bank Account
+
+   That last column answered a question this product had been reconciling by
+   hand: its only non-zero value in the sample is -66863.51, which is exactly
+   the AED 66,863.51 credited to the Ecosine ENBD account on 24 August. The
+   wire is IN the report.
+
+   Why this exists at all, and why it took so long to find: the trip export
+   (REPORT_TYPE_TRIP_ACTIVITY) has fifteen columns and no fare, so 12,445 of
+   August's 13,950 bookings carried price NULL and every fare figure in the
+   product came from the hotel, Bolt and Yango channels — a tenth of the work.
+   api/probe.js had asked Uber which report types exist using sixteen INVENTED
+   names, four of which happened to be real, and reported "only four report
+   types are valid for this org". Uber publishes sixteen real ones. This was in
+   the twelve nobody asked for.
+
+   ── the column names are a tree flattened into strings ───────────────────
+   Uber renders the earnings breakdown as a path — 'Paid to you:Your
+   earnings:Fare:Fare' — and the separator is inconsistent in the provider's
+   own header row: some columns use ' : ' with spaces and some use ':' without.
+   Both spellings appear in ONE report. So every lookup here normalises
+   whitespace around the separator rather than matching the literal, because a
+   mapper keyed on the exact string silently reads null the first time Uber
+   reformats a header, and a null fare is indistinguishable from a trip that
+   was never priced.
+
+   ── which rows are a trip, and which are not ─────────────────────────────
+   Description takes five values in the sample:
+
+     'trip completed order'                          a ride
+     'Business Order for: marketplace: PERSONAL_TRANSPORT'   a ride, U4B
+     'trip fare adjust order'                        a correction to a ride
+     'Business Adjustment Order for: ...'            a correction, U4B
+     'so.payout'                                     the weekly WIRE
+
+   Only the first two are the fare of a ride. An adjustment is real money and
+   belongs to the trip, but adding it to `price` would make the fare of the
+   trip differ from what the rider was charged; it is summed separately so a
+   page can show both. 'so.payout' carries no Trip UUID and is the settlement —
+   it is the row that reconciles to the bank, and writing it as a trip price
+   would attribute a whole week's wire to one ride. */
+const PAYMENTS_REPORT = 'REPORT_TYPE_PAYMENTS_ORDER';
+
+/* Uber writes the same path with and without spaces around the colon, in the
+   same header row. Keyed on the squeezed form so both find each other. */
+const pathKey = (s) => String(s || '').toLowerCase().replace(/\s*:\s*/g, ':').trim();
+
+const PAY_COLS = {
+  txn: 'transaction uuid',
+  trip: 'trip uuid',
+  driver: 'driver uuid',
+  what: 'description',
+  paid: 'paid to you',
+  earnings: 'paid to you:your earnings',
+  fare: 'paid to you:your earnings:fare:fare',
+  fare_total: 'paid to you:your earnings:fare',
+  service_fee: 'paid to you:your earnings:service fee',
+  cash: 'paid to you:trip balance:payouts:cash collected',
+  bank: 'paid to you:trip balance:payouts:transferred to bank account',
+  tip: 'paid to you:your earnings:tip',
+};
+
+/* A ride, an adjustment to a ride, or the weekly wire. Matched on substrings
+   because the U4B variants carry a marketplace suffix that will grow. */
+function orderKind(description) {
+  const d = String(description || '').toLowerCase();
+  if (d.includes('payout')) return 'payout';
+  if (d.includes('adjust')) return 'adjustment';
+  if (d.includes('order')) return 'trip';
+  return 'other';
+}
+
+const money = (v) => {
+  if (v == null || v === '') return null;
+  /* Uber writes '0' for a component that did not apply and '-66863.51' for
+     money leaving the balance. Both are real values; only a blank is absent. */
+  const n = Number(String(v).replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(n) ? n : null;
+};
+
+/* One CSV into the two things it holds: a fare per trip, and the settlement
+   rows that are not about any trip. */
+export function csvToPayments(csv) {
+  const recs = parse(csv, { columns: true, skip_empty_lines: true, bom: true });
+  const trips = new Map();
+  const settlements = [];
+  for (const r of recs) {
+    const g = {};
+    for (const [k, v] of Object.entries(r)) g[pathKey(k)] = v;
+    const kind = orderKind(g[PAY_COLS.what]);
+    const tripId = String(g[PAY_COLS.trip] || '').trim();
+    if (kind === 'payout' || !tripId) {
+      settlements.push({
+        transaction_id: String(g[PAY_COLS.txn] || '').trim() || null,
+        driver_ext_id: String(g[PAY_COLS.driver] || '').trim() || null,
+        description: g[PAY_COLS.what] || null,
+        amount: money(g[PAY_COLS.paid]),
+        bank: money(g[PAY_COLS.bank]),
+        kind,
+      });
+      continue;
+    }
+    /* One trip can carry several transactions — the ride, then a fare
+       adjustment days later, then a tip. They are folded here rather than
+       upserted one after another, because two upserts on the same primary key
+       would leave whichever arrived last, and the answer is the sum. */
+    const cur = trips.get(tripId) || { external_id: tripId, fare: null, adjustment: null,
+      earnings: null, service_fee: null, cash: null, tip: null, txns: 0 };
+    const add = (field, v) => { if (v != null) cur[field] = (cur[field] ?? 0) + v; };
+    if (kind === 'adjustment') add('adjustment', money(g[PAY_COLS.paid]));
+    else add('fare', money(g[PAY_COLS.fare]) ?? money(g[PAY_COLS.fare_total]));
+    add('earnings', money(g[PAY_COLS.earnings]));
+    add('service_fee', money(g[PAY_COLS.service_fee]));
+    add('cash', money(g[PAY_COLS.cash]));
+    add('tip', money(g[PAY_COLS.tip]));
+    cur.txns += 1;
+    trips.set(tripId, cur);
+  }
+  return { trips: [...trips.values()], settlements };
+}
+
+
+/* Walk the payments report and fill in the fare every Uber trip was missing.
+   ─────────────────────────────────────────────────────────────────────────
+   Weekly windows, newest first, for the same reasons pullTrips walks months
+   newest first: a truncated run leaves the recent weeks collected rather than
+   the oldest, and a report costs minutes at the provider.
+
+   WEEKS and not months, because this report is rate-limited on a counter of
+   its own — 'Payment report generation limit reached. Please wait for current
+   reports to complete before generating a new one' — which is a different cap
+   from the three-in-flight one the trip reports hit, and it is easily
+   exhausted. A month-wide window would be cheaper in requests but Uber refuses
+   the wider ranges on this type more often than it refuses a week.
+
+   The writes are deliberately narrow. `trip` rows already exist from
+   TRIP_ACTIVITY, keyed on (platform, external_id), and this fills price and
+   currency on the ones the payments report prices. It must never INSERT a trip:
+   a payments row whose Trip UUID we have never seen is a trip outside the
+   window the trip report covered, and inventing a row for it would create a
+   booking with no time, no plate and no driver that every count in the product
+   would then include. */
+async function pullTripFares(from, to, onStep, checkpoint = null) {
+  let total = 0;
+  const chunks = [];
+  const weeks = [...closedWeeks(from, to)].reverse();
+  let consecutiveFailures = 0;
+  for (const w of weeks) {
+    const ps = iso(w.start), pe = iso(w.end);
+    const chunk = { from: ps, to: pe, rows: 0, error: null };
+    if (checkpoint?.has(`fares ${ps}..${pe}`)) {
+      chunk.skipped = true; chunks.push(chunk); continue;
+    }
+    await onStep?.({ window: `fares ${ps}..${pe}`, index: chunks.length, of: weeks.length,
+      rows_so_far: total });
+    try {
+      const id = await generateReport(w.start, w.end, 0, PAYMENTS_REPORT);
+      const url = await downloadReport(id);
+      const { data: csv } = await http(url, { expect: 'text', timeoutMs: 180000 });
+      const { trips, settlements } = csvToPayments(csv);
+      /* UPDATE, never upsert. See the header above: a Trip UUID we do not hold
+         is a trip outside the collected window, and the row must not be
+         invented. The count of rows that matched is what tells an operator
+         whether the two reports actually describe the same trips. */
+      let priced = 0;
+      for (const t of trips) {
+        if (t.fare == null && t.earnings == null) continue;
+        const { rowCount } = await pool.query(
+          `UPDATE trip SET price = $3, currency = coalesce(currency, 'AED'),
+                  raw = coalesce(raw, '{}'::jsonb) || $4::jsonb
+             WHERE platform = 'uber' AND external_id = $2 AND fleet_id = $1`,
+          [org().fleet, t.external_id, t.fare,
+            JSON.stringify({ uber_payments: {
+              fare: t.fare, earnings: t.earnings, service_fee: t.service_fee,
+              cash_collected: t.cash, tip: t.tip, adjustment: t.adjustment,
+              transactions: t.txns } })]);
+        priced += rowCount;
+      }
+      total += priced;
+      chunk.rows = priced;
+      /* Both numbers, because they answer different questions. `rows` is what
+         landed; `orders` and `unmatched` say whether the payments report and
+         the trip report agree about which trips exist, which is the check that
+         catches a window collected by one and not the other. */
+      chunk.orders = trips.length;
+      chunk.unmatched = trips.length - priced;
+      chunk.settlements = settlements.length;
+      log.info(SRC, `fares ${ps}..${pe}`, { orders: trips.length, priced,
+        unmatched: trips.length - priced, settlements: settlements.length });
+      consecutiveFailures = 0;
+    } catch (err) {
+      const msg = String(err);
+      const expected = /invalid date range|retention|out of range/i.test(msg);
+      /* Rate limiting is its OWN case and is not a hole. This report has a
+         generation cap separate from the three-in-flight one, and a run that
+         hits it has not failed to collect the week — it has been told to come
+         back. Recorded as an error so the run reads partial, but never
+         checkpointed, so the next pass asks again. */
+      const throttled = /rate-limit|generation limit|too many ongoing/i.test(msg);
+      chunk.error = expected ? `outside retention: ${msg.slice(0, 160)}`
+        : throttled ? `rate-limited, will retry next run: ${msg.slice(0, 120)}`
+          : msg.slice(0, 300);
+      chunk.expected = expected;
+      chunk.throttled = throttled;
+      log[expected || throttled ? 'info' : 'error'](SRC,
+        `fare chunk ${ps}..${pe} ${expected ? 'outside retention' : throttled ? 'rate-limited' : 'FAILED'}`,
+        { err: msg.slice(0, 200) });
+      if (!expected && !throttled) consecutiveFailures++;
+      if (throttled) break;   // the cap is per run; the rest of the weeks will hit it too
+    }
+    chunks.push(chunk);
+    if (!chunk.error || chunk.expected) await checkpoint?.mark(`fares ${ps}..${pe}`, chunk.rows);
+    await sleep(consecutiveFailures ? 20000 : 8000);
+  }
+  return { total, chunks };
+}
+
 // Pull historical trips one month at a time. Sequential is necessary but not
 // sufficient: a report abandoned mid-generation keeps its slot, so pacing and a
 // realistic poll budget are what actually keep us under the three-report cap.
@@ -1230,6 +1461,26 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
       written += trips.total;
       const perf = await pullEarnerBreakdowns(from, to, onStep, ck);
       written += perf.total;
+      /* The per-trip fare, after the trips exist and before quality.
+         ─────────────────────────────────────────────────────────────────────
+         AFTER pullTrips because it UPDATEs rows that pull created and never
+         inserts its own — a payments row for a trip we do not hold is skipped,
+         and the count of skipped rows is what tells an operator the two
+         reports disagree about which trips exist.
+
+         BEFORE quality for the same reason quality runs last: money is the
+         product, and a run that exhausts the provider's report slots should
+         end having collected it.
+
+         Not on the incremental. The payments report has a generation cap of
+         its own, separate from the three-in-flight one, and a half-hourly
+         three-day window would spend it on a week that has not closed — the
+         fares land when the week does, which is what the nightly catch-up and
+         the weekly backfill are for. */
+      const fares = mode === 'incremental'
+        ? { total: 0, chunks: [] }
+        : await pullTripFares(from, to, onStep, ck);
+      written += fares.total;
       /* Quality LAST, and never on the half-hourly incremental.
          ─────────────────────────────────────────────────────────────────────
          Two reports per week per fleet, minutes each, against a cap of three
@@ -1249,15 +1500,16 @@ export async function collect({ from, to, mode, onStep, fleet = null, checkpoint
       written += qual.total;
       // Every sub-source's windows, so a run that fetched every trip and no
       // earnings reads as partial rather than as ok.
-      const chunks = [...trips.chunks, ...perf.chunks, ...qual.chunks];
+      const chunks = [...trips.chunks, ...perf.chunks, ...fares.chunks, ...qual.chunks];
       // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
       // are still missing", and it is the difference between a hole that is
       // visible and one that is not.
       await logRun({ source: SRC, fleet_id: o.fleet, mode,
         window_start: from, window_end: to,
-        rows_written: trips.total + perf.total + qual.total,
+        rows_written: trips.total + perf.total + fares.total + qual.total,
         chunks });
-      log.info(SRC, `done (${o.fleet})`, { trips: trips.total, perf, quality: qual.total,
+      log.info(SRC, `done (${o.fleet})`, { trips: trips.total, perf, fares: fares.total,
+        quality: qual.total,
         windows_failed: trips.chunks.filter((c) => c.error).length, of: trips.chunks.length });
     } catch (e) {
       /* rows_written, not 0. src/db.js stores `run.rows_written || 0`, so
