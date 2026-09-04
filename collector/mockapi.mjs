@@ -3826,9 +3826,14 @@ app.get('/api/track', (req, r) => {
 app.get('/api/reconcile/periods', (req, r) => {
   const from = String(req.query.from || '').slice(0, 10) || '2026-08-01';
   const to = String(req.query.to || '').slice(0, 10) || '2026-08-31';
+  /* trips and distance_km are the PROVIDER's own count of what it paid for.
+     They are the test for whether a settlement route is inside the payout: a
+     statement that counts fewer trips than the trip export holds is a
+     statement that is not paying for the difference. */
   const mk = (ps, pe, days, fleet, net, cash, drivers) => ({
     platform: 'uber', fleet_id: fleet, period_start: ps, period_end: pe,
     period_days: days, drivers, net, cash,
+    trips: Math.round(net / 46), distance_km: Math.round(net / 4.8),
     whole: ps >= from && pe <= to,
   });
   const rows = [
@@ -3853,9 +3858,11 @@ app.get('/api/reconcile/periods', (req, r) => {
   for (const wk of rows.filter((x) => x.period_days === 7)) {
     for (let i = 0; i < 7; i++) {
       const day = new Date(Date.parse(wk.period_start) + i * 864e5).toISOString().slice(0, 10);
+      const dn = +(wk.net / 7 * 1.06).toFixed(2);
       daily.push({ platform: 'uber', fleet_id: wk.fleet_id, period_start: day, period_end: day,
         period_days: 1, drivers: Math.round(wk.drivers * 0.34),
-        net: +(wk.net / 7 * 1.06).toFixed(2), cash: +(wk.cash / 7).toFixed(2),
+        net: dn, cash: +(wk.cash / 7).toFixed(2),
+        trips: Math.round(dn / 46), distance_km: Math.round(dn / 4.8),
         whole: day >= from && day <= to });
     }
   }

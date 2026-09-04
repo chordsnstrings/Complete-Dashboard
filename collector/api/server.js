@@ -2204,7 +2204,21 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
        SELECT platform, fleet_id, driver_ext_id, period_start, period_end,
               max(period_days) AS period_days,
               max(period_earnings) AS period_earnings,
-              max(cash_earnings * period_days) AS cash_earnings
+              max(cash_earnings * period_days) AS cash_earnings,
+              /* The provider's OWN count of what it paid for, and the distance
+                 it paid over. driver_payout_day divides both by the period's
+                 length; multiplying back recovers what the statement said.
+
+                 These are the decisive test for whether a settlement route is
+                 inside the provider's money at all. Uber's trip export marks
+                 2,540 of August's 12,445 bookings as settled offline and carries
+                 no fare column, so nothing in the product could say whether Uber was
+                 paying for them. Its own trip count can: if the statement
+                 counts every booking, the offline ones are inside the payout;
+                 if it counts only the rest, they are not, and that is money
+                 settled in the car that no statement will ever reimburse. */
+              max(trips * period_days) AS trips,
+              max(distance_km * period_days) AS distance_km
          FROM driver_payout_day
         WHERE period_end >= $1::date AND period_start <= $2::date
           AND ($3::text IS NULL OR platform = $3)
@@ -2218,6 +2232,8 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
             count(*)::int AS drivers,
             round(sum(period_earnings)::numeric, 2) AS net,
             round(sum(cash_earnings)::numeric, 2) AS cash,
+            round(sum(trips)::numeric, 0)::int AS trips,
+            round(sum(distance_km)::numeric, 0) AS distance_km,
             /* Whether the window the caller asked for contains this statement
                whole. A period cut by the window edge contributes a part of
                itself to any day-spread total, which is exactly the error this
