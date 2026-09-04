@@ -5,7 +5,7 @@
 import { config, normPlate } from '../config.js';
 import { http } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
-import { iso, weekChunks } from '../util.js';
+import { iso, closedWeeks } from '../util.js';
 import { log } from '../log.js';
 import { stateRow } from '../roster.js';
 import { noteCredential } from '../auth_state.js';
@@ -238,7 +238,12 @@ async function pullTrips(from, to) {
    window is a duplicate and a huge one is a smear. */
 async function pullDrivers(from, to, chunks = []) {
   let total = 0;
-  for (const { start, end } of weekChunks(from, to)) {
+  /* closedWeeks, for the same reason Uber uses it: driver_performance is keyed
+     on (period_start, period_end), so an open week asked for today would key a
+     partial week under the whole week's identity — and this endpoint aggregates
+     whatever range it is given, which is the smear the comment above is about.
+     The week lands when it closes. */
+  for (const { start, end } of closedWeeks(from, to)) {
     /* PER WEEK, like fms.js and uber.js already do.
        ─────────────────────────────────────────────────────────────────────
        post() throws on any status >= 400 and nothing stood between it and

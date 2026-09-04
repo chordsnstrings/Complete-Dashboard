@@ -29,8 +29,15 @@ const src = readFileSync('src/sources/uber.js', 'utf8');
 console.log('\nboth grids stop where the provider stops answering');
 
 check('the weekly grid is filtered by a horizon at all',
-  /weekChunks\(from, to\)\]\s*\n?\s*\.filter\(\(w\) => w\.end >= weekHorizon\)/.test(src),
-  'an unbounded weekChunks walk asks for every week of the backfill span');
+/* closedWeeks wraps weekChunks and drops only the week that has not finished:
+   an open week ends on the coming Sunday, and Uber refuses that outright with
+   "endDate is too late" — measured on production, every mid-week run. The
+   calendar grid, which is what these assertions are about, is unchanged. */
+  /closedWeeks\(from, to\)\]\s*\n?\s*\.filter\(\(w\) => w\.end >= weekHorizon\)/.test(src),
+  'an unbounded walk asks for every week of the backfill span');
+check('and the open week is not asked for at all',
+  /closedWeeks/.test(src) && !/\bweekChunks\(from, to\)/.test(src),
+  'Uber answers "endDate is too late" for a week that has not closed');
 
 /* The SAME constant as the daily grid, not a second number that can drift
    away from it. Two horizons for one endpoint is how they stop agreeing. */

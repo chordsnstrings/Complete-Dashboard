@@ -7,7 +7,7 @@ import { parse } from 'csv-parse/sync';
 import { config, normPlate } from '../config.js';
 import { http, qs, sleep } from '../http.js';
 import { upsertMany, logRun, pool } from '../db.js';
-import { dateChunks, weekChunks, dubaiDayChunks, iso, unixMs } from '../util.js';
+import { dateChunks, weekChunks, closedWeeks, dubaiDayChunks, iso, unixMs } from '../util.js';
 import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST,
   UBER_EARNER_HORIZON_DAYS, UBER_EARNER_ASK_MARGIN_DAYS } from '../auth/uber.js';
 import { stateRow } from '../roster.js';
@@ -354,7 +354,11 @@ async function pullDriverQuality(from, to, onStep, checkpoint = null) {
      given, so the window IS the grain, and driver_performance is keyed on
      (period_start, period_end) — an arbitrary seven days from whenever a run
      began would key a second row against the same week's work. */
-  const weeks = [...weekChunks(from, to)].reverse().slice(0, QUALITY_WEEK_HORIZON);
+  /* closedWeeks, not weekChunks: an open week ends on the coming Sunday and
+     Uber refuses it outright — "endDate is too late" — so every mid-week run
+     spent a report slot to be told no and recorded a failed chunk for it. See
+     src/util.js. The week lands when it closes. */
+  const weeks = [...closedWeeks(from, to)].reverse().slice(0, QUALITY_WEEK_HORIZON);
   for (const w of weeks) {
     const ps = iso(w.start), pe = iso(w.end);
     const chunk = { from: ps, to: pe, rows: 0, error: null };
@@ -850,7 +854,7 @@ async function pullEarnerBreakdowns(from, to, onStep, checkpoint = null) {
      never be re-fetched. A week is kept if any part of it reaches the
      horizon. */
   const weekHorizon = new Date(Date.now() - EARNER_DAY_HORIZON * 864e5);
-  const weekly = [...weekChunks(from, to)]
+  const weekly = [...closedWeeks(from, to)]
     .filter((w) => w.end >= weekHorizon)
     .map((w) => ({ ...w, ps: iso(w.start), pe: iso(w.end) }));
 

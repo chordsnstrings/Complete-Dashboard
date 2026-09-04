@@ -16,7 +16,7 @@
 
    sql/schema_v23.sql cleans up after both on the read side. This is about not
    creating them. */
-import { weekChunks, dateChunks, iso } from '../src/util.js';
+import { weekChunks, closedWeeks, dateChunks, iso } from '../src/util.js';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -132,8 +132,12 @@ import { readFileSync } from 'node:fs';
 const uber = readFileSync('src/sources/uber.js', 'utf8');
 const fn = uber.slice(uber.indexOf('async function pullEarnerBreakdowns'));
 const body = fn.slice(0, fn.indexOf('\nasync function ') > 0 ? fn.indexOf('\nasync function ') : fn.length);
-check('the earnings pull builds its windows with weekChunks',
-  /weekChunks\(from, to\)/.test(body));
+/* closedWeeks wraps weekChunks and drops only the week that has not finished:
+   an open week ends on the coming Sunday, and Uber refuses that outright with
+   "endDate is too late" — measured on production, every mid-week run. The
+   calendar grid, which is what these assertions are about, is unchanged. */
+check('the earnings pull builds its windows on the week grid',
+  /closedWeeks\(from, to\)/.test(body));
 check('and no longer with the run-anchored dateChunks', !/dateChunks\(/.test(body));
 /* Every call site hands over `until`, the exclusive bound — never `e`, the
    last day covered. There are three now: driver-list mode for a week, page
@@ -257,7 +261,21 @@ console.log('\nyango asks in weeks too');
 const yango = readFileSync('src/sources/yango.js', 'utf8');
 const yfn = yango.slice(yango.indexOf('async function pullDrivers'));
 const ybody = yfn.slice(0, yfn.indexOf('\nasync function ', 1) > 0 ? yfn.indexOf('\nasync function ', 1) : yfn.length);
-check('the yango summary is asked per calendar week', /weekChunks\(from, to\)/.test(ybody));
+check('the yango summary is asked per calendar week', /closedWeeks\(from, to\)/.test(ybody));
+/* The grid itself, once, so the wrapper cannot quietly change which weeks it
+   yields. closedWeeks must be weekChunks minus exactly the unfinished week. */
+{
+  const now = new Date('2026-09-03T18:49:00Z');
+  const f = (w) => `${iso(w.start)}..${iso(w.end)}`;
+  const all = [...weekChunks(D('2026-08-10'), D('2026-09-03'))].map(f);
+  const closed = [...closedWeeks(D('2026-08-10'), D('2026-09-03'), now)].map(f);
+  check('closedWeeks is the same grid, minus the week that has not finished',
+    closed.length === all.length - 1 && all.slice(0, -1).join() === closed.join(),
+    `${all.length} weeks -> ${closed.length}`);
+  check('and the week it drops is the one ending in the future',
+    all.at(-1) === '2026-08-31..2026-09-06' && !closed.includes(all.at(-1)),
+    'Uber answers "endDate is too late" for exactly this window');
+}
 check('and each row is stamped with the week, not the run',
   /period_start: iso\(start\), period_end: iso\(end\)/.test(ybody));
 check('a driver with no work that week writes no row',

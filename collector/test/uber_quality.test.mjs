@@ -115,7 +115,11 @@ check('only the two reports that carry a uuid are collected',
   && !/REPORT_TYPE_DRIVER_PERFORMANCE/.test(bare),
   'DRIVER_PERFORMANCE identifies drivers by name, email and phone with no uuid');
 check('it walks whole provider weeks, because the window IS the grain',
-  /weekChunks\(from, to\)/.test(body),
+/* closedWeeks wraps weekChunks and drops only the week that has not finished:
+   an open week ends on the coming Sunday, and Uber refuses that outright with
+   "endDate is too late" — measured on production, every mid-week run. The
+   calendar grid, which is what these assertions are about, is unchanged. */
+  /closedWeeks\(from, to\)/.test(body),
   'driver_performance is keyed on (period_start, period_end); seven arbitrary days would key a second '
   + 'row against the same week’s work');
 check('newest first, so a run that dies part-way has collected the useful end',

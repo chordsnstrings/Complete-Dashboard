@@ -37,6 +37,35 @@ export function* dateChunks(from, to, maxDays = 31) {
    Both edges are widened to whole weeks rather than clipped. A clipped week is
    a different key, which is the bug this exists to prevent, and asking for a
    few extra days costs one request. */
+/* ── a week that has not finished is not a week you can ask for ───────────
+   weekChunks yields whole Monday-to-Sunday weeks, deliberately: driver_
+   performance is keyed on (period_start, period_end), so an arbitrary seven
+   days from whenever a run began would key a second row against the same
+   week's work. That is right, and it has a consequence nobody had followed
+   through — for any run made mid-week, the last week it yields ends on the
+   COMING Sunday.
+
+   Measured on production 2026-09-03, a Thursday: the Uber backfill asked for
+   2026-08-31..2026-09-06 and Uber answered
+
+     Code: invalid-argument, Message: endDate is too late
+
+   and the window was recorded as a failed chunk. Every run, on every open
+   week. It is the third source found asking a provider for tomorrow — Bolt
+   refused it with INVALID_REQUEST and lost its newest window, and the Bolt
+   fix clamped the END DATE. That cannot be done here: clamping the date
+   without clamping the KEY would store four days of a week under the whole
+   week's identity, which is exactly the smear the weekly grain exists to
+   prevent, and it would look complete.
+
+   So the open week is skipped and lands when it closes. One request saved, one
+   phantom failure removed from the run, and no partial week masquerading as a
+   whole one. */
+export const weekIsClosed = (w, now = new Date()) => w.end < now;
+export function* closedWeeks(from, to, now = new Date()) {
+  for (const w of weekChunks(from, to)) if (weekIsClosed(w, now)) yield w;
+}
+
 export function* weekChunks(from, to) {
   const monday = (d) => {
     const x = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
