@@ -76,7 +76,16 @@ check('and a schema that answers skips the forty guesses entirely',
      lists and the caller picks which by name. The gate is unchanged — an
      answered introspection or a dead session still skips every guess. */
   && /described \|\| !sessionWorks \? \[\] : wanted/.test(body)
-  && /described \|\| !sessionWorks \|\| wanted !== TIER_FIELDS \? \[\] : TIER_OPS/.test(body));
+  /* The OPERATION loop takes the same gate. Pinned to the property rather than
+     to one spelling of it: this assertion used to quote the whole ternary
+     including `wanted !== TIER_FIELDS ? [] : TIER_OPS`, so adding a second
+     operation list — the per-trip money question, which is not the tier
+     question and must not spend its requests — failed a test about a gate that
+     had not moved. What must hold is that the ops loop is skipped when the
+     schema described itself or the session is dead, and that WHICH list it
+     asks about is chosen from the caller's set rather than hardcoded. */
+  && /described \|\| !sessionWorks \? \[\] : opsWanted/.test(body)
+  && /wanted === TIER_FIELDS \? TIER_OPS/.test(body));
 /* The property that keeps this a probe rather than a proxy. */
 check('the caller picks a fixed list by name, never a field',
   /const SETS = \{ tier: TIER_FIELDS/.test(body)

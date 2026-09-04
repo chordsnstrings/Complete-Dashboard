@@ -238,6 +238,53 @@ const TIER_OPS = [
   'getDriverIncentives', 'getPerformanceReport', 'getFleetDrivers',
 ];
 
+/* ── is there a PER-TRIP amount anywhere? ─────────────────────────────────
+   The operator is sure the fleet portal shows what each ride paid, and the
+   product cannot: Uber's trip export has 15 columns and no fare among them,
+   only four report types are valid for this org and none is trip-level, and
+   getEarnerBreakdownsV2 answers per driver per WEEK — a net amount, a trip
+   count and a distance, never a fare on a ride.
+
+   That is a statement about the two surfaces this collector already uses, not
+   about the schema. If the portal renders a per-trip figure then some
+   operation serves it, and this gateway names the operations it does not have
+   (CONTROL_OP proves that on every run), so the question is answerable by
+   asking rather than by arguing from what we happen to call.
+
+   The four verdicts matter here more than anywhere else in this file. "No such
+   operation" closes it for good. "Exists — denied to this session" means the
+   figure IS served and a higher-privilege login would reach it, which is a
+   thing an operator can act on with Uber. Those are opposite answers and the
+   difference is worth thirteen requests.
+
+   Spellings from Uber's own families: earner/driver/trip crossed with
+   earnings/activities/breakdown, plus the two the driver app is known to use
+   for its own trip-by-trip earnings list. */
+/* And the same question asked of the driver object, in case the amount hangs
+   off a trip the schema already exposes rather than off an operation of its
+   own. `status` is the known-real sibling on ComplianceInfo; here the pair
+   partner is the driver itself, and zzNotARealFieldQx is the control. */
+const TRIP_MONEY_FIELDS = [
+  ['driver', 'trips'],
+  ['driver', 'activities'],
+  ['driver', 'earnerActivities'],
+  ['driver', 'tripEarnings'],
+  ['driver', 'jobs'],
+  ['driverInfo', 'trips'],
+  ['driverInfo', 'activities'],
+  ['driverInfo', 'tripEarnings'],
+  ['user', 'trips'],
+  ['user', 'activities'],
+  ['driver', 'zzNotARealFieldQx'],
+];
+
+const TRIP_MONEY_OPS = [
+  'getEarnerActivities', 'getActivities', 'getEarnerTrips', 'getTripEarnings',
+  'getEarnerTripEarnings', 'getEarningsBreakdownByTrip', 'getTripEarningsBreakdown',
+  'getEarnerActivityFeed', 'getActivityFeed', 'getTripDetails', 'getTripHistory',
+  'getEarnerJobs', 'getJobEarnings',
+];
+
 /* ── the contact fields, asked for rather than assumed ────────────────────
    src/sources/uber_profile.js says the portal's own query returns "a picture
    url, a phone number and an email as well", and declines to store them. That
@@ -1027,7 +1074,7 @@ export function probeRoutes(app, { wrap }) {
     const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
       subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST,
       identity: IDENTITY_FIELDS, compliance: COMPLIANCE_SUB, documents: COMPLIANCE_DOCS,
-      doctype: COMPLIANCE_DOC_TYPE, docnames: DOC_NAMING };
+      doctype: COMPLIANCE_DOC_TYPE, docnames: DOC_NAMING, tripmoney: TRIP_MONEY_FIELDS };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {
@@ -1067,7 +1114,12 @@ export function probeRoutes(app, { wrap }) {
     const ops = [];
     /* Operations are a tier question; the contact set is about fields on a
        driver we already fetch, so it does not spend thirteen more requests. */
-    for (const name of (described || !sessionWorks || wanted !== TIER_FIELDS ? [] : TIER_OPS)) {
+    /* Which operation list this run asks about. The tier question and the
+       per-trip money question are different lists and neither should spend the
+       other's requests; every other set asks about fields only. */
+    const opsWanted = wanted === TIER_FIELDS ? TIER_OPS
+      : wanted === TRIP_MONEY_FIELDS ? TRIP_MONEY_OPS : [];
+    for (const name of (described || !sessionWorks ? [] : opsWanted)) {
       const withArg = await probeOp(name, true);
       await new Promise((r) => setTimeout(r, 80));
       /* An operation that exists but takes different arguments answers the
