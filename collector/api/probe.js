@@ -755,7 +755,12 @@ export function probeRoutes(app, { wrap }) {
 
     /* 1. Introspection. If it answers, nothing below is needed. */
     const introspection = {};
-    for (const t of ['DriverInfo', 'Driver', 'User']) {
+    /* SupplierUserEntity is the type the contact fields actually live on — the
+       refusals name it — and PhoneNumber and UserName are the two objects
+       hanging off it. Asking about 'User' was asking about a type this schema
+       does not use for the driver's account. */
+    for (const t of ['DriverInfo', 'Driver', 'User', 'SupplierUserEntity',
+      'PhoneNumber', 'UserName']) {
       const d = await ask(`query I($n: String!) { __type(name: $n) { name fields { name } } }`, { n: t });
       const fields = d?.data?.__type?.fields;
       introspection[t] = fields ? fields.map((f) => f.name)
