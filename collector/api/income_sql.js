@@ -190,7 +190,15 @@ export function chooseBasis(r, windowDays) {
       ? `net payout, after the platform’s commission — this is the money that `
         + `arrived; the fares on ${r.priced_bookings} of ${r.bookings} bookings are `
         + `the gross the riders paid, which is a larger and different figure`
-      : 'net payout, after the platform’s commission — this channel reports no fare at all';
+      /* "this channel reports no fare at all" was a claim about the CHANNEL
+         made from one window's rows. On any window inside the week Uber's
+         payments walk has not reached — "today", "yesterday", the first days
+         of "this week" — the money page of a fleet analytics product stated in
+         plain English that Uber reports no fare, for a channel that priced
+         2,107 bookings of the week before. The sentence says what the window
+         shows and stops there. */
+      : 'net payout, after the platform’s commission — this is the money that arrived, '
+        + 'and no booking in this window carries a fare of its own';
   } else if (r.priced_bookings && r.fare_coverage_pct >= 80) {
     r.basis = 'fares';
     r.best = r.fares;

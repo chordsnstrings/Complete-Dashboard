@@ -204,7 +204,15 @@ export function tripRoutes(app, { q, wrap }) {
          facts and only one of them is a problem. */
       notes: {
         fare_reported: Boolean(t.has_fare),
-        platform_prices_trips: platform !== 'uber' && platform !== 'fms',
+        /* Measured, not asserted. This was `platform !== 'uber'`, which told
+           every reader of an unpriced Uber trip that the channel never prices
+           anything — on a channel that priced 6,369 bookings this month. What
+           is true of Uber is that its fares arrive in a separate report a week
+           at a time, so an unpriced ride is a week not yet collected; what is
+           true of a telematics journey is that nobody sold it. The count is
+           over this driver's own day, which is the set already in hand. */
+        platform_prices_trips: platform !== 'fms'
+          && (t.has_fare || sameDay.some((x) => x.platform === platform && x.price != null)),
         is_telematics_journey: !t.is_booking,
       },
     });

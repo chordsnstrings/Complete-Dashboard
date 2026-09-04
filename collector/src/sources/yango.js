@@ -288,7 +288,31 @@ async function pullDrivers(from, to, chunks = []) {
       plate: normPlate(it.car?.callsign), period_start: iso(start), period_end: iso(end),
       trips: it.count_orders_completed, distance_km: it.sum_distance != null ? Number(it.sum_distance) / 1000 : null,
       hours_online: it.work_time_seconds != null ? it.work_time_seconds / 3600 : null,
-      earnings: (Number(it.price_cash) || 0) + (Number(it.price_cashless) || 0),
+      /* NET, like every other channel's earnings — this was the gross.
+         ─────────────────────────────────────────────────────────────────
+         driver_payout_day.earnings is one column and api/income_sql.js prints
+         one sentence over it: "net payout, after the platform's commission —
+         this is the money that arrived". Uber's side of that column is
+         netOutstanding, which is net. Yango's was price_cash + price_cashless,
+         which is what the riders paid — so a quarter of Yango's line was
+         Yango's own commission, described to a reader as money that arrived.
+
+         Measured on production for August 2026: Aliyan Khalil, gross 3,069.00
+         against a platform commission of -749.58, which is 24.4%. Across the
+         fleet's Yango line for the month, roughly AED 1,320-1,590 of the
+         5,846.06 the product reported had never reached the operator.
+
+         price_platform_commission is filed NEGATIVE by Yango — the funnel
+         route at api/analytics_routes.js reads it as it stands — so this adds
+         rather than subtracts, and a row that omits the field falls back to
+         the gross rather than to nothing.
+
+         RESTATING HISTORY NEEDS A BACKFILL: rows already stored keep the
+         gross until this window is collected again. */
+      earnings: (Number(it.price_cash) || 0) + (Number(it.price_cashless) || 0)
+        + (Number(it.price_platform_commission) || 0),
+      /* Unchanged, and deliberately: cash is what the driver was handed, which
+         is a fact about custody rather than about commission. */
       cash_earnings: it.price_cash, raw: it,
     /* A driver who did nothing that week comes back as a row of zeros, and a
        zero is a measure — it would claim the week's days in the resolution and

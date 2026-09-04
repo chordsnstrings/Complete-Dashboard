@@ -2251,10 +2251,16 @@ V.finance = async (root) => {
      that can ever appear here are the hotel and Yango ones. The honest
      sentence already existed twenty lines down and only fired when the table
      was completely empty. */
+  /* This ended "no Uber tier can reach this table however much it earned",
+     printed directly above a table whose top four rows are now Uber tiers with
+     real per-trip fares. It was the flattest never-will sentence left in the
+     product and the guard test written to stop exactly that did not match it —
+     both are fixed, and test/fare_reason_shared.test.mjs now reads the server
+     files too. */
   const tier = panel('What each priced tier earns',
-    'Only channels that price per trip can appear here — on this fleet that is the hotel and Yango '
-    + 'bookings. Uber names a tier on every trip and carries no fare at all, so no Uber tier can '
-    + 'reach this table however much it earned.');
+    `A tier appears here once its rides carry a fare. ${UBER_FARE_WHY}, so an Uber tier fills in `
+    + 'behind that walk while the hotel and Yango bookings, which are priced on the trip itself, '
+    + 'have always been here.');
   g2.append(tier.panel);
   const comp = panel('Earnings components', 'How the platform breaks a payout down: fares, tips, promotions, and what it deducts'); g2.append(comp.panel);
   const tips = panel('Tips by driver', 'Service quality expressed in money. Riders tip the experience, not the route.'); root.append(tips.panel);

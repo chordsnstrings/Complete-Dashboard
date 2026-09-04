@@ -23,12 +23,19 @@ import { readdirSync, readFileSync } from 'node:fs';
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-const files = readdirSync('api/public').filter((f) => f.endsWith('.js'));
-const src = new Map(files.map((f) => [f, readFileSync(`api/public/${f}`, 'utf8')]));
+/* The SERVER files too. Sentences reach a reader through /api/forecast's
+   revenue_note and /api/playbook's assumption note as surely as through a
+   panel subtitle, and two of them were still asserting a permanent absence
+   while this file scanned only api/public. */
+const files = [
+  ...readdirSync('api/public').filter((f) => f.endsWith('.js')).map((f) => `api/public/${f}`),
+  ...readdirSync('api').filter((f) => f.endsWith('.js')).map((f) => `api/${f}`),
+];
+const src = new Map(files.map((f) => [f, readFileSync(f, 'utf8')]));
 
 console.log('\nthe sentence lives in ui.js and nowhere else');
 
-const ui = src.get('ui.js');
+const ui = src.get('api/public/ui.js');
 check('ui.js exports the short reason',
   /export const UBER_FARE_WHY =/.test(ui), 'UBER_FARE_WHY is missing');
 check('…and it says the fare comes from the payments report, not that none exists',
@@ -45,6 +52,14 @@ const CLAIMS = [
   /publishes no fare/i,
   /has no fare field/i,
   /reports no fare per trip/i,
+  /* Added after two live copies survived the sweep this file was written for.
+     The flattest of them — "no Uber tier can reach this table however much it
+     earned" — sat above a table whose top four rows were Uber tiers with real
+     fares, and this test reported green over it, because it matched none of
+     the four phrasings above and lived in a file the scan did not read. */
+  /carries no fare at all/i,
+  /reports no fare at all/i,
+  /no [a-z]+ tier can reach/i,
 ];
 
 /* Only what a reader can see. A code comment describing the trip export is
@@ -55,20 +70,49 @@ const stripComments = (s) => s
   .replace(/\/\*[\s\S]*?\*\//g, '')
   .replace(/^[ \t]*\/\/.*$/gm, '');
 
+/* The phrase is not banned — the unqualified phrase is. "Uber's trip export
+   carries no fare column" is still the truest first clause there is; what must
+   never follow it is a full stop. A sentence that goes on to name where the
+   fare DOES come from is the sentence this file is trying to produce, so the
+   window around a hit is checked for that qualifier before it is called an
+   offence. */
+const QUALIFIED = /payments report|collected a week at a time|not yet collected|not collected yet/i;
 const offenders = [];
 for (const [f, s] of src) {
-  if (f === 'ui.js') continue;
+  if (f === 'api/public/ui.js') continue;
   const code = stripComments(s);
-  for (const line of code.split('\n')) {
-    if (CLAIMS.some((re) => re.test(line))) offenders.push(`${f}: ${line.trim().slice(0, 110)}`);
+  for (const m of code.matchAll(/[^\n]*\n?/g)) {
+    const line = m[0];
+    if (!CLAIMS.some((re) => re.test(line))) continue;
+    /* The statement, not the line: these sentences are built by concatenation
+       across three or four source lines. */
+    const around = code.slice(Math.max(0, m.index - 260), m.index + 380);
+    if (QUALIFIED.test(around)) continue;
+    offenders.push(`${f}: ${line.trim().slice(0, 110)}`);
   }
 }
 check('no other file states it in its own words',
   offenders.length === 0, `\n      ${offenders.join('\n      ')}`);
 
+/* The two sentences that made this scan reach the server files. Pinned by
+   the property rather than the wording: both must say the fare is coming
+   rather than that it does not exist. */
+check('the forecast note says where the fare comes from instead of denying it',
+  /payments report/.test(src.get('api/forecast_routes.js') || ''),
+  'revenue_note asserted "every AED figure describes the hotel, Bolt and Yango rows only"');
+/* Comments stripped first: this file's own header quotes the sentence it
+   replaced, and a check that cannot tell a quotation from a claim would fail
+   on the record of the fix. */
+const income = stripComments(src.get('api/income_sql.js') || '');
+check('and the payout basis note describes the WINDOW, not the channel',
+  !/reports no fare at all/.test(income)
+  && /no booking in this window carries a fare/.test(income),
+  'a claim about a channel made from one window fires on any window inside an uncollected week');
+
 console.log('\nand the files that need it import it');
 
-const users = [...src].filter(([f, s]) => f !== 'ui.js' && /UBER_FARE_WHY/.test(stripComments(s)));
+const users = [...src].filter(([f, s]) => f !== 'api/public/ui.js'
+  && f.startsWith('api/public/') && /UBER_FARE_WHY/.test(stripComments(s)));
 check('somebody actually uses it — this is not a constant nothing reads',
   users.length >= 8, `${users.length} files`);
 const unimported = users.filter(([, s]) =>
