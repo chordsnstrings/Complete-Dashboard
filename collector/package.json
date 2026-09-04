@@ -20,7 +20,8 @@
     "audit:live": "node bin/live-audit.mjs",
     "smoke:views": "node test/smoke_views.mjs",
     "live-ui": "node bin/live-ui.mjs",
-    "mutate": "node bin/mutate.mjs"
+    "mutate": "node bin/mutate.mjs",
+    "fares:reconcile": "node bin/fare-vs-statement.mjs"
   },
   "dependencies": {
     "compression": "^1.8.1",
