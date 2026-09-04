@@ -338,6 +338,33 @@ const PHONE_LAST = [
   ['user', 'phone', ' { countryCode zzNotARealFieldQx }'],
 ];
 
+/* ── identity DOCUMENTS, which the contact round never asked about ────────
+   The contact round asked for a phone, an email, a picture and an address. It
+   never asked whether Uber holds a government identity number, and the fleet's
+   own hotel channel DOES — driver_compliance.emirates_id is populated on the
+   hotel records and empty everywhere else, so a single identifier that would
+   join a person across all four channels may be sitting one field away.
+
+   Asked beside countryCode-style known-real siblings where the parent is an
+   object, because on this gateway a bare "Invalid GraphQL query" is an absence
+   with its suggestion scrubbed, and a pair with one known-real member is what
+   tells the two apart. */
+const IDENTITY_FIELDS = [
+  ['user', 'emiratesId'], ['user', 'nationalId'], ['user', 'nationalIdNumber'],
+  ['user', 'identityNumber'], ['user', 'governmentId'], ['user', 'idNumber'],
+  ['user', 'documentNumber'], ['user', 'passportNumber'], ['user', 'nationality'],
+  ['user', 'dateOfBirth'], ['user', 'birthDate'],
+  ['driver', 'emiratesId'], ['driver', 'nationalId'], ['driver', 'identityDocument'],
+  ['driver', 'documentInfo'], ['driver', 'identity'], ['driver', 'kyc'],
+  ['driver', 'licenseNumber'], ['driver', 'licence'], ['driver', 'driverLicense'],
+  ['driver', 'complianceDocuments'], ['driver', 'backgroundCheck'],
+  ['driverInfo', 'licenseNumber'], ['driverInfo', 'nationalId'],
+  /* complianceInfo is a type this schema DOES have — GetDriver already selects
+     complianceInfo { status } — so a document hanging off it is the likeliest
+     home of all. */
+  ['driver', 'complianceInfo'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -856,7 +883,8 @@ export function probeRoutes(app, { wrap }) {
        the names in it are all in this file, so this stays what the header
        promises: not an open GraphQL proxy onto the fleet's session. */
     const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
-      subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST };
+      subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST,
+      identity: IDENTITY_FIELDS };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {
