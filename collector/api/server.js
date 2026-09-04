@@ -2166,6 +2166,85 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
     platform, fleet });
 }));
 
+/* What each STATEMENT actually said, so a bank line can be matched to it.
+   ──────────────────────────────────────────────────────────────────────────
+   Every money surface in this product reads driver_payout_day, whose rows are
+   a report window spread evenly across its days. sql/schema_v23.sql is explicit
+   about the limit of that: even spreading "is the right estimate for a WINDOW
+   total ... and it is exact whenever the window contains whole periods." A
+   calendar month does not contain whole periods. Uber's weeks run Monday to
+   Sunday and are wired the following Monday, so August's five bank credits pay
+   for work from 27 July to 30 August, and no month-shaped query can be checked
+   against them.
+
+   Measured while reconciling the August 2026 statements against ENBD (Ecosine)
+   and ADCB (Egari): asked for calendar August the day-spread total is AED
+   428,084 against AED 440,445 actually received — the dashboard 2.8% LOW.
+   Asked for 27 Jul – 30 Aug it is AED 465,924 against the same AED 440,445 —
+   now 5.8% HIGH. Same data, opposite conclusions, because the window was cut
+   through the middle of a statement at both ends. A reconciliation that flips
+   sign on the choice of window is not a reconciliation.
+
+   So this returns the periods THEMSELVES, undivided. period_earnings is the
+   provider's own figure for the whole window and is repeated on each of that
+   window's day rows, so it is taken once per (driver, period) and then summed —
+   summing the column directly would multiply every statement by its own length.
+
+   Nothing here estimates or apportions. A caller with a bank statement can put
+   one line against one row and see the difference, which is the only form of
+   this question that has an answer. */
+app.get('/api/reconcile/periods', wrap(async (req, res) => {
+  const [from, to, platform, fleet] = range(req);
+  const rows = await q(
+    `WITH per_driver AS (
+       /* One row per driver per statement. max() rather than DISTINCT: two
+          rows for the same driver and period that disagree about the amount
+          are a collection fault, and taking the larger keeps the discrepancy
+          visible in the total instead of silently doubling it. */
+       SELECT platform, fleet_id, driver_ext_id, period_start, period_end,
+              max(period_days) AS period_days,
+              max(period_earnings) AS period_earnings,
+              max(cash_earnings * period_days) AS cash_earnings
+         FROM driver_payout_day
+        WHERE period_end >= $1::date AND period_start <= $2::date
+          AND ($3::text IS NULL OR platform = $3)
+          AND ($4::text IS NULL OR fleet_id = $4)
+        GROUP BY 1, 2, 3, 4, 5
+     )
+     SELECT platform, fleet_id,
+            to_char(period_start, 'YYYY-MM-DD') AS period_start,
+            to_char(period_end, 'YYYY-MM-DD') AS period_end,
+            max(period_days)::int AS period_days,
+            count(*)::int AS drivers,
+            round(sum(period_earnings)::numeric, 2) AS net,
+            round(sum(cash_earnings)::numeric, 2) AS cash,
+            /* Whether the window the caller asked for contains this statement
+               whole. A period cut by the window edge contributes a part of
+               itself to any day-spread total, which is exactly the error this
+               route exists to make visible rather than absorb. */
+            bool_and(period_start >= $1::date AND period_end <= $2::date) AS whole
+       FROM per_driver
+      GROUP BY 1, 2, 3, 4
+      ORDER BY period_start, platform, fleet_id`, [from, to, platform, fleet]);
+  const n = (v) => (v == null ? 0 : Number(v));
+  const whole = rows.filter((r) => r.whole);
+  res.json({ rows,
+    totals: {
+      net: +rows.reduce((a, r) => a + n(r.net), 0).toFixed(2),
+      cash: +rows.reduce((a, r) => a + n(r.cash), 0).toFixed(2),
+      periods: rows.length,
+      /* The total a bank statement can actually be checked against: the
+         statements that fall entirely inside the window. */
+      net_whole_periods: +whole.reduce((a, r) => a + n(r.net), 0).toFixed(2),
+      whole_periods: whole.length,
+      cut_periods: rows.length - whole.length,
+    },
+    window: { from, to }, platform, fleet,
+    note: 'period_earnings is the provider\u2019s own figure for the whole window, taken once '
+      + 'per driver and period rather than summed across the days it was spread over. Rows with '
+      + 'whole=false are cut by the window edge and cannot be matched against a bank line.' });
+}));
+
 /* ───────────────────────── unauthorized trips ───────────────────────── */
 // Seat-sensor occupancy that no booking explains. See docs/unauthorized-trips.md.
 /* The fleet chip narrows these; the platform chip does not, and cannot.

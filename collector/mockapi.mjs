@@ -3815,6 +3815,47 @@ app.get('/api/track', (req, r) => {
    out loud), and the two newest days have no money at all — the statement for
    the current week has not landed yet, and a chart must draw that as a hole
    rather than as a day the fleet earned nothing. */
+/* Statement periods, undivided — the shape a bank line can be matched against.
+   ──────────────────────────────────────────────────────────────────────────
+   The fixture's periods are Monday-to-Sunday weeks, and the window deliberately
+   cuts the first and last of them: whole=false is the case the page must render
+   differently, because a statement sliced by the window edge is exactly what
+   made the August reconciliation flip from 2.8% low to 5.8% high depending on
+   which dates were asked for. One period is 4 days rather than 7, because they
+   are not all weeks and a caller that assumes seven will mis-align. */
+app.get('/api/reconcile/periods', (req, r) => {
+  const from = String(req.query.from || '').slice(0, 10) || '2026-08-01';
+  const to = String(req.query.to || '').slice(0, 10) || '2026-08-31';
+  const mk = (ps, pe, days, fleet, net, cash, drivers) => ({
+    platform: 'uber', fleet_id: fleet, period_start: ps, period_end: pe,
+    period_days: days, drivers, net, cash,
+    whole: ps >= from && pe <= to,
+  });
+  const rows = [
+    mk('2026-07-27', '2026-08-02', 7, 'ecosine', 53522.95, 15680.12, 148),
+    mk('2026-07-27', '2026-08-02', 7, 'egari', 27523.86, 7420.55, 66),
+    mk('2026-08-03', '2026-08-09', 7, 'ecosine', 55683.59, 16104.88, 151),
+    mk('2026-08-03', '2026-08-09', 7, 'egari', 25022.36, 7011.02, 64),
+    mk('2026-08-10', '2026-08-16', 7, 'ecosine', 62539.87, 18220.41, 155),
+    mk('2026-08-10', '2026-08-16', 7, 'egari', 25305.28, 7188.19, 65),
+    mk('2026-08-17', '2026-08-23', 7, 'ecosine', 68862.45, 19944.30, 158),
+    mk('2026-08-17', '2026-08-23', 7, 'egari', 31911.98, 8402.77, 68),
+    mk('2026-08-24', '2026-08-27', 4, 'ecosine', 41260.11, 11983.55, 160),
+    mk('2026-08-28', '2026-09-03', 7, 'ecosine', 51992.44, 14877.63, 162),
+  ].filter((x) => x.period_end >= from && x.period_start <= to)
+    .filter((x) => !req.query.fleet || x.fleet_id === req.query.fleet);
+  const sum = (k, list) => +list.reduce((a, x) => a + (x[k] || 0), 0).toFixed(2);
+  const whole = rows.filter((x) => x.whole);
+  r.json({ rows,
+    totals: { net: sum('net', rows), cash: sum('cash', rows), periods: rows.length,
+      net_whole_periods: sum('net', whole), whole_periods: whole.length,
+      cut_periods: rows.length - whole.length },
+    window: { from, to },
+    platform: req.query.platform || null, fleet: req.query.fleet || null,
+    note: 'period_earnings is the provider\u2019s own figure for the whole window, taken once '
+      + 'per driver and period rather than summed across the days it was spread over. Rows with '
+      + 'whole=false are cut by the window edge and cannot be matched against a bank line.' });
+});
 app.get('/api/finance/daily', (req, r) => {
   /* Money per day, with the shape BOTH defects lived in.
      ──────────────────────────────────────────────────────────────────────

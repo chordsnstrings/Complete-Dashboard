@@ -32,7 +32,7 @@
    run of dashes. */
 import { empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, money, fmt, pct,
-  countOf, plural, verdict } from './ui.js';
+  countOf, plural, verdict, sourceLabel } from './ui.js';
 import { qChan, href } from './data.js';
 
 /* Why a money column can be empty for a whole year of months.
@@ -279,6 +279,16 @@ export async function renderReconcile(root, month) {
      default view, of the heaviest read in the product. api/cache.js keys on
      the whole originalUrl; data.js has had this guard since the same bug cost
      /api/coverage its warm entry. */
+  /* The last day of a 'YYYY-MM' month, without a Date. new Date(y, m, 0) would
+     answer in the reader's timezone, and every day key in this product is
+     Dubai's — the exact class of bug test/server_day_keys.test.mjs forbids on
+     the server side. */
+  const monthEnd = (m) => {
+    const [y, mo] = String(m).split('-').map(Number);
+    const len = [31, (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0 ? 29 : 28,
+      31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1];
+    return `${m}-${String(len).padStart(2, '0')}`;
+  };
   const d = await qChan('/api/reconcile', month ? { month } : {});
   host.innerHTML = '';
 
@@ -426,6 +436,73 @@ export async function renderReconcile(root, month) {
     }
   }
   host.append(mp.panel);
+
+  /* ── the statements themselves, undivided ───────────────────────────────
+     Everything above this point is monthly, and a month cannot be checked
+     against a bank statement. Uber's weeks run Monday to Sunday and are wired
+     the following Monday, so August 2026's five credits pay for work from 27
+     July to 30 August. Reconciling the August 2026 ENBD (Ecosine) and ADCB
+     (Egari) statements against this product: asked for calendar August the
+     day-spread total is AED 428,084 against AED 440,445 actually received, the
+     dashboard 2.8% LOW; asked for 27 Jul – 30 Aug it is AED 465,924 against
+     the same AED 440,445, now 5.8% HIGH. Same data, opposite conclusions,
+     because both windows cut through a statement at each end.
+
+     sql/schema_v23.sql is explicit that the even day-spread "is exact whenever
+     the window contains whole periods" — so this panel shows the periods
+     whole, marks the ones the window cuts, and totals only the ones it does
+     not. That total is the number a bank line can be put against. */
+  {
+    const rp = await qChan('/api/reconcile/periods', month
+      ? { from: `${month}-01`, to: monthEnd(month) } : {}).catch(() => null);
+    if (rp && rp.rows && rp.rows.length) {
+      const sp = panel('What each statement said',
+        'The provider\u2019s own figure for each pay period, undivided \u2014 this is what a bank '
+        + 'line matches against. A month never does: the period runs Monday to Sunday and is wired '
+        + 'the following week.');
+      const rt = rp.totals || {};
+      sp.body.append(tableFrom(rp.rows, [
+        { label: 'Period', key: 'period_start',
+          render: (r) => `${esc(r.period_start)} \u2192 ${esc(r.period_end)}`
+            + (r.period_days !== 7
+              ? `<span class="dim" title="not a full week — a caller assuming seven days would `
+                + `mis-align this one"> ${esc(String(r.period_days))}d</span>` : '') },
+        { label: 'Channel', key: 'platform', render: (r) => esc(sourceLabel(r.platform)) },
+        { label: 'Fleet', key: 'fleet_id',
+          render: (r) => (r.fleet_id ? esc(r.fleet_id)
+            : '<span class="ent-off" title="this statement is not attributed to a fleet">—</span>') },
+        { label: 'Drivers', key: 'drivers', num: true, render: (r) => fmt(r.drivers) },
+        { label: 'Net', key: 'net', num: true, render: (r) => money(r.net) },
+        { label: 'Of which cash', key: 'cash', num: true,
+          render: (r) => (r.cash == null
+            ? '<span class="ent-off" title="this statement reports no cash split">—</span>'
+            : money(r.cash)) },
+        /* The whole point of the column: a period the window cuts contributes a
+           fraction of itself to every monthly figure above, and cannot be put
+           against a bank line at all. */
+        { label: 'Complete', key: 'whole',
+          render: (r) => (r.whole ? pill('whole', 'ok')
+            : `<span class="tag warn" title="this pay period is cut by the edge of the window, so `
+              + `only part of it is inside any total above — it cannot be matched to a bank line">`
+              + 'cut by the window</span>') },
+      ], { compact: true, sortable: true, sortId: 'stmtperiods',
+        defaultSort: { key: 'period_start', dir: 'desc' } }));
+      sp.body.append(el('p', 'cap',
+        `${countOf(rt.whole_periods || 0, 'pay period')} `
+        + `${plural(rt.whole_periods || 0, 'falls', 'fall')} entirely inside this window and `
+        + `${plural(rt.whole_periods || 0, 'totals', 'total')} `
+        + `<b>${esc(money(rt.net_whole_periods))}</b>. That is the figure to check a bank `
+        + 'statement against.'
+        + (rt.cut_periods
+          ? ` ${countOf(rt.cut_periods, 'other period')} `
+            + `${plural(rt.cut_periods, 'is', 'are')} cut by the window edge; `
+            + `counting ${plural(rt.cut_periods, 'it', 'them')} would add `
+            + `${money((rt.net || 0) - (rt.net_whole_periods || 0))} of work the window only `
+            + 'partly contains.'
+          : '')));
+      host.append(sp.panel);
+    }
+  }
 
   host.append(el('p', 'cap', esc(d.note)));
   /* The horizon this note described was the REST feed's, and Uber has two.
