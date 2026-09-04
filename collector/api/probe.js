@@ -238,7 +238,45 @@ const TIER_OPS = [
   'getDriverIncentives', 'getPerformanceReport', 'getFleetDrivers',
 ];
 
-/* ── is there a PER-TRIP amount anywhere? ─────────────────────────────────
+/* ── SETTLED 2026-09-04: there is NO per-trip amount. ─────────────────────
+   Uber gives a fleet its money at DRIVER-DAY grain and no finer. Five
+   independent checks, all run live against production, none of them inference:
+
+     1. The trip export has 15 columns and no fare among them
+        (/api/probe/uber/report-columns).
+     2. Only four report types are valid for this org — TRIP_ACTIVITY,
+        DRIVER_ACTIVITY, DRIVER_QUALITY, DRIVER_PERFORMANCE. Everything that
+        sounds like money (PAYMENT_DETAILS, TRIP_DETAILS, EARNINGS, INVOICE)
+        answers "invalid report type" (/api/probe/uber/report-types).
+     3. getEarnerBreakdownsV2 answers per driver per period: netOutstanding, a
+        trip COUNT and a distance. No fare on a ride.
+     4. Eleven field spellings on driver / driverInfo / user — trips,
+        activities, earnerActivities, tripEarnings, jobs — all NAMED absent,
+        with a control that was also named.
+     5. Thirteen operation spellings: seven named absent, six refused
+        generically. That six looked like operations asked with the wrong
+        arguments, and it is not — which the control below settles.
+
+   THE CONTROL THAT CLOSED IT. getEarnerBreakdownsV2 asked with an impossible
+   argument answers, in full:
+
+       Unknown argument "zzBogusArgQx" on field "Query.getEarnerBreakdownsV2".
+       Field "getEarnerBreakdownsV2" argument "supplierUuid" of type "ID!" is
+       required, but it was not provided.
+
+   Argument errors are NAMED on this schema, precisely, including which
+   required argument is missing. So a generic refusal cannot mean "right
+   operation, wrong arguments": if those six existed, all fifteen shapes below
+   would have been told what they got wrong. They were not. The six do not
+   exist, and no argument list will make them.
+
+   Keep this round rather than deleting it. The question comes back — the fleet
+   portal appears to show a per-ride figure and it is reasonable to assume the
+   API does too — and re-probing costs thirty requests against a live session.
+   The answer is here, with the evidence, and the control is what makes it an
+   answer instead of a guess.
+
+   ── is there a PER-TRIP amount anywhere? ─────────────────────────────────
    The operator is sure the fleet portal shows what each ride paid, and the
    product cannot: Uber's trip export has 15 columns and no fare among them,
    only four report types are valid for this org and none is trip-level, and
