@@ -557,8 +557,16 @@ async function pullTripFares(from, to, onStep, checkpoint = null) {
       if (!expected && !throttled) consecutiveFailures++;
       /* A throttle on the RUNNING week must not cost the closed ones. It is
          the first ask of the pass and the only speculative one; everywhere
-         else the cap is per run and the remaining weeks would hit it too. */
-      if (throttled && !isOpen) break;
+         else the cap is per run and the remaining weeks would hit it too.
+
+         The chunk is pushed BEFORE the break, and that is a fix rather than a
+         tidy-up: `break` from inside this catch skipped the push at the foot
+         of the loop, so a fares pass refused outright recorded no chunk at all
+         and the run reported itself ok. An operator reading /api/status saw a
+         healthy Uber run with no fares in it and nothing saying why — the same
+         class of silence as the 299-day hole the trip walk's comment
+         describes. */
+      if (throttled && !isOpen) { chunks.push(chunk); break; }
     }
     chunks.push(chunk);
     /* Never for the running week: it is not finished, and marking it done

@@ -85,8 +85,29 @@ check('…and never marked done',
   /if \(!isOpen && \(!chunk\.error \|\| chunk\.expected\)\) await checkpoint\?\.mark/.test(fn),
   'marking a part-week answer done would freeze it for the life of the job');
 check('a throttle on it continues rather than abandoning the closed weeks',
-  /if \(throttled && !isOpen\) break;/.test(fn),
+  /if \(throttled && !isOpen\) \{ chunks\.push\(chunk\); break; \}/.test(fn),
   'the speculative ask must not cost the weeks that are actually collectable');
+/* And the chunk is recorded before the break. `break` from inside the catch
+   skipped the push at the foot of the loop, so a fares pass refused outright
+   recorded nothing and the run reported itself ok — an operator saw a healthy
+   Uber run with no fares in it and no reason given. */
+check('…and a throttle that DOES stop the pass is still recorded as a chunk',
+  /chunks\.push\(chunk\); break;/.test(fn),
+  'breaking without pushing makes a refused fares pass invisible on /api/status');
+
+console.log('\nand the week boundary is the fleet’s, not UTC’s');
+
+/* w.end is a UTC midnight, so `w.end < now` called the week closed from
+   Sunday 00:00 UTC — 04:00 Sunday in Dubai, twenty hours early. */
+const WEEK = [new Date('2026-08-31'), new Date('2026-09-06')];   // one whole week
+const onSunday = [...closedWeeks(...WEEK, new Date('2026-09-06T02:00:00Z'))];   // 06:00 Dubai
+const onMonday = [...closedWeeks(...WEEK, new Date('2026-09-07T02:00:00Z'))];
+check('a week is still running at 06:00 Dubai on its own Sunday',
+  onSunday.length === 0,
+  `closedWeeks yielded ${onSunday.length}; at Sunday 00:00 UTC it is 04:00 in Dubai`);
+check('…and is closed by 06:00 Dubai on the Monday',
+  onMonday.length === 1 && iso(onMonday[0].end) === '2026-09-06',
+  JSON.stringify(onMonday.map((w) => [iso(w.start), iso(w.end)])));
 check('and a refusal of it is classified expected, not a hole',
   /const expected = isOpen \|\|/.test(fn),
   'a week Uber has not settled is an answer, not a failed collection');

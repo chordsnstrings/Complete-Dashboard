@@ -60,8 +60,26 @@ export function* dateChunks(from, to, maxDays = 31) {
 
    So the open week is skipped and lands when it closes. One request saved, one
    phantom failure removed from the run, and no partial week masquerading as a
-   whole one. */
-export const weekIsClosed = (w, now = new Date()) => w.end < now;
+   whole one.
+
+   ── the one caller this reasoning does NOT cover ─────────────────────────
+   "Clamping the date without clamping the key" is a statement about a writer
+   whose key IS the window. driver_performance is one; so is the quality grid.
+   pullTripFares is not: its only write is an UPDATE of price on a trip row
+   keyed by the trip's own UUID, so a part-week report smears nothing — it
+   prices the trips it covers and says nothing about the rest. That walk
+   therefore reaches the running week on purpose, clamped to the window's own
+   end, and test/uber_running_week.test.mjs holds down that it is the only one.
+
+   ── and the comparison is a DUBAI one ────────────────────────────────────
+   `w.end` is a UTC midnight, so `w.end < now` called this week closed from
+   Sunday 00:00 UTC — which is Sunday 04:00 in Dubai, with twenty hours of the
+   fleet's week still to run. Nothing was damaged by it only because the two
+   things that walk weeks fire at 21:00 and 22:00 UTC, by which time it is
+   Monday in Dubai; a backfill triggered by hand from the Settings page on a
+   Sunday afternoon would have asked for a week that had not finished and been
+   refused. The fleet works one city's calendar, and this is that city's. */
+export const weekIsClosed = (w, now = new Date()) => dubaiIso(now) > iso(w.end);
 export function* closedWeeks(from, to, now = new Date()) {
   for (const w of weekChunks(from, to)) if (weekIsClosed(w, now)) yield w;
 }
