@@ -751,6 +751,13 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
   font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.28rem;letter-spacing:.02em;
 }
 .av.sm{width:38px;height:38px;border-radius:10px;font-size:.92rem}
+/* The photo sits ON the initials, so a remote image that 404s degrades to the
+   avatar that was always there rather than to an empty box. onerror removes
+   the img and the initials underneath are already in place. */
+.av-photo{position:relative;overflow:hidden}
+.av-photo img{
+  position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
+}
 .idmeta{min-width:0;flex:1}
 .idmeta h2{
   font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.42rem;letter-spacing:-.015em;

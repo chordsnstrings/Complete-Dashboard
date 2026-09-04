@@ -3551,7 +3551,8 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
         WHERE coalesce(btrim(driver_name), '') <> ''
         GROUP BY 1
      )
-     SELECT platform, c.driver_ext_id, full_name, phone, licence_no, licence_expires,
+     SELECT platform, c.driver_ext_id, full_name, phone, email, picture_url,
+            licence_no, licence_expires,
             c.fleet_id,
             (licence_expires - now()::date) AS days_left, state, suspension_reason, rating,
             /* IS THIS PERSON STILL DRIVING?

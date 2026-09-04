@@ -72,8 +72,16 @@ check('introspection is tried first',
   'a server that describes itself answers every guess below in one call');
 check('and a schema that answers skips the forty guesses entirely',
   /const described = Array\.isArray\(introspection\.DriverInfo\)/.test(body)
-  && /described \|\| !sessionWorks \? \[\] : TIER_FIELDS/.test(body)
-  && /described \|\| !sessionWorks \? \[\] : TIER_OPS/.test(body));
+  /* `wanted` now, not TIER_FIELDS: the route probes one of several FIXED
+     lists and the caller picks which by name. The gate is unchanged — an
+     answered introspection or a dead session still skips every guess. */
+  && /described \|\| !sessionWorks \? \[\] : wanted/.test(body)
+  && /described \|\| !sessionWorks \|\| wanted !== TIER_FIELDS \? \[\] : TIER_OPS/.test(body));
+/* The property that keeps this a probe rather than a proxy. */
+check('the caller picks a fixed list by name, never a field',
+  /const SETS = \{ tier: TIER_FIELDS/.test(body)
+  && !/req\.query\.(field|parent|selection)/.test(body),
+  'nothing the caller sends may become part of a query against the fleet session');
 check('the probe paces itself',
   /setTimeout\(r, 80\)/.test(body));
 check('a GraphQL error is read as a message, never stringified as an object',
@@ -118,7 +126,7 @@ console.log('\nthe positive control, without which every negative is worthless')
 check('a field known to be real is asked first, and gates the whole run',
   /const POSITIVE_CONTROL = \['driverInfo', 'recognitionRating'\]/.test(bare)
   && /const sessionWorks = !!positive && positive\.value != null/.test(body)
-  && /described \|\| !sessionWorks \? \[\] : TIER_FIELDS/.test(body),
+  && /described \|\| !sessionWorks \? \[\] : wanted/.test(body),
   'an expired supplier cookie refuses everything, and thirty refusals read exactly like '
   + '"Uber does not publish a tier" when they mean "we did not ask anybody"');
 check('and a run against a dead session says VOID rather than "no tier"',

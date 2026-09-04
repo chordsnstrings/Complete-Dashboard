@@ -531,7 +531,15 @@ function identityCard(p) {
   const lastEver = dates('last_trip').pop() || p.span?.last_trip;
 
   wrap.innerHTML = `
-    <div class="av">${esc(initials)}</div>
+    ${c.picture_url
+    /* The portal's own photo, with the initials left underneath it rather than
+       replaced: the URL is a remote CloudFront object that can 404 long after
+       the row was written, and an avatar that fails to load must degrade to
+       the thing it replaced rather than to an empty box. */
+    ? `<div class="av av-photo">${esc(initials)}<img src="${esc(c.picture_url)}" alt=""
+         loading="lazy" referrerpolicy="no-referrer"
+         onerror="this.remove()"></div>`
+    : `<div class="av">${esc(initials)}</div>`}
     <div class="idmeta">
       <h2>${esc(p.name || 'Unnamed driver')}</h2>
       <div class="idsub">
@@ -543,7 +551,8 @@ function identityCard(p) {
     : lic != null ? pill(`licence ${lic < 0 ? `expired ${Math.abs(lic)}d ago` : `${lic}d left`}`, licTone) : ''}
       </div>
       <div class="idfacts">
-        ${c.phone ? `<span><b>Phone</b> ${esc(c.phone)}</span>` : ''}
+        ${c.phone ? `<span><b>Phone</b> <a class="lnk" href="tel:${esc(c.phone)}">${esc(c.phone)}</a></span>` : ''}
+        ${c.email ? `<span><b>Email</b> <a class="lnk" href="mailto:${esc(c.email)}">${esc(c.email)}</a></span>` : ''}
         ${c.licence_no ? `<span><b>Licence</b> ${esc(c.licence_no)}</span>` : ''}
         ${c.emirates_id ? `<span><b>Emirates ID</b> ${esc(c.emirates_id)}</span>` : ''}
         ${c.device_brand ? `<span><b>Device</b> ${esc(c.device_brand)} ${esc(c.device_model || '')}</span>` : ''}

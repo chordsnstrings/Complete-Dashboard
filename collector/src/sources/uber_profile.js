@@ -47,9 +47,31 @@ import { dubaiIso } from '../util.js';
 const SRC = 'uber_profile';
 const URL_ = `${UBER_WEB_HOST}/graphql`;
 
-/* The selection set, trimmed to what we store. The portal's own query asks for
-   a picture url, a phone number and an email as well; none of them is a fact
-   about the work and this is not the place to start holding them. */
+/* The selection set.
+   ─────────────────────────────────────────────────────────────────────────
+   This used to stop at the driving record, with the note that the portal
+   "asks for a picture url, a phone number and an email as well; none of them
+   is a fact about the work and this is not the place to start holding them".
+   The operator asked for them, so they are here now — and they go to
+   driver_compliance, which has been the fleet's contact store since v2 and
+   already held a phone for all 132 hotel drivers.
+
+   THE SPELLINGS ARE MEASURED, NOT GUESSED. Introspection is disabled on this
+   gateway ("GraphQL introspection is not allowed by Apollo Server"), and its
+   refusals are scrubbed of their "Did you mean" suggestions, so the schema had
+   to be established a field at a time through api/probe.js. What answers:
+
+     email                              a scalar
+     pictureUrl                         a scalar
+     phone { countryCode
+             nationalPhoneNumber }      +971 / 569585536
+     name  { firstName lastName }
+
+   phoneNumber, mobile, mobileNumber, emailAddress, photoUrl, profilePhotoUrl,
+   avatarUrl and eleven more spellings of the number are all named absent, and
+   so is EVERY address spelling on all three parent types — there is no postal
+   address on this surface. sql/schema_v57.sql records that so nobody repeats
+   the fifty-eight requests it took to find out. */
 const QUERY = `query GetDriver($orgUUID: ID!, $driverUUID: ID!) {
   getDriver(orgUUID: $orgUUID, driverUUID: $driverUUID) {
     driver {
@@ -58,12 +80,27 @@ const QUERY = `query GetDriver($orgUUID: ID!, $driverUUID: ID!) {
         uuid
         driverInfo { completedTripsCount recognitionRating }
         isBanned
+        email
+        pictureUrl
+        phone { countryCode nationalPhoneNumber }
+        name { firstName lastName }
       } }
       associatedVehicles { uuid licensePlate make model year }
       complianceInfo { status }
     }
   }
 }`;
+
+/* E.164, with the plus. Uber hands back the country code and the national
+   number separately and the hotel channel stores one string, so a column
+   holding both spellings would be a column nobody can match on.
+   sql/schema_v57.sql normalises the existing rows to the same form. */
+export function e164(phone) {
+  const cc = String(phone?.countryCode || '').replace(/[^0-9]/g, '');
+  const nn = String(phone?.nationalPhoneNumber || '').replace(/[^0-9]/g, '');
+  if (!cc || !nn) return null;
+  return `+${cc}${nn}`;
+}
 
 const credOf = (o) => (o.fleet === 'ecosine' ? 'UBER_WEB_COOKIE' : 'UBER_WEB_COOKIE_EGARI');
 
@@ -93,7 +130,8 @@ async function fetchOne(o, uuid) {
   const d = data?.data?.getDriver?.driver;
   if (!d) return { err: 'no driver in the response' };
 
-  const info = d.member?.user?.driverInfo || {};
+  const u = d.member?.user || {};
+  const info = u.driverInfo || {};
   const rating = Number(info.recognitionRating);
   const trips = Number(info.completedTripsCount);
   const cars = (d.associatedVehicles || []).filter((v) => v && (v.licensePlate || v.uuid));
@@ -102,9 +140,24 @@ async function fetchOne(o, uuid) {
       platform: 'uber', driver_ext_id: uuid, fleet_id: o.fleet,
       rating: Number.isFinite(rating) ? rating : null,
       lifetime_trips: Number.isFinite(trips) ? trips : null,
-      is_banned: typeof d.member?.user?.isBanned === 'boolean' ? d.member.user.isBanned : null,
+      is_banned: typeof u.isBanned === 'boolean' ? u.isBanned : null,
       compliance_status: d.complianceInfo?.status || null,
       profile_at: new Date().toISOString(),
+    },
+    /* The contact details, kept apart from the driving record deliberately.
+       driver_platform_state is rewritten on every pass and is the fleet's
+       operational view; driver_compliance is where a person's phone, licence
+       and identity documents already live, for the hotel channel since v2.
+       Personal details belong in one place, not two. */
+    contact: {
+      platform: 'uber', driver_ext_id: uuid, fleet_id: o.fleet,
+      full_name: [u.name?.firstName, u.name?.lastName]
+        .filter((x) => x && String(x).trim()).join(' ').trim() || null,
+      phone: e164(u.phone),
+      email: u.email || null,
+      picture_url: u.pictureUrl || null,
+      rating: Number.isFinite(rating) ? rating : null,
+      state: d.complianceInfo?.status || null,
     },
     /* The assignment as the PROVIDER states it, which is a different and better
        fact than the one this product infers from who happened to drive the car.
@@ -132,9 +185,15 @@ async function driverIdsFor(o) {
 
 /* The two writes that make a profile durable, so they can happen per batch
    instead of once at the very end of a 160-driver pass. */
-async function writeProfiles(rows) {
+async function writeProfiles(rows, contacts = []) {
   if (!rows.length) return;
   await upsertMany('driver_platform_state', rows, ['platform', 'driver_ext_id']);
+  /* The contact details, into the store that has always held them. Only rows
+     that actually carry something: a driver whose portal record has no phone,
+     no email and no picture must not overwrite whatever is on file with three
+     nulls. */
+  const real = contacts.filter((c) => c && (c.phone || c.email || c.picture_url));
+  if (real.length) await upsertMany('driver_compliance', real, ['platform', 'driver_ext_id']);
   /* And kept, as well as overwritten.
      ─────────────────────────────────────────────────────────────────────
      driver_platform_state answers "what is this driver rated"; it is
@@ -196,7 +255,7 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
     if (!pending.length) return;
     const batch = pending;
     pending = [];
-    await writeProfiles(batch.map((b) => b.row));
+    await writeProfiles(batch.map((b) => b.row), batch.map((b) => b.contact));
     for (const b of batch) await checkpoint?.mark(`profile ${o.fleet}`, b.uuid, 1);
     rows.push(...batch.map((b) => b.row));
   };
@@ -231,7 +290,7 @@ async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {
       failed += 1;
       if (failed <= 3) log.warn(SRC, 'driver refused', { fleet: o.fleet, err: out.err });
     } else {
-      pending.push({ row: out.row, uuid });
+      pending.push({ row: out.row, contact: out.contact, uuid });
       if (out.row.rating != null) rated += 1;
       for (const v of out.vehicles) cars.set(v.plate, v);
       if (pending.length >= BATCH) await flush();

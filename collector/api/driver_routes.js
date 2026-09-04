@@ -720,7 +720,8 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               count(DISTINCT plate)::int vehicles, min(fleet_id) fleet_id
        FROM trip WHERE ${TW}`, p);
     const compliance = await q(
-      `SELECT platform, driver_ext_id, full_name, phone, emirates_id, licence_no, licence_expires,
+      `SELECT platform, driver_ext_id, full_name, phone, email, picture_url,
+              emirates_id, licence_no, licence_expires,
               (licence_expires - now()::date) AS licence_days_left, state, suspension_reason,
               rating, device_brand, device_model, updated_at
        FROM driver_compliance WHERE driver_ext_id = ANY($1)`, [d.keys]);

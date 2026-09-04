@@ -367,6 +367,11 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
     // field was never filled in, plus two real dates.
     ...Array.from({ length: 6 }, (_, i) => ({ platform: 'hotel', driver_ext_id: `d${10 + i}`,
       full_name: drivers[i], phone: '+9715000000', licence_no: '123456', fleet_id: 'ecosine',
+      /* Contact details, which only the Uber supplier portal and the hotel
+         channel carry. Two of the six have no picture and one no email, so the
+         absent case renders as well as the present one. */
+      email: i === 4 ? null : `${String(drivers[i]).toLowerCase().replace(/[^a-z]+/g, '.')}@example.com`,
+      picture_url: i > 3 ? null : `https://d1w2poirtb3as9.cloudfront.net/mock-${i}.jpg`,
       licence_expires: '2026-01-01', days_left: -232, state: 'active',
       /* Not expired — never entered. The directory counted all 77 of these into
          "77 with an expired licence" and painted red pills, while this endpoint
@@ -385,11 +390,13 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
       // A licence expiring is a CAR that stops earning. The row names it.
       vehicle: { plate: plates[i % plates.length], day: '2026-08-21' } })),
     { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', phone: '+9715000001',
+      email: null, picture_url: null,
       licence_no: 'AE1802580', licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
       fleet_id: 'egari', licence_placeholder: false,
       suspension_reason: 'documents under review', rating: 4.71,
       vehicle: { plate: plates[2], day: '2026-08-19' } },
     { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', phone: null,
+      email: null, picture_url: null,
       licence_no: 'AE9911', licence_expires: '2026-08-01', days_left: -20, state: 'active',
       fleet_id: 'ecosine', licence_placeholder: false,
       suspension_reason: null, rating: null,
@@ -750,6 +757,11 @@ app.get('/api/driver/profile', (req, r) => {
       days_worked: 26 - i, vehicles: 2, fleet_id: i % 3 ? 'ecosine' : 'egari' },
     compliance: [{ platform: 'hotel', driver_ext_id: req.query.id, full_name: drivers[i],
       phone: '+9715012345' + i, emirates_id: '784-1990-000000' + i, licence_no: 'AE18025' + i,
+      /* From the Uber supplier portal. There is no postal address on that
+         surface — every spelling is named absent — so the panel has a phone,
+         an email and a picture and nothing else. */
+      email: i === 2 ? null : `driver${i}@example.com`,
+      picture_url: i === 2 ? null : `https://d1w2poirtb3as9.cloudfront.net/mock-p${i}.jpg`,
       licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9,
       state: i === 3 ? 'suspended' : 'active',
       suspension_reason: i === 3 ? 'documents under review' : null,
