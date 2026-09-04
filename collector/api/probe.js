@@ -238,6 +238,34 @@ const TIER_OPS = [
   'getDriverIncentives', 'getPerformanceReport', 'getFleetDrivers',
 ];
 
+/* ── the contact fields, asked for rather than assumed ────────────────────
+   src/sources/uber_profile.js says the portal's own query returns "a picture
+   url, a phone number and an email as well", and declines to store them. That
+   sentence is a claim about a schema nobody has re-checked, and the operator
+   now wants those fields — so before writing any storage for them, ask the
+   schema what it actually has and under which spellings.
+
+   Fixed candidates, like every other list in this file: nothing the caller
+   sends becomes part of a query, so this cannot become an open GraphQL proxy
+   onto the fleet's session. Read-only; writes nothing.
+
+   `user` first, because a phone and an email belong to a person rather than to
+   a driving record — and `driver` too, because an address, if it exists, is
+   more likely to hang off the driver the org contracted than off the account. */
+const CONTACT_FIELDS = [
+  ['user', 'phoneNumber'], ['user', 'phone'], ['user', 'mobile'], ['user', 'mobileNumber'],
+  ['user', 'mobileCountryIso2'], ['user', 'mobileDigits'],
+  ['user', 'email'], ['user', 'emailAddress'],
+  ['user', 'firstName'], ['user', 'lastName'], ['user', 'name'],
+  ['user', 'pictureUrl'], ['user', 'picture'], ['user', 'photoUrl'], ['user', 'profilePhotoUrl'],
+  ['user', 'profilePictureUrl'], ['user', 'avatarUrl'],
+  ['user', 'address'], ['user', 'homeAddress'], ['user', 'city'], ['user', 'country'],
+  ['driver', 'phoneNumber'], ['driver', 'email'], ['driver', 'address'],
+  ['driver', 'pictureUrl'], ['driver', 'profilePhotoUrl'],
+  ['driver', 'contactInfo'], ['driver', 'personalInfo'], ['driver', 'documents'],
+  ['driverInfo', 'phoneNumber'], ['driverInfo', 'email'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -747,8 +775,13 @@ export function probeRoutes(app, { wrap }) {
     const namesItsAbsences = controls.length > 0 && controls.every((c) => c.named_absent);
 
     /* 2. One field at a time, and the ERROR is the payload. */
+    /* WHICH fixed list, never which field. The caller picks a set by name and
+       the names in it are all in this file, so this stays what the header
+       promises: not an open GraphQL proxy onto the fleet's session. */
+    const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS };
+    const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
-    for (const [parent, field] of (described || !sessionWorks ? [] : TIER_FIELDS)) {
+    for (const [parent, field] of (described || !sessionWorks ? [] : wanted)) {
       const r = await probeField(parent, field);
       await new Promise((r2) => setTimeout(r2, 80));
       /* A field the server would not name, on a server that names its
@@ -782,7 +815,9 @@ export function probeRoutes(app, { wrap }) {
     const namesItsMissingOps = !!control?.named;
 
     const ops = [];
-    for (const name of (described || !sessionWorks ? [] : TIER_OPS)) {
+    /* Operations are a tier question; the contact set is about fields on a
+       driver we already fetch, so it does not spend thirteen more requests. */
+    for (const name of (described || !sessionWorks || wanted !== TIER_FIELDS ? [] : TIER_OPS)) {
       const withArg = await probeOp(name, true);
       await new Promise((r) => setTimeout(r, 80));
       /* An operation that exists but takes different arguments answers the
