@@ -306,6 +306,38 @@ const CONTACT_PAIRS = [
   ['user', 'phone', ' { countryCode nationalNumber countryIso2 }'],
 ];
 
+/* ── one more round on PhoneNumber, and the proof the method works ────────
+   The pair technique settled the interpretation. name { firstName } answers
+   "Sabbir Hossain" and name { lastName } answers "Shahalom" — both proven real
+   — yet name { firstName lastName fullName } comes back "Invalid GraphQL
+   query". Two known-real fields plus one unknown produce the generic refusal,
+   so on this gateway the generic refusal IS an absence, scrubbed of its "Did
+   you mean" suggestion. Every suggestion in three runs came back stripped,
+   which is consistent.
+
+   By that proof nationalNumber and countryIso2 are absent too, and fifteen
+   spellings of "the actual digits" have now been refused on PhoneNumber. This
+   round is the last of them; if none answers, the type carries a dialling code
+   and no subscriber number, and the operator's phone list cannot come from
+   this surface. */
+const PHONE_LAST = [
+  ['user', 'phone', ' { countryCode msisdn }'],
+  ['user', 'phone', ' { countryCode localNumber }'],
+  ['user', 'phone', ' { countryCode nationalPhoneNumber }'],
+  ['user', 'phone', ' { countryCode subscriberNo }'],
+  ['user', 'phone', ' { countryCode phoneDigits }'],
+  ['user', 'phone', ' { countryCode raw }'],
+  ['user', 'phone', ' { countryCode line }'],
+  ['user', 'phone', ' { countryCode mobileNumber }'],
+  ['user', 'phone', ' { countryCode internationalNumber }'],
+  ['user', 'phone', ' { countryCode fullNumber }'],
+  /* And the control for THIS round: a name that certainly cannot exist, asked
+     the same way. If it draws the same generic refusal as the candidates, the
+     round has proved nothing new; if it draws a named absence while a
+     candidate draws the generic one, that candidate is interesting. */
+  ['user', 'phone', ' { countryCode zzNotARealFieldQx }'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -824,7 +856,7 @@ export function probeRoutes(app, { wrap }) {
        the names in it are all in this file, so this stays what the header
        promises: not an open GraphQL proxy onto the fleet's session. */
     const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
-      subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS };
+      subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {
