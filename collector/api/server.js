@@ -2271,7 +2271,7 @@ app.get('/api/reconcile/periods', wrap(async (req, res) => {
       WHERE day BETWEEN $1::date AND $2::date
         AND ($3::text IS NULL OR platform = $3)
         AND ($4::text IS NULL OR fleet_id = $4)
-      GROUP BY 1 ORDER BY 1`, p);
+      GROUP BY 1 ORDER BY 1`, [from, to, platform, fleet]);
   const n = (v) => (v == null ? 0 : Number(v));
   /* GRAINS DO NOT ADD, and the first version of this route added them.
      ────────────────────────────────────────────────────────────────────────
