@@ -720,8 +720,21 @@ export function economicsRoutes(app, { q, wrap, range }) {
                 count(DISTINCT day)::int payout_days,
                 round(sum(trips)::numeric,0)::int reported_trips,
                 round(sum(distance_km)::numeric,0) reported_km,
-                round(sum(hours_online)::numeric,1) hours_online
-         FROM driver_payout_day
+                round(sum(hours_online)::numeric,1) hours_online,
+                /* And the same money split by channel, for the income rule.
+                   See where the rows are assembled below. */
+                (SELECT json_agg(c) FROM (
+                   SELECT platform,
+                          round(sum(earnings)::numeric,2) payouts,
+                          round(sum(cash_earnings)::numeric,2) cash,
+                          count(DISTINCT day)::int payout_days
+                     FROM driver_payout_day d2
+                    WHERE d2.driver_ext_id = d.driver_ext_id
+                      AND d2.day BETWEEN $1::date AND $2::date
+                      AND ($3::text IS NULL OR d2.platform=$3)
+                      AND ($4::text IS NULL OR d2.fleet_id=$4)
+                    GROUP BY platform) c) AS channels
+         FROM driver_payout_day d
          WHERE day BETWEEN $1::date AND $2::date
            AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
          GROUP BY 1`, p),
@@ -824,6 +837,23 @@ export function economicsRoutes(app, { q, wrap, range }) {
                 count(*) FILTER (WHERE has_fare)::int priced_bookings,
                 count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL AND plate <> '')::int vehicles,
                 array_agg(DISTINCT platform) platforms,
+                /* The same work, split by CHANNEL, because the income rule
+                   chooses between a fare and a payout one channel at a time —
+                   see where the rows are assembled below, and
+                   /api/economics/assets, which has carried its own copy of
+                   this since it was written. A nested aggregate rather than a
+                   second query: the w CTE is the expensive part and it is
+                   already materialised. */
+                (SELECT json_agg(c) FROM (
+                   SELECT platform,
+                          count(*) FILTER (WHERE is_booking)::int bookings,
+                          count(*) FILTER (WHERE has_fare)::int priced_bookings,
+                          count(*) FILTER (WHERE outcome = 'completed' OR has_fare)::int chargeable_bookings,
+                          count(*) FILTER (WHERE outcome <> 'completed' AND NOT has_fare)::int uncharged_bookings,
+                          round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
+                          round(sum(distance_km) FILTER (WHERE is_booking AND has_distance)::numeric,0) km,
+                          count(DISTINCT local_day)::int booking_days
+                     FROM w w2 WHERE w2.pk = w.pk GROUP BY platform) c) AS channels,
                 min(fleet_id) fleet_id,
                 max(requested_at) last_trip
          FROM w GROUP BY 1`, pd),
@@ -952,6 +982,16 @@ export function economicsRoutes(app, { q, wrap, range }) {
     }
 
     const people = new Map();
+    /* A person's row for one channel, created on first sight. Mirrors `plat`
+       in /api/economics/assets above. */
+    const chanOf = (r, name) => {
+      if (!r.chan.has(name)) {
+        r.chan.set(name, { platform: name, bookings: 0, priced_bookings: 0,
+          chargeable_bookings: 0, uncharged_bookings: 0, fares: null, km: null,
+          booking_days: 0, payouts: null, cash: null, payout_days: 0 });
+      }
+      return r.chan.get(name);
+    };
     const person = (name, id) => {
       const k = canon(name) || `id:${id}`;
       if (!people.has(k)) {
@@ -959,6 +999,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
           platforms: new Set(), payouts: null, cash: null, payout_days: 0,
           bookings: 0, completed: 0, bookable: 0, days_worked: 0, worked: new Set(),
           km: 0, alert_km: 0, fares: 0,
+          /* One entry per channel this person worked, carrying whichever kinds
+             of money that channel reports — the same structure
+             /api/economics/assets builds per plate, and for the same reason:
+             the income rule chooses between a fare and a payout ONE CHANNEL AT
+             A TIME. Folded across the person's accounts, because a person with
+             an Uber id and a hotel id is one person on two channels. */
+          chan: new Map(),
           priced_bookings: 0, vehicles: 0, plates: [], alerts: 0, reported_km: 0,
           hours_online: null,
           measured_hours_online: null, measured_idle_h: null, availability_days: 0,
@@ -1003,6 +1050,16 @@ export function economicsRoutes(app, { q, wrap, range }) {
       r.km += Number(w.km || 0);
       r.alert_km += Number(w.alert_km || 0);
       r.fares = add(r.fares, w.fares) ?? 0;
+      for (const c of (w.channels || [])) {
+        const e = chanOf(r, c.platform);
+        e.bookings += c.bookings || 0;
+        e.priced_bookings += c.priced_bookings || 0;
+        e.chargeable_bookings += c.chargeable_bookings || 0;
+        e.uncharged_bookings += c.uncharged_bookings || 0;
+        e.fares = add(e.fares, c.fares);
+        e.km = add(e.km, c.km);
+        e.booking_days = Math.max(e.booking_days, c.booking_days || 0);
+      }
       r.priced_bookings += w.priced_bookings;
       r.vehicles = Math.max(r.vehicles, w.vehicles);
       (w.platforms || []).forEach((x) => r.platforms.add(x));
@@ -1012,6 +1069,12 @@ export function economicsRoutes(app, { q, wrap, range }) {
     for (const y of pay) {
       const r = person(y.driver_name, y.driver_ext_id);
       r.payouts = add(r.payouts, y.payouts);
+      for (const c of (y.channels || [])) {
+        const e = chanOf(r, c.platform);
+        e.payouts = add(e.payouts, c.payouts);
+        e.cash = add(e.cash, c.cash);
+        e.payout_days = Math.max(e.payout_days, c.payout_days || 0);
+      }
       r.cash = add(r.cash, y.cash);
       r.payout_days = Math.max(r.payout_days, y.payout_days);
       r.reported_km += Number(y.reported_km || 0);
@@ -1068,11 +1131,27 @@ export function economicsRoutes(app, { q, wrap, range }) {
 
     const rows = [...people.values()].map((r) => {
       const st = standing.get(r.key) || {};
-      /* Fares and payouts are added here, unlike on a vehicle row, because a
-         person's fares come from the hotel channel and their payouts from Uber
-         — different rides on different channels. Within one channel they are
-         never both present: no platform this fleet works reports both. */
-      const money = round((r.payouts || 0) + (r.fares || 0), 2) || null;
+      /* THE INCOME RULE, per channel, exactly as the vehicle ledger runs it.
+         ─────────────────────────────────────────────────────────────────
+         This was `payouts + fares`, on a premise the comment stated plainly:
+         "within one channel they are never both present: no platform this
+         fleet works reports both". That was true until Uber's payments report
+         landed. Uber now reports both — a gross per-trip fare AND the net
+         payout that is what is left of the same fares after its 25% — and
+         adding them counted every priced Uber ride twice.
+
+         Measured on production, days=30, before this: the people ledger
+         totalled AED 1,038,493.42 (fares 586,052.56 + payouts 452,440.86)
+         against AED 567,163.76 on /api/economics/assets for the same fleet and
+         the same window — the two ledgers of one business, 83% apart. It is
+         also the sort key, so the ranking favoured whoever had the largest
+         double count.
+
+         fleetIncome picks ONE figure per channel and names which, so a hotel
+         driver is still counted on their fares and an Uber driver on the
+         payout that reconciles to the bank. */
+      const income = fleetIncome([...r.chan.values()], windowDays);
+      const money = income.accounted;
       r.days_worked = r.worked.size;
     const idleDays = Math.max(0, windowDays - r.days_worked);
       return {
@@ -1082,7 +1161,16 @@ export function economicsRoutes(app, { q, wrap, range }) {
         accounts: r.ids.length,
         platforms: [...r.platforms].sort(),
         fleet_id: r.fleet_id,
-        money, payouts: r.payouts, fares: r.fares || null, cash: r.cash,
+        /* The CHOSEN halves, so a reader adding the two columns gets the
+           money and not some of it twice. The raw sums stay beside them under
+           their own names — they are the reconciliation totals and they answer
+           a different question. */
+        money,
+        payouts: income.accounted_payouts, fares: income.accounted_fares,
+        money_platforms: income.accounted_platforms,
+        money_basis: [...r.chan.values()].map((c) => `${c.platform}: ${c.basis}`).sort().join(', ')
+          || null,
+        attributed_payouts: r.payouts, reported_fares: r.fares || null, cash: r.cash,
         bookings: r.bookings, completed: r.completed,
         completion_pct: r.bookable ? round((r.completed / r.bookable) * 100, 0) : null,
         km: r.km || null, vehicles: r.vehicles,

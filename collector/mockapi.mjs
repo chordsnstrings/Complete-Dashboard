@@ -4660,7 +4660,15 @@ app.get('/api/economics/drivers', (_, r) => {
         accounts: i % 3 === 0 ? 2 : 1,
         platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
         fleet_id: i % 3 ? 'ecosine' : 'egari',
-        money, payouts, fares, cash: i % 2 ? 320 + i * 40 : null,
+        /* The CHOSEN halves, which add to `money` — a channel reporting both
+           a fare and a payout contributes to one of them, never both. The raw
+           sums keep their own names beside them. */
+        money, payouts, fares, money_platforms: [payouts != null ? 'uber' : null,
+          fares != null ? 'hotel' : null].filter(Boolean),
+        money_basis: [payouts != null ? 'uber: payout' : null,
+          fares != null ? 'hotel: fares' : null].filter(Boolean).join(', ') || null,
+        attributed_payouts: payouts, reported_fares: fares,
+        cash: i % 2 ? 320 + i * 40 : null,
         bookings, completed: Math.round(bookings * 0.95),
         completion_pct: 97 - i, km, vehicles: 1 + (i % 2),
         plates: [{ plate: plates[i % plates.length], days: daysWorked }]

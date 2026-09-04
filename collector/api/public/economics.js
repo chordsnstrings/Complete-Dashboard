@@ -867,6 +867,12 @@ async function driversTab(root) {
   const t = D.totals;
 
   root.insertBefore(kpiRow([
+    /* The two halves are the CHOSEN ones now — see the income rule in
+       api/economics_routes.js. They add to the figure above them, which they
+       did not while a channel reporting both a fare and a payout contributed
+       to each: on days=30 this tile read AED 1,038,493 over halves of 586,053
+       and 452,441, against AED 567,164 on the vehicle ledger for the same
+       fleet and window. */
     { label: 'Money to drivers', value: money(t.money),
       sub: `${money(t.payouts || 0)} in payouts · ${money(t.fares || 0)} in fares they collected` },
     { label: 'Per day worked', value: money(t.aed_per_day_worked, 'AED', 0),
