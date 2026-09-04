@@ -110,9 +110,23 @@ async function settleMix(host) {
     (() => {
       const off = s.classes.find((c) => c.settlement_class === 'off_platform');
       if (!off) return null;
+      /* The tone was `warn` because this route was the one the page could say
+         least about. It can say plenty now: the payments report prices these
+         rides like any other, at a slightly HIGHER average fare than card or
+         cash, with nothing collected in cash and Uber's usual quarter taken
+         out. So the sub says what they earned where that is known, and the
+         warning is kept only while the money for them is still uncollected —
+         which is a statement about this product's collection, not about the
+         rides. */
+      const known = off.priced_trips > 0;
       return { label: 'Settled off-platform', value: pct((off.trips / total) * 100, 1),
-        sub: `${fmt(off.trips)} bookings — the platform records the fare as settled outside the `
-          + 'app and gives no further detail', tone: 'warn' };
+        sub: known
+          ? `${fmt(off.trips)} bookings — settled outside the app, and paid for like any other: `
+            + `${money(off.revenue)} over the ${fmt(off.priced_trips)} of them whose fare has been `
+            + `collected, at ${money(off.avg_fare, 'AED', 2)} a ride`
+          : `${fmt(off.trips)} bookings — settled outside the app, and no fare for them has been `
+            + 'collected yet, so their value is not known here',
+        tone: known ? null : 'warn' };
     })(),
     /* Whatever the four tiles above do not name. They covered card, wallet,
        cash, on-account, salary and off-platform — 98.2% — under a first tile
