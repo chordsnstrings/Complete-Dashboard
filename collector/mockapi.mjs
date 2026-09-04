@@ -3726,6 +3726,53 @@ app.get('/api/track', (req, r) => {
   }));
 });
 
+/* Money per day, with the shape the defect lived in.
+   ──────────────────────────────────────────────────────────────────────────
+   The Finance panel drew `revenue` — sum(trip.price) — under a title about
+   money, and on production that was 15% of it: Uber files no per-trip fare and
+   is 90% of the bookings, so its money arrives only as a weekly statement.
+   A fixture whose fares and money are the same size cannot exercise that, so
+   here the fares are a seventh of the money, money_period_days is 7 for most
+   days (a weekly statement divided across its days, which the page must say
+   out loud), and the two newest days have no money at all — the statement for
+   the current week has not landed yet, and a chart must draw that as a hole
+   rather than as a day the fleet earned nothing. */
+app.get('/api/finance/daily', (req, r) => {
+  const rows = [];
+  for (let b = 30; b >= 0; b--) {
+    const d = dayISO(b).slice(0, 10);
+    const bookings = Math.round(60 + Math.sin(b / 3) * 18 + rnd(0, 22));
+    const priced = Math.round(bookings * 0.12);
+    const fares = Math.round(priced * rnd(58, 88));
+    /* The newest two days: the week's statement has not been filed. */
+    const pending = b <= 1;
+    const payout = pending ? null : Math.round(bookings * rnd(52, 74));
+    rows.push({ d,
+      amount: b % 7 === 0 ? +(rnd(-40, 180)).toFixed(2) : null,
+      entries: b % 7 === 0 ? 3 + Math.round(rnd(0, 9)) : null,
+      revenue: fares, priced_trips: priced, bookings,
+      money: pending ? null : fares + payout,
+      money_driver_days: pending ? 0 : 30 + Math.round(rnd(0, 8)),
+      /* A weekly statement spread across its days for most of the window, and
+         one day that a channel really did report as a day. */
+      money_period_days: pending ? null : (b % 9 === 0 ? 1 : 7),
+      money_source: pending ? null : (b % 9 === 0 ? 'fares' : 'statement'),
+      payout,
+      nothing_recorded: pending });
+  }
+  const from = String(req.query.from || '').slice(0, 10);
+  const to = String(req.query.to || '').slice(0, 10);
+  const win = rows.filter((x) => (!from || x.d >= from) && (!to || x.d <= to));
+  const sum = (k) => (win.some((x) => x[k] != null)
+    ? +win.reduce((a, x) => a + (x[k] == null ? 0 : Number(x[k])), 0).toFixed(2) : null);
+  r.json({ rows: win,
+    totals: { money: sum('money'), fares: sum('revenue'), payout: sum('payout'),
+      bookings: win.reduce((a, x) => a + (x.bookings || 0), 0),
+      priced_trips: win.reduce((a, x) => a + (x.priced_trips || 0), 0) },
+    money_narrowed_by_platform: false,
+    fares_narrowed_by_platform: req.query.platform != null && req.query.platform !== '',
+    platform: req.query.platform || null, fleet: req.query.fleet || null });
+});
 app.get('/api/finance/ledger', (_, r) => r.json([
   { category: 'trip_fare', n: 812, amount: 96540.5, currency: 'AED' },
   { category: 'commission', n: 812, amount: -21238.9, currency: 'AED' },

@@ -39,7 +39,8 @@
 
 import { areaChart, hbars, scatter, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
-  dayStr, money, pct, sourceLabel, countOf, plural, verdict } from './ui.js';
+  dayStr, money, pct, sourceLabel, countOf, plural, verdict,
+  alertRateFigure } from './ui.js';
 import { q, href, state } from './data.js';
 import { makeMap, fitTo } from './map.js';
 
@@ -796,9 +797,24 @@ async function assetsTab(root) {
       render: (r) => (r.km == null ? absent('no booking carries a usable distance') : fmt(r.km)) },
     { label: 'Earning days', key: 'days_earning', num: true, render: (r) => fmt(r.days_earning) },
     { label: 'Idle days', key: 'idle_days', num: true, render: (r) => fmt(r.idle_days) },
+    /* Two false zeros, both fixed in ui.js rather than here — see
+       alertRateFigure. A car on no telematics feed supplied a full denominator
+       from the trip table and an empty numerator, so it printed 0.0 and sorted
+       to the TOP of this column as the cleanest thing in the fleet: 30 of 228
+       rows on production 2026-09-04, 39,843 km between them and not one alert.
+       And a car with one alert over three thousand kilometres rounds to the
+       same "0.0" at one decimal, which is the identical lie from the other
+       side. The absence sentence is the server's, because the server is what
+       knows which of its three reasons applies; this column used to hardcode
+       one of them and was wrong for the other two. */
     { label: 'Alerts /100km', key: 'alerts_per_100km', num: true,
-      render: (r) => (r.alerts_per_100km == null ? absent('no distance to measure against')
-        : `<span class="${r.alerts_per_100km > 20 ? 'ent-off' : ''}">${fmt(r.alerts_per_100km, 1)}</span>`) },
+      sortValue: (r) => alertRateFigure(r).value,
+      render: (r) => {
+        const a = alertRateFigure(r);
+        if (!a.measured) return absent(a.title);
+        return `<span class="${a.value > 20 ? 'ent-off' : ''}"${a.title
+          ? ` title="${esc(a.title)}"` : ''}>${a.text}</span>`;
+      } },
     { label: 'Papers', key: 'doc_days_left', num: true,
       render: (r) => (r.doc_days_left == null ? absent('no document with an expiry date on file')
         : pill(r.doc_days_left < 0 ? 'expired' : `${fmt(r.doc_days_left)}d`,
@@ -926,9 +942,19 @@ async function driversTab(root) {
           + (r.vehicles > r.plates.length
             ? `<span class="dim"> +${fmt(r.vehicles - r.plates.length)}</span>` : '')
         : absent('no custody row places this person in a vehicle in this range')) },
+    /* The same rule on the people ledger, where it was worse: 26 of 309 rows
+       at days=30 rated 0.0 because no telematics feed ever saw the cars they
+       held — Zahid Khan Khan over 2,788 km, Imran Hussain Islam over 225
+       bookings — against a fleet rate of 86.4 per 100 km. Sorting this column
+       ranked exactly those people the safest in the fleet. */
     { label: 'Alerts /100km', key: 'alerts_per_100km', num: true,
-      render: (r) => (r.alerts_per_100km == null ? absent('no distance to measure against')
-        : fmt(r.alerts_per_100km, 1)) },
+      sortValue: (r) => alertRateFigure(r).value,
+      render: (r) => {
+        const a = alertRateFigure(r);
+        return a.measured
+          ? `<span${a.title ? ` title="${esc(a.title)}"` : ''}>${a.text}</span>`
+          : absent(a.title);
+      } },
     { label: 'Licence', key: 'licence_days_left', num: true,
       absent: 'most of these people have no licence expiry on file — the compliance record comes '
         + 'from the channel that onboarded them, and the channels report it for a minority',

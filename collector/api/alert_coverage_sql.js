@@ -266,9 +266,14 @@ export function alertRateReason(km, cov, { alerts = null, device = 0, tracked = 
   /* Said as a fact about the FEED, not about the driving. These vehicles drove
      the distance in the denominator; what is missing is the box that would
      have watched them do it, and "no alerts" would read as a clean record. */
+  /* Said about the CARS, not about "this vehicle": the identical sentence is
+     printed on the people ledger and on a driver's own page, where the subject
+     is a person and the thing the feed did not see is whatever they were
+     driving. A reason that names the wrong subject is a reason a reader
+     distrusts. */
   if (tracked === 0 && !(Number(alerts) > 0) && !(Number(device) > 0)) {
-    return 'not measured — no telematics journey was recorded here in this window, so the '
-      + 'feed that raises these events never saw this vehicle';
+    return 'not measured — no telematics journey was recorded on the vehicles here in this '
+      + 'window, so the feed that raises these events never saw them being driven';
   }
   return null;
 }

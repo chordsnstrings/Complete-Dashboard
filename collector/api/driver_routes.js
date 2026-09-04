@@ -33,7 +33,8 @@ import { isoDay } from '../src/sources/ledger.js';
    These two helpers are for the parts of a driver page that are not an
    aggregate: resolving the id in the URL, and the directory's per-row fold,
    where a record with no work in the window has no stored key to fold on. */
-import { canonicalName, mergedIds, mergedNames, mergedPlatforms, ALIAS_KEY } from './identity_map.js';
+import { canonicalName, mergedIds, mergedNames, mergedPlatforms, ALIAS_KEY,
+  personOf } from './identity_map.js';
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -1754,19 +1755,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        where /api/drivers/leaderboard counts 361 people who drove — more peers
        than there are drivers, and every percentile taken against that.
 
-       canonName is this file's own alias fold, the rule resolve() already uses
-       to decide that two ids are one human, and test/consistency.test.mjs
-       holds it byte-identical to the SQL fold every other headcount uses — so
-       the cohort now counts people the way the rest of the product does. It
-       does not consult the three-record identity register (api/identity_map.js
-       keys that on the id, and this folds on the name), which can leave at
-       most three of some four hundred accounts unmerged; the fold that keys on
-       an id is on the subject's side of this comparison and already applies
-       it. An account nobody named keys on itself, which keeps it visible
-       rather than merging every unnamed account into one ghost. */
+       personOf() is the product's own answer to "which human is this record":
+       the three-record identity register first, then the name fold — the same
+       one the driver directory folds on twelve hundred lines above, and the
+       same one sql/schema_v53.sql stores. So the cohort now counts people the
+       way every other headcount in this product counts them. An account nobody
+       named keys on itself, which keeps it visible rather than merging every
+       unnamed account into one ghost. */
     const folded = new Map();
     for (const r of peers) {
-      const k = mineIds.has(r.driver_ext_id) ? '__me__' : (canonName(r.driver_name) || r.driver_ext_id);
+      const k = mineIds.has(r.driver_ext_id)
+        ? '__me__' : (personOf(r.driver_ext_id, r.driver_name) || r.driver_ext_id);
       const c = folded.get(k) || { trips: 0, km: 0, revenue: 0, days: 0, _cw: 0, avg_km: 0, completion: 0, cancel: 0 };
       c.trips += r.trips; c.km += +r.km || 0; c.revenue += +r.revenue || 0;
       c.days = Math.max(c.days, r.days);

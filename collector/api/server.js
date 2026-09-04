@@ -1963,25 +1963,117 @@ app.get('/api/finance/ledger', wrap(async (req, res) => res.json(await q(
    next as if they were adjacent, compressing a 123-day hole into one segment.
    And a null amount coerced to 0, so 186 days on which no fare was ever
    collected were drawn as AED 0 of revenue. */
+/* The day's money, not only the day's FARES.
+   ──────────────────────────────────────────────────────────────────────────
+   This returned `revenue` — sum(trip.price) — and the Finance page drew it
+   under the title "Fares per day". Measured on production for 1–3 Sept 2026:
+   the series totals AED 12,313 while the fleet actually accounted for
+   AED 81,385 over the same three days. It is 15% of the money, and the shape
+   of the missing 85% is not random: of 2,293 bookings, 2,073 are Uber's, and
+   Uber's supplier trip export carries no fare column at all, so `price` is
+   NULL on every one of them. Uber's money arrives instead as a weekly payout
+   statement — AED 69,072 net for those days — at driver-week grain. The
+   channels that do price per trip are the small ones: hotel 110 of 112
+   bookings, Yango 7 of 7, Bolt 53 (which is every completed order; its other
+   48 are cancellations).
+
+   So a fares series on this fleet is a series about the hotel desk, drawn on
+   the page whose subject is the whole business. The resolution already exists
+   one table over: driver_day.money is the statement's net where a channel
+   filed one and its fares where it did not (src/rollup.js), at Dubai-day
+   grain, and driver_payout_day carries the statement half on its own.
+
+   Both travel, and so does what qualifies them:
+     - money_period_days is the COARSEST provider window behind the day's
+       figure. 7 means most of it is a weekly statement divided across its
+       days, which is an allocation and not a measurement, and a page that
+       prints the money without it is stating a week's figure over a day.
+     - money_source says which column it came from, per schema_v41.
+   Neither is decoration: without them this series is a different lie from the
+   one it replaces.
+
+   The platform chip cannot narrow the money and does narrow the fares, so the
+   response says which of the two the caller is looking at rather than letting
+   a filtered fares line sit beside an unfiltered money line with nothing to
+   mark the difference. driver_day holds the platforms worked that day as an
+   array and its money column covers all of them at once — there is no
+   per-channel share to take, exactly as /api/drivers/leaderboard records. */
 app.get('/api/finance/daily', wrap(async (req, res) => {
-  const [from, to] = range(req);
-  res.json(await q(
+  const [from, to, platform, fleet] = range(req);
+  const rows = await q(
     `WITH cal AS (SELECT generate_series($1::date, $2::date, interval '1 day')::date AS d),
      led AS (
        SELECT (event_at AT TIME ZONE 'Asia/Dubai')::date AS d,
               round(sum(amount)::numeric,2) amount, count(*)::int entries
-       FROM ledger_entry WHERE ${DAYWIN('event_at')} GROUP BY 1
+       FROM ledger_entry
+       WHERE ${DAYWIN('event_at')}
+         AND ($3::text IS NULL OR platform = $3)
+         AND ($4::text IS NULL OR fleet_id = $4)
+       GROUP BY 1
      ),
      fare AS (
        SELECT local_day AS d, round(sum(price)::numeric,2) revenue,
               count(*) FILTER (WHERE has_fare)::int priced_trips
-       FROM trip_norm WHERE local_day BETWEEN $1::date AND $2::date AND has_fare GROUP BY 1
+       FROM trip_norm WHERE ${W()} AND has_fare GROUP BY 1
+     ),
+     /* Every booking of the day, priced or not, so the page can say what share
+        of them the fares line is drawn from. 54 of 689 is the fact that makes
+        the fares line readable. */
+     book AS (
+       SELECT local_day AS d, count(*)::int bookings
+       FROM trip_norm WHERE ${W()} AND is_booking GROUP BY 1
+     ),
+     mon AS (
+       SELECT day AS d,
+              round(sum(money)::numeric, 2) AS money,
+              count(*) FILTER (WHERE money IS NOT NULL)::int AS money_driver_days,
+              /* NULL the moment any row carrying money cannot say what window
+                 it came from — an unknown grain is not a fine one. */
+              CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
+                   ELSE max(money_period_days) END AS money_period_days,
+              CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
+                   THEN 'mixed'
+                   ELSE max(money_source) FILTER (WHERE money_source <> 'none') END AS money_source
+         FROM driver_day
+        WHERE day BETWEEN $1::date AND $2::date
+          AND ($4::text IS NULL OR fleet_id = $4)
+        GROUP BY 1
+     ),
+     pay AS (
+       SELECT day AS d, round(sum(earnings)::numeric, 2) AS payout
+         FROM driver_payout_day
+        WHERE day BETWEEN $1::date AND $2::date
+          AND ($3::text IS NULL OR platform = $3)
+          AND ($4::text IS NULL OR fleet_id = $4)
+        GROUP BY 1
      )
      SELECT to_char(cal.d, 'YYYY-MM-DD') AS d, led.amount, led.entries,
             fare.revenue, coalesce(fare.priced_trips, 0) AS priced_trips,
-            (led.d IS NULL AND fare.d IS NULL) AS nothing_recorded
-     FROM cal LEFT JOIN led ON led.d = cal.d LEFT JOIN fare ON fare.d = cal.d
-     ORDER BY cal.d`, [from, to]));
+            coalesce(book.bookings, 0) AS bookings,
+            mon.money, coalesce(mon.money_driver_days, 0) AS money_driver_days,
+            mon.money_period_days, mon.money_source,
+            pay.payout,
+            (led.d IS NULL AND fare.d IS NULL AND mon.d IS NULL) AS nothing_recorded
+     FROM cal
+     LEFT JOIN led ON led.d = cal.d
+     LEFT JOIN fare ON fare.d = cal.d
+     LEFT JOIN book ON book.d = cal.d
+     LEFT JOIN mon ON mon.d = cal.d
+     LEFT JOIN pay ON pay.d = cal.d
+     ORDER BY cal.d`, [from, to, platform, fleet]);
+  const sum = (k) => {
+    const v = rows.reduce((a, r) => a + (r[k] == null ? 0 : Number(r[k])), 0);
+    return rows.some((r) => r[k] != null) ? +v.toFixed(2) : null;
+  };
+  res.json({ rows,
+    totals: { money: sum('money'), fares: sum('revenue'), payout: sum('payout'),
+      bookings: rows.reduce((a, r) => a + (r.bookings || 0), 0),
+      priced_trips: rows.reduce((a, r) => a + (r.priced_trips || 0), 0) },
+    /* What the caller is allowed to conclude from the two lines, said by the
+       endpoint rather than assumed by each page that draws them. */
+    money_narrowed_by_platform: false,
+    fares_narrowed_by_platform: platform != null,
+    platform, fleet });
 }));
 
 /* ───────────────────────── unauthorized trips ───────────────────────── */

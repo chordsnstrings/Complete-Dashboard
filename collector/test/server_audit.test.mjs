@@ -416,14 +416,39 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
 
 /* ── revenue per day drew AED 0 where nothing was ever collected ─────── */
 {
-  const fin = await get(`/api/finance/daily?from=${DAY}&to=2026-08-16`);
+  const finBody = await get(`/api/finance/daily?from=${DAY}&to=2026-08-16`);
+  const fin = finBody.rows;
   check('every calendar day in the window is present', fin.length === 3, String(fin.length));
   check('a day with nothing recorded is null, not zero',
-    fin.every((r) => r.nothing_recorded === false || (r.amount === null && r.revenue === null)),
+    fin.every((r) => r.nothing_recorded === false
+      || (r.amount === null && r.revenue === null && r.money === null)),
     JSON.stringify(fin));
   check('and says so explicitly', fin.some((r) => r.nothing_recorded === true));
   check('the day is a plain date string, not a JS Date rendering',
     /^\d{4}-\d{2}-\d{2}$/.test(fin[0].d), fin[0].d);
+  /* The money half, and the two facts without which it cannot be read.
+     ─────────────────────────────────────────────────────────────────────
+     `revenue` here is sum(trip.price) and on this fleet that is a seventh of
+     what came in — Uber files no per-trip fare and is 90% of the bookings.
+     The row must therefore carry the resolved figure as well, the period the
+     provider reported it over (7 means a weekly statement divided across its
+     days, which is an allocation, not a measurement of that day), and which
+     record it came out of. */
+  for (const f of ['money', 'money_period_days', 'money_source', 'payout', 'bookings']) {
+    check(`each day carries ${f}`, fin.every((r) => f in r), JSON.stringify(fin[0]));
+  }
+  check('a day whose money is unknown says so as null, never as 0',
+    fin.every((r) => r.money !== 0 || r.money_driver_days > 0), JSON.stringify(fin));
+  check('the totals travel with the rows so a caption cannot re-derive them wrongly',
+    finBody.totals && 'money' in finBody.totals && 'fares' in finBody.totals
+      && 'bookings' in finBody.totals, JSON.stringify(finBody.totals));
+  /* The platform chip narrows the fares and cannot narrow the money — a page
+     that showed both under one filter without saying so would be attributing
+     a whole-fleet figure to one channel. */
+  const finU = await get(`/api/finance/daily?from=${DAY}&to=2026-08-16&platform=uber`);
+  check('and the response says which half a platform filter narrowed',
+    finU.fares_narrowed_by_platform === true && finU.money_narrowed_by_platform === false,
+    JSON.stringify({ f: finU.fares_narrowed_by_platform, m: finU.money_narrowed_by_platform }));
 }
 
 /* ── the daily trend must distinguish a hole from a quiet day ─────────── */

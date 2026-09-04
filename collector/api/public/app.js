@@ -2223,11 +2223,26 @@ V.finance = async (root) => {
   const vfHost = el('div'); root.append(vfHost);
   const kh = el('div'); root.append(kh); loading(kh);
   const g = el('div', 'grid g2'); root.append(g);
-  /* Fares per day, and titled as such. Platform statements are weekly, so this
-     series can only be the metered half — the tiles above carry the combined
-     figure, and a panel titled Revenue beside them implied this was the same
-     money at a finer grain. */
-  const rev = panel('Fares per day', 'Metered fares only — platform payouts are weekly and appear in the tiles above'); g.append(rev.panel);
+  /* Money in per day — all of it, not the metered eighth.
+     ─────────────────────────────────────────────────────────────────────────
+     This drew sum(trip.price) and captioned it "Metered fares only", which was
+     an honest label on a dishonest panel: on this fleet the metered half is
+     almost nothing. Measured on production for 1–3 Sept 2026, the series
+     totalled AED 12,313 against AED 81,385 actually accounted for over the
+     same three days — 15% of the money, on the page whose subject is the
+     money. And the missing 85% is not spread evenly: 2,073 of the window's
+     2,293 bookings are Uber's, and Uber's supplier trip export carries no fare
+     column at all, so every one of them arrives with price NULL. The channels
+     that do price per trip are the small ones — hotel 110 of 112 bookings,
+     Yango 7 of 7, Bolt 53, which is every completed order it had.
+
+     driver_day.money is the resolution the collector already makes: the
+     statement's net where a channel filed one, its fares where it did not,
+     at Dubai-day grain. That is what this draws, with the metered share and
+     the grain said underneath rather than left for a reader to assume. */
+  const rev = panel('Money in per day',
+    'Everything the fleet was paid, by the day it was earned — the platforms\u2019 own '
+    + 'statements where they file one, and the metered fare where they do not'); g.append(rev.panel);
   const pay = panel('Payment mix', 'Cash vs card vs wallet — cash is money the fleet has to collect'); g.append(pay.panel);
   const g2 = el('div', 'grid g2'); root.append(g2);
   /* The old caption named Uber Black and Comfort over a table that can never
@@ -2245,12 +2260,14 @@ V.finance = async (root) => {
   const led = panel('Ledger by category', 'Platform fees, bonuses and adjustments'); root.append(led.panel);
   [rev.body, pay.body, tier.body, comp.body, tips.body, led.body].forEach(loading);
 
-  const [k, daily, payDetail, byProd, ledger, components, tipRows, bySvc] = await Promise.all([
+  const [k, daily, payDetail, byProd, ledger, components, tipRows, bySvc, fin] = await Promise.all([
     q('/api/kpis'), q('/api/trips/daily'), q('/api/mix/detail', { by: 'payment' }), q('/api/mix'),
     q('/api/finance/ledger'),
     q('/api/earnings/components').catch(() => []),
     q('/api/earnings/tips').catch(() => []),
     q('/api/mix', { by: 'service' }).catch(() => []),
+    /* The day series that carries the payout half as well as the fares. */
+    q('/api/finance/daily').catch(() => null),
   ]);
 
   /* Cash is three labels on this fleet — `cash` (Uber), `cash-driver` and
@@ -2427,7 +2444,61 @@ V.finance = async (root) => {
       `and every tile below it is over fares only.`));
   }
 
-  areaChart(rev.body, daily, { x: 'd', y: 'revenue', color: '--s3', valueFmt: (v) => money(v) });
+  /* gapBars, not areaChart: a day whose statement has not arrived yet must be a
+     HOLE, not a bar at zero. The current week's Uber statement lands on the
+     following Monday, so the newest days in any window reaching to today have
+     no payout half yet — drawn as an area that would be a cliff the fleet did
+     not have, which is the same defect the landing page's trend chart was
+     fixed for. */
+  {
+    const fr = (fin && fin.rows) || [];
+    if (!fr.length) {
+      /* No day series at all: say which figure is missing rather than drawing
+         the fares line under a title about money. */
+      rev.body.innerHTML = '';
+      rev.body.append(note('The daily money series did not load, so this panel cannot say what '
+        + 'came in on each day. The totals above are unaffected — they come from /api/kpis.'));
+    } else {
+      gapBars(rev.body, fr, { x: 'd', y: 'money', label: 'in', color: '--s3',
+        gapKey: 'nothing_recorded', gapLabel: 'nothing has reported money for this day yet',
+        valueFmt: (v) => money(v) });
+      /* What the bars are MADE of, and at what grain — both required, and for
+         opposite reasons. Without the composition a reader assumes this is
+         fares and reconciles it against the meter; without the grain they read
+         a seventh of a weekly statement as a day that was measured. */
+      const t = fin.totals || {};
+      const grain = fr.reduce((a, r) => Math.max(a, r.money_period_days || 0), 0);
+      const unknownGrain = fr.some((r) => r.money != null && r.money_period_days == null);
+      const fareShare = t.money > 0 && t.fares != null
+        ? Math.round((t.fares / t.money) * 100) : null;
+      const parts = [];
+      if (t.fares != null && t.money != null) {
+        parts.push(`${money(t.fares)} of ${money(t.money)}`
+          + (fareShare != null ? ` (${fareShare}%)` : '')
+          + ` is a fare on the booking itself — ${fmt(t.priced_trips)} of `
+          + `${fmt(t.bookings)} bookings carry one. The rest is what the platforms `
+          + 'reported paying, on channels that publish no per-trip fare at all.');
+      }
+      if (unknownGrain) {
+        parts.push('Part of this cannot say what period it was reported over, so it is drawn '
+          + 'on the day it was filed against and nothing here can promise that day is where '
+          + 'it was earned.');
+      } else if (grain > 1) {
+        parts.push(`Up to ${countOf(grain, 'day')} of it is a single statement divided across `
+          + 'its days — an allocation at this grain, not a measurement of that day.');
+      }
+      if (parts.length) rev.body.append(el('p', 'cap', parts.join(' ')));
+      /* The platform chip narrows the fares and cannot narrow the money, so a
+         filtered page says so rather than showing a whole-fleet figure under a
+         one-channel heading. */
+      if (fin.fares_narrowed_by_platform && !fin.money_narrowed_by_platform) {
+        rev.body.append(note(`The ${sourceLabel(state.platform)} filter narrows the metered `
+          + 'share named above but not the bars: a day\u2019s money is held per driver across '
+          + 'every channel they worked that day, with no per-channel share to take from it.',
+        'warn'));
+      }
+    }
+  }
   paymentDonut(pay.body, payDetail);
 
   /* Tier economics: the count alone hides the point, which is that a tier can
