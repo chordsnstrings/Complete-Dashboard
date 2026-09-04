@@ -434,21 +434,43 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
      provider reported it over (7 means a weekly statement divided across its
      days, which is an allocation, not a measurement of that day), and which
      record it came out of. */
-  for (const f of ['money', 'money_period_days', 'money_source', 'payout', 'bookings']) {
+  for (const f of ['money', 'money_period_days', 'money_source', 'payout', 'bookings',
+    'fares_part', 'payout_part']) {
     check(`each day carries ${f}`, fin.every((r) => f in r), JSON.stringify(fin[0]));
   }
-  check('a day whose money is unknown says so as null, never as 0',
-    fin.every((r) => r.money !== 0 || r.money_driver_days > 0), JSON.stringify(fin));
+  check('a day with no money at all says null, never 0',
+    fin.every((r) => r.money !== 0), JSON.stringify(fin));
   check('the totals travel with the rows so a caption cannot re-derive them wrongly',
     finBody.totals && 'money' in finBody.totals && 'fares' in finBody.totals
       && 'bookings' in finBody.totals, JSON.stringify(finBody.totals));
-  /* The platform chip narrows the fares and cannot narrow the money — a page
-     that showed both under one filter without saying so would be attributing
-     a whole-fleet figure to one channel. */
-  const finU = await get(`/api/finance/daily?from=${DAY}&to=2026-08-16&platform=uber`);
-  check('and the response says which half a platform filter narrowed',
-    finU.fares_narrowed_by_platform === true && finU.money_narrowed_by_platform === false,
-    JSON.stringify({ f: finU.fares_narrowed_by_platform, m: finU.money_narrowed_by_platform }));
+  /* THE INVARIANT THIS PANEL EXISTS FOR.
+     ─────────────────────────────────────────────────────────────────────
+     The bars sit directly under the accounted tile, and the first version of
+     this endpoint summed driver_day.money — which is built from the trip table
+     and so holds only the people who drove, while the statements pay everyone.
+     On production 1-3 Sept 2026 it came to AED 56,917 against AED 81,385
+     accounted: a chart contradicting the tile above it, on the finance page.
+     Both figures now come from the same per-platform basis in
+     api/income_sql.js, so they must agree, and the endpoint returns the tile's
+     own number so a caller can check rather than trust. */
+  const barSum = fin.reduce((a, r) => a + (r.money || 0), 0);
+  check('the bars sum to the accounted figure the tiles above them show',
+    finBody.totals.accounted == null
+      || Math.abs(finBody.totals.accounted - barSum) <= Math.max(1, barSum * 0.005),
+    JSON.stringify({ accounted: finBody.totals.accounted, bars: +barSum.toFixed(2) }));
+  check('and the money never double-counts a channel that reports both',
+    finBody.totals.money == null
+      || Math.abs(finBody.totals.money
+        - ((finBody.totals.money_fares_part || 0) + (finBody.totals.money_payout_part || 0)))
+        <= 1,
+    JSON.stringify(finBody.totals));
+  /* Which figure each channel was counted on, so a caption can name it rather
+     than infer it from the shape of the numbers. A channel counted on its
+     payout must not also appear as fares. */
+  check('the response names the basis it applied per channel',
+    Array.isArray(finBody.money_basis)
+      && finBody.money_basis.every((b) => b.platform && typeof b.basis === 'string'),
+    JSON.stringify(finBody.money_basis));
 }
 
 /* ── the daily trend must distinguish a hole from a quiet day ─────────── */

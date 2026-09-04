@@ -2000,78 +2000,163 @@ app.get('/api/finance/ledger', wrap(async (req, res) => res.json(await q(
    per-channel share to take, exactly as /api/drivers/leaderboard records. */
 app.get('/api/finance/daily', wrap(async (req, res) => {
   const [from, to, platform, fleet] = range(req);
-  const rows = await q(
-    `WITH cal AS (SELECT generate_series($1::date, $2::date, interval '1 day')::date AS d),
-     led AS (
-       SELECT (event_at AT TIME ZONE 'Asia/Dubai')::date AS d,
-              round(sum(amount)::numeric,2) amount, count(*)::int entries
+  const p = [from, to, platform, fleet];
+  /* THE SAME RULE THE TILES ABOVE THIS CHART USE, day by day.
+     ──────────────────────────────────────────────────────────────────────
+     The first version of this summed driver_day.money and was quietly wrong on
+     production: 1-3 Sept 2026 came to AED 56,917 while /api/kpis on the same
+     window reported AED 81,385 accounted. driver_day exists per driver per day
+     and is built from the TRIP table, so it holds the 138 people who drove;
+     the statements pay 230. Ninety-two people's money — everybody paid for
+     work our trip record does not carry — was simply not in the series, under
+     a panel captioned as everything the fleet was paid, sitting directly below
+     tiles saying otherwise.
+
+     So the money is built the way api/income_sql.js builds it and every other
+     money surface in this product reads it: per PLATFORM, choose ONE figure,
+     because a payout is what is left of those same fares after the platform's
+     commission and adding both counts the same rides nearly twice.
+
+     The basis is chosen ONCE over the whole window and then applied to each
+     day, deliberately. Choosing it per day would let a channel flip between
+     fares and payout as its coverage wobbles, and the daily series would stop
+     summing to the window total it is drawn beneath. This way the bars add up
+     to the tile, which is the only property that makes them trustworthy. */
+  const [fareRows, payRows, stmtRows] = await Promise.all([
+    q(platformFares(F), p),
+    q(platformPayouts(), p),
+    q(platformStatements(), p),
+  ]);
+  const num = (v) => (v == null ? null : Number(v));
+  const byPlat = new Map();
+  const plat = (name) => {
+    if (!byPlat.has(name)) {
+      byPlat.set(name, { platform: name, bookings: 0, priced_bookings: 0,
+        fares: null, payouts: null, payout_days: 0 });
+    }
+    return byPlat.get(name);
+  };
+  for (const f of fareRows) Object.assign(plat(f.platform), {
+    bookings: f.bookings, priced_bookings: f.priced_bookings, fares: num(f.fares),
+    booking_days: f.booking_days });
+  for (const y of payRows) Object.assign(plat(y.platform), {
+    payouts: num(y.payouts), payout_days: y.payout_days ?? 0, payout_drivers: y.drivers });
+  for (const t of stmtRows) Object.assign(plat(t.platform), {
+    statement_net: num(t.statement_net), statement_days: t.statement_days });
+  const windowDays = Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1;
+  /* Mutates each row with `basis` and `best`, which is what the loop below
+     reads. Identical call to the one in /api/kpis. */
+  const income = fleetIncome([...byPlat.values()], windowDays);
+  const USES_FARES = new Set([...byPlat.values()]
+    .filter((r) => r.basis === 'fares' || r.basis === 'partial_fares').map((r) => r.platform));
+  const USES_PAYOUT = new Set([...byPlat.values()]
+    .filter((r) => r.basis === 'payout' || r.basis === 'partial_payout').map((r) => r.platform));
+
+  const [cal, dayFare, dayPay, led] = await Promise.all([
+    q(`SELECT to_char(d, 'YYYY-MM-DD') AS d
+       FROM generate_series($1::date, $2::date, interval '1 day') AS d`, [from, to]),
+    /* to_char, not the raw DATE. node-postgres hands a DATE back as a JS Date
+       and String(thatDate).slice(0, 10) is "Sat Aug 01" — which then matches no
+       calendar key and silently contributes nothing, so this endpoint returned
+       every bar at zero the first time it was written. It is at least the
+       fourth place in this codebase the same slice has been wrong, and the
+       calendar below is keyed on the same to_char so the two cannot drift. */
+    q(`SELECT to_char(local_day, 'YYYY-MM-DD') AS d, platform,
+              count(*)::int bookings,
+              count(*) FILTER (WHERE has_fare)::int priced_trips,
+              round(sum(price) FILTER (WHERE has_fare)::numeric, 2) fares
+       FROM trip_norm WHERE ${W()} AND is_booking GROUP BY 1, 2`, p),
+    /* period_days is the provider's own report window for the row. 7 means the
+       day's share is a week's statement divided across its days — an
+       allocation, not a measurement of that day — and the page has to say so
+       or it states a week's figure over a day. */
+    q(`SELECT to_char(day, 'YYYY-MM-DD') AS d, platform,
+              round(sum(earnings)::numeric, 2) payouts,
+              max(period_days)::int period_days,
+              bool_or(period_days IS NULL) AS unknown_period
+       FROM driver_payout_day
+       WHERE day BETWEEN $1::date AND $2::date
+         AND ($3::text IS NULL OR platform = $3)
+         AND ($4::text IS NULL OR fleet_id = $4)
+       GROUP BY 1, 2`, p),
+    q(`SELECT to_char((event_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS d,
+              round(sum(amount)::numeric, 2) amount, count(*)::int entries
        FROM ledger_entry
        WHERE ${DAYWIN('event_at')}
          AND ($3::text IS NULL OR platform = $3)
          AND ($4::text IS NULL OR fleet_id = $4)
-       GROUP BY 1
-     ),
-     fare AS (
-       SELECT local_day AS d, round(sum(price)::numeric,2) revenue,
-              count(*) FILTER (WHERE has_fare)::int priced_trips
-       FROM trip_norm WHERE ${W()} AND has_fare GROUP BY 1
-     ),
-     /* Every booking of the day, priced or not, so the page can say what share
-        of them the fares line is drawn from. 54 of 689 is the fact that makes
-        the fares line readable. */
-     book AS (
-       SELECT local_day AS d, count(*)::int bookings
-       FROM trip_norm WHERE ${W()} AND is_booking GROUP BY 1
-     ),
-     mon AS (
-       SELECT day AS d,
-              round(sum(money)::numeric, 2) AS money,
-              count(*) FILTER (WHERE money IS NOT NULL)::int AS money_driver_days,
-              /* NULL the moment any row carrying money cannot say what window
-                 it came from — an unknown grain is not a fine one. */
-              CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
-                   ELSE max(money_period_days) END AS money_period_days,
-              CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
-                   THEN 'mixed'
-                   ELSE max(money_source) FILTER (WHERE money_source <> 'none') END AS money_source
-         FROM driver_day
-        WHERE day BETWEEN $1::date AND $2::date
-          AND ($4::text IS NULL OR fleet_id = $4)
-        GROUP BY 1
-     ),
-     pay AS (
-       SELECT day AS d, round(sum(earnings)::numeric, 2) AS payout
-         FROM driver_payout_day
-        WHERE day BETWEEN $1::date AND $2::date
-          AND ($3::text IS NULL OR platform = $3)
-          AND ($4::text IS NULL OR fleet_id = $4)
-        GROUP BY 1
-     )
-     SELECT to_char(cal.d, 'YYYY-MM-DD') AS d, led.amount, led.entries,
-            fare.revenue, coalesce(fare.priced_trips, 0) AS priced_trips,
-            coalesce(book.bookings, 0) AS bookings,
-            mon.money, coalesce(mon.money_driver_days, 0) AS money_driver_days,
-            mon.money_period_days, mon.money_source,
-            pay.payout,
-            (led.d IS NULL AND fare.d IS NULL AND mon.d IS NULL) AS nothing_recorded
-     FROM cal
-     LEFT JOIN led ON led.d = cal.d
-     LEFT JOIN fare ON fare.d = cal.d
-     LEFT JOIN book ON book.d = cal.d
-     LEFT JOIN mon ON mon.d = cal.d
-     LEFT JOIN pay ON pay.d = cal.d
-     ORDER BY cal.d`, [from, to, platform, fleet]);
+       GROUP BY 1`, p),
+  ]);
+
+  /* Every query above returns its day already as 'YYYY-MM-DD', so this is a
+     guard rather than a conversion: a raw Date reaching here would produce a
+     key that matches nothing and drop that day's money in silence. */
+  const key = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+  const day = new Map(cal.map((c) => [c.d, { d: c.d,
+    amount: null, entries: null,
+    revenue: null, priced_trips: 0, bookings: 0,
+    money: null, fares_part: null, payout_part: null,
+    money_period_days: 1, money_source: null, payout: null,
+    nothing_recorded: true }]));
+  const add = (o, k, v) => { if (v != null) o[k] = (o[k] == null ? 0 : o[k]) + Number(v); };
+
+  for (const r of led) {
+    const o = day.get(key(r.d)); if (!o) continue;
+    o.amount = num(r.amount); o.entries = r.entries; o.nothing_recorded = false;
+  }
+  for (const r of dayFare) {
+    const o = day.get(key(r.d)); if (!o) continue;
+    o.bookings += r.bookings; o.priced_trips += r.priced_trips;
+    add(o, 'revenue', r.fares);
+    o.nothing_recorded = false;
+    /* Only the channels this window counts on fares contribute to the money. */
+    if (USES_FARES.has(r.platform)) { add(o, 'fares_part', r.fares); add(o, 'money', r.fares); }
+  }
+  let unknownGrain = false;
+  for (const r of dayPay) {
+    const o = day.get(key(r.d)); if (!o) continue;
+    add(o, 'payout', r.payouts);
+    o.nothing_recorded = false;
+    if (!USES_PAYOUT.has(r.platform)) continue;
+    add(o, 'payout_part', r.payouts); add(o, 'money', r.payouts);
+    /* NULL the moment any contributing row cannot say what period it covers —
+       an unknown grain is not a fine one. */
+    if (r.unknown_period) { o.money_period_days = null; unknownGrain = true; }
+    else if (o.money_period_days != null) {
+      o.money_period_days = Math.max(o.money_period_days, r.period_days || 1);
+    }
+  }
+  const rows = [...day.values()].map((o) => {
+    const both = o.fares_part != null && o.payout_part != null;
+    return { ...o,
+      money: o.money == null ? null : +o.money.toFixed(2),
+      revenue: o.revenue == null ? null : +o.revenue.toFixed(2),
+      payout: o.payout == null ? null : +o.payout.toFixed(2),
+      fares_part: o.fares_part == null ? null : +o.fares_part.toFixed(2),
+      payout_part: o.payout_part == null ? null : +o.payout_part.toFixed(2),
+      money_period_days: o.money == null ? null : o.money_period_days,
+      money_source: o.money == null ? null
+        : both ? 'mixed' : (o.payout_part != null ? 'statement' : 'fares') };
+  });
   const sum = (k) => {
-    const v = rows.reduce((a, r) => a + (r[k] == null ? 0 : Number(r[k])), 0);
-    return rows.some((r) => r[k] != null) ? +v.toFixed(2) : null;
+    if (!rows.some((r) => r[k] != null)) return null;
+    return +rows.reduce((a, r) => a + (r[k] == null ? 0 : Number(r[k])), 0).toFixed(2);
   };
   res.json({ rows,
     totals: { money: sum('money'), fares: sum('revenue'), payout: sum('payout'),
+      money_fares_part: sum('fares_part'), money_payout_part: sum('payout_part'),
       bookings: rows.reduce((a, r) => a + (r.bookings || 0), 0),
-      priced_trips: rows.reduce((a, r) => a + (r.priced_trips || 0), 0) },
-    /* What the caller is allowed to conclude from the two lines, said by the
-       endpoint rather than assumed by each page that draws them. */
-    money_narrowed_by_platform: false,
+      priced_trips: rows.reduce((a, r) => a + (r.priced_trips || 0), 0),
+      /* The window figure this series must add up to, from the identical call
+         /api/kpis makes. A caller can check the two rather than trust them. */
+      accounted: income.accounted },
+    /* Which channel each half came from, so the caption can name them. */
+    money_basis: [...byPlat.values()].map((r) => ({ platform: r.platform, basis: r.basis,
+      best: r.best })),
+    unknown_grain: unknownGrain,
+    /* The platform chip narrows both halves here, because both are built from
+       per-platform rows. Kept as fields so a page cannot assume either way. */
+    money_narrowed_by_platform: platform != null,
     fares_narrowed_by_platform: platform != null,
     platform, fleet });
 }));

@@ -6,7 +6,7 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBa
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
-  verdict, dominantBar, foldRows, foldChildren, sourceLine } from './ui.js';
+  verdict, dominantBar, foldRows, foldChildren, sourceLine, andList } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
@@ -2468,16 +2468,32 @@ V.finance = async (root) => {
          a seventh of a weekly statement as a day that was measured. */
       const t = fin.totals || {};
       const grain = fr.reduce((a, r) => Math.max(a, r.money_period_days || 0), 0);
-      const unknownGrain = fr.some((r) => r.money != null && r.money_period_days == null);
-      const fareShare = t.money > 0 && t.fares != null
-        ? Math.round((t.fares / t.money) * 100) : null;
+      const unknownGrain = fin.unknown_grain
+        || fr.some((r) => r.money != null && r.money_period_days == null);
+      const fareShare = t.money > 0 && t.money_fares_part != null
+        ? Math.round((t.money_fares_part / t.money) * 100) : null;
       const parts = [];
-      if (t.fares != null && t.money != null) {
-        parts.push(`${money(t.fares)} of ${money(t.money)}`
-          + (fareShare != null ? ` (${fareShare}%)` : '')
-          + ` is a fare on the booking itself — ${fmt(t.priced_trips)} of `
-          + `${fmt(t.bookings)} bookings carry one. The rest is what the platforms `
-          + 'reported paying, on channels that publish no per-trip fare at all.');
+      if (t.money != null) {
+        /* Named from the basis the endpoint actually applied, not guessed from
+           the shape of the numbers. A channel counted on its payout does not
+           also contribute its fares — see api/income_sql.js — so this says
+           which channel each half of the bar came from. */
+        const onFares = (fin.money_basis || []).filter((b) => /fares/.test(b.basis || ''))
+          .map((b) => sourceLabel(b.platform));
+        const onPayout = (fin.money_basis || []).filter((b) => /payout/.test(b.basis || ''))
+          .map((b) => sourceLabel(b.platform));
+        const bits = [];
+        if (t.money_fares_part != null) {
+          bits.push(`${money(t.money_fares_part)}`
+            + (fareShare != null ? ` (${fareShare}%)` : '')
+            + ` is metered fares from ${andList(onFares)}`);
+        }
+        if (t.money_payout_part != null) {
+          bits.push(`${money(t.money_payout_part)} is what ${andList(onPayout)} reported paying, `
+            + 'on a channel that publishes no per-trip fare at all');
+        }
+        parts.push(`${bits.join('; ')}. Across the whole window ${fmt(t.priced_trips)} of `
+          + `${fmt(t.bookings)} bookings carry a fare of their own.`);
       }
       if (unknownGrain) {
         parts.push('Part of this cannot say what period it was reported over, so it is drawn '
@@ -2488,14 +2504,19 @@ V.finance = async (root) => {
           + 'its days — an allocation at this grain, not a measurement of that day.');
       }
       if (parts.length) rev.body.append(el('p', 'cap', parts.join(' ')));
-      /* The platform chip narrows the fares and cannot narrow the money, so a
-         filtered page says so rather than showing a whole-fleet figure under a
-         one-channel heading. */
-      if (fin.fares_narrowed_by_platform && !fin.money_narrowed_by_platform) {
-        rev.body.append(note(`The ${sourceLabel(state.platform)} filter narrows the metered `
-          + 'share named above but not the bars: a day\u2019s money is held per driver across '
-          + 'every channel they worked that day, with no per-channel share to take from it.',
-        'warn'));
+      /* The bars must add up to the tile above them, and the endpoint returns
+         the tile's own figure so this can be checked rather than assumed. A
+         drift here is the defect this panel was rebuilt for: the first version
+         summed driver_day.money and came to AED 56,917 where /api/kpis said
+         AED 81,385 over the same three days, because driver_day is built from
+         the trip table and holds the 138 people who drove while the statements
+         pay 230. */
+      if (t.accounted != null && t.money != null
+          && Math.abs(t.accounted - t.money) > Math.max(1, t.accounted * 0.005)) {
+        rev.body.append(note(`These bars total ${money(t.money)} and the accounted figure above `
+          + `is ${money(t.accounted)}. They are built from the same per-channel rule, so a gap `
+          + 'means one of the two is reading a day this window does not contain — trust neither '
+          + 'until it is explained.', 'warn'));
       }
     }
   }

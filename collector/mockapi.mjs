@@ -1578,13 +1578,21 @@ app.get('/api/vehicle/safety', (req, r) => {
           km: 2100, booked_km: 2100, days_held: 9, per_100km: null,
           per_100km_absent: 'not measured — every event while this person held the vehicle is '
             + 'the tracker reporting its own power loss, so nothing here measures driving' }]
+      /* per_100km_absent is on EVERY row, null where the rate is measured. The
+         real route returns the key unconditionally and a fixture that omits it
+         on the measured rows lets a page read `undefined` in the branch it
+         takes most often — which test/mockapi.test.mjs compares for exactly
+         this reason. */
       : [{ driver_name: drivers[i], driver_ext_id: `drv-${i}`, n: 78, device_alerts: 7,
-          km: 3400, booked_km: 3400, days_held: 21, per_100km: +((78 * 100) / 3400).toFixed(2) },
+          km: 3400, booked_km: 3400, days_held: 21,
+          per_100km: +((78 * 100) / 3400).toFixed(2), per_100km_absent: null },
         { driver_name: drivers[(i + 4) % drivers.length],
           driver_ext_id: `drv-${(i + 4) % drivers.length}`, n: 41, device_alerts: 5,
-          km: 2100, booked_km: 2100, days_held: 9, per_100km: +((41 * 100) / 2100).toFixed(2) },
+          km: 2100, booked_km: 2100, days_held: 9,
+          per_100km: +((41 * 100) / 2100).toFixed(2), per_100km_absent: null },
         { driver_name: 'unattributed', driver_ext_id: null, n: 13, device_alerts: 0,
-          km: null, booked_km: null, days_held: null, per_100km: null }]),
+          km: null, booked_km: null, days_held: null,
+          per_100km: null, per_100km_absent: null }]),
     by_driver_total: 3, by_driver_shown: 3, by_driver_truncated: false, by_driver_alerts: 132,
     recent_total: 40, recent_shown: 40, recent_truncated: false,
     daily: vDaily(req.query.plate).map((d) => ({ day: d.day, alerts: d.alerts })),
@@ -3798,13 +3806,25 @@ app.get('/api/track', (req, r) => {
    the current week has not landed yet, and a chart must draw that as a hole
    rather than as a day the fleet earned nothing. */
 app.get('/api/finance/daily', (req, r) => {
+  /* Money per day, with the shape BOTH defects lived in.
+     ──────────────────────────────────────────────────────────────────────
+     The panel drew `revenue` — sum(trip.price) — under a title about money,
+     and on production that was 15% of it: Uber files no per-trip fare and is
+     90% of the bookings, so its money arrives only as a weekly statement. Then
+     the first fix summed driver_day.money and understated by 30%, because
+     driver_day is built from the trip table and holds the people who DROVE
+     while the statements pay everyone. So the fixture makes fares a small
+     fraction of the money, gives the payout half a period_days of 7, and
+     returns `accounted` so the page can check that its bars add up to the tile
+     above them. The two newest days have no statement yet — the current week's
+     has not been filed — and must draw as a hole rather than as a day the
+     fleet earned nothing. */
   const rows = [];
   for (let b = 30; b >= 0; b--) {
     const d = dayISO(b).slice(0, 10);
     const bookings = Math.round(60 + Math.sin(b / 3) * 18 + rnd(0, 22));
     const priced = Math.round(bookings * 0.12);
     const fares = Math.round(priced * rnd(58, 88));
-    /* The newest two days: the week's statement has not been filed. */
     const pending = b <= 1;
     const payout = pending ? null : Math.round(bookings * rnd(52, 74));
     rows.push({ d,
@@ -3812,11 +3832,10 @@ app.get('/api/finance/daily', (req, r) => {
       entries: b % 7 === 0 ? 3 + Math.round(rnd(0, 9)) : null,
       revenue: fares, priced_trips: priced, bookings,
       money: pending ? null : fares + payout,
-      money_driver_days: pending ? 0 : 30 + Math.round(rnd(0, 8)),
-      /* A weekly statement spread across its days for most of the window, and
-         one day that a channel really did report as a day. */
-      money_period_days: pending ? null : (b % 9 === 0 ? 1 : 7),
-      money_source: pending ? null : (b % 9 === 0 ? 'fares' : 'statement'),
+      fares_part: pending ? null : fares,
+      payout_part: payout,
+      money_period_days: pending ? null : 7,
+      money_source: pending ? null : 'mixed',
       payout,
       nothing_recorded: pending });
   }
@@ -3827,10 +3846,19 @@ app.get('/api/finance/daily', (req, r) => {
     ? +win.reduce((a, x) => a + (x[k] == null ? 0 : Number(x[k])), 0).toFixed(2) : null);
   r.json({ rows: win,
     totals: { money: sum('money'), fares: sum('revenue'), payout: sum('payout'),
+      money_fares_part: sum('fares_part'), money_payout_part: sum('payout_part'),
       bookings: win.reduce((a, x) => a + (x.bookings || 0), 0),
-      priced_trips: win.reduce((a, x) => a + (x.priced_trips || 0), 0) },
-    money_narrowed_by_platform: false,
-    fares_narrowed_by_platform: req.query.platform != null && req.query.platform !== '',
+      priced_trips: win.reduce((a, x) => a + (x.priced_trips || 0), 0),
+      /* Equal to the sum of the bars, because on production it must be — the
+         panel warns when it is not, and a fixture that never satisfies the
+         invariant cannot exercise the branch that checks it. */
+      accounted: sum('money') },
+    money_basis: [{ platform: 'hotel', basis: 'fares', best: sum('fares_part') },
+      { platform: 'yango', basis: 'fares', best: 0 },
+      { platform: 'uber', basis: 'payout', best: sum('payout_part') }],
+    unknown_grain: false,
+    money_narrowed_by_platform: !!req.query.platform,
+    fares_narrowed_by_platform: !!req.query.platform,
     platform: req.query.platform || null, fleet: req.query.fleet || null });
 });
 app.get('/api/finance/ledger', (_, r) => r.json([
