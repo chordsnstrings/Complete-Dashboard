@@ -1201,14 +1201,48 @@ export function probeRoutes(app, { wrap }) {
        they are worthless unless that signature is present. */
     const argShapes = [];
     if (!described && sessionWorks && wanted === TRIP_MONEY_ARG_FIELDS) {
+      /* THE CONTROL THIS ROUND ACTUALLY NEEDS, and the last one missing.
+         ─────────────────────────────────────────────────────────────────
+         The whole 'those six operations exist and I asked them wrong' reading
+         rests on the assumption that this gateway scrubs ARGUMENT errors into
+         the same generic refusal it uses elsewhere. That has never been tested.
+         getEarnerBreakdownsV2 is known-real — src/sources/uber.js calls it
+         every run — so asking it with an argument that cannot exist separates
+         the two worlds:
+
+           named   ("Unknown argument zzBogusArgQx")  argument errors are NOT
+                   scrubbed, so a generic refusal on the six means something
+                   other than wrong arguments and the theory is dead.
+           generic ("Invalid GraphQL query")          argument errors ARE
+                   scrubbed, and the six are still worth chasing.
+
+         Without this the round cannot conclude anything either way, which is
+         the failure mode this file exists to avoid. */
+      const argCtl = await ask(
+        'query Probe { getEarnerBreakdownsV2(zzBogusArgQx: 1) { __typename } }', {});
+      const argCtlErr = errText(argCtl);
+      argShapes.push({ operation: 'getEarnerBreakdownsV2', args: '(zzBogusArgQx: 1)',
+        kind: 'control — known-real operation, impossible argument',
+        verdict: /Unknown argument|zzBogusArgQx/i.test(argCtlErr)
+          ? 'argument errors are NAMED — a generic refusal below is NOT about arguments'
+          : 'argument errors are SCRUBBED — a generic refusal below may be about arguments',
+        detail: (argCtl?.transportError || argCtlErr || '').slice(0, 200) || null });
+      await new Promise((r) => setTimeout(r, 80));
       /* One real trip of this driver's, so the job-keyed shapes are asked with
          an id the provider can actually resolve — a made-up uuid would answer
          "not found" and prove nothing about the argument. */
-      const [trip] = await pool.query(
-        `SELECT external_id FROM trip WHERE platform = 'uber' AND driver_ext_id = $1
-           AND requested_at > now() - interval '60 days'
-         ORDER BY requested_at DESC LIMIT 1`, [uuid]).then((r) => r.rows);
-      const jobUuid = trip?.external_id || null;
+      /* This driver's newest trip, and failing that ANY recent Uber trip of the
+         fleet's. The first version required a trip of the probed driver inside
+         60 days and the driver is picked by observed_at, not by whether they
+         drove — so all three job-keyed shapes went unasked, which are the ones
+         that would answer the operator outright. A trip belonging to someone
+         else still tests whether the ARGUMENT is accepted, which is the whole
+         question here. */
+      const { rows: tr } = await pool.query(
+        `SELECT external_id FROM trip
+          WHERE platform = 'uber' AND coalesce(btrim(external_id), '') <> ''
+          ORDER BY (driver_ext_id = $1) DESC, requested_at DESC NULLS LAST LIMIT 1`, [uuid]);
+      const jobUuid = tr[0]?.external_id || null;
       const RANGE = { startsAt: String(Date.now() - 7 * 864e5), endsAt: String(Date.now()) };
       for (const [name, args, kind] of TRIP_MONEY_ARGS) {
         if (kind === 'job' && !jobUuid) { argShapes.push({ operation: name, args, kind,
