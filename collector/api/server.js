@@ -2088,10 +2088,15 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
        GROUP BY 1`, p),
   ]);
 
-  /* Every query above returns its day already as 'YYYY-MM-DD', so this is a
-     guard rather than a conversion: a raw Date reaching here would produce a
-     key that matches nothing and drop that day's money in silence. */
-  const key = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+  /* No coercion at all, deliberately. All four queries above return their day
+     through to_char as 'YYYY-MM-DD', so the keys already match the calendar's;
+     a JS fallback here would be a second, silent way to derive a day key, and
+     test/server_day_keys.test.mjs exists to forbid exactly that — both the
+     String(aDate).slice(0, 10) that produced "Sat Aug 01" and the toISOString
+     cut that shifts a Dubai day back across midnight. If a query is ever
+     changed to return a raw DATE, its rows will fail to match and the guard
+     test will say so, which is the failure mode worth having. */
+  const key = (v) => v;
   const day = new Map(cal.map((c) => [c.d, { d: c.d,
     amount: null, entries: null,
     revenue: null, priced_trips: 0, bookings: 0,
@@ -3807,6 +3812,35 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
   const share = mode && mode.with_date ? mode.n / mode.with_date : 0;
   const placeholder = share >= 0.5 && mode.n >= 5;
   const ph = placeholder ? mode.licence_expires : null;
+  /* THE NUMBER IS A DEFAULT TOO, and nothing had ever said so.
+     ──────────────────────────────────────────────────────────────────────
+     This route already counted distinct_numbers in the query above and threw
+     the answer away. Measured on production 2026-09-04: of 289 compliance
+     rows, 195 carry no licence number at all and every one of the other 94
+     carries the identical string "123456" — the same 94 rows whose expiry is
+     the source's 2026-01-01 default. The page marked the DATE as "a default,
+     not a date" and printed the number beside it as though it were a licence,
+     so a reader checking a driver's papers had a number to read out that
+     belongs to nobody.
+
+     Detected the same way and for the same reason: one value on more than half
+     the rows that have one is a default, not a coincidence. Five is the floor
+     so a two-driver fleet whose people genuinely share nothing cannot trip
+     it. */
+  const [numMode] = await q(
+    `SELECT licence_no, count(*)::int n,
+            (SELECT count(*)::int FROM driver_compliance
+              WHERE coalesce(btrim(licence_no), '') <> ''
+                AND ($1::text IS NULL OR fleet_id = $1)) AS with_number,
+            (SELECT count(DISTINCT licence_no)::int FROM driver_compliance
+              WHERE coalesce(btrim(licence_no), '') <> ''
+                AND ($1::text IS NULL OR fleet_id = $1)) AS distinct_numbers
+     FROM driver_compliance
+     WHERE coalesce(btrim(licence_no), '') <> '' AND ($1::text IS NULL OR fleet_id = $1)
+     GROUP BY licence_no ORDER BY n DESC LIMIT 1`, [fleet]);
+  const numShare = numMode && numMode.with_number ? numMode.n / numMode.with_number : 0;
+  const numPlaceholder = numShare >= 0.5 && numMode.n >= 5;
+  const phNum = numPlaceholder ? numMode.licence_no : null;
   /* The list, ordered so the placeholder rows are not the first thing a reader
      sees. 77 of the live rows carry the identical never-filled-in date, and
      ordering by licence_expires ASC put every one of them at the top of a page
@@ -3880,6 +3914,7 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
                               AT TIME ZONE 'Asia/Dubai')::date) AS days_since_last_trip,
             ($1::text IS NOT NULL
              AND to_char(licence_expires,'YYYY-MM-DD') = $1) AS licence_placeholder,
+            ($3::text IS NOT NULL AND btrim(licence_no) = $3) AS licence_no_placeholder,
             -- A licence expiring in six days is a CAR that stops earning in six
             -- days. The row named the person and left the asset to be worked
             -- out by hand, which is the difference between a list and a plan.
@@ -3900,7 +3935,7 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      WHERE ($2::text IS NULL OR c.fleet_id = $2)
      ORDER BY ($1::text IS NOT NULL
                AND to_char(licence_expires,'YYYY-MM-DD') = $1) ASC,
-              licence_expires ASC NULLS LAST LIMIT 300`, [ph, fleet]);
+              licence_expires ASC NULLS LAST LIMIT 300`, [ph, fleet, phNum]);
   /* Counted in the database, excluding the placeholder date, rather than by
      filtering the 300 rows the page happened to receive. "Driver licences
      expired — stand down until renewed" is the single most consequential
@@ -3923,8 +3958,13 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
             /* Coverage for the identity number, and the channels behind it, so
                the page states a fact about the sources rather than a count a
                reader would read as missing paperwork. */
-            count(*) FILTER (WHERE coalesce(btrim(emirates_id), '') <> '')::int with_emirates_id
-     FROM driver_compliance WHERE ($2::text IS NULL OR fleet_id = $2)`, [ph, fleet]);
+            count(*) FILTER (WHERE coalesce(btrim(emirates_id), '') <> '')::int with_emirates_id,
+            count(*) FILTER (WHERE coalesce(btrim(licence_no), '') <> '')::int with_number,
+            count(*) FILTER (WHERE $3::text IS NOT NULL
+                               AND btrim(licence_no) = $3)::int placeholder_numbers,
+            count(*) FILTER (WHERE coalesce(btrim(licence_no), '') <> ''
+                               AND ($3::text IS NULL OR btrim(licence_no) <> $3))::int real_numbers
+     FROM driver_compliance WHERE ($2::text IS NULL OR fleet_id = $2)`, [ph, fleet, phNum]);
   const idBy = await q(
     `SELECT platform, count(*) FILTER (WHERE coalesce(btrim(emirates_id), '') <> '')::int n,
             count(*)::int of_n
@@ -3939,6 +3979,20 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     placeholder_date: ph,
     placeholder_rows: placeholder ? mode.n : 0,
     rows_with_a_date: mode?.with_date ?? 0,
+    /* The licence NUMBER's own placeholder, beside the date's. Two independent
+       defaults on the same rows, and a page that flags one and prints the other
+       is half honest. distinct_numbers is the evidence: 1 distinct value across
+       94 rows is not a roster, it is a default. */
+    placeholder_licence_no: phNum,
+    placeholder_number_rows: numPlaceholder ? numMode.n : 0,
+    distinct_licence_numbers: numMode?.distinct_numbers ?? 0,
+    licence_no_caveat: numPlaceholder
+      ? `Every one of the ${numMode.n} licence numbers on this roster is the identical string `
+        + `"${numMode.licence_no}" — ${numMode.distinct_numbers} distinct `
+        + `${numMode.distinct_numbers === 1 ? 'value' : 'values'} across all of them. It is what `
+        + 'this source writes when the field was never filled in, so no row here carries a licence '
+        + 'number anybody could check.'
+      : null,
     /* Which channels answer an Emirates ID and which do not, in figures. A
        page that prints a blank identity column without this reads as a fleet
        that lost its paperwork. */

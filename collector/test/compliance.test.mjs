@@ -84,6 +84,28 @@ const spreadPh = (await q(
 check('placeholder dates detected as dominant', spreadPh.common_n / spreadPh.total >= 0.5,
   `${spreadPh.common_n}/${spreadPh.total}`);
 
+/* THE NUMBER IS A DEFAULT TOO, and this file has said so in a comment since it
+   was written — "licence numbers like 123456" — while guarding only the date.
+   Measured on production 2026-09-04: of 289 compliance rows, 94 carry a licence
+   number and every one of the 94 is the identical string, one distinct value
+   across all of them; the other 195 carry none. So the roster holds ZERO real
+   licence numbers and the page printed 94 of them as though a reader could
+   check one. Detected the same way as the date, and by the same rule: one value
+   on more than half the rows that have one is a default. */
+const numPh = (await q(
+  `SELECT count(*)::int with_number,
+          count(DISTINCT licence_no)::int distinct_numbers,
+          mode() WITHIN GROUP (ORDER BY licence_no) AS common_no,
+          count(*) FILTER (WHERE licence_no =
+            (SELECT mode() WITHIN GROUP (ORDER BY licence_no) FROM driver_compliance
+             WHERE coalesce(btrim(licence_no),'') <> ''))::int AS common_n
+   FROM driver_compliance WHERE coalesce(btrim(licence_no),'') <> ''`))[0];
+check('placeholder licence numbers detected as dominant',
+  numPh.common_n / numPh.with_number >= 0.5 && numPh.common_n >= 5,
+  `${numPh.common_n}/${numPh.with_number}`);
+check('and one distinct value across the roster is the evidence',
+  numPh.distinct_numbers === 1, String(numPh.distinct_numbers));
+
 // a genuine spread must NOT trip the guard
 await q(`DELETE FROM driver_compliance`);
 const dates = ['2026-09-01','2026-10-15','2027-01-20','2026-08-01','2026-12-05','2027-03-11'];
@@ -99,6 +121,17 @@ const spreadReal = (await q(
    FROM driver_compliance WHERE licence_expires IS NOT NULL`))[0];
 check('genuine spread does not trip the guard', spreadReal.common_n / spreadReal.total < 0.5,
   `${spreadReal.common_n}/${spreadReal.total}`);
+/* The same, for the number: a roster of genuine licence numbers must not be
+   accused of being defaults. AE1000..AE1005 above are six distinct values. */
+const numReal = (await q(
+  `SELECT count(*)::int with_number, count(DISTINCT licence_no)::int distinct_numbers,
+          count(*) FILTER (WHERE licence_no =
+            (SELECT mode() WITHIN GROUP (ORDER BY licence_no) FROM driver_compliance
+             WHERE coalesce(btrim(licence_no),'') <> ''))::int AS common_n
+   FROM driver_compliance WHERE coalesce(btrim(licence_no),'') <> ''`))[0];
+check('a roster of genuine licence numbers is not accused of being defaults',
+  numReal.common_n / numReal.with_number < 0.5 && numReal.distinct_numbers === 6,
+  `${numReal.common_n}/${numReal.with_number}, ${numReal.distinct_numbers} distinct`);
 
 /* ── deadhead maths (verified against 237 real hotel trips: 6.8% ratio) ── */
 const R = 6371, rad = (d) => d * Math.PI / 180;

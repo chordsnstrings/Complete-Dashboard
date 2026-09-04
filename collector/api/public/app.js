@@ -3967,12 +3967,18 @@ V.compliance = async (root) => {
       figure = fmt(vMonth + (dt.within_45 || 0)); unit = 'due in 45 days';
     }
     const blind = dPlaceholder + dNoDate;
+    const numBlind = drvPage.placeholder_number_rows || 0;
     verdict(vHost, {
       claim, figure, unit, tone, recommend,
       sub: blind
         ? `${fmt(blind)} ${plural(blind, 'licence')} cannot be checked at all — `
           + `${fmt(dPlaceholder)} carry the source's default date and ${fmt(dNoDate)} carry no date. `
           + 'They are not counted as expired, because an absent date is not an expiry.'
+          /* The number, not only the date. A roster where every licence number
+             is the same string cannot be checked against anything, and the
+             verdict is where a reader looks before the table. */
+          + (numBlind ? ` The same ${fmt(numBlind)} carry the source's default licence NUMBER `
+            + 'as well, so there is nothing on those rows to verify against.' : '')
         : 'Every licence and document on the books carries a real date.',
     });
   }
@@ -4001,6 +4007,9 @@ V.compliance = async (root) => {
   /* Said once, above the table, so the Emirates ID column's dashes read as a
      statement about the channels rather than as missing paperwork. */
   if (drvPage.emirates_id_caveat) root.append(note(drvPage.emirates_id_caveat));
+  /* The licence NUMBER's default, said beside the date's rather than left for a
+     reader to notice that every row shows the same digits. */
+  if (drvPage.licence_no_caveat) root.append(note(drvPage.licence_no_caveat, 'warn'));
 
   // The data holds registration only; naming three document types implied a
   // completeness this page does not have.
@@ -4089,11 +4098,26 @@ V.compliance = async (root) => {
         : '<span class="ent-off" title="this platform publishes no phone number">—</span>') },
     { label: 'Platform', key: 'platform', render: (r) => esc(sourceLabel(r.platform)) },
     { label: 'Licence', key: 'licence_no',
-      /* An em-dash with nothing behind it read as a licence nobody had filed.
-         The licence NUMBER comes from the same record as the expiry, so a
-         blank one is the same fact the Expires column is already saying. */
-      render: (r) => (r.licence_no ? `<span class="plate">${esc(r.licence_no)}</span>`
-        : '<span class="ent-off" title="this channel publishes no licence number">—</span>') },
+      /* Two absences, and the second one used to print as a licence.
+         ─────────────────────────────────────────────────────────────────
+         An em-dash with nothing behind it read as a licence nobody had filed;
+         the number comes from the same record as the expiry, so a blank is
+         the fact the Expires column is already stating. And on production
+         every one of the 94 numbers on this roster is the identical string
+         "123456" — one distinct value across all of them, the same 94 rows
+         whose expiry is this source's 2026-01-01 default. The date was marked
+         and the number was printed as though somebody could check it. */
+      render: (r) => {
+        if (!r.licence_no) {
+          return '<span class="ent-off" title="this channel publishes no licence number">—</span>';
+        }
+        if (r.licence_no_placeholder) {
+          return `<span class="tag dim" title="every licence number on this roster is this same `
+            + 'string — the source\u2019s own default, written when the field was never filled '
+            + 'in">not filled in</span>';
+        }
+        return `<span class="plate">${esc(r.licence_no)}</span>`;
+      } },
     /* The one government identity number this fleet holds.
        ─────────────────────────────────────────────────────────────────────
        132 of the roster carry a real Emirates ID and this page — whose whole

@@ -361,13 +361,17 @@ app.get('/api/compliance/vehicles', (_, r) => {
 });
 app.get('/api/compliance/drivers', (_, r) => r.json({
   totals: { total: 148, with_date: 96, expired: 2, within_45: 5, no_date_at_all: 52,
-    with_emirates_id: 6 },
+    with_emirates_id: 6, with_number: 8, placeholder_numbers: 6, real_numbers: 2 },
   shown: 8, truncated: false,
   drivers: [
     // Six rows carrying the identical placeholder the source writes when the
     // field was never filled in, plus two real dates.
     ...Array.from({ length: 6 }, (_, i) => ({ platform: 'hotel', driver_ext_id: `d${10 + i}`,
       full_name: drivers[i], phone: '+9715000000', licence_no: '123456', fleet_id: 'ecosine',
+      /* The number is a default too, and on production every one of the 94
+         licence numbers on this roster is this identical string. The date was
+         marked and the number was printed as though somebody could check it. */
+      licence_no_placeholder: true,
       /* Contact details, which only the Uber supplier portal and the hotel
          channel carry. Two of the six have no picture and one no email, so the
          absent case renders as well as the present one. */
@@ -400,20 +404,26 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
       /* Bolt files no compliance record at all upstream, so this is null and
          the dash must read as a fact about the channel. */
       emirates_id: null,
-      licence_no: 'AE1802580', licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
+      licence_no: 'AE1802580', licence_no_placeholder: false,
+      licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
       fleet_id: 'egari', licence_placeholder: false,
       suspension_reason: 'documents under review', rating: 4.71,
       vehicle: { plate: plates[2], day: '2026-08-19' } },
     { platform: 'hotel', driver_ext_id: 'd3', full_name: 'Aliyan Khalil', phone: null,
       email: null, picture_url: null,
       emirates_id: '784-1990-7766554-2',
-      licence_no: 'AE9911', licence_expires: '2026-08-01', days_left: -20, state: 'active',
+      licence_no: 'AE9911', licence_no_placeholder: false,
+      licence_expires: '2026-08-01', days_left: -20, state: 'active',
       fleet_id: 'ecosine', licence_placeholder: false,
       suspension_reason: null, rating: null,
       // Nobody has held this person's car in the window we have custody for.
       vehicle: null },
   ],
   fleet: null, placeholder_date: '2026-01-01', placeholder_rows: 6, rows_with_a_date: 8,
+  placeholder_licence_no: '123456', placeholder_number_rows: 6, distinct_licence_numbers: 3,
+  licence_no_caveat: 'Every one of the 6 licence numbers on this roster is the identical string '
+    + '"123456" — 3 distinct values across all of them. It is what this source writes when the '
+    + 'field was never filled in, so no row here carries a licence number anybody could check.',
   emirates_id_by_platform: [{ platform: 'hotel', n: 6, of_n: 7 },
     { platform: 'bolt', n: 0, of_n: 1 }],
   emirates_id_caveat: '6 of 148 people carry an Emirates ID. Every one of them comes from the '
