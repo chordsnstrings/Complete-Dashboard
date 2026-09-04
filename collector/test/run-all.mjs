@@ -77,17 +77,41 @@ const results = [];
    itself a failure rather than a pass. */
 const TALLY = /(\d+) passed, (\d+) failed/;
 
+/* A file that never finishes is a failing file, not a stopped suite.
+   ─────────────────────────────────────────────────────────────────────────
+   spacing.test.mjs drives Chromium over 116 routes and one of them hung on a
+   navigation — 0:02 of CPU over twenty minutes, nothing on stdout, and the
+   whole run parked behind it with 182 of 183 files already green. Nothing
+   said so; the log simply stopped. The slowest file in this suite finishes in
+   under a minute, so five is an allowance no healthy file can reach, and a
+   file that does reach it is reported like any other failure with what it had
+   printed before it stopped. */
+const FILE_TIMEOUT_MS = Number(process.env.TEST_FILE_TIMEOUT_MS || 300_000);
+
 function run(file) {
   return new Promise((resolve) => {
     const started = Date.now();
     const p = spawn(process.execPath, [`test/${file}`], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      /* SIGKILL, not SIGTERM: the thing that hangs is a browser page whose
+         own process tree ignores a polite ask, and a suite that waited on
+         the shutdown would be back where it started. */
+      p.kill('SIGKILL');
+    }, FILE_TIMEOUT_MS);
     p.stdout.on('data', (d) => { out += d; });
     p.stderr.on('data', (d) => { out += d; });
     p.on('close', (code) => {
-      const m = out.match(TALLY);
+      clearTimeout(timer);
+      const m = timedOut ? null : out.match(TALLY);
+      if (timedOut) {
+        out += `\n  ✗ TIMED OUT after ${FILE_TIMEOUT_MS / 1000}s and was killed — `
+          + 'it printed the lines above and then stopped\n';
+      }
       resolve({
-        file, code, out, secs: ((Date.now() - started) / 1000).toFixed(1),
+        file, code, out, timedOut, secs: ((Date.now() - started) / 1000).toFixed(1),
         passed: m ? +m[1] : 0,
         failed: m ? +m[2] : null,          // null = never reported a tally
       });
@@ -102,7 +126,8 @@ await Promise.all(Array.from({ length: LIMIT }, async () => {
     results.push(r);
     const bad = r.code !== 0 || r.failed === null || r.failed > 0;
     console.log(`${bad ? '✗' : '✓'} ${r.file.padEnd(34)} ${String(r.passed).padStart(4)} passed`
-      + `${r.failed ? `, ${r.failed} FAILED` : ''}${r.failed === null ? ', NO TALLY REPORTED' : ''}`
+      + `${r.failed ? `, ${r.failed} FAILED` : ''}`
+      + `${r.timedOut ? ', TIMED OUT' : r.failed === null ? ', NO TALLY REPORTED' : ''}`
       + `  ${r.secs}s`);
     if (bad) console.log(r.out.split('\n').filter((l) => /✗|FAIL|Error|error:/.test(l)).slice(0, 25)
       .map((l) => `      ${l}`).join('\n'));

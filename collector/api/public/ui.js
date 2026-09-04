@@ -942,9 +942,30 @@ export const hourStr = (h) => {
    either". They were not, they cannot, and nothing on the page said so —
    which reads as a broken page rather than as a fact about Uber's export.
    Shared here so the sentence is the same wherever the gap is. */
-export const UBER_FARE = 'Uber\'s trip export carries no fare column at all, and Uber is most of '
-  + 'this fleet\'s work — the money for these trips is in the weekly payout statement, not on the '
-  + 'trip, so a fare exists only on the hotel and Yango rows';
+/* Rewritten for the same reason as UBER_HOURS below: the sentence outlived
+   the thing it described. It used to end "so a fare exists only on the hotel
+   and Yango rows", which was true of the trip export and is no longer true of
+   the record. REPORT_TYPE_PAYMENTS_ORDER prices every ride, the collector
+   walks it a week at a time, and Uber rows carry fares behind it.
+
+   What is still true is narrower, and it is what a reader has to know to read
+   a dash correctly: the fare is not on the trip export, it arrives from a
+   second report that is still being collected, and it is GROSS — Uber's
+   service fee is exactly a quarter of it, measured on 29 of 29 priced trips,
+   so a fare here is not what the fleet was paid. */
+export const UBER_FARE = 'Uber\'s trip export carries no fare column at all. The fares on Uber '
+  + 'rows come from its separate payments report, which is collected a week at a time — so a dash '
+  + 'is a week not yet collected, not a ride nobody paid for. And a fare here is the GROSS the '
+  + 'rider was charged: Uber keeps a quarter of it, and what the fleet received is the payout';
+
+/* The same fact in the short form a table cell can carry, so a tooltip that
+   names its own subject — this corridor, this hour, this pickup area — does
+   not carry its own hand-written half of the reason and drift from the long
+   one. Fifteen cells said "Uber's export has no fare column" and stopped
+   there, which reads as "and therefore never will".
+   test/fare_reason_shared.test.mjs keeps a sixteenth from being written. */
+export const UBER_FARE_WHY = 'Uber\u2019s trip export carries no fare column, and the fares on Uber '
+  + 'rows come from its separate payments report, which is collected a week at a time';
 /* Rewritten, because the old sentence outlived the thing it described.
    ─────────────────────────────────────────────────────────────────────────
    It read "no channel reports hours to this fleet", and that was true when it

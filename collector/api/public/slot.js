@@ -13,7 +13,7 @@
 import { empty, fmt, barChart, hbars, donut, areaChart } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dayStr, dateStr, hourStr, money, pct, sourceLabel, countOf, plural,
-         UBER_FARE } from './ui.js';
+         UBER_FARE, UBER_FARE_WHY } from './ui.js';
 import { q, href } from './data.js';
 
 /* How many occurrences a rate needs before it is a rate.
@@ -81,7 +81,7 @@ export async function renderSlot(root, dow, hour) {
     { label: 'Fares', value: h.priced_n ? money(h.revenue) : '—',
       sub: h.priced_n
         ? `over the ${fmt(h.priced_n)} of ${fmt(h.trips)} trips that carry a fare`
-        : 'no trip in this slot carries a fare — Uber’s export has no fare column' },
+        : `no trip in this slot carries a fare — ${UBER_FARE_WHY}` },
     { label: 'Per priced trip', value: h.revenue_per_priced_trip != null
       ? money(h.revenue_per_priced_trip, 'AED', 2)
       : (h.priced_n ? money(h.revenue / h.priced_n, 'AED', 2) : '—'),
@@ -92,8 +92,8 @@ export async function renderSlot(root, dow, hour) {
 
   if (h.priced_n && h.priced_n < h.trips) {
     root.append(note(`Only ${fmt(h.priced_n)} of ${fmt(h.trips)} trips in this slot carry a fare, so every money `
-      + 'figure on this page describes those and no others. The Uber trip export has no fare column at all, '
-      + 'so an hour dominated by Uber will look poor here whatever it actually earned.'));
+      + `figure on this page describes those and no others. ${UBER_FARE_WHY}, so an hour dominated by `
+      + 'Uber looks poor here until its weeks have been collected — whatever it actually earned.'));
   }
 
   const g = el('div', 'grid g2'); root.append(g);
@@ -123,8 +123,8 @@ export async function renderSlot(root, dow, hour) {
               + `base to judge">${r.completion_pct}%</span>`;
         } },
       { label: 'Fares', key: 'revenue', num: true,
-        absent: 'no booking in this hour carries a fare — Uber\'s export has no fare column, and '
-          + 'at this hour of the week Uber is all of the work',
+        absent: `no booking in this hour carries a fare — ${UBER_FARE_WHY}, and at this hour of `
+          + 'the week Uber is all of the work',
         render: (r) => (r.revenue ? money(r.revenue)
           : '<span class="ent-off" title="no trip of theirs in this hour carries a fare">—</span>') },
     ], { compact: true, sortable: true, sortId: 'slotdrv', defaultSort: { key: 'trips', dir: 'desc' },
@@ -184,7 +184,13 @@ export async function renderSlot(root, dow, hour) {
       { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
       { label: 'Trips', key: 'trips', num: true },
       { label: 'Fares', key: 'revenue', num: true, absent: UBER_FARE,
-        render: (r) => (r.priced_n ? money(r.revenue) : '<span class="dim">no fare column</span>') },
+        /* Per platform, because the reason differs by platform and this table
+           has one row each. "not collected yet" is true of Uber and false of a
+           channel that simply did not price the booking. */
+        render: (r) => (r.priced_n ? money(r.revenue)
+          : r.platform === 'uber'
+            ? `<span class="dim" title="${UBER_FARE_WHY}">not collected yet</span>`
+            : '<span class="ent-off" title="no booking of this channel in this hour carries a fare">—</span>') },
     ], { compact: true }));
   } else empty(pp.body, 'No platform data');
 

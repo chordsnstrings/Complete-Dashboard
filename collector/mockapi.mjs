@@ -223,6 +223,10 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
   /* accounted is the best figure PER PLATFORM summed, so it is not fares plus
      payouts: yango reports both here and is counted on its payout only. */
   accounted: 237366, accounted_fares: 41188, accounted_payouts: 196178,
+  /* The fare half's own denominator — see fleetIncome. Not the fleet's
+     priced_bookings, because a channel that prices every booking can still be
+     counted on its payout. */
+  accounted_fare_bookings: 486,
     statement_net: 96480, statement_platforms: ['bolt', 'hotel', 'uber', 'yango'],
   accounted_bookings: 2043, accounted_platforms: ['hotel', 'uber', 'yango'],
   dark_bookings: 0, dark_pct: 0,
@@ -923,7 +927,7 @@ app.get('/api/driver/kpis', (req, r) => {
     statement_net: null, statement_platforms: [],
     accounted: 9800 - i * 500 + Math.round(d.reduce((a, x) => a + x.revenue, 0)),
     accounted_fares: Math.round(d.reduce((a, x) => a + x.revenue, 0)),
-    accounted_payouts: 9800 - i * 500,
+    accounted_payouts: 9800 - i * 500, accounted_fare_bookings: 40 + i,
     accounted_platforms: ['hotel', 'uber'], accounted_bookings: trips,
     /* The statement's own fare line, beside the accounted money rather than
        inside it — the gross the rider was charged, which already contains the
@@ -1155,12 +1159,15 @@ app.get('/api/driver/trips', (req, r) => {
   }));
   const rows = all.slice(offset, offset + limit);
   /* The money a day's unpriced trips are part of, as api/driver_routes.js
-     returns it. One entry per (platform, day) the ROWS SENT cover, because a
-     client that renders 400 rows must not have to guess at a 401st day.
-     Deliberately not every day: the last one carries a grain_reason and no
-     earnings, which is the third branch the Fare cell renders. */
+     returns it: one entry per (platform, day) in the WINDOW, not in the page.
+     Over `all` and not `rows` for that reason — the real route computes it
+     from the same predicate as the count, so a second page of trips brings no
+     new days, and a client that assumed otherwise would pass here and fail on
+     production. Deliberately not every day carries money: one in eleven has a
+     grain_reason instead and one in seven has nothing at all, which are the
+     other two branches the Fare cell renders. */
   const seen = new Map();
-  for (const t of rows) {
+  for (const t of all) {
     const k = `${t.platform}|${t.local_day}`;
     const d = seen.get(k) || { platform: t.platform, day: t.local_day, trips: 0, priced: 0,
       earnings: null, cash_earnings: null, grain_reason: null };
@@ -1447,7 +1454,7 @@ app.get('/api/vehicle/kpis', (req, r) => {
     statement_net: null, statement_platforms: [],
     accounted: 5082.65 + Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
     accounted_fares: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
-    accounted_payouts: 5082.65, accounted_platforms: ['hotel', 'uber'],
+    accounted_payouts: 5082.65, accounted_fare_bookings: 62, accounted_platforms: ['hotel', 'uber'],
     accounted_bookings: trips, dark_bookings: 0, dark_pct: 0,
     undercovered_bookings: 0, undercovered_pct: 0,
     undercovered_payouts: null, undercovered_platforms: [],
@@ -1733,7 +1740,7 @@ app.get('/api/trend/monthly', (_, r) => {
              older half of this record has work and no recoverable money, which
              is a fact the page has to state rather than draw as a flat line. */
           accounted_fares: Math.round(row.trips * 0.35 * 96),
-          statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : null,
+          statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : null, accounted_fare_bookings: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 0.1) : null,
           accounted: Math.round(row.trips * 0.35 * 96)
             + (i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : 0),
           accounted_platforms: i >= MONTH_KEYS.length - 6 ? ['hotel', 'uber'] : ['hotel'],
@@ -1749,7 +1756,7 @@ app.get('/api/trend/monthly', (_, r) => {
           drivers_known: row.attributed_trips > 0 }
       : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0, earning_vehicles: 0,
           km: null, measured_trips: 0, revenue: null, priced_trips: 0, cancel_pct: null,
-          accounted: null, accounted_fares: null, statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: null,
+          accounted: null, accounted_fares: null, statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: null, accounted_fare_bookings: null,
           accounted_platforms: [], income_missing: false,
           platforms: [], booking_platforms: [], no_data: true, drivers_known: false,
           partial_month: false, days_in_record: null };
@@ -2293,7 +2300,7 @@ app.get('/api/revenue', (_, r) => {
     totals: { bookings: 8241, priced_bookings: 1484, fares: 70680, payouts: 3210, cash: 640,
       statement_net: 78800, statement_cash: 12880, statement_bank: 63420,
       tips: 1840,
-      accounted: 69710, accounted_fares: 66500, accounted_payouts: 3210,
+      accounted: 69710, accounted_fares: 66500, accounted_payouts: 3210, accounted_fare_bookings: 812,
       accounted_bookings: 2099, accounted_platforms: ['bolt', 'hotel', 'yango'],
       statement_platforms: ['hotel', 'uber', 'yango'],
       dark_bookings: 6760, dark_pct: 82,
@@ -3187,7 +3194,7 @@ app.get('/api/day', (req, r) => {
       /* The day's income: fares from the hotel channel plus a share of the
          weekly Uber statements covering this day. payout_basis is what stops
          that share reading as something measured on the day itself. */
-      accounted: 10430, accounted_fares: 4180, accounted_payouts: 6250,
+      accounted: 10430, accounted_fares: 4180, accounted_payouts: 6250, accounted_fare_bookings: 51,
       accounted_platforms: ['hotel', 'uber'], accounted_bookings: 215,
       dark_bookings: 0, dark_pct: 0,
       undercovered_bookings: 0, undercovered_pct: 0,

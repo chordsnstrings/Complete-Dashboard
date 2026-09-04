@@ -14,7 +14,8 @@
 
 import { donut, hbars, stackedBar, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
-  dayStr, dateStr, dtStr, timeStr, money, pct, sourceLabel, countOf, plural, verdict } from './ui.js';
+  dayStr, dateStr, dtStr, timeStr, money, pct, sourceLabel, countOf, plural, verdict,
+  UBER_FARE_WHY } from './ui.js';
 import { q, href, state } from './data.js';
 
 export const SETTLE_TABS = [
@@ -178,9 +179,10 @@ async function settleMix(host) {
       + `${s.unlabelled_platforms.length ? ` (${s.unlabelled_platforms.map(sourceLabel).join(', ')})` : ''} and are left out `
       + 'of every share above rather than counted as cash.'));
   }
-  host.append(note('"Revenue: not reported" is not zero. The Uber trip export carries no fare column, '
-    + 'so for any route that is mostly Uber the count is known and the value is not — and inventing a '
-    + 'number there is how this dashboard once reported an average fare of AED 6.98.'));
+  host.append(note(`"Revenue: not reported" is not zero. ${UBER_FARE_WHY}, so for a route that is `
+    + 'mostly Uber the count is known and the value follows behind it — and inventing a number in '
+    + 'the meantime is how this dashboard once reported an average fare of AED 6.98. Where a fare '
+    + 'IS shown it is the gross the rider was charged; Uber keeps a quarter of it.'));
 }
 
 async function settleCash(host) {

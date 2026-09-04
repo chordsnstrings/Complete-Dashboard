@@ -110,13 +110,26 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     on_account: 'Charged to the room or the property. Outstanding until the hotel settles.',
     salary: 'Posted against an employee’s salary. Outstanding until payroll runs.',
     complimentary: 'Given away. Costs a driver-hour and fuel, earns nothing.',
-    off_platform: 'Uber records the fare as settled outside the app. The export gives no further '
-      + 'detail, so this is a settlement route and not, on this evidence, a business-account label.',
+    /* This used to end "the export gives no further detail", which was true of
+       the trip export and is no longer true of the record. The payments report
+       prices these rides like any other: 475 of Ecosine's 505 off-platform
+       trips for 24-30 August 2026 carry a fare, AED 28,205 at an average of
+       AED 59.38 — HIGHER than card (56.56) or cash (52.18) — with nothing
+       collected in cash and Uber's usual 25% service fee taken out of them.
+       So it is a settlement route, and one Uber pays for. */
+    off_platform: 'Uber settled the fare outside the app. It is a paid, commissioned ride like '
+      + 'any other — the payments report prices these at a slightly HIGHER average fare than '
+      + 'card or cash, with no cash collected — so it is a settlement route and not unpaid work.',
     adjustment: 'A derived charge — split fare, credit or correction.',
   };
 
   /* Cash in drivers' hands. The count is knowable on every channel; the VALUE
-     is only knowable where the channel reports a fare, which Uber does not. */
+     is knowable only where a fare has been collected for the trip. That used
+     to mean "not Uber", which is most of the fleet. It now means "not Uber
+     YET": REPORT_TYPE_PAYMENTS_ORDER prices them and the backfill is walking
+     the weeks, so this figure fills in behind it. The route already reports
+     priced_cash_trips against cash_trips per row and says so in words rather
+     than assuming either state. */
   app.get('/api/settlement/cash-exposure', wrap(async (req, res) => {
     const p = range(req);
     /* Grouped once, with the fleet-wide totals riding on the rows.

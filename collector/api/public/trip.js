@@ -15,7 +15,7 @@
 import { empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill, money,
   dayStr, dtStr, timeStr, sourceLabel, tierLabel, countOf, plural, noneChosen,
-  trackerState, trackerSpeed } from './ui.js';
+  trackerState, trackerSpeed, UBER_FARE_WHY } from './ui.js';
 import { api, href } from './data.js';
 
 const OUTCOME_TONE = { completed: 'ok', not_completed: 'warn' };
@@ -91,8 +91,8 @@ export async function renderTrip(root, platform, id) {
 
   /* ── the money ────────────────────────────────────────────────────────── */
   const mp = panel('What this trip earned',
-    'A fare is a measurement of THIS booking. A payout is a measurement of the whole DAY, and it '
-    + 'is the only money most of this fleet’s work has — Uber’s trip export carries no fare column.');
+    `A fare is a measurement of THIS booking. A payout is a measurement of the whole DAY. ${UBER_FARE_WHY}, `
+    + 'so on an Uber trip whose week is not collected the payout is the only money there is.');
   root.append(mp.panel);
   const pd = d.payout_day;
   const sd = d.statement_day;
@@ -201,8 +201,8 @@ export async function renderTrip(root, platform, id) {
       { label: 'Product', key: 'product', render: (r) => (r.product ? tierLabel(r.product) : '—') },
       { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', OUTCOME_TONE[r.outcome] || null) },
       { label: 'Fare', key: 'price', num: true,
-        absent: 'no booking in this day carries a fare — most of this fleet’s work is Uber, '
-          + 'whose export has no fare column',
+        absent: `no booking in this day carries a fare — most of this fleet’s work is Uber, and `
+          + `${UBER_FARE_WHY}`,
         render: (r) => (r.price != null ? money(r.price, r.currency || 'AED', 2)
           : '<span class="ent-off">—</span>') },
     ], { compact: true,

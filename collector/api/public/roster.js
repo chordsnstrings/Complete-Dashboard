@@ -18,7 +18,8 @@
 
 import { donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
-  dayStr, dateStr, dtStr, money, pct, sourceLabel, countOf, plural, verdict, foldRows } from './ui.js';
+  dayStr, dateStr, dtStr, money, pct, sourceLabel, countOf, plural, verdict, foldRows,
+  UBER_FARE_WHY } from './ui.js';
 import { q, href, state } from './data.js';
 
 export const ROSTER_TABS = [
@@ -335,12 +336,12 @@ const FILTER = {
        rather than sitting alongside it. */
     { label: 'Fares', key: 'fares_shown', num: true,
       absent: 'nobody in this group has a booking that reports a fare, and no statement of '
-        + 'theirs reports one either — Uber\'s trip export carries no fare column',
+        + `theirs reports one either — ${UBER_FARE_WHY}`,
       render: (r) => (r.revenue ? money(r.revenue)
         : r.statement_fares
           ? `${money(r.statement_fares)}<span class="dim" title="no booking of theirs reports a fare; this is the fare line of ${
             r.statement_fare_periods} weekly statement${r.statement_fare_periods === 1 ? '' : 's'}, which the Paid column came out of"> stmt</span>`
-          : '<span class="ent-off" title="no booking of theirs reports a fare and no statement reports one — Uber’s export has no fare column">—</span>') },
+          : `<span class="ent-off" title="no booking of theirs reports a fare and no statement reports one — ${UBER_FARE_WHY}">—</span>`) },
     /* The money this page was missing. Fares alone left 251 of 280 people
        blank on production — on the page an operator reads to decide who to
        keep supplying with cars. driver_payout_day is what their accounts were

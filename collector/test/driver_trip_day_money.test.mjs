@@ -199,6 +199,52 @@ const priced = all.filter((c) => /AED\s*120/.test(c.text));
 check('a channel that prices its bookings still prints the fare itself',
   priced.length === 2, JSON.stringify(all.map((c) => c.text)));
 
+console.log('\nthe column has to survive long enough to render');
+
+/* tableFrom drops a column whose declared key is blank in EVERY row when that
+   column declares `absent`. On an Uber-only driver every price is null, so the
+   Fare column would be pruned before its renderer ran and the reader would be
+   told the fare is unknowable while the server was holding the day's money.
+
+   Two drivers, two answers. UNPRICED has no fare on any trip and a day figure
+   for every one; NOTHING has neither. */
+const UNPRICED = 'u-uma', NOTHING = 'u-nadia';
+for (let i = 0; i < 3; i++) await trip('uber', UNPRICED, 'Uma Rahim', '2026-09-02', 8 + i, null);
+await perf(UNPRICED, '2026-09-02', '2026-09-02', 210.5);
+for (let i = 0; i < 3; i++) await trip('uber', NOTHING, 'Nadia Salem', '2026-09-02', 8 + i, null);
+await refreshRollups({ db });
+await refreshPayouts(db);
+
+const fareCells = async (who) => {
+  await page.goto(`${base}/?ui=desktop#driver/${who}/trips?${W}`, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(6000);
+  return page.evaluate(() => {
+    const tbl = [...document.querySelectorAll('table')]
+      .find((t) => [...t.querySelectorAll('th')].some((h) => /^(Fare|Requested)$/i.test(h.textContent.trim())));
+    const heads = tbl ? [...tbl.querySelectorAll('th')].map((h) => h.textContent.trim()) : [];
+    const fi = heads.findIndex((h) => /^Fare$/i.test(h));
+    return {
+      hasFare: fi >= 0,
+      cells: fi < 0 ? [] : [...tbl.querySelectorAll('tbody tr')]
+        .map((tr) => (tr.querySelectorAll('td')[fi]?.textContent || '').trim()),
+      notes: [...document.querySelectorAll('.cap, .note')].map((n) => n.textContent).join(' | '),
+    };
+  });
+};
+
+const u = await fareCells(UNPRICED);
+check('a driver with no priced trip at all keeps the Fare column',
+  u.hasFare, 'the column was pruned before its renderer could run');
+check('…and every cell says what the trip is part of',
+  u.cells.length === 3 && u.cells.every((c) => /part of AED 210\.50/.test(c)),
+  JSON.stringify(u.cells));
+
+const none = await fareCells(NOTHING);
+check('a driver with no fare and no day figure drops the column instead',
+  !none.hasFare, JSON.stringify(none.cells));
+check('…and the page says why, rather than showing three dashes',
+  /payments report/.test(none.notes), none.notes.slice(0, 200));
+
 await browser.close(); server.close(); await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

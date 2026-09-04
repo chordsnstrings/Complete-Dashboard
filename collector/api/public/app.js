@@ -6,7 +6,8 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBa
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
-  verdict, dominantBar, foldRows, foldChildren, sourceLine, andList } from './ui.js';
+  verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
+  UBER_FARE_WHY } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
@@ -1305,7 +1306,7 @@ V.demand = async (root) => {
         render: (r) => (r.revenue
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim"> · ${fmt(r.priced_trips)} of ${fmt(r.trips)} priced</span>` : ''}`
-        : '<span class="ent-off" title="no booking on this day reports a fare — Uber’s export has no fare column">—</span>') },
+        : `<span class="ent-off" title="no booking on this day reports a fare — ${UBER_FARE_WHY}">—</span>`) },
       { label: 'Max temp', key: 'temp_max', num: true, render: (r) => (r.temp_max != null
         ? `<span class="pill ${r.temp_max >= 44 ? 'bad' : r.temp_max >= 41 ? 'warn' : 'ok'}">${r.temp_max.toFixed(1)}°C</span>` : '—') },
       /* Zero millimetres IS the measurement, and on this fleet it is 28 of 30
@@ -2114,9 +2115,9 @@ async function platformTiers(root) {
     { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
     { label: 'Avg km', key: 'avg_km', num: true, render: (r) => fmt(r.avg_km, 1) },
   ], { sortable: true, sortId: 'tiers', defaultSort: { key: 'trips', dir: 'desc' } }));
-  root.append(note('No revenue column here is deliberate. The Uber trip export has no fare field at '
-    + 'all, so a per-tier revenue figure would have to be invented — and the mix itself is the lever: '
-    + 'the same car, the same hour, a different tier.'));
+  root.append(note(`No revenue column here is deliberate. ${UBER_FARE_WHY}, so until every week is `
+    + 'collected a per-tier revenue figure would cover some tiers and not others — and the mix itself '
+    + 'is the lever anyway: the same car, the same hour, a different tier.'));
 }
 
 /* Yango and Bolt report what a trip table cannot: how many jobs were offered
@@ -2534,7 +2535,7 @@ V.finance = async (root) => {
     : r.priced_n ? +r.revenue / r.priced_n : null);
   const withRev = byProd.filter((r) => perTrip(r) != null);
   if (!withRev.length) {
-    tier.body.append(note('No fares attached to any product tier in this range. Uber\'s trip export names the tier but carries no fare column at all, so no Uber tier can appear here — this table fills from the hotel, Yango and Bolt channels.'));
+    tier.body.append(note(`No fares attached to any product tier in this range. Uber's trip export names the tier but carries no fare of its own, so an Uber tier appears here only once its week has been collected from the payments report — ${UBER_FARE_WHY}. Until then this table fills from the hotel, Yango and Bolt channels.`));
     /* The cut, said out loud. This is the one table on the page that sliced to
        ten and disclosed nothing — bin/slice-audit.mjs found it as the last of
        27 — and it is the branch a reader reaches precisely when the money is

@@ -18,7 +18,8 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './ch
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
   sourceLabel, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
-  avatar, moneyInTile, faresTile, alertRateFigure, splitAlerts } from './ui.js';
+  avatar, moneyInTile, faresTile, alertRateFigure, splitAlerts,
+  UBER_FARE_WHY } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
@@ -676,10 +677,10 @@ async function tabOverview(root, id, prof) {
     stand.body.append(el('p', 'cap',
       `Compared against ${countOf(st.n_peers || 0, 'driver')} with five or more trips in this window.`
       + (moneyBar
-        ? ' The revenue bar is over FARES only: Uber publishes no fare per trip and is most of this '
-          + 'fleet\'s work, so the fleet median it is measured against is near zero and a driver who '
-          + 'works one priced channel outranks one who works none. Read it as a rank among priced '
-          + 'bookings, not as a rank by earnings.'
+        ? ` The revenue bar is over FARES only, and ${UBER_FARE_WHY} — so on a fleet that is `
+          + 'mostly Uber the median it is measured against is near zero until those weeks land, and '
+          + 'a driver who works one priced channel outranks one who works none. Read it as a rank '
+          + 'among priced bookings, not as a rank by earnings.'
         : '')));
   }
 
@@ -1038,7 +1039,7 @@ async function tabTerritory(root, id) {
     { label: 'Avg trip', key: 'avg_km', num: true, render: (r) => (r.avg_km ? `${fmt(r.avg_km, 1)} km` : '—') },
     { label: 'Avg fare', key: 'avg_fare', num: true, absent: UBER_FARE,
       render: (r) => (r.avg_fare ? money(r.avg_fare)
-        : '<span class="ent-off" title="no pickup in this area carries a fare — Uber’s export has no fare column">—</span>') },
+        : `<span class="ent-off" title="no pickup in this area carries a fare — ${UBER_FARE_WHY}">—</span>`) },
   ], { compact: true, sortable: true, sortId: 'areas', defaultSort: { key: 'n', dir: 'desc' } }));
   if ((terr.areas || []).length > 12) {
     areas.body.append(el('p', 'cap',
@@ -1120,9 +1121,18 @@ async function tabEarnings(root, id, prof) {
     /* Same rule as the overview's Fares tile, and the same reason: the trips
        report nothing, the statement reports the fare, and the two must not be
        added. Where neither exists the tile still says which is missing. */
+    /* And it is BOOKED revenue, which is not this driver's money. A fare is
+       the gross the rider was charged; Uber's service fee is exactly a quarter
+       of it, measured on 29 of 29 priced trips. Now that Uber's payments
+       report is filling these in, this tile sits beside a payout that is the
+       same money minus the commission, and a reader who adds the two counts
+       the fare twice. The sentence says so rather than leaving the tile to be
+       read as earnings. */
     (k.priced_trips
       ? { label: 'Booked revenue', value: money(k.revenue),
-          sub: `over ${fmt(k.priced_trips)} of ${fmt(k.trips)} trips that report a fare`,
+          sub: `the gross the riders were charged, over ${fmt(k.priced_trips)} of `
+            + `${fmt(k.trips)} trips that report a fare — the payout below is what was left `
+            + 'of it after the platform’s commission, not an addition to it',
           tone: k.trips && k.priced_trips / k.trips < 0.5 ? 'warn' : null }
       : { label: 'Booked revenue', value: k.statement_fares ? money(k.statement_fares) : '—',
           sub: k.statement_fares
@@ -1538,6 +1548,11 @@ async function tabTrips(root, id) {
   const dayMoney = new Map();
   const addDays = (r) => (r.days || []).forEach((d) => dayMoney.set(d.platform + '|' + d.day, d));
   addDays(res0);
+  /* Whether the Fare column has anything to say beyond a dash — a day that
+     reports money, or one that reports why it is withholding it. A day list
+     of nothing but nulls is the same absence as no day list at all. */
+  const dayMoneyKnown = [...dayMoney.values()]
+    .some((d) => d.earnings != null || d.grain_reason);
   p.body.innerHTML = '';
   if (!rows.length) {
     return empty(p.body, 'No trip on any channel for this driver in this window. Widen the range above '
@@ -1588,12 +1603,24 @@ async function tabTrips(root, id) {
        the one sql/schema_v58.sql turns on: a figure that cannot be measured at
        this grain renders absent with a reason, and the reason here is a real
        number at the grain that does exist. */
-    { label: 'Fare', key: 'price', num: true, absent: UBER_FARE,
+    /* `absent` is declared only when there is nothing to put in the cell at
+       all, and that is load-bearing rather than tidy. tableFrom drops a column
+       whose declared key is blank in every row IF it declares `absent` — which
+       is right for a Rating nothing reports, and would be exactly wrong here:
+       on an Uber-only driver every `price` is null, so the column carrying the
+       day's money would be pruned before its renderer ever ran and the reader
+       would be told the fare is unknowable while the server was holding it.
+
+       Keyed on `price` and not on a computed fallback, so the sort stays a
+       sort on FARES. Sorting unpriced rows by their day's money would rank a
+       trip from a busy day above a priced trip worth less, which is a
+       different ordering wearing the same column heading. */
+    { label: 'Fare', key: 'price', num: true, absent: dayMoneyKnown ? undefined : UBER_FARE,
       render: (r) => {
         if (r.price) return money(r.price, r.currency);
         const d = dayMoney.get(r.platform + '|' + r.local_day);
         const own = r.platform === 'uber'
-          ? 'Uber’s trip export carries no fare column at all'
+          ? UBER_FARE_WHY
           : 'no fare is recorded on this booking';
         /* The day WAS reported, and superseded: a finer report already stated
            this money, and the server wrote the sentence saying so. */
@@ -1994,7 +2021,7 @@ export async function renderDriverDirectory(root) {
       render: (r) => (r.revenue
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
-        : '<span class="ent-off" title="Uber publishes no fare per trip, and Uber is most of this fleet’s work — the money is in Paid">—</span>') },
+        : `<span class="ent-off" title="${UBER_FARE_WHY}. Until this week is collected the money for it is in Paid">—</span>`) },
     { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
     /* Measured on the live fleet: rating is null for all 360 people, because
        nothing in the collector writes it — Uber's roster endpoint returns

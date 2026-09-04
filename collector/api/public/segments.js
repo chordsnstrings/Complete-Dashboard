@@ -18,7 +18,7 @@ import { empty, fmt, areaChart, hbars, donut } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, entity, pill,
          dtStr, timeStr, dayStr, dateStr, money, custody,
          sourceLabel, countOf, plural, asList, noneChosen,
-         trackerState, trackerSpeed, stillNote } from './ui.js';
+         trackerState, trackerSpeed, stillNote, UBER_FARE_WHY } from './ui.js';
 import { q, api, href, state, unfiltered } from './data.js';
 
 const VERDICT_TONE = { unauthorized: 'bad', authorized: 'ok', sensor_suspect: 'warn',
@@ -382,8 +382,7 @@ export async function renderSegment(root, plate, at) {
         ? `<span class="tag ${r.outcome === 'completed' ? 'ok' : 'warn'}">${esc(r.outcome)}</span>`
         : `<span class="tag dim">${esc(r.status || '—')}</span>`) },
       { label: 'Fare', key: 'price', num: true,
-        absent: 'none of the bookings around this interval carries a fare — Uber\'s trip export '
-          + 'has no fare column, and Uber is most of this fleet\'s work',
+        absent: `none of the bookings around this interval carries a fare — ${UBER_FARE_WHY}`,
         render: (r) => (r.price != null ? money(r.price) : '—') },
     ], { compact: true }));
     const offs = d.nearby_vehicle_trips.map((r) => r.gap_min).filter((n) => n != null);

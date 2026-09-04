@@ -220,8 +220,22 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('four card processors fold into one card class', by.card?.trips === 89, `${by.card?.trips}`);
   check('apple_pay is a wallet, not a card', by.wallet?.trips === 10, String(by.wallet?.trips));
   check('offline is its own settlement route', by.off_platform?.trips === 20, String(by.off_platform?.trips));
-  check('offline is not described as a business-account label',
-    /not, on this evidence, a business-account label/.test(by.off_platform?.meaning || ''));
+  /* Pinned on the property rather than the sentence, because the sentence has
+     now been rewritten twice. It first said "the export gives no further
+     detail", which the payments report made false: 475 of Ecosine's 505
+     off-platform trips for 24-30 August 2026 carry a fare, AED 28,205 at an
+     average of AED 59.38 — higher than card or cash — with no cash collected
+     and Uber's usual quarter taken out. What must hold is that the meaning
+     calls it a settlement route, says it was PAID, and does not reach for a
+     business-account explanation the evidence does not support. */
+  {
+    const m = by.off_platform?.meaning || '';
+    check('offline is described as a settlement route', /settlement route/.test(m), m);
+    check('…that Uber paid for, rather than as unpaid or unexplained work',
+      /paid|commissioned/i.test(m) && !/no further detail/i.test(m), m);
+    check('…and not as a business-account label',
+      !/business[- ]account|u4b|for business/i.test(m), m);
+  }
   // A GPS trace has no payment type because "how was this paid" is not a
   // question about a GPS trace. It is excluded from the base rather than
   // charted as a 40-trip "unknown" slice.

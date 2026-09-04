@@ -12,13 +12,16 @@ import { TZ } from './tz.js';
 
 import { barChart, donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
-  dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel, signed } from './ui.js';
+  dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel, signed,
+  UBER_FARE } from './ui.js';
 import { api, href, state } from './data.js';
 
 /* Why a fare column on this page can be almost entirely empty. Shared between
-   the drivers table and the vehicles table, which have the same answer. */
-const FARE_ABSENT = 'Uber\'s trip export carries no fare column at all, and Uber is most of this '
-  + 'fleet\'s work — the money for those bookings reaches the fleet in the weekly statement';
+   the drivers table and the vehicles table, which have the same answer — and
+   now shared with the rest of the product too: this was a second copy of
+   UBER_FARE that had already drifted from it by a clause, which is how one of
+   the two comes to outlive the fact and the other does not. */
+const FARE_ABSENT = UBER_FARE;
 
 const shift = (day, n) => {
   const d = new Date(`${day}T12:00:00Z`);

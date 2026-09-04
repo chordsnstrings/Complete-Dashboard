@@ -16,7 +16,8 @@
 import { barChart, gapBars, areaChart, donut, hbars, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, money, pct, fmt, tripTime,
-  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, noneChosen, verdict, foldRows,
+  custodyAsOf, sourceLabel, plural, countOf, asList, UBER_FARE, UBER_FARE_WHY,
+  noneChosen, verdict, foldRows,
   trackerState, trackerSpeed, stillNote, alertRateFigure, splitAlerts } from './ui.js';
 import { qAll, href, parseHash, currentGen, alive } from './data.js';
 import { membersOf } from './cohorts.js';
@@ -920,8 +921,8 @@ async function tabTrips(root, plate) {
     { label: 'Product', key: 'product' },
     { label: 'Status', key: 'status', render: (r) => pill(r.status || '—', /cancel/i.test(r.status || '') ? 'warn' : 'ok') },
     { label: 'Fare', key: 'price', num: true,
-      absent: 'Uber\'s trip export carries no fare column at all, and Uber is most of what this '
-        + 'vehicle carries — the money for those trips reaches the fleet in the weekly statement',
+      absent: `${UBER_FARE_WHY}, and Uber is most of what this vehicle carries — until a week has `
+        + 'been collected the money for those trips is in the weekly statement alone',
       render: (r) => (r.price ? money(r.price, r.currency) : '—') },
   ];
   const DRAW = 400;
@@ -1275,7 +1276,7 @@ export async function renderVehicleDirectory(root) {
           ? `<span class="dim" title="bookings behind this figure${asList(r.fares_platforms).length
             ? ` — the ones on ${asList(r.fares_platforms).map(sourceLabel).join(', ')}, the channel(s) counted on the fare they charge`
             : ', on the channels counted on the fare they charge'}"> · ${fmt(r.priced_trips)}</span>` : ''}`
-        : '<span class="ent-off" title="no booking on this vehicle reports a fare — Uber’s export has no fare column">—</span>') },
+        : `<span class="ent-off" title="no booking on this vehicle reports a fare — ${UBER_FARE_WHY}">—</span>`) },
     /* The money column this page was missing. Fares alone left 108 of 140
        vehicles blank on production, because Uber's export has no fare column
        and Uber is most of the work — on the page whose job is to rank assets

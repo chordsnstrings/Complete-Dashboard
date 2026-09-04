@@ -288,6 +288,34 @@ const pathKey = (s) => String(s || '').toLowerCase().replace(/\s*:\s*/g, ':').tr
    was on record as costing nothing, which is not a missing figure a reader
    can see but a wrong one they cannot.
 
+   ── and Uber's OTHER surface says the same thing ─────────────────────────
+   The weekly earnings breakdown — a different API, a different vocabulary —
+   carries the identical tree. One driver's week of 24-30 August 2026, read off
+   /api/driver/earnings:
+
+       your_earnings          1900.67
+       ├─ fare                2550.17     the BRANCH
+       │  ├─ little_fare      2468.75     its base-fare leaf
+       │  ├─ wait_time          66.42
+       │  └─ cancellation       15.00
+       ├─ service_fee         -637.61     exactly 25.00% of fare
+       ├─ taxes_earnings       -31.89     5% VAT on that fee
+       └─ tip                   20.00
+                              --------
+                              1900.67     closes to the fils
+
+   `little_fare` is what this parser was writing into trip.price. Measured
+   across the five drivers of that week whose payments report priced 100% of
+   their trips, sum(trip.price) equalled their little_fare EXACTLY — 0.0% on
+   every one — and sat 1.2% to 3.4% under their `fare`. So the two surfaces
+   agree about which node is which, and this was reading the wrong one on both.
+
+   It matters beyond the size of it: `statement_fares`, the figure the driver
+   page already calls the fare the platform reports, is the BRANCH. With the
+   leaf in trip.price the product held two numbers for one quantity and they
+   could not be reconciled. With the branch, sum(trip.price) IS the statement's
+   fare line, and each is a check on the other.
+
    So the branch is read first and the leaf is the fallback, for a report old
    enough not to carry the branch. The leaf is kept beside it in `raw` — an
    auditor comparing the two is exactly how this was found. */

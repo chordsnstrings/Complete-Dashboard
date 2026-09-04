@@ -10,7 +10,7 @@
 
 import { hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, money, pct,
-  countOf, plural, sourceLabel, foldRows, verdict } from './ui.js';
+  countOf, plural, sourceLabel, foldRows, verdict, UBER_FARE_WHY } from './ui.js';
 import { q, href, hrefFilter, state, currentGen, alive } from './data.js';
 
 /* How many bars and wave rows this page draws. One constant, used by the
@@ -354,7 +354,7 @@ export async function renderCorridors(root) {
        The denominator sits beside it and the tone is withheld below half. */
     { label: 'Avg fare', key: 'avg_fare', num: true,
       render: (r) => {
-        if (!r.priced) return '<span class="ent-off" title="no trip on this corridor reports a fare — mostly Uber, whose export has no fare column">—</span>';
+        if (!r.priced) return `<span class="ent-off" title="no trip on this corridor reports a fare — mostly Uber, and ${UBER_FARE_WHY}">—</span>`;
         const cover = r.trips ? (r.priced / r.trips) * 100 : 0;
         return cover < 50
           ? `<span class="dim" title="over only ${r.priced} of ${r.trips} trips — too little coverage to compare corridors on">${
@@ -405,9 +405,9 @@ export async function renderCorridors(root) {
      this table's column belongs. */
   const blankFare = c.corridors.filter((r) => !r.priced).length;
   if (blankFare) {
-    caps.push(`Avg fare is blank on ${countOf(blankFare, 'corridor')} — those are mostly Uber, whose `
-      + 'export carries no fare column at all. The trip count on those rows is real; the money is '
-      + 'simply not there to report');
+    caps.push(`Avg fare is blank on ${countOf(blankFare, 'corridor')} — those are mostly Uber, and `
+      + `${UBER_FARE_WHY}. The trip count on those rows is real; the fare for them has not been `
+      + 'collected yet');
   }
   if (caps.length) b3.append(el('p', 'cap', `${caps.join('. ')}.`));
 

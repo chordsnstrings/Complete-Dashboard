@@ -25,9 +25,23 @@
    small.
 
    The fixture has the same shape: yango and bolt each price 100% of their
-   trips AND pay out weekly, uber prices nothing and pays out. So the chosen
-   answer is uber's payout alone, and everything yango and bolt paid belongs
-   to the Fares column. */
+   trips AND pay out weekly, uber prices nothing and pays out.
+
+   ── what the corrected basis rule did to this test ───────────────────────
+   api/income_sql.js used to prefer fares wherever they covered 80% of
+   bookings, so yango and bolt were counted on their fares and their payouts
+   sat in `attributed` alone — which is the divergence the assertions below
+   were built to catch. The rule now prefers the PAYOUT wherever one covers
+   the window, because a fare is gross of the platform's commission and a
+   payout is what reached the bank (see chooseBasis, and the AED 440,445.31
+   of Uber credits it is measured against).
+
+   That makes this class of bug structurally impossible rather than merely
+   absent: a channel that reports a payout is never counted on its fares, so
+   nothing can appear in both columns of one row. The first check below is
+   inverted to say exactly that, and the assertions that the directory agrees
+   with /api/economics/assets are unchanged — they are the guard that matters
+   and they would still catch a directory summing the wrong column. */
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { seedFleet } from './fixture.mjs';
@@ -57,13 +71,16 @@ const econ = new Map(eco.rows.map((r) => [r.plate, r]));
 const num = (v) => (v == null ? null : Number(v));
 const near = (a, b) => (a == null && b == null) || Math.abs(Number(a || 0) - Number(b || 0)) < 0.01;
 
-/* The fixture has to contain the fault before the assertions mean anything: a
-   plate where one channel reports both a fare and a payout, so the raw
-   attributed figure and the chosen one differ. */
+/* The fixture still has the production shape — channels that both price and
+   pay — and under the corrected rule that no longer produces a divergence.
+   Every channel with a payout is counted on it, so the raw attribution and the
+   chosen payout are the same figure on every plate. Asserted rather than
+   assumed: if a channel ever fell back to fares while still carrying a payout,
+   its money would be in both columns of one row again. */
 const overlap = eco.rows.filter((r) => !near(r.attributed, r.payouts));
-check('the fixture reproduces the production shape — a channel that both prices and pays',
-  overlap.length > 0,
-  JSON.stringify(eco.rows.map((r) => [r.plate, r.attributed, r.payouts])));
+check('a channel that pays is counted on what it paid, so nothing lands in both columns',
+  overlap.length === 0,
+  JSON.stringify(overlap.map((r) => [r.plate, r.attributed, r.payouts])));
 
 console.log('\nthe Payout column is the chosen payout, not the raw attribution');
 
@@ -118,15 +135,21 @@ server.close(); await db.close();
    three answers differ: one plate, three channels that all pay, two of them
    believed on their payout and their paid days overlapping.
 
-     uber  pays over 2026-08-01..07, prices nothing  → counted on its payout
-     bolt  pays over 2026-08-05..11, prices nothing  → counted on its payout
-     yango pays over 2026-08-12..14, prices everything → counted on its fares
+     uber  pays over 2026-08-01..07, prices nothing     → counted on its payout
+     bolt  pays over 2026-08-05..11, prices nothing     → counted on its payout
+     yango works 2026-08-12..14, prices every trip and
+           reports NO payout at all                     → counted on its fares
 
    union of the chosen days   = 01..11 = 11
    sum of their day counts    = 7 + 7  = 14
-   every channel that paid    = 01..14 = 14
+   every day the plate worked = 01..14 = 14
 
-   so a wrong rule cannot read 11 by accident. */
+   so a wrong rule cannot read 11 by accident.
+
+   Yango files no payout here, which is the hotel channel's shape and the only
+   shape a fares-basis channel can now have: since chooseBasis prefers a payout
+   wherever one covers the window, a channel counted on fares is a channel that
+   reported none. */
 console.log('\nthe day count under the payout is the days that payout covers');
 
 const mix = new PGlite();
@@ -151,7 +174,7 @@ for (let d = 5; d <= 11; d++) { await trip('bolt', 'b9', d, null); await trip('b
 for (let d = 12; d <= 14; d++) { await trip('yango', 'y9', d, 90); await trip('yango', 'y9', d, 90); }
 await perf('uber', 'u9', '2026-08-01', '2026-08-07', 3500);
 await perf('bolt', 'b9', '2026-08-05', '2026-08-11', 2100);
-await perf('yango', 'y9', '2026-08-12', '2026-08-14', 700);
+/* No perf row for yango, deliberately — see above. */
 await refreshPayouts(mix);
 await rebuildCustody({ from: '2026-08-01', to: '2026-08-14', db: mix });
 
@@ -170,8 +193,13 @@ check('and its Payout is still the figure /api/economics/assets chose',
   near(Number(mRow?.payout), mEco?.payouts), `${mRow?.payout} vs ${mEco?.payouts}`);
 check('the day count is the union of the days those two channels paid over, not the sum',
   mRow?.payout_days === 11, `${mRow?.payout_days} days`);
-check('and not the days every channel that paid covered either',
-  mRow?.attributed_days === 14, `${mRow?.attributed_days} attributed days`);
+/* The raw count and the chosen one coincide, and that is the corrected rule
+   stated as an identity rather than as a preference: a channel counted on
+   fares contributes no payout, so there is no day in the raw attribution that
+   the chosen one is missing. It is 11 and not 14 because yango's three days
+   carry fares and no payout at all. */
+check('and the raw attribution covers the same days, because a fares channel pays nothing',
+  mRow?.attributed_days === 11, `${mRow?.attributed_days} attributed days`);
 
 mixApi.server.close(); await mix.close();
 

@@ -36,7 +36,8 @@
       carrying someone, measured from the trips, and it is labelled that. */
 import { hbars } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity, money,
-  fmt, empty, noneChosen, sourceLabel, dateStr, verdict, countOf } from './ui.js';
+  fmt, empty, noneChosen, sourceLabel, dateStr, verdict, countOf,
+  UBER_FARE_WHY } from './ui.js';
 import { TZ } from './tz.js';
 import { q, href, state } from './data.js';
 
@@ -505,7 +506,7 @@ export async function renderPerformer(root, id, week) {
       { label: 'Km', key: 'km', num: true, render: (r) => fmt(r.km) },
       { label: 'Fares', key: 'fares', num: true,
         render: (r) => (r.fares ? `${money(r.fares)}<span class="dim"> · ${fmt(r.priced)}</span>`
-          : '<span class="ent-off" title="this channel publishes no fare per trip">—</span>') },
+          : `<span class="ent-off" title="no trip of theirs here carries a fare — ${UBER_FARE_WHY}">—</span>`) },
       { label: 'Paid', key: 'payout', num: true,
         render: (r) => (r.payout != null ? money(r.payout)
           : '<span class="ent-off" title="no payout statement covers this week for this channel">—</span>') },
