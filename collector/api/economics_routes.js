@@ -45,7 +45,7 @@
    computed from what this database holds. */
 
 import { attributedEarnings, unattributedEarnings } from './attribution_sql.js';
-import { fleetIncome, chooseBasis } from './income_sql.js';
+import { fleetIncome, chooseBasis, COMPLETED_SQL } from './income_sql.js';
 import { vehiclesOverWindow } from './custody_sql.js';
 /* The alerts-per-distance rule, in one place. Both tables on this page carry a
    safety rate and both were dividing a partial numerator by a whole-window
@@ -199,7 +199,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
                        ('foc-complimentary', 'foc', 'complimentary')) AS has_fare,
                   (t.distance_km IS NOT NULL AND t.distance_km > 0
                    AND t.distance_km < 500) AS has_distance,
-                  t.price, t.distance_km, t.requested_at, t.fleet_id,
+                  t.status, t.price, t.distance_km, t.requested_at, t.fleet_id,
                   coalesce(nullif(t.person_key, ''), t.driver_ext_id) AS person
            FROM trip t
            WHERE (t.requested_at AT TIME ZONE 'Asia/Dubai')::date
@@ -234,6 +234,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
            SELECT plate, platform,
                   count(*)::int bookings,
                   count(*) FILTER (WHERE has_fare)::int priced_bookings,
+                /* The denominator fare coverage is taken over — see
+                   platformFares in api/income_sql.js. A ride nobody took has
+                   no fare and never will; counting it as missing coverage made
+                   Bolt read 63.8% covered on a month it priced 99.7% of its
+                   completed rides. */
+                  count(*) FILTER (WHERE ${COMPLETED_SQL()} OR has_fare)::int chargeable_bookings,
+                  count(*) FILTER (WHERE NOT (${COMPLETED_SQL()}) AND NOT has_fare)::int uncharged_bookings,
                   round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
                   round(sum(distance_km) FILTER (WHERE has_distance)::numeric,0) km,
                   count(DISTINCT local_day)::int booking_days
@@ -787,15 +794,22 @@ export function economicsRoutes(app, { q, wrap, range }) {
            SELECT ${PK} AS pk, t.driver_name, t.platform, t.plate, t.price,
                   t.distance_km, t.requested_at, t.fleet_id,
                   (t.platform <> 'fms') AS is_booking,
+                  /* A FOURTH copy of trip_norm's status list lived here, and
+                     it had already drifted: no optional_ride_ strip and no
+                     offer_rejected, so 1,534 Bolt rows that schema_v18 reads
+                     as not_completed read as 'other' on this ledger alone. The
+                     completed arm is the shared test now; the rest follows
+                     sql/schema_v18.sql. */
                   CASE
                     WHEN t.platform = 'fms' THEN NULL
                     WHEN t.status IS NULL THEN NULL
-                    WHEN lower(btrim(t.status)) IN ('completed', 'finished', 'complete',
-                                                    'closed', 'delivered') THEN 'completed'
-                    WHEN t.status ILIKE '%cancel%'
-                      OR lower(btrim(t.status)) IN ('client_did_not_show', 'driver_did_not_respond',
-                                                    'driver_rejected', 'rejected', 'expired',
-                                                    'failed', 'no_show') THEN 'not_completed'
+                    WHEN ${COMPLETED_SQL('t.status')} THEN 'completed'
+                    WHEN regexp_replace(lower(btrim(t.status)), '^optional_ride_', '')
+                           LIKE '%cancel%'
+                      OR regexp_replace(lower(btrim(t.status)), '^optional_ride_', '')
+                           IN ('client_did_not_show', 'driver_did_not_respond',
+                               'driver_rejected', 'rejected', 'offer_rejected',
+                               'expired', 'failed', 'no_show') THEN 'not_completed'
                     ELSE 'other'
                   END AS outcome,
                   (t.requested_at AT TIME ZONE 'Asia/Dubai')::date AS local_day,
@@ -835,6 +849,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
                       AND local_day = ANY($5::date[]))::numeric,0) alert_km,
                 round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
                 count(*) FILTER (WHERE has_fare)::int priced_bookings,
+                /* The denominator fare coverage is taken over — see
+                   platformFares in api/income_sql.js. A ride nobody took has
+                   no fare and never will; counting it as missing coverage made
+                   Bolt read 63.8% covered on a month it priced 99.7% of its
+                   completed rides. */
+                count(*) FILTER (WHERE outcome = 'completed' OR has_fare)::int chargeable_bookings,
+                count(*) FILTER (WHERE outcome <> 'completed' AND NOT has_fare)::int uncharged_bookings,
                 count(DISTINCT plate) FILTER (WHERE plate IS NOT NULL AND plate <> '')::int vehicles,
                 array_agg(DISTINCT platform) platforms,
                 /* The same work, split by CHANNEL, because the income rule

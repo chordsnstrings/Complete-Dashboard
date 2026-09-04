@@ -12,7 +12,7 @@
    is a worse failure than showing the same person twice. */
 
 import { win, winDays } from './window.js';
-import { fleetIncome } from './income_sql.js';
+import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline and both
    economics ledgers so this page cannot disagree with the tables that link
    to it. See api/alert_coverage_sql.js for the rule and its assumption. */
@@ -983,6 +983,13 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const [fareByPlat, payByPlat] = await Promise.all([
       q(`SELECT platform, count(*)::int bookings,
                 count(*) FILTER (WHERE has_fare)::int priced_bookings,
+                /* The denominator fare coverage is taken over — see
+                   platformFares in api/income_sql.js. A ride nobody took has
+                   no fare and never will; counting it as missing coverage made
+                   Bolt read 63.8% covered on a month it priced 99.7% of its
+                   completed rides. */
+                count(*) FILTER (WHERE ${COMPLETED_SQL()} OR has_fare)::int chargeable_bookings,
+                count(*) FILTER (WHERE NOT (${COMPLETED_SQL()}) AND NOT has_fare)::int uncharged_bookings,
                 round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares
          FROM trip_norm WHERE ${TW} AND is_booking GROUP BY 1`, p),
       q(`SELECT platform, round(sum(earnings)::numeric,2) payouts,

@@ -26,6 +26,26 @@
    test/consistency.test.mjs is what caught the drift and now requires they
    agree. */
 
+/* "did this ride complete", for a query that reads `trip` rather than the view.
+   ─────────────────────────────────────────────────────────────────────────
+   trip_norm derives `outcome` (sql/schema_v18.sql) and several hot queries
+   deliberately read `trip` directly instead — person_key is a column of trip
+   and joining the view for it cost a sequential scan at every window. Those
+   queries already re-derive has_fare and has_distance in the same spirit, and
+   this is the third of the same kind: the status list is schema_v18's, minus
+   Bolt's `optional_ride_` prefix, which marks how an offer was MADE and not
+   how it ended.
+
+   Kept here rather than written out four times, and test/completed_sql.test.mjs
+   asserts it agrees with trip_norm.outcome on every status spelling in the
+   record — a re-derivation nothing checks is a re-derivation that drifts. */
+export const COMPLETED_SQL = (col = 'status') =>
+  /* Character for character schema_v18's `k.s`: btrim INSIDE the lower, then
+     the prefix strip. Written without the btrim first, and the test caught it
+     on ' Finished ' — which the view reads as completed and this did not. */
+  `regexp_replace(lower(btrim(coalesce(${col}, ''))), '^optional_ride_', '')`
+  + ` IN ('completed', 'finished', 'complete', 'closed', 'delivered')`;
+
 /* Per-platform fares from the trip feed. `$1..$2` are the window bounds and
    `$3` an optional platform filter; the caller supplies the window predicate
    because trip_norm's is a Dubai-local day expression, not a bare column. */

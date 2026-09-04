@@ -182,9 +182,19 @@ console.log('\nthe person fold is the stored column, not a regex per row');
    on the explanation. */
 const src = readFileSync('api/economics_routes.js', 'utf8')
   .replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+/* Aimed at the NAME fold, not at every regexp. The check used to ban
+   regexp_replace outright, which was a fine proxy while the file had no other
+   use for one — and then it caught the status normalisation that strips Bolt's
+   `optional_ride_` prefix, which is a different expression doing a different
+   job over a different column. A guard that fires on the wrong thing gets
+   loosened by whoever it blocks, so it is narrowed here instead: what must not
+   appear is a regexp over a NAME. */
+const nameFold = [...src.matchAll(/regexp_replace\s*\(([\s\S]{0,120}?)\)/g)]
+  .filter((m) => /name/i.test(m[1]));
 check('neither ledger folds the driver name per row',
-  !/regexp_replace/.test(src) && !/personKey\s*\(/.test(src),
-  'api/economics_routes.js computes the fold — read trip.person_key instead');
+  nameFold.length === 0 && !/personKey\s*\(/.test(src),
+  `api/economics_routes.js computes the fold — read trip.person_key instead: `
+  + JSON.stringify(nameFold.map((m) => m[0].slice(0, 60))));
 check('and neither self-joins trip to reach it',
   !/JOIN_TRIP/.test(src),
   'JOIN_TRIP puts an unwindowed scan of the whole trip table into the query');

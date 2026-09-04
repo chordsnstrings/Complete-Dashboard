@@ -180,6 +180,13 @@ export function revenueRoutes(app, { q, wrap, range }) {
                    payout coverage is measured against. See api/income_sql.js. */
                 count(DISTINCT n.local_day)::int booking_days,
                 count(*) FILTER (WHERE n.has_fare)::int priced_bookings,
+                /* The denominator fare coverage is taken over, and the rides
+                   left out of it. See platformFares in api/income_sql.js —
+                   this route has its own copy of the query and the two must
+                   agree, or #revenue and #overview report different coverage
+                   for the same month. */
+                count(*) FILTER (WHERE n.outcome = 'completed' OR n.has_fare)::int chargeable_bookings,
+                count(*) FILTER (WHERE n.outcome <> 'completed' AND NOT n.has_fare)::int uncharged_bookings,
                 round(sum(n.price) FILTER (WHERE n.has_fare)::numeric,2) fares,
                 round(sum(n.distance_km) FILTER (WHERE n.has_fare AND n.has_distance)::numeric,0) priced_km,
                 round(sum(n.distance_km) FILTER (WHERE n.has_distance)::numeric,0) km,
