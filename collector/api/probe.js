@@ -285,6 +285,55 @@ const TRIP_MONEY_OPS = [
   'getEarnerJobs', 'getJobEarnings',
 ];
 
+/* ── the argument shape those six operations actually take ────────────────
+   The operation round found seven of thirteen NAMED absent and six refused
+   generically — on a gateway that had just demonstrated it names what it does
+   not have. On this schema that is not absence. getActivities, getTripEarnings,
+   getEarnerTripEarnings, getEarningsBreakdownByTrip, getTripEarningsBreakdown
+   and getActivityFeed are there; the probe asked them with the wrong
+   arguments, and Uber scrubs "Unknown argument" into "Invalid GraphQL query"
+   the same way it scrubs its Did-you-mean suggestions.
+
+   So the arguments are asked for. The shapes are not guesses from nowhere:
+   getEarnerBreakdownsV2 — the operation this collector already calls, in
+   src/sources/uber.js — takes (supplierUuid: ID!, timeRange:
+   OneOfTimeRange__Input, driverList: [ID!]), and a sibling that itemises the
+   same money by trip is far likelier to take that set than a set nobody here
+   has seen. The rest are the two other identifiers this schema is known to
+   use: the driver uuid the timeline query takes, and a jobuuid, which is what
+   GetTimelineInfo calls a trip.
+
+   Each entry is [operation, argument string, variables key]. The variables are
+   filled at request time from the org and driver this probe is already
+   running against, so nothing here is caller-supplied — the same rule as every
+   other list in this file. */
+/* The field list this argument round runs with. Same as the tripmoney set —
+   the fields are already settled — so the round still carries its control and
+   its positive control without spending a second list on them. */
+const TRIP_MONEY_ARG_FIELDS = [
+  ['driver', 'zzNotARealFieldQx'],
+];
+
+const TRIP_MONEY_ARGS = [
+  ['getTripEarnings', '(supplierUuid: $supplierUuid, timeRange: $timeRange)', 'supplier_range'],
+  ['getEarnerTripEarnings', '(supplierUuid: $supplierUuid, timeRange: $timeRange)', 'supplier_range'],
+  ['getEarningsBreakdownByTrip', '(supplierUuid: $supplierUuid, timeRange: $timeRange)', 'supplier_range'],
+  ['getTripEarningsBreakdown', '(supplierUuid: $supplierUuid, timeRange: $timeRange)', 'supplier_range'],
+  ['getActivities', '(supplierUuid: $supplierUuid, timeRange: $timeRange)', 'supplier_range'],
+  ['getActivityFeed', '(supplierUuid: $supplierUuid, timeRange: $timeRange)', 'supplier_range'],
+  /* The same six, keyed on one driver rather than the whole supplier. */
+  ['getTripEarnings', '(driverUuid: $driverUuid)', 'driver'],
+  ['getEarnerTripEarnings', '(earnerUuid: $driverUuid)', 'driver'],
+  ['getEarningsBreakdownByTrip', '(driverUuid: $driverUuid)', 'driver'],
+  ['getActivities', '(driverUuid: $driverUuid)', 'driver'],
+  ['getActivityFeed', '(driverUuid: $driverUuid)', 'driver'],
+  /* And on ONE trip, which is the shape that would answer the operator's
+     question outright. jobuuid is what GetTimelineInfo calls a trip. */
+  ['getTripEarnings', '(jobUuid: $jobUuid)', 'job'],
+  ['getEarningsBreakdownByTrip', '(jobUuid: $jobUuid)', 'job'],
+  ['getTripEarningsBreakdown', '(tripUuid: $jobUuid)', 'job'],
+];
+
 /* ── the contact fields, asked for rather than assumed ────────────────────
    src/sources/uber_profile.js says the portal's own query returns "a picture
    url, a phone number and an email as well", and declines to store them. That
@@ -1074,7 +1123,8 @@ export function probeRoutes(app, { wrap }) {
     const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
       subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST,
       identity: IDENTITY_FIELDS, compliance: COMPLIANCE_SUB, documents: COMPLIANCE_DOCS,
-      doctype: COMPLIANCE_DOC_TYPE, docnames: DOC_NAMING, tripmoney: TRIP_MONEY_FIELDS };
+      doctype: COMPLIANCE_DOC_TYPE, docnames: DOC_NAMING, tripmoney: TRIP_MONEY_FIELDS,
+      tripargs: TRIP_MONEY_ARG_FIELDS };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {
@@ -1145,8 +1195,55 @@ export function probeRoutes(app, { wrap }) {
       });
     }
 
+    /* ── and what those operations want to be asked ─────────────────────
+       Only for the argument set, and only when the operation round has already
+       shown these six refusing generically: this is thirteen more requests and
+       they are worthless unless that signature is present. */
+    const argShapes = [];
+    if (!described && sessionWorks && wanted === TRIP_MONEY_ARG_FIELDS) {
+      /* One real trip of this driver's, so the job-keyed shapes are asked with
+         an id the provider can actually resolve — a made-up uuid would answer
+         "not found" and prove nothing about the argument. */
+      const [trip] = await pool.query(
+        `SELECT external_id FROM trip WHERE platform = 'uber' AND driver_ext_id = $1
+           AND requested_at > now() - interval '60 days'
+         ORDER BY requested_at DESC LIMIT 1`, [uuid]).then((r) => r.rows);
+      const jobUuid = trip?.external_id || null;
+      const RANGE = { startsAt: String(Date.now() - 7 * 864e5), endsAt: String(Date.now()) };
+      for (const [name, args, kind] of TRIP_MONEY_ARGS) {
+        if (kind === 'job' && !jobUuid) { argShapes.push({ operation: name, args, kind,
+          verdict: 'not asked — no recent trip of this driver to key on' }); continue; }
+        const decl = kind === 'supplier_range'
+          ? '($supplierUuid: ID!, $timeRange: OneOfTimeRange__Input)'
+          : kind === 'driver' ? '($driverUuid: ID!)' : '($jobUuid: ID!)';
+        const vars = kind === 'supplier_range'
+          ? { supplierUuid: org.orgUuid, timeRange: { unionType: 'CUSTOM', custom: RANGE } }
+          : kind === 'driver' ? { driverUuid: uuid } : { jobUuid };
+        const d = await ask(`query Probe${decl} { ${name}${args} { __typename } }`, vars);
+        const err = errText(d);
+        await new Promise((r) => setTimeout(r, 80));
+        argShapes.push({ operation: name, args, kind,
+          /* The prize is 'answered' or a complaint about the SELECTION rather
+             than the arguments — either means the shape is right and only the
+             fields asked for are wrong, which is a solvable problem. */
+          verdict: d?.transportError ? 'transport'
+            : !err ? 'ANSWERED'
+              : /Cannot query field|Unknown field/i.test(err) ? 'no such operation'
+                : /must have a selection|selection of subfields/i.test(err)
+                  ? 'ARGUMENTS ACCEPTED — wrong selection'
+                  : /Unknown argument|used in position expecting|expected type/i.test(err)
+                    ? 'wrong arguments, and it says so'
+                    : /PERMISSION_DENIED|UNAUTHENTICATED|FORBIDDEN|not authorized/i.test(err)
+                      ? 'EXISTS — denied to this session'
+                      : 'refused generically',
+          detail: (d?.transportError || err || '').slice(0, 200) || null,
+          sample: !err && d?.data ? JSON.stringify(d.data).slice(0, 300) : null });
+      }
+    }
+
     const found = fields.filter((f) => f.exists);
     res.json({
+      arg_shapes: argShapes.length ? argShapes : undefined,
       driver: uuid, org: org.fleet,
       introspection,
       /* The control, stated before any verdict that depends on it. Without it
