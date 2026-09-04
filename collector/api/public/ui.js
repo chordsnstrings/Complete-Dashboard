@@ -1318,3 +1318,97 @@ export function faresTile(k) {
   return { label: 'Fares', value: '\u2014',
     sub: 'no trip carries a fare and no statement reports one' };
 }
+
+
+/* ── the distance a distance was averaged over ────────────────────────────
+   avg_km is kilometres per booking THAT REPORTS A DISTANCE, and the tile it
+   sits under counts every booking. Measured on production 2026-09-04:
+   Muhammad Khalid at days=365 has km 40,905 over 3,573 bookings — 11.4 km each
+   — while avg_km reads 13.2, which is 40,905 over the 3,092 that carry a
+   distance. Printed as "13.2 km a booking" that overstates by 15.5%, and the
+   worst of the thirty busiest drivers (Wajid Ali Ameer Bakhsh, 21,155 km over
+   2,674 bookings against 1,663 measured) overstates by 60.5%.
+
+   The desktop driver page fixed this by naming the denominator it used, with
+   the note "3,381 km over 269 trips is 12.6, and this said 14.8". The phone
+   was ported without it, and so was the desktop vehicle page's own wording, so
+   there were three sentences for one fact. This is the sentence.
+
+   Both field spellings, because the two endpoints disagree: /api/driver/kpis
+   carries trips_with_distance and /api/vehicle/kpis carries measured_trips. */
+export function avgKmSub(k, { noun = 'booking' } = {}) {
+  const measured = k?.trips_with_distance ?? k?.measured_trips ?? null;
+  const total = k?.trips ?? k?.bookings ?? null;
+  const avg = k?.avg_km;
+  if (avg == null || !Number.isFinite(Number(avg))) {
+    return `no ${noun} here carries a usable distance`;
+  }
+  /* Only where it differs. Naming a denominator that is the same as the count
+     already on the tile is noise, and the desktop is careful about that. */
+  if (measured != null && total != null && Number(measured) !== Number(total)) {
+    return `avg ${fmt(avg, 1)} km over the ${fmt(measured)} reporting one`;
+  }
+  return `avg ${fmt(avg, 1)} km a ${noun}`;
+}
+
+/* ── alerts per 100 km, and the two ways it can be a lie ──────────────────
+   The server decides whether the rate exists — api/alert_coverage_sql.js is
+   the statement of that rule, and it returns null with a reason for a dark
+   feed, for a vehicle whose every alert is its own tracker losing power, and
+   for a vehicle no telematics feed ever reached. What was left to the pages
+   was PRINTING it, and four of them did it four ways: #unit/assets and
+   #unit/drivers rendered fmt(0, 1) for the untracked cars, #vehicles painted
+   the same 0.0 green, and only the driver Quality tab said "not measured".
+
+   Two shapes of false zero, so both are handled here:
+     - absent: an em-dash and the server's own reason, never a number, never a
+       tone. A rate nobody measured must not be coloured as if it were good.
+     - too small to print: Moses Bale is 1 alert over 3,029 km, which is 0.033
+       per 100 km and rounds to the same "0" an untracked car printed. The
+       server now keeps it non-zero (alertRate); this says so in words.
+
+   Takes a row from any of the endpoints that publish the figure: the ledgers
+   spell it alerts_per_100km, /api/alerts/by-driver spells it per_100km. */
+export function alertRateFigure(r, { digits = 1 } = {}) {
+  const v = r?.alerts_per_100km ?? r?.per_100km ?? null;
+  const why = r?.alerts_per_100km_absent ?? r?.per_100km_absent ?? null;
+  if (v == null || !Number.isFinite(Number(v))) {
+    return { measured: false, value: null, text: '\u2014',
+      title: why || 'not measured — nothing here says how far this was driven while the '
+        + 'alert feed was up' };
+  }
+  const n = Number(v);
+  const floor = 10 ** -digits;
+  if (n > 0 && n < floor / 2) {
+    return { measured: true, value: n, text: `<${fmt(floor, digits)}`,
+      title: `${n} per 100 km — measured, and smaller than this column can print. It is not `
+        + 'zero, which is what an unmeasured rate would show' };
+  }
+  return { measured: true, value: n, text: fmt(n, digits), title: null };
+}
+
+/* ── a tracker losing power is not a driving style ────────────────────────
+   Four of the feed's five types are things a driver did; the fifth, Main Power
+   Lost, is the box complaining about its own wiring. Ranked together they made
+   L38439 and L39421 — 100% device fault — the two cleanest cars in the fleet,
+   and the phone safety headline counts 14,961 of them as harsh driving.
+
+   The split is the SERVER's: api/alert_coverage_sql.js owns the word list, and
+   the endpoints that return per-type rows now mark each row `device` so no
+   page has to guess. There is deliberately no word list here — a third copy of
+   it is exactly the drift this codebase has been paying for.
+
+   `classified` is false when not one row carries the flag, which means the
+   endpoint feeding it has not been taught to send it. A page must then say the
+   split is unavailable rather than print a total under a heading about harsh
+   driving: the totals below count every row as driving in that case, which is
+   the same safe direction the server takes for a type it has never seen. */
+export function splitAlerts(rows, { count = 'n' } = {}) {
+  const list = (rows || []).filter((r) => r && typeof r === 'object');
+  const classified = list.some((r) => 'device' in r);
+  const device = list.filter((r) => r.device === true);
+  const driving = list.filter((r) => r.device !== true);
+  const sum = (a) => a.reduce((x, r) => x + (Number(r[count]) || 0), 0);
+  return { classified, driving, device,
+    drivingN: sum(driving), deviceN: sum(device), total: sum(list) };
+}

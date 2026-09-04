@@ -365,6 +365,27 @@ const IDENTITY_FIELDS = [
   ['driver', 'complianceInfo'],
 ];
 
+/* ── inside ComplianceInfo, the last place a document could hide ──────────
+   Every one of the 25 identity candidates came back named-absent except two,
+   and one of those two is real: driver.complianceInfo answers with
+   __typename ComplianceInfo. GetDriver already selects complianceInfo
+   { status }, so `status` is a known-real sibling — which is exactly what the
+   pair technique needs to tell a scrubbed absence from a real field. */
+const COMPLIANCE_SUB = [
+  ['driver', 'complianceInfo', ' { status documents }'],
+  ['driver', 'complianceInfo', ' { status emiratesId }'],
+  ['driver', 'complianceInfo', ' { status nationalId }'],
+  ['driver', 'complianceInfo', ' { status licenseNumber }'],
+  ['driver', 'complianceInfo', ' { status licenseExpiry }'],
+  ['driver', 'complianceInfo', ' { status expiresAt }'],
+  ['driver', 'complianceInfo', ' { status items }'],
+  ['driver', 'complianceInfo', ' { status requirements }'],
+  ['driver', 'complianceInfo', ' { status reasons }'],
+  ['driver', 'complianceInfo', ' { status __typename }'],
+  /* The control for this round: cannot exist, asked the same way. */
+  ['driver', 'complianceInfo', ' { status zzNotARealFieldQx }'],
+];
+
 /* GetDriver with one extra field spliced into one of its three selections.
    The rest of the query is the shape already known to work, so a failure is
    about the field and not about the request. */
@@ -884,7 +905,7 @@ export function probeRoutes(app, { wrap }) {
        promises: not an open GraphQL proxy onto the fleet's session. */
     const SETS = { tier: TIER_FIELDS, contact: CONTACT_FIELDS,
       subfields: CONTACT_SUBFIELDS, pairs: CONTACT_PAIRS, phone: PHONE_LAST,
-      identity: IDENTITY_FIELDS };
+      identity: IDENTITY_FIELDS, compliance: COMPLIANCE_SUB };
     const wanted = SETS[String(req.query.set || 'tier')] || TIER_FIELDS;
     const fields = [];
     for (const [parent, field, sel] of (described || !sessionWorks ? [] : wanted)) {

@@ -1065,14 +1065,23 @@ app.get('/api/driver/quality', (req, r) => {
     cancels: [{ platform: 'uber', status: 'rider_cancelled', n: 7, pct: 70 },
       { platform: 'bolt', status: 'client_did_not_show', n: 3, pct: 30 }],
     cancel_daily: dailyFor(req.query.id).map((d) => ({ day: d.day, cancelled: d.cancelled, trips: d.trips })),
-    alerts: [{ alert_type: 'Harsh Braking', n: 41 + i * 3, latest: new Date().toISOString() },
-      { alert_type: 'Overspeed', n: 26 + i * 2, latest: new Date().toISOString() },
-      { alert_type: 'Harsh Acceleration', n: 14, latest: new Date().toISOString() },
-      { alert_type: 'Harsh Cornering', n: 6, latest: new Date().toISOString() }],
+    /* One of them is the tracker complaining about its own wiring, marked as
+       such by the server so the tile above does not count it as this person's
+       driving. */
+    alerts: [{ alert_type: 'Harsh Braking', n: 41 + i * 3, latest: new Date().toISOString(), device: false },
+      { alert_type: 'Overspeed', n: 26 + i * 2, latest: new Date().toISOString(), device: false },
+      { alert_type: 'Harsh Acceleration', n: 14, latest: new Date().toISOString(), device: false },
+      { alert_type: 'Harsh Cornering', n: 6, latest: new Date().toISOString(), device: false },
+      { alert_type: 'Main Power Lost', n: i === 1 ? 18 : 0, latest: new Date().toISOString(), device: true }],
     /* The distance on the days the alert feed was up — the only denominator
        this rate may have. See api/alert_coverage_sql.js. */
     alert_km: 3410 - i * 240, alerts_per_100km: +(((87 + i * 5) / (3410 - i * 240)) * 100).toFixed(1),
     alerts_per_100km_absent: null, device_alerts: i === 1 ? 18 : 0,
+    /* Journeys the telematics feed recorded on the cars this person held. 0
+       means the feed never saw them, which is why a rate of 0.0 would be a
+       lie rather than a clean record; null means no custody row places them
+       in a car at all. */
+    telematics_journeys: i === 4 ? 0 : 120 - i * 9,
     alert_coverage: alertCoverage(30),
     /* What the fleet does, so a rate has something to be high AGAINST. The page
        painted this critical from a hardcoded 5/15 scale under a sub-label
@@ -3150,7 +3159,20 @@ app.get('/api/day', (req, r) => {
 });
 
 
-app.get('/api/alerts/by-driver', (_, r) => r.json({ totals: { drivers: 74, alerts: 1904, unattributed: 212 }, shown: 8, truncated: true, rows: drivers.map((name, i) => {
+/* Refuses `id`, exactly as the real route does. The phone driver screen used
+   to fetch this with an id and get the FLEET leaderboard back — six strangers'
+   event counts under one person's name — because the parameter was read by
+   nobody. A mock that answers 200 to a request production refuses would hide
+   the very defect this refusal exists to make impossible. */
+app.get('/api/alerts/by-driver', (req, r) => {
+  if (req.query.id) {
+    return r.status(400).json({
+      error: 'this list ranks the whole fleet and has no per-driver form, so it cannot filter '
+        + 'by id — asking it to would return other people\'s events under one person\'s name',
+      use: '/api/driver/quality?id=<driver>',
+    });
+  }
+  return r.json({ totals: { drivers: 74, alerts: 1904, unattributed: 212 }, shown: 8, truncated: true, rows: drivers.map((name, i) => {
   const brake = 22 - i * 2, accel = 12 - i, turn = i % 3, over = i % 2;
   const km = (900 - i * 90);
   /* A tracker losing power is not a driving style. Row 2 carries a failing box
@@ -3191,13 +3213,19 @@ app.get('/api/alerts/by-driver', (_, r) => r.json({ totals: { drivers: 74, alert
   plate_list: plates.slice(0, 3), booked_km: null, alert_km: null, per_100km: null,
   per_100km_absent: 'no booked distance on the days the alert feed covered' }]),
 alert_coverage: { measured: true, days: 22, window_days: 30,
-  rule: 'a day the alert feed produced at least one row on' } }));
+  rule: 'a day the alert feed produced at least one row on' } });
+});
 
 
+/* `device` is the server's own classification, sent so no page carries a copy
+   of the word list. Main Power Lost is 31 of these 296 events; summed into the
+   others they print as harsh driving. */
 app.get('/api/alerts/summary', (_, r) => r.json([
-  { alert_type: 'Harsh Brake', n: 148 }, { alert_type: 'Harsh Acceleration', n: 86 },
-  { alert_type: 'Overspeed', n: 22 }, { alert_type: 'Sharp Turn', n: 9 },
-  { alert_type: 'Main Power Lost', n: 31 },
+  { alert_type: 'Harsh Brake', n: 148, device: false },
+  { alert_type: 'Harsh Acceleration', n: 86, device: false },
+  { alert_type: 'Overspeed', n: 22, device: false },
+  { alert_type: 'Sharp Turn', n: 9, device: false },
+  { alert_type: 'Main Power Lost', n: 31, device: true },
 ]));
 app.get('/api/alerts/by-vehicle', (_, r) => r.json({ totals: { vehicles: 118, alerts: 1904 }, shown: 8, truncated: true, rows: plates.map((p2, i) => {
   const brake = 30 - i * 3, accel = 18 - i * 2, turn = i % 3, over = i % 2, other = i % 4 === 0 ? 5 : 0;
@@ -3232,6 +3260,17 @@ app.get('/api/drivers/leaderboard', (_, r) => r.json({
        229. */
     completed_trips: Math.round((180 - i * 14) * (96 - i) / 100),
     avg_km: 12 + i * 0.3, revenue: i % 3 ? null : (180 - i * 14) * 96,
+    /* The money that exists for the two rows in three where `revenue` does
+       not. Uber files no per-trip fare, so revenue is null for most of this
+       list, and a People tab reading only that left 72 of 100 people as a dash
+       and ranked them last. money is driver_day's resolution — the statement's
+       net where a channel filed one, its fares where it did not — and
+       money_period_days is the coarsest period behind it, because most of it
+       is a weekly statement divided across its days. */
+    payout: (180 - i * 14) * 58, payout_days: 30 - i,
+    money: (180 - i * 14) * 61, money_days: 28 - i,
+    money_period_days: i % 3 ? 7 : 1,
+    money_source: i % 3 ? 'statement' : 'fares',
     // The denominator the completion rate is over — a percentage whose base is
     // missing cannot be checked, and Bolt's four failure states make it matter.
     outcome_n: 180 - i * 14,
@@ -4351,10 +4390,20 @@ app.get('/api/economics/drivers', (_, r) => {
         aed_per_measured_hour: i < 4 ? rt(money, 180 - i * 12) : null,
         /* alert_km, not km: the safety rate is over the days the alert feed
            covered and the money rates are over the whole window. */
-        alerts: 40 - i * 3, alert_km: Math.round(km * 0.73),
-        alerts_per_100km: rt((40 - i * 3) * 100, Math.round(km * 0.73)),
+        alerts: i === 4 ? 0 : 40 - i * 3, alert_km: Math.round(km * 0.73),
+        /* Row 4 is the shape this column got wrong: a driver whose cars are on
+           no telematics feed, so the numerator is empty while the trip table
+           supplies a full denominator. It printed a confident 0 — 26 of 309
+           production rows did at days=30 — and sorting the column ranked
+           exactly those people the safest in the fleet. telematics_journeys is
+           what tells that apart from a clean record. */
+        telematics_journeys: i === 4 ? 0 : 210 - i * 15,
+        alerts_per_100km: i === 4 ? null : rt((40 - i * 3) * 100, Math.round(km * 0.73)),
         device_alerts: i === 2 ? 15 : 0,
-        alerts_per_100km_absent: null,
+        alerts_per_100km_absent: i === 4
+          ? 'not measured — no telematics journey was recorded here in this window, so the '
+            + 'feed that raises these events never saw this vehicle'
+          : null,
         state: i === 3 ? 'suspended' : 'active',
         platform_state: i === 3 ? 'suspended' : 'active', can_earn: i !== 3,
         licence_expires: '2026-11-30', licence_days_left: i === 1 ? -12 : 40 + i * 9,
@@ -4372,6 +4421,9 @@ app.get('/api/economics/drivers', (_, r) => {
       aed_per_hour_online: null, hours_online: null,
       measured_hours_online: null, measured_idle_h: null, availability_days: 0,
       aed_per_measured_hour: null, alerts: 0, alert_km: null, alerts_per_100km: null,
+      /* null, not 0: no custody row places this person in a car at all, which
+         is a different absence from "the feed never saw their car". */
+      telematics_journeys: null, device_alerts: 0,
       alerts_per_100km_absent: 'no distance was measured on the days the alert feed covered',
       state: 'active', platform_state: 'active', can_earn: true,
       licence_expires: '2026-06-01', licence_days_left: -81, last_trip: null, band: 'idle' },

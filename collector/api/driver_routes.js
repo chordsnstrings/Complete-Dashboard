@@ -17,7 +17,7 @@ import { fleetIncome } from './income_sql.js';
    economics ledgers so this page cannot disagree with the tables that link
    to it. See api/alert_coverage_sql.js for the rule and its assumption. */
 import { alertCoverage, alertRate, alertRateReason, drivingCount,
-  deviceCount, isDeviceFault } from './alert_coverage_sql.js';
+  deviceCount, isDeviceFault, DEVICE_FAULT_SQL } from './alert_coverage_sql.js';
 import { areaOf } from './analytics_routes.js';
 /* A pg DATE, as the day it holds. Imported rather than re-typed: it is not a
    cycle (src/sources/ledger.js reaches only src/db.js and src/log.js, and
@@ -1704,6 +1704,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   app.get('/api/driver/standing', withDriver(async (req, res, d, p) => {
     const peers = await q(
       `SELECT ${PKEY} AS driver_ext_id,
+              /* The NAME as well as the key, because the key is an ACCOUNT and
+                 the cohort below has to be people — see the fold underneath
+                 this query. max() over a group whose key is the provider id:
+                 one id, one person, whichever spelling the feed used. */
+              max(driver_name) AS driver_name,
               count(*)::int trips,
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days,
               sum(distance_km) km, sum(price) revenue,
@@ -1738,11 +1743,30 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     };
     me.trips_per_day = me.days ? me.trips / me.days : null;
 
-    // Peer values are folded to one per person too, so a driver split across
-    // two platforms isn't counted as two mediocre drivers.
+    /* Peer values folded to one per person, which is what this claimed to do
+       and did not.
+       ─────────────────────────────────────────────────────────────────────
+       The key it folded on was PKEY — a provider id where there is one — so
+       only the SUBJECT collapsed, through the '__me__' branch. Every other
+       driver holding two platform accounts stayed as two rows: two mediocre
+       halves of one person, in a population the page then calls "drivers".
+       Measured on production 2026-09-04 at days=365 the page said 414 peers
+       where /api/drivers/leaderboard counts 361 people who drove — more peers
+       than there are drivers, and every percentile taken against that.
+
+       canonName is this file's own alias fold, the rule resolve() already uses
+       to decide that two ids are one human, and test/consistency.test.mjs
+       holds it byte-identical to the SQL fold every other headcount uses — so
+       the cohort now counts people the way the rest of the product does. It
+       does not consult the three-record identity register (api/identity_map.js
+       keys that on the id, and this folds on the name), which can leave at
+       most three of some four hundred accounts unmerged; the fold that keys on
+       an id is on the subject's side of this comparison and already applies
+       it. An account nobody named keys on itself, which keeps it visible
+       rather than merging every unnamed account into one ghost. */
     const folded = new Map();
     for (const r of peers) {
-      const k = mineIds.has(r.driver_ext_id) ? '__me__' : r.driver_ext_id;
+      const k = mineIds.has(r.driver_ext_id) ? '__me__' : (canonName(r.driver_name) || r.driver_ext_id);
       const c = folded.get(k) || { trips: 0, km: 0, revenue: 0, days: 0, _cw: 0, avg_km: 0, completion: 0, cancel: 0 };
       c.trips += r.trips; c.km += +r.km || 0; c.revenue += +r.revenue || 0;
       c.days = Math.max(c.days, r.days);
@@ -2066,10 +2090,37 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const alerts = await q(
       `WITH days AS (SELECT DISTINCT plate, day FROM vehicle_driver_day
                      WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date)
-       SELECT a.alert_type, count(*)::int n, max(a.occurred_at) latest
+       /* Marked for what it is, so the tile above this table does not have to
+          classify it again — the Quality tile sums these rows and the tracker
+          losing its own power is not a thing this person did. The word list
+          lives in api/alert_coverage_sql.js and nowhere else. */
+       SELECT a.alert_type, count(*)::int n, max(a.occurred_at) latest,
+              bool_or(${DEVICE_FAULT_SQL('a.alert_type')}) AS device
        FROM alert a JOIN days ON days.plate = a.plate
             AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = days.day
        GROUP BY 1 ORDER BY n DESC LIMIT 15`, p);
+    /* Whether the telematics feed saw this person's cars at all.
+       ─────────────────────────────────────────────────────────────────────
+       The third reason this rate can be absent, and the one that used to fall
+       straight through to the divide. A driver whose cars are on no telematics
+       feed drove the distance in the denominator and produced no alert row, so
+       the tile read a confident 0.0 per 100 km — measured on the drivers
+       ledger for the same people, 26 of 309 rows at days=30, against a fleet
+       rate of 86.4. alerts 0 with device_alerts 0 cannot tell that apart from
+       a genuinely clean record; the journey count can. Same custody days as
+       the alert query above, so the numerator and this are about one set of
+       plate-days; plate_days is carried so that "no custody row at all" stays
+       a different absence from "the feed saw nothing". */
+    const [tele] = await q(
+      `WITH days AS (SELECT DISTINCT plate, day FROM vehicle_driver_day
+                     WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date)
+       SELECT (SELECT count(*)::int FROM days) AS plate_days,
+              count(*)::int AS telematics_journeys
+       FROM trip t JOIN days ON days.plate = t.plate
+            AND (t.requested_at AT TIME ZONE 'Asia/Dubai')::date = days.day
+       WHERE t.platform = 'fms'
+         AND (t.requested_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date`, p);
+    const trackedJourneys = tele && tele.plate_days ? tele.telematics_journeys : null;
     /* The days the alert feed covered, and both halves of the rate narrowed to
        them.
        ─────────────────────────────────────────────────────────────────────
@@ -2121,10 +2172,14 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          rather than 0 when the feed covered nothing in the window — a page
          must render that as "not measured", not as a spotless record. */
       alerts_per_100km: alertRate(totalAlerts, exposure?.km, cov, 1,
-        { device: deviceAlerts }),
+        { device: deviceAlerts, tracked: trackedJourneys }),
       alerts_per_100km_absent: alertRateReason(exposure?.km, cov,
-        { alerts: totalAlerts, device: deviceAlerts }),
+        { alerts: totalAlerts, device: deviceAlerts, tracked: trackedJourneys }),
       device_alerts: deviceAlerts,
+      /* Beside the rate, because it is why the rate is absent when it is: 0 is
+         a car the feed never saw, null is a person no custody row places in a
+         car at all. The same field the asset and people ledgers carry. */
+      telematics_journeys: trackedJourneys,
       fleet_alerts_per_100km: alertRate(fleetRate?.alerts, fleetRate?.km, cov, 1,
         { device: fleetRate?.device_alerts }),
       fleet_device_alerts: fleetRate?.device_alerts ?? null,

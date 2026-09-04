@@ -18,7 +18,8 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
-import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile } from '../ui.js';
+import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile,
+  alertRateFigure, splitAlerts } from '../ui.js';
 import { dubaiClock } from '../tz.js';
 
 export const TABS = [
@@ -351,29 +352,67 @@ async function people(deck, ctx) {
      `platforms` and `accounts` are how many channel identities that person
      holds — so folding again on this side would only be a second, worse copy
      of a rule the server already applies. */
+  /* Money, not `revenue`.
+     ───────────────────────────────────────────────────────────────────────
+     `revenue` is sum(trip.price), and Uber's trip export carries no fare
+     column at all — so this tab printed an em-dash for 72 of 100 people at a
+     month and 81 of 100 at a year, then sorted every one of those dashes to
+     zero. Everybody driving Uber filed below anybody with a single priced
+     hotel booking; Nauman Hassan, 40,596 km, ranked on nothing.
+
+     None of that was unmeasured. The same response now carries `money` —
+     driver_day's resolution, the statement's net where a channel filed one and
+     its fares where it did not — and it is present for all 72. `revenue`
+     stays as the fallback so a row that somehow has only the trip-side figure
+     still shows it, and a row with neither is a dash WITH a reason, which is
+     the only honest dash on this column. */
+  const moneyOf = (d) => (d.money != null ? n(d.money)
+    : (d.revenue != null ? n(d.revenue) : null));
+  const KEY = { trips: (d) => n(d.trips) || 0, km: (d) => n(d.km) || 0, money: moneyOf };
+  /* Which record the figure came out of, said on the row rather than left for
+     the reader to assume it is fares. money_period_days is the coarsest period
+     behind the total — most of it is a weekly statement divided across its
+     days — and a page that prints the money without it states a week's figure
+     over a day. */
+  const moneySub = (d) => {
+    if (d.money == null) {
+      return d.revenue != null ? 'fares on the bookings themselves'
+        : 'no fare on any booking and no statement covers this window';
+    }
+    const src = { statement: 'from the platform statements',
+      fares: 'from the fares on the bookings',
+      mixed: 'statements and fares' }[d.money_source] || 'from the daily ledger';
+    return src + (d.money_period_days > 1
+      ? `, weekly figures split across days` : '');
+  };
   let sort = 'trips', term = '';
   const draw = () => {
     list.innerHTML = '';
     const shown = board.rows
       .filter((d) => !term || String(d.driver_name || d.person || '')
         .toLowerCase().includes(term.toLowerCase()))
-      .sort((a, b) => (n(b[sort]) || 0) - (n(a[sort]) || 0));
+      /* Absences last in this descending sort, not first and not as zero — the
+         same rule the desktop tables follow in ui.js. */
+      .sort((a, b) => (KEY[sort](b) ?? -1) - (KEY[sort](a) ?? -1));
     if (!shown.length) { empty(list, 'Nobody matches that', 'Try part of a name.'); return; }
     rows(list, shown.map((d) => row({
       title: d.driver_name || d.person || d.driver_ext_id,
       name: d.driver_name || d.person || '?',
       photo: d.picture_url || null,
       sub: `${(d.platforms || []).join(', ') || 'no channel'} \u00b7 ${fmt(d.km)} km`
-        + (d.accounts > 1 ? ` \u00b7 ${d.accounts} accounts` : ''),
-      value: sort === 'revenue' ? money(n(d.revenue)) : fmt(n(d[sort])),
-      note: { trips: 'bookings', km: 'km', revenue: 'fares' }[sort],
+        + (d.accounts > 1 ? ` \u00b7 ${d.accounts} accounts` : '')
+        + (sort === 'money' ? ` \u00b7 ${moneySub(d)}` : ''),
+      value: sort === 'money'
+        ? (moneyOf(d) == null ? '\u2014' : money(moneyOf(d)))
+        : fmt(KEY[sort](d)),
+      note: { trips: 'bookings', km: 'km', money: 'money in' }[sort],
       to: href('driver', d.driver_ext_id),
     })));
     if (!term) cut(list, board, 'people who drove');
   };
   search(bar, 'Search people', (v) => { term = v; draw(); });
   seg(bar, [{ id: 'trips', label: 'Bookings' }, { id: 'km', label: 'Distance' },
-    { id: 'revenue', label: 'Fares' }], sort, (id) => { sort = id; draw(); });
+    { id: 'money', label: 'Money in' }], sort, (id) => { sort = id; draw(); });
   draw();
 }
 
@@ -711,12 +750,27 @@ async function more(deck) {
 async function driver(deck, ctx) {
   const id = ctx.param;
   skeleton(deck, 4);
-  const [profile, kpis, daily, standing, alerts] = await Promise.all([
+  const [profile, kpis, daily, standing, quality] = await Promise.all([
     qAll('/api/driver/profile', { id }).catch(() => null),
     qAll('/api/driver/kpis', { id }).catch(() => null),
     qAll('/api/driver/daily', { id }).catch(() => []),
     qAll('/api/driver/standing', { id }).catch(() => null),
-    qAll('/api/alerts/by-driver', { id }).catch(() => null),
+    /* The PER-PERSON endpoint, not the fleet leaderboard.
+       ───────────────────────────────────────────────────────────────────
+       This asked /api/alerts/by-driver with &id=, and that route reads no
+       id at all: it ranks the WHOLE FLEET and stops at a hundred. So a page
+       headed "Aamir Khan Amin - 0 bookings in this window" printed the top
+       six rows of that leaderboard as his - 1,186 / 620 / 585 / 532 / 523 /
+       519 events, measured on production 2026-09-04 - and at days=365 one
+       man's page showed 40,270 events where his own record holds 3,548. One
+       of those rows belonged to a near-namesake, so a reader would have gone
+       and coached the wrong man.
+
+       /api/driver/quality is id-scoped, is what the desktop has always used,
+       and carries what a ranked list never could: the rate, the fleet
+       baseline it should be read against, and the server's own sentence for
+       why the rate is sometimes not measurable at all. */
+    qAll('/api/driver/quality', { id }).catch(() => null),
   ]);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
@@ -791,14 +845,58 @@ async function driver(deck, ctx) {
     })));
   }
 
-  const alertRows = unwrap(alerts).rows;
-  if (alertRows.length) {
-    deck.append(el('p', 'm-sec', 'Harsh-driving events'));
-    rows(deck, alertRows.slice(0, 6).map((r) => row({
-      title: r.alert_type || r.plate || 'event',
-      sub: r.plate && r.alert_type ? r.plate : null,
-      value: fmt(n(r.n ?? r.alerts)), note: 'events',
-    })));
+  /* How this person drives, and how that compares - not a count on its own.
+     ───────────────────────────────────────────────────────────────────────
+     A bare list of event types answers "how many", which is the question
+     nobody has: 87 events is good over 40,000 km and alarming over 900. The
+     rate and the fleet's own rate come back in the same response, so both are
+     on the tile. Main Power Lost is the tracker complaining about its own
+     wiring and is split out rather than counted as driving - the word list is
+     the server's, in api/alert_coverage_sql.js, and splitAlerts reads the flag
+     the rows already carry. */
+  const qy = quality || {};
+  const ev = splitAlerts(qy.alerts || []);
+  const rate = alertRateFigure(qy);
+  if (ev.total || rate.measured) {
+    deck.append(el('p', 'm-sec', 'Harsh driving'));
+    const base = qy.fleet_alerts_per_100km;
+    const ratio = rate.measured && base > 0 ? rate.value / base : null;
+    stats(deck, [
+      /* Absent WITH THE REASON, never a zero. An untracked car supplies a full
+         denominator from the trip table and an empty numerator, and the 0.0
+         that used to print made exactly those people the fleet's safest. */
+      rate.measured
+        ? { label: 'Per 100 km', value: rate.text,
+            sub: base != null
+              ? `fleet ${fmt(base, 1)}${ratio ? ` - ${ratio >= 1 ? `${fmt(ratio, 1)}x it`
+                : `${fmt(1 / ratio, 1)}x better`}` : ''}`
+              : (rate.title || 'over the days the alert feed covered'),
+            tone: ratio == null ? null
+              : ratio <= 0.7 ? 'good' : ratio <= 1.3 ? null : 'warn' }
+        : { label: 'Per 100 km', value: 'not measured', sub: rate.title, long: true },
+      /* When the feed has not marked which rows are tracker faults, the count
+         is every row and the tile says so rather than heading a total nobody
+         has split with the word "driving". */
+      { label: 'Events', value: fmt(ev.drivingN),
+        sub: !ev.classified && ev.total
+          ? 'not split from tracker faults - this channel does not mark them'
+          : (qy.alert_km ? `over ${fmt(qy.alert_km)} km the feed covered`
+            : 'no matched distance') },
+      /* Named, not hidden. A car whose every alert is its own power loss has a
+         wiring job waiting, and that is worth a line even though it is not
+         this person's driving. */
+      ev.deviceN
+        ? { label: 'Tracker faults', value: fmt(ev.deviceN),
+            sub: 'the box reporting its own power loss, not driving' }
+        : null,
+    ], true);
+    if (ev.driving.length) {
+      rows(deck, ev.driving.slice(0, 6).map((r) => row({
+        title: r.alert_type || 'event',
+        sub: r.latest ? `latest ${dayStr(r.latest)}` : null,
+        value: fmt(n(r.n)), note: 'events',
+      })));
+    }
   }
 
   deck.append(el('p', 'm-sec', 'More'));

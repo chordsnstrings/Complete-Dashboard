@@ -1128,13 +1128,72 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
             count(*) FILTER (WHERE n.outcome IS NOT NULL)::int outcome_n
        FROM trip_norm n ${JOIN_TRIP}
        WHERE ${W('n')} AND coalesce(btrim(n.driver_name), '') <> ''
-       GROUP BY t.person_key)
+       GROUP BY t.person_key),
+     /* What actually reached the fleet for this person's work.
+        ─────────────────────────────────────────────────────────────────────
+        The revenue column above is sum(trip.price), and Uber's trip export carries no
+        fare column at all. Measured on production 2026-09-04 at days=30, 71 of
+        the hundred rows this endpoint returns have revenue null — and the
+        phone's People tab, which has no other money on the row, printed an
+        em-dash for 72 of 100 at a month and 81 of 100 at a year, then sorted
+        those dashes to 0 so everyone driving Uber filed below anyone with a
+        single priced hotel booking. Nauman Hassan, 40,596 km, ranked on
+        nothing.
+
+        None of those is genuinely unmeasured. For the same window
+        /api/drivers/directory holds money for 72 of those 72 and payout for 72
+        of 72; the two blocks below are that same computation, keyed on
+        person_key so a person's several platform accounts land on the one row
+        this list already folds them onto.
+
+        Not narrowed by the platform chip, the way the directory's copy is not:
+        driver_day carries the platforms a person worked that day as an array
+        and its money column covers all of them, so there is no per-channel share to
+        take. money_source travels with the figure for that reason. */
+     pay AS (
+       SELECT person_key AS person,
+              round(sum(earnings)::numeric, 0) AS payout,
+              count(DISTINCT day)::int AS payout_days
+         FROM driver_payout_day
+        WHERE day BETWEEN $1::date AND $2::date
+          AND ($3::text IS NULL OR platform = $3)
+          AND ($4::text IS NULL OR fleet_id = $4)
+          AND coalesce(person_key, '') <> ''
+        GROUP BY 1
+     ),
+     /* driver_day.money is the resolution this fleet already made: per
+        platform, the statement's net where a channel filed one and its fares
+        where it did not (src/rollup.js). money_period_days travels with it
+        because most of it is a weekly statement divided across its days, and
+        the coarsest period on a person's days is what limits what can be said
+        about their total — a page that prints the money without it is stating
+        a week's figure over a day. */
+     dmoney AS (
+       SELECT person_key AS person,
+              round(sum(money)::numeric, 0) AS money,
+              count(*) FILTER (WHERE money IS NOT NULL)::int AS money_days,
+              CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
+                   ELSE max(money_period_days) END AS money_period_days,
+              CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
+                   THEN 'mixed'
+                   ELSE max(money_source) FILTER (WHERE money_source <> 'none') END AS money_source
+         FROM driver_day
+        WHERE day BETWEEN $1::date AND $2::date
+          AND ($4::text IS NULL OR fleet_id = $4)
+          AND coalesce(person_key, '') <> ''
+        GROUP BY 1
+     )
      /* The person's face, joined on the id the row already carries. LEFT, and
         DISTINCT ON, because a person with a hotel record and an Uber one has
         two compliance rows and only Uber's carries a photo — so the one with a
         picture wins rather than whichever the planner reached first. */
-     SELECT people.*, pic.picture_url, count(*) OVER ()::int AS _people
+     SELECT people.*, pic.picture_url, count(*) OVER ()::int AS _people,
+            pay.payout, coalesce(pay.payout_days, 0) AS payout_days,
+            dm.money, coalesce(dm.money_days, 0) AS money_days,
+            dm.money_period_days, dm.money_source
        FROM people
+       LEFT JOIN pay ON pay.person = people.person
+       LEFT JOIN dmoney dm ON dm.person = people.person
        LEFT JOIN LATERAL (
          SELECT dc.picture_url FROM driver_compliance dc
           WHERE dc.driver_ext_id = people.driver_ext_id
@@ -1580,8 +1639,18 @@ app.get('/api/map/journey', wrap(async (req, res) => {
    telematics box in the car, not from a booking channel, so there is no
    channel to narrow it to. The front end says so on the page (F14) rather than
    the endpoint pretending to have filtered. */
+/* Each type marked for what it IS, so no page has to classify it again.
+   ─────────────────────────────────────────────────────────────────────────
+   This returned alert_type and a count, and every reader that needed to know
+   whether a type was a driver braking hard or a tracker losing power carried
+   its own copy of the word list — api/public/app.js has one, and the phone
+   safety screen, which has none, sums the lot and prints 14,961 power-loss
+   events under a headline about harsh driving. The word list belongs to
+   api/alert_coverage_sql.js; this sends its answer with the row. */
 app.get('/api/alerts/summary', wrap(async (req, res) => res.json(await q(
-  `SELECT alert_type, count(*)::int n FROM alert
+  `SELECT alert_type, count(*)::int n,
+          bool_or(${DEVICE_FAULT_SQL('alert_type')}) AS device
+   FROM alert
    WHERE ${DAYWIN('occurred_at')} AND ($3::text IS NULL OR fleet_id = $3)
    GROUP BY 1 ORDER BY 2 DESC`, [range(req)[0], range(req)[1], range(req)[3]]))));
 
@@ -1668,6 +1737,31 @@ app.get('/api/alerts/by-vehicle', wrap(async (req, res) => {
 /* The same events, attributed to people rather than to plates. The safety page
    named nobody at all: it fetched a driver column and rendered only the plate. */
 app.get('/api/alerts/by-driver', wrap(async (req, res) => {
+  /* This list is the FLEET's, ranked, and there is no per-person form of it.
+     ─────────────────────────────────────────────────────────────────────────
+     The phone driver screen fetched it with &id= and the handler read no id at
+     all, so a page headed "Aamir Khan Amin — 0 bookings in this window" printed
+     six other people's event counts as his: 1,186 / 620 / 585 / 532 / 523 /
+     519, the top of this leaderboard, measured on production 2026-09-04. At
+     days=365 one man's page showed 40,270 events where his own quality record
+     is 3,548, and one of the rows on it belonged to a near-namesake — so a
+     reader would have been coached about the wrong driver.
+
+     The per-person answer already exists and the desktop already uses it:
+     /api/driver/quality is id-scoped and returns alerts[] with alert_km,
+     alerts_per_100km and its absence reason. Narrowing THIS route instead
+     would give the Safety page and cohorts.js a second meaning for one URL.
+
+     So the parameter is REFUSED rather than dropped. Silently ignoring it is
+     what put a stranger's data on somebody's profile, and a caller that has
+     asked a question this route cannot answer must be told so. */
+  if (req.query.id) {
+    return res.status(400).json({
+      error: 'this list ranks the whole fleet and has no per-driver form, so it cannot filter '
+        + 'by id — asking it to would return other people\'s events under one person\'s name',
+      use: '/api/driver/quality?id=<driver>',
+    });
+  }
   const [from, to, , fleet] = range(req);
   /* Fleet-filtered with the list, so the numerator and the denominator name
      the same days — see api/alert_coverage_sql.js for why coverage is never

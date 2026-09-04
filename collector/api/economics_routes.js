@@ -520,10 +520,16 @@ export function economicsRoutes(app, { q, wrap, range }) {
            (2026-06-06 → 2026-08-17) contributed distance and nothing else.
            Null rather than 0 when the feed covered none of the window: see
            `alert_coverage` on the response for which days those were. */
+        /* telematics_journeys is on this row already and is the discriminator
+           between a clean car and a car nothing was watching: 30 of the 228
+           plates at days=30 print a rate of 0 with no telematics journey at
+           all, 39,843 km between them and not one alert row, and sorting the
+           column put them above the 66 cars the feed does cover. */
         alerts_per_100km: alertRate(r.alerts ?? 0, r.alert_km, cov, 1,
-          { device: r.device_alerts }),
+          { device: r.device_alerts, tracked: r.telematics_journeys ?? null }),
         alerts_per_100km_absent: alertRateReason(r.alert_km, cov,
-          { alerts: r.alerts ?? 0, device: r.device_alerts }),
+          { alerts: r.alerts ?? 0, device: r.device_alerts,
+            tracked: r.telematics_journeys ?? null }),
         device_alerts: r.device_alerts ?? 0,
         any_even_split: !!r.any_even_split,
         soonest_expiry: r.soonest_expiry ?? null,
@@ -701,7 +707,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
        never anything to join TO. */
     const PK = `coalesce(nullif(btrim(t.driver_ext_id), ''), 'name:' || t.person_key)`;
 
-    const [pay, avail, work, who, custody, held, coverage] = await Promise.all([
+    const [pay, avail, work, who, custody, tele, held, coverage] = await Promise.all([
       /* What each account was actually paid, at day grain with the overlapping
          report windows already resolved — never driver_performance directly,
          where one driver's twenty-eight weeks were held as sixty-seven rows.
@@ -867,6 +873,41 @@ export function economicsRoutes(app, { q, wrap, range }) {
            AND (a.occurred_at AT TIME ZONE 'Asia/Dubai')::date = ANY($3::date[])
          GROUP BY 1`, [from, to, cov.days]),
 
+      /* Whether the telematics feed saw this person's cars at all.
+         ─────────────────────────────────────────────────────────────────
+         Alerts /100km on this ledger printed a confident 0 for 26 of 309 rows
+         at days=30 — Zahid Khan Khan over 2,788 km, Imran Hussain Islam over
+         225 bookings — and sorting the column ranked exactly those people the
+         safest in the fleet, against a fleet rate of 86.4 per 100 km. Their
+         cars are on no telematics feed: alerts come from FMS, alert_km comes
+         from the trip table, so an untracked car supplies a full denominator
+         and an empty numerator.
+
+         alerts 0 AND device_alerts 0 was the only discriminator this response
+         carried, and it cannot tell "no tracker" from "drove cleanly" — it
+         would blank a genuinely alert-free driver on a watched car. The asset
+         ledger has told the two apart since it was written, with
+         telematics_journeys; this is the same count, folded onto the person
+         through the days they actually held the plate.
+
+         Same custody shape as the alert query above, and DISTINCT for the same
+         reason: vehicle_driver_day carries one row per platform, so a driver
+         running two apps on one car in one day would count its journeys twice.
+         The window predicate on trip is redundant against the join and is
+         spelled out so the planner can push it down — the identical fix the
+         alert join above records. */
+      q(`WITH held AS (
+           SELECT DISTINCT driver_ext_id, plate, day FROM vehicle_driver_day
+           WHERE day BETWEEN $1::date AND $2::date
+         )
+         SELECT h.driver_ext_id, count(*)::int telematics_journeys
+         FROM trip t
+         JOIN held h ON h.plate = t.plate
+          AND (t.requested_at AT TIME ZONE 'Asia/Dubai')::date = h.day
+         WHERE t.platform = 'fms'
+           AND (t.requested_at AT TIME ZONE 'Asia/Dubai')::date BETWEEN $1::date AND $2::date
+         GROUP BY 1`, [from, to]),
+
       /* Which cars each person actually held, busiest first and capped at
          three. A ledger that names a driver and not their vehicle is the dead
          end this codebase has a rule against: a person earning nothing is a
@@ -1008,6 +1049,23 @@ export function economicsRoutes(app, { q, wrap, range }) {
       r.device_alerts = r.ids.reduce((a, id) => a + (devAlerts.get(id) || 0), 0);
     }
 
+    /* Journeys the telematics feed recorded on the cars this person held,
+       summed across their accounts the way every other figure here is.
+       ─────────────────────────────────────────────────────────────────────
+       NULL, not 0, for a person no custody row places in any vehicle in this
+       window: "the feed never saw their car" and "we do not know which car
+       they were in" are two different absences, and only the first one says
+       anything about safety. custodied is the set of accounts vehicle_driver_day
+       actually holds a day for — the same query that supplies the plate links
+       below, so the two cannot disagree about who has a custody record. */
+    const teleBy = new Map(tele.map((t) => [t.driver_ext_id, t.telematics_journeys]));
+    const custodied = new Set(held.map((h) => h.driver_ext_id));
+    for (const r of people.values()) {
+      r.telematics_journeys = r.ids.some((id) => custodied.has(id))
+        ? r.ids.reduce((a, id) => a + (teleBy.get(id) || 0), 0)
+        : null;
+    }
+
     const rows = [...people.values()].map((r) => {
       const st = standing.get(r.key) || {};
       /* Fares and payouts are added here, unlike on a vehicle row, because a
@@ -1069,10 +1127,15 @@ export function economicsRoutes(app, { q, wrap, range }) {
            days to 41.5 at 30 — off the identical 69,338 alerts — because the
            feed's 73-day hole contributed distance and nothing else. */
         alerts_per_100km: alertRate(r.alerts, r.alert_km, cov, 1,
-          { device: r.device_alerts }),
+          { device: r.device_alerts, tracked: r.telematics_journeys }),
         alerts_per_100km_absent: alertRateReason(r.alert_km, cov,
-          { alerts: r.alerts, device: r.device_alerts }),
+          { alerts: r.alerts, device: r.device_alerts,
+            tracked: r.telematics_journeys }),
         device_alerts: r.device_alerts ?? 0,
+        /* Beside the rate rather than instead of it, so a reader can see WHY
+           it is absent: 0 here is a car nothing was watching, null is a person
+           no custody row places in a car at all. */
+        telematics_journeys: r.telematics_journeys,
         state: st.state ?? null,
         platform_state: st.platform_state ?? null,
         can_earn: st.can_earn ?? null,

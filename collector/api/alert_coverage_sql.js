@@ -214,7 +214,7 @@ export const deviceCount = (col = 'alert_type') =>
  * Null, never 0, when it cannot be measured: absence renders as an em-dash
  * with a reason, and a zero here would read as a perfect safety record.
  */
-export function alertRate(alerts, km, cov, digits = 1, { device = 0 } = {}) {
+export function alertRate(alerts, km, cov, digits = 1, { device = 0, tracked = null } = {}) {
   if (!cov || !cov.measured) return null;
   const d = Number(km);
   if (!(d > 0)) return null;
@@ -223,11 +223,33 @@ export function alertRate(alerts, km, cov, digits = 1, { device = 0 } = {}) {
      car in the fleet — which is exactly what production did with L38439 and
      L39421. Absent, with a reason, the same as any other unmeasured rate. */
   if (!(Number(alerts) > 0) && Number(device) > 0) return null;
-  return +(((Number(alerts) || 0) * 100) / d).toFixed(digits);
+  /* And the third unmeasured case, which fell straight through to the divide:
+     a vehicle no telematics feed ever reached. It supplies a full denominator
+     from the trip table and an empty numerator, so it rated exactly 0.
+     Measured on production 2026-09-04 at days=30: of 228 rows on
+     /api/economics/assets, 30 print a rate of 0 with telematics_journeys 0 —
+     39,843 km between them and not one alert row — against a median of 127.6
+     among the 66 cars the feed does cover. Sorting the column put those thirty
+     at the top as the fleet's safest. The same shape on the people ledger:
+     26 of /api/economics/drivers' 309 rows. `tracked` is the count of journeys
+     the telematics feed recorded for the entity, and null where the caller
+     cannot say — an absent argument keeps the old behaviour, so nothing rates
+     absent merely because its route has not been taught to ask. */
+  if (tracked === 0 && !(Number(alerts) > 0) && !(Number(device) > 0)) return null;
+  const exact = ((Number(alerts) || 0) * 100) / d;
+  const shown = +exact.toFixed(digits);
+  /* A rate that WAS measured must not round into the string an unmeasured one
+     prints. Moses Bale: 1 alert over 3,029 km is 0.033 per 100 km, and at one
+     decimal that is "0" — the same false-perfect score this function exists to
+     stop, arrived at from the other direction. Kept at whatever precision
+     keeps it non-zero; the page decides how to say "smaller than it can
+     print". */
+  if (shown === 0 && exact > 0) return +exact.toPrecision(1);
+  return shown;
 }
 
 /** Why the rate is absent, in the words a page prints beside the em-dash. */
-export function alertRateReason(km, cov, { alerts = null, device = 0 } = {}) {
+export function alertRateReason(km, cov, { alerts = null, device = 0, tracked = null } = {}) {
   if (!cov || !cov.measured) {
     return 'not measured — the alert feed covered none of the days in this window';
   }
@@ -240,6 +262,13 @@ export function alertRateReason(km, cov, { alerts = null, device = 0 } = {}) {
   if (alerts != null && !(Number(alerts) > 0) && Number(device) > 0) {
     return `not measured — all ${Number(device)} alerts on this vehicle are the tracker `
       + 'reporting its own power loss, so nothing here measures driving';
+  }
+  /* Said as a fact about the FEED, not about the driving. These vehicles drove
+     the distance in the denominator; what is missing is the box that would
+     have watched them do it, and "no alerts" would read as a clean record. */
+  if (tracked === 0 && !(Number(alerts) > 0) && !(Number(device) > 0)) {
+    return 'not measured — no telematics journey was recorded here in this window, so the '
+      + 'feed that raises these events never saw this vehicle';
   }
   return null;
 }

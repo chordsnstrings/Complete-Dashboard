@@ -91,10 +91,22 @@ check('every screen the table names is defined', (() => {
    A phone shows eight rows of seventy-four with no scrollbar to hint at the
    rest, so a cut list that does not say so is a lie of omission. */
 check('the cut-list line exists', /export const cut = /.test(uiSrc));
+/* The function's OWN body, found by its boundaries rather than by counting
+   2,600 characters from its start. The character count was a guess that held
+   until the People screen grew a comment explaining why it ranks on `money`
+   and not on `revenue` — at which point `cut(` fell past the cut-off and this
+   reported a disclosure that had never moved as missing. A test pinned to how
+   long a function happens to be fails on every edit that is not a bug. */
+const bodyOf = (name) => {
+  const at = screensSrc.indexOf(`async function ${name}(`);
+  if (at < 0) return '';
+  const rest = screensSrc.slice(at + 1);
+  const end = rest.search(/\n(?:async function |function |\/\* \u2500\u2500)/);
+  return end < 0 ? rest : rest.slice(0, end);
+};
 for (const screen of ['people', 'fleet']) {
-  const body = screensSrc.slice(screensSrc.indexOf(`async function ${screen}(`),
-    screensSrc.indexOf(`async function ${screen}(`) + 2600);
-  check(`${screen} discloses that its list was cut`, /\bcut\(/.test(body));
+  const body = bodyOf(screen);
+  check(`${screen} discloses that its list was cut`, body.length > 400 && /\bcut\(/.test(body));
 }
 /* A share taken over the rows that FITTED read 17% five times and summed to
    84%. The denominator must be everything. */
