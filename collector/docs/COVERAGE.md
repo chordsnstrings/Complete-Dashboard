@@ -215,6 +215,27 @@ for the accounted view with its basis stated. `/api/day` takes a day and
 nothing else — no platform or fleet filter — so both surfaces say "both fleets,
 every channel" rather than pretending to follow the chips.
 
+**Three caches sit between a live figure and the truth**, and each needs a
+different answer. `api()` in `api/public/data.js` is stale-while-revalidate:
+it hands back the held body immediately, which is right for a page about a
+window and wrong for a line stamped "as of 07:15 Dubai" — on production the
+band read 56 bookings while the lede three inches below it read 68, for the
+same day, in the same second.
+
+| cache | how to pass it |
+|---|---|
+| the client store (`swr.js`) | pass **any** options object to `api()` — it then neither reads nor writes the store |
+| the browser's HTTP cache | `cache: 'no-store'` |
+| the server's response cache (`api/cache.js`) | version-keyed, re-checked every 30s — a `&t=<minute>` key costs at most one real computation a minute |
+
+And **one today per screen**: anything that mentions the current day must read
+the same object, not a second endpoint. `todayLive()` is that object.
+
+Today's Uber fares lag its bookings, and that is a schedule rather than a hole:
+the payments report is walked on the nightly catch-up and the Sunday backfill,
+never on the half-hourly incremental. `FARES_LAG` in `api/public/today.js` is
+the one sentence both shells say it with.
+
 ---
 
 ## Known holes, with owners
