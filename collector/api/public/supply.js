@@ -15,7 +15,7 @@
      WHERE how long the wait is after a dropoff in each area — the
            repositioning question, in the only geography this data has */
 import { el, esc, panel, loading, note, tableFrom, fmt, empty, verdict, foldRows,
-  plural, countOf, dayStr } from './ui.js';
+  plural, countOf, dayStr, sourceLabel } from './ui.js';
 import { q, href } from './data.js';
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -107,11 +107,65 @@ export async function renderSupply(root) {
     q('/api/supply/areas').catch(() => ({ areas: [] })),
   ]);
 
-  if (!bal.covered) {
-    vHost.append(note('Driver availability has not been collected for this window. Uber serves the '
-      + 'last 31 days and nothing older, so this page fills in going forward and cannot be '
-      + 'backfilled past that.', 'warn'));
-  }
+  /* ── two different nothings, and they need two different sentences ──────
+     This note used to say one thing whatever the reason: that Uber serves the
+     last 31 days and nothing older, so the page fills in going forward and
+     cannot be backfilled past that. That is true of a window that predates the
+     collector and it is false of #supply?platform=bolt, which is the case the
+     chip fix on /api/supply/balance made reachable. Bolt is not waiting for a
+     backfill: driver_timeline_event carries platform 'uber' and nothing else
+     (src/sources/uber_timeline.js writes SRC = 'uber' at :29 and stamps it on
+     every row at :143), so there is no Bolt availability feed to be inside or
+     outside a window of, and there will not be one until somebody writes a
+     Bolt collector. An operator reading the old sentence under a Bolt chip
+     would have waited for data that is never coming.
+
+     The route now says which of the two it is — `uncovered.reason`, either
+     'outside-window' or 'no-feed' — and names the platforms the feed does
+     carry, read from the table rather than asserted here, so this page cannot
+     drift from what was actually collected. A false reason is worse than a
+     bare dash, because a reader acts on it. */
+  const why = bal.uncovered || null;
+  /* Through sourceLabel, because these are database keys — the platform column
+     stores 'uber', and a sentence printed at an operator says Uber. */
+  const feeds = (why?.platforms || []).map(sourceLabel);
+  const feedList = feeds.length === 0 ? 'no platform at all'
+    : feeds.length === 1 ? feeds[0]
+      : `${feeds.slice(0, -1).join(', ')} and ${feeds[feeds.length - 1]}`;
+  /* Four reasons, because there are four ways to have no denominator and each
+     one sends an operator somewhere different. Two of them were a single
+     sentence about Uber's 31-day retention: a window in the FUTURE was told its
+     days "cannot be backfilled past that", and so was a window holding events
+     that simply never closed a span. Neither is a retention fact.
+
+     The empty-feed case gets its own wording too. `feedList` renders an empty
+     list as "no platform at all", which inside "the availability feed carries
+     no platform at all and nothing else" reads as a rendering fault rather
+     than as the true and quite different statement that no channel has ever
+     filed availability to this instance. */
+  const uncoveredWhy = why?.reason === 'no-feed'
+    ? (why.feed_empty
+      ? 'Driver availability has never been collected on this instance. No channel files it, so '
+        + 'there is no supply here to be busy or idle — an unmeasured window rather than a quiet '
+        + 'one. The jobs on the other pages are real; the online hours they would be divided by '
+        + 'were never recorded.'
+      : 'Driver availability is not collected for this selection at all. The availability feed '
+        + `carries ${feedList} and nothing else, so there is no supply here to be busy or idle — `
+        + 'this is an unmeasured window rather than a quiet one, and no backfill will fill it in. '
+        + 'The jobs on the other pages are real; the online hours they would be divided by were '
+        + 'never recorded.')
+    : why?.reason === 'not-yet'
+      ? 'This window is in the future, so there is nothing collected for it yet — not a gap in '
+        + 'the record, just days that have not happened.'
+      : why?.reason === 'no-span'
+        ? 'Availability events were recorded in this window but none of them close a shift — a '
+          + 'driver who went online and has not gone offline, or a single event with nothing to '
+          + 'pair it with. There is no online-hours figure to divide the jobs by, and widening '
+          + 'the range is what usually resolves it.'
+        : 'Driver availability has not been collected for this window. Uber serves the last 31 '
+          + 'days and nothing older, so this page fills in going forward and cannot be '
+          + 'backfilled past that.';
+  if (!bal.covered) vHost.append(note(uncoveredWhy, 'warn'));
 
   const t = bal.totals;
   /* The worst slot that is actually a slot: enough supply for the ratio to
@@ -136,22 +190,54 @@ export async function renderSupply(root) {
     ? Math.round((medRate - worst.jobs_per_online_h) * worst.online_h * worst.occurrences)
     : null;
 
+  /* ── the headline when nothing was measured ─────────────────────────────
+     The fallback under the idle rate was `${fmt(t.jobs)} jobs in this window`
+     over `fmt(t.jobs)` as the big figure, written when the only way to reach
+     it was a window with supply but no idle arithmetic. The chip fix made it
+     reachable with no supply at all, and totals.jobs is reduced over the
+     supply cells — so a Bolt chip landed here with jobs 0 and the page
+     headlined "0 jobs in this window" at 48px, under a warning note saying
+     availability had not been collected. Two statements about the same
+     selection, one of them false: Bolt sold 614 rides in the window that
+     printed it, and none of them were zero.
+
+     The route now sends every total as null rather than 0 in that case, which
+     fmt() renders as an em dash on its own — correct and mute. So the claim
+     and the figure say what is absent instead: the dash stays the figure, the
+     unit names the absence, and the note directly above carries the reason.
+     No new markup, no new panel — the same verdict block, told to say the true
+     thing. */
   verdict(vHost, {
-    claim: t.idle_pct != null
-      ? `${t.idle_pct}% of the hours drivers are online, nobody is in the car`
-      : `${fmt(t.jobs)} jobs in this window`,
-    figure: t.jobs_per_online_h != null ? fmt(t.jobs_per_online_h, 2) : fmt(t.jobs),
-    unit: t.jobs_per_online_h != null ? 'jobs per online hour' : 'jobs',
+    claim: !bal.covered
+      ? (noFeed ? 'This selection has no availability feed, so there is no supply to measure'
+        : 'No driver availability was collected inside this window')
+      : t.idle_pct != null
+        ? `${t.idle_pct}% of the hours drivers are online, nobody is in the car`
+        : `${fmt(t.jobs)} jobs in this window`,
+    figure: !bal.covered ? '—'
+      : t.jobs_per_online_h != null ? fmt(t.jobs_per_online_h, 2) : fmt(t.jobs),
+    unit: !bal.covered ? (noFeed ? 'never collected here' : 'not collected for these days')
+      : t.jobs_per_online_h != null ? 'jobs per online hour' : 'jobs',
     tone: t.idle_pct != null && t.idle_pct >= 70 ? 'warn' : null,
     /* The span the rate is actually over. Uber serves about 31 days of
        availability and nothing older, so on a 12-month range this figure
        describes a month of it — and said without that, widening the range
        looked like the fleet getting busier. */
-    meta: `${fmt(t.online_h)} online h · ${fmt(t.on_job_h)} on job`
+    /* Nothing to caption when there are no hours: "— online h · — on job" is
+       three dashes pretending to be a measurement. */
+    meta: !bal.covered ? null
+      : `${fmt(t.online_h)} online h · ${fmt(t.on_job_h)} on job`
       + (bal.measured && bal.measured.narrower_than_window
         ? ` · over the ${countOf(bal.measured.days, 'day')} availability covers, not the whole range`
         : ''),
-    sub: `${fmt(t.idle_h)} driver-hours were available and not dispatched.`
+    /* The note directly above already carries the reason in full, so this says
+       the consequence instead of repeating it: every figure on this page is a
+       division by online hours, and there are none. */
+    sub: !bal.covered
+      ? 'Every figure on this page divides by online hours, so none of them exist for this '
+        + 'selection — they are absent rather than zero, for the reason above. The grid below is '
+        + 'empty for the same reason, not because those hours sold nothing.'
+      : `${fmt(t.idle_h)} driver-hours were available and not dispatched.`
       + (bal.measured && bal.measured.narrower_than_window
         ? ` Availability is only reported from ${dayStr(bal.measured.from)}, so every hour figure `
           + 'here is over that span rather than the range above — the two halves of the rate have '

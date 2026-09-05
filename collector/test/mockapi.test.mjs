@@ -158,6 +158,47 @@ check('the mock answers in the same shape as the real API, one level into rows',
 check('and it compared most of the routes rather than skipping them',
   compared > skipped * 3, `${compared} compared, ${skipped} skipped`);
 
+/* ── the chips, which the loop above cannot see ────────────────────────────
+   Every fetch above is unchipped, so a fixture that ignores ?platform= and
+   ?fleet= answers the right SHAPE under all of them and the comparison is
+   satisfied. /api/supply/balance was exactly that: one set of 168 cells
+   whatever was on the address, which is the defect the real route had just
+   been fixed for — one fleet's job hours over both fleets' online hours, and
+   one platform's over a platform that reports no availability at all. The
+   browser smoke run drove the mock and agreed with the bug.
+
+   Three properties, the same three the real route is pinned on in
+   test/supply_chip_denominator.test.mjs, so the fixture cannot drift back:
+   the two fleets disagree about the denominator, a platform the feed has never
+   carried comes back uncovered, and an uncovered answer reports its totals as
+   absent rather than as zero. Values are not compared — the mock is meant to
+   differ in values — only that the chips MOVE them. */
+const supply = async (extra = '') => (await (await fetch(
+  `http://127.0.0.1:${mockPort}/api/supply/balance?${WIN}${extra}`)).json());
+const [mAll, mEco, mEg, mBolt] = await Promise.all([
+  supply(), supply('&fleet=ecosine'), supply('&fleet=egari'), supply('&platform=bolt')]);
+const mOld = await (await fetch(
+  `http://127.0.0.1:${mockPort}/api/supply/balance?from=2026-06-01&to=2026-06-30`)).json();
+
+check('the fixture\'s fleet chips move the denominator, not just the numerator',
+  mEco.totals.online_h !== mEg.totals.online_h
+    && mEco.totals.online_h !== mAll.totals.online_h,
+  `all ${mAll.totals.online_h}, ecosine ${mEco.totals.online_h}, egari ${mEg.totals.online_h}`);
+check('…and the two of them are the whole feed between them',
+  Math.abs(mEco.totals.online_h + mEg.totals.online_h - mAll.totals.online_h) <= 2,
+  `${mEco.totals.online_h} + ${mEg.totals.online_h} vs ${mAll.totals.online_h}`);
+check('a platform the fixture\'s feed never carried is uncovered, not 99% idle',
+  mBolt.covered === false && mBolt.uncovered.reason === 'no-feed',
+  JSON.stringify({ covered: mBolt.covered, uncovered: mBolt.uncovered }));
+check('…and a window before the feed started is uncovered for a different reason',
+  mOld.covered === false && mOld.uncovered.reason === 'outside-window',
+  JSON.stringify(mOld.uncovered));
+/* The state the page has to render as absent. A fixture answering 0 here
+   teaches the smoke run that zero is a reachable value on this endpoint, and
+   the whole point of the page's uncovered branch is that it is not. */
+check('an uncovered fixture reports every total as absent rather than 0',
+  Object.values(mBolt.totals).every((v) => v === null), JSON.stringify(mBolt.totals));
+
 console.log(`\n  ${compared} routes compared, ${skipped} skipped`);
 console.log(`\n${pass} passed, ${fail} failed`);
 mockServer.close(); server.close(); await db.close();

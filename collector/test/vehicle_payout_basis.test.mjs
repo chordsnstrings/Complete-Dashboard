@@ -136,16 +136,20 @@ check('a car with no work still reports absence rather than a zero',
    instead of 100%, and the page then either dropped the channel to its gross
    fares or filed money that had already arrived as not yet collected.
 
-   Measured on production 2026-09-05 across all 98 earning plates for
-   2026-08-01..2026-08-31: the sum of this endpoint's accounted came to AED
-   567,258.53 against AED 502,709.89 from /api/economics/assets and from
-   /api/vehicles/directory, which agree with each other to the cent — an
-   excess of AED 64,548.64 on exactly 45 plates, every one of them with
-   accounted_payouts null and undercovered_bookings 0. L46185's page printed
-   "AED 11,986.98 in fares · AED 0 attributed from platform payouts" while its
-   own earnings panel three sections down showed AED 6,355.12 attributed from
-   Uber, and the directory row for the same car and window said 1,842.00 +
-   6,355.12 = 8,197.12. The page contradicted itself by 46.2%.
+   Re-measured against production at 2026-09-05T19:44Z across all 98 earning
+   plates for 2026-08-01..2026-08-31, because the backfill moves these figures
+   by the hour and the first draft of this note already read differently: the
+   sum of this endpoint's accounted comes to AED 567,078.98 against AED
+   502,446.44 from /api/economics/assets and from /api/vehicles/directory,
+   which agree with each other to the cent on all 273 plates — 45 plates
+   disagree with the page, a net excess of AED 64,632.54. Of those 45, 43 are
+   this defect exactly, with accounted_payouts null and undercovered_bookings 0,
+   and they come to AED 64,893.30 of excess between them; the other two, L36397 and
+   L46174, are short by AED 260.76 with their payout half intact and belong to
+   the separate window defect described at the foot of this comment. L46185's
+   page prints "AED 11,986.98 in fares · AED 0 attributed from platform
+   payouts" while the directory row for the same car and window says 1,842.00 +
+   6,352.21 = 8,194.21. The page contradicts itself by 46.3%.
 
    Pinned as AGREEMENTS and not as numbers: the two surfaces answer the same
    question about the same car over the same window through the same
@@ -274,20 +278,53 @@ check('and the raw attribution covers the same days, because a fares channel pay
   mRow?.attributed_days === 11, `${mRow?.attributed_days} attributed days`);
 
 /* And the same agreement on the mixed-basis plate, which is where the missing
-   denominator bites hardest: uber worked 7 of these 14 days and was paid for
-   all 7, bolt likewise. Against the days they WORKED both are 100% covered and
-   are counted on their payouts; against the 14-day calendar window both read
-   50%, fall to partial_payout, and the page then reports as "not yet
-   collected" money that was collected in full. The two numbers below are the
-   two halves of that: the money must match the row, and none of it may be
-   filed as under-covered when every day the channel worked was paid for. */
+   denominator bites — though not, it turns out, in the total.
+   ──────────────────────────────────────────────────────────────────────────
+   Uber worked 7 of these 14 days on M100 and was paid for all 7, bolt likewise.
+   Against the days they WORKED both are 100% covered and take basis `payout`;
+   against the 14-day calendar window both read 50%, fall to `partial_payout`,
+   and the page reports as "not yet collected" money that was collected in full.
+
+   The first version of the first check below compared mKpi.accounted against
+   mRow.revenue + mRow.payout and nothing else, and it PASSED with the
+   booking_days carry deleted from /api/vehicle/kpis — an assertion that
+   survives the removal of the fix it exists to hold up is not an assertion.
+   The fixture is not what is wrong with it and no reshaping of the fixture
+   would help. The reason is structural, and it is the other half of the same
+   commit: chooseBasis now guards its fares branch on `payouts == null`, so a
+   row carrying a payout can reach only `payout` or `partial_payout`, and both
+   of those set best = payouts. accounted, accounted_payouts and
+   accounted_fares are therefore invariant under the payout coverage ratio at
+   every window length, day count and fixture shape that can be built — the
+   missing denominator can no longer move the money, only the account the
+   product gives OF the money. That total is now C2's identity to hold up, and
+   the run proves which one it is: deleting `booking_days: f.booking_days` from
+   the fold in api/vehicle_routes.js takes this file from 14 passed, 0 failed to
+   12 passed, 2 failed, and both failures are coverage, neither is a total.
+
+   So the check is pinned to what the denominator does still decide: the page
+   must state the same money as the row AND state it as money that ARRIVED. A
+   page reading "AED 6,140 accounted, AED 5,600 of it not yet collected"
+   against a row reading "AED 540 of fares plus AED 5,600 paid over 11 days" is
+   not stating the same money whatever its total says. That is the shape the
+   defect takes WITH the guard; production, which is still serving the code
+   without it, takes the other exit from the same wrong denominator and
+   restates 43 plates' money as Uber's gross fares instead. Both halves are
+   compared separately as well as summed, so a later change that balanced the
+   total by moving money from one column to the other fails here too. */
 const mKpi = (await mixApi.get(`/api/vehicle/kpis?plate=M100&${mixWin}`)).body;
-check('the mixed plate’s page states the same money as its directory row',
+check('the mixed plate’s page states the same money as its row, and states it as collected',
   near(mKpi.accounted, Math.round(((Number(mRow?.revenue) || 0)
-    + (Number(mRow?.payout) || 0)) * 100) / 100),
-  `${mKpi.accounted} vs ${mRow?.revenue} + ${mRow?.payout}`);
-check('and a payout covering every day its channel worked is not reported as under-covered',
-  mKpi.undercovered_bookings === 0 && mKpi.undercovered_payouts == null,
+    + (Number(mRow?.payout) || 0)) * 100) / 100)
+    && near(mKpi.accounted_payouts, mRow?.payout)
+    && near(mKpi.accounted_fares, mRow?.revenue)
+    && mKpi.undercovered_payouts == null,
+  `accounted ${mKpi.accounted} vs ${mRow?.revenue} + ${mRow?.payout}`
+    + ` · payout half ${mKpi.accounted_payouts} vs ${mRow?.payout}`
+    + ` · fares half ${mKpi.accounted_fares} vs ${mRow?.revenue}`
+    + ` · reported uncollected ${mKpi.undercovered_payouts}`);
+check('and a payout covering every day its channel worked leaves no booking under-covered',
+  mKpi.undercovered_bookings === 0,
   JSON.stringify([mKpi.undercovered_bookings, mKpi.undercovered_payouts,
     mKpi.undercovered_platforms]));
 

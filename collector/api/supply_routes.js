@@ -115,28 +115,53 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
        Byte-identical denominators under six different chips, down to the
        heatmap cells — dow 0 hour 0 read online_h 30.45 under all of them. The
        numerator split correctly, 4,634 + 1,468 = 6,102; only the divisor was
-       unfiltered. Egari's own online hours are roughly 9,800, so its idle_h
-       was overstated about three times over and the page told the operator
-       that 24,439 Egari driver-hours went undispatched.
+       unfiltered.
+
+       How big the error is can be measured WITHOUT this fix being deployed,
+       and the first version of this comment carried the audit's guess of
+       "roughly 9,800" instead, which is not a measurement and was not close.
+       driver_day.online_min is built from the same driver_timeline_event
+       ONLINE spans by src/rollup.js:927-932, and /api/compare/period sums that
+       column with the fleet chip honoured. Over the identical window, fetched
+       from production on 2026-09-05:
+
+         unfiltered     online_min 1,609,712  →  26,829 h
+         &fleet=ecosine online_min 1,074,609  →  17,910 h
+         &fleet=egari   online_min   534,900  →   8,915 h
+
+       Egari is 33.2% of the fleet's online time, not 100% of it. Scaled onto
+       this endpoint's own 25,907 h — the two totals differ by 3.6% because
+       driver_day folds a span into the Dubai day it started in — Egari's share
+       of the denominator is about 8,610 h. So its real idle is about 7,140 h
+       and about 83% rather than the 24,439 h and 94% the page printed: the
+       idle hours were overstated about three and a half times over.
 
        The platform chips were worse than wrong. driver_timeline_event holds
-       platform 'uber' and nothing else — src/sources/uber_timeline.js writes
-       SRC = 'uber' on every row — so #supply?platform=bolt was printing Uber's
-       25,907 hours as Bolt's and calling that channel 99% idle, with no
-       availability feed for Bolt existing anywhere. api/public/optimise.js
-       builds the Rota recommendation off the same totals, so #optimise
-       inherited the fabricated denominator too.
+       platform 'uber' and nothing else — src/sources/uber_timeline.js sets
+       SRC = 'uber' at :29 and stamps it on every row it builds at :143 — so
+       #supply?platform=bolt was printing Uber's 25,907 hours as Bolt's and
+       calling that channel 99% idle, with no availability feed for Bolt
+       existing anywhere. api/public/optimise.js builds the Rota recommendation
+       off the same totals, so #optimise inherited the fabricated denominator
+       too.
 
        Both queries therefore take the full `p` and repeat the platform and
-       fleet predicates the W() helper in api/server.js applies to trip_norm.
-       The table carries both columns — platform text NOT NULL, fleet_id text
-       NOT NULL, sql/schema_v37.sql:26-27 — so this is a filter the feed can
-       actually answer, not a guess. Nothing downstream needs changing:
-       `covered: supply.length > 0` below already drives the note at
-       api/public/supply.js, so bolt and hotel now render "Driver availability
-       has not been collected for this window" instead of another platform's
-       hours dressed up as their own. An absent figure with the reason beside
-       it is the honest answer here, and a fabricated 99% was never one. */
+       fleet predicates the W() helper in api/server.js applies to trip_norm —
+       in the WHERE for the span query below, and in `spans` for the one after
+       it, for the reason set out above that query. The table carries both
+       columns — platform text NOT NULL, fleet_id text NOT NULL,
+       sql/schema_v37.sql:26-27 — so this is a filter the feed can actually
+       answer, not a guess.
+
+       What DID need changing downstream, and did not get it in the first pass,
+       is what the page says once `covered` goes false. One sentence used to
+       serve it — Uber keeps about 31 days and nothing older, so wait for the
+       backfill — and under a Bolt chip that sentence is false in a way a
+       reader acts on: there is no Bolt feed to backfill. `uncovered` below
+       tells the two cases apart and api/public/supply.js prints the matching
+       one. An absent figure with the RIGHT reason beside it is the honest
+       answer here; a fabricated 99% was never one, and neither is an absence
+       explained by something that did not happen. */
     const [span] = await q(
       `SELECT min(at) AS from_at, max(at) AS to_at,
               count(DISTINCT (at AT TIME ZONE 'Asia/Dubai')::date)::int AS days
@@ -159,18 +184,54 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
        across eight slots, and attributing all of it to 18:00 would invent a
        peak that is really a shift boundary. generate_series over the span does
        the splitting; the clamps keep the first and last hour partial. */
+    /* The chip predicates sit AFTER lead(), not before it.
+       ─────────────────────────────────────────────────────────────────────
+       This is a correctness bug the chip fix itself introduced, and it is the
+       reason the two predicates are in `spans` rather than beside the window
+       bound in `ev` where they were first written. A span is not one row: it
+       is an ONLINE row and the very next event on that driver's timeline,
+       whatever that next event is. lead() reads whatever rows the CTE hands
+       it, so a predicate applied BEFORE it does not select spans, it deletes
+       events out of the middle of a timeline and lets the survivors close each
+       other.
+
+       Reproduced on PGlite against one driver, three events — ONLINE at Dubai
+       10:00 stamped fleet 'egari', OFFLINE two hours later stamped 'ecosine',
+       then the next day's ONLINE at 10:00. Unfiltered the endpoint answers 3
+       online hours, which is right. With the predicates in `ev`,
+       &fleet=egari answered 25 — the OFFLINE that ended the shift was filtered
+       away, so the 10:00 ONLINE ran on to the following morning's ONLINE and
+       painted 25 consecutive heatmap cells for a driver who was online for
+       two. A one-row filter turned a 2-hour span into a 24-hour one, in the
+       direction that inflates the denominator, which is the direction this
+       whole fix exists to stop.
+
+       After the move, `ev` is the driver's timeline as the provider wrote it
+       and `spans` keeps the ONLINE rows belonging to the chip. The end of a
+       span is then the real instant the driver stopped being online — a
+       provider stamping the closing row with another fleet_id or another
+       platform does not mean the driver stayed logged in, and the span is
+       attributed to the fleet that OPENED it, which is the fleet whose supply
+       it was. src/rollup.js:927-932 computes driver_day.online_min from this
+       same shape with lead() over the unfiltered stream, so this is also what
+       makes the two agree rather than two answers to one question.
+
+       The span query above keeps its predicates in the WHERE deliberately: it
+       has no window function to disturb, and what it reports is the reach of
+       the chip's own rows, which is exactly what min(at)/max(at) over them
+       means. */
     const supply = await q(
       `WITH ev AS (
-         SELECT driver_ext_id, at, status,
+         SELECT driver_ext_id, at, status, platform, fleet_id,
                 lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
            FROM driver_timeline_event
           WHERE kind = 'status' AND status <> ''
-            AND at >= $1::timestamptz AND at <= $2::timestamptz
-            AND ($3::text IS NULL OR platform = $3)
-            AND ($4::text IS NULL OR fleet_id = $4)),
+            AND at >= $1::timestamptz AND at <= $2::timestamptz),
        spans AS (
          SELECT driver_ext_id, at AS s, next_at AS e FROM ev
-          WHERE next_at IS NOT NULL AND status = 'ONLINE'),
+          WHERE next_at IS NOT NULL AND status = 'ONLINE'
+            AND ($3::text IS NULL OR platform = $3)
+            AND ($4::text IS NULL OR fleet_id = $4)),
        slots AS (
          SELECT sp.driver_ext_id, g AS slot,
                 extract(epoch FROM (
@@ -265,19 +326,111 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
       jobs: a.jobs + c.total_jobs,
     }), { online_h: 0, on_job_h: 0, idle_h: 0, jobs: 0 });
 
+    const covered = supply.length > 0;
+
+    /* WHY there is nothing, because it is not one reason, and the page prints
+       a sentence off it.
+       ─────────────────────────────────────────────────────────────────────
+       Until the chip fix landed, `covered` was false only for a window that
+       predates the collector, so one sentence could serve it — Uber keeps
+       about 31 days of availability and nothing older, so this page fills in
+       going forward and cannot be backfilled. The chip fix made a second case
+       reachable and gave it that same sentence, which is false in it:
+       #supply?platform=bolt is not a window problem and no amount of waiting
+       fills it in. driver_timeline_event carries platform 'uber' and nothing
+       else — src/sources/uber_timeline.js writes SRC = 'uber' at :29 and
+       stamps it on every row at :143 — so Bolt, Hotel and Yango have no
+       availability feed to be inside or outside the window OF. A reader told
+       to wait for the backfill would wait forever.
+
+       The two are told apart by asking whether the chip has ever produced a
+       row at all, window bound dropped, which is the same predicate pair the
+       queries above use. Rows but none here is a window problem; no rows ever
+       is a feed that does not exist. `platforms` beside it is what the feed
+       DOES carry, read from the table rather than hard-coded, so the page
+       names the collected channel from the data instead of asserting 'uber'
+       and drifting the day a second collector lands. */
+    let uncovered = null;
+    if (!covered) {
+      /* Three states, not two. "Has this chip ever produced a row" split
+         'outside-window' from 'no-feed' and got a third case wrong in between:
+         a chip with rows INSIDE the requested window that open no span — a
+         driver who went online and never went offline, or a window holding one
+         lone event — answered 'outside-window' and told the reader the days
+         "cannot be backfilled past that", which is a claim about Uber's
+         retention and not about this window at all. So the count is taken
+         twice: once bounded to the window, once not. Rows in the window but no
+         span is its own answer, and it is the one an operator can act on. */
+      const [ever] = await q(
+        `SELECT count(*)::int AS n
+           FROM driver_timeline_event
+          WHERE kind = 'status' AND status <> ''
+            AND ($1::text IS NULL OR platform = $1)
+            AND ($2::text IS NULL OR fleet_id = $2)`, p.slice(2));
+      const [inWin] = await q(
+        `SELECT count(*)::int AS n
+           FROM driver_timeline_event
+          WHERE kind = 'status' AND status <> ''
+            AND at >= $1::timestamptz AND at < ($2::date + 1)::timestamptz
+            AND ($3::text IS NULL OR platform = $3)
+            AND ($4::text IS NULL OR fleet_id = $4)`, p);
+      const feed = await q(
+        `SELECT DISTINCT platform FROM driver_timeline_event
+          WHERE kind = 'status' AND status <> '' ORDER BY 1`);
+      /* A future window is neither: nothing has happened yet, and saying the
+         days cannot be backfilled would be a statement about the past. */
+      const future = new Date(`${p[0]}T00:00:00+04:00`) > new Date();
+      uncovered = {
+        reason: ever.n === 0 ? 'no-feed'
+          : future ? 'not-yet'
+            : inWin.n > 0 ? 'no-span' : 'outside-window',
+        platforms: feed.map((r) => r.platform),
+        /* Named separately from `platforms`, because the page's sentence about
+           WHICH channels the feed carries is only informative when the feed
+           carries any. An empty list under "the availability feed carries…"
+           reads as a rendering fault; the page needs to know it is empty. */
+        feed_empty: feed.length === 0,
+      };
+    }
+
     res.json({
       cells,
-      totals: {
+      /* Absent with the reason beside it, never zero.
+         ─────────────────────────────────────────────────────────────────
+         `tot` is a reduction over `supply` cells, so when the feed answers
+         nothing every field of it is 0 — and 0 here is not a measurement, it
+         is the absence of one. idle_pct and jobs_per_online_h already guarded
+         themselves because they divide by online_h; the four summed fields did
+         not, and the platform chips made that branch reachable for the first
+         time. api/public/supply.js headlined the result as "0 jobs in this
+         window", which reads as a channel that sold nothing rather than a
+         channel whose supply was never collected — and jobs is the field that
+         reads worst as a zero, because Bolt really did sell 614 rides in the
+         window that printed it.
+
+         totals.jobs is not the window's job count in any case: it is the jobs
+         that fell in an hour supply was measured for, which is why it belongs
+         with the other three rather than being rescued from `demand`. With no
+         measured hour there is no such count, so it is null and `uncovered`
+         above says why. */
+      totals: covered ? {
         online_h: Math.round(tot.online_h), on_job_h: Math.round(tot.on_job_h),
         idle_h: Math.round(tot.idle_h), jobs: tot.jobs,
         idle_pct: tot.online_h ? Math.round((tot.idle_h / tot.online_h) * 100) : null,
         jobs_per_online_h: tot.online_h ? Math.round((tot.jobs / tot.online_h) * 100) / 100 : null,
+      } : {
+        online_h: null, on_job_h: null, idle_h: null, jobs: null,
+        idle_pct: null, jobs_per_online_h: null,
       },
-      /* Whether there is anything to say at all. Uber serves 31 days of
-         availability and nothing older, so a window before the collector
-         started has demand and no supply — and a balance chart drawn over that
-         reads as a fleet that was never online. */
-      covered: supply.length > 0,
+      /* Whether there is anything to say at all — a window before the
+         collector started, or a chip the collector has never covered, has
+         demand and no supply, and a balance chart drawn over that reads as a
+         fleet that was never online. WHICH of the two it is now travels in
+         `uncovered` beside it rather than being assumed by the page. */
+      covered,
+      /* Null when covered; {reason, platforms} when not — see the note above
+         the probe that fills it. */
+      uncovered,
       /* The span every figure above is actually over, which is the
          availability feed's own reach inside the window rather than the window
          the reader picked. A page that prints a rate has to be able to say

@@ -180,12 +180,17 @@ check('an event in the second half of the later month is a candidate for it',
    or because the move fell back under the 30% threshold — was never rewritten
    and never removed. It was simply served for ever.
 
-   MEASURED, production /api/breaks against /api/trend/monthly on 2026-09-05:
-   nine of thirty-four stored rows disagreed with the live series, four of them
-   with the sign inverted — fms 2025-12 -> 2026-01 was stored as 4,537 -> 119,
-   a 97.4% collapse, against a live 11,865 -> 13,674, a 15.2% RISE — and the
-   page contradicted itself, a KPI tile reading "LARGEST MOVE +1,029%" directly
-   above a card reading "+115,800%".
+   RE-MEASURED on 2026-09-05, production /api/breaks against
+   /api/trend/monthly?platform=… counted as bookings plus telematics journeys,
+   which is what the collector's own count(*) adds together: nine of thirty-four
+   stored rows disagree with the live series, and SIX of the nine have the sign
+   inverted — fms 2025-12 -> 2026-01 is stored as 4,537 -> 119, a 97.4%
+   collapse, against a live 11,865 -> 13,674, a 15.2% RISE. Six, not the four
+   this comment and the one in src/sources/events.js both said in round one;
+   that count was taken off an example list which itself already held five, and
+   uber 2026-06 -> 07 (stored +44.4%, live -3.9%) was never in it. The page
+   contradicts itself with them, a KPI tile reading "LARGEST MOVE +1,029%"
+   directly above a card reading "+115,800%".
 
    Both directions are asserted here, because the fix for the first is a DELETE
    and a DELETE with the wrong fence is a worse bug than the one it fixes: a

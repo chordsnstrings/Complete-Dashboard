@@ -293,6 +293,15 @@ const COLS = (keyCol) => [
    the arithmetic and left the row SET wrong. Deriving anything here is the
    defect; the endpoint is the only place that knows which rows it reconciled.
 
+   That first round is also where this page's oldest measurement comes from,
+   and it is worth keeping in front of whoever edits this function next. The
+   comment at api/reconcile_routes.js:118 records what deriving a gap from
+   two differently-scoped columns cost the last time: a whole-month statement
+   compared against a whole-month bank payout — "a month whose statement held
+   one week read as the platform overpaying by 1,449%". Every drift this band
+   has had is the same shape, one level up: two figures over two different row
+   sets, subtracted anyway.
+
    The fix is to stop deriving: the gap is t.delta, the count is
    t.reconciled_rows, and the two halves are t.bank_covered and
    t.expected_covered — which is what the Gap tile a few lines below already
@@ -319,19 +328,77 @@ export function headlineVerdict(d, month = null) {
   const gap = comparable && t.delta != null ? Number(t.delta) : null;
   const excluded = Number(t.not_comparable_rows) || 0;
   const reasons = Array.isArray(t.not_comparable_reasons) ? t.not_comparable_reasons : [];
+  /* The third exclusion, which this band named for nobody.
+     ─────────────────────────────────────────────────────────────────────
+     api/reconcile_routes.js:544 splits the rows before it splits them into
+     comparable and not: `settled = rows.filter((r) => !r.accrual)`, and only
+     the settled ones are counted into reconciled_rows and
+     not_comparable_rows. An accrual row is a DAY dated after today — Uber
+     writes a whole weekly payout period the moment it opens, so a period
+     running to the 30th writes rows for the 26th onward on the 25th. Both
+     halves of such a day are the same forward projection, which is why
+     api/reconcile_routes.js:536 nulls its delta outright.
+
+     So an accrual row is dropped BEFORE the not-comparable bookkeeping ever
+     sees it, and totals.accrual_rows is the only place it is counted. This
+     band read the other two counters and not that one, which made the
+     sub-line's arithmetic unresolvable on the exact view the drill-down
+     opens. Measured on production 2026-09-05, /api/reconcile?month=2026-09:
+
+       rows 30   reconciled_rows 5   not_comparable_rows 0   accrual_rows 25
+       6 days carry an expected payout, 6 carry a bank payout
+
+     The band claimed "5 days of 30 can be reconciled at all" over a sentence
+     saying six days carry each side and that both sides are what it takes —
+     six against five, with nothing on screen accounting for the sixth. That
+     sixth is 6 September, AED 14,061.78 expected against AED 12,673.86 bank,
+     a day that has not happened. Twenty-five rows in the table below it were
+     in the same position and the page said nothing about any of them: the
+     rule this round is built on is that an excluded row is SHOWN as excluded,
+     and half of it had been applied. */
+  const accrued = Number(t.accrual_rows) || 0;
 
   /* Named, not counted away. The endpoint hands back one reason per distinct
      cause; joined into the sentence they read as the two sentences an
      operator needs — "we cannot fetch it" and "it is not finished yet" — and
-     neither of them is a discrepancy anybody can act on. */
+     neither of them is a discrepancy anybody can act on.
+
+     "left out of the figure above" was the wording here, and it is false in
+     the state below where there is no figure above — when nothing reconciles,
+     the band prints "0 of 24 comparable" rather than a gap. A reason that is
+     wrong in one of the two states it renders in is the failure this round is
+     about, so the clause names the comparison instead, which is true in
+     both. */
   const why = reasons.length
-    ? ` ${plural(excluded, 'It is', 'They are')} left out of the figure above because `
+    ? ` ${plural(excluded, 'It is', 'They are')} left out of the comparison because `
       + `${reasons.join(', and ')} — `
       + `${reasons.length === 1 ? 'which is not' : 'none of which is'} a discrepancy to chase.`
     : '';
+  /* "A further" counts on from a figure that has to exist. With
+     reconciled_rows 0 and not_comparable_rows 2 the sentence read "Nothing in
+     this range can be reconciled … A further 2 months carry both sides and
+     still cannot be compared" — further than the nothing, which invites the
+     reader to look for the periods the further ones are further than. In that
+     state the excluded rows are not an addition to the comparison, they ARE
+     the whole of what could have been compared, so the clause says so. */
   const held = excluded
-    ? ` A further ${countOf(excluded, unit)} ${plural(excluded, 'carries', 'carry')} both sides `
-      + `and still cannot be compared.${why}`
+    ? (comparable
+      ? ` A further ${countOf(excluded, unit)} ${plural(excluded, 'carries', 'carry')} both sides `
+        + `and still cannot be compared.${why}`
+      : ` Even the ${countOf(excluded, unit)} that ${plural(excluded, 'carries', 'carry')} both `
+        + `sides cannot be compared.${why}`)
+    : '';
+  /* The accrual rows, in the same shape the not-comparable ones are named in:
+     how many, and the reason, said as the reason it is rather than as a gap
+     nobody measured. They are always the tail of a day-grain range — the
+     predicate is `k > TODAY` — and always absent at month grain, where an
+     open month carries its accrual inside the row instead. */
+  const ahead = accrued
+    ? ` The last ${countOf(accrued, unit)} of the range ${plural(accrued, 'has', 'have')} not `
+      + `happened yet — Uber writes a whole weekly payout period the moment it opens, so both `
+      + `sides of ${plural(accrued, 'that one', 'those')} are the same forward projection rather `
+      + `than a measurement. ${plural(accrued, 'It is', 'They are')} shown in the table below and `
+      + `left out of every total above.`
     : '';
 
   return {
@@ -342,14 +409,21 @@ export function headlineVerdict(d, month = null) {
     unit: gap != null ? (gap >= 0 ? 'more wired than owed' : 'less wired than owed') : 'comparable',
     tone: gap != null ? (Math.abs(gap) > 1000 ? 'warn' : null) : 'warn',
     meta: `${fmt(periods)} ${plural(periods, unit)} on record`,
+    /* Said once. This read "only where both exist is there anything to
+       compare" and then, one clause later, "A further 2 months carry both
+       sides and still cannot be compared" — defensible only if you are
+       already reading the first as a necessary condition rather than a
+       sufficient one, and a flat contradiction to anybody who is not. The
+       first clause now states the necessity it meant. */
     sub: `${fmt(withExpected)} ${plural(withExpected, unit)} carry an expected payout and `
-      + `${fmt(withBank)} carry a bank payout — the two are collected from different surfaces `
-      + `and only where both exist is there anything to compare.${held}`,
+      + `${fmt(withBank)} carry a bank payout — the two are collected from different surfaces, `
+      + `and a ${unit} needs both sides before it can be compared at all.${held}${ahead}`,
     /* The two numbers the band is made of, so a test can assert the band
        against the endpoint rather than against the sentence it renders. */
     gap,
     comparable,
     excluded,
+    accrued,
   };
 }
 

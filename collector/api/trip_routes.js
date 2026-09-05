@@ -100,7 +100,8 @@ export function tripRoutes(app, { q, wrap }) {
        so each block is fetched independently and an empty one is reported as
        empty rather than turning the page into an error. */
     const day = t.local_day;
-    const [custody, telemetry, segment, payout, sameDay, vehicle, statement] = await Promise.all([
+    const [custody, telemetry, segment, payout, sameDay, vehicle, statement,
+      stmtWindow] = await Promise.all([
       /* Who held the car that day, from the shared definition — the same one
          the day page and the playbook use, so the person a trip names is the
          person the to-do list chases. */
@@ -208,11 +209,26 @@ export function tripRoutes(app, { q, wrap }) {
          "Yango does not report this" and a number. Uber trips are untouched:
          they were already matching the only rows this predicate could
          legitimately reach. */
+      /* period_days rides along, because these four are not always a day.
+         ─────────────────────────────────────────────────────────────────
+         src/rollup.js's resolved CTE spreads each Uber report evenly over the
+         days it covers — `p.net / p.days` — and sql/schema_v44.sql added
+         period_days precisely so a reader can tell "seven consecutive rows
+         carrying a seventh of one number each" from seven days that were each
+         measured. This query selected every column of that row except the one
+         that says what it is, so the page had no way to qualify it and the
+         caption it grew claimed a day. Measured on /api/money/sources
+         2026-09-05: uber_components reports max_period_days 7 on both fleets,
+         so on this fleet the usual case is a week, not a day. MAX, not MIN,
+         for the same reason src/rollup.js:819 folds it that way — where two
+         accounts fold into one person-day the coarsest window is the one that
+         limits what may be claimed about it. */
       (t.driver_ext_id || t.driver_name) && day ? q(
         `SELECT round(sum(net)::numeric,2)   AS net,
                 round(sum(tips)::numeric,2)  AS tips,
                 round(sum(salik)::numeric,2) AS salik,
                 round(sum(cash)::numeric,2)  AS cash,
+                max(period_days) AS period_days,
                 min(source) AS source
          FROM driver_statement_day
          WHERE source <> 'ledger' AND NOT pseudo AND day = $2::date
@@ -220,7 +236,69 @@ export function tripRoutes(app, { q, wrap }) {
            AND (($1::text IS NOT NULL AND driver_ext_id = $1)
                 OR ($3::text IS NOT NULL AND btrim(name_key) = $3))`,
         [t.driver_ext_id || null, day, stmtName(t.driver_name), t.platform]) : [],
+
+      /* HOW FAR THE STATEMENTS WE HOLD FOR THIS CHANNEL ACTUALLY REACH.
+         ─────────────────────────────────────────────────────────────────
+         A null statement_day above has four different causes and the page was
+         about to print one sentence for all of them. Three of the four are
+         about our collection and only one is about the channel, and the page
+         cannot tell them apart from a null.
+
+         The one that matters most is the horizon. driver_statement_day's
+         non-ledger slice is rebuilt from driver_earnings_component, and that
+         walk reaches back about as far as the payout walk api/day_routes.js:240
+         documents. Measured on production 2026-09-05: /api/money/sources
+         reports uber_components first_period 2026-02-09 on both fleets, and
+         /api/revenue?days=400 reports statement_days 209 of 400 — so a little
+         over half the window we serve has no component statement at all.
+         Checked trip by trip on the boundary: /api/trip for Uber bookings on
+         2026-02-08 answers statement_day null for both drivers sampled, and
+         on 2026-02-09 both answer a row. /api/trips/list counts 175,105 Uber
+         bookings between 2025-08-01 and 2026-02-08, every one of them on the
+         far side of that boundary, and one of the drivers with nothing on
+         2026-02-08 — Mahaz Ahmad Darwaish Khan — has AED 116.32 of net on
+         2026-02-09. Uber filed for that person; we have not collected the
+         week. A page that says "Uber filed no statement covering 8 Feb 2026"
+         states the provider's behaviour and is wrong about it on all 175,105.
+
+         So the window comes back with the response and the page says which
+         side of it the day is on. Split by whether the row is the operator's
+         imported ledger, because the aggregate above deliberately excludes
+         that source and a sentence that says a channel files nothing must not
+         be written where the ledger holds one: /api/money/sources reports
+         statement_import rows on platform 'hotel' (3,233 rows) as well as
+         'uber', so "the hotel channel files no day statement" would be the
+         next false reason in the same place. Cheap enough to run on every
+         request — the platform is the leading column of this table's primary
+         key (sql/schema_v25.sql:52) and the whole table is under 100k rows. */
+      q(`SELECT (source = 'ledger') AS ledger,
+                min(day)::text AS first_day, max(day)::text AS last_day,
+                count(DISTINCT day)::int AS days
+         FROM driver_statement_day
+         WHERE NOT pseudo AND platform = $1
+         GROUP BY 1`, [t.platform]),
     ]);
+
+    /* Which of the four absences this is — decided here, where the reasons
+       are, rather than guessed at by the page from a null. `sd` present is no
+       absence at all; a record naming nobody was never asked about (the
+       predicate above is per driver, and 1,944 telematics journeys in the
+       last three days name no driver); a day outside the collected window is
+       our gap; and only a day INSIDE it, on a channel that files, is the
+       channel itself having filed nothing. */
+    const sd = statement[0]?.net == null ? null : statement[0];
+    const winOf = (led) => {
+      const r = stmtWindow.find((x) => Boolean(x.ledger) === led);
+      return r && r.first_day ? { first_day: r.first_day, last_day: r.last_day, days: r.days } : null;
+    };
+    const channelWindow = winOf(false);
+    const statementAbsent = sd ? null
+      : !(t.driver_ext_id || t.driver_name) ? 'no_driver_named'
+        : !day ? 'no_day_on_record'
+          : !channelWindow ? 'channel_files_none'
+            : day < channelWindow.first_day ? 'before_channel_window'
+              : day > channelWindow.last_day ? 'after_channel_window'
+                : 'in_channel_window';
 
     res.json({
       trip: { ...t, raw: safeRaw.value },
@@ -288,14 +366,31 @@ export function tripRoutes(app, { q, wrap }) {
       payout_day: payout[0] || null,
       /* Null when no component covers the day, rather than a row of zeroes —
          "the statement does not reach this day" and "the driver earned
-         nothing" are different facts and the page says which. Now that the
-         predicate above is per channel, null also carries a third fact — the
-         channel files no day statement at all, which is true of Yango, Bolt
-         and the hotel channel — and the page distinguishes that one too. The
-         `source` this row carries is the surface that filed the figure, and
-         the page prints it, because "what the channel says" is only checkable
-         if the reader can see which of its surfaces said it. */
-      statement_day: statement[0]?.net == null ? null : statement[0],
+         nothing" are different facts and the page says which. Which of them
+         it is no longer has to be inferred from the null: statement_absent
+         below names the reason, because the first version of this fix let the
+         page print one sentence over four different causes and that sentence
+         was false on three of them. The `source` this row carries is the
+         surface that filed the figure, and the page prints it, because "what
+         the channel says" is only checkable if the reader can see which of
+         its surfaces said it. */
+      statement_day: sd,
+      /* Why it is null, in the route's own words rather than the page's guess.
+         One of 'no_driver_named', 'no_day_on_record', 'channel_files_none',
+         'before_channel_window', 'after_channel_window', 'in_channel_window'
+         — and null when a statement is present. Only the last of the six is a
+         statement the channel did not file; the rest are facts about this
+         record or about how far our collection reaches, and the page must not
+         report any of them as the provider having filed nothing. */
+      statement_absent: statementAbsent,
+      /* And the span itself, so the page can name the dates it is claiming a
+         day falls outside of. `channel` is the slice the four figures are read
+         from — every non-ledger source, which today is uber_rest — and null
+         means this channel has never filed one to us. `ledger` is the
+         operator's import, which this endpoint deliberately does not read and
+         which the page names rather than letting a reader conclude that no
+         figure for the date exists anywhere. */
+      statement_window: { channel: channelWindow, ledger: winOf(true) },
       same_day: sameDay,
       /* Named rather than inferred from an empty array: "no tracker reported
          this plate that day" and "this plate has no tracker" are different

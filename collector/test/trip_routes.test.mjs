@@ -79,6 +79,41 @@ await q(`INSERT INTO driver_earnings_component (platform,fleet_id,driver_ext_id,
                 ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20','taxes_earnings','your_earnings',-5,'AED'),
                 ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20','toll','refunds',12.5,'AED'),
                 ('uber','ecosine','d-1','Ali Khan','2026-08-20','2026-08-20','cash_collected','payouts',-140,'AED')`);
+/* A WEEK, not a day — and one with no tip and no toll line in it.
+   ─────────────────────────────────────────────────────────────────────────
+   Two of this file's claims rest on this fixture. src/rollup.js spreads a
+   report evenly across the days it covers, so these seven days each carry
+   700/7 = 100 of net and period_days 7; Uber files this fleet weekly
+   (/api/money/sources: uber_components max_period_days 7 on both fleets), so
+   this is the ORDINARY Uber row and the single-day one above is the rarity.
+   And the period carries no `tip` and no `toll` component at all, which makes
+   tips and salik null rather than zero on every one of the seven — the shape
+   /api/trip returned on all three Uber bookings sampled from production
+   2026-02-15, each with a net and a null salik. */
+await q(`INSERT INTO driver_earnings_component (platform,fleet_id,driver_ext_id,driver_name,
+           period_start,period_end,category,parent,amount,currency)
+         VALUES ('uber','ecosine','d-2','Bilal Noor','2026-08-18','2026-08-24','net_fare',NULL,700,'AED')`);
+/* Trips either side of the collected span, and one inside it. The span these
+   fixtures build is 2026-08-18 → 2026-08-24: everything before it is a date
+   our walk has not reached, everything after is a report not yet collected,
+   and a driver-day inside it with nothing filed is the only one of the three
+   that is the channel having filed nothing. */
+await q(
+  `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+     requested_at,ended_at,distance_km,status)
+   VALUES ('uber','u-week','ecosine','L100','d-2','Bilal Noor',
+     '2026-08-21T08:00:00+04','2026-08-21T08:30:00+04',9.0,'completed'),
+          ('uber','u-old','ecosine','L100','d-1','Ali Khan',
+     '2026-08-01T08:00:00+04','2026-08-01T08:30:00+04',9.0,'completed'),
+          ('uber','u-new','ecosine','L100','d-1','Ali Khan',
+     '2026-09-01T08:00:00+04','2026-09-01T08:30:00+04',9.0,'completed')`);
+/* A telematics journey: the tracker saw the vehicle move and no channel sold
+   it, so it names no driver at all. 1,944 of these in the last three days on
+   production, every one with driver_name and driver_ext_id null. */
+await q(
+  `INSERT INTO trip (platform,external_id,fleet_id,plate,requested_at,ended_at,distance_km,status)
+   VALUES ('fms','L100|2026-08-20T10:00:00+04:00','ecosine','L100',
+     '2026-08-20T10:00:00+04','2026-08-20T10:20:00+04',4.0,'completed')`);
 const { refreshPayouts, refreshStatements } = await import('../src/rollup.js');
 await refreshPayouts(db);
 await refreshStatements(db);
@@ -90,6 +125,16 @@ await refreshStatements(db);
 await q(`INSERT INTO driver_statement_day (platform, fleet_id, driver_name, day,
            net, tips, salik, cash, source, pseudo)
          VALUES ('yango','ecosine','Ali Khan','2026-08-20',66,0,0,4,'yango_park',false)`);
+/* And the operator's imported ledger, on a channel that files nothing of its
+   own. /api/money/sources reports statement_import rows on platform 'hotel'
+   (3,233 of them) as well as 'uber' — so "the hotel channel files no day
+   statement" is false as stated, and the route has to hand the page the
+   ledger's span so the page can say the true version: this channel files none
+   of its OWN, and the import that does carry figures for it is not what these
+   four rows read. */
+await q(`INSERT INTO driver_statement_day (platform, fleet_id, driver_name, day,
+           net, source, pseudo)
+         VALUES ('hotel','ecosine','Ali Khan','2026-08-20',120,'ledger',false)`);
 
 const app = express();
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
@@ -210,6 +255,87 @@ check('missing context is empty rather than fatal',
 check('a day no statement covers is null rather than zeroed',
   e.statement_day === null, JSON.stringify(e.statement_day));
 
+/* ── an absent figure, and WHICH of the five reasons it is ────────────────
+   The first version of this fix made the four "that day" figures go absent on
+   every channel but the trip's own, and then printed one sentence for it:
+   "<channel> filed no statement covering <day> … this driver may well have a
+   statement elsewhere". That is a claim about the PROVIDER, and on production
+   2026-09-05 it was false on the larger half of the fleet's history — the
+   non-ledger statement slice is rebuilt from the earnings components, and
+   /api/money/sources reports those starting 2026-02-09 while /api/trips/list
+   counts 175,105 Uber bookings before that date. Uber filed; we had not
+   walked back. It was also incoherent on the 1,944 telematics journeys of the
+   last three days, which name no driver and come from a tracker that files no
+   earnings at all.
+
+   These pin the STATE the route reports, not the sentence the page writes
+   from it: which of the five causes a null statement_day has, and the span
+   that decides three of them. A rewording is free; losing the distinction is
+   the regression. */
+console.log('\nan absent statement says which of five reasons it is');
+
+const win = r.statement_window || {};
+check('the span of statements collected for the channel comes back',
+  win.channel?.first_day === '2026-08-18' && win.channel?.last_day === '2026-08-24',
+  JSON.stringify(win.channel));
+check('a day a statement covers reports no absence at all',
+  r.statement_absent === null, JSON.stringify(r.statement_absent));
+
+const older = (await get('/api/trip?platform=uber&id=u-old')).body;
+check('a day BEFORE the collected span is our gap, not the channel filing nothing',
+  older.statement_day === null && older.statement_absent === 'before_channel_window',
+  JSON.stringify(older.statement_absent));
+const newer = (await get('/api/trip?platform=uber&id=u-new')).body;
+check('a day AFTER it is a report not collected yet, and says so separately',
+  newer.statement_day === null && newer.statement_absent === 'after_channel_window',
+  JSON.stringify(newer.statement_absent));
+/* d-9 drove on 2026-08-20, inside the span, and no component names them. This
+   is the ONLY one of the five that is the channel having filed nothing. */
+check('a driver-day inside the span with nothing filed is the channel’s silence',
+  e.statement_day === null && e.statement_absent === 'in_channel_window',
+  JSON.stringify(e.statement_absent));
+
+const fms = (await get(`/api/trip?platform=fms&id=${encodeURIComponent('L100|2026-08-20T10:00:00+04:00')}`)).body;
+check('a record naming no driver was never asked about, and the route says so',
+  fms.statement_absent === 'no_driver_named', JSON.stringify(fms.statement_absent));
+check('and it is not reported as a tracker feed having failed to file',
+  fms.statement_absent !== 'in_channel_window' && fms.statement_absent !== 'channel_files_none'
+  && fms.statement_window?.channel === null,
+  JSON.stringify(fms.statement_window));
+
+check('a channel that files none of its own says that, not that the day is uncovered',
+  h.statement_absent === 'channel_files_none' && h.statement_window?.channel === null,
+  JSON.stringify(h.statement_absent));
+/* And the import that DOES carry figures for that channel is named, so the
+   page cannot leave a reader concluding no figure exists anywhere. */
+check('and the operator’s ledger span for it comes back beside the absence',
+  h.statement_window?.ledger?.first_day === '2026-08-20',
+  JSON.stringify(h.statement_window?.ledger));
+
+console.log('\nand at what grain the figures it does show were measured');
+
+/* sql/schema_v44.sql: seven consecutive rows carrying a seventh of one number
+   each are indistinguishable from seven measured days unless the divisor
+   travels with them. uber_components reports max_period_days 7 on both fleets
+   on production, so the spread week is the ordinary Uber row. */
+const wk = (await get('/api/trip?platform=uber&id=u-week')).body;
+check('a week spread across its days carries the divisor that spread it',
+  Number(wk.statement_day.period_days) === 7 && Number(wk.statement_day.net) === 100,
+  JSON.stringify(wk.statement_day));
+check('and a day the channel filed as a day is marked as one',
+  Number(r.statement_day.period_days) === 1, JSON.stringify(r.statement_day?.period_days));
+check('a row whose report window was never recorded says null, not 1',
+  y.statement_day.period_days === null, JSON.stringify(y.statement_day?.period_days));
+
+/* A statement can carry a net and no toll line at all — measured on three
+   Uber bookings from 2026-02-15, salik null on all three and tips null on
+   one. Number(null) is 0, so the page used to print "no toll was reimbursed
+   that day" beside the em dash of a figure nobody measured. */
+check('a term the statement did not carry stays null and never becomes a zero',
+  wk.statement_day.tips === null && wk.statement_day.salik === null
+  && Number(wk.statement_day.net) === 100,
+  JSON.stringify(wk.statement_day));
+
 /* ── and the page says whose book it is showing ───────────────────────────
    The route can only make the figure right; the page is where a reader is
    told what it is. Two things had to change there and both are easy to lose
@@ -225,9 +351,56 @@ check('a day no statement covers is null rather than zeroed',
    regression. */
 const page = readFileSync('api/public/trip.js', 'utf8');
 const money = page.slice(page.indexOf('── the money'), page.indexOf('── the driver'));
-check('the page names the channel when no statement covers the day',
-  /no \$\{sourceLabel\(t\.platform\)\} statement covers this day/.test(money),
-  'the absent basis no longer names the channel');
+/* REPINNED. This used to test for the literal "no ${sourceLabel(t.platform)}
+   statement covers this day", which is one sentence over five different
+   causes — and it passed while the page said that a GPS tracker had filed no
+   earnings statement and that Uber had filed nothing for 175,105 bookings it
+   did file for. The property is not the sentence: it is that the page reads
+   the route's reason and writes a different one for each, and that where the
+   channel is the reason the channel is named. */
+check('the page writes a different absence for each reason the route names',
+  /statement_absent/.test(money)
+  && ['no_driver_named', 'no_day_on_record', 'channel_files_none',
+    'before_channel_window', 'after_channel_window', 'in_channel_window']
+    .every((c) => money.includes(c)),
+  'the page has gone back to one sentence over every cause');
+check('and it still names the channel where the channel is the reason',
+  /sourceLabel\(t\.platform\)/.test(money) && /statement_window/.test(money),
+  'the absent basis no longer names the channel or the span it is outside of');
+/* The grain, on the page as well as the wire: a caption that says "a figure
+   for the whole day" over a seventh of a week contradicts the note printed
+   directly beneath it, which has said "a week's average spread across it"
+   since it was written. */
+/* Pinned to the CAPTION, not to the word. `/period_days/.test(money)` passed on
+   the unmodified pre-fix page, because trip.js already mentioned period_days in
+   a different branch — so the assertion was true before the fix and could never
+   have failed for the reason it was written for. What it exists to check is
+   that the sentence about the four figures BRANCHES on the divisor: a period of
+   one day may be called a measured day, a period of seven may not. */
+const grainSentence = money.slice(money.indexOf('const pDays ='),
+  money.indexOf('mp.body.append', money.indexOf('const pDays =')));
+check('the caption reads the divisor rather than asserting a measured day',
+  /sd\.period_days/.test(grainSentence)
+  && /pDays === 1/.test(grainSentence) && /pDays > 1/.test(grainSentence),
+  'the page must branch on the period length, not merely mention it');
+/* And the third state, which is the one a bare "=== 1 else spread" would get
+   wrong: a row written before sql/schema_v44.sql added the column has no
+   period_days at all, and neither "measured on this day" nor "spread from a
+   week" is known to be true of it. */
+check('…and says so plainly where the divisor was never recorded',
+  /not recorded/.test(grainSentence));
+/* And the three statement terms tell a line the statement did not carry from
+   one it filed as zero — the null guard has to come BEFORE the truthiness
+   test, which is what Number(null) === 0 defeated. */
+for (const [term, label, from, to] of [
+  ['tips', 'a tip line', "what: 'Tips that day'", "what: 'Salik"],
+  ['salik', 'a toll line', "what: 'Salik reimbursed", "what: 'Cash the driver"]]) {
+  const cell = money.slice(money.indexOf(from), money.indexOf(to, money.indexOf(from) + 1));
+  check(`${label} the statement never carried is not printed as a measured zero`,
+    cell.includes(`sd.${term} == null`)
+    && cell.indexOf(`sd.${term} == null`) < cell.indexOf(`Number(sd.${term})`),
+    `the ${term} basis still reads Number(null) as 0`);
+}
 check('and it prints which surface filed the figures it does show',
   /sd\.source/.test(money) && /el\('p', 'cap'/.test(money),
   'statement_day.source is unread on the page again');

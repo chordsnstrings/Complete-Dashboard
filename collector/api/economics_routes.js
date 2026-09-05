@@ -454,6 +454,20 @@ export function economicsRoutes(app, { q, wrap, range }) {
     };
     for (const w of work) {
       for (const c of (w.channels || [])) {
+        /* booking_days is carried, not merely selected, and it is load-bearing.
+           coverage() in api/income_sql.js reads booking_days > 0 ?
+           booking_days : windowDays, so a channel row that arrives here
+           without it has its payout's day count divided by the length of the
+           CALENDAR window — which is how /api/vehicle/kpis and
+           /api/driver/kpis came to report a car's gross fares as its income,
+           a net AED 64,632.54 of excess across the 45 of 98 earning plates
+           whose page disagrees with their directory row on production for
+           2026-08, re-measured 2026-09-05T19:44Z. This ledger has always
+           asked the per_channel CTE for the column; until now nothing held it
+           to carrying it, and deleting this one field left all 49 assertions
+           in test/economics.test.mjs green. The three checks at the foot of
+           that file are the guard — a channel that worked seven days of August
+           and was paid for all seven must read 7 of 7 here and not 7 of 31. */
         Object.assign(plat(row(w.plate), c.platform), {
           bookings: c.bookings, priced_bookings: c.priced_bookings,
           fares: n(c.fares), km: n(c.km), booking_days: c.booking_days,
@@ -1079,6 +1093,17 @@ export function economicsRoutes(app, { q, wrap, range }) {
         e.uncharged_bookings += c.uncharged_bookings || 0;
         e.fares = add(e.fares, c.fares);
         e.km = add(e.km, c.km);
+        /* The same load-bearing field as on the asset ledger above, and the
+           same guard at the foot of test/economics.test.mjs: without it this
+           person's payout coverage is measured against the calendar window
+           rather than against the days their channel worked, and money_basis —
+           which is printed on the row as a sentence — reads partial_payout for
+           a channel paid in full. MAX rather than a union because what arrives
+           here is one count per ACCOUNT, not a set of days: a person whose two
+           accounts on one platform worked disjoint days is understated by it,
+           which is a smaller and separate defect than the one this field
+           exists to prevent, and the understatement is in the direction of
+           believing the payout rather than of doubting it. */
         e.booking_days = Math.max(e.booking_days, c.booking_days || 0);
       }
       r.priced_bookings += w.priced_bookings;

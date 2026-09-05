@@ -31,6 +31,13 @@ const BASIS = {
   partial_payout: { label: 'part-window', tone: 'warn',
     means: 'a real payout covering only part of the window — the rest of this channel’s money has not '
       + 'been collected yet, so the figure is right about the days it covers and silent about the others' },
+  /* A payout statement that exists and sums to exactly zero, beside trips that
+     do report fares. Neither figure is taken — see the zero-payout branch of
+     api/income_sql.js — so the pill says which row this is rather than letting
+     it render as a bare basis string. */
+  zero_payout: { label: 'no net', tone: 'critical',
+    means: 'a payout statement covers this channel and sums to exactly zero, so no net figure can '
+      + 'be taken from it, and the fares beside it are set aside rather than counted as income' },
   none: { label: 'dark', tone: 'critical',
     means: 'no fare on any booking and no payout reported: this channel’s money is not collected at all' },
 };
@@ -79,9 +86,20 @@ export async function renderRevenue(root) {
      channel worked, not the length of the window (see api/income_sql.js
      coverage()). */
   const paidRows = live.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout');
+  /* `?? 0` printed "0 of the 31 days Uber worked" for a channel whose coverage
+     is UNKNOWN rather than nil — a measured zero standing in for an absence,
+     which is the one substitution this product does not make. A row that
+     reaches the payout branch always has a payout; what it can lack is the day
+     count behind it, and when it does the honest sentence names the payout
+     without a span it cannot support. */
   const payoutSpan = paidRows
-    .map((r) => `${fmt(r.payout_coverage_days ?? r.payout_days ?? 0)} of the `
-      + `${fmt(r.payout_coverage_base ?? d.window_days)} days ${sourceLabel(r.platform)} worked`)
+    .map((r) => {
+      const days = r.payout_coverage_days ?? r.payout_days ?? null;
+      return days == null
+        ? `an unstated number of the days ${sourceLabel(r.platform)} worked`
+        : `${fmt(days)} of the ${fmt(r.payout_coverage_base ?? d.window_days)} `
+          + `days ${sourceLabel(r.platform)} worked`;
+    })
     .join(', and ');
   const underRows = live.filter((r) => r.basis === 'partial_payout');
 
@@ -145,6 +163,22 @@ export async function renderRevenue(root) {
           : null,
         t.accounted_payouts
           ? `${money(t.accounted_payouts)} in net payout over ${payoutSpan || 'the days it covers'}`
+          : null,
+        /* Money that is in neither half, named where the halves are named.
+           ─────────────────────────────────────────────────────────────────
+           A channel whose payout statement sums to exactly zero is counted
+           nowhere: its payout states no net figure and its fares are gross of
+           a commission, so income_sql sets it aside instead of choosing one.
+           Measured by calling fleetIncome on one such row — 8,500 priced
+           bookings, AED 500,000 of fares, a payout of 0 over 10 of 30 days —
+           every total came back null and the AED 500,000 appeared in no tile
+           and no sentence on this page. It is not in the figure above, and
+           this line is what stops it being missing rather than excluded. */
+        t.set_aside_fares
+          ? `${money(t.set_aside_fares)} of fares on `
+            + `${andList((t.set_aside_platforms || []).map((pl) => sourceLabel(pl)))} counted in `
+            + 'neither half — that payout statement sums to exactly zero, so which of its two '
+            + 'figures is income is unsettled and neither was taken'
           : null,
       ].filter(Boolean).join(' · ')
         || `across ${fmt(t.accounted_bookings)} of ${fmt(t.bookings)} bookings`,
@@ -224,12 +258,47 @@ export async function renderRevenue(root) {
      What still moves — and what a reader still has to compare across two
      ranges before reading it as a trend — is the COVERAGE, because a payout
      is measured over days and the window is not. */
+  /* "carry no fare per booking" was a claim about the CHANNELS, printed from
+     the fact that they are counted on a payout.
+     ─────────────────────────────────────────────────────────────────────────
+     The two are not the same thing and the sentence is false wherever they
+     differ. Measured on production 2026-09-05T18:51Z: yango is on basis payout
+     at every window read — 7, 14, 240, 300 and 365 days — and prices 13 of 13
+     bookings at days=7, 28 of 28 at days=14 and 36 of 36 at days=300, 100% on
+     all of them, while this caption named it as carrying no fare per booking. Uber joins
+     the list at 300 and 365 days now that the payouts == null guard in
+     api/income_sql.js stops a real payout being thrown away for gross fares,
+     and Uber prices 139,499 of the 147,780 bookings that could carry a fare at
+     300 days (94.4%) and 196,848 of 207,319 at 365 (94.9%). Both readings are
+     on the same rows this caption is built from, four columns to the left in
+     the table below it.
+
+     What is actually true is the thing the page exists to say: which channels
+     are accounted BY PAYOUT, and that being accounted by payout is a choice
+     between two kinds of money rather than the absence of one of them. The
+     channels that genuinely price nothing in the window still get that said
+     about them, because it is still true of them — separately, and only of
+     them. */
   const flipped = live.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout');
+  const flippedPriced = flipped.filter((r) => (+r.priced_bookings || 0) > 0);
+  const flippedBare = flipped.filter((r) => !(+r.priced_bookings || 0));
   if (flipped.length) {
     host.append(el('p', 'cap',
-      `${flipped.map((r) => sourceLabel(r.platform)).join(', ')} `
-      + `${plural(flipped.length, 'carries', 'carry')} no fare per booking and `
-      + `${plural(flipped.length, 'is', 'are')} accounted for by payout instead. A payout covers DAYS, `
+      `${andList(flipped.map((r) => sourceLabel(r.platform)))} `
+      + `${plural(flipped.length, 'is', 'are')} accounted for by payout rather than by the fares on `
+      + 'the trips themselves. '
+      + (flippedBare.length
+        ? `${andList(flippedBare.map((r) => sourceLabel(r.platform)))} `
+          + `${plural(flippedBare.length, 'carries', 'carry')} no fare on any booking in this window. `
+        : '')
+      + (flippedPriced.length
+        ? `${andList(flippedPriced.map((r) => `${sourceLabel(r.platform)} prices `
+          + `${pct(r.fare_coverage_pct, 1)} of the bookings that could carry a fare`))} — a channel `
+          + 'can be accounted by payout and still price its bookings: on a channel that takes a '
+          + 'commission the fare is the gross the rider paid and the payout is what reached the '
+          + 'bank, and only one of the two can be counted as income. '
+        : '')
+      + 'A payout covers DAYS, '
       + 'not bookings, so widening the range past the statements we hold does not add money to the '
       + 'total — it lowers the share of the window that total was measured over. The figure stays '
       + 'right about the days it covers and silent about the others; compare the coverage across two '

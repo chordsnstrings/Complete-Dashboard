@@ -19,6 +19,7 @@ import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { seedFleet, PLATES } from './fixture.mjs';
 import { rebuildCustody } from '../src/custody.js';
+import { refreshPayouts } from '../src/rollup.js';
 import { mountAll } from './mount.mjs';
 
 let pass = 0, fail = 0;
@@ -338,6 +339,92 @@ check('people arrive ranked by money',
     `${egari.rows.length} filtered vs ${both.rows.length} unfiltered`);
 }
 
-console.log(`\n${pass} passed, ${fail} failed`);
 server.close(); await db.close();
+
+/* ── the payout coverage denominator is the days the channel WORKED ───────
+   Both ledgers on this page hand chooseBasis a per-channel row and let it pick
+   between a fare and a payout, and coverage() in api/income_sql.js reads
+   `booking_days > 0 ? booking_days : windowDays`. Drop booking_days from
+   either fold and the payout's day count is divided by the length of the
+   CALENDAR window instead — the omission /api/vehicle/kpis and
+   /api/driver/kpis were both carrying, and one worth a net AED 64,632.54 of
+   excess across the 45 of 98 earning plates whose page disagrees with their
+   directory row on production for 2026-08, re-measured 2026-09-05T19:44Z.
+
+   /api/economics/assets and /api/economics/drivers have always selected the
+   column and nothing held them to it. Measured by deleting it: removing
+   `booking_days: c.booking_days` from the asset fold in
+   api/economics_routes.js, and separately removing the `Math.max` that carries
+   it onto a person's channel row, left all 49 assertions in this file and all
+   35 in test/economics_cost.test.mjs green. A field no assertion notices the
+   loss of is a field the next edit removes for free, which is exactly how the
+   two KPI endpoints came to be missing it.
+
+   This needs a database of its own because the shared fixture cannot show it:
+   every paying channel there covers all 31 days of the window, so the two
+   denominators agree and no assertion over that seed can tell them apart. Here
+   uber works the first seven days of August and is paid for exactly those
+   seven. Against the days it worked that is 7 of 7 and the channel is believed
+   on its payout; against the 31-day window it is 22.6%, the channel falls to
+   partial_payout, and the sentence it prints — "net payout covering only 7 of
+   the 31 day(s) this channel worked" — states a number of worked days this
+   channel never worked. That is the second half of house rule 2 rather than
+   the first: the money is unchanged, because chooseBasis takes the payout on
+   either branch, and what goes wrong is the REASON printed beside it. A false
+   reason is worse than a bare dash, because a reader acts on it. */
+console.log('\nthe coverage denominator is the days the channel worked, not the calendar');
+
+const part = new PGlite();
+await applySchema(part);
+const pq = (t, v = []) => part.query(t, v);
+let pseq = 0;
+for (let d = 1; d <= 7; d++) {
+  for (let i = 0; i < 2; i++) {
+    await pq(
+      `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+         requested_at, ended_at, distance_km, status, price)
+       VALUES ('uber',$1,'ecosine','E100','e9','Part Month',$2,$3,12,'completed',NULL)`,
+      [`e${pseq++}`,
+        `2026-08-0${d}T09:00:00+04:00`, `2026-08-0${d}T10:00:00+04:00`]);
+  }
+}
+await pq(
+  `INSERT INTO driver_performance (platform, fleet_id, driver_ext_id, driver_name, plate,
+     period_start, period_end, trips, distance_km, earnings, cash_earnings)
+   VALUES ('uber','ecosine','e9','Part Month','E100','2026-08-01','2026-08-07',14,168,3500,0)`);
+await refreshPayouts(part);
+await rebuildCustody({ from: '2026-08-01', to: '2026-08-31', db: part });
+
+const partApi = await mountAll(part);
+const pget = async (u) => (await partApi.get(u)).body;
+const pA = await pget(`/api/economics/assets?${WIN}`);
+const pD = await pget(`/api/economics/drivers?${WIN}`);
+const uber = (pA.by_platform || []).find((c) => c.platform === 'uber');
+
+/* The denominator itself, named on the row: seven days worked, not thirty-one.
+   Pinned as the count and not only as the percentage, because 100% divided by
+   the wrong base is the failure this whole class is made of. */
+check('the channel yield table measures a payout against the days that channel worked',
+  uber?.payout_coverage_base === 7 && uber?.payout_coverage_days === 7
+    && uber?.payout_coverage_pct === 100,
+  JSON.stringify([uber?.payout_coverage_days, uber?.payout_coverage_base,
+    uber?.payout_coverage_pct]));
+/* And the consequence of that denominator: a channel paid for every day it
+   worked is believed on its payout and says so, rather than being filed as
+   part-covered with the uncollected remainder of a month it never worked. */
+check('…and believes it, rather than reporting three weeks of uncollected money',
+  uber?.basis === 'payout'
+    && !/covering only/.test(uber?.basis_note || ''),
+  `${uber?.basis} — ${uber?.basis_note}`);
+
+/* The same fold on the people ledger, which is the one surface that prints the
+   basis as a sentence a reader sees: money_basis is rendered on the row. */
+const pers = (pD.rows || []).find((r) => (r.ids || []).includes('e9')
+  || r.driver_ext_id === 'e9');
+check('the people ledger says the same about the same channel',
+  pers?.money_basis === 'uber: payout', `${pers?.driver_name}: ${pers?.money_basis}`);
+
+partApi.server.close(); await part.close();
+
+console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

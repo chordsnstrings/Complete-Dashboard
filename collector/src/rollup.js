@@ -446,10 +446,17 @@ const MONEY_SOURCES = [
    partial phase is quieter and no better: a total that is 49% of the real one
    and looks exactly like a total.
 
-   The fix is the shape refreshPayouts above already intends — one
-   transaction, so a concurrent reader's snapshot holds the previous complete
-   table until the whole new one commits, and never sees between. The DELETE
-   also stays a DELETE and not a TRUNCATE for the reason given there: TRUNCATE
+   The fix is the shape refreshPayouts already intends — one transaction, so a
+   concurrent reader's snapshot holds the previous complete table until the
+   whole new one commits, and never sees between. That function is FURTHER
+   DOWN this file, not above it: `export async function refreshPayouts`, near
+   line 643, and the paragraph that explains its DELETE begins near line 638.
+   This paragraph used to say "above", which sent anyone who followed it
+   scanning upward through the file instead of down; the name is given here
+   rather than a direction because the direction was wrong once already, and
+   a line number drifts every time anything is inserted between the two — so
+   grep the name if these numbers stop landing. The DELETE also stays a
+   DELETE and not a TRUNCATE for the reason given there: TRUNCATE
    takes ACCESS EXCLUSIVE and blocks readers instead of letting them read the
    old rows.
 
@@ -466,16 +473,44 @@ const MONEY_SOURCES = [
    already one transaction, and it is used directly.
 
    A FAILING SOURCE STILL MUST NOT COST THE OTHERS THEIR ROWS, and putting the
-   five INSERTs in one transaction is exactly how that guarantee gets lost —
-   in Postgres the first error aborts the whole transaction, every later
-   statement fails with "current transaction is aborted", and the COMMIT
-   becomes a rollback. That would turn one provider's missing table into an
-   empty provenance record, which is the failure this function was written to
-   avoid and is worse than what it replaced. Each source therefore runs inside
-   its own SAVEPOINT: an INSERT that throws is rolled back to the savepoint,
-   the transaction stays alive, and the other four still commit — the per
-   source tolerance the warning below has always promised, now with the
-   all-or-nothing visibility the readers need on top of it. */
+   five INSERTs in one transaction is exactly how that guarantee gets lost. The
+   mechanism is written out here because the first version of this paragraph
+   got it wrong, and a wrong mechanism in a comment is a trap for whoever
+   decides next whether the savepoints are load-bearing. In Postgres the first
+   error aborts the whole transaction and every later statement fails with
+   "current transaction is aborted, commands ignored until end of transaction
+   block" — that part was right. What follows is not a failed COMMIT and not an
+   emptied table. The COMMIT does not throw; the server answers it with the
+   command tag ROLLBACK and no error at all, so the DELETE is discarded along
+   with the INSERTs and money_event is left holding exactly what the last
+   successful pass left in it. Stale, not blank.
+
+   Measured, because the old wording was asserted rather than measured: this
+   function with the SAVEPOINT statements stripped out, run against the fixture
+   in test/rollup_money_atomic.test.mjs with ledger_entry renamed away. The
+   healthy pass writes 12 rows; the savepoint-less pass then returns 11,
+   throws nothing, logs one warning for the broken park ledger and a second
+   for the source that runs after it, and leaves the same 12 rows standing —
+   the park-ledger rows it was supposed to drop still there, and the fare
+   added between the two passes nowhere in the table. Nothing was written and
+   nothing was removed, and the caller is handed a positive count to record
+   the pass a success with.
+
+   That is worse than the blank table the old wording imagined, not better. An
+   empty provenance record contradicts itself on sight — anyone who knows the
+   fleet drove that week can see the table claiming nobody was paid — while a
+   table that quietly stops advancing looks complete to every reader and every
+   alert, and goes on looking complete for as long as one provider's table
+   stays broken. The one case that really does read empty is a database whose
+   money_event has never been filled: a fresh boot before the first good
+   rebuild, where api/public/provenance.js prints "No provider sent a figure
+   for this window" about a table that has never held one.
+
+   Each source therefore runs inside its own SAVEPOINT: an INSERT that throws
+   is rolled back to the savepoint, the transaction stays alive and still
+   committable, and the other four still commit — the per source tolerance the
+   warning below has always promised, now with the all-or-nothing visibility
+   the readers need on top of it. */
 /* Exported for the same reason refreshPayouts and refreshLifetime are: the
    property that matters here — that no reader ever meets this table between
    the DELETE and the last INSERT — is a property of THIS function's statement
@@ -500,7 +535,9 @@ export async function refreshMoneyEvents(db = pool) {
              four their rows: this is a provenance record, and a partial one that
              says which part is missing beats none. The rollback to the savepoint
              is what keeps that true now that the five share a transaction —
-             without it this source's error would abort the other four as well. */
+             without it this source's error aborts the transaction the other
+             four are writing in, and the COMMIT at the end is answered
+             ROLLBACK, discarding the whole rebuild silently. */
           await client.query('ROLLBACK TO SAVEPOINT money_source');
           await client.query('RELEASE SAVEPOINT money_source');
           log.warn(SRC, `money_event ${s.name} failed`, { err: String(e).slice(0, 160) });

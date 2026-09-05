@@ -171,23 +171,27 @@ console.log('\na channel that reports both, where the payout covers only part of
    its GROSS fares the moment payout coverage slipped under 80% — and said in
    words that it reports no payout at all.
 
-   Production 2026-09-05, the same uber row read at two window lengths.
-   /api/revenue?days=240: basis payout, best AED 2,286,096.27, payout coverage
-   88.3%, fleet accounted AED 2,750,609.49. /api/revenue?days=300: basis fares,
-   best AED 8,220,967.15, payout coverage 70.7%, fleet accounted AED
-   8,896,812.27, accounted_payouts down to yango's AED 17,744.50 alone — with
-   payouts AED 2,302,977.73 still sitting on the row. Dragging one control from
-   240 days to 300 raised fleet income 3.2x by changing what the figure MEANT.
+   Production, the same uber row read at two window lengths, re-measured at
+   2026-09-05T18:51Z — the Uber fare backfill is live, so both sides of this
+   move and the numbers below are a snapshot rather than constants (the payout
+   drifted AED 2,193 and the 365-day fares 5.3% between the first reading of
+   this paragraph and this one). /api/revenue?days=240: basis payout, best AED
+   2,305,171.07, payout coverage 88.3%, fleet accounted AED 2,772,248.29.
+   /api/revenue?days=300: basis fares, best AED 8,220,967.15, payout coverage
+   70.7%, fleet accounted AED 8,896,989.27, accounted_payouts down to yango's
+   AED 17,744.50 alone — with payouts AED 2,305,171.07 still sitting on the
+   row. Dragging one control from 240 days to 300 raised fleet income 3.2x by
+   changing what the figure MEANT.
 
-   The row below is that production row, field for field. */
-const uberPart = chooseBasis(row({ platform: 'uber', bookings: 165736,
-  chargeable_bookings: 147722, uncharged_bookings: 18014, priced_bookings: 139499,
-  fares: 8220967.15, payouts: 2302977.73, payout_days: 212, booking_days: 300 }), 300);
+   The row below is that production row, field for field, at 18:51Z. */
+const uberPart = chooseBasis(row({ platform: 'uber', bookings: 165803,
+  chargeable_bookings: 147780, uncharged_bookings: 18023, priced_bookings: 139499,
+  fares: 8220967.15, payouts: 2305171.07, payout_days: 212, booking_days: 300 }), 300);
 check('fare coverage 94.4% and payout coverage 70.7%, as production reads them',
   uberPart.fare_coverage_pct === 94.4 && uberPart.payout_coverage_pct === 70.7,
   `${uberPart.fare_coverage_pct} / ${uberPart.payout_coverage_pct}`);
 check('a real payout is not thrown away for the gross fare when coverage dips',
-  uberPart.basis === 'partial_payout' && uberPart.best === 2302977.73,
+  uberPart.basis === 'partial_payout' && uberPart.best === 2305171.07,
   `${uberPart.basis} ${uberPart.best}`);
 check('…so the window does not multiply the channel by 3.6x on its own',
   uberPart.best !== 8220967.15, String(uberPart.best));
@@ -212,7 +216,7 @@ check('it states the days the payout actually covers, and they are the row’s',
    part of this payout. It is the other kind of money — gross of a commission
    measured at 25% — over the whole window, not the uncovered end of it. */
 check('…and names the fares beside it as the gross they are, not the remainder',
-  /139499 of 165736 bookings are the gross/.test(uberPart.basis_note)
+  /139499 of 165803 bookings are the gross/.test(uberPart.basis_note)
   && /not the uncollected remainder/.test(uberPart.basis_note), uberPart.basis_note);
 /* And where there are no fares to say it about, it says nothing about them —
    production's 365-day uber row before the fare backfill reached it. */
@@ -236,39 +240,196 @@ check('…and only such a row is ever told the channel reports no payout',
 
 console.log('\nthe fleet total over the window that used to triple it');
 
-/* Production's four channels at days=300. The old rule made the fleet
-   AED 8,896,812.27 of which AED 8,879,067.77 was gross fare; the payout half
-   was yango's AED 17,744.50 on its own. */
-const at300 = fleetIncome([
-  row({ platform: 'uber', bookings: 165736, chargeable_bookings: 147722,
-    uncharged_bookings: 18014, priced_bookings: 139499, fares: 8220967.15,
-    payouts: 2302977.73, payout_days: 212, booking_days: 300 }),
-  row({ platform: 'bolt', bookings: 22000, chargeable_bookings: 11000,
-    uncharged_bookings: 11000, priced_bookings: 10989, fares: 519641.7,
+/* Production's four channels at days=300, every field as /api/revenue served
+   them at 2026-09-05T18:51Z. The old rule made the fleet AED 8,896,989.27 of
+   which AED 8,879,244.77 was gross fare; the payout half was yango's AED
+   17,744.50 on its own. Both sides move with the backfill, so the assertions
+   below are written from these rows rather than quoting a remembered total. */
+const rows300 = [
+  row({ platform: 'uber', bookings: 165803, chargeable_bookings: 147780,
+    uncharged_bookings: 18023, priced_bookings: 139499, fares: 8220967.15,
+    payouts: 2305171.07, payout_days: 212, booking_days: 300 }),
+  row({ platform: 'bolt', bookings: 22180, chargeable_bookings: 8697,
+    uncharged_bookings: 13483, priced_bookings: 8686, fares: 519818.7,
     booking_days: 300 }),
-  row({ platform: 'hotel', bookings: 1700, chargeable_bookings: 1650,
-    uncharged_bookings: 50, priced_bookings: 1635, fares: 138458.92, booking_days: 300 }),
-  row({ platform: 'yango', bookings: 200, chargeable_bookings: 200,
-    uncharged_bookings: 0, priced_bookings: 200, fares: 12000, payouts: 17744.5,
-    payout_days: 100, booking_days: 100 }),
-], 300);
+  row({ platform: 'hotel', bookings: 1735, chargeable_bookings: 1735,
+    uncharged_bookings: 0, priced_bookings: 1719, fares: 138458.92, booking_days: 61 }),
+  row({ platform: 'yango', bookings: 36, chargeable_bookings: 36,
+    uncharged_bookings: 0, priced_bookings: 36, fares: 1812, payouts: 17744.5,
+    payout_days: 118, booking_days: 14 }),
+];
+const at300 = fleetIncome(rows300, 300);
 check('the fleet counts uber on its payout, not on AED 8.2M of gross fare',
-  at300.accounted === 2978822.85, String(at300.accounted));
-check('…which is not the AED 8,896,812.27 production printed',
-  at300.accounted !== 8896812.27, String(at300.accounted));
+  at300.accounted === 2981193.19, String(at300.accounted));
+check('…which is not the AED 8,896,989.27 production printed',
+  at300.accounted !== 8896989.27, String(at300.accounted));
 check('the payout half is no longer yango alone',
-  at300.accounted_payouts === 2320722.23, String(at300.accounted_payouts));
+  at300.accounted_payouts === 2322915.57, String(at300.accounted_payouts));
 check('the fare half is the two channels that report no payout',
-  at300.accounted_fares === 658100.62, String(at300.accounted_fares));
+  at300.accounted_fares === 658277.62, String(at300.accounted_fares));
 /* A part-covered payout is present money over a stated fraction of the days,
    so uber's bookings belong in undercovered, never in dark. */
 check('uber’s bookings are reported as under-covered, not as dark',
-  at300.undercovered_bookings === 165736 && at300.undercovered_payouts === 2302977.73
+  at300.undercovered_bookings === 165803 && at300.undercovered_payouts === 2305171.07
   && at300.undercovered_platforms.join() === 'uber',
   `${at300.undercovered_bookings} / ${at300.undercovered_payouts}`);
 check('and the two halves still add to the whole',
   Math.round((at300.accounted_fares + at300.accounted_payouts) * 100) / 100 === at300.accounted,
   `${at300.accounted_fares} + ${at300.accounted_payouts} vs ${at300.accounted}`);
+
+console.log('\nthe claim about the fares is the comparison, not a habit');
+
+/* "a larger and different figure" was printed by both payout branches with
+   nothing comparing the fares to the payout — the clause was gated on
+   priced_bookings alone. It is false on production today, and has been for
+   every window yango appears in. Measured 2026-09-05T18:51Z on /api/revenue:
+   yango is basis payout at days=7 with fares AED 357 against a payout of AED
+   433.29, at days=14 with AED 1,328 against AED 1,482.94, and at days=300 with
+   AED 1,812 against AED 17,744.50. Uber at days=300 is the row the sentence
+   was written for and there it holds: AED 8,220,967.15 against AED
+   2,305,171.07.
+
+   Pinned as the rule rather than as the wording: a note may claim the fares
+   are larger only on a row where they are, and may say they fall short only
+   where they do. Reverting the gate turns the three yango rows red. */
+const claimAgreesWithFigures = (r) => {
+  const note = r.basis_note || '';
+  const f = r.fares == null ? null : Number(r.fares);
+  const p = r.payouts == null ? null : Number(r.payouts);
+  if (/larger and different figure/.test(note)) return f != null && p != null && f > p;
+  if (/come to less than this payout/.test(note)) return f != null && p != null && f < p;
+  if (/come to exactly this payout/.test(note)) return f != null && p != null && f === p;
+  return true;
+};
+
+/* Production's yango row at days=7 and at days=14, and the days=300 one, all
+   three on the payout branch with fares under the payout. */
+const yango7 = chooseBasis(row({ platform: 'yango', bookings: 13, chargeable_bookings: 13,
+  priced_bookings: 13, fares: 357, payouts: 433.29, payout_days: 7, booking_days: 4 }), 7);
+const yango14 = chooseBasis(row({ platform: 'yango', bookings: 28, chargeable_bookings: 28,
+  priced_bookings: 28, fares: 1328, payouts: 1482.94, payout_days: 14, booking_days: 10 }), 14);
+const yango300 = chooseBasis(row({ platform: 'yango', bookings: 36, chargeable_bookings: 36,
+  priced_bookings: 36, fares: 1812, payouts: 17744.5, payout_days: 118, booking_days: 14 }), 300);
+/* And the same shape one branch down: a real payout covering part of the days,
+   with fares that do NOT reach it. Nothing on production is here today — yango
+   always clears 80% because its payout days exceed its booking days — which is
+   exactly why the unguarded sentence had to be gated before a row arrives. */
+const smallFarePart = chooseBasis(row({ platform: 'careem', bookings: 900,
+  chargeable_bookings: 800, priced_bookings: 700, fares: 40000, payouts: 96000,
+  payout_days: 9, booking_days: 30 }), 30);
+const equalFare = chooseBasis(row({ platform: 'careem', bookings: 10, chargeable_bookings: 10,
+  priced_bookings: 10, fares: 500, payouts: 500, payout_days: 30, booking_days: 30 }), 30);
+
+check('yango at days=7 is on its payout, with fares of 357 under a payout of 433.29',
+  yango7.basis === 'payout' && Number(yango7.fares) < Number(yango7.payouts),
+  `${yango7.basis} ${yango7.fares} vs ${yango7.payouts}`);
+check('…and is NOT told those fares are a larger and different figure',
+  !/larger and different figure/.test(yango7.basis_note), yango7.basis_note);
+check('…it is told they fall short of the payout, so the pair is not gross and net',
+  /come to less than this payout rather than more/.test(yango7.basis_note)
+  && /not the gross this net was taken out of/.test(yango7.basis_note), yango7.basis_note);
+check('…and the difference is not attributed to a commission that cannot explain it',
+  /is not this channel’s commission/.test(yango7.basis_note), yango7.basis_note);
+check('the part-covered branch gates the same claim the same way',
+  smallFarePart.basis === 'partial_payout'
+  && !/larger and different figure/.test(smallFarePart.basis_note)
+  && /not the uncollected remainder of it either/.test(smallFarePart.basis_note),
+  `${smallFarePart.basis} — ${smallFarePart.basis_note}`);
+check('a row whose fares DO exceed its payout still says so, in both branches',
+  /larger and different figure/.test(uber.basis_note)
+  && /larger and different figure/.test(uberPart.basis_note),
+  `${uber.basis_note} || ${uberPart.basis_note}`);
+check('and every row built in this file has a claim its own two figures support',
+  [uber, hotel, yango, partial, thin, bolt, uberPart, yango7, yango14, yango300,
+    smallFarePart, equalFare, ...rows300].every(claimAgreesWithFigures),
+  [uber, yango, uberPart, yango7, yango14, yango300, smallFarePart, equalFare]
+    .filter((r) => !claimAgreesWithFigures(r))
+    .map((r) => `${r.platform} ${r.fares}/${r.payouts}: ${r.basis_note}`).join(' | '));
+
+console.log('\na payout whose day count is missing says which figure is missing');
+
+/* platformPayouts cannot serve this — a non-null sum implies count(DISTINCT
+   day) >= 1 — but four callers write `payout_days: ... ?? 0` defensively
+   (api/revenue_routes.js:309, api/server.js:607, api/day_routes.js:271,
+   api/vehicle_routes.js:367), and before the payouts == null guard such a row
+   with good fare coverage went to 'fares' and never printed this note at all.
+   Reproduced directly against chooseBasis: "net payout covering only null of
+   the null day(s) this channel worked (null%)". */
+const noDays = chooseBasis(row({ platform: 'uber', bookings: 100, chargeable_bookings: 100,
+  priced_bookings: 95, fares: 5000, payouts: 1234.5, payout_days: 0, booking_days: 30 }), 30);
+check('the payout is still real and still what the row is counted on',
+  noDays.basis === 'partial_payout' && noDays.best === 1234.5,
+  `${noDays.basis} ${noDays.best}`);
+check('the note prints no null where a coverage figure should be',
+  !/null/.test(noDays.basis_note), noDays.basis_note);
+check('…and says which figure is absent rather than implying a coverage of none',
+  /reports no day for it in this window/.test(noDays.basis_note)
+  && /cannot be stated/.test(noDays.basis_note), noDays.basis_note);
+check('…and the coverage fields are absent rather than zero',
+  noDays.payout_coverage_pct === null && noDays.payout_coverage_days === null
+  && noDays.payout_coverage_base === null,
+  `${noDays.payout_coverage_pct} / ${noDays.payout_coverage_days} / ${noDays.payout_coverage_base}`);
+/* And the row that DOES have them still prints them, so the branch above is
+   not quietly swallowing the coverage sentence for everybody. */
+check('a payout that reports its days still states them',
+  /covering only 212 of the 300 day\(s\)/.test(uberPart.basis_note), uberPart.basis_note);
+
+console.log('\na payout of exactly zero beside real fares');
+
+/* Watched directly against fleetIncome before the fix: basis partial_payout,
+   best 0, and accounted / accounted_fares / accounted_payouts /
+   undercovered_payouts all null — AED 500,000 of charged fares left the
+   product with no figure and no sentence anywhere. A zero payout is not a
+   measurement of nothing: the payout says nothing arrived and the trips say
+   something was charged, the rows settle neither, so no figure is taken and
+   the fares are named as set aside. */
+const zeroPay = row({ platform: 'uber', bookings: 10000, chargeable_bookings: 9000,
+  uncharged_bookings: 1000, priced_bookings: 8500, fares: 500000, payouts: 0,
+  payout_days: 10, booking_days: 30 });
+const tZero = fleetIncome([zeroPay], 30);
+check('a zero payout is not taken as the channel’s income',
+  zeroPay.basis === 'zero_payout' && zeroPay.best === null,
+  `${zeroPay.basis} ${zeroPay.best}`);
+check('…and the reason is on the row, in the row’s own terms',
+  /sum to exactly zero across the 10 day\(s\) they cover/.test(zeroPay.basis_note)
+  && /no net figure to take from them/.test(zeroPay.basis_note), zeroPay.basis_note);
+check('…and it is left unstated rather than stated as nothing',
+  /left unstated rather than stated as nothing/.test(zeroPay.basis_note), zeroPay.basis_note);
+check('the fares are not silently dropped: the note says they were set aside, and why',
+  /the fares on 8500 of 10000 bookings are set aside, not counted as income/
+    .test(zeroPay.basis_note)
+  && /a payout of zero is no evidence/.test(zeroPay.basis_note), zeroPay.basis_note);
+/* THE assertion the old shape failed: AED 500,000 was in no field the function
+   returns. It is in one now, and it is not in the income halves — a gross fare
+   on a commission channel is not income, which is the whole doctrine of
+   chooseBasis. */
+check('the AED 500,000 reaches a field of its own rather than vanishing',
+  tZero.set_aside_fares === 500000 && tZero.set_aside_fare_bookings === 8500
+  && tZero.set_aside_bookings === 10000 && tZero.set_aside_platforms.join() === 'uber',
+  JSON.stringify([tZero.set_aside_fares, tZero.set_aside_fare_bookings,
+    tZero.set_aside_bookings, tZero.set_aside_platforms]));
+check('…and is counted in neither half of the income, nor as a green zero',
+  tZero.accounted === null && tZero.accounted_fares === null
+  && tZero.accounted_payouts === null && tZero.accounted_bookings === 0,
+  `${tZero.accounted} / ${tZero.accounted_fares} / ${tZero.accounted_bookings}`);
+/* Nor is it dark — the fares exist and were measured; what is missing is which
+   of the two figures is the money. Counting it as dark would be the same
+   double-description this file already fixed for partial_payout. */
+check('…and is not filed as bookings with no money value either',
+  tZero.dark_bookings === 0 && tZero.undercovered_bookings === 0,
+  `dark=${tZero.dark_bookings} under=${tZero.undercovered_bookings}`);
+/* Beside channels that do report money, the zero-payout channel stays out of
+   the totals and the totals stay right about themselves. */
+const mixed = fleetIncome([
+  row({ platform: 'uber', bookings: 10000, chargeable_bookings: 9000, priced_bookings: 8500,
+    fares: 500000, payouts: 0, payout_days: 10, booking_days: 30 }),
+  row({ platform: 'hotel', bookings: 1631, chargeable_bookings: 1631, priced_bookings: 1616,
+    fares: 130218.92, booking_days: 30 }),
+], 30);
+check('a zero-payout channel does not move the fleet total it is not in',
+  mixed.accounted === 130218.92 && mixed.accounted_fares === 130218.92
+  && mixed.set_aside_fares === 500000,
+  `${mixed.accounted} / ${mixed.accounted_fares} / ${mixed.set_aside_fares}`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -458,18 +458,26 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
            from the trip table and an empty numerator, so it divided to exactly
            0.0 and the Per 100 km column painted it GREEN under a caption
            reading "measured over all N days in this window" — a sentence that
-           asserts it WAS measured. Measured on production over a five-day
-           window: 32 rows printed "Harsh events 0 / 0 per 100 km", 31 of them
-           on vehicles that worked, and 24 of those carry telematics_journeys
-           0 — the feed that raises these events never saw them being driven at
-           all. That is roughly a third of the working fleet painted as having
-           a spotless safety record, and sorting the column ascending ranked
-           those 24 at the top as the safest cars there are. The remaining
-           seven are a different question — cars the feed DID see that simply
-           raised no driving event in the window — and this change deliberately
-           leaves them alone: the fix for a misleading low number is not a
-           different low number, but it is also not silencing a measurement
-           that was really taken.
+           asserts it WAS measured.
+
+           Re-measured against production at 2026-09-05T19:44Z on
+           /api/vehicles/directory?days=5, because the first draft of this note
+           quoted a reading the fleet has already moved past and a figure
+           presented as measured today has to have been: the alert feed covers
+           5 of the 5 days, 93 of the fleet's 273 plates worked in the window,
+           and 32 of those 93 print "Harsh events 0 / 0 per 100 km". All 32
+           worked — by trips and by days moved alike, so the earlier count of
+           31 no longer holds — and 25 of the 32 carry telematics_journeys 0,
+           the feed that raises these events never having seen them driven at
+           all. That is 26.9% of the working fleet, roughly a quarter of it,
+           painted as having a spotless safety record, and sorting the column
+           ascending ranks those 25 at the top as the safest cars there are.
+           The remaining seven are a different question — cars the feed DID
+           see that simply raised no driving event in the window — and this
+           change deliberately leaves them alone: the fix for a misleading low
+           number is not a different low number, but it is also not silencing a
+           measurement that was really taken.
+
            alertRate() and alertRateReason() have known how to answer this
            since api/economics_routes.js:535 taught them — absent, with the
            server's own reason beside it and no tone — so the whole fix is
@@ -854,18 +862,28 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
                    August's 31 days and holds a payout covering every one of
                    those 23 read 23/31 = 74.2% rather than 100%, dropped out of
                    the payout branch, and was reported on its GROSS Uber fares.
-                   Measured over 2026-08-01..2026-08-31, all 98 earning plates:
-                   the sum of this endpoint's accounted came to AED
-                   567,258.53 against AED 502,709.89 from /api/economics/assets
-                   and /api/vehicles/directory, which agree with each other to
-                   the cent — an excess of AED 64,548.64 on exactly 45 plates,
-                   every one of them with accounted_payouts null and
-                   undercovered_bookings 0. L46185 is the worked example: this
-                   endpoint said AED 11,986.98, all of it fares, while its own
-                   earnings panel three sections down showed AED 6,355.12
-                   attributed from Uber and the directory row for the same car
-                   and window said 1,842.00 + 6,355.12 = 8,197.12. The page
-                   contradicted itself by 46.2%.
+                   Re-measured against production at 2026-09-05T19:44Z, after
+                   the figures in the first draft of this note had already
+                   drifted with the live backfill, over 2026-08-01..2026-08-31
+                   and all 98 earning plates: the sum of this endpoint's
+                   accounted comes to AED 567,078.98 against AED 502,446.44
+                   from /api/economics/assets and /api/vehicles/directory,
+                   which agree with each other to the cent on every one of the
+                   fleet's 273 plates — 45 plates disagree with the page and
+                   the net excess is AED 64,632.54.
+
+                   Of those 45, 43 are this defect exactly: accounted_payouts
+                   null, undercovered_bookings 0, the whole of the car's money
+                   restated as fares, and those 43 alone come to AED 64,893.30
+                   of excess. The remaining two, L36397 and L46174, disagree by
+                   AED 260.76 in the OTHER direction with their payout half
+                   intact, and they are the separate Dubai-versus-UTC window
+                   defect described in test/vehicle_payout_basis.test.mjs — not
+                   this one, and worth keeping apart from it rather than
+                   rounding both into one number. L46185 is the worked example:
+                   this endpoint says AED 11,986.98, all of it fares, while the
+                   directory row for the same car and window says 1,842.00 +
+                   6,352.21 = 8,194.21. The page contradicts itself by 46.3%.
                    /api/economics/assets and the directory's chan CTE have
                    always selected this; the fix is to ask the same question
                    here rather than to teach coverage() a second rule. */

@@ -1026,18 +1026,37 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                    against — the identical omission /api/vehicle/kpis carried,
                    fixed in the same change so the two pages cannot disagree.
                    ───────────────────────────────────────────────────────────
-                   coverage() in api/income_sql.js reads booking_days > 0 ?
-                   booking_days : windowDays, so without this column the
-                   payout's day count is divided by the length of the CALENDAR
-                   window. A driver who worked 23 of August's 31 days and holds
-                   an Uber statement covering every one of them read 74.2%
-                   rather than 100%, fell out of the payout branch, and had
-                   their income reported as Uber's GROSS fares — a figure that
-                   is gross of a commission measured at exactly 25% and is not
-                   money anyone received. Swept across the vehicle ledger the
-                   same defect put AED 64,548.64 of excess on 45 of 98 plates
-                   for 2026-08; the driver ledger divides the same payouts the
-                   same wrong way. platformFares in api/income_sql.js and
+                   This half of that change is PREVENTIVE, and the honest
+                   reason for making it is not that a driver's page is printing
+                   a wrong number today. coverage() in api/income_sql.js reads
+                   booking_days > 0 ? booking_days : windowDays, so without
+                   this column the payout's day count is divided by the length
+                   of the CALENDAR window — wrong arithmetic on any person who
+                   worked fewer days than the window is long, and on the
+                   vehicle ledger it is wrong out loud: a net AED 64,632.54 of
+                   excess across the 45 of 98 earning plates whose page
+                   disagrees with their directory row for 2026-08, re-measured
+                   2026-09-05T19:44Z. Here it is wrong quietly, and it was
+                   quiet before this change too. Measured on the same day over
+                   the same window: of the 97 people /api/economics/drivers
+                   holds a payout for in 2026-08, not one has a payout covering
+                   under 80% of the 31-day window while covering 80% or more of
+                   the days that person actually worked — which is the only
+                   shape that moves a row out of the payout branch — and the
+                   same count at 7, 14 and 92 days is zero as well. Two things
+                   keep it at zero: Uber's payments walk lands a payout row on
+                   nearly every calendar day it reaches, so both denominators
+                   give the same answer, and the people it reaches carry no
+                   per-trip fare for the page to fall back TO — the ledger
+                   reports fares null for every one of the twelve largest.
+
+                   So this is the same omission repaired before it produced a
+                   visible figure. That is a good enough reason on its own: the
+                   Uber fare backfill is live and moves both halves weekly, the
+                   day the two denominators stop agreeing is a day nobody would
+                   be watching for, and two pages answering the same question
+                   about the same person must not answer it differently.
+                   platformFares in api/income_sql.js and
                    /api/economics/drivers have always selected it. */
                 count(DISTINCT local_day)::int booking_days
          FROM trip_norm WHERE ${TW} AND is_booking GROUP BY 1`, p),

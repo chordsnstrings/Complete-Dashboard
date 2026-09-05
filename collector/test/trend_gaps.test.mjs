@@ -251,6 +251,129 @@ check('a break where the platform mix changed says so',
     withWork.filter((m) => m.accounted_payouts != null).every((m) => m.income_missing === false));
 }
 
+/* ── a month the BOOKING record never reaches is not a partial month ──────
+   Narrowing the partiality span to the booking record — so that this route and
+   /api/forecast stop disagreeing about which months are whole — made a clamp
+   reachable that never had been. `Math.max(1, dayDiff(...))` sat under the day
+   count because, while the span came from every trip_norm row, no month
+   carrying a row could lie outside it. Measured against the BOOKING record a
+   month easily can: production on 2026-09-05 holds 6,960 telematics journeys
+   in October 2024 and 9,588 in November against 0 bookings in either, and the
+   first booking of the whole record is 2024-12-19. Those months produce a
+   NEGATIVE overlap with the span, the clamp turned it into 1, and #causes
+   captioned each of them "1 of 31 days collected" beside its own count of
+   thousands of journeys — false under either reading, since the record holds
+   all 31 days of that month's telematics and none of its bookings.
+
+   Seeded as that exact shape: a month of telematics ending well before the
+   record's first booking. The month is checked against the first booking day
+   read back from the database rather than against a date written here, so the
+   assertion cannot agree with the endpoint by restating its arithmetic. */
+{
+  for (let i = 1; i <= 25; i++) await mk('fms', `pre${n++}`, `2025-06-${String(i).padStart(2, '0')}`, null);
+  const [{ first_booking: firstBooking }] = await q(
+    `SELECT to_char(min((requested_at AT TIME ZONE 'Asia/Dubai')::date),'YYYY-MM-DD') first_booking
+     FROM trip WHERE platform <> 'fms'`);
+  const t = (await get('/api/trend/monthly')).body;
+  const jun = (t.months || []).find((m) => m.m === '2025-06');
+  check('the telematics-only month sits before the first booking in the record',
+    firstBooking > '2025-06-30', `first booking ${firstBooking}`);
+  check('a month with journeys and no bookings still carries its journeys',
+    jun?.trips === 0 && jun?.telematics_journeys === 25,
+    JSON.stringify([jun?.trips, jun?.telematics_journeys]));
+  check('a month the booking record never reaches is not called partial',
+    jun?.partial_month === false, String(jun?.partial_month));
+  /* The refutation this block exists for: not "days_in_record is null" as a
+     spelling, but that no day count is reported for a month no day of which
+     the booking record covers — and specifically never the 1 the clamp gave. */
+  check('and it reports no day count at all, rather than the one day a clamp gave it',
+    jun?.days_in_record == null, String(jun?.days_in_record));
+  check('the absence carries its reason, so a page can print why rather than a number',
+    jun?.outside_booking_record === 'before', String(jun?.outside_booking_record));
+  /* The same property across the whole record: a day count is only ever
+     reported for a month the booking record actually reaches, and a month it
+     reaches has a booking in it. */
+  check('no month in the record reports days collected without a booking to collect',
+    (t.months || []).every((m) => m.days_in_record == null || m.trips > 0),
+    JSON.stringify((t.months || []).filter((m) => m.days_in_record != null && !m.trips)
+      .map((m) => [m.m, m.days_in_record])));
+  check('and every month says which side of the booking record it falls on, or that it is inside it',
+    (t.months || []).every((m) => m.outside_booking_record === null
+      || m.outside_booking_record === 'before' || m.outside_booking_record === 'after'),
+    JSON.stringify((t.months || []).map((m) => [m.m, m.outside_booking_record])));
+  // The months the record does cover are untouched by any of this.
+  const aug2 = (t.months || []).find((m) => m.m === '2025-08');
+  check('a month the record starts inside still reports the days it holds',
+    aug2?.partial_month === true && aug2?.days_in_record === 11
+      && aug2?.outside_booking_record === null,
+    JSON.stringify([aug2?.partial_month, aug2?.days_in_record, aug2?.outside_booking_record]));
+}
+
+/* ── payout coverage on this page is measured over the days a channel BOOKED ─
+   The per-month income cells here are handed to the same fleetIncome as every
+   other money surface, and coverage() in api/income_sql.js reads `booking_days
+   > 0 ? booking_days : windowDays` — so a cell built without booking_days has
+   its payout coverage divided by the CALENDAR length of the month. A channel
+   that booked two days of a thirty-day June and was paid for both is 100%
+   covered; divided by the calendar it reads 6.7%, drops under chooseBasis's
+   80% bar, and lands on partial_payout with every one of its bookings reported
+   as money not collected. It is the same defect /api/kpis carried and it lands
+   on the income line of the page whose subject is explaining why the numbers
+   moved.
+
+   Asserted as the property — a channel paid for every day it booked is
+   reported on its payout and as nothing undercovered — over BOTH paths this
+   route has, the live grain and the stored rollup, because the fallback and
+   the rollup are two executions of one definition and only one of them gets
+   looked at. */
+{
+  const JUN = ['2026-06-10', '2026-06-11'];
+  for (const d of JUN) {
+    for (let i = 0; i < 10; i++) {
+      await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+                 requested_at,distance_km,status,price)
+               VALUES ('uber',$1,'ecosine','L1','d1','Driver d1',$2,10,'completed',100)`,
+      [`jun-${d}-${i}`, `${d}T09:00:00+04:00`]);
+    }
+    await q(`INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, day,
+               period_start, period_end, earnings)
+             VALUES ('uber','ecosine','d1',$1::date,$1::date,$1::date,750)`, [d]);
+  }
+  const live = (await get('/api/trend/monthly')).body;
+  const jun = (live.months || []).find((m) => m.m === '2026-06');
+  /* This first one holds either way today — the payouts == null guard in
+     chooseBasis keeps a row with a real payout off its gross fares whatever
+     the coverage says — and it is here for the shape, not as the guard. The
+     one below it is the assertion that bites: strip booking_days out of the
+     cells and this month reports 20 undercovered bookings and 100%. */
+  check('the month is counted on the payout that arrived, not the gross fares',
+    jun?.accounted_payouts === 1500 && jun?.accounted_fares == null,
+    JSON.stringify([jun?.accounted, jun?.accounted_fares, jun?.accounted_payouts]));
+  check('a channel paid for every day it booked is not reported as undercovered',
+    jun?.undercovered_bookings === 0,
+    `${jun?.undercovered_bookings} undercovered, ${jun?.undercovered_pct}%`);
+
+  /* The same question of the stored rollup. refreshRollups rebuilds
+     driver_payout_day from the report tables it is derived from — DELETE then
+     INSERT, src/rollup.js — so the two payout days seeded above are wiped by
+     the refresh and are written back after it; the trips they belong to are
+     already in the rollup by then. */
+  const { refreshRollups } = await import('../src/rollup.js');
+  await refreshRollups({ db });
+  for (const d of JUN) {
+    await q(`INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, day,
+               period_start, period_end, earnings)
+             VALUES ('uber','ecosine','d1',$1::date,$1::date,$1::date,750)`, [d]);
+  }
+  const stored = (await get('/api/trend/monthly')).body;
+  const junR = (stored.months || []).find((m) => m.m === '2026-06');
+  check('and the stored rollup answers the same, so the two paths cannot drift',
+    junR?.accounted_payouts === jun?.accounted_payouts
+      && junR?.accounted_fares === jun?.accounted_fares
+      && junR?.undercovered_bookings === jun?.undercovered_bookings,
+    JSON.stringify([junR?.accounted_fares, junR?.accounted_payouts, junR?.undercovered_bookings]));
+}
+
 server.close();
 
 console.log(`\n${pass} passed, ${fail} failed`);

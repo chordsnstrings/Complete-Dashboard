@@ -180,6 +180,53 @@ export function coverage(r, windowDays) {
   };
 }
 
+/* The sentence a payout note prints about the fares sitting beside it, and the
+   comparison it is finally gated on.
+   ─────────────────────────────────────────────────────────────────────────
+   Both payout branches below said the same unconditional thing — the fares are
+   "a larger and different figure" — which is a claim about two numbers made
+   without reading either of them, gated only on the fares existing. It is
+   false on production today. Measured 2026-09-05T18:51Z on /api/revenue: yango
+   is on basis payout at every window read — 7, 14, 240, 300 and 365 days — and
+   its fares are the SMALLER figure in all of them. At days=7 they are AED 357
+   against a payout of AED 433.29; at days=14, AED 1,328 against AED 1,482.94;
+   at days=300, AED 1,812 against AED 17,744.50 — and every one of those rows
+   carried a note calling the fares larger. Uber is the row the sentence was
+   written for and there it is true: AED 8,220,967.15 of 300-day fares against
+   AED 2,305,171.07 of payout, the fare gross of a service fee measured at
+   exactly 25%.
+
+   So the claim is gated on the comparison. Where the fares are larger the
+   sentence is word for word what it was. Where they are not, the two do not
+   line up as gross and net at all — a payout also carries days, tips, bonuses
+   and adjustments that no trip in the window priced, which is the only shape
+   that fits yango's AED 17,744.50 against AED 1,812 of fares over 300 days —
+   and the note says that instead of inverting the arithmetic in front of the
+   reader. Both sides move with the backfill, which is why this compares them
+   per row rather than stating a direction once and for all.
+
+   `whole` picks the partial_payout wording, where the fares span the whole
+   window and the payout only part of it, and the extra thing that has to be
+   said is that they are not the uncollected remainder either. */
+const faresBesidePayout = (r, { whole = false } = {}) => {
+  if (!r.priced_bookings || r.fares == null || r.payouts == null) return '';
+  const over = `the fares on ${r.priced_bookings} of ${r.bookings} bookings`;
+  if (Number(r.fares) > Number(r.payouts)) {
+    return whole
+      ? `; ${over} are the gross the `
+        + `riders paid across the whole window — a larger and different figure, not the `
+        + `uncollected remainder of this payout`
+      : `; ${over} are `
+        + `the gross the riders paid, which is a larger and different figure`;
+  }
+  return `; ${over} ${Number(r.fares) < Number(r.payouts)
+    ? 'come to less than this payout rather than more'
+    : 'come to exactly this payout, not to more'}, so they are not the gross this net was taken `
+    + `out of${whole ? ' and not the uncollected remainder of it either' : ''} — a payout also `
+    + `carries days, tips and adjustments that no trip in this window priced, and the gap `
+    + `between the two is not this channel’s commission`;
+};
+
 /* Which figure to believe for one platform, and why.
    ──────────────────────────────────────────────────────────────────────────
    THE PAYOUT WINS. A fare is what a rider was charged; a payout is what
@@ -216,13 +263,62 @@ export function coverage(r, windowDays) {
    Mutates the row, because both callers want the reasoning on it. */
 export function chooseBasis(r, windowDays) {
   Object.assign(r, coverage(r, windowDays));
-  if (r.payouts != null && r.payout_coverage_pct >= 80) {
+  /* A payout that sums to exactly zero is not a measurement of nothing.
+     ────────────────────────────────────────────────────────────────────────
+     Reproduced by calling fleetIncome directly on one row — uber, 10,000
+     bookings, 8,500 of them priced, AED 500,000 of fares, payouts 0 over 10 of
+     30 days. The row took basis partial_payout with `best` 0, which put it in
+     the measured set, and every total the function returns came back null:
+     accounted null, accounted_fares null, accounted_payouts null,
+     undercovered_payouts null. AED 500,000 of charged fares left the product
+     without a figure or a sentence anywhere. The `|| null` on each sum is what
+     turns the zero absent, so house rule 2 is not broken at the tile — the
+     page prints a dash, not a green zero — but nothing said the fares had been
+     dropped, or why.
+
+     What a zero payout beside real fares MEANS is the decision here, and the
+     honest answer is that it means the two sources contradict each other. A
+     payout summing to exactly zero across days it does cover is either a
+     statement whose deductions cancelled its earnings or a set of placeholder
+     rows; the trips beside it say money was charged. Nothing in the rows
+     settles which, so neither figure is taken: `best` is null with the reason
+     on the row, the way api/alert_coverage_sql.js states an unmeasurable
+     coverage, and the fares are named as SET ASIDE rather than counted. They
+     cannot simply be counted instead — on a commission channel the fare is the
+     gross a quarter comes out of, which is the whole doctrine above — and they
+     must not vanish silently, so fleetIncome reports them as set_aside_fares
+     over set_aside_fare_bookings and api/public/revenue.js prints that clause
+     beside the accounted total.
+
+     This is deliberately the same answer for every channel, including one that
+     invoices and keeps its fares: a channel that keeps its own fares has no
+     payout rows at all, so a zero payout on it is the same contradiction and
+     not a reason to believe the fares harder. The shape already existed on the
+     payout branch below for a zero payout covering 80% of the days; it is
+     answered here for both. */
+  if (r.payouts != null && Number(r.payouts) === 0) {
+    r.basis = 'zero_payout';
+    r.best = null;
+    r.basis_note = 'the payout rows for this channel in this window sum to exactly zero'
+      + (r.payout_days ? ` across the ${r.payout_days} day(s) they cover` : '')
+      + ', so there is no net figure to take from them — this channel’s income is left unstated '
+      + 'rather than stated as nothing'
+      + (r.priced_bookings && r.fares != null
+        ? `; the fares on ${r.priced_bookings} of ${r.bookings} bookings are set aside, not `
+          + 'counted as income, because '
+          + (COMMISSION_CHANNELS.has(r.platform)
+            ? 'this channel takes a commission out of them — they are the gross the rider paid, '
+              + 'and a payout of zero is no evidence of what that gross came to at the bank'
+            : 'a payout saying nothing arrived beside fares saying something was charged is a '
+              + 'contradiction these rows cannot settle, and counting either figure would state '
+              + 'it as settled')
+        : '');
+  } else if (r.payouts != null && r.payout_coverage_pct >= 80) {
     r.basis = 'payout';
     r.best = r.payouts;
     r.basis_note = r.priced_bookings
       ? `net payout, after the platform’s commission — this is the money that `
-        + `arrived; the fares on ${r.priced_bookings} of ${r.bookings} bookings are `
-        + `the gross the riders paid, which is a larger and different figure`
+        + `arrived` + faresBesidePayout(r)
       /* "this channel reports no fare at all" was a claim about the CHANNEL
          made from one window's rows. On any window inside the week Uber's
          payments walk has not reached — "today", "yesterday", the first days
@@ -240,17 +336,22 @@ export function chooseBasis(r, windowDays) {
      fares instead — the one thing the doctrine at the head of this function
      says must never happen on a commission channel.
 
-     Measured on production 2026-09-05. /api/revenue?days=240 reads uber
-     basis=payout, best AED 2,286,096.27, payout coverage 88.3%, and the fleet
-     accounts for AED 2,750,609.49. Drag the range to 300 days and the SAME
-     uber row — still carrying payouts AED 2,302,977.73 on the row itself —
+     Measured on production, and RE-measured at 2026-09-05T18:51Z because the
+     Uber fare backfill is still running and every figure in this paragraph
+     moves with it — the payout drifted AED 2,193 and the 365-day fares 5.3%
+     between the first reading and this one, so read these as a snapshot of the
+     shape rather than as constants. /api/revenue?days=240 reads uber
+     basis=payout, best AED 2,305,171.07, payout coverage 88.3%, and the fleet
+     accounts for AED 2,772,248.29. Drag the range to 300 days and the SAME
+     uber row — still carrying payouts AED 2,305,171.07 on the row itself —
      reads basis=fares, best AED 8,220,967.15, payout coverage 70.7%, the
-     fleet accounts for AED 8,896,812.27, and accounted_payouts collapses to
+     fleet accounts for AED 8,896,989.27, and accounted_payouts collapses to
      AED 17,744.50, which is yango on its own. At 365 days it is AED
-     10,966,371.14 of fares against the same AED 2.29M payout and a statement
-     net of AED 2,298,946.49. An operator dragging one control from 240 to 300
-     days watches fleet income go up 3.2x with nothing marking that the figure
-     changed MEANING, from net payout to gross fare.
+     11,545,933.71 of fares at 58.1% payout coverage, against the same AED
+     2,305,171.07 payout and a statement net of AED 2,299,035.17. An operator
+     dragging one control from 240 to 300 days watches fleet income go up 3.2x
+     with nothing marking that the figure changed MEANING, from net payout to
+     gross fare.
 
      Uber's service fee is measured at exactly 25% of the fare on every priced
      row, so the fares are gross of a quarter and cannot be income, while the
@@ -291,9 +392,28 @@ export function chooseBasis(r, windowDays) {
        was never collected — which is the whole gap, not a rounding. */
     r.basis = 'partial_payout';
     r.best = r.payouts;
-    r.basis_note = `net payout covering only ${r.payout_coverage_days} of the `
-      + `${r.payout_coverage_base} day(s) this channel worked `
-      + `(${r.payout_coverage_pct}%) — the rest of this channel’s money has not been collected yet`
+    /* Three of the four terms in that sentence come from coverage(), and every
+       one of them is null when the row carries a payout and no payout_days.
+       Reproduced by calling chooseBasis directly on a row holding payouts AED
+       1,234.50, payout_days 0 and 95 priced bookings of 100: the note read
+       "net payout covering only null of the null day(s) this channel worked
+       (null%)". platformPayouts cannot produce that shape — a non-null sum
+       implies count(DISTINCT day) >= 1 — but four callers defensively write
+       `payout_days: ... ?? 0` (api/revenue_routes.js:309, api/server.js:607,
+       api/day_routes.js:271, api/vehicle_routes.js:367), which is what a
+       caller writes after seeing the field absent, and before the guard above
+       such a row with good fare coverage went to 'fares' and never printed it.
+       So the coverage clause is written only where the terms exist, and where
+       they do not the note says which figure is missing rather than printing
+       the word null three times — the payout itself is still real and is still
+       what the row is counted on. */
+    r.basis_note = (r.payout_coverage_days != null && r.payout_coverage_base != null
+      ? `net payout covering only ${r.payout_coverage_days} of the `
+        + `${r.payout_coverage_base} day(s) this channel worked `
+        + `(${r.payout_coverage_pct}%) — the rest of this channel’s money has not been collected yet`
+      : `net payout, and the payout source reports no day for it in this window — so how much of `
+        + `this channel’s work it covers cannot be stated, and this figure is money we hold over `
+        + `an unknown share of the window rather than over all of it`)
       /* Reachable for the first time by a row that also prices its bookings.
          Uber over 300 days is 94.4% fare-covered and 70.7% payout-covered, and
          "the rest has not been collected" printed beside a fares column of AED
@@ -303,11 +423,7 @@ export function chooseBasis(r, windowDays) {
          25%, over the whole window rather than the uncovered end of it. The
          sentence says so where there are fares to say it about, and stops
          where there are none. */
-      + (r.priced_bookings
-        ? `; the fares on ${r.priced_bookings} of ${r.bookings} bookings are the gross the `
-          + `riders paid across the whole window — a larger and different figure, not the `
-          + `uncollected remainder of this payout`
-        : '');
+      + faresBesidePayout(r, { whole: true });
   } else if (r.priced_bookings) {
     r.basis = 'partial_fares';
     r.best = r.fares;
@@ -384,6 +500,13 @@ export function fleetIncome(rows, windowDays) {
      over a stated fraction of the days. */
   const darkRows = rows.filter((r) => r.basis === 'none' || r.basis === 'partial_fares');
   const underRows = rows.filter((r) => r.basis === 'partial_payout');
+  /* And the third kind of row: one whose payout sums to exactly zero, which is
+     counted nowhere. It is not measured — `best` is null, so it is out of
+     `accounted` — and it is not dark either, because it carries fares that the
+     trip feed did price. Without this it was out of every field the function
+     returns, which is how AED 500,000 of fares left the product with nothing
+     said about them. See the zero-payout branch of chooseBasis. */
+  const asideRows = rows.filter((r) => r.basis === 'zero_payout');
   return {
     accounted: sum(measured.map((r) => r.best)) || null,
     /* Both halves of it, so a reader can see which kind of money moved.
@@ -443,5 +566,12 @@ export function fleetIncome(rows, windowDays) {
       ? Math.round((underRows.reduce((a, r) => a + n(r.bookings), 0) / bookings) * 1000) / 10 : null,
     undercovered_payouts: sum(underRows.map((r) => r.payouts)) || null,
     undercovered_platforms: underRows.map((r) => r.platform).sort(),
+    /* Money that was charged and is counted as income nowhere, with the
+       channels it belongs to, so the page can say it was set aside and why
+       rather than letting it disappear between the totals. */
+    set_aside_fares: sum(asideRows.map((r) => r.fares)) || null,
+    set_aside_fare_bookings: asideRows.reduce((a, r) => a + n(r.priced_bookings), 0) || null,
+    set_aside_bookings: asideRows.reduce((a, r) => a + n(r.bookings), 0),
+    set_aside_platforms: asideRows.map((r) => r.platform).sort(),
   };
 }

@@ -2488,7 +2488,13 @@ V.finance = async (root) => {
            which channel each half of the bar came from. */
         const onFares = (fin.money_basis || []).filter((b) => /fares/.test(b.basis || ''))
           .map((b) => sourceLabel(b.platform));
-        const onPayout = (fin.money_basis || []).filter((b) => /payout/.test(b.basis || ''))
+        /* Anchored, not a substring test. /payout/ also matches the new
+           `zero_payout` basis — a channel whose payout summed to nothing and
+           whose fares were therefore set aside — so a channel that was paid
+           NOTHING was being named among those that "reported paying" money.
+           The three bases that mean money actually arrived are payout,
+           partial_payout and the ledger's own; zero_payout is not one of them. */
+        const onPayout = (fin.money_basis || []).filter((b) => /^(partial_)?payout$/.test(b.basis || ''))
           .map((b) => sourceLabel(b.platform));
         const bits = [];
         if (t.money_fares_part != null) {

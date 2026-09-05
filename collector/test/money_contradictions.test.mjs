@@ -156,9 +156,41 @@ const { app: mockApp } = await import('../mockapi.mjs');
 const mockServer = mockApp.listen(0);
 const mockPort = mockServer.address().port;
 
-const revenueBody = () => {
-  const rows = platformRows();
-  const income = fleetIncome(rows, 365);
+/* Production's four channels at days=300, every field as /api/revenue served
+   them at 2026-09-05T18:51Z — the window where the payouts == null guard puts
+   uber on a part-window payout while it prices 139,499 of the 147,780 bookings
+   that could carry a fare, which is the pair of facts the caption below has to
+   describe without contradicting either.
+
+   Bolt's payout is the one field here that production does not serve: bolt
+   reports no payout at all, and this row carries 0 instead, which is the shape
+   the verifier reproduced against fleetIncome — a payout statement summing to
+   exactly zero beside AED 519,818.70 of charged fares. Before it was answered
+   those fares appeared in no field of the totals and in no sentence on this
+   page. */
+const platformRows300 = () => [
+  { platform: 'uber', bookings: 165803, chargeable_bookings: 147780,
+    uncharged_bookings: 18023, priced_bookings: 139499, fares: 8220967.15, km: 1990000,
+    priced_km: 1700000, payouts: 2305171.07, cash: null, payout_days: 212,
+    booking_days: 300, statement_net: 2299035.17, statement_gross: 3060000,
+    statement_days: 206, statement_drivers: 234, drivers: 207, vehicles: 137,
+    payout_drivers: 234, collection_status: 'ok', collection_error: null },
+  { platform: 'bolt', bookings: 22180, chargeable_bookings: 8697, uncharged_bookings: 13483,
+    priced_bookings: 8686, fares: 519818.7, km: 260000, priced_km: 105000,
+    payouts: 0, cash: null, payout_days: 41, booking_days: 300, drivers: 40, vehicles: 40,
+    collection_status: 'ok', collection_error: null },
+  { platform: 'hotel', bookings: 1735, chargeable_bookings: 1735, uncharged_bookings: 0,
+    priced_bookings: 1719, fares: 138458.92, km: 20400, priced_km: 20300, payouts: null,
+    cash: null, payout_days: 0, booking_days: 61, drivers: 37, vehicles: 38,
+    collection_status: 'ok', collection_error: null },
+  { platform: 'yango', bookings: 36, chargeable_bookings: 36, uncharged_bookings: 0,
+    priced_bookings: 36, fares: 1812, km: 454, priced_km: 454, payouts: 17744.5,
+    cash: 6411.52, payout_days: 118, booking_days: 14, drivers: 3, vehicles: 3,
+    collection_status: 'ok', collection_error: null },
+];
+
+const bodyFor = (rows, windowDays, window) => {
+  const income = fleetIncome(rows, windowDays);
   for (const r of rows) {
     const paid = r.basis === 'payout' || r.basis === 'partial_payout';
     r.revenue_per_km = paid && r.payouts != null && r.km
@@ -168,9 +200,9 @@ const revenueBody = () => {
     r.per_km_km = r.per_km_basis === 'payout' ? r.km : r.priced_km ?? null;
   }
   return {
-    window: ['2025-09-03', '2026-09-02'],
+    window,
     platforms: rows.sort((a, b) => b.bookings - a.bookings),
-    window_days: 365,
+    window_days: windowDays,
     totals: {
       bookings: rows.reduce((a, r) => a + r.bookings, 0),
       priced_bookings: rows.reduce((a, r) => a + (r.priced_bookings || 0), 0),
@@ -192,6 +224,8 @@ const revenueBody = () => {
     silent_platforms: [],
   };
 };
+const revenueBody = () => bodyFor(platformRows(), 365, ['2025-09-03', '2026-09-02']);
+const revenue300Body = () => bodyFor(platformRows300(), 300, ['2025-11-10', '2026-09-05']);
 
 /* Production's idle-day split at ?days=2, 2026-09-02T13:18Z, laid over the
    mock's own asset rows so every other field the page reads stays intact:
@@ -228,7 +262,16 @@ const assetsBody = async () => {
 };
 
 const shell = express();
-shell.get('/api/revenue', (_, res) => res.json(revenueBody()));
+/* The page sends from/to rather than a day count (api/public/data.js
+   windowParams), so the fixture picks its window by the span it is asked for:
+   the 365-day body for the double-count section above, the 300-day one for the
+   caption section below. */
+shell.get('/api/revenue', (req, res) => {
+  const span = req.query.from && req.query.to
+    ? Math.round((Date.parse(req.query.to) - Date.parse(req.query.from)) / 86400000) + 1
+    : 365;
+  res.json(span <= 330 ? revenue300Body() : revenueBody());
+});
 shell.get('/api/economics/assets', (_, res) => assetsBody().then((b) => res.json(b))
   .catch((e) => res.status(500).json({ error: String(e) })));
 shell.use(express.static('api/public'));
@@ -315,6 +358,82 @@ check('…with the size of it, and which side is ahead',
   /AED 545,918 apart \(29\.4%, the bank ahead\)/.test(recon), recon);
 check('…and the two denominators, which are not the same days',
   /206 statement days and 209 payout days on Uber/.test(recon), recon);
+
+/* ── 2b. the caption about the payout channels, against those channels' rows ──
+   "<channels> carry no fare per booking and are accounted for by payout
+   instead" was printed for every row on a payout basis, from the basis alone.
+   The two are different facts. Measured on production 2026-09-05T18:51Z: yango
+   is on basis payout at every window the page offers and prices 100% of its
+   bookings in all of them, and uber joins the list at 300 and 365 days now
+   that the payouts == null guard holds a real payout — pricing 94.4% and 94.9%
+   of the bookings that could carry a fare. Nothing pinned the string, so
+   nothing caught it.
+
+   The assertions below compare the CLAIM to the FIGURES on the same rows: the
+   percentages are computed from the fixture's own priced/chargeable counts, so
+   a caption that states a number the row does not support fails here. */
+console.log('\n…and the payout caption describes the same rows the table does');
+await open('#revenue?days=300',
+  () => [...document.querySelectorAll('.kpi .l')].some((l) => /Accounted for/.test(l.textContent)));
+const tiles300 = await tiles();
+const caps300 = await page.evaluate(() => [...document.querySelectorAll('p.cap')].map((c) => c.textContent.replace(/\s+/g, ' ').trim()));
+const flip = caps300.find((c) => /accounted for by payout/.test(c)) || '';
+/* Built from the fixture rows the same way api/income_sql.js coverage() builds
+   them — priced over the bookings that COULD carry a fare — so this is the
+   row's own figure and not a number typed twice. */
+const rows300 = platformRows300();
+const covOf = (p) => {
+  const r = rows300.find((x) => x.platform === p);
+  return `${(Math.round((r.priced_bookings / r.chargeable_bookings) * 1000) / 10).toFixed(1)}%`;
+};
+
+check('the caption is on the page', !!flip, caps300.join('\n---\n').slice(0, 400));
+check('it no longer says the payout channels carry no fare per booking',
+  !/carr(y|ies) no fare per booking/.test(flip), flip);
+check('…it names which channels are accounted by payout, which is what is true',
+  /Uber and Yango are accounted for by payout rather than by the fares/.test(flip), flip);
+check(`…and states Uber's fare coverage as Uber's own row reports it (${covOf('uber')})`,
+  flip.includes(`Uber prices ${covOf('uber')} of the bookings that could carry a fare`), flip);
+check(`…and Yango's (${covOf('yango')}), on the same window`,
+  flip.includes(`Yango prices ${covOf('yango')} of the bookings that could carry a fare`), flip);
+check('…and says outright that a payout basis is not the absence of a fare',
+  /can be accounted by payout and still price its bookings/.test(flip), flip);
+/* The claim and the table cannot disagree: whatever the caption says about a
+   channel's pricing, the row four columns to the left says the same. */
+const priceCells = await page.evaluate(() => [...document.querySelectorAll('table tbody tr')]
+  .map((tr) => tr.textContent.replace(/\s+/g, ' ').trim()));
+const uberCell = priceCells.find((c) => /^Uber/.test(c)) || '';
+const uberRow300 = rows300.find((r) => r.platform === 'uber');
+check('…and the table row below it reports the same pricing, to its own rounding',
+  uberCell.includes(uberRow300.priced_bookings.toLocaleString('en-US'))
+  && uberCell.includes(`· ${Math.round(Number(covOf('uber').replace('%', '')))}%`),
+  uberCell.slice(0, 160));
+
+/* ── 2c. the fares beside a payout of exactly zero ───────────────────────────
+   Bolt's row in this fixture holds a payout summing to exactly zero beside AED
+   519,818.70 of charged fares. Before it was answered the row took basis
+   partial_payout with best 0, which put it in the measured set and turned
+   every total the function returns null — the fares appeared in no tile and no
+   sentence. They are set aside now, and the tile says so. */
+console.log('\n…and money beside a zero payout is set aside in words, not dropped');
+const income300 = fleetIncome(platformRows300(), 300);
+const aed = (v) => `AED ${Math.round(v).toLocaleString('en-US')}`;
+const accTile300 = tiles300.find((k) => k.label === 'Accounted for');
+const boltRow = rows300.find((r) => r.platform === 'bolt');
+check('the accounted figure is the one fleetIncome computes, without those fares',
+  accTile300?.value === aed(income300.accounted),
+  `tile "${accTile300?.value}" vs ${aed(income300.accounted)}`);
+check('…and the AED 519,819 of fares beside the zero payout is named, not missing',
+  accTile300?.sub.includes(`${aed(boltRow.fares)} of fares on Bolt counted in neither half`),
+  `sub "${accTile300?.sub}"`);
+check('…with the reason, so it reads as excluded rather than as an error',
+  /payout statement sums to exactly zero/.test(accTile300?.sub || '')
+  && /neither was taken/.test(accTile300?.sub || ''), `sub "${accTile300?.sub}"`);
+/* And it is not counted twice by being called dark as well: the bookings it
+   carries are money we cannot settle, not money nothing reports. */
+const darkTile300 = tiles300.find((k) => k.label === 'Bookings with no money value');
+check('…and those 22,180 bookings are not also filed as having no money value',
+  darkTile300?.value === '0', `reads "${darkTile300?.value}"`);
 
 /* ── 3. the idle tile names the base its money was measured over ─────────── */
 console.log('\n#unit pairs its idle days with the base the cost was measured over');

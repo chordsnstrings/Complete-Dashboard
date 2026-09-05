@@ -583,18 +583,43 @@ app.get('/api/kpis', wrap(async (req, res) => {
        the calendar length of the window when the row does not carry it, and
        this fold was the one caller that did not.
        ─────────────────────────────────────────────────────────────────────
-       What that cost, measured on production on 2026-09-05. GET
+       WHAT THIS ONE FIELD HOLDS UP TODAY, which is no longer the headline.
+       The payouts == null guard in chooseBasis (api/income_sql.js) now stops a
+       row holding a real payout falling through to its gross fares at all, so
+       the TOTAL survives without this line. Measured by calling fleetIncome
+       directly on the shape test/server_audit.test.mjs seeds — one Uber month,
+       20 bookings and 20 fares of AED 100 across two days, AED 1,500 of payout
+       covering both of those days, over a 31-day window — accounted is AED
+       1,500 with the field and AED 1,500 without it. What moves is everything
+       the product says ABOUT that figure: with booking_days the row reads
+       basis 'payout', payout coverage 100% of the two days it worked and 0
+       undercovered bookings; without it, basis 'partial_payout', coverage
+       6.5%, all 20 bookings undercovered, undercovered_pct 100, and a caption
+       reading "net payout covering only 2 of the 31 day(s) this channel
+       worked". That sentence is false — the channel worked two days and was
+       paid for both — and api/public/revenue.js prints it beneath a warn-toned
+       "Bookings with no money value" tile as "20 more are covered by a payout
+       that reaches 2 of Uber's 31 days". A wrong denominator here now buys a
+       wrong REASON rather than a wrong total, which is the harder kind to
+       catch and the kind a reader acts on.
+       ─────────────────────────────────────────────────────────────────────
+       THE HISTORY THAT FOUND IT, kept because it is what a missing denominator
+       did to the money before that guard existed, and because it is still what
+       production serves. Measured on production on 2026-09-05, GET
        /api/kpis?from=2026-09-01&to=2026-09-30 returned accounted 168,213.30,
        all of it accounted_fares, accounted_payouts null and Uber on a fares
-       basis; GET /api/revenue over the identical window — same rows, same
-       income_sql — returned accounted 125,188.63 with Uber on basis=payout,
-       best=109,113.52, booking_days=5. Uber had booked five days of a
+       basis, against GET /api/revenue over the identical window — same rows,
+       same income_sql — at accounted 125,188.63, Uber on basis=payout,
+       best 109,113.52, booking_days 5. Uber had booked five days of a
        thirty-day September and been paid for all five, so its payout coverage
-       is 100%; dividing by the calendar instead made it 5/30 = 16.7%, under
-       chooseBasis's 80% bar, and the channel fell through to its GROSS fares.
-       The Overview 'Money in' tile therefore read AED 168,213 for a fleet
-       whose income over those days was AED 125,189 — a 34.4% overstatement,
-       and precisely the commission Uber takes before the fleet is paid.
+       is 100%; dividing by the calendar made it 5/30 = 16.7%, under
+       chooseBasis's 80% bar, and the channel fell through to its GROSS fares —
+       the Overview 'Money in' tile overstating the fleet's income by 34.4%,
+       which is precisely the commission Uber takes before the fleet is paid.
+       Re-measured hours later the same day, with the backfill still running,
+       the same two calls give 170,708.30 against 146,279.92, Uber's payout at
+       127,709.81 and booking_days still 5: the figures move with every
+       collection, the disagreement does not.
        Latent on the default view, which clamps to today and so has no calendar
        tail to divide by; live the moment a reader picks a date range, because
        api/public/data.js sends explicit from/to.
@@ -3867,7 +3892,47 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
        FROM (${rollupGrainSql('month')}) g
        WHERE fleet_id = coalesce($2, '*') AND platform <> '*'
          AND ($1::text IS NULL OR platform = $1)`;
-  const [platMonths, payMonths, stmtMonths] = await Promise.all([
+  /* The days each channel actually BOOKED in each month, which is the
+     denominator payout coverage is taken over.
+     ─────────────────────────────────────────────────────────────────────────
+     coverage() in api/income_sql.js reads `booking_days > 0 ? booking_days :
+     windowDays` and the cells built below carried no booking_days at all, so
+     every month's payout coverage was divided by the CALENDAR length of that
+     month. It is the same defect the /api/kpis fold carried — see the long
+     comment on booking_days there — and what it costs is the same thing it
+     costs there. Measured by mounting this route over two Uber days of a
+     June, twenty bookings priced at AED 100 and AED 1,500 of payout covering
+     both days: with the field the month reads basis 'payout', coverage 100% of
+     the two days the channel worked and nothing undercovered; without it,
+     coverage 2/30 = 6.7%, basis 'partial_payout', and all twenty bookings come
+     back as undercovered_bookings with undercovered_pct 100 under the sentence
+     "net payout covering only 2 of the 30 day(s) this channel worked" — which
+     is false, the channel worked two days and was paid for both. Before the
+     payouts == null guard landed in chooseBasis the same row fell through to
+     its GROSS fares and the money itself moved; with the guard the total holds
+     and it is the coverage and the reason beside it that go wrong, on the
+     income line of #causes, the page whose whole subject is explaining why the
+     numbers moved.
+     ─────────────────────────────────────────────────────────────────────────
+     Counted from rollup_day, and from the same grain SQL the rollup is built
+     from when the rollup has not run, exactly as platMonthSql above does and
+     for the same reason: `bookings` there is already the guarded count that
+     excludes telematics twins, so a day the tracker moved a car and nobody
+     ordered a ride is not a day the channel booked. */
+  const bookingDaySql = fromRollup
+    ? `SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS m, platform,
+              count(DISTINCT day) FILTER (WHERE bookings > 0)::int AS booking_days
+       FROM rollup_day
+       WHERE fleet_id = coalesce($2, '*') AND platform <> '*'
+         AND ($1::text IS NULL OR platform = $1)
+       GROUP BY 1, 2`
+    : `SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS m, platform,
+              count(DISTINCT day) FILTER (WHERE bookings > 0)::int AS booking_days
+       FROM (${rollupGrainSql('day')}) g
+       WHERE fleet_id = coalesce($2, '*') AND platform <> '*'
+         AND ($1::text IS NULL OR platform = $1)
+       GROUP BY 1, 2`;
+  const [platMonths, payMonths, stmtMonths, bookingDayMonths] = await Promise.all([
     q(platMonthSql, [req.query.platform || null, trendFleet]),
     q(`SELECT to_char(date_trunc('month', day), 'YYYY-MM') AS m, platform,
               round(sum(earnings)::numeric, 2) AS payouts,
@@ -3885,6 +3950,7 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
        WHERE source <> 'ledger' AND ($1::text IS NULL OR platform = $1)
          AND ($2::text IS NULL OR fleet_id = $2)
        GROUP BY 1, 2`, [req.query.platform || null, trendFleet]),
+    q(bookingDaySql, [req.query.platform || null, trendFleet]),
   ]);
   const incomeByMonth = new Map();
   {
@@ -3893,7 +3959,11 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
       if (!acc.has(m)) acc.set(m, new Map());
       const inner = acc.get(m);
       if (!inner.has(pl)) {
-        inner.set(pl, { platform: pl, bookings: 0, priced_bookings: 0,
+        /* booking_days seeded at 0 rather than left off: coverage() tests
+           `booking_days > 0`, so a cell for a channel with no booked day in
+           the month reads the window length exactly as it did before, and a
+           cell that has one reads the days it booked. */
+        inner.set(pl, { platform: pl, bookings: 0, booking_days: 0, priced_bookings: 0,
           fares: null, payouts: null, payout_days: 0 });
       }
       return inner.get(pl);
@@ -3904,6 +3974,8 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
     for (const r of payMonths) Object.assign(cell(r.m, r.platform), {
       payouts: r.payouts == null ? null : Number(r.payouts),
       payout_days: r.payout_days ?? 0 });
+    for (const r of bookingDayMonths) Object.assign(cell(r.m, r.platform), {
+      booking_days: r.booking_days ?? 0 });
     for (const r of stmtMonths) Object.assign(cell(r.m, r.platform), {
       statement_net: r.statement_net == null ? null : Number(r.statement_net),
       statement_cash: r.statement_cash == null ? null : Number(r.statement_cash),
@@ -3920,15 +3992,62 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
     const k = key(d);
     const row = byMonth.get(k);
     const inc = incomeByMonth.get(k) || {};
-    const partial = !!row && ((spanFrom && spanFrom > `${k}-01`) || (spanTo && spanTo < lastOf(k)));
+    const monthFrom = `${k}-01`, monthTo = lastOf(k);
+    /* Whether the BOOKING record reaches this month at all, which is a
+       different question from whether it covers the whole of it.
+       ─────────────────────────────────────────────────────────────────────
+       Narrowing the span above to the booking record — the change that made
+       this route agree with /api/forecast about which months are partial —
+       made a clamp that had never been reachable start firing. While spanFrom
+       and spanTo came from the same trip_norm rows rollup_month is built from,
+       every month carrying a row lay inside the span and the overlap below was
+       always at least one day. Measured against the BOOKING record it is not:
+       this fleet's first booking is 19 December 2024 while the telematics
+       boxes were already running in October, so October and November 2024 fall
+       wholly BEFORE the span, their overlap with it is negative, and
+       `Math.max(1, ...)` turned that into a 1.
+
+       Re-measured on production on 2026-09-05, /api/trend/monthly serves
+       2024-10 as 0 bookings against 6,960 telematics journeys and 2024-11 as 0
+       against 9,588, and /api/trips/daily puts the first booking of the record
+       on 2024-12-19. With the clamp reachable, #causes would have captioned
+       each of those months "1 of 31 days collected" and "1 of 30 days
+       collected" directly beside its own count of thousands of journeys. The
+       figure is false under either reading of it — the record holds all 31
+       days of October's telematics and none of its bookings, and 1 is neither.
+
+       A month with telematics and no booking is not partly collected. What is
+       true of it is narrower: no booked ride we hold falls inside it, while
+       the tracker watched the cars all month. Whether that is a fleet that
+       took no booking or a channel whose collected history does not reach back
+       this far, this route cannot tell and therefore does not say. The month
+       is flagged with the side of the record it falls on, and days_in_record
+       is left ABSENT — there is no number of days to report here, and 1 was a
+       lie a reader would have acted on. api/public/causes.js renders the flag
+       as the reason the count is missing. */
+    const outsideBookings = !row || !spanFrom ? null
+      : spanFrom > monthTo ? 'before'
+        : (spanTo && spanTo < monthFrom) ? 'after' : null;
+    const partial = !!row && !outsideBookings
+      && ((spanFrom && spanFrom > monthFrom) || (spanTo && spanTo < monthTo));
     months.push(row
       ? { ...row, m: k, no_data: false,
           // True where the record itself starts or ends inside this month, so
           // the month holds fewer days than it appears to.
           partial_month: partial,
+          /* Which side of the booking record a month outside it falls on, and
+             null for every month the record reaches — the reason days_in_record
+             is absent, carried beside the absence rather than left to a page to
+             infer from a null. */
+          outside_booking_record: outsideBookings,
+          /* No clamp. `partial` is now true only where the span and the month
+             genuinely overlap, so the difference below is at least one day by
+             construction; the Math.max(1, ...) that used to stand here is
+             exactly what turned a month the record never reached into "1 of 31
+             days collected". */
           days_in_record: partial
-            ? Math.max(1, dayDiff(spanFrom > `${k}-01` ? spanFrom : `${k}-01`,
-              spanTo < lastOf(k) ? spanTo : lastOf(k)))
+            ? dayDiff(spanFrom > monthFrom ? spanFrom : monthFrom,
+              spanTo < monthTo ? spanTo : monthTo)
             : null,
           ...inc,
           /* A month with work and no statement is not a month the fleet earned
@@ -3952,7 +4071,11 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
              the import exists to recover invisible on the one chart that
              shows history. */
           ...inc,
-          no_data: true, drivers_known: false, partial_month: false, days_in_record: null });
+          no_data: true, drivers_known: false, partial_month: false, days_in_record: null,
+          // Present on every month so a page can read one field rather than
+          // testing for its existence; a month with no rows at all is a hole,
+          // not a month the booking record fell short of.
+          outside_booking_record: null });
   }
 
   // Month-over-month breaks, computed only between months we actually observed.

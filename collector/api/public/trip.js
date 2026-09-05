@@ -136,8 +136,30 @@ export async function renderTrip(root, platform, id) {
   /* One sentence, written once and used in all four "that day" rows — the
      same grouping argument tableFrom's own absent-note makes: four columns
      sharing one answer, printed four times in four different wordings, read
-     as four separate faults. */
-  const noStmt = `no ${sourceLabel(t.platform)} statement covers this day`;
+     as four separate faults.
+
+     ONE SENTENCE, BUT NOT ONE REASON. It used to be a single string, "no <X>
+     statement covers this day", printed whatever the cause. There are five,
+     the route now names which (statement_absent), and the string it deserves
+     differs: a telematics journey names no driver to look a statement up by,
+     a day before the components walk begins is our gap and not the channel's
+     silence, and only a day inside the collected span is the channel itself
+     having filed nothing. The old wording was the last of those five, written
+     over all of them — and on a GPS feed it read as though the tracker owed
+     us an earnings statement. */
+  const A = d.statement_absent;
+  const chWin = d.statement_window?.channel || null;
+  const ledWin = d.statement_window?.ledger || null;
+  const span = (w) => `${dayStr(w.first_day)} → ${dayStr(w.last_day)}`;
+  const noStmt = A === 'no_driver_named'
+    ? 'this record names no driver, and a day statement is filed per driver'
+    : A === 'no_day_on_record'
+      ? 'this record carries no Dubai day to look a statement up by'
+      : A === 'channel_files_none'
+        ? `${sourceLabel(t.platform)} files no day statement of its own`
+        : A === 'before_channel_window' || A === 'after_channel_window'
+          ? `outside the ${sourceLabel(t.platform)} statements collected so far`
+          : `no ${sourceLabel(t.platform)} statement covers this driver on this day`;
   mp.body.append(tableFrom([
     { what: 'Fare on this booking', v: t.price != null ? money(t.price, t.currency || 'AED', 2) : null,
       basis: t.price != null
@@ -195,20 +217,44 @@ export async function renderTrip(root, platform, id) {
        caption that says "the channel" is unfalsifiable in exactly the way that
        let the wrong book sit there unnoticed.
 
-       The absent sentence is written to be true of both ways a channel can
-       have nothing to say: one that files no day statement at all, which is
-       every channel but Uber on this fleet, and Uber on a date its
-       earner-payments surface no longer answers for. Either way the cell is a
-       dash with a reason beside it and never a zero. */
+       The absent sentence is per CAUSE, and the causes are not alike. A
+       channel that files no day statement of its own, a record that names no
+       driver to file one against, a date before or after the span we have
+       collected, and a driver-day inside that span with nothing filed for it
+       are four different facts, and the route names which (statement_absent)
+       rather than leaving the page to read one meaning into a null. Whichever
+       it is, the cell is a dash with a reason beside it and never a zero. */
+    /* AND A TERM THE STATEMENT DID NOT CARRY IS NOT A ZERO EITHER.
+       ─────────────────────────────────────────────────────────────────────
+       Each of these three read `Number(sd.tips) ? … : "no rider tipped this
+       driver that day"`, and Number(null) is 0 — so a statement that carried
+       a net and no toll line printed the em dash of an absent figure beside
+       the sentence "no toll was reimbursed that day", which is a measured
+       zero asserted about a number nobody measured. Not a corner case:
+       /api/trip on three Uber bookings sampled from 2026-02-15 came back with
+       salik null on all three and tips null on one of them, all three
+       carrying a net — and every Uber page for those driver-days said no toll
+       was reimbursed. src/rollup.js builds these with `sum(amount) FILTER
+       (WHERE category = 'toll')`, which is null when the period's component
+       tree has no toll line at all, and that is a different fact from a zero.
+
+       Three states each, then, the way the cash row below has had three since
+       it was written: a figure, a real zero the statement filed, and a line
+       the statement did not carry. */
     { what: 'Net fare that day', v: sd?.net != null ? money(sd.net, 'AED', 2) : null,
-      basis: sd ? `what ${sourceLabel(t.platform)} says the day’s trips earned, after its commission`
-        : noStmt },
+      basis: !sd ? noStmt
+        : (sd.net == null ? 'the statement covering this day carries no net-fare line'
+          : `what ${sourceLabel(t.platform)} says the day’s trips earned, after its commission`) },
     { what: 'Tips that day', v: sd?.tips != null ? money(sd.tips, 'AED', 2) : null,
-      basis: sd ? (Number(sd.tips) ? 'riders’ tips, on top of the fares'
-        : 'no rider tipped this driver that day') : noStmt },
+      basis: !sd ? noStmt
+        : (sd.tips == null ? 'the statement covering this day carries no tip line'
+          : Number(sd.tips) ? 'riders’ tips, on top of the fares'
+            : 'no rider tipped this driver that day') },
     { what: 'Salik reimbursed that day', v: sd?.salik != null ? money(sd.salik, 'AED', 2) : null,
-      basis: sd ? (Number(sd.salik) ? 'tolls the channel paid back'
-        : 'no toll was reimbursed that day') : noStmt },
+      basis: !sd ? noStmt
+        : (sd.salik == null ? 'the statement covering this day carries no toll line'
+          : Number(sd.salik) ? 'tolls the channel paid back'
+            : 'no toll was reimbursed that day') },
     /* The basis has to describe what is in the cell, not what would be there.
        Written unconditionally it said "part of the figure above" beside an
        em dash, which describes a number that is not on the page. */
@@ -231,13 +277,115 @@ export async function renderTrip(root, platform, id) {
      either way round: which surface filed it, or that this channel filed
      nothing and the figures are therefore absent rather than borrowed. */
   const dayName = t.local_day ? dayStr(t.local_day) : 'this trip’s day';
+  /* AND THE CAPTION SAYS WHICH OF THE FIVE ABSENCES IT IS, AND AT WHAT GRAIN.
+     ───────────────────────────────────────────────────────────────────────
+     The first version of this caption said, on every null, "<channel> filed no
+     statement covering <day> … this driver may well have a statement
+     elsewhere". That is a claim about the PROVIDER'S behaviour, and it is
+     false on the largest population this page serves. driver_statement_day's
+     non-ledger slice is rebuilt from the earnings components, and
+     /api/money/sources reports those beginning 2026-02-09 on both fleets —
+     209 statement days out of the 400 /api/revenue serves. Checked on the
+     boundary on 2026-09-05: two Uber bookings on 2026-02-08 answer
+     statement_day null, two on 2026-02-09 answer rows, and one driver with
+     nothing on the 8th has AED 116.32 of net on the 9th. /api/trips/list
+     counts 175,105 Uber bookings between 2025-08-01 and 2026-02-08. Uber
+     filed for those weeks; we have not walked back that far. The caption also
+     pointed the reader at other channels when the missing book is Uber's own.
+
+     The second falsehood was the grain. src/rollup.js's resolved CTE divides
+     each report by the days it covers, sql/schema_v44.sql records the divisor
+     for exactly this reason, and uber_components reports max_period_days 7 —
+     so "a figure for the whole day" was, on the usual Uber row, a seventh of a
+     week presented as a measurement of one day, contradicting the note
+     directly below this caption which says so in as many words. period_days
+     now comes back on the row and the caption states the window it was spread
+     from, or says the window is unrecorded where the row predates the column.
+
+     Nothing about the panel's shape changes: one caption in the class this
+     page already uses for provenance, in the same place. */
+  const pDays = sd && sd.period_days != null ? Number(sd.period_days) : null;
+  const grain = pDays === 1
+    ? `${esc(sourceLabel(t.platform))} filed ${esc(dayName)} as a day of its own, so these are `
+      + 'figures for the whole day and not for this booking.'
+    : pDays > 1
+      ? `filed as a report covering ${esc(countOf(pDays, 'day'))} and divided evenly across them, so `
+        + `each of these is that period’s total divided by ${esc(String(pDays))} rather than `
+        + `anything measured on ${esc(dayName)} — and a figure for a whole day, never for this `
+        + 'booking.'
+      : 'the report window behind it is not recorded, so whether it was measured on this day or '
+        + 'spread from a longer period is not known. Either way it is a figure for a whole day, '
+        + 'not for this booking.';
   mp.body.append(el('p', 'cap', sd
-    ? `The four “that day” figures are ${esc(sourceLabel(t.platform))}’s own statement for `
-      + `${esc(dayName)}, filed by ${esc(stmtSurface(sd.source))} — a figure for the whole `
-      + 'day, not for this booking.'
-    : `${esc(sourceLabel(t.platform))} filed no statement covering ${esc(dayName)}, so the four `
-      + '“that day” figures are absent rather than taken from another channel’s book. This driver may '
-      + 'well have a statement elsewhere for this date; it would not be a measurement of this channel.'));
+    ? `The “that day” figures above are ${esc(sourceLabel(t.platform))}’s own statement covering `
+      + `${esc(dayName)}, filed by ${esc(stmtSurface(sd.source))} — ${grain}`
+    : A === 'no_driver_named'
+      ? 'This record names no driver, so no statement was looked up: a day statement is filed per '
+        + 'driver and per day, and there is nobody here to file one against. '
+        + (chWin
+          ? `The ${esc(sourceLabel(t.platform))} statements collected run ${esc(span(chWin))}, and `
+            + 'none of them can be tied to a record with no driver on it.'
+          : `${esc(sourceLabel(t.platform))} files no day statement to this fleet at all, so there `
+            + 'would have been nothing to find.')
+      : A === 'no_day_on_record'
+        ? 'This record carries no Dubai day, and a day statement is filed per day — so there is no '
+          + 'date to look one up by and the four figures are absent rather than nil.'
+        : A === 'channel_files_none'
+          ? `${esc(sourceLabel(t.platform))} files no day statement of its own to this fleet, so the `
+            + '“that day” figures are absent rather than taken from another channel’s book. '
+            + (ledWin
+              /* NOT "#reconcile is where the two are put side by side". It is
+                 not: api/reconcile_routes.js filters `source <> 'ledger'` on
+                 all three of its statement reads, and says at :26 exactly why
+                 — comparing the operator's import against the bank would be
+                 checking the ledger against itself. Pointing a reader at a
+                 comparison no page performs is the same defect as a figure
+                 with a false reason, one indirection further out. */
+              ? `The operator’s imported ledger does hold ${esc(sourceLabel(t.platform))} figures `
+                + `for ${esc(span(ledWin))}; this panel reads the channel’s own filing and not `
+                + 'that import, and no page compares the two — #reconcile deliberately excludes '
+                + 'the ledger, because it is the bank side of its own sum.'
+              : 'No other surface files one for this channel either.')
+          : chWin && A === 'before_channel_window'
+            ? `The ${esc(sourceLabel(t.platform))} statements collected so far begin `
+              + `${esc(dayStr(chWin.first_day))} and ${esc(dayName)} is before that, so these are `
+              + 'absent because our collection does not reach this date — not because '
+              + `${esc(sourceLabel(t.platform))} filed nothing for it. `
+              + (ledWin
+                /* Same correction, and one more: the branch opens "our
+                   collection does not reach this date" and then names an
+                   import that does reach it, which reads as a contradiction.
+                   It is not one — the ledger is a different record from the
+                   channel's own filing, and this panel is about the filing —
+                   so the sentence says that rather than leaving the reader to
+                   reconcile the two halves themselves. */
+                ? `The operator’s imported ledger does cover ${esc(span(ledWin))} for this `
+                  + 'channel, but it is the operator’s own record rather than the channel’s '
+                  + 'filing, and this panel reports the filing.'
+                /* Not "the week has not been walked", which reads as a backfill
+                   somebody forgot to run. Uber's earnings surface serves a
+                   rolling window that moves forward daily, so a date before it
+                   is one the provider no longer answers for — nothing will
+                   fetch it later. */
+                : 'The provider serves a rolling window that has since moved past this date, '
+                  + 'so no later collection will reach it.')
+            : chWin && A === 'after_channel_window'
+              ? `The ${esc(sourceLabel(t.platform))} statements collected so far end `
+                + `${esc(dayStr(chWin.last_day))} and ${esc(dayName)} is after that — the report `
+                + 'covering it has not been collected yet, so these are absent rather than nil.'
+              : chWin && A === 'in_channel_window'
+                ? `${esc(sourceLabel(t.platform))} statements covering ${esc(span(chWin))} are `
+                  + `collected and not one of them covers this driver on ${esc(dayName)}. That is `
+                  + 'the channel having filed nothing for them that day, and the figures are absent '
+                  + 'rather than taken from another channel’s book.'
+                /* A reason this page has not been taught. Written to be true
+                   of whatever it turns out to be — a claim about our records,
+                   which is the only thing the page can check — rather than
+                   letting an unrecognised code fall into the sentence that
+                   says the channel filed nothing. */
+                : `no ${esc(sourceLabel(t.platform))} statement we hold covers this driver on `
+                  + `${esc(dayName)}, so the figures are absent rather than taken from another `
+                  + 'channel’s book.'));
   /* The identity, checked on the page rather than asserted in a caption.
      ───────────────────────────────────────────────────────────────────────
      #reconcile proves `bank ≈ net + tips + salik − cash` month by month, to

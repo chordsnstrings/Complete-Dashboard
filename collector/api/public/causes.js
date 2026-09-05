@@ -45,6 +45,31 @@ const partialDays = (m) => {
   return all ? `${fmt(have)} of ${fmt(all)} days collected` : `${countOf(have, 'day')} collected`;
 };
 
+/* A month the BOOKING record does not reach, which is not a partial month and
+   has no day count at all.
+   ─────────────────────────────────────────────────────────────────────────
+   The telematics boxes were running before the first ride we hold was booked.
+   Production on 2026-09-05 serves October 2024 as 0 bookings against 6,960
+   telematics journeys and November 2024 as 0 against 9,588, while the first
+   booking in the record is 19 December 2024. Both months therefore sit wholly
+   outside the booking span, and the endpoint's day count for them was the
+   result of clamping a negative overlap up to one — so this caption would have
+   read "1 of 31 days collected" in the bar tooltip and again in the clicked
+   note, directly beside the fleet's own count of thousands of journeys.
+
+   There is no reading of that month under which 1 is right: the record holds
+   every day of its telematics and none of its bookings. So the count is absent
+   and this is the reason printed in its place — which side of the booking
+   record the month falls on, and nothing about what the fleet did, because a
+   month with no booked ride in the record may be a month the fleet took no
+   booking or a channel whose collected history does not reach back that far,
+   and the endpoint cannot tell the two apart either. */
+const outsideRecordWhy = (m) => (m.outside_booking_record === 'before'
+  ? 'the record’s first booking comes after it'
+  : m.outside_booking_record === 'after'
+    ? 'the record’s last booking comes before it'
+    : '');
+
 const MONTH = (m) => {
   const [y, mm] = String(m).slice(0, 7).split('-');
   return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][+mm - 1]} ${y.slice(2)}`;
@@ -134,7 +159,9 @@ function trendChart(host, months, onPick) {
         data-m="${esc(m.m)}"><title>${MONTH(m.m)} — ${fmt(m.trips)} trips${
         m.drivers_known ? `, ${m.drivers} drivers` : ', no driver attribution'}${
         part ? ` — PARTIAL: ${partialDays(m) || 'the record starts or stops inside this month'}`
-          : ''}</title></rect>`);
+          : m.outside_booking_record
+            ? ` — NO BOOKINGS: ${outsideRecordWhy(m)}, so there is no count of days collected for it`
+            : ''}</title></rect>`);
     }
     out.push(`<text x="${(x + bw / 2).toFixed(1)}" y="${H - 24}" font-size="10" fill="var(--ink-3)" text-anchor="middle">${MONTH(m.m)}</text>`);
   });
@@ -433,6 +460,13 @@ export async function renderCauses(root) {
       + (row.partial_month ? ` — a PARTIAL month${partialDays(row) ? `: ${partialDays(row)}` : ''}. `
         + 'The record starts or stops inside it, so it holds fewer days than the months beside it '
         + 'and should not be compared with them directly' : '')
+      /* Never both: the endpoint marks a month partial only where the booking
+         record actually overlaps it, and outside_booking_record only where it
+         does not. */
+      + (row.outside_booking_record
+        ? ` — no booking in the record falls inside this month: ${outsideRecordWhy(row)}. `
+          + 'That is not the same thing as a partial month, and there is no count of days '
+          + 'collected to give for it' : '')
       + (near.length ? ` — ${countOf(near.length, 'break')} ${plural(near.length, 'touches', 'touch')} this month.` : '');
     trend.body.append(d);
   });

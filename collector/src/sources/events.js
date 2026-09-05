@@ -370,25 +370,89 @@ export async function detectBreaks() {
      restates a month, or the pair simply falls back under the 30% threshold,
      the old numbers stop being recomputed and are served for ever.
 
-     MEASURED, production /api/breaks against /api/trend/monthly on 2026-09-05.
-     Thirty-four stored rows, of which nine disagree with the live series, four
-     of those with the sign inverted:
+     RE-MEASURED on 2026-09-05, production /api/breaks against
+     /api/trend/monthly?platform=… — bookings plus telematics journeys, which
+     is the pair of numbers the count(*) above adds together, because a trip
+     row is either a booking or the tracker's own view of one. Thirty-four
+     stored rows, of which nine disagree with the live series, and SIX of those
+     nine have the sign inverted. The first version of this comment said four:
+     it was counting its own example list, which already held five, and it had
+     never looked at uber 2026-06 -> 07. All six, in full:
 
        fms  2025-11 -> 12  stored    714 ->  4,537  +535.4%   live 16,074 -> 11,865  -26.2%
        fms  2025-12 -> 01  stored  4,537 ->    119   -97.4%   live 11,865 -> 13,674  +15.2%
        fms  2026-01 -> 02  stored    119 ->  5,671 +4,665.5%  live 13,674 -> 11,724  -14.3%
        fms  2026-04 -> 05  stored  6,296 ->  3,576   -43.2%   live  6,485 ->  7,781  +20.0%
        fms  2026-05 -> 06  stored  3,576 ->  7,444  +108.2%   live  7,781 ->  7,445   -4.3%
-       uber 2026-05 -> 06  stored  6,647 -> 10,040   +51.0%   live  9,707 -> 10,047   +3.5%
+       uber 2026-06 -> 07  stored  6,702 ->  9,676   +44.4%   live 10,047 ->  9,655   -3.9%
 
-     Five of the twelve cards #causes renders are wrong on those numbers, and
-     the page contradicts itself in one screen: its own KPI tile reads
-     "LARGEST MOVE +1,029%" directly above a card list whose largest card is
-     "+115,800%" — fms 2024-09 -> 10, 6 trips to 6,954, a boundary row from
-     before the FMS history was backfilled. The tile is computed from the live
+     Two of the other three keep the direction and lose the size — uber
+     2025-07 -> 08 stored +46.8% against a live +22.6%, uber 2026-05 -> 06
+     stored +51.0% against a live +3.5% — and the ninth is fms 2024-09 -> 10,
+     which has no live counterpart at all and is the paragraph after next.
+
+     Five of the twelve cards #causes renders are wrong on those numbers,
+     re-counted today over the twelve largest absolute changes, which is the
+     order the page sorts and slices them in. And the page contradicts itself
+     in one screen: its own KPI tile reads "LARGEST MOVE +1,029%" — still
+     +1,029%, 2025-03 to 2025-04, on today's series — directly above a card
+     list whose largest card is "+115,800%". The tile is computed from the live
      series and the cards are read from this table, so the two only agree when
      this table is a function of the series, which is what deleting the
      unconfirmed rows makes it.
+
+     AND THAT +115,800% CARD IS NOT WHAT THIS COMMENT FIRST CALLED IT. It said
+     "a boundary row from before the FMS history was backfilled", and the
+     arithmetic refuses that reading. The row is fms 2024-09 -> 10, 6 -> 6,954,
+     and 6 + 6,954 = 6,960 — exactly what /api/trend/monthly?platform=fms
+     serves for 2024-10 today, and exactly what that month's thirty-one rows on
+     /api/trips/daily sum to. A backfill ADDS journeys and would leave today's
+     October larger than the pair; this pair conserves them to the journey. It
+     was not the data that arrived, it was the month boundary that moved.
+
+     Dubai-bucketed, the FMS telematics history begins on 2024-10-01: every day
+     of September 2024 is empty and the first day carries 72 journeys. This
+     statement cut the year on the UTC clock until 131ab1f, on 2 September
+     2026, gave it AT TIME ZONE 'Asia/Dubai', and Dubai is UTC+4, so the last
+     four hours of a UTC month are the first four hours of the next Dubai one.
+     Six of that first morning's 72 journeys are stamped before 04:00 Dubai —
+     2024-09-30 20:00 UTC or later — and the old query counted those six as the
+     whole of September 2024.
+
+     The table still carries the proof: the row keyed 2024-10 -> 11 says
+     October was 6,960 and the row keyed 2024-09 -> 10 says it was 6,954, two
+     stored values for one month. The Dubai-clock run rewrote the first and
+     could not reach the second, because under Dubai months fms has no 2024-09
+     at all and no pair with that period_from is ever recomputed. So the row is
+     legitimate history of an old bucketing and stale as a statement about the
+     fleet, which is the same verdict this DELETE was already written for — a
+     row that recomputation cannot restate can only be removed. (6,954 is what
+     the UTC clock made of October on the day that row was written, not a
+     number today's series can reproduce: the same four-hour shift at the other
+     end of the month would have pulled some of 1 November's small hours into
+     it. That is the point rather than a caveat.)
+
+     WHAT THE PAGE DOES WITH AN EMPTY RESULT, which this statement makes an
+     ordinary state rather than a startup one. api/public/causes.js renders a
+     card per stored row, and when it has none while /api/trend/monthly still
+     reports a move it prints "Breaks are visible in the trend above, but the
+     collector has not yet written its decomposition for them. It runs on the
+     next collection." After this DELETE an empty result usually means the
+     opposite of that sentence — the run happened and decided the pair is not a
+     break. The two sets are built differently on purpose: the endpoint
+     compares BOOKINGS alone and compares into the month still running, this
+     file compares bookings plus telematics and refuses the running month, so
+     they can disagree with neither side wrong. MEASURED on 2026-09-05,
+     /api/breaks?platform=yango serves nothing while the same month range on
+     /api/trend/monthly?platform=yango reports 2026-08 -> 09 at -76%, and every
+     fleet chip is the same shape because every row this file writes carries
+     fleet_id NULL. The
+     yango case is already live: it is the open-month DELETE above, deployed in
+     131ab1f, emptying a platform whose only 30% move ran into the month in
+     progress. This statement generalises it to any platform whose stored rows
+     the current series no longer supports. Left for the lane that owns
+     causes.js — a caption is not this file's to write — and recorded here
+     because these two DELETEs are what make it a caption anyone will read.
 
      WHAT THIS IS SCOPED TO, and why the scope is not optional. A DELETE that
      said only `grain = 'month'` would turn a stale-row bug into a data-loss

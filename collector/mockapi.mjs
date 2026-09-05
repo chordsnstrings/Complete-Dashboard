@@ -232,6 +232,9 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
   accounted_fare_bookings: 486,
     statement_net: 96480, statement_platforms: ['bolt', 'hotel', 'uber', 'yango'],
   accounted_bookings: 2043, accounted_platforms: ['hotel', 'uber', 'yango'],
+  /* The money a zero payout set aside, reported rather than dropped so a channel whose payout summed to nothing cannot take its fares out of every total in silence. Null throughout this fixture because no mock channel is in that state; the KEYS must still be here, because a fixture whose rows lack a field the real route sends is what test/mockapi.test.mjs exists to catch. */
+  set_aside_fares: null, set_aside_fare_bookings: null,
+  set_aside_bookings: 0, set_aside_platforms: [],
   dark_bookings: 0, dark_pct: 0,
 /* fleetIncome() also returns the under-covered pair beside the dark one —
      a channel whose money we hold over only part of the days it worked. Zero
@@ -952,6 +955,9 @@ app.get('/api/driver/kpis', (req, r) => {
     accounted_fares: Math.round(d.reduce((a, x) => a + x.revenue, 0)),
     accounted_payouts: 9800 - i * 500, accounted_fare_bookings: 40 + i,
     accounted_platforms: ['hotel', 'uber'], accounted_bookings: trips,
+    /* The money a zero payout set aside, reported rather than dropped so a channel whose payout summed to nothing cannot take its fares out of every total in silence. Null throughout this fixture because no mock channel is in that state; the KEYS must still be here, because a fixture whose rows lack a field the real route sends is what test/mockapi.test.mjs exists to catch. */
+    set_aside_fares: null, set_aside_fare_bookings: null,
+    set_aside_bookings: 0, set_aside_platforms: [],
     /* The statement's own fare line, beside the accounted money rather than
        inside it — the gross the rider was charged, which already contains the
        payout above. Present on every driver here so the Fares tile's
@@ -1478,6 +1484,9 @@ app.get('/api/vehicle/kpis', (req, r) => {
     accounted: 5082.65 + Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
     accounted_fares: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
     accounted_payouts: 5082.65, accounted_fare_bookings: 62, accounted_platforms: ['hotel', 'uber'],
+    /* The money a zero payout set aside, reported rather than dropped so a channel whose payout summed to nothing cannot take its fares out of every total in silence. Null throughout this fixture because no mock channel is in that state; the KEYS must still be here, because a fixture whose rows lack a field the real route sends is what test/mockapi.test.mjs exists to catch. */
+    set_aside_fares: null, set_aside_fare_bookings: null,
+    set_aside_bookings: 0, set_aside_platforms: [],
     accounted_bookings: trips, dark_bookings: 0, dark_pct: 0,
     undercovered_bookings: 0, undercovered_pct: 0,
     undercovered_payouts: null, undercovered_platforms: [],
@@ -1761,6 +1770,15 @@ app.get('/api/trend/monthly', (_, r) => {
           priced_trips: Math.round(row.trips * 0.35), no_data: false,
           // Collection starts on 21 August 2025, so that month holds 11 days.
           partial_month: k === '2025-08', days_in_record: k === '2025-08' ? 11 : null,
+          /* Which side of the BOOKING record a month outside it falls on, and
+             null for every month inside it — the reason /api/trend/monthly
+             gives when it has no day count to report, rather than the clamped
+             1 it used to serve for a month holding telematics and no booking.
+             Null throughout here because every month of this fixture carries
+             bookings; the field must still be present, because a fixture whose
+             rows lack a field the real route sends is what this shape check
+             exists to catch. */
+          outside_booking_record: null,
           /* Money per month, both channels — and the months no statement can
              ever cover. Uber's earnings API serves roughly the last six, so the
              older half of this record has work and no recoverable money, which
@@ -1770,6 +1788,9 @@ app.get('/api/trend/monthly', (_, r) => {
           accounted: Math.round(row.trips * 0.35 * 96)
             + (i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : 0),
           accounted_platforms: i >= MONTH_KEYS.length - 6 ? ['hotel', 'uber'] : ['hotel'],
+          /* The money a zero payout set aside, reported rather than dropped so a channel whose payout summed to nothing cannot take its fares out of every total in silence. Null throughout this fixture because no mock channel is in that state; the KEYS must still be here, because a fixture whose rows lack a field the real route sends is what test/mockapi.test.mjs exists to catch. */
+          set_aside_fares: null, set_aside_fare_bookings: null,
+          set_aside_bookings: 0, set_aside_platforms: [],
           income_missing: i < MONTH_KEYS.length - 6,
           /* The bookings the money above actually covers, and the share it does
              not. On a month before the earnings API's retention horizon that is
@@ -1784,8 +1805,11 @@ app.get('/api/trend/monthly', (_, r) => {
           km: null, measured_trips: 0, revenue: null, priced_trips: 0, cancel_pct: null,
           accounted: null, accounted_fares: null, statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: null, accounted_fare_bookings: null,
           accounted_platforms: [], income_missing: false,
+          /* The money a zero payout set aside, reported rather than dropped so a channel whose payout summed to nothing cannot take its fares out of every total in silence. Null throughout this fixture because no mock channel is in that state; the KEYS must still be here, because a fixture whose rows lack a field the real route sends is what test/mockapi.test.mjs exists to catch. */
+          set_aside_fares: null, set_aside_fare_bookings: null,
+          set_aside_bookings: 0, set_aside_platforms: [],
           platforms: [], booking_platforms: [], no_data: true, drivers_known: false,
-          partial_month: false, days_in_record: null };
+          partial_month: false, days_in_record: null, outside_booking_record: null };
   });
   const breaks = [];
   for (let i = 1; i < months.length; i++) {
@@ -2090,13 +2114,82 @@ app.get('/api/optimise', (req, r) => {
   });
 });
 
+/* ── the availability feed as the real one is shaped ──────────────────────
+   This fixture answered the same 168 cells whatever chips were on the address,
+   which is precisely the defect that had just been fixed in the route it
+   stands in for: /api/supply/balance divided one fleet's job hours by both
+   fleets' online hours, and one platform's by a platform that reports no
+   availability at all. A mock that keeps the old behaviour makes the browser
+   smoke run agree with the bug — #supply?platform=bolt rendered a full grid
+   and a 99% idle rate here while the real route now answers covered:false.
+
+   So the three facts about the real feed are modelled, and only those three.
+   driver_timeline_event carries platform 'uber' and nothing else
+   (src/sources/uber_timeline.js writes SRC = 'uber' at :29 and stamps it at
+   :143), so a chip for any other channel has no feed to read. It carries both
+   fleets, unevenly: over 2026-08-06 → 2026-09-05, /api/compare/period sums
+   driver_day.online_min — the same ONLINE spans, rolled up by
+   src/rollup.js:927-932 — at 1,074,609 minutes for ecosine and 534,900 for
+   egari, so ecosine is 67% of the online time against egari's 33%, while the
+   job halves split 71/29. And it reaches back about 31 days and no further, so
+   a window that ends before it starts has demand and no supply.
+
+   That last one is why the window is read at all: the uncovered state has TWO
+   reasons on the real route, and a fixture that can only produce one leaves
+   the other rendering only in production. #supply?platform=bolt exercises
+   'no-feed' and a window ending before 2026-08-03 exercises 'outside-window'.
+
+   Every total is null and not 0 in that state, which is what the route now
+   sends: a fixture that answers 0 online hours teaches the page that zero is a
+   reachable value here, and the page's whole job is to say the figure is
+   absent instead. */
+const SUPPLY_FEED = { platforms: ['uber'], from: '2026-08-03', to: '2026-09-02', days: 31 };
+/* online share first, jobs share second — the two differ, which is the entire
+   point of splitting the denominator as well as the numerator. */
+const SUPPLY_SHARE = {
+  fleet: { ecosine: [0.67, 0.71], egari: [0.33, 0.29] },
+  platform: { uber: [1, 0.9] },
+};
+const SUPPLY_BASIS = 'Online hours are split across the hours they were actually online in.';
+
 app.get('/api/supply/balance', (req, r) => {
+  const platform = req.query.platform || null;
+  const fleet = req.query.fleet || null;
+  const to = String(req.query.to || '').slice(0, 10);
+
+  /* A channel the collector has never written a row for is not a quiet
+     channel, and no width of window reaches it. */
+  const noFeed = platform != null && !SUPPLY_FEED.platforms.includes(platform);
+  /* The feed exists for this selection and this window sits entirely before
+     its reach — the case that predates the collector. */
+  const beforeFeed = !noFeed && to !== '' && to < SUPPLY_FEED.from;
+  if (noFeed || beforeFeed) {
+    r.json({
+      cells: [],
+      totals: { online_h: null, on_job_h: null, idle_h: null, jobs: null,
+        idle_pct: null, jobs_per_online_h: null },
+      covered: false,
+      uncovered: { reason: noFeed ? 'no-feed' : 'outside-window',
+        platforms: SUPPLY_FEED.platforms },
+      measured: null,
+      basis: SUPPLY_BASIS,
+    });
+    return;
+  }
+
+  /* Composed, not one-or-the-other: both chips can be on the address at once,
+     and a fixture where the fleet chip silently stops mattering as soon as a
+     platform chip is set is the same class of blindness this is fixing. */
+  const [pOn, pJob] = (platform && SUPPLY_SHARE.platform[platform]) || [1, 1];
+  const [fOn, fJob] = (fleet && SUPPLY_SHARE.fleet[fleet]) || [1, 1];
+  const onShare = pOn * fOn;
+  const jobShare = pJob * fJob;
   const cells = [];
   for (let dow = 0; dow < 7; dow++) {
     for (let h = 0; h < 24; h++) {
       if (h < 5 && dow % 3 === 0) continue;                 // uncollected
-      const online = Math.round((4 + Math.sin(h / 3) * 3 + (h > 16 ? 6 : 0)) * 10) / 10;
-      const jobs = Math.max(0, Math.round(online * (h > 6 && h < 23 ? 0.9 : 0.1)));
+      const online = Math.round((4 + Math.sin(h / 3) * 3 + (h > 16 ? 6 : 0)) * onShare * 10) / 10;
+      const jobs = Math.max(0, Math.round(online * (h > 6 && h < 23 ? 0.9 : 0.1) * jobShare / onShare));
       const onJob = Math.round(jobs * 0.35 * 10) / 10;
       /* Per OCCURRENCE of the weekday, exactly as the real route answers: a
          30-day window holds five of two weekdays and four of the rest. The
@@ -2119,11 +2212,13 @@ app.get('/api/supply/balance', (req, r) => {
       idle_pct: Math.round((s('idle_h') / s('online_h')) * 100),
       jobs_per_online_h: Math.round((s('jobs') / s('online_h')) * 100) / 100 },
     covered: true,
+    uncovered: null,
     /* The span the availability feed actually covers inside the window, which
        is what every hour figure above is over. Uber serves about 31 days of
        it and nothing older. */
-    measured: { from: '2026-08-03', to: '2026-09-02', days: 31, narrower_than_window: false },
-    basis: 'Online hours are split across the hours they were actually online in.',
+    measured: { from: SUPPLY_FEED.from, to: SUPPLY_FEED.to, days: SUPPLY_FEED.days,
+      narrower_than_window: false },
+    basis: SUPPLY_BASIS,
   });
 });
 
@@ -3620,7 +3715,26 @@ app.get('/api/trip', (req, r) => {
           source: 'the platform’s payments report, one row per transaction' }
       : null,
     // The day as the channel breaks it down — the surface that does carry cash.
-    statement_day: { net: 352.4, tips: 25, salik: 12, cash: 140, source: 'uber_rest' },
+    /* period_days 7 because that is the ORDINARY Uber row: src/rollup.js
+       spreads each weekly report evenly across its days, and
+       /api/money/sources reports uber_components max_period_days 7 on both
+       fleets. A mock that said 1 would render the one caption the live page
+       almost never shows. */
+    statement_day: { net: 352.4, tips: 25, salik: 12, cash: 140, period_days: 7,
+      source: 'uber_rest' },
+    /* Null because the statement above is present. The five reasons it can
+       carry instead are why the page no longer prints one sentence over every
+       absence — see api/trip_routes.js. */
+    statement_absent: null,
+    /* How far the statements collected for this channel actually reach, which
+       is what lets the page tell "the channel filed nothing" from "our walk
+       does not reach this date". The dates are production's on 2026-09-05:
+       the component slice begins 2026-02-09, and the operator's imported
+       ledger — which this endpoint does not read — begins 2025-09-01. */
+    statement_window: {
+      channel: { first_day: '2026-02-09', last_day: '2026-09-06', days: 209 },
+      ledger: { first_day: '2025-09-01', last_day: '2026-08-21', days: 355 },
+    },
     same_day: [
       { platform, external_id: id, requested_at: at('06:50'), ended_at: at('07:31'),
         plate: plates[0], distance_km: 17.5, status: 'completed', outcome: 'completed',
