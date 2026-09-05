@@ -66,43 +66,53 @@ code second — the other order is a lockout.**
 
 ## Batch 2 — the eleven small criticals
 
-Commit `c034bb1`. **written + committed. NOT deployed, and deliberately so.**
+Commits `c034bb1` (round one), `7971589` (the refutations), `a72e71b` (a page
+that could not load). **Proven on production 2026-09-05**, each by the
+measurement that found it.
 
-Eight lanes over disjoint files, each read afterwards by an adversarial verifier
-told to refute rather than confirm. Six could not refute; **two could**, and both
-refutations are regressions introduced *by a fix* rather than surviving one:
+| # | what it did | re-measured after the deploy |
+|---|---|---|
+| C2/C15 | dragging 240→300 days took fleet income from AED 2.75M to **8.89M**, silently changing the figure's meaning from net payout to gross fare | 300d now AED 2.99M, uber `basis=partial_payout` holding its real payout 2,319,203.89. The cliff is gone at 240, 300 and 365 |
+| C3 | `/api/kpis` divided by calendar days, so the picker made "Money in" read AED 168,213 against a true 125,189 | kpis and revenue agree **to the cent** on both windows tested — 148,340.39 and 499,453.53 |
+| C4 | 45 of 98 plates reported Uber's gross as the car's income, AED 64,548.64 above the ledger | 40 plates swept: **0** still report fares while holding a payout |
+| C5 | `#causes` said FMS fell 97% into January when it rose 15%; the KPI tile and the cards below disagreed | 34 → **25** stored rows; tile and panel now both read +1,029% Mar 25 → Apr 25 |
+| C6 | every chip read 25,907 online hours byte-identical; Bolt was called 99% idle on a feed that does not exist | ecosine 17,274 + egari 8,633 = 25,907 exactly; **Bolt renders an em-dash and "never collected here"** |
+| C7 | the provenance page said "No provider sent a figure for this window" for 112s of every 900s | **176 consecutive samples across a live rebuild**, never once blank or partial |
+| C8 | `#causes` and `#forecast` disagreed about Dec 2024, flipping the page's central conclusion | Dec 24 now partial with 13 days; the two telematics-only months report `days_in_record: null` |
+| C9 | 31 working vehicles showed "0 per 100 km" in the tone reserved for good news | **26 of 26** untracked plates render absent with the reason |
+| C10 | a Yango trip page printed AED 342.05 as Yango's net on a day whose Yango fares were AED 66.00 | yango, bolt and hotel all `statement_day: null`; uber keeps its own, now with `period_days: 7` |
+| C11 | the headline read AED 384,266 over a Gap tile reading 117,766, on one screen | banner and tile agree — 6 months, delta 117,588.87, and the 2 excluded months are named |
 
-- **C8** — narrowing the trend's partiality span to the booking record made a
-  pre-existing `Math.max(1, dayDiff(…))` clamp reachable. A month holding only
-  telematics now reports `partial_month=true, days_in_record=1`, and `#causes`
-  renders "1 of 31 days collected" beside "0 bookings, 6,960 telematics
-  journeys". False under either reading. **No test catches it** — `causes.js`
-  filters the supply thirds on `trips > 0`.
-- **C10** — the new caption says the channel "filed no statement covering this
-  day" on every Uber trip older than the components horizon. The horizon starts
-  around Feb 2026 and 167,007 bookings sit before it. Uber filed plenty; *we*
-  do not reach back that far. The same sentence prints on 1,944 FMS telematics
-  journeys that name no driver at all.
+18 of 18 pages render with no console error.
 
-Six more verifiers could not refute but found real falsehoods, the sharpest
-being one the fix itself introduced: the supply predicates sit in the `ev` CTE
-**ahead of** the `lead()` window, so they remove rows before the span is formed
-and a driver whose closing event belongs to another fleet gets a wrong span.
+### What the adversarial verifiers were worth
 
-Round two is answering all of it. **Nothing from this batch reaches production
-until the refutations are closed** — a fix that trades a wrong number for a
-wrong sentence has not fixed anything.
+Round one's eight lanes were each read by a verifier told to refute rather than
+confirm. **Two succeeded**, and both had found a regression introduced *by a
+fix*: C8's span narrowing made a `Math.max(1, …)` clamp reachable so a
+telematics-only month claimed "1 of 31 days collected", and C10's new caption
+asserted the provider filed nothing on 175,105 Uber bookings where the truth is
+that we do not reach back that far. Neither was caught by any test.
 
-### The lesson this batch keeps teaching
+Round two answered both, and its own verifiers found six more — almost all of
+one kind: **a figure correctly made absent and then given a reason that is not
+true.** A caption sending readers to `#reconcile` to see a comparison that page
+deliberately does not perform. `?? 0` printing "0 of the 31 days Uber worked"
+for coverage that is unknown. A future window told its days "cannot be
+backfilled". `/payout/` matching the new `zero_payout` basis, so a channel paid
+nothing was named among those that reported paying.
 
-Three round-one lanes broke a test that was pinned to a **value** rather than a
-property — `licence_no === 'AE99'`, `licence_no === 'DL-77'`, a mock fixture
-missing a new key. And one round-one lane shipped an assertion that **passes
-with the fix reverted**, which is not an assertion at all. Both failure modes
-are now in every lane brief: *pin the property, and prove the assertion bites by
-reverting.*
+### And the one the tests could not have caught
 
----
+`#supply?platform=bolt` — the exact page the chip fix was written for —
+rendered **"COULD NOT LOAD THIS VIEW · noFeed is not defined"** while 30
+assertions passed green. The tests drove the route; nothing drove the page.
+Found by screenshotting production after the deploy. The file now carries a
+thirty-first assertion that every local the module reads is declared in it,
+verified by reintroducing the dangling name and watching it fail.
+
+**A suite passing tells you the tests agree with the code. Only a screenshot
+tells you the page renders.**
 
 ## `docs/COVERAGE.md` — two corrections
 
