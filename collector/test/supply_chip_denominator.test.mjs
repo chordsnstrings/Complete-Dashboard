@@ -49,6 +49,7 @@
    not reach — must carry DIFFERENT reasons, because the page prints the reason
    and a reader told to wait for a backfill that is never coming has been told
    something worse than nothing. */
+import { readFileSync } from 'node:fs';
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
@@ -313,6 +314,33 @@ check('and it names the platforms the feed does carry, read from the table',
   && bolt.uncovered.platforms.join() === seededFeed.join()
   && seededFeed.length > 0,
   `${JSON.stringify(bolt.uncovered.platforms)} vs seeded ${JSON.stringify(seededFeed)}`);
+/* Every name the page reads must exist.
+   ─────────────────────────────────────────────────────────────────────────
+   This suite was 30 green while #supply?platform=bolt rendered "COULD NOT LOAD
+   THIS VIEW · noFeed is not defined" — the exact page the chip fix was written
+   for. The tests drove the ROUTE and nothing drove the PAGE, so a const removed
+   from one branch and still read in another was invisible to all thirty. A
+   ReferenceError is not a subtle failure and it does not need a browser to
+   catch: every identifier the module reads is declared somewhere in it. */
+{
+  const src = readFileSync('api/public/supply.js', 'utf8');
+  const declared = new Set([...src.matchAll(/\b(?:const|let|var|function)\s+([A-Za-z_$][\w$]*)/g)]
+    .map((m) => m[1])
+    .concat([...src.matchAll(/\bimport\s*\{([^}]*)\}/g)]
+      .flatMap((m) => m[1].split(',').map((x) => x.trim().split(/\s+as\s+/).pop())))
+    .concat([...src.matchAll(/\(([^)]*)\)\s*=>/g)]
+      .flatMap((m) => m[1].split(',').map((x) => x.trim().replace(/[={].*$/, '').trim())))
+    .filter(Boolean));
+  /* camelCase locals only — globals, properties and DOM names are out of scope
+     and would need a parser rather than a regex to tell apart. This is enough
+     to catch the class of bug that shipped: a local deleted in one edit and
+     still read a hundred lines down. */
+  const read = [...src.matchAll(/(?<![.\w'"`-])([a-z][a-zA-Z0-9]*[A-Z][\w$]*)\s*\?/g)].map((m) => m[1]);
+  const missing = [...new Set(read)].filter((n) => !declared.has(n));
+  check('every local the page reads is declared in it',
+    missing.length === 0, missing.join(', '));
+}
+
 check('a covered answer carries no reason, because there is nothing to explain',
   all.uncovered === null && uber.uncovered === null,
   `${JSON.stringify(all.uncovered)} / ${JSON.stringify(uber.uncovered)}`);

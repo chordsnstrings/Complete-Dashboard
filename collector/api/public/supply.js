@@ -207,16 +207,31 @@ export async function renderSupply(root) {
      unit names the absence, and the note directly above carries the reason.
      No new markup, no new panel — the same verdict block, told to say the true
      thing. */
+  /* The verdict's short form of the same four reasons. It read `noFeed`, a
+     boolean that no longer exists now that 'no-feed' is one of four states —
+     and a stale reference to it is what put "COULD NOT LOAD THIS VIEW ·
+     noFeed is not defined" on #supply?platform=bolt, which is the page the
+     whole chip fix was for. Driven off the reason itself, so the next state
+     added here cannot leave a dangling name behind. */
+  const uncoveredClaim = {
+    'no-feed': 'This selection has no availability feed, so there is no supply to measure',
+    'not-yet': 'This window is in the future, so there is nothing collected for it yet',
+    'no-span': 'Availability was recorded here but no shift closes, so there are no online hours',
+  }[why?.reason] || 'No driver availability was collected inside this window';
+  const uncoveredUnit = {
+    'no-feed': 'never collected here',
+    'not-yet': 'these days have not happened',
+    'no-span': 'no shift closes in this window',
+  }[why?.reason] || 'not collected for these days';
   verdict(vHost, {
     claim: !bal.covered
-      ? (noFeed ? 'This selection has no availability feed, so there is no supply to measure'
-        : 'No driver availability was collected inside this window')
+      ? uncoveredClaim
       : t.idle_pct != null
         ? `${t.idle_pct}% of the hours drivers are online, nobody is in the car`
         : `${fmt(t.jobs)} jobs in this window`,
     figure: !bal.covered ? '—'
       : t.jobs_per_online_h != null ? fmt(t.jobs_per_online_h, 2) : fmt(t.jobs),
-    unit: !bal.covered ? (noFeed ? 'never collected here' : 'not collected for these days')
+    unit: !bal.covered ? uncoveredUnit
       : t.jobs_per_online_h != null ? 'jobs per online hour' : 'jobs',
     tone: t.idle_pct != null && t.idle_pct >= 70 ? 'warn' : null,
     /* The span the rate is actually over. Uber serves about 31 days of
