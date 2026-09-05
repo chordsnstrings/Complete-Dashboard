@@ -23,6 +23,12 @@ import { rollupGrainSql } from '../src/rollup.js';
    here would let a regression that leaks them again pass. requireAdmin stays
    stubbed open below so the write routes are still reachable from a test. */
 import { isAdmin, redactSettings } from '../api/admin_gate.js';
+/* The raw-value sampler now refuses to sample a secret-shaped field and
+   redacts an object that arrives serialised as a scalar — see api/redact.js.
+   The harness evaluates the marked region of server.js as a function body with
+   its helpers injected by name, so a helper the region references and this list
+   omits is a ReferenceError before the first assertion of every route test. */
+import { secretField, redactSampleValue } from '../api/redact.js';
 /* The provider alias tables, shared with src/probe.js. /api/schema/raw-fields
    matched raw field names against information_schema alone, so thirteen of
    Uber's fifteen fields read "not promoted to a column" while the collector
@@ -91,7 +97,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
   const injected = {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
-    isAdmin, redactSettings, RAW_ALIASES, spanGaps,
+    isAdmin, redactSettings, secretField, redactSampleValue, RAW_ALIASES, spanGaps,
     recordImport, spanOf, tallyBatch, takeTally,
     LEDGER_CADENCE, ledgerSilence,
     FIX_FRESH: "interval '30 minutes'",

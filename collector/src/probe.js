@@ -22,7 +22,15 @@
    3. Responses are reduced to SHAPE before anything is stored. Field names,
       fill rates, and sample values ONLY for fields narrow enough to be a
       dimension. A field with many distinct values is an identifier, an address
-      or free text, and its contents never leave this module. */
+      or free text, and its contents never leave this module.
+   4. And a NARROW field is not automatically a safe one. Narrow cardinality is
+      exactly what makes a credential cheap to guess, so a secret-shaped key
+      has its sample suppressed however few distinct values it has. Measured on
+      production 2026-09-05 with curl and no credentials: /api/probe/results
+      answers anonymously off this table, and the same sampler behind
+      /api/schema/raw-values returned bcrypt hashes — $2b$10$…, Emirates IDs
+      and ExponentPushToken[…] — outright. What a probe records today, an
+      unauthenticated GET serves tomorrow. */
 
 import { config, loadSettings } from './config.js';
 import { http, qs } from './http.js';
@@ -32,9 +40,30 @@ import { fiToken } from './sources/bolt.js';
 import { dotDate, iso, daysAgo } from './util.js';
 import { log } from './log.js';
 import { probeEarnerWindow } from './sources/uber.js';
+/* Whether a FIELD NAME is one whose values must not be sampled. api/redact.js
+   is the single authority on that line and on why phone and email stay the
+   right side of it; this module asks it rather than growing a second opinion,
+   the way api/server.js's raw-value sampler does. Imported across src/ → api/
+   like src/rollup.js reaches api/custody_sql.js. */
+import { secretField } from '../api/redact.js';
+import { createHash } from 'node:crypto';
 
 const SRC = 'probe';
 const MAX_VALUES = 12;
+
+/* What a suppressed sample says instead of a value.
+   ──────────────────────────────────────────────────────────────────────────
+   A string rather than an empty list, because api/public/providers.js renders
+   `values: null` as "wide — an identifier or free text, contents not
+   recorded", which would be a plain untruth about a two-value password field.
+   One chip, in the renderer the page already has, saying the thing that is
+   actually true — the same trade /api/schema/raw-values makes when it returns
+   value "(withheld)" with a reason beside it. */
+const WITHHELD = '(withheld — a credential or an identity document by name)';
+const WITHHELD_REASON = 'This field\'s NAME marks it as a credential or an identity document '
+  + '(api/redact.js), so the probe records how many distinct values it saw and never what they '
+  + 'were. The count is real and unredacted: it is what answers "is this a dimension worth a '
+  + 'column, or an identifier?", and it answers it without printing anything.';
 
 /* Reduce any JSON to a description of its shape. */
 export function describe(records, { maxValues = MAX_VALUES } = {}) {
@@ -45,8 +74,14 @@ export function describe(records, { maxValues = MAX_VALUES } = {}) {
     for (const [k, v] of Object.entries(obj)) {
       const path = prefix ? `${prefix}.${k}` : k;
       if (v && typeof v === 'object' && !Array.isArray(v)) { walk(v, path, depth + 1); continue; }
+      /* Judged on the LEAF, which is the key the provider actually chose —
+         `driver.password` is a password however deep it sits, and that is the
+         rule SECRET_KEY states: "matched against the KEY, at any depth".
+         Judged once, when the field is first seen, because the answer is a
+         property of the name and not of the row. */
       const f = fields.get(path)
-        || { key: path, present: 0, filled: 0, values: new Set(), all: new Set(), type: null };
+        || { key: path, present: 0, filled: 0, values: new Set(), all: new Set(), type: null,
+          secret: secretField(k) };
       f.present++;
       if (v !== null && v !== '' && !(Array.isArray(v) && !v.length)) f.filled++;
       f.type = f.type || (Array.isArray(v) ? 'array' : typeof v);
@@ -62,23 +97,46 @@ export function describe(records, { maxValues = MAX_VALUES } = {}) {
            reported "14 distinct" for a trip uuid, a plate, a driver name and a
            timestamp alike, and 14 was never once the real answer. Bounded by
            the 300-row sample below, so an uncapped count is at most 300. */
-        if (f.values.size <= maxValues + 1) f.values.add(val);
-        f.all.add(val);
+        if (f.secret) {
+          /* The count, from something that is not the value. A secret is
+             counted by the DIGEST of what was seen, so the distinct total
+             stays exact — a sha256 of a 48-character sample collides with
+             nothing — while the value itself is never held in a structure some
+             later edit could decide to report. `values` here has always been
+             the set the row prints; `all` has always been a counter that never
+             leaves this function, and this keeps that true by construction
+             rather than by everyone remembering it. */
+          f.all.add(createHash('sha256').update(val).digest('hex'));
+        } else {
+          if (f.values.size <= maxValues + 1) f.values.add(val);
+          f.all.add(val);
+        }
       }
       fields.set(path, f);
     }
   };
   const sample = rows.slice(0, 300);
   sample.forEach((r) => walk(r));
-  return [...fields.values()].map((f) => ({
-    key: f.key, type: f.type,
-    fill_pct: f.present ? Math.round((f.filled / f.present) * 100) : 0,
-    distinct_seen: f.all.size,
-    // True where every row in the sample carried a different value, so the
-    // count is a floor rather than the field's real cardinality.
-    distinct_capped: f.all.size >= sample.length && sample.length > 0,
-    values: f.all.size <= maxValues ? [...f.values] : null,
-  })).sort((a, b) => b.fill_pct - a.fill_pct || a.key.localeCompare(b.key));
+  return [...fields.values()].map((f) => {
+    const row = {
+      key: f.key, type: f.type,
+      fill_pct: f.present ? Math.round((f.filled / f.present) * 100) : 0,
+      distinct_seen: f.all.size,
+      // True where every row in the sample carried a different value, so the
+      // count is a floor rather than the field's real cardinality.
+      distinct_capped: f.all.size >= sample.length && sample.length > 0,
+      values: f.all.size <= maxValues ? [...f.values] : null,
+    };
+    /* A field with nothing withheld is byte-identical to what this function
+       returned before, so no surface grows a caveat it has not earned — the
+       same rule /api/schema/raw-values follows for a row it did not touch.
+       And a withheld field says so IN the row rather than by having an empty
+       one: "the probe would not print this" and "the provider sent nothing"
+       are different facts and the page has to be able to tell them apart. */
+    if (!f.secret) return row;
+    return { ...row, values: [WITHHELD], values_withheld: true,
+      values_withheld_reason: WITHHELD_REASON };
+  }).sort((a, b) => b.fill_pct - a.fill_pct || a.key.localeCompare(b.key));
 }
 
 /* A payload whose ONLY keys are error keys is a refusal, whatever the HTTP

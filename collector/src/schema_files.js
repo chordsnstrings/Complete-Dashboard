@@ -34,4 +34,9 @@ export const SCHEMA_FILES = [
   'schema_v56.sql',
   'schema_v57.sql',
   'schema_v58.sql',
+  /* One-time scrub of credentials already stored: bcrypt hashes and Expo push
+     tokens written into trip.raw by the hotel feed before api/redact.js
+     existed, and sampled secrets in provider_probe. Guarded by schema_once, so
+     it runs once and is a no-op on every boot after. */
+  'schema_v59.sql',
 ];

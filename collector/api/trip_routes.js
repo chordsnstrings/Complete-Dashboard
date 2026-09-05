@@ -17,6 +17,8 @@
    booking. A page that showed only `price` would be blank for 90% of the work
    this fleet does, so the payout day is here beside the fare and the page says
    which one is a measurement of THIS trip and which is not. */
+import { redactRaw } from './redact.js';
+
 /* The fold driver_statement_day's stored name_key uses: whitespace runs
    collapsed and lowercased (sql/schema_v25.sql:33), plus the trim the generated
    column omits. Deliberately NOT the person fold used for identity elsewhere —
@@ -50,6 +52,48 @@ export function tripRoutes(app, { q, wrap }) {
       return res.status(404).json({ error: 'no trip with that platform and id',
         platform, external_id: id });
     }
+
+    /* ── the provider's record leaves redacted, and says what it withheld ──
+       Measured on production 2026-09-05, with curl and no credentials:
+       GET /api/trip?platform=hotel&id=6a95b3691698f7d77013df68 answered 200
+       and trip.raw.driver carried `password` ($2b$10$… bcrypt cost 10),
+       `emiratesId` 784-1999-8885500-5 and `notificationToken`
+       ExponentPushToken[…] — on all 12 of 12 hotel trips sampled, and 0 of 36
+       uber/bolt/yango ones. The hotel channel is a document store and its
+       booking EMBEDS the driver record, so every booking this route could
+       address handed an anonymous caller that driver's login credential. The
+       push token is the sharpest of the three: it is a capability, not a fact
+       — whoever holds it can push a notification to that driver's handset.
+
+       The strip happens HERE, at the boundary, and deliberately not at
+       ingest. `raw` is the audit trail this whole product rests on — every
+       "what did the provider actually send" answer and every field we have
+       not thought to map yet — and a stored row that has been cleaned can
+       never answer that question again. api/redact.js holds the rule and the
+       argument for it: phone and email STAY, because the operator asked for
+       them in as many words and #drivers renders them; identity documents,
+       bank numbers and credentials go.
+
+       And the removed PATHS come back with the response, because a field
+       silently missing from `raw` is indistinguishable from a field the
+       provider never sent, and telling those two apart is this product's
+       central claim. On the record above that is four paths:
+       driver.password, driver.emiratesId, driver.notificationToken — and
+       car.licenseNumber, which is a false positive on the key NAME (it holds
+       the plate, L46706, not a driving licence). That fourth one costs
+       nothing a reader can lose: the plate is a column of its own on this
+       same response, the page prints it, and the withheld line names the path
+       rather than leaving a hole. It is the trade redact.js made on purpose —
+       one withheld value on a diagnostic panel against a national identity
+       number on the open web.
+
+       `trip` is the only object on this response that carries a provider
+       record. Every other block below is a SELECT of named columns — vehicle,
+       custody, telemetry, occupancy_segment, payout, statement, same_day —
+       and not one of them selects `raw`; checked against the live response on
+       2026-09-05, where `trip` was the only object with a `raw` key. A block
+       that starts selecting one has to redact it here too. */
+    const safeRaw = redactRaw(t.raw);
 
     /* Everything below is context and every one of them may be empty. A trip
        on a plate nobody held, on a day no tracker reported, is a real trip —
@@ -147,7 +191,13 @@ export function tripRoutes(app, { q, wrap }) {
     ]);
 
     res.json({
-      trip: t,
+      trip: { ...t, raw: safeRaw.value },
+      /* The paths redactRaw() took out of `raw` above, in the order it found
+         them — never null, so an empty array is itself the statement "nothing
+         was withheld from this record" rather than an older deploy that did
+         not look. The page names them; see the block above for why naming
+         them is not optional here. */
+      raw_redacted: safeRaw.removed,
       /* THE BOOKING'S OWN MONEY, where the provider states it per booking.
          ───────────────────────────────────────────────────────────────────
          The panel this feeds is titled "What this trip earned" and for a long
@@ -166,7 +216,17 @@ export function tripRoutes(app, { q, wrap }) {
          absent, not zeroed, so "this channel does not break a fare down" and
          "it kept nothing" stay different facts. */
       trip_money: (() => {
-        const m = t.raw && typeof t.raw === 'object' ? t.raw.uber_payments : null;
+        /* Read off the REDACTED copy rather than the row, so no figure this
+           endpoint serves can be derived from a value it just refused to
+           serve. It costs nothing today: the eight keys below are money
+           components and none of them is secret-shaped — measured on the
+           hotel booking above, where the four paths redactRaw() removes are
+           car.licenseNumber and the three driver credentials, with
+           uber_payments untouched. If the rule in redact.js ever grew to
+           cover one of these the figure would go missing rather than leak,
+           and raw_redacted would name the path that took it. */
+        const raw = safeRaw.value;
+        const m = raw && typeof raw === 'object' ? raw.uber_payments : null;
         if (!m) return null;
         const n = (v) => (v == null ? null : Number(v));
         const fare = n(m.fare);

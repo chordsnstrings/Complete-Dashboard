@@ -17,6 +17,12 @@ import { stateRow } from '../roster.js';
    reach for it the same way. */
 import { isoDay } from './ledger.js';
 import { noteCredential, saysAuth } from '../auth_state.js';
+/* The one place this codebase decides what is a credential and what is a fact.
+   Imported across src/ → api/ rather than copied: src/rollup.js already reaches
+   for api/custody_sql.js the same way, and a second matcher in a second file is
+   a second thing nobody re-reads when the provider adds a field. No cycle —
+   api/redact.js imports nothing. */
+import { redactRaw } from '../../api/redact.js';
 
 const SRC = 'hotel';
 
@@ -49,6 +55,53 @@ const deadheadKm = (t) => legKm(t.driverStartLat, t.driverStartLon, t.startLat, 
    kilometres to a pickup is normal while being left somewhere with no return
    work is the expensive kind. */
 const returnDeadheadKm = (t) => legKm(t.endLat, t.endLon, t.driverEndLat, t.driverEndLon);
+
+/* The provider's record, minus what should never have been written down.
+   ──────────────────────────────────────────────────────────────────────────
+   Measured on production 2026-09-05, with curl and NO credentials — this
+   product has no user authentication, so every /api route answers a request
+   with no cookie, no header and no token:
+
+     GET /api/trip?platform=hotel&id=…  answered 200 and trip.raw.driver
+     carried `password` ($2b$10$…, bcrypt cost 10), `emiratesId`
+     784-1999-8885500-5 and `notificationToken` ExponentPushToken[…] — on 12 of
+     12 hotel trips sampled, and 0 of 36 uber/bolt/yango ones.
+
+   This channel is a document store whose booking EMBEDS the whole driver
+   record, so `raw: t` wrote a live login credential onto every trip it
+   collected: 1,714 stored rows hold one today (sql/schema_v59.sql scrubs
+   them).
+
+   ── why this is stripped here, when the general rule is the boundary ──────
+   api/redact.js's header argues the general case and it stands: `raw` is the
+   audit trail this product rests on, so the stored row keeps what the provider
+   sent and api/trip_routes.js decides what leaves. This is the exception that
+   file names in as many words — a bcrypt hash and a push token are not
+   evidence about a ride and should never have been written at all. A boundary
+   holds only for the routes that call it; the next route added next year will
+   not remember to, and a value that was never stored cannot leak from one.
+
+   ── what it takes, measured on the live record ───────────────────────────
+   Exactly four paths: driver.password, driver.emiratesId,
+   driver.notificationToken and car.licenseNumber. The fourth is a false
+   positive on the key NAME — it holds the plate, "L-46185", not a driving
+   licence — and it costs no fact anybody can lose: the plate is a column on
+   this same row (normPlate above) and the Emirates ID is a column on
+   driver_compliance, both written from `t` a few lines below and unaffected by
+   what `raw` keeps. driver.driverLicense is NOT matched by the rule and stays,
+   so the licence numbers /api/compliance/drivers prints are untouched. The two
+   paths that map to no column are precisely the two that must not exist here.
+
+   ── and the row says what it lost ────────────────────────────────────────
+   A field silently missing from `raw` is indistinguishable from a field the
+   provider never sent, and telling those two apart is this product's central
+   claim. So the removed paths go back on the record under a key no provider
+   owns, and /api/trip reports the same thing at the boundary as
+   `raw_redacted`. */
+function storableRaw(t) {
+  const { value, removed } = redactRaw(t);
+  return removed.length ? { ...value, _redacted: removed } : value;
+}
 
 /* Hotel licence dates arrive as "1/1/26" or "01/01/2026" — day-first, two- or
    four-digit year. That is the live shape: measured on production 2026-09-02,
@@ -252,7 +305,10 @@ export async function collect({ from, to, mode }) {
         is_missing: !!t.isMissingTrip,
         driver_own: !!t.driverOwnTrip,
         authorized: t.operatorApproval != null ? String(t.operatorApproval) : (t.authorization != null ? String(t.authorization) : null),
-        raw: t,
+        // The booking as the provider sent it, less the driver's credentials —
+        // see storableRaw() above for what comes out and why it is the one
+        // thing stripped on the way IN rather than at the boundary.
+        raw: storableRaw(t),
       })).filter((r) => r.external_id && r.requested_at);
       if (rows.length) total += await upsertMany('trip', rows, ['platform', 'external_id']);
       chunk.rows = rows.length;

@@ -47,6 +47,14 @@ import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
 import { probeRoutes } from './probe.js';
 import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
+/* The one place that decides what a reader with no credential may see of a
+   person. api/redact.js holds the rule and the production measurements behind
+   it; three routes in this file are the boundary it guards. Imported rather
+   than re-derived: a second matcher is a second answer, and the one that drifts
+   is always the one nobody re-reads. Its header is also where the deliberate
+   exclusions live — phone and email STAY, because the operator asked for them
+   and four pages render them. */
+import { secretField, redactSampleValue } from './redact.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
 import { RAW_ALIASES } from '../src/probe.js';
 
@@ -113,7 +121,37 @@ const cache = responseCache({
   pool,
   enabled: String(process.env.CACHE || '').toLowerCase() !== 'off',
 });
-app.use('/api', cache);
+/* ONE ROUTE'S ANSWER DEPENDS ON THE CALLER, AND THE CACHE KEYS ON THE URL.
+   ─────────────────────────────────────────────────────────────────────────
+   api/cache.js keys every entry on req.originalUrl and nothing else, which was
+   exactly right for as long as every cached answer was a function of the URL.
+   /api/compliance/drivers stopped being one below, where it began withholding
+   licence numbers and Emirates IDs from a caller who presents no admin token.
+   Left cached, the sequence that undoes that fix is one an operator performs
+   by accident: they open the page with their token, the full body — 123 real
+   Emirates IDs, measured on production 2026-09-05 — is stored under the plain
+   URL, and the next anonymous GET of the same URL is served it out of the map
+   without ever reaching the route. The redaction would be correct and
+   completely ineffective, which is the worst of the three possible states
+   because it reads as fixed.
+
+   /api/settings has the same property and cache.js handles it by name in its
+   own NEVER list. This one is named here instead, because the reason lives
+   here rather than there: it is not "this is cheap enough to serve live", it
+   is "this route varies by caller and the cache cannot see the caller".
+
+   Skipped outright rather than keyed by token. Keying would cache an admin
+   body, and a copy of the fleet's identity documents sitting in a shared
+   process map for the lifetime of a data version is a worse thing to hold than
+   the two queries it saves. The route is a 300-row read.
+
+   /api/export/trips.csv also varies by caller and needs no entry: it answers
+   with res.write, and cache.js only ever intercepts res.json. */
+const VARIES_BY_CALLER = ['/api/compliance/drivers'];
+app.use('/api', (req, res, next) => (
+  VARIES_BY_CALLER.some((p) => req.originalUrl.split('?')[0].startsWith(p))
+    ? next()
+    : cache(req, res, next)));
 
 /* A slow query is the most common reason a panel renders as a skeleton, and
    until now nothing on the server said WHICH one. bin/render-audit.mjs can see
@@ -3983,6 +4021,39 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      records which fleet's credentials collected the row, and on a two-fleet
      operator the compliance list was both fleets under one heading. */
   const fleet = req.query.fleet || null;
+  /* WHO IS ASKING, AND WHAT THAT CHANGES.
+     ──────────────────────────────────────────────────────────────────────
+     Measured on production with curl and no credentials, 2026-09-05: this
+     route returned 289 rows carrying phone 289/289, emirates_id 123/289 and
+     licence_no 94/289 — full government identity numbers, 784-1977-5137316-4
+     among them, to anyone who knew the URL. There is no sign-in anywhere in
+     this product, so "anyone" is the correct reading.
+
+     isAdmin(), not adminGate(). The write gate in api/admin_gate.js is held
+     OPEN on an instance with no ADMIN_TOKEN, on the operator's explicit
+     instruction, and its own comment says why deriving a reader's rights from
+     that verdict would hand every anonymous GET the thing the redaction
+     exists to withhold. isAdmin() answers the other question — "is this caller
+     an administrator" — strictly, and it is the question a READ must ask. GET
+     /api/settings above uses it for exactly this.
+
+     WHAT GOES AND WHAT STAYS. The identity DOCUMENTS go: emirates_id and
+     licence_no. Name, phone and email stay — they are a feature the operator
+     asked for in as many words and four pages render them, and removing them
+     here would break a page on purpose while calling it a security fix.
+
+     THE EXPIRY DATES STAY, whoever is asking, and so does every flag derived
+     from them. This page's entire job is "whose licence lapses on Thursday",
+     and a date answers that without a document number: a reader who cannot see
+     the number can still see that Sayed's licence expired, that 94 of the
+     dates on file are this source's own default, and that 195 people have no
+     date at all. Presence, provenance and expiry survive redaction; the value
+     does not — the same line redactSettings() draws in api/admin_gate.js.
+
+     Not cached, either: see VARIES_BY_CALLER at the top of this file. The
+     response cache keys on the URL alone, so without that this redaction would
+     be undone by the first operator who opened the page with their token. */
+  const admin = isAdmin(req);
   const [mode] = await q(
     /* to_char, not the raw date. node-postgres hands a DATE back as a JS Date,
        and String(thatDate).slice(0, 10) is "Thu Jan 01" — which then fails to
@@ -4156,8 +4227,76 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
             count(*)::int of_n
      FROM driver_compliance WHERE ($1::text IS NULL OR fleet_id = $1)
      GROUP BY 1 HAVING count(*) > 0 ORDER BY 2 DESC`, [fleet]);
+  /* The columns a caller with no admin token does not receive.
+     ──────────────────────────────────────────────────────────────────────
+     Dropped here rather than left out of the SELECT, because the query needs
+     both of them: licence_no_placeholder is `btrim(licence_no) = $3`, and the
+     placeholder detection that makes this page honest about its own data is
+     computed FROM the numbers. So they are read, used, and then not sent — the
+     same shape as `raw`, which is stored whole and redacted at the boundary
+     (api/redact.js). */
+  const IDENTITY_DOCS = ['licence_no', 'emirates_id'];
+  const drivers = admin ? rows : rows.map((r) => {
+    const o = { ...r };
+    for (const c of IDENTITY_DOCS) delete o[c];
+    return o;
+  });
+  /* SAID, not merely absent. api/public/app.js renders a missing licence
+     number as an em-dash captioned "this channel publishes no licence number",
+     which for a withheld one is a false statement about the provider — exactly
+     the confusion between "never sent" and "not shown" that this product
+     exists to resolve. The page already prints emirates_id_caveat and
+     licence_no_caveat above the table, so the sentence goes there, where a
+     reader is looking, as well as into a machine-readable key. */
+  const withheldNote = (what) => `The ${what} themselves are withheld from this response: this `
+    + 'API answers every request without a credential, and a government identity document is not '
+    + 'something to hand to an anonymous GET. Coverage, expiry dates and the expired/expiring '
+    + 'counts are all unredacted above and below — only the numbers are gone. Present a valid '
+    + 'x-admin-token to see them.';
+  /* The licence-number caveat, in three states rather than two. The page used
+     to have "every number on this roster is the same default" or nothing; a
+     withheld column needs a third sentence, and a withheld column that is ALSO
+     entirely a default needs both facts, because the second one is what stops
+     an operator from filing a data-quality bug about a redaction. The evidence
+     — how many rows carry a number, how many distinct values they take —
+     survives in every state; only the string itself is conditional. */
+  const numbersHeld = t?.with_number ?? 0;
+  const licenceNoCaveat = (() => {
+    const isDefault = numPlaceholder
+      ? `Every one of the ${numMode.n} licence numbers on this roster is the identical string`
+        + `${admin ? ` "${numMode.licence_no}"` : ''} — ${numMode.distinct_numbers} distinct `
+        + `${numMode.distinct_numbers === 1 ? 'value' : 'values'} across all of them. It is what `
+        + 'this source writes when the field was never filled in, so no row here carries a licence '
+        + 'number anybody could check.'
+      : null;
+    if (admin) return isDefault;
+    if (!numbersHeld) return isDefault;
+    return isDefault ? `${isDefault} ${withheldNote('numbers')}`
+      : `${numbersHeld} of ${t.total} rows carry a licence number. ${withheldNote('numbers')}`;
+  })();
+  /* Same three states for the identity number. The unredacted half of this
+     sentence is the one that matters most to a reader — a blank Emirates ID
+     column is a fact about WHICH CHANNEL onboarded the person, since the hotel
+     channel is the only one that reports one at all — so it is kept verbatim
+     and the withholding is appended to it rather than replacing it. */
+  const emiratesIdCaveat = (t?.with_emirates_id ?? 0) > 0
+    ? `${t.with_emirates_id} of ${t.total} people carry an Emirates ID. Every one of them `
+      + `comes from the ${idBy.filter((r) => r.n > 0).map((r) => r.platform).join(', ')} `
+      + 'channel, which is the only one that reports one. Uber names the field absent on '
+      + 'every type it exposes, and Bolt and Yango file no compliance record at all, so a '
+      + 'blank here is about which channel onboarded the person, not about their documents.'
+      + (admin ? '' : ` ${withheldNote('identity numbers')}`)
+    /* Nothing was withheld in this state, so nothing is claimed to have been:
+       the column really is empty for everybody, and saying otherwise would be
+       the same lie in the other direction. */
+    : 'No channel on this fleet reports an Emirates ID, so this column is empty for '
+      + 'everyone — an absence about the sources, not about the drivers.';
   res.json({
-    drivers: rows,
+    drivers,
+    /* Which columns were removed, named, so a page can caption the gap instead
+       of implying the provider sent nothing. Empty for an administrator. */
+    identity_withheld: admin ? [] : IDENTITY_DOCS,
+    identity_withheld_reason: admin ? null : withheldNote('licence numbers and Emirates IDs'),
     totals: t,
     shown: rows.length,
     truncated: (t?.total ?? 0) > rows.length,
@@ -4168,29 +4307,23 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     /* The licence NUMBER's own placeholder, beside the date's. Two independent
        defaults on the same rows, and a page that flags one and prints the other
        is half honest. distinct_numbers is the evidence: 1 distinct value across
-       94 rows is not a roster, it is a default. */
-    placeholder_licence_no: phNum,
+       94 rows is not a roster, it is a default.
+
+       The detected default is by construction NOT anybody's licence number —
+       a string repeated across 94 rows is what a source writes when the field
+       was never filled in, which is the very reason it can be detected. It is
+       still a licence number by name, and the rule this file follows is not
+       "leak the ones that look harmless". An unauthenticated reader gets the
+       COUNTS that make the caveat true and not the string itself. */
+    placeholder_licence_no: admin ? phNum : null,
     placeholder_number_rows: numPlaceholder ? numMode.n : 0,
     distinct_licence_numbers: numMode?.distinct_numbers ?? 0,
-    licence_no_caveat: numPlaceholder
-      ? `Every one of the ${numMode.n} licence numbers on this roster is the identical string `
-        + `"${numMode.licence_no}" — ${numMode.distinct_numbers} distinct `
-        + `${numMode.distinct_numbers === 1 ? 'value' : 'values'} across all of them. It is what `
-        + 'this source writes when the field was never filled in, so no row here carries a licence '
-        + 'number anybody could check.'
-      : null,
+    licence_no_caveat: licenceNoCaveat,
     /* Which channels answer an Emirates ID and which do not, in figures. A
        page that prints a blank identity column without this reads as a fleet
        that lost its paperwork. */
     emirates_id_by_platform: idBy,
-    emirates_id_caveat: (t?.with_emirates_id ?? 0) > 0
-      ? `${t.with_emirates_id} of ${t.total} people carry an Emirates ID. Every one of them `
-        + `comes from the ${idBy.filter((r) => r.n > 0).map((r) => r.platform).join(', ')} `
-        + 'channel, which is the only one that reports one. Uber names the field absent on '
-        + 'every type it exposes, and Bolt and Yango file no compliance record at all, so a '
-        + 'blank here is about which channel onboarded the person, not about their documents.'
-      : 'No channel on this fleet reports an Emirates ID, so this column is empty for '
-        + 'everyone — an absence about the sources, not about the drivers.',
+    emirates_id_caveat: emiratesIdCaveat,
     caveat: placeholder
       ? `${mode.n} of ${mode.with_date} licence dates are the identical value `
         + `${mode.licence_expires}, which is what this source writes when the field `
@@ -4592,21 +4725,106 @@ app.get('/api/schema/raw-fields', wrap(async (req, res) => {
   });
 }));
 
-// Distinct values of one raw field, with counts — for deciding whether a field
-// is a dimension worth charting or free text.
+/* Distinct values of one raw field, with counts — for deciding whether a field
+   is a dimension worth charting or free text.
+
+   WHAT IT SAMPLED, MEASURED ON PRODUCTION WITH NO CREDENTIALS, 2026-09-05
+   ─────────────────────────────────────────────────────────────────────────
+   ?table=telemetry_snapshot&key=driverInfo returned 60 rows, each one a whole
+   provider record that `raw ->> $2` had serialised into the value column.
+   ?table=trip&platform=hotel&key=driver returned 39, each carrying `password`
+   ($2b$10$Gx5ViZ06m2p15VqHkOxoc…, bcrypt cost 10), `emiratesId`
+   784-2001-4740905-4 and an `ExponentPushToken[…]`. The sampler had no idea
+   what it was sampling: it asked Postgres to group by a field it was handed
+   and printed whatever came back.
+
+   Two different holes, so two fixes, both taken from api/redact.js so this file
+   does not grow a second opinion about where the line is.
+
+   1. A SECRET-SHAPED KEY IS NEVER SAMPLED. `?key=password` on a fleet where a
+      source writes one default for everybody would have printed that default
+      outright — narrow cardinality is precisely what makes a secret cheap to
+      guess, and revealing cardinality is precisely what this endpoint is for.
+      But the COUNTS still come back, because the question the page asks is "is
+      this field a dimension worth a column, or an identifier?", and the shape
+      of the distribution answers it with no value at all: sixty buckets of one
+      is an identifier, three buckets of four hundred is a dimension. The value
+      is left out of the SELECT list rather than blanked afterwards, so it never
+      becomes a string in this process — it cannot reach the slow-query log
+      above, the response cache, or a future edit that keeps the query and drops
+      the map.
+
+   2. A VALUE THAT IS ITSELF A RECORD IS REDACTED. Refusing the key is not
+      enough when the key is innocent and the value is not: `driverInfo` and
+      `driver` are ordinary names, and `raw ->> 'driver'` flattens an entire
+      object — bcrypt hash, Emirates ID and push token included — into one
+      cell. redactSampleValue() parses it back, strips the secret-shaped
+      members and re-serialises. Phone, email and name survive that on purpose;
+      api/redact.js's header explains why they are a feature rather than an
+      oversight.
+
+   The response stays an ARRAY of {value, n}. api/public/providers.js reads
+   rows.length, sums r.n and renders r.value, and a security fix is not a
+   licence to reshape a page. What is added is per-row `withheld` and
+   `withheld_reason`, and a value that reads "(withheld)" rather than empty —
+   because an empty cell here is indistinguishable from a field the provider
+   sent empty, and telling those two apart is the whole claim this product
+   makes about `raw`. */
 app.get('/api/schema/raw-values', wrap(async (req, res) => {
   const table = ['trip', 'alert', 'telemetry_snapshot', 'driver_performance', 'vehicle_profile']
     .includes(req.query.table) ? req.query.table : 'trip';
-  if (!req.query.key) return res.status(400).json({ error: 'key required' });
+  const key = req.query.key;
+  if (!key) return res.status(400).json({ error: 'key required' });
   const tcol = { trip: 'requested_at', alert: 'occurred_at', telemetry_snapshot: 'captured_at',
     driver_performance: 'period_start', vehicle_profile: 'updated_at' }[table];
-  res.json(await q(
+  const params = [req.query.platform || null, key, ...win(req)];
+  const where = `raw ? $2 AND ${providerFilter(table, 1)} AND ${tcol} BETWEEN $3 AND $4`;
+
+  if (secretField(key)) {
+    /* GROUP BY an expression that is not in the SELECT list is ordinary SQL,
+       and it is the point: the counts are real and the values are never read
+       out of the database at all. */
+    const counts = await q(
+      `SELECT count(*)::int n FROM ${table}
+        WHERE ${where} GROUP BY raw ->> $2 ORDER BY n DESC LIMIT 60`, params);
+    const reason = `"${key}" is a credential or an identity document by name, so this endpoint `
+      + 'does not sample its values. The counts beside them are real and unredacted: '
+      + `${counts.length === 60 ? '60 or more' : counts.length} distinct `
+      + `${counts.length === 1 ? 'value' : 'values'} across `
+      + `${counts.reduce((a, r) => a + r.n, 0)} stored records, which is what says whether this `
+      + 'field is a dimension worth a column or an identifier. See api/redact.js for the rule.';
+    return res.json(counts.map((r) => ({
+      value: '(withheld)', n: r.n, withheld: true, withheld_reason: reason,
+    })));
+  }
+
+  const rows = await q(
     `SELECT raw ->> $2 AS value, count(*)::int n
      FROM ${table}
-     WHERE raw ? $2 AND ${providerFilter(table, 1)} AND ${tcol} BETWEEN $3 AND $4
-     GROUP BY 1 ORDER BY n DESC LIMIT 60`,
-    [req.query.platform || null, req.query.key,
-     ...win(req)]));
+     WHERE ${where}
+     GROUP BY 1 ORDER BY n DESC LIMIT 60`, params);
+  return res.json(rows.map((r) => {
+    const value = redactSampleValue(r.value);
+    /* Unflagged is the common case and it has to stay byte-identical, or every
+       field on this page grows a caveat it has not earned. A scalar is caught
+       here: redactSampleValue returns one unchanged. */
+    if (value === r.value) return r;
+    /* A CHANGED STRING IS NOT EVIDENCE THAT ANYTHING WAS REMOVED. The value
+       column is jsonb rendered to text, and Postgres writes `{"email": "x"}`
+       where JSON.stringify writes `{"email":"x"}` — so every record value comes
+       back differing by whitespace whether or not it lost a member, and a naive
+       comparison would mark all sixty rows withheld and say so in words. Ask
+       the right question instead: re-serialise the ORIGINAL the same way and
+       compare like with like. Only a real difference earns the flag. */
+    let unchanged = false;
+    try { unchanged = JSON.stringify(JSON.parse(r.value)) === value; } catch { unchanged = false; }
+    if (unchanged) return r;
+    return { ...r, value, withheld: true,
+      withheld_reason: 'This value is a whole provider record, and members of it whose NAME marks '
+        + 'them as a credential or an identity document — a password hash, a push token, an '
+        + 'Emirates ID, a licence or passport number, a bank or card number — have been removed '
+        + 'from it. Phone, email and name are kept deliberately. See api/redact.js.' };
+  }));
 }));
 
 /* ───────────────── per-driver detail pages ───────────────── */
@@ -4654,7 +4872,81 @@ dayRoutes(app, { q, wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });
-exportRoutes(app, { q, wrap, winDays, log });
+/* ── the export, and what an anonymous GET may carry away ──────────────────
+   MEASURED ON PRODUCTION WITH CURL AND NO CREDENTIALS, 2026-09-05:
+   GET /api/export/trips.csv?grain=trip&from=2025-09-05&to=2026-09-05 answered
+   200 with x-export-rows 262,162 against the 400,000-row cap — a whole year in
+   one file, and the cap is set above the entire 364,015-row booking history,
+   so "everything we have ever done" also fits in one GET. Every line carries
+   pickup_addr and dropoff_addr in full: "Al Jadaf - Dubai - United Arab
+   Emirates" to "Garhoud Area - opposite to Airport Terminal 3". That is not a
+   fleet report, it is a movement record — which named driver took which named
+   passenger's booking from which door to which door, at what time, in which
+   car — and it left over an unauthenticated HTTP request in 40 seconds.
+
+   THE GATE IS isAdmin(), NOT adminGate(). api/admin_gate.js holds the WRITE
+   gate open on an instance with no ADMIN_TOKEN, deliberately and on the
+   operator's explicit instruction, because they are still pasting provider
+   cookies and triggering collector runs through those routes. Refusing the
+   export through that gate would therefore do one of two useless things:
+   refuse nobody while the token is unset, or refuse the operator's own testing
+   the moment it is set. isAdmin() answers the other question — "is this caller
+   an administrator" — strictly and always, and its own comment says that this
+   is the question a read must ask. So the export is not refused at all.
+
+   IT IS SERVED, MINUS THE TWO COLUMNS THAT MAKE IT A LOCATION BOOK. Everything
+   an operator actually reconciles against is untouched at both grains: the day,
+   the fleet, the channel, the trip id, both timestamps, the driver and their
+   id, the plate, the distance, the product, the payment type, the status, the
+   outcome, the price. grain=day never carried an address at all, so it is
+   unchanged in every respect.
+
+   AND THE FILE ITSELF SAYS SO, not only the response. A CSV saved to a laptop
+   keeps none of its headers, and six months later a column of blanks is
+   indistinguishable from a fleet that never recorded a pickup — the very
+   distinction this product claims to preserve. So a row whose address WAS
+   recorded reads "(withheld)" and a row that genuinely has none stays empty.
+   x-export-withheld names the columns for anything reading the response live.
+
+   TWO ROUTERS, NOT A FLAG. api/export_routes.js takes `q` once at mount time
+   and never sees a request, so the choice cannot be made inside it without
+   changing a file this fix has no business changing. One router is built on
+   the real q and one on a q that blanks those two columns on the way back from
+   Postgres; the dispatcher picks per request. Nothing is shared between them,
+   so two concurrent readers — one admin, one not — cannot race, which is
+   exactly what a module-level "the current request is an admin" variable would
+   have let them do. */
+const LOCATION_COLS = ['pickup_addr', 'dropoff_addr'];
+/* Blanked as the rows come back, before the CSV formatter or anything else has
+   seen them. `rows` is a fresh array from pg on every call, so mutating it in
+   place holds nothing and copies nothing. */
+const qWithoutAddresses = async (text, params) => {
+  const rows = await q(text, params);
+  for (const r of rows) {
+    for (const c of LOCATION_COLS) {
+      // An address that was never recorded stays empty. Only a real one is
+      // replaced, so the file distinguishes "withheld" from "never sent".
+      if (r[c] != null && r[c] !== '') r[c] = '(withheld)';
+    }
+  }
+  return rows;
+};
+const exportFull = express.Router();
+exportRoutes(exportFull, { q, wrap, winDays, log });
+const exportRedacted = express.Router();
+exportRoutes(exportRedacted, { q: qWithoutAddresses, wrap, winDays, log });
+app.use((req, res, next) => {
+  /* Matched here rather than by mounting at '/api/export', because Express
+     strips a mount path before the router sees it and these routes declare
+     their full path — mounted at the prefix they would match nothing at all. */
+  if (!req.path.startsWith('/api/export/')) return next();
+  if (isAdmin(req)) return exportFull(req, res, next);
+  res.setHeader('x-export-withheld', LOCATION_COLS.join(','));
+  res.setHeader('x-export-withheld-reason',
+    'pickup and drop-off addresses are served only to a caller presenting x-admin-token; '
+    + 'a cell reading (withheld) had an address, an empty cell never did');
+  return exportRedacted(req, res, next);
+});
 
 /* Occupancy segments as pages rather than a modal: the list with its own
    facets, and one interval with every booking that stood near it. */

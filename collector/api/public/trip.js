@@ -312,6 +312,20 @@ export async function renderTrip(root, platform, id) {
     + '<p class="cap">The record as it arrived, before this product mapped it into columns. '
     + 'Every figure above is derived from this; a field here with nowhere to go is what '
     + '“What each API offers” is for.</p>';
+  /* The record below is now the record MINUS whatever api/redact.js refused to
+     serve — on a hotel booking that is the embedded driver's bcrypt password,
+     Emirates ID and Expo push token, which /api/trip handed to anonymous
+     callers on all 12 of 12 hotel trips sampled on 2026-09-05. A field that
+     just vanished from this dump would be indistinguishable from a field the
+     provider never sent, and this panel exists precisely to tell those apart,
+     so the withheld paths are named. Nothing when the record carried none:
+     an empty line under every uber trip would only teach a reader to skip it. */
+  const withheld = d.raw_redacted || [];
+  if (withheld.length) {
+    raw.append(el('p', 'cap', `${countOf(withheld.length, 'field')} withheld: `
+      + withheld.map((p) => `<code>${esc(p)}</code>`).join(', ')
+      + ' — identity documents and credentials are not served. Everything else the provider sent is below.'));
+  }
   const pre = el('pre', 'wrap');
   pre.style.cssText = 'overflow:auto;max-height:26rem;font-size:.72rem;line-height:1.5';
   pre.textContent = JSON.stringify(t.raw ?? {}, null, 2);

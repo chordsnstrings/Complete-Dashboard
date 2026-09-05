@@ -138,10 +138,25 @@ check('server.js mounts compression', /app\.use\(compression\(/.test(serverJs));
 /* Before the routes AND before the response cache, or a cached answer — which
    is most answers — is the one thing that goes out uncompressed. */
 const at = (re) => serverJs.search(re);
+/* Pinned to the ORDER, not to the spelling of the mount. This read
+   `app.use('/api', cache)` as a literal until /api/compliance/drivers began
+   varying its body by caller: the response cache keys on req.originalUrl alone,
+   so an admin's unredacted answer would have been cached and served to the next
+   anonymous GET, and the cache is now applied through a dispatcher that skips
+   the routes it cannot key. The literal vanished, the search returned -1, and a
+   check on middleware order failed for a change that did not touch the order —
+   the same trap that has broken collector_invariants twice. What matters is
+   that compression wraps everything below it, so that is what is asserted. */
+const firstApiUse = at(/app\.use\('\/api'/);
 check('compression is mounted before the cache and the routes',
-  at(/app\.use\(compression\(/) < at(/app\.use\('\/api', cache\)/)
+  at(/app\.use\(compression\(/) < firstApiUse
   && at(/app\.use\(compression\(/) < at(/app\.use\(express\.static/),
   'mounted too late to wrap them');
+/* And the cache is still actually mounted — an order test passes trivially if
+   the thing it is ordering against has been deleted. */
+check('…and the response cache is still applied to /api',
+  /cache\(req, res, next\)/.test(serverJs) || /app\.use\('\/api', cache\)/.test(serverJs),
+  'the response cache is no longer wired to /api at all');
 
 /* And that it does what the mount assumes. The filter is the part worth
    checking: compressing a woff2 or a PNG spends CPU to make the file bigger,
