@@ -9,6 +9,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
   UBER_FARE_WHY } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
+import { todayLive, todayLede } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow } from './data.js';
@@ -5474,7 +5475,7 @@ async function render() {
     root.innerHTML = '';
     root.append(failureBox(e, () => render()));
   }
-  if (alive(gen)) { freshness(); authBanner(); }
+  if (alive(gen)) { freshness(); authBanner(); todayNow(); }
 }
 
 /* ── every page says what it was built from ───────────────────────────────
@@ -5721,6 +5722,71 @@ async function authBanner() {
    oldest batch source is named beside it, because that is the number that
    decides whether the page in front of you is worth reading. */
 const REALTIME_SOURCE = /cabman|live|track/i;
+/* Today, live, above every page — see api/public/today.js for which money
+   figure this shows and why it is not the other one.
+
+   Rendered on every view rather than on one, because "what is happening now"
+   is not a page: an operator who navigates to Drivers has not stopped caring
+   what the fleet has taken since midnight. It is the only thing in this shell
+   that is not about the reader's window, and it says so.
+
+   Never a row of noughts. Before the first booking of the day lands, every
+   figure here is genuinely unmeasured, and the band says that in a sentence
+   with the minute it is speaking at — the same house rule as alertRate in
+   api/alert_coverage_sql.js, on the surface a reader sees first. */
+async function todayNow() {
+  const host = $('#todayNow');
+  if (!host) return;
+  try {
+    const t = await todayLive();
+    const f = [];
+    const fact = (label, value, sub) => {
+      if (value == null) return;
+      f.push(`<span class="tn-f"><b>${esc(String(value))}</b>${esc(label)}`
+        + (sub ? ` <span class="tn-sub">${esc(sub)}</span>` : '') + '</span>');
+    };
+    if (t.started) {
+      /* Not the booking count again — the lede above already carries it, and
+         a band that says 21 twice in eight words reads as a rendering fault. */
+      fact('completed', fmt(t.completed),
+        t.cancelled ? `${fmt(t.cancelled)} cancelled` : null);
+      /* The fares are a measurement of today; `accounted` is a seventh of a
+         week that has not finished. The count it covers rides with it, because
+         a fare total over an unstated number of bookings is the figure this
+         product spent a month removing from its money pages. */
+      if (t.fares != null && t.priced) {
+        fact('in fares', money(t.fares), `on ${fmt(t.priced)} of ${fmt(t.bookings)} priced so far`);
+      }
+      fact('km', fmt(t.km));
+      if (t.drivers != null) fact('out', fmt(t.drivers), `${fmt(t.vehicles)} cars`);
+      if (t.lastAt) f.push(`<span class="tn-f tn-sub">latest booking ${esc(timeStr(t.lastAt))}</span>`);
+    } else {
+      f.push('<span class="tn-quiet">no booking has landed yet on any channel</span>');
+    }
+    /* The other half of "live", and true whether or not a booking has landed:
+       a fleet with no trips yet at 06:00 still has cars reporting. */
+    if (t.fresh != null && t.tracked) {
+      f.push(`<span class="tn-f"><b>${fmt(t.fresh)}</b>reporting now`
+        + ` <span class="tn-sub">of ${fmt(t.tracked)} tracked</span></span>`);
+    }
+    host.innerHTML = `<span class="tn-now"><span class="tn-dot" aria-hidden="true"></span>`
+      + `${esc(todayLede(t))}</span>${f.join('')}`
+      + `<span class="tn-links"><a href="${href('day', t.day)}">the whole day \u2192</a>`
+      + `<a href="#compare">against yesterday \u2192</a>`
+      + `<a href="#live">live map \u2192</a></span>`;
+    /* Whole fleet, both channels: /api/day takes a day and nothing else, so
+       this cannot honour the chips above it and must not pretend to. */
+    host.title = 'Today so far, across both fleets and every channel \u2014 this band '
+      + 'does not follow the filters above it. Fares are the price on the bookings taken '
+      + 'since midnight, not a share of a weekly statement.';
+    host.hidden = false;
+  } catch {
+    /* A band that cannot be built is removed, not left saying something
+       wrong: every page below it is still correct. */
+    host.hidden = true; host.innerHTML = '';
+  }
+}
+
 async function freshness() {
   const host = $('#freshness');
   try {

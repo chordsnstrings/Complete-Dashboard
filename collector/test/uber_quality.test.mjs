@@ -129,9 +129,15 @@ check('it checkpoints per window',
   && /checkpoint\?\.mark\(`quality \$\{ps\}\.\.\$\{pe\}`/.test(body));
 check('a window past Uber’s retention is expected, not an error',
   /const expected = \/invalid date range\|retention\|out of range\/i\.test\(msg\)/.test(body));
+/* Read off collect()'s phase names rather than off the call spelling. The
+   pulls used to be `await pullX(from, to, onStep, ck)` written out one after
+   another; interleaving the two fleets turned them into phases, and a check
+   pinned to the old spelling failed a change that does not touch the ordering
+   it is about. The ordering is what matters and it still reads plainly. */
+const collectSrc = bare.slice(bare.indexOf('export async function collect'));
+const phaseAt = (n) => collectSrc.indexOf(`phase(s, '${n}'`);
 check('and it runs after trips and earnings, which are the ones worth keeping',
-  bare.indexOf('pullEarnerBreakdowns(from, to, onStep, ck)') > 0
-  && bare.indexOf('pullEarnerBreakdowns(from, to, onStep, ck)') < bare.indexOf('pullDriverQuality(from, to, onStep, ck)'),
+  phaseAt('trips') > 0 && phaseAt('perf') > phaseAt('trips') && phaseAt('qual') > phaseAt('perf'),
   'a run that runs out of report slots should end having collected the money');
 check('the report type is a parameter now, and its old value is still the default',
   /generateReport\(start, end, attempt = 0, reportType = 'REPORT_TYPE_TRIP_ACTIVITY'\)/.test(bare),
@@ -146,10 +152,25 @@ check('the new columns are added, never assumed',
 check('and the rolling driver-app figures are stored apart from the period ones',
   /acceptance_rate_app/.test(sql) && /cancellation_rate_app/.test(sql));
 
-check('the half-hourly incremental never spends a report on it',
-  /mode === 'incremental'\s*\n?\s*\? \{ total: 0, chunks: \[\] \}/.test(bare),
-  'two reports per week per fleet, every thirty minutes, out of a cap of three in flight — '
-  + 'taken from the slots the trip and earnings pulls need');
+/* The guard is now a block around the phase rather than a ternary on its
+   result, because the phase is a loop over both fleets. Same rule: the
+   nearest thing standing between the incremental and this walk must be the
+   mode test. */
+{
+  const at = collectSrc.indexOf("phase(s, 'qual'");
+  const guard = collectSrc.lastIndexOf("mode !== 'incremental'", at);
+  check('the half-hourly incremental never spends a report on it',
+    at > 0 && guard > 0 && at - guard < 400,
+    'two reports per week per fleet, every thirty minutes, out of a cap of three in flight — '
+    + 'taken from the slots the trip and earnings pulls need');
+  /* And the same for the fare walk, which is the other report this mode must
+     not spend: it was a ternary too, and is now a block. */
+  const fareAt = collectSrc.indexOf('pullTripFaresAcross(');
+  const fareGuard = collectSrc.lastIndexOf("mode !== 'incremental'", fareAt);
+  check('…nor one on the payments report',
+    fareAt > 0 && fareGuard > 0 && fareAt - fareGuard < 900,
+    'the payments report has a generation cap of its own and the week has not closed yet');
+}
 check('and the walk is bounded, so a backfill still finishes',
   /const QUALITY_WEEK_HORIZON = 26/.test(bare)
   && /\.slice\(0, QUALITY_WEEK_HORIZON\)/.test(body),

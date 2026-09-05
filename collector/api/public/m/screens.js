@@ -21,6 +21,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
 import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile,
   alertRateFigure, splitAlerts } from '../ui.js';
 import { dubaiClock } from '../tz.js';
+import { todayLive, todayLede } from '../today.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -41,7 +42,10 @@ const WINDOW_NOTE = () => windowLabel()
 
 export function titleFor(view, param) {
   const t = {
-    today: ['Today', WINDOW_NOTE()],
+    /* The screen leads with the day and then widens; the subtitle said
+       THIS MONTH under a tab called Today, which named the second half of
+       the screen and not the first. */
+    today: ['Today', `now, then ${WINDOW_NOTE()}`],
     money: ['Money', WINDOW_NOTE()],
     people: ['People', WINDOW_NOTE()],
     fleet: ['Fleet', WINDOW_NOTE()],
@@ -78,15 +82,70 @@ const countOfDays = (nDays) => `${fmt(nDays)} ${nDays === 1 ? 'day' : 'days'}`;
 /* ── Today ──────────────────────────────────────────────────────────────── */
 async function today(deck, ctx) {
   skeleton(deck, 4);
-  const [k, daily, status, unauth] = await Promise.all([
+  const [k, daily, status, unauth, now] = await Promise.all([
     q('/api/kpis').catch(() => null),
     q('/api/trips/daily').catch(() => []),
     api('/api/status').catch(() => []),
     q('/api/unauthorized/summary').catch(() => null),
+    /* The day in its own right — see api/public/today.js. The rest of this
+       screen is the WINDOW, which excludes today on purpose because a part-day
+       averaged into a daily rate reads as a collapse. Both are true and they
+       are different questions, so the screen answers them one after the other
+       instead of choosing. */
+    todayLive().catch(() => null),
   ]);
   if (!ctx.alive()) return;
   deck.innerHTML = '';
   if (!k) { failed(deck, new Error('The overview could not be fetched.')); return; }
+
+  /* ── today, first, on the tab called Today ───────────────────────────────
+     This screen led with the month and mentioned the current day in a clause
+     at the end of a paragraph. An operator opening a fleet dashboard at 06:45
+     is asking what the fleet has done since midnight and how many cars are
+     reporting, and neither was on the screen.
+
+     Absent, never zero: before the first booking lands, the card is a sentence
+     with the minute it is speaking at rather than four noughts. */
+  if (now) {
+    /* The tiles carry the counts; the caption carries the two things they
+       cannot — the minute this is true at, and that it is the whole fleet
+       whatever the chips above say. Leading it with the booking count as
+       well printed 21 twice in one card. */
+    const t = card('Today so far', now.started
+      ? `as of ${now.asOf} Dubai \u00b7 both fleets, every channel`
+      : todayLede(now));
+    if (now.started) {
+      stats(t.body, [
+        { label: 'Bookings', value: fmt(now.bookings),
+          sub: now.completed != null
+            ? `${fmt(now.completed)} done \u00b7 ${fmt(now.cancelled ?? 0)} cancelled` : null,
+          href: href('day', now.day) },
+        /* The measured half of today's money. `accounted` on the day page is a
+           share of a weekly statement spread across its days, which is the
+           right figure for a settled day and a projection for a day three
+           hours old. */
+        { label: 'Fares so far', value: now.fares != null ? money(now.fares) : '\u2014',
+          sub: now.priced ? `on ${fmt(now.priced)} of ${fmt(now.bookings)} priced` : 'nothing priced yet',
+          href: href('day', now.day) },
+        { label: 'Distance', value: now.km != null ? `${fmt(now.km)} km` : '\u2014',
+          sub: now.drivers != null ? `${fmt(now.drivers)} out in ${fmt(now.vehicles)} cars` : null },
+        { label: 'Reporting now', value: now.fresh != null ? fmt(now.fresh) : '\u2014',
+          sub: now.tracked ? `of ${fmt(now.tracked)} tracked` : null,
+          href: href('live') },
+      ]);
+      if (now.lastAt) {
+        t.body.append(el('p', 'm-cap', `Latest booking ${timeStr(now.lastAt)}.`));
+      }
+    } else {
+      /* Not a grid of noughts. The cars are still worth stating: a fleet with
+         no trips yet at 06:00 still has vehicles reporting a position. */
+      t.body.append(el('p', 'm-cap',
+        'No booking has landed yet on any channel today.'
+        + (now.tracked ? ` ${fmt(now.fresh ?? 0)} of ${fmt(now.tracked)} tracked vehicles are reporting a position.` : '')));
+      rows(t.body, [{ title: 'Live fleet', sub: 'where every car is now', to: href('live') }]);
+    }
+    deck.append(t.card);
+  }
 
   /* Today is still being collected, so it is neither averaged into the daily
      rate nor used as the "last full day" it was being compared as. On

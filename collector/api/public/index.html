@@ -139,6 +139,13 @@
         <span id="tzNote" class="tz-note" title=""></span>
       </div>
     </header>
+    <!-- Today, live, above every page.
+         The window controls above answer "how has it been going"; this answers
+         "what is happening now", and the two are different questions. It sits
+         outside #view because a reader should not have to be on the right page
+         to see it, and because every view replaces #view wholesale. Filled by
+         todayNow() in app.js; hidden until there is something true to say. -->
+    <div id="todayNow" class="todaynow" hidden></div>
     <section id="view"></section>
   </main>
 </div>
