@@ -118,3 +118,46 @@ export function redactSampleValue(v) {
   if (!(s.startsWith('{') || s.startsWith('['))) return s;
   try { return JSON.stringify(redactRaw(JSON.parse(s)).value); } catch { return s; }
 }
+
+/* ── the identity documents a COLUMN carries, not a raw blob ─────────────
+   redactRaw() above walks a provider record whose shape nobody controls. This
+   pair is the other half of the same rule, applied where the shape IS ours:
+   driver_compliance has named columns, and two of them are government identity
+   documents. The set lives here rather than in each route because it was
+   defined in api/server.js and /api/driver/profile — a route on another file,
+   selecting the same two columns for one person instead of the whole roster —
+   went on serving 784-1977-5137316-4 to an anonymous GET after the roster
+   stopped. Measured on production 2026-09-05, after the roster fix shipped to
+   this branch and before this one did. One definition, imported twice, is the
+   only arrangement in which that cannot happen again.
+
+   Phone, email and picture stay, here as everywhere: see "what stays, and why"
+   at the top of this file. */
+export const IDENTITY_DOCS = ['licence_no', 'emirates_id'];
+
+/** Drop the identity documents from a row set unless the caller is an admin.
+    Non-mutating; the rows keep every other column. */
+export function stripIdentity(rows, admin) {
+  if (admin) return rows;
+  return rows.map((r) => {
+    const o = { ...r };
+    for (const c of IDENTITY_DOCS) delete o[c];
+    return o;
+  });
+}
+
+/** The sentence a page prints where the number used to be.
+
+    SAID, not merely absent — the rule this whole file is built on. A blank
+    Emirates ID cell already means something specific on this product ("the
+    channel that onboarded this person does not report one"), and letting a
+    withheld value render as that same blank would make the page state a
+    falsehood about the provider. Every route that calls stripIdentity() also
+    returns `identity_withheld` and this reason, and api/public/app.js and
+    api/public/driver.js render the withheld cell differently from the empty
+    one because of it. */
+export const withheldNote = (what) => `The ${what} themselves are withheld from this response: this `
+  + 'API answers every request without a credential, and a government identity document is not '
+  + 'something to hand to an anonymous GET. Coverage, expiry dates and the expired/expiring '
+  + 'counts are all unredacted above and below — only the numbers are gone. Present a valid '
+  + 'x-admin-token to see them.';

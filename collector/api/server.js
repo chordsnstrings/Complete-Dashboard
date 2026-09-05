@@ -54,7 +54,7 @@ import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
    is always the one nobody re-reads. Its header is also where the deliberate
    exclusions live — phone and email STAY, because the operator asked for them
    and four pages render them. */
-import { secretField, redactSampleValue } from './redact.js';
+import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote } from './redact.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
 import { RAW_ALIASES } from '../src/probe.js';
 
@@ -4235,24 +4235,22 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      computed FROM the numbers. So they are read, used, and then not sent — the
      same shape as `raw`, which is stored whole and redacted at the boundary
      (api/redact.js). */
-  const IDENTITY_DOCS = ['licence_no', 'emirates_id'];
-  const drivers = admin ? rows : rows.map((r) => {
-    const o = { ...r };
-    for (const c of IDENTITY_DOCS) delete o[c];
-    return o;
-  });
-  /* SAID, not merely absent. api/public/app.js renders a missing licence
+  /* IDENTITY_DOCS, stripIdentity and withheldNote all come from api/redact.js
+     rather than being spelled out here. They used to be local to this route,
+     and /api/driver/profile — which selects the same two columns for one
+     person — kept serving them to an anonymous GET for exactly as long as the
+     definition lived in one file and not the other. */
+  const drivers = stripIdentity(rows, admin);
+  /* SAID, not merely absent. api/public/app.js rendered a missing licence
      number as an em-dash captioned "this channel publishes no licence number",
-     which for a withheld one is a false statement about the provider — exactly
+     which for a WITHHELD one is a false statement about the provider — exactly
      the confusion between "never sent" and "not shown" that this product
-     exists to resolve. The page already prints emirates_id_caveat and
-     licence_no_caveat above the table, so the sentence goes there, where a
-     reader is looking, as well as into a machine-readable key. */
-  const withheldNote = (what) => `The ${what} themselves are withheld from this response: this `
-    + 'API answers every request without a credential, and a government identity document is not '
-    + 'something to hand to an anonymous GET. Coverage, expiry dates and the expired/expiring '
-    + 'counts are all unredacted above and below — only the numbers are gone. Present a valid '
-    + 'x-admin-token to see them.';
+     exists to resolve. Two things fix it: the sentence goes into
+     emirates_id_caveat and licence_no_caveat above the table, where a reader
+     is already looking, and `identity_withheld` names the columns so the two
+     cell renderers can caption a withheld blank differently from an empty one.
+     Both, because a caveat above a table is not read by somebody hovering a
+     cell in it. */
   /* The licence-number caveat, in three states rather than two. The page used
      to have "every number on this roster is the same default" or nothing; a
      withheld column needs a third sentence, and a withheld column that is ALSO

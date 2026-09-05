@@ -26,6 +26,8 @@ import { areaOf } from './analytics_routes.js';
    copy of a rule this product has now got wrong in four places is a fourth
    place to get it wrong. */
 import { isoDay } from '../src/sources/ledger.js';
+import { isAdmin } from './admin_gate.js';
+import { IDENTITY_DOCS, stripIdentity, withheldNote } from './redact.js';
 /* The three identities a human verified, id to id — see api/identity_map.js
    for the measurement behind each and why this is a LIST and not a rule. The
    stored person_key already carries them (sql/schema_v53.sql generates it from
@@ -724,12 +726,34 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               count(DISTINCT (requested_at AT TIME ZONE 'Asia/Dubai')::date)::int days_worked,
               count(DISTINCT plate)::int vehicles, min(fleet_id) fleet_id
        FROM trip WHERE ${TW}`, p);
-    const compliance = await q(
+    /* The identity documents leave this route the same way they leave
+       /api/compliance/drivers, through the same helper.
+       ─────────────────────────────────────────────────────────────────────
+       That route stopped serving emirates_id and licence_no to an anonymous
+       caller; this one did not, and it is the more exposed of the two — the
+       roster hands out a list, this hands out ONE NAMED PERSON'S papers, which
+       is the shape somebody actually wants. Measured on production 2026-09-05
+       with curl and no credentials:
+       /api/driver/profile?id=67483c64055e070d791000fa returned
+       {emirates_id: '784-1977-5137316-4', licence_no: '123456'}.
+
+       The columns are still SELECTed, because an administrator presenting
+       x-admin-token gets them, and because the counts and the expiry dates
+       below are derived from the same rows. What changes is what leaves. */
+    const complianceRows = await q(
       `SELECT platform, driver_ext_id, full_name, phone, email, picture_url,
               emirates_id, licence_no, licence_expires,
               (licence_expires - now()::date) AS licence_days_left, state, suspension_reason,
               rating, device_brand, device_model, updated_at
        FROM driver_compliance WHERE driver_ext_id = ANY($1)`, [d.keys]);
+    const admin = isAdmin(req);
+    const compliance = stripIdentity(complianceRows, admin);
+    /* Which of them this person actually HAS, counted before the values were
+       dropped. Without this the page cannot tell "withheld" from "the hotel
+       channel never filed one", and those are the two states the whole
+       #compliance page exists to keep apart. */
+    const identityHeld = admin ? null : IDENTITY_DOCS.filter(
+      (c) => complianceRows.some((r) => String(r[c] ?? '').trim() !== ''));
     const vehicles = await q(
       `SELECT plate, count(*)::int days, sum(trips)::int trips, round(sum(km)::numeric,0) km,
               round(sum(revenue)::numeric,0) revenue, min(day) first_day, max(day) last_day,
@@ -770,6 +794,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const banned = standing.filter((r) => r.is_banned === true);
     res.json({ ...d,
       span, compliance, standing, vehicles, accounts,
+      /* Named, so the page captions the gap instead of implying the provider
+         sent nothing. Empty for an administrator. */
+      identity_withheld: admin ? [] : IDENTITY_DOCS,
+      identity_held: identityHeld,
+      identity_withheld_reason: admin ? null
+        : withheldNote('licence numbers and Emirates IDs'),
       rating: rated[0]?.rating ?? null,
       rating_platform: rated[0]?.platform ?? null,
       rating_at: rated[0]?.profile_at ?? null,

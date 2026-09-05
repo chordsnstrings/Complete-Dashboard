@@ -493,6 +493,22 @@ const isPlaceholderLicence = (c) => !!(c.licence_placeholder
 
 function identityCard(p) {
   const c = p.compliance?.[0] || {};
+  /* The identity documents the API refused to send, and — separately — whether
+     this person's record actually HOLDS one. Both facts are needed: the two
+     lines below render only when their value is truthy, so a withheld number
+     would simply vanish from the card, which is the one thing this product is
+     not allowed to do with a value it has. `identity_held` is counted on the
+     server before the values are dropped, so "withheld" is printed for a
+     person who has papers on file and nothing at all for a person whose
+     channel never filed any — the same two states the row rendered before. */
+  const idWithheld = new Set(p.identity_withheld || []);
+  const idHeld = new Set(p.identity_held || []);
+  const idNote = esc(p.identity_withheld_reason || 'withheld from an unauthenticated response');
+  const idFact = (col, label) => (idWithheld.has(col)
+    ? (idHeld.has(col)
+      ? `<span><b>${label}</b> <span class="dim" title="${idNote}">withheld</span></span>`
+      : '')
+    : (c[col] ? `<span><b>${label}</b> ${esc(c[col])}</span>` : ''));
   const wrap = el('div', 'idcard');
   const lic = c.licence_days_left;
   const placeholder = isPlaceholderLicence(c);
@@ -546,8 +562,8 @@ function identityCard(p) {
       <div class="idfacts">
         ${c.phone ? `<span><b>Phone</b> <a class="lnk" href="tel:${esc(c.phone)}">${esc(c.phone)}</a></span>` : ''}
         ${c.email ? `<span><b>Email</b> <a class="lnk" href="mailto:${esc(c.email)}">${esc(c.email)}</a></span>` : ''}
-        ${c.licence_no ? `<span><b>Licence</b> ${esc(c.licence_no)}</span>` : ''}
-        ${c.emirates_id ? `<span><b>Emirates ID</b> ${esc(c.emirates_id)}</span>` : ''}
+        ${idFact('licence_no', 'Licence')}
+        ${idFact('emirates_id', 'Emirates ID')}
         ${c.device_brand ? `<span><b>Device</b> ${esc(c.device_brand)} ${esc(c.device_model || '')}</span>` : ''}
         <span><b>First trip</b> ${dateStr(firstEver)}<span class="dim" title="the first trip on record for this person's platform account — it does not move with the range selector"> ever</span></span>
         <span><b>Last trip</b> ${lastEver ? `${dateStr(lastEver)} ${timeStr(lastEver)}` : '—'}</span>

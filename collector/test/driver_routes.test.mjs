@@ -115,7 +115,23 @@ check('display name prefers the fuller spelling', prof.body.name === 'Amina Rash
 check('both platforms listed', ['uber', 'yango'].every((p) => prof.body.platforms.includes(p)), String(prof.body.platforms));
 check('trip span covers both accounts', prof.body.span.trips === 47, String(prof.body.span?.trips));
 check('vehicles from custody', prof.body.vehicles.length === 2, String(prof.body.vehicles.length));
-check('compliance record attached', prof.body.compliance[0]?.licence_no === 'DL-77');
+/* Pinned to the row, not to its licence number. This read
+   `compliance[0]?.licence_no === 'DL-77'`, and DL-77 stopped leaving the route
+   the day /api/driver/profile began withholding identity documents from a
+   caller with no token — see test/driver_identity.test.mjs. The property is
+   that the yango compliance record is ATTACHED to the folded person; the
+   number was only how the row was recognised. Phone and expiry both survive
+   redaction, so either identifies it, and the withholding is asserted too so
+   the row cannot pass this check by being empty. */
+const comp = prof.body.compliance?.[0];
+check('compliance record attached',
+  comp?.platform === 'yango' && String(comp.licence_expires).slice(0, 10) === '2026-11-30'
+  && comp.phone === '+9715000',
+  JSON.stringify(comp));
+check('…with the licence number withheld from an unauthenticated caller',
+  !('licence_no' in (comp || {}))
+  && (prof.body.identity_withheld || []).includes('licence_no'),
+  JSON.stringify(prof.body.identity_withheld));
 check('accounts break down per platform', prof.body.accounts.length === 2, String(prof.body.accounts.length));
 
 const other = await get(`/api/driver/profile?id=${OTHER}&${W}`);

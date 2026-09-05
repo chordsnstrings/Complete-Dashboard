@@ -28,7 +28,7 @@ import { isAdmin, redactSettings } from '../api/admin_gate.js';
    The harness evaluates the marked region of server.js as a function body with
    its helpers injected by name, so a helper the region references and this list
    omits is a ReferenceError before the first assertion of every route test. */
-import { secretField, redactSampleValue } from '../api/redact.js';
+import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote } from '../api/redact.js';
 /* The provider alias tables, shared with src/probe.js. /api/schema/raw-fields
    matched raw field names against information_schema alone, so thirteen of
    Uber's fifteen fields read "not promoted to a column" while the collector
@@ -98,6 +98,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     q, wrap, range, F, FB, W, DAYWIN, CANON, quote, endOfDay, requireAdmin, win, winDays,
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
     isAdmin, redactSettings, secretField, redactSampleValue, RAW_ALIASES, spanGaps,
+    IDENTITY_DOCS, stripIdentity, withheldNote,
     recordImport, spanOf, tallyBatch, takeTally,
     LEDGER_CADENCE, ledgerSilence,
     FIX_FRESH: "interval '30 minutes'",

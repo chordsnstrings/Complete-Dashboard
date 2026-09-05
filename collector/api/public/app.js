@@ -3943,6 +3943,16 @@ V.compliance = async (root) => {
      already refusing to accuse any of them. The two halves of the product
      disagreed about whether 77 people could legally drive. */
   const placeholder = drvPage.placeholder_date;
+  /* Which identity columns the API refused to send, and the sentence it gave
+     for refusing. An anonymous caller — which every browser is, this product
+     having no sign-in — gets ['licence_no','emirates_id'] here and an empty
+     cell where the number was. Without this the two renderers below caption
+     that cell "this channel publishes no licence number", which is a false
+     statement about the provider and precisely the confusion between "never
+     sent" and "not shown" the rest of the page exists to prevent. */
+  const withheld = new Set(drvPage.identity_withheld || []);
+  const withheldWhy = drvPage.identity_withheld_reason
+    || 'withheld from an unauthenticated response';
   const dt = drvPage.totals || {};
   const dExpired = dt.expired ?? drv.filter((r) => r.licence_expires
     && String(r.licence_expires).slice(0, 10) !== placeholder && dl(r) < 0).length;
@@ -4116,6 +4126,12 @@ V.compliance = async (root) => {
          whose expiry is this source's 2026-01-01 default. The date was marked
          and the number was printed as though somebody could check it. */
       render: (r) => {
+        /* Withheld before absent, because a withheld column is empty for
+           EVERYBODY and would otherwise read as a roster with no licences
+           filed — the strongest possible version of the wrong story. */
+        if (withheld.has('licence_no')) {
+          return `<span class="tag dim" title="${esc(withheldWhy)}">withheld</span>`;
+        }
         if (!r.licence_no) {
           return '<span class="ent-off" title="this channel publishes no licence number">—</span>';
         }
@@ -4142,11 +4158,16 @@ V.compliance = async (root) => {
        says which channel would have had to supply it rather than leaving the
        dash to imply missing paperwork. */
     { label: 'Emirates ID', key: 'emirates_id',
-      render: (r) => (r.emirates_id
-        ? `<span class="plate">${esc(r.emirates_id)}</span>`
-        : `<span class="ent-off" title="${esc(sourceLabel(r.platform))} reports no identity `
-          + 'number — only the hotel channel does, so this is about which channel onboarded '
-          + 'this person and not about their documents">—</span>') },
+      render: (r) => {
+        if (withheld.has('emirates_id')) {
+          return `<span class="tag dim" title="${esc(withheldWhy)}">withheld</span>`;
+        }
+        return (r.emirates_id
+          ? `<span class="plate">${esc(r.emirates_id)}</span>`
+          : `<span class="ent-off" title="${esc(sourceLabel(r.platform))} reports no identity `
+            + 'number — only the hotel channel does, so this is about which channel onboarded '
+            + 'this person and not about their documents">—</span>');
+      } },
     { label: 'Expires', key: 'licence_expires', render: (r) => {
       const d = String(r.licence_expires || '').slice(0, 10);
       if (!d) return '<span class="ent-off" title="this platform publishes no expiry date for the licence">—</span>';

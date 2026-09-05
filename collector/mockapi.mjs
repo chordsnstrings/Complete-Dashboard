@@ -369,6 +369,18 @@ app.get('/api/compliance/vehicles', (_, r) => {
 app.get('/api/compliance/drivers', (_, r) => r.json({
   totals: { total: 148, with_date: 96, expired: 2, within_45: 5, no_date_at_all: 52,
     with_emirates_id: 6, with_number: 8, placeholder_numbers: 6, real_numbers: 2 },
+  /* Empty ON PURPOSE, and the rows below therefore keep their numbers. The
+     mock is what the browser smoke test renders, and the interesting cases in
+     these columns — a real Emirates ID, a channel that files none, the shared
+     "123456" default — only exist in the ADMIN shape. Serving the anonymous
+     shape here would blank both columns for all eight rows and take three
+     rendering states out of the smoke run to exercise a fourth. The withheld
+     state is asserted directly instead, in test/server_redaction.test.mjs
+     against the real route, where it can be checked with and without a token.
+     What matters for the shape check is that the keys exist and that the pair
+     is CONSISTENT: nothing withheld, so the numbers are present. */
+  identity_withheld: [],
+  identity_withheld_reason: null,
   shown: 8, truncated: false,
   drivers: [
     // Six rows carrying the identical placeholder the source writes when the
@@ -794,6 +806,14 @@ app.get('/api/driver/profile', (req, r) => {
        is the superset their rows can be matched by, which includes the
        synthesised name key for the channels that name them without an id. */
     keys: [req.query.id, `name:${drivers[i].toLowerCase()}`],
+    /* The admin shape, for the same reason /api/compliance/drivers serves it:
+       the smoke run needs a card that renders a licence number and an Emirates
+       ID. Nothing withheld, so `compliance` below keeps both — the pair has to
+       stay consistent or the card would print "withheld" beside the value it
+       was supposedly withholding. */
+    identity_withheld: [],
+    identity_held: null,
+    identity_withheld_reason: null,
     platforms: i % 3 === 0 ? ['uber', 'yango'] : ['uber'],
     span: { first_trip: dayISO(DAYS), last_trip: new Date().toISOString(), trips: 420 - i * 37,
       days_worked: 26 - i, vehicles: 2, fleet_id: i % 3 ? 'ecosine' : 'egari' },
@@ -3556,11 +3576,21 @@ app.get('/api/trip', (req, r) => {
     distance_km: 17.5, duration_s: null, status: 'completed', product: priced ? 'pick_and_drop' : 'Comfort',
     payment_type: priced ? 'on_account' : 'offline', seat_count: priced ? null : 4,
     price: priced ? 88.5 : null, currency: 'AED',
-    ingested_at: at('08:02'), raw: { tripUUID: id, productName: 'Comfort', surge: 1 },
+    ingested_at: at('08:02'),
+    /* No secret-shaped key in it, so api/redact.js takes nothing and
+       raw_redacted below is the empty array rather than absent — the state
+       every non-hotel trip is in on production. */
+    raw: { tripUUID: id, productName: 'Comfort', surge: 1 },
     is_booking: true, outcome: 'completed', has_fare: priced, has_distance: true, local_day: day,
   };
   r.json({
     trip,
+    /* The paths api/redact.js removed from `trip.raw` on the way out, so a
+       page can say a field was withheld rather than let it read as a field
+       the provider never sent. Empty here; on a hotel booking production
+       returns ['driver.password','driver.notificationToken',
+       'driver.emiratesId']. */
+    raw_redacted: [],
     vehicle: { plate: plates[0], make: 'BYD', model: 'Han EV', year: 2025, colour: 'White', fleet_id: 'ecosine' },
     custody: [{ driver_ext_id: 'drv-1', driver_name: drivers[0], platform: 'uber', trips: 5,
       km: 124, is_primary: true, first_trip_at: at('01:00'), last_trip_at: at('10:44') }],

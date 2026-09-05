@@ -396,8 +396,19 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
     `${c.placeholder_date} x ${c.placeholder_rows}`);
   check('the caveat says it is a data problem, not an expiry',
     /data-quality problem, not expired licences/.test(c.caveat || ''), c.caveat);
+  /* Pinned to the ROW, not to its licence number. This asserted
+     `d.licence_no === 'AE99'`, which stopped being true the day
+     /api/compliance/drivers began withholding identity documents from an
+     unauthenticated caller — and the test would then have failed for a reason
+     that has nothing to do with what it is checking, which is that the one
+     genuine expiry date on the roster is not counted as the source's default.
+     The name and the date are the property; the licence number was only ever
+     how the row was found. */
+  const real = c.drivers.find((d) => d.full_name === 'Real Person');
   check('a genuine date is not swept up with it',
-    c.drivers.some((d) => d.licence_no === 'AE99'));
+    Boolean(real) && String(real.licence_expires).slice(0, 10) === '2026-08-01'
+    && real.licence_placeholder !== true,
+    JSON.stringify(real && { e: real.licence_expires, p: real.licence_placeholder }));
   /* node-postgres returns a DATE as a JS Date, and String(thatDate).slice(0, 10)
      is "Thu Jan 01". Every date a server response carries as an identifier is
      formatted in SQL rather than sliced in JS. */

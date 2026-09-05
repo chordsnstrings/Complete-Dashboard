@@ -33,7 +33,7 @@ import express from 'express';
 import { readFileSync } from 'node:fs';
 import { win, winDays } from '../api/window.js';
 import { isAdmin } from '../api/admin_gate.js';
-import { secretField, redactSampleValue } from '../api/redact.js';
+import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote } from '../api/redact.js';
 import { vehicleLatest } from '../api/custody_sql.js';
 import { exportRoutes } from '../api/export_routes.js';
 import { responseCache } from '../api/cache.js';
@@ -140,7 +140,7 @@ console.log('\n/api/schema/raw-values — a sampler that did not know what it wa
       { value: '{"email": "wisalm213@example.ae", "phone": "+971508527871", "firstName": "Wisal"}', n: 8 },
     ];
   };
-  const injected = { q, wrap, win, secretField, redactSampleValue };
+  const injected = { q, wrap, win, secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote };
   const api = await serve((app) => {
     mount(app, `${F_PROVIDER_FILTER}\n${F_RAW_VALUES}`, injected);
   });
@@ -233,7 +233,8 @@ function complianceApp() {
     }
     throw new Error(`unexpected SQL in the compliance route: ${sql.slice(0, 80)}`);
   };
-  return (app) => mount(app, F_COMPLIANCE, { q, wrap, isAdmin, vehicleLatest });
+  return (app) => mount(app, F_COMPLIANCE, { q, wrap, isAdmin, vehicleLatest,
+    IDENTITY_DOCS, stripIdentity, withheldNote });
 }
 
 console.log('\n/api/compliance/drivers — 123 Emirates IDs to anyone who knew the URL');
