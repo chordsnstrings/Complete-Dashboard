@@ -1,6 +1,11 @@
 // Uber collector — one pass per configured org (Ecosine, Egari).
 //  Historical trips  : report pipeline GenerateReport -> poll DownloadReport -> signed CSV.
-//                      Server limits: <=31-day range, <=3 concurrent reports, async, ~12mo retention.
+//                      Server limits: <=31-day range, <=3 concurrent reports, async.
+//                      Retention is ~17.6 months, MEASURED: PAYMENTS_ORDER accepts a
+//                      window opening 2025-03-17 and refuses 2025-03-16. This line said
+//                      ~12mo until 2026-09-05, read off Uber's documentation rather than
+//                      off the server, and docs/COVERAGE.md wrote off five recoverable
+//                      months of fares on the strength of it.
 //  Driver perf       : GraphQL getPerformanceReport / getEarnerBreakdownsV2 (per driver).
 //  Live status       : OAuth /drivers/actions (online/on-trip/offline).
 import { parse } from 'csv-parse/sync';
@@ -704,7 +709,8 @@ async function pullTrips(from, to, onStep, checkpoint = null) {
       consecutiveFailures = 0;
     } catch (err) {
       const msg = String(err);
-      // "invalid date range" past retention (~12mo) is expected on the oldest
+      // "invalid date range" past retention (~17.6mo, measured — see the head of this
+      // file) is expected on the oldest
       // windows; anything else is a real failure and is recorded as one,
       // because a silent skip turns a broken backfill into a successful empty
       // one — which is exactly how a 299-day hole survived for months behind a

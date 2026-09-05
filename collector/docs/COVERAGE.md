@@ -74,14 +74,30 @@ September 2025 onward. The residual 0.0–0.1% is a handful of rows per month
 (7 in August) that are completed and unpriced; every other unpriced row is a
 cancellation, which correctly has no fare.
 
-**2. Before ~September 2025 the coverage is partial and can never be
-repaired.** Uber's report retention is about **12 months** (stated at the head
-of `src/sources/uber.js`, and verified nightly by `uberAuditTick`, which walks
-three windows per fleet a night so the whole retention window is re-checked
-inside a week). April–August 2025 sit outside it: what is held was collected
-while those months were still in range, and the walk now classifies a refusal
-there as `outside retention` rather than as a hole. **This is a ceiling, not a
-bug.**
+**2. Before ~September 2025 the coverage is partial — and Apr–Aug 2025 is a
+bug, not a ceiling.** This section said the opposite until 2026-09-05 and was
+wrong twice. Both errors are corrected here rather than deleted, because the
+sentence they produced — *"can never be repaired"* — is the kind that stops
+anybody trying again.
+
+*Retention is ~17.6 months, not ~12.* Measured against the live backfill, not
+read off a comment: `PAYMENTS_ORDER` accepts a window starting 2025-03-17 and
+refuses 2025-03-16. The `~12mo` at the head of `src/sources/uber.js` is a note
+somebody wrote from the documentation; the boundary above is what the server
+actually does. `uberAuditTick` still verifies it nightly, walking three windows
+per fleet so the whole horizon is re-checked inside a week — it was the horizon
+that was mis-stated, not the audit.
+
+*So April–August 2025 is INSIDE retention, and the gap is ours.* Those eight
+payments weeks were generated successfully by Uber and we failed to download
+them: `download timed out after 600s for report <uuid>`, thrown at
+`src/sources/uber.js:137`. Two things make it recur rather than resolve. The
+reportId is discarded inside an error string, so the generated report — which
+Uber had already built and would serve — cannot be re-fetched; and the failure
+is not checkpointed, so every Sunday backfill spends about 80 minutes and eight
+of its three-at-a-time report slots re-failing the same eight windows. Roughly
+13,800 Ecosine bookings and some AED 700k of fares are recoverable, and the
+recovery is a retry that keeps the reportId, not a new entitlement.
 
 **3. Egari had nothing before August 2026, and the reason was ours.** Egari's
 reports are served — the weeks that were finally asked for came back full, and
@@ -101,8 +117,8 @@ both fleets the same distance back. Held down by
 
 | figure | surface | grain | horizon |
 |---|---|---|---|
-| trips | TRIP_ACTIVITY report | ≤31-day windows | ~12 months |
-| per-trip fare | PAYMENTS report | whole weeks | ~12 months |
+| trips | TRIP_ACTIVITY report | ≤31-day windows | ~17.6 months (measured) |
+| per-trip fare | PAYMENTS report | whole weeks | ~17.6 months (measured) |
 | driver earnings / trips / km | supplier GraphQL, daily grid | one Dubai day | **192 days**, rolling |
 | earnings components (fare, fee, tips) | supplier GraphQL, weekly | whole weeks only | 192 days |
 | acceptance / cancellation / rating | DRIVER_QUALITY report | whole weeks | `QUALITY_WEEK_HORIZON` = 26 |
@@ -244,7 +260,7 @@ the one sentence both shells say it with.
 |---|---|---|
 | Bolt Ecosine roster | `BOLT_CLIENT_ID is not entitled to company_id 142868` — the same token reads 142897 (Egari), so the secret is fine | the fleet-integration app in the Bolt portal to be granted 142868 |
 | Yango Ecosine | `YANGO_PARK_ID` → HTTP 403 (401 without a cookie) | park entitlement |
-| Uber fares, Apr–Aug 2025 | 60–97%, permanently | nothing — past retention |
+| Uber fares, Apr–Aug 2025 | 60–97% — **recoverable**, and this row said "permanently" until 2026-09-05 | a retry that keeps the reportId: eight weeks Uber generated and we timed out downloading, inside retention, re-failed every Sunday because the failure is not checkpointed |
 | Uber "offline payment" trips | tracked, unexplained | Uber documentation |
 
 ---
