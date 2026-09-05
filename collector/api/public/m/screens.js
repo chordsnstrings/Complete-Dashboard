@@ -127,6 +127,24 @@ async function today(deck, ctx) {
         { label: 'Fares so far', value: now.fares != null ? money(now.fares) : '\u2014',
           sub: now.priced ? `on ${fmt(now.priced)} of ${fmt(now.bookings)} priced` : 'nothing priced yet',
           href: href('day', now.day) },
+        /* Money in, which is NOT the fares above and must not read as a second
+           opinion about them: a fare where the channel publishes one, the
+           platform's payout where it publishes a payout instead. Uber is why
+           they diverge — it pays a net payout and its gross fares are not
+           counted into this at all, which on 5 September was AED 24,118 here
+           against AED 6,110 of fares. The sub-line names the two halves so the
+           reader can see which is which rather than wondering why one tile
+           disagrees with the one beside it. */
+        { label: 'Money in', value: now.money != null ? money(now.money) : '\u2014',
+          sub: now.money == null
+            ? 'no channel has been credited yet today'
+            /* fmt, not money: the currency is already on the value above, and
+               repeating it twice more wrapped the sub onto a second line and
+               made this tile taller than the one beside it. */
+            : [now.moneyFares ? `${fmt(now.moneyFares)} fares` : null,
+              now.moneyPayouts ? `${fmt(now.moneyPayouts)} payouts` : null]
+              .filter(Boolean).join(' \u00b7 ') || 'basis on the day page',
+          href: href('day', now.day) },
         { label: 'Distance', value: now.km != null ? `${fmt(now.km)} km` : '\u2014',
           sub: now.drivers != null ? `${fmt(now.drivers)} out in ${fmt(now.vehicles)} cars` : null },
         { label: 'Reporting now', value: now.fresh != null ? fmt(now.fresh) : '\u2014',

@@ -30,15 +30,40 @@ const css = readFileSync('api/public/app.css', 'utf8');
 
 console.log('\nthe figure it shows is a measurement of today');
 
-/* /api/day carries `revenue` — the price on the bookings actually taken since
-   midnight — and `accounted`, whose own basis line reads "a share of each
-   weekly platform statement, spread evenly across the days it covers". On 5
-   September those were AED 964 and AED 9,657. The second is a seventh of a
-   week that has not happened: it would print the same number at 06:00 as at
-   23:00. A live line must not carry a projection. */
-check('it reads the day’s own fares, not the statement spread',
-  /fares: num\(h\.revenue\)/.test(mod) && !/accounted/.test(mod.replace(/\/\*[\s\S]*?\*\//g, '')),
-  'accounted is a share of a weekly statement spread across its days — a projection, not today');
+/* /api/day carries two money figures and the band now shows both, because they
+   answer different questions: `revenue` is the price on the bookings taken
+   since midnight, `accounted` is what the fleet is actually credited with — a
+   fare where the channel publishes one, the platform's payout where it
+   publishes a payout instead.
+
+   This assertion used to FORBID `accounted`, on the argument that it is a
+   frozen seventh of a weekly statement and therefore a projection. That did
+   not survive measurement: polled minutes apart on the afternoon of 5
+   September the fares half stood still at AED 3,211 while the payout half
+   moved 20,431.69 to 20,906.66 — the collector writing rows, not a statement
+   being re-spread. So the rule it was protecting is unchanged and the test of
+   it moves: a live line may carry money in, and must carry the two halves
+   beside it, so no reader has to guess which part is a fare and which a
+   payout. Pinned to that property rather than to the absence of a word. */
+check('it reads the day’s own fares',
+  /fares: num\(h\.revenue\)/.test(mod),
+  'the price on the bookings taken since midnight');
+check('…and money in, the figure the fleet is credited with',
+  /money: num\(h\.accounted\)/.test(mod));
+check('…which never travels without its two halves named',
+  /moneyFares: num\(h\.accounted_fares\)/.test(mod)
+  && /moneyPayouts: num\(h\.accounted_payouts\)/.test(mod),
+  'a total whose composition is unstated is the figure this product exists to stop printing');
+check('both shells print money in, from the one module',
+  /label: 'Money in'/.test(phone) && /fact\('money in'/.test(app),
+  'the phone and the desktop disagreeing about today is what this module exists to prevent');
+check('and both name the halves rather than printing a bare total',
+  /moneyFares/.test(phone) && /moneyPayouts/.test(phone)
+  && /moneyFares/.test(app) && /moneyPayouts/.test(app));
+/* Absent, never zero — the same rule the rest of this card is built on. Before
+   any channel has been credited today the tile is a sentence, not AED 0. */
+check('an uncredited day says so rather than printing nought',
+  /no channel has been credited yet today/.test(phone));
 check('and it carries the count those fares cover',
   /priced: num\(h\.priced\)/.test(mod),
   'a fare total over an unstated number of bookings is the figure this product spent a month removing');

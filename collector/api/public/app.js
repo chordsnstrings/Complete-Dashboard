@@ -5779,6 +5779,17 @@ async function todayNow() {
       if (t.fares != null && t.priced) {
         fact('in fares', money(t.fares), `on ${fmt(t.priced)} of ${fmt(t.bookings)} priced so far`);
       }
+      /* Money in, beside the fares rather than instead of them. The two differ
+         because a fare is what the rider was charged and money in is what the
+         fleet is credited with — Uber pays a net payout and its gross fares
+         are not counted into this — so the sub-line names the halves instead
+         of leaving a reader to wonder why one figure disagrees with the one
+         next to it. Measured 5 September: AED 24,118 in, AED 6,110 of fares. */
+      if (t.money != null) {
+        const half = [t.moneyFares ? `${fmt(t.moneyFares)} fares` : null,
+          t.moneyPayouts ? `${fmt(t.moneyPayouts)} payouts` : null].filter(Boolean).join(' \u00b7 ');
+        fact('money in', money(t.money), half || null);
+      }
       /* Why that ratio is low at breakfast and high by lunch — a schedule, not
          a hole. See FARES_LAG. */
       lag = t.priced != null && t.bookings != null && t.priced < t.bookings;

@@ -14,19 +14,29 @@
    So today is stated in its own right, beside the window rather than inside
    it: the exclusion from the RATE stands, and the day gets its own line.
 
-   ── which money, and why not the other one ───────────────────────────────
-   /api/day carries two money figures for a day and they differ by an order of
-   magnitude — on 5 September, AED 964 and AED 9,657. The larger one is
-   `accounted`, and its own basis line says what it is: "a share of each weekly
-   platform statement, spread evenly across the days it covers". That is the
-   right figure for a settled day and the wrong one for a day three hours old,
-   because it is a seventh of a week that has not happened yet — it would print
-   the same number at 06:00 as at 23:00 and move only when the statement did.
+   ── both money figures, because they answer different questions ──────────
+   /api/day carries two, and they differ by a lot — on 5 September, AED 6,110
+   of fares against AED 24,118 accounted. This module used to show only the
+   fares, on the argument that `accounted` is a frozen seventh of a week and so
+   a projection. That argument does not survive measurement: polled minutes
+   apart the same afternoon, the fares half stood still at AED 3,211 while the
+   payout half moved 20,431.69 → 20,906.66. It moves because the collector is
+   writing rows, which is a measurement catching up, not a statement being
+   re-spread.
 
-   The fares are a MEASUREMENT of today: the price on each booking the fleet
-   has actually taken since midnight. So that is what this shows, with the
-   count it covers, and the day page is one click away for the accounted view
-   with its basis stated. A live line must not carry a projection.
+   So both are shown. They are not two answers to one question:
+
+     FARES SO FAR is the price on the bookings taken since midnight — every
+       channel that publishes a fare, whether or not that fare is the money the
+       fleet keeps.
+     MONEY IN is what the fleet is actually credited with — a fare where the
+       channel publishes one, the platform's payout where it publishes a payout
+       instead. Uber is the reason the two diverge: it pays a net payout and its
+       gross fares are not counted into money in at all.
+
+   Money in carries its two halves in the sub-line so a reader can see which
+   part is a fare and which is a payout, and the day page is one click away for
+   the full basis.
 
    ── absent, never zero ───────────────────────────────────────────────────
    Before the first booking of the day lands, every one of these is genuinely
@@ -77,6 +87,17 @@ export async function todayLive() {
     cancelled: num(h.not_completed),
     priced: num(h.priced),
     fares: num(h.revenue),
+    /* Money in — the product's own name for this figure, the same one the
+       Overview tile and the vehicle page print. `accounted` is fares where the
+       channel publishes a fare and the platform's payout where it publishes a
+       payout instead, which is why it is not the fares figure above and must
+       not be captioned as though it were: on 5 September it read AED 24,118
+       against AED 6,110 of fares, because Uber's money reaches us as a payout
+       and its fares are not counted into it. The two halves ride with it so
+       the tile can say which is which. */
+    money: num(h.accounted),
+    moneyFares: num(h.accounted_fares),
+    moneyPayouts: num(h.accounted_payouts),
     km: num(h.booked_km),
     drivers: num(h.drivers),
     vehicles: num(h.vehicles),
