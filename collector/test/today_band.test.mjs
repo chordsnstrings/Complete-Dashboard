@@ -63,9 +63,9 @@ check('…and the phone still names the cars, which are reporting either way',
 console.log('\none module, both shells');
 
 check('the desktop imports the shared shape rather than building its own',
-  /import \{ todayLive, todayLede \} from '\.\/today\.js'/.test(app));
+  /import \{ todayLive, todayLede.*\} from '\.\/today\.js'/.test(app));
 check('and so does the phone',
-  /import \{ todayLive, todayLede \} from '\.\.\/today\.js'/.test(phone),
+  /import \{ todayLive, todayLede.*\} from '\.\.\/today\.js'/.test(phone),
   'a rule kept in one shell is a rule the other shell will contradict');
 check('the clock is Dubai’s on both, from tz.js',
   /dubaiClock\(\)\.hhmm/.test(mod) && /import \{ dubaiDay, dubaiClock \}/.test(mod));
@@ -86,6 +86,34 @@ check('the phone puts it FIRST on the tab that is named after it',
   'a Today tab that leads with the month is answering a question nobody opened it to ask');
 check('and the tab’s subtitle no longer says only THIS MONTH',
   /today: \['Today', `now, then \$\{WINDOW_NOTE\(\)\}`\]/.test(phone));
+
+console.log('\nit is live, and there is one today per screen');
+
+/* api() is stale-while-revalidate: it returns the held body immediately and
+   revalidates behind it. That is right for a page about a window and wrong for
+   a band that stamps a Dubai clock time on itself — on production the band read
+   56 bookings "as of 07:15" while the lede three inches below it, off a
+   different endpoint, read 68. */
+check('the band takes api() off the stale-while-revalidate path',
+  /api\(`\$\{path\}&t=\$\{minute\}`, \{ cache: 'no-store' \}\)/.test(mod),
+  'passing an options object is what stops api() reading and writing the store');
+check('…and stamps the minute, for the caches it cannot pass an option to',
+  /const minute = Math\.floor\(Date\.now\(\) \/ 60000\)/.test(mod),
+  'the server cache is version-keyed and re-checks every 30s; a per-minute key costs one computation');
+check('the phone\u2019s month lede reads the SAME today the card above it shows',
+  /Today has \$\{fmt\(now\?\.started \? now\.bookings : soFar\)\} so far/.test(phone),
+  'two numbers for today on one screen is the complaint the calendar window was built to answer');
+
+console.log('\nand a low fares ratio is explained as the schedule it is');
+
+check('the reason lives in one place',
+  /export const FARES_LAG/.test(mod)
+  && /separate weekly report, walked overnight/.test(mod));
+check('the desktop hangs it off the band when the ratio is short',
+  /lag \? `\\n\\n\$\{FARES_LAG\}` : ''/.test(app));
+check('and the phone prints it, having no hover to put it in',
+  /if \(now\.priced != null && now\.bookings != null && now\.priced < now\.bookings\)/.test(phone)
+  && /FARES_LAG/.test(phone));
 
 console.log('\nand the window keeps its own rule');
 

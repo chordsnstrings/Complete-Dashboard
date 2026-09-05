@@ -21,7 +21,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
 import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile,
   alertRateFigure, splitAlerts } from '../ui.js';
 import { dubaiClock } from '../tz.js';
-import { todayLive, todayLede } from '../today.js';
+import { todayLive, todayLede, FARES_LAG } from '../today.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -136,6 +136,11 @@ async function today(deck, ctx) {
       if (now.lastAt) {
         t.body.append(el('p', 'm-cap', `Latest booking ${timeStr(now.lastAt)}.`));
       }
+      /* A fares count well under the booking count at breakfast is a schedule,
+         not a hole, and the phone has no hover to explain it in. */
+      if (now.priced != null && now.bookings != null && now.priced < now.bookings) {
+        t.body.append(el('p', 'm-cap', FARES_LAG));
+      }
     } else {
       /* Not a grid of noughts. The cars are still worth stating: a fleet with
          no trips yet at 06:00 still has vehicles reporting a position. */
@@ -195,7 +200,13 @@ async function today(deck, ctx) {
             ? `${dayStr(complete[days - 1].d)} ran ${drift >= 0 ? 'up' : 'down'} `
               + `${Math.abs(drift)}% on the day before it.`
             : '')
-          + (partial ? ` Today has ${fmt(soFar)} so far and is still being collected.` : '')
+          /* The SAME number the card above it shows. This read the daily
+             series, which is the stale-while-revalidate copy, while the card
+             reads live — and on production the two printed 68 and 56 for the
+             same day on the same screen. One today per screen. */
+          + (partial || now?.started
+            ? ` Today has ${fmt(now?.started ? now.bookings : soFar)} so far and is still being collected.`
+            : '')
         /* No complete day, so no daily rate exists — and saying which minute
            the figure stopped at is what makes it usable instead of merely
            unexplained. */

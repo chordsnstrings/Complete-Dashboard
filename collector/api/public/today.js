@@ -45,9 +45,24 @@ export async function todayLive() {
   /* Whole fleet, both channels: /api/day takes a day and nothing else, so a
      strip that claimed to honour the channel chips would be lying about a
      figure it cannot filter. The tile says so. */
+  /* Live, never the cache. api() is stale-while-revalidate and returns the
+     held body immediately, which is right for a page about a window and wrong
+     for a band that puts a Dubai clock time on itself: on production the band
+     read 56 bookings "as of 07:15" while the lede three inches below it, off a
+     different endpoint, read 68. Two numbers for today on one screen is the
+     exact complaint the calendar window was built to answer.
+
+     Two things make it live. Passing an options object at all takes api() off
+     the stale-while-revalidate path — it neither reads nor writes the store —
+     and `no-store` stops the browser's own HTTP cache. The minute stamp is for
+     the third cache, the server's: it is version-keyed and re-checks every 30
+     seconds, so a stamp that changes once a minute costs at most one real
+     computation a minute and can never serve a body from before it. */
+  const minute = Math.floor(Date.now() / 60000);
+  const live = (path) => api(`${path}&t=${minute}`, { cache: 'no-store' }).catch(() => null);
   const [d, k] = await Promise.all([
-    api(`/api/day?day=${day}`).catch(() => null),
-    api('/api/kpis?days=1').catch(() => null),
+    live(`/api/day?day=${day}`),
+    live('/api/kpis?days=1'),
   ]);
   const h = d?.headline || {};
   const bookings = num(h.bookings);
@@ -72,6 +87,22 @@ export async function todayLive() {
     tracked: num(k?.tracked_vehicles),
   };
 }
+
+/* Why today's fares lag its bookings, in one sentence both shells can use.
+   ─────────────────────────────────────────────────────────────────────────
+   On production at 07:15 the band read "AED 964 in fares on 15 of 56 priced
+   so far", which is true and, without this, unexplained. Uber carries no fare
+   on its trip export at all: the price arrives on a separate PAYMENTS report
+   asked for a whole week at a time, and that report has a generation cap of
+   its own — so it is walked on the nightly catch-up and the Sunday backfill,
+   never on the half-hourly incremental. Every other channel prices a booking
+   on the trip row the same day.
+
+   A low ratio here is therefore a schedule, not a hole, and the difference
+   matters: one is worth investigating and the other is worth waiting for. */
+export const FARES_LAG = 'Uber carries no fare on its trip export \u2014 the price arrives '
+  + 'on a separate weekly report, walked overnight, so today\u2019s Uber bookings are priced '
+  + 'by the morning rather than as they happen. Every other channel prices a booking as it lands.';
 
 /* The one sentence both shells lead with, so they cannot word it differently. */
 export const todayLede = (t) => (t.started

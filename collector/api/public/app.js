@@ -9,7 +9,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
   UBER_FARE_WHY } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
-import { todayLive, todayLede } from './today.js';
+import { todayLive, todayLede, FARES_LAG } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow } from './data.js';
@@ -5740,6 +5740,7 @@ async function todayNow() {
   try {
     const t = await todayLive();
     const f = [];
+    let lag = false;
     const fact = (label, value, sub) => {
       if (value == null) return;
       f.push(`<span class="tn-f"><b>${esc(String(value))}</b>${esc(label)}`
@@ -5757,6 +5758,9 @@ async function todayNow() {
       if (t.fares != null && t.priced) {
         fact('in fares', money(t.fares), `on ${fmt(t.priced)} of ${fmt(t.bookings)} priced so far`);
       }
+      /* Why that ratio is low at breakfast and high by lunch — a schedule, not
+         a hole. See FARES_LAG. */
+      lag = t.priced != null && t.bookings != null && t.priced < t.bookings;
       fact('km', fmt(t.km));
       if (t.drivers != null) fact('out', fmt(t.drivers), `${fmt(t.vehicles)} cars`);
       if (t.lastAt) f.push(`<span class="tn-f tn-sub">latest booking ${esc(timeStr(t.lastAt))}</span>`);
@@ -5778,7 +5782,8 @@ async function todayNow() {
        this cannot honour the chips above it and must not pretend to. */
     host.title = 'Today so far, across both fleets and every channel \u2014 this band '
       + 'does not follow the filters above it. Fares are the price on the bookings taken '
-      + 'since midnight, not a share of a weekly statement.';
+      + 'since midnight, not a share of a weekly statement.'
+      + (lag ? `\n\n${FARES_LAG}` : '');
     host.hidden = false;
   } catch {
     /* A band that cannot be built is removed, not left saying something
