@@ -126,6 +126,78 @@ check('a car with no work still reports absence rather than a zero',
   idle.every((r) => r.payout == null && r.attributed == null),
   JSON.stringify(idle.map((r) => [r.plate, r.payout, r.attributed])));
 
+/* ── the car's own page and the car's row must state the same money ───────
+   /api/vehicle/kpis built its per-channel rows from a SELECT that never asked
+   for booking_days, and coverage() in api/income_sql.js reads
+   booking_days > 0 ? booking_days : windowDays — so every channel on this
+   endpoint had its payout's day count divided by the length of the CALENDAR
+   window rather than by the days the channel actually worked. A car that
+   worked 23 of August's 31 days and holds a payout covering all 23 read 74.2%
+   instead of 100%, and the page then either dropped the channel to its gross
+   fares or filed money that had already arrived as not yet collected.
+
+   Measured on production 2026-09-05 across all 98 earning plates for
+   2026-08-01..2026-08-31: the sum of this endpoint's accounted came to AED
+   567,258.53 against AED 502,709.89 from /api/economics/assets and from
+   /api/vehicles/directory, which agree with each other to the cent — an
+   excess of AED 64,548.64 on exactly 45 plates, every one of them with
+   accounted_payouts null and undercovered_bookings 0. L46185's page printed
+   "AED 11,986.98 in fares · AED 0 attributed from platform payouts" while its
+   own earnings panel three sections down showed AED 6,355.12 attributed from
+   Uber, and the directory row for the same car and window said 1,842.00 +
+   6,355.12 = 8,197.12. The page contradicted itself by 46.2%.
+
+   Pinned as AGREEMENTS and not as numbers: the two surfaces answer the same
+   question about the same car over the same window through the same
+   chooseBasis, so whatever either one says the other has to say too. A fixture
+   figure would go stale the next time the seed changes; these cannot.
+
+   The FARES half is compared on the mixed-basis fixture below rather than
+   here, for a reason that is worth writing down because it looks like a
+   failure of this fix and is not. The two surfaces read different windows: the
+   directory asks trip_norm for local_day BETWEEN from AND to, the Dubai
+   calendar day, while every query in /api/vehicle/* asks for requested_at
+   BETWEEN two bare timestamps, which Postgres reads in the session's zone. On
+   this fixture that is one hotel booking of AED 56.29 on L45240 — inside the
+   Dubai window, outside the UTC one. It is a real defect and a separate one,
+   it predates this change, it is a whole class spanning every TW query in
+   api/vehicle_routes.js and api/driver_routes.js, and it is not this brief's
+   to fix; noted here so the next reader does not mistake it for this one. */
+console.log('\nthe vehicle page and the vehicle row report one number, not two');
+
+const kpiByPlate = new Map();
+for (const r of dir) {
+  if (!r.trips) continue;
+  kpiByPlate.set(r.plate, await get(`/api/vehicle/kpis?plate=${r.plate}&${WIN}`));
+}
+
+/* The half that C4 rewrote. A channel whose payout coverage is measured
+   against the calendar instead of against the days it worked falls out of the
+   payout branch, and its money reappears on the page as the GROSS fare the
+   riders paid — which is what production served for 45 of 98 plates. */
+const payDisagree = [...kpiByPlate].filter(([plate, k]) =>
+  !near(k.accounted_payouts, num(dir.find((r) => r.plate === plate).payout)));
+check('every plate’s payout half is the same figure on its page as on its row',
+  payDisagree.length === 0,
+  JSON.stringify(payDisagree.map(([plate, k]) =>
+    [plate, k.accounted_payouts, dir.find((r) => r.plate === plate).payout])));
+
+/* And the same defect seen from the other side, which is the half that
+   survives whichever way chooseBasis is ordered. Every paying channel in this
+   fixture pays over every day it worked — the payouts are built from
+   driver_performance periods that span the trips — so measured against the
+   days worked there is no shortfall to report at all. Measured against the
+   31-day calendar instead, every one of those channels reads under 80%, falls
+   to partial_payout, and the page files 42 to 50 of the plate's bookings as
+   money that has not been collected while the money sits in the same
+   response's accounted_payouts. A car cannot have been both paid and not paid
+   for the same days, and the directory row for it says paid. */
+const stillUncovered = [...kpiByPlate].filter(([, k]) => k.undercovered_bookings !== 0);
+check('and money the row counts as paid is not reported as uncollected on the page',
+  stillUncovered.length === 0,
+  JSON.stringify(stillUncovered.map(([plate, k]) =>
+    [plate, k.undercovered_bookings, k.undercovered_platforms])));
+
 server.close(); await db.close();
 
 /* ── payout_days has to describe the figure printed beside it ─────────────
@@ -200,6 +272,24 @@ check('the day count is the union of the days those two channels paid over, not 
    carry fares and no payout at all. */
 check('and the raw attribution covers the same days, because a fares channel pays nothing',
   mRow?.attributed_days === 11, `${mRow?.attributed_days} attributed days`);
+
+/* And the same agreement on the mixed-basis plate, which is where the missing
+   denominator bites hardest: uber worked 7 of these 14 days and was paid for
+   all 7, bolt likewise. Against the days they WORKED both are 100% covered and
+   are counted on their payouts; against the 14-day calendar window both read
+   50%, fall to partial_payout, and the page then reports as "not yet
+   collected" money that was collected in full. The two numbers below are the
+   two halves of that: the money must match the row, and none of it may be
+   filed as under-covered when every day the channel worked was paid for. */
+const mKpi = (await mixApi.get(`/api/vehicle/kpis?plate=M100&${mixWin}`)).body;
+check('the mixed plate’s page states the same money as its directory row',
+  near(mKpi.accounted, Math.round(((Number(mRow?.revenue) || 0)
+    + (Number(mRow?.payout) || 0)) * 100) / 100),
+  `${mKpi.accounted} vs ${mRow?.revenue} + ${mRow?.payout}`);
+check('and a payout covering every day its channel worked is not reported as under-covered',
+  mKpi.undercovered_bookings === 0 && mKpi.undercovered_payouts == null,
+  JSON.stringify([mKpi.undercovered_bookings, mKpi.undercovered_payouts,
+    mKpi.undercovered_platforms]));
 
 mixApi.server.close(); await mix.close();
 

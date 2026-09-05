@@ -451,9 +451,36 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
         fares_platforms: chosenFare.map((c) => c.platform).sort(),
         payout_platforms: chosenPay.map((c) => c.platform).sort(),
         alert_km: ak,
-        alerts_per_100km: alertRate(r.alerts, ak, cov, 1, { device: r.device_alerts }),
+        /* `tracked` is the third unmeasured case, and this column was the last
+           ledger not passing it.
+           ─────────────────────────────────────────────────────────────────
+           A car no telematics feed ever reached supplies a full denominator
+           from the trip table and an empty numerator, so it divided to exactly
+           0.0 and the Per 100 km column painted it GREEN under a caption
+           reading "measured over all N days in this window" — a sentence that
+           asserts it WAS measured. Measured on production over a five-day
+           window: 32 rows printed "Harsh events 0 / 0 per 100 km", 31 of them
+           on vehicles that worked, and 24 of those carry telematics_journeys
+           0 — the feed that raises these events never saw them being driven at
+           all. That is roughly a third of the working fleet painted as having
+           a spotless safety record, and sorting the column ascending ranked
+           those 24 at the top as the safest cars there are. The remaining
+           seven are a different question — cars the feed DID see that simply
+           raised no driving event in the window — and this change deliberately
+           leaves them alone: the fix for a misleading low number is not a
+           different low number, but it is also not silencing a measurement
+           that was really taken.
+           alertRate() and alertRateReason() have known how to answer this
+           since api/economics_routes.js:535 taught them — absent, with the
+           server's own reason beside it and no tone — so the whole fix is
+           handing them the journey count the row is already carrying. The
+           column is coalesced to 0 in the SELECT above, so 0 here means the
+           feed saw nothing rather than that nobody asked. */
+        alerts_per_100km: alertRate(r.alerts, ak, cov, 1,
+          { device: r.device_alerts, tracked: r.telematics_journeys ?? null }),
         alerts_per_100km_absent: alertRateReason(ak, cov,
-          { alerts: r.alerts, device: r.device_alerts }),
+          { alerts: r.alerts, device: r.device_alerts,
+            tracked: r.telematics_journeys ?? null }),
         device_alerts: r.device_alerts ?? 0,
         alert_days: cov.covered_days, alert_window_days: cov.window_days,
       };
@@ -814,7 +841,35 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
                    completed rides. */
                 count(*) FILTER (WHERE ${COMPLETED_SQL()} OR has_fare)::int chargeable_bookings,
                 count(*) FILTER (WHERE NOT (${COMPLETED_SQL()}) AND NOT has_fare)::int uncharged_bookings,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares
+                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
+                /* The days this channel actually WORKED on this car, which is
+                   the denominator chooseBasis measures payout coverage against
+                   — and this SELECT, with its twin in api/driver_routes.js,
+                   was where the product forgot to ask for it.
+                   ───────────────────────────────────────────────────────────
+                   coverage() in api/income_sql.js reads booking_days > 0 ?
+                   booking_days : windowDays, so a row arriving without the
+                   column silently divides the payout's day count by the length
+                   of the CALENDAR window instead. A car that worked 23 of
+                   August's 31 days and holds a payout covering every one of
+                   those 23 read 23/31 = 74.2% rather than 100%, dropped out of
+                   the payout branch, and was reported on its GROSS Uber fares.
+                   Measured over 2026-08-01..2026-08-31, all 98 earning plates:
+                   the sum of this endpoint's accounted came to AED
+                   567,258.53 against AED 502,709.89 from /api/economics/assets
+                   and /api/vehicles/directory, which agree with each other to
+                   the cent — an excess of AED 64,548.64 on exactly 45 plates,
+                   every one of them with accounted_payouts null and
+                   undercovered_bookings 0. L46185 is the worked example: this
+                   endpoint said AED 11,986.98, all of it fares, while its own
+                   earnings panel three sections down showed AED 6,355.12
+                   attributed from Uber and the directory row for the same car
+                   and window said 1,842.00 + 6,355.12 = 8,197.12. The page
+                   contradicted itself by 46.2%.
+                   /api/economics/assets and the directory's chan CTE have
+                   always selected this; the fix is to ask the same question
+                   here rather than to teach coverage() a second rule. */
+                count(DISTINCT local_day)::int booking_days
          FROM trip_norm WHERE ${TW} AND is_booking GROUP BY 1`, p),
       q(`SELECT platform, round(sum(attributed)::numeric,2) payouts,
                 count(DISTINCT day)::int payout_days
@@ -831,7 +886,12 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     const n = (v) => (v == null ? null : Number(v));
     for (const f of fareByPlat) Object.assign(plat(f.platform), {
       bookings: f.bookings, priced_bookings: f.priced_bookings, fares: n(f.fares),
-      chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings });
+      chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings,
+      /* Carried onto the row, not merely selected — the default above seeds it
+         at 0, and 0 is exactly the value that sends coverage() to the calendar
+         window. Selecting the column and forgetting to copy it here would
+         reproduce the whole defect with the fix apparently in place. */
+      booking_days: f.booking_days });
     for (const y of attByPlat) Object.assign(plat(y.platform), {
       payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
     const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
@@ -842,9 +902,18 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
          handler for the production numbers this replaces. Null, never 0, for a
          window the feed was dark for: alert_coverage says which days those
          were and the page renders it as "not measured". */
-      alerts_per_100km: alertRate(a.alerts, t.alert_km, cov, 1, { device: a.device_alerts }),
+      /* And the same third case here, on the one car's own page — see the note
+         at the matching call in /api/vehicles/directory above. The tile and
+         the table row describe the identical vehicle and window, so a car the
+         telematics feed never saw has to read the same way in both places or
+         one of the two pages is lying about the other. `t.telematics_journeys`
+         is the count of non-booking journeys over the whole window, the same
+         quantity /api/economics/assets carries on its row. */
+      alerts_per_100km: alertRate(a.alerts, t.alert_km, cov, 1,
+        { device: a.device_alerts, tracked: t.telematics_journeys ?? null }),
       alerts_per_100km_absent: alertRateReason(t.alert_km, cov,
-        { alerts: a.alerts, device: a.device_alerts }),
+        { alerts: a.alerts, device: a.device_alerts,
+          tracked: t.telematics_journeys ?? null }),
       device_alerts: a.device_alerts ?? 0,
       alert_coverage: cov,
       // Over the priced distance, and from the revenue of the same trips —

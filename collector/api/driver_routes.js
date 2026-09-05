@@ -1020,7 +1020,26 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                    completed rides. */
                 count(*) FILTER (WHERE ${COMPLETED_SQL()} OR has_fare)::int chargeable_bookings,
                 count(*) FILTER (WHERE NOT (${COMPLETED_SQL()}) AND NOT has_fare)::int uncharged_bookings,
-                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares
+                round(sum(price) FILTER (WHERE has_fare)::numeric,2) fares,
+                /* The days this channel actually WORKED for this person, which
+                   is the denominator chooseBasis measures payout coverage
+                   against — the identical omission /api/vehicle/kpis carried,
+                   fixed in the same change so the two pages cannot disagree.
+                   ───────────────────────────────────────────────────────────
+                   coverage() in api/income_sql.js reads booking_days > 0 ?
+                   booking_days : windowDays, so without this column the
+                   payout's day count is divided by the length of the CALENDAR
+                   window. A driver who worked 23 of August's 31 days and holds
+                   an Uber statement covering every one of them read 74.2%
+                   rather than 100%, fell out of the payout branch, and had
+                   their income reported as Uber's GROSS fares — a figure that
+                   is gross of a commission measured at exactly 25% and is not
+                   money anyone received. Swept across the vehicle ledger the
+                   same defect put AED 64,548.64 of excess on 45 of 98 plates
+                   for 2026-08; the driver ledger divides the same payouts the
+                   same wrong way. platformFares in api/income_sql.js and
+                   /api/economics/drivers have always selected it. */
+                count(DISTINCT local_day)::int booking_days
          FROM trip_norm WHERE ${TW} AND is_booking GROUP BY 1`, p),
       q(`SELECT platform, round(sum(earnings)::numeric,2) payouts,
                 count(DISTINCT day)::int payout_days
@@ -1039,7 +1058,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const n = (v) => (v == null ? null : Number(v));
     for (const f of fareByPlat) Object.assign(plat(f.platform), {
       bookings: f.bookings, priced_bookings: f.priced_bookings, fares: n(f.fares),
-      chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings });
+      chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings,
+      /* Copied onto the row, not merely selected — the default above seeds
+         booking_days at 0, and 0 is the exact value that sends coverage() back
+         to the calendar window. */
+      booking_days: f.booking_days });
     for (const y of payByPlat) Object.assign(plat(y.platform), {
       payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
     const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;

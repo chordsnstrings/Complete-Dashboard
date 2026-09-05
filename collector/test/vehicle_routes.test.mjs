@@ -17,6 +17,9 @@ const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (f
 await applySchema(db);
 
 const PLATE = 'L46174', OTHER = 'L41435';
+/* A third plate, with bookings and distance but nothing on the telematics or
+   alert feeds — see the insert below. */
+const UNTRACKED = 'L50002';
 await q(`INSERT INTO fleet (id, name) VALUES ('ecosine','Ecosine') ON CONFLICT DO NOTHING`);
 await q(`INSERT INTO vehicle (plate, fleet_id, make, model, year, fuel_type)
          VALUES ($1,'ecosine','Tesla','Model Y',2023,'electric')`, [PLATE]);
@@ -80,6 +83,21 @@ await q(`INSERT INTO alert (platform,external_id,plate,alert_type,occurred_at,lo
                 ('fms','a2',$1,'Overspeed','2026-08-13T10:00:00+04:00','E11'),
                 ('fms','a3',$1,'Overspeed','2026-08-12T10:00:00+04:00','E11'),
                 ('fms','a4',$2,'Overspeed','2026-08-13T10:00:00+04:00','E11')`, [PLATE, OTHER]);
+
+/* ── a car the telematics feed never saw ────────────────────────────────
+   UNTRACKED works, earns and covers distance on a day the alert feed WAS up,
+   and carries no FMS row and no alert of any kind. That is the shape 24 of the
+   fleet's 93 working vehicles had on production 2026-09-05: a full denominator
+   from the trip table, an empty numerator, and therefore a rate of exactly 0.0
+   printed in the tone reserved for good news, under a caption reading
+   "measured over all N days in this window" which asserts it WAS measured.
+   Deliberately given no alert row at all — an alert of any kind would make
+   this a measurement; what makes it unmeasured is that nothing was watching. */
+await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+           requested_at,distance_km,status,price)
+         VALUES ('uber','ut1','ecosine',$1,'d-noor','Noor Aziz','2026-08-13T09:00:00+04:00',20,'completed',80),
+                ('uber','ut2','ecosine',$1,'d-noor','Noor Aziz','2026-08-13T12:00:00+04:00',20,'completed',80)`,
+  [UNTRACKED]);
 
 await q(`INSERT INTO vehicle_document (platform,vehicle_ext_id,doc_type,plate,status,expires_at)
          VALUES ('uber','veh-1','Vehicle Registration Form',$1,'ACTIVE','2026-09-05'),
@@ -309,7 +327,14 @@ check('trips carry the driver name', tr.every((t) => t.driver_name || t.platform
 
 /* ── directory ──────────────────────────────────────────────────────────── */
 const dir = (await get(`/api/vehicles/directory?${W}`)).body;
-check('directory lists every known plate', dir.length === 2, String(dir.length));
+/* Repinned from `dir.length === 2` when the untracked-car fixture added a
+   third plate. The property this line has always been checking is that every
+   plate the fixture knows about is LISTED, not that the fixture holds exactly
+   two of them — a count is an incidental value and it made an unrelated
+   fixture row read as a directory bug. */
+check('directory lists every known plate',
+  [PLATE, OTHER, UNTRACKED].every((pl) => dir.some((r) => r.plate === pl)),
+  JSON.stringify(dir.map((r) => r.plate)));
 const row = dir.find((r) => r.plate === PLATE);
 check('directory carries make and model', row?.make === 'Tesla' && row?.model === 'Model Y');
 check('directory carries the soonest document expiry', row?.soonest_expiry != null);
@@ -391,6 +416,55 @@ console.log('\nwhat the car took in, not what a tenth of it was priced at');
   const empty = (await get(`/api/vehicle/kpis?plate=${PLATE}&from=2019-01-01&to=2019-01-31`)).body;
   check('an empty window reports no income rather than AED 0',
     empty.accounted == null, String(empty.accounted));
+}
+
+console.log('\na car the alert feed never covered is not a car with a clean record');
+
+/* 32 of 93 working vehicles printed "Harsh events 0 / 0 per 100 km" in GREEN on
+   production 2026-09-05, and 24 of them carry telematics_journeys 0 — the feed
+   that raises these events never saw them being driven, so the 0 is the absence
+   of a watcher and not the absence of harsh driving. Sorting the directory by
+   Per 100 km ascending ranked those 24 as the safest cars in the fleet.
+   alertRate() has known how to answer this since the `tracked` argument was
+   added for /api/economics/assets; the two call sites here were simply not
+   passing it. Both surfaces are checked, because the tile on a car's own page
+   and the row on the directory describe the identical vehicle and window. */
+{
+  const dirAll = (await get(`/api/vehicles/directory?${W}`)).body;
+  const u = dirAll.find((r) => r.plate === UNTRACKED);
+  const t = dirAll.find((r) => r.plate === PLATE);
+
+  /* The fixture has to actually BE the shape the defect needs, or the three
+     assertions under it pass for the wrong reason: distance on a covered day,
+     nothing from the telematics feed, and no alert of either kind. */
+  check('the untracked fixture car has distance the feed could have watched, and no feed',
+    !!u && Number(u.alert_km) > 0 && u.telematics_journeys === 0
+      && u.alerts === 0 && u.device_alerts === 0,
+    JSON.stringify(u && [u.alert_km, u.telematics_journeys, u.alerts, u.device_alerts]));
+  check('its rate is absent rather than 0 on the directory',
+    u?.alerts_per_100km === null, String(u?.alerts_per_100km));
+  /* Absent WITH A REASON. A silent null is a hole a page fills with whatever
+     it likes; the sentence is what stops it being filled with a zero. */
+  check('and the directory says why, naming the feed rather than the driving',
+    typeof u?.alerts_per_100km_absent === 'string'
+      && /telematics/i.test(u.alerts_per_100km_absent),
+    String(u?.alerts_per_100km_absent));
+
+  const k = (await get(`/api/vehicle/kpis?plate=${UNTRACKED}&${W}`)).body;
+  check('the car’s own page agrees — absent, with the same reason',
+    k.alerts_per_100km === null
+      && typeof k.alerts_per_100km_absent === 'string'
+      && /telematics/i.test(k.alerts_per_100km_absent),
+    JSON.stringify([k.alerts_per_100km, k.alerts_per_100km_absent]));
+
+  /* And the fix must not silence a car the feed DID cover. PLATE has an FMS
+     journey and three alerts in the window, so it is measured and keeps its
+     number — a rule that made every rate absent would pass the checks above
+     and destroy the page. */
+  check('a car the feed did see keeps its measured rate',
+    typeof t?.alerts_per_100km === 'number' && t.alerts_per_100km > 0
+      && t.alerts_per_100km_absent == null,
+    JSON.stringify([t?.telematics_journeys, t?.alerts, t?.alerts_per_100km]));
 }
 
 server.close();

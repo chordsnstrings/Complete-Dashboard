@@ -417,22 +417,107 @@ const MONEY_SOURCES = [
 /* Rebuilt whole rather than merged. Every row is derived from a table this
    pass has just refreshed, so a partial write would leave the two disagreeing
    in a way no reader could see — and the table is small enough that whole is
-   also the simplest thing that is correct. */
-async function refreshMoneyEvents(db) {
-  await db.query('DELETE FROM money_event');
-  let n = 0;
-  for (const s of MONEY_SOURCES) {
+   also the simplest thing that is correct.
+
+   REBUILT WHOLE, BUT ALSO REBUILT ATOMICALLY — and it was not.
+   ─────────────────────────────────────────────────────────────────────────
+   The DELETE and the five INSERTs ran as six separate autocommitted
+   statements. Between the first and the last, money_event on disk was the
+   truth about nothing: first empty, then a sixth of itself, then half, then
+   most. Every reader in that gap got a complete-looking answer computed from
+   an incomplete table, and nothing in the response said so.
+
+   Measured on production, polling GET /api/money/sources?from=2026-08-01&
+   to=2026-08-31 about every two seconds across the quarter-hourly rollup that
+   fires at 10:00 UTC. From 10:00:50 to 10:01:46 the window answered 21 rows, AED
+   4,614,074.57, 30,764 figures. From 10:01:49 to 10:03:04 — seventy-five
+   consecutive seconds — it answered rows=0, amount=0, rows_seen=0. Then it
+   climbed back through the sources one INSERT at a time: 6 rows and AED
+   740,768.19 at 10:03:05 (16% of the money), 9 rows and AED 2,278,446.30 at
+   10:03:15 (49%), 14 rows and AED 4,257,358.45 at 10:03:25 (92%), whole again
+   at 10:03:39. That is 112 corrupt seconds of every 900 — 12.4% of the
+   wall-clock life of this table, every quarter of an hour, all day.
+
+   The blank phase is the part that does real damage, because
+   api/public/provenance.js reads an empty result as a measurement and prints
+   "No provider sent a figure for this window", subtitled "Not a quiet week
+   necessarily" — a confident, specific, false claim, made at the moment 21
+   channels had in fact sent AED 4,614,074.57 across 30,764 figures. The
+   partial phase is quieter and no better: a total that is 49% of the real one
+   and looks exactly like a total.
+
+   The fix is the shape refreshPayouts above already intends — one
+   transaction, so a concurrent reader's snapshot holds the previous complete
+   table until the whole new one commits, and never sees between. The DELETE
+   also stays a DELETE and not a TRUNCATE for the reason given there: TRUNCATE
+   takes ACCESS EXCLUSIVE and blocks readers instead of letting them read the
+   old rows.
+
+   ONE CLIENT, NOT THE POOL. `db` here is a pg Pool in production and a PGlite
+   instance in tests, and the two need different handling. pg's Pool.query()
+   checks out whichever connection is free per call, so BEGIN, DELETE and
+   COMMIT issued through the pool can land on three different backends: the
+   BEGIN opens a transaction nobody else is in, the DELETE autocommits on its
+   own connection, and the table is empty for real. So where the handle has
+   .connect() the whole sequence is pinned to one checked-out client and the
+   client is released on every path, error included — the same test
+   `withDbLock` above already uses to tell a Pool from PGlite. PGlite is a
+   single session with no pool, so BEGIN/COMMIT through its own query() is
+   already one transaction, and it is used directly.
+
+   A FAILING SOURCE STILL MUST NOT COST THE OTHERS THEIR ROWS, and putting the
+   five INSERTs in one transaction is exactly how that guarantee gets lost —
+   in Postgres the first error aborts the whole transaction, every later
+   statement fails with "current transaction is aborted", and the COMMIT
+   becomes a rollback. That would turn one provider's missing table into an
+   empty provenance record, which is the failure this function was written to
+   avoid and is worse than what it replaced. Each source therefore runs inside
+   its own SAVEPOINT: an INSERT that throws is rolled back to the savepoint,
+   the transaction stays alive, and the other four still commit — the per
+   source tolerance the warning below has always promised, now with the
+   all-or-nothing visibility the readers need on top of it. */
+/* Exported for the same reason refreshPayouts and refreshLifetime are: the
+   property that matters here — that no reader ever meets this table between
+   the DELETE and the last INSERT — is a property of THIS function's statement
+   sequence, and test/rollup_money_atomic.test.mjs asserts it by handing in a
+   recording handle. Nothing else calls it; refreshRollupsInner still does. */
+export async function refreshMoneyEvents(db = pool) {
+  const pooled = typeof db.connect === 'function';
+  const client = pooled ? await db.connect() : db;
+  try {
+    await client.query('BEGIN');
     try {
-      const r = await db.query(s.sql);
-      n += r.rowCount || 0;
+      await client.query('DELETE FROM money_event');
+      let n = 0;
+      for (const s of MONEY_SOURCES) {
+        await client.query('SAVEPOINT money_source');
+        try {
+          const r = await client.query(s.sql);
+          n += r.rowCount || 0;
+          await client.query('RELEASE SAVEPOINT money_source');
+        } catch (e) {
+          /* One provider's table missing or malformed must not cost the other
+             four their rows: this is a provenance record, and a partial one that
+             says which part is missing beats none. The rollback to the savepoint
+             is what keeps that true now that the five share a transaction —
+             without it this source's error would abort the other four as well. */
+          await client.query('ROLLBACK TO SAVEPOINT money_source');
+          await client.query('RELEASE SAVEPOINT money_source');
+          log.warn(SRC, `money_event ${s.name} failed`, { err: String(e).slice(0, 160) });
+        }
+      }
+      await client.query('COMMIT');
+      return n;
     } catch (e) {
-      /* One provider's table missing or malformed must not cost the other
-         four their rows: this is a provenance record, and a partial one that
-         says which part is missing beats none. */
-      log.warn(SRC, `money_event ${s.name} failed`, { err: String(e).slice(0, 160) });
+      await client.query('ROLLBACK').catch(() => {});
+      throw e;
     }
+  } finally {
+    /* Only a pooled client is ours to hand back; releasing the caller's PGlite
+       handle would be releasing the database itself. A leak here is permanent
+       — the pool caps at eight — so it is in a finally and not on the paths. */
+    if (pooled) client.release();
   }
-  return n;
 }
 
 async function refreshRollupsInner({ db = pool, days = null } = {}) {

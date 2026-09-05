@@ -96,12 +96,55 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
        first, and the job and demand halves are clamped to it. The response
        says which span it used, because a rate over 31 of the 365 days somebody
        asked for is only honest if it says so. */
+    /* The chips filter the numerator and not the denominator.
+       ─────────────────────────────────────────────────────────────────────
+       Both queries below read driver_timeline_event, and both bound it on the
+       window alone — `[p[0], p[1]]` — while the on-job and demand halves carry
+       the whole of `p`, which range(req) returns as [from, to, platform,
+       fleet]. So one fleet's job hours were being divided by BOTH fleets'
+       online hours, and one platform's job hours by a platform that has no
+       availability feed at all. Measured on production over 2026-08-06 →
+       2026-09-05, every variant fetched in one pass:
+
+         unfiltered      online_h 25,907   on job 6,102   76% idle
+         &fleet=ecosine  online_h 25,907   on job 4,634   82% idle
+         &fleet=egari    online_h 25,907   on job 1,468   94% idle
+         &platform=bolt  online_h 25,907   on job   138   99% idle
+         &platform=uber  online_h 25,907   on job 4,595   82% idle
+
+       Byte-identical denominators under six different chips, down to the
+       heatmap cells — dow 0 hour 0 read online_h 30.45 under all of them. The
+       numerator split correctly, 4,634 + 1,468 = 6,102; only the divisor was
+       unfiltered. Egari's own online hours are roughly 9,800, so its idle_h
+       was overstated about three times over and the page told the operator
+       that 24,439 Egari driver-hours went undispatched.
+
+       The platform chips were worse than wrong. driver_timeline_event holds
+       platform 'uber' and nothing else — src/sources/uber_timeline.js writes
+       SRC = 'uber' on every row — so #supply?platform=bolt was printing Uber's
+       25,907 hours as Bolt's and calling that channel 99% idle, with no
+       availability feed for Bolt existing anywhere. api/public/optimise.js
+       builds the Rota recommendation off the same totals, so #optimise
+       inherited the fabricated denominator too.
+
+       Both queries therefore take the full `p` and repeat the platform and
+       fleet predicates the W() helper in api/server.js applies to trip_norm.
+       The table carries both columns — platform text NOT NULL, fleet_id text
+       NOT NULL, sql/schema_v37.sql:26-27 — so this is a filter the feed can
+       actually answer, not a guess. Nothing downstream needs changing:
+       `covered: supply.length > 0` below already drives the note at
+       api/public/supply.js, so bolt and hotel now render "Driver availability
+       has not been collected for this window" instead of another platform's
+       hours dressed up as their own. An absent figure with the reason beside
+       it is the honest answer here, and a fabricated 99% was never one. */
     const [span] = await q(
       `SELECT min(at) AS from_at, max(at) AS to_at,
               count(DISTINCT (at AT TIME ZONE 'Asia/Dubai')::date)::int AS days
          FROM driver_timeline_event
         WHERE kind = 'status' AND status <> ''
-          AND at >= $1::timestamptz AND at <= $2::timestamptz`, [p[0], p[1]]);
+          AND at >= $1::timestamptz AND at <= $2::timestamptz
+          AND ($3::text IS NULL OR platform = $3)
+          AND ($4::text IS NULL OR fleet_id = $4)`, p);
     /* Where the feed has nothing, leave the window alone: every query then
        returns nothing and `covered` already says so. */
     /* ISO strings, not the driver's Date objects: the occurrence query below
@@ -122,7 +165,9 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
                 lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
            FROM driver_timeline_event
           WHERE kind = 'status' AND status <> ''
-            AND at >= $1::timestamptz AND at <= $2::timestamptz),
+            AND at >= $1::timestamptz AND at <= $2::timestamptz
+            AND ($3::text IS NULL OR platform = $3)
+            AND ($4::text IS NULL OR fleet_id = $4)),
        spans AS (
          SELECT driver_ext_id, at AS s, next_at AS e FROM ev
           WHERE next_at IS NOT NULL AND status = 'ONLINE'),
@@ -139,7 +184,7 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
               extract(hour FROM slot)::int AS h,
               round(sum(greatest(0, mins))::numeric / 60, 1) AS online_h,
               count(DISTINCT driver_ext_id)::int AS drivers
-         FROM slots GROUP BY 1, 2 ORDER BY 1, 2`, [p[0], p[1]]);
+         FROM slots GROUP BY 1, 2 ORDER BY 1, 2`, p);
 
     /* The same split for time ON a job, so idle is a subtraction over
        identical slots rather than two differently-shaped numbers. */

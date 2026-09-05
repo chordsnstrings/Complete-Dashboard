@@ -232,7 +232,41 @@ export function chooseBasis(r, windowDays) {
          shows and stops there. */
       : 'net payout, after the platform’s commission — this is the money that arrived, '
         + 'and no booking in this window carries a fare of its own';
-  } else if (r.priced_bookings && r.fare_coverage_pct >= 80) {
+  /* A real payout does not stop being the money because the fares caught up.
+     ────────────────────────────────────────────────────────────────────────
+     This branch carried no `payouts == null` guard, so a channel holding BOTH
+     a real payout and good fare coverage fell out of the payout branch above
+     the moment payout coverage dipped under 80% and was reported on its gross
+     fares instead — the one thing the doctrine at the head of this function
+     says must never happen on a commission channel.
+
+     Measured on production 2026-09-05. /api/revenue?days=240 reads uber
+     basis=payout, best AED 2,286,096.27, payout coverage 88.3%, and the fleet
+     accounts for AED 2,750,609.49. Drag the range to 300 days and the SAME
+     uber row — still carrying payouts AED 2,302,977.73 on the row itself —
+     reads basis=fares, best AED 8,220,967.15, payout coverage 70.7%, the
+     fleet accounts for AED 8,896,812.27, and accounted_payouts collapses to
+     AED 17,744.50, which is yango on its own. At 365 days it is AED
+     10,966,371.14 of fares against the same AED 2.29M payout and a statement
+     net of AED 2,298,946.49. An operator dragging one control from 240 to 300
+     days watches fleet income go up 3.2x with nothing marking that the figure
+     changed MEANING, from net payout to gross fare.
+
+     Uber's service fee is measured at exactly 25% of the fare on every priced
+     row, so the fares are gross of a quarter and cannot be income, while the
+     payout is what reconciles to the bank at +0.06%. The right answer for a
+     part-covered payout is the one partial_payout below already gives — the
+     smaller correct figure, with the fraction of the days it covers stated in
+     its own note and in undercovered_bookings / undercovered_payouts — so the
+     guard is the whole fix, and the row falls through to it.
+
+     It also settles the complaint that this branch is TESTED before
+     partial_payout: with the guard, a row holding a payout can only reach the
+     payout branch above or partial_payout below, whichever order they sit in.
+     And this branch's own sentence — "this channel reports no payout covering
+     the window" — was flatly false of every row that arrived here holding one.
+     The guard is what makes it true; the wording did not need softening. */
+  } else if (r.payouts == null && r.priced_bookings && r.fare_coverage_pct >= 80) {
     r.basis = 'fares';
     r.best = r.fares;
     /* "nothing takes a commission out of this money" is a claim about the
@@ -259,7 +293,21 @@ export function chooseBasis(r, windowDays) {
     r.best = r.payouts;
     r.basis_note = `net payout covering only ${r.payout_coverage_days} of the `
       + `${r.payout_coverage_base} day(s) this channel worked `
-      + `(${r.payout_coverage_pct}%) — the rest of this channel’s money has not been collected yet`;
+      + `(${r.payout_coverage_pct}%) — the rest of this channel’s money has not been collected yet`
+      /* Reachable for the first time by a row that also prices its bookings.
+         Uber over 300 days is 94.4% fare-covered and 70.7% payout-covered, and
+         "the rest has not been collected" printed beside a fares column of AED
+         8,220,967.15 reads as though that AED 8.2M were the missing part of
+         this payout. It is not missing and it is not the remainder — it is the
+         other KIND of money, gross of a commission this channel measures at
+         25%, over the whole window rather than the uncovered end of it. The
+         sentence says so where there are fares to say it about, and stops
+         where there are none. */
+      + (r.priced_bookings
+        ? `; the fares on ${r.priced_bookings} of ${r.bookings} bookings are the gross the `
+          + `riders paid across the whole window — a larger and different figure, not the `
+          + `uncollected remainder of this payout`
+        : '');
   } else if (r.priced_bookings) {
     r.basis = 'partial_fares';
     r.best = r.fares;

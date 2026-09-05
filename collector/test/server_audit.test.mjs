@@ -553,6 +553,105 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
     dc.totals.total === 9, String(dc.totals.total));
 }
 
+/* ── two pages, one window, two different answers for the fleet's income ──
+   /api/kpis and /api/revenue apply the same rule from api/income_sql.js —
+   choose ONE figure per channel, and prefer the payout, because a payout is
+   what is left of the same fares after the platform's commission. The rule
+   only works if both routes hand chooseBasis the same row, and the /api/kpis
+   fold dropped booking_days, so coverage() fell back to dividing by the
+   CALENDAR length of the window. A channel that booked two days of a
+   thirty-one-day month and was paid for both then read as 6.5% covered
+   instead of 100%, fell under the 80% bar, and was counted on its GROSS fares.
+   Measured on production 2026-09-05: /api/kpis said accounted 168,213.30 over
+   1-30 September where /api/revenue, same window and same rows, said
+   125,188.63 — the Overview 'Money in' tile overstating the fleet's income by
+   34.4%, which is exactly Uber's commission.
+
+   Seeded in its own month so nothing above depends on it: a channel that
+   worked two days of July, priced every ride, and was paid for both days.
+   The assertion is that THE TWO ROUTES AGREE, not that either equals a
+   particular number — a fixture's arithmetic is incidental and the agreement
+   is the property this fold exists to keep. */
+{
+  const JUL = ['2026-07-06', '2026-07-07'];
+  for (const d of JUL) {
+    for (let i = 0; i < 10; i++) {
+      await trip({ platform: 'uber', plate: 'L200', drv: 'j1', name: 'July Driver',
+        at: `${d}T09:00:00+04:00`, km: 10, price: 100, pay: 'braintree', product: 'UberX' });
+    }
+    await q(`INSERT INTO driver_payout_day (platform, fleet_id, driver_ext_id, day,
+               period_start, period_end, earnings)
+             VALUES ('uber','ecosine','j1',$1::date,$1::date,$1::date,750)`, [d]);
+  }
+  const JW = 'from=2026-07-01&to=2026-07-31';
+  const k = await get(`/api/kpis?${JW}`);
+  const rev = await get(`/api/revenue?${JW}`);
+  check('the two money surfaces agree on what the fleet was paid in one window',
+    k.accounted === rev.totals.accounted,
+    `kpis ${k.accounted} vs revenue ${rev.totals.accounted}`);
+  /* The whole income shape, not the headline alone. The headline can agree by
+     luck — where a channel's payout is the same number whichever branch of
+     chooseBasis picks it up — while the coverage travelling beside it does
+     not, and the coverage is what a caption reads out loud. */
+  for (const f of ['accounted_fares', 'accounted_payouts', 'accounted_bookings',
+    'undercovered_bookings', 'undercovered_pct', 'dark_bookings']) {
+    check(`and on ${f}, which is measured over the same days`,
+      (k[f] ?? null) === (rev.totals[f] ?? null),
+      `kpis ${k[f]} vs revenue ${rev.totals[f]}`);
+  }
+  /* And the fact underneath the agreement, so a regression that makes both
+     wrong in the same direction still fails: this channel worked two days of
+     the month and was paid for both, so its payout covers everything it did.
+     Divided by the calendar it read as 6.5% covered and every one of its
+     bookings was reported as money we had not collected. */
+  check('a channel paid for every day it booked is not reported as undercovered',
+    k.undercovered_bookings === 0 && k.accounted_payouts != null && k.accounted_fares == null,
+    `undercovered ${k.undercovered_bookings}, payouts ${k.accounted_payouts}, `
+    + `fares ${k.accounted_fares}`);
+}
+
+/* ── #causes and #forecast disagreed about which months are partial ───────
+   Partiality is marked from the span of the RECORD, and the two routes were
+   measuring different records. /api/forecast asks the booking record;
+   /api/trend/monthly asked trip_norm unfiltered, which also holds the
+   telematics journeys — the tracker's view of the same cars, starting and
+   stopping on its own days. A month whose bookings began on the 19th read as
+   whole because telematics had been running since the 1st.
+
+   On production that month was December 2024, and the disagreement inverted
+   the conclusion of the page: counting it whole gave #causes 21 supply months,
+   thirds of 7, and "+25% bookings / +18% drivers / +22% per driver — both
+   sides moved together, so neither explains the other"; dropping it as partial
+   gives 20 months, thirds of 6, and -16% / +4% / -7% — output per driver
+   falling.
+
+   Seeded as that exact shape: telematics from the first of the month, the
+   first booking eighteen days later. */
+{
+  await trip({ platform: 'fms', plate: 'L300', at: '2026-05-01T08:00:00+04:00', km: 15 });
+  for (let i = 0; i < 4; i++) {
+    await trip({ platform: 'uber', plate: 'L300', drv: 'm1', name: 'May Driver',
+      at: '2026-05-19T08:00:00+04:00', km: 11, price: 60, pay: 'braintree', product: 'UberX' });
+  }
+  const tr = await get('/api/trend/monthly');
+  const fc = await get('/api/forecast');
+  const trPartial = new Map((tr.months || []).map((m) => [m.m, !!m.partial_month]));
+  // /api/forecast carries every month it saw as `observed`; `months_used` is
+  // the subset it fitted, which is precisely the ones it judged whole.
+  const fcPartial = new Map((fc.observed || []).map((m) => [m.m, !!m.partial_month]));
+  const shared = [...fcPartial.keys()].filter((m) => trPartial.has(m));
+  check('both routes have months to compare', shared.length > 0, String(shared.length));
+  const disagree = shared.filter((m) => trPartial.get(m) !== fcPartial.get(m));
+  check('the trend and the forecast agree on which months are partial',
+    disagree.length === 0,
+    disagree.map((m) => `${m}: trend=${trPartial.get(m)} forecast=${fcPartial.get(m)}`).join(', '));
+  /* The specific month the fixture was built around, so the assertion above
+     cannot pass by both routes calling everything whole. */
+  check('a month whose bookings start mid-month is partial on both',
+    trPartial.get('2026-05') === true && fcPartial.get('2026-05') === true,
+    `trend=${trPartial.get('2026-05')} forecast=${fcPartial.get('2026-05')}`);
+}
+
 server.close();
 
 console.log(`\n${pass} passed, ${fail} failed`);

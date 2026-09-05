@@ -13,6 +13,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import express from 'express';
+import { readFileSync } from 'node:fs';
 import { tripRoutes } from '../api/trip_routes.js';
 
 const db = new PGlite();
@@ -40,6 +41,16 @@ await q(
      requested_at,ended_at,distance_km,status,price,currency)
    VALUES ('hotel','h-9','ecosine','L100','d-1','Ali Khan',
      '2026-08-20T09:00:00+04','2026-08-20T09:30:00+04',12.0,'completed',88.50,'AED')`);
+/* A Yango booking the same day, for the SAME PERSON under a different
+   platform id — which is the shape the day statement used to leak through.
+   driver_statement_day's identity is the name, so a per-driver-day fold that
+   does not also name the platform answers a Yango trip with whatever book that
+   name appears in, and on this fleet that is Uber's. */
+await q(
+  `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+     requested_at,ended_at,distance_km,status,price,currency)
+   VALUES ('yango','y-3','ecosine','L100','y-1','Ali Khan',
+     '2026-08-20T13:00:00+04','2026-08-20T13:20:00+04',6.0,'complete',48.00,'AED')`);
 /* And an Egari booking, so the fleet is not assumed. */
 await q(
   `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,requested_at,status)
@@ -71,6 +82,14 @@ await q(`INSERT INTO driver_earnings_component (platform,fleet_id,driver_ext_id,
 const { refreshPayouts, refreshStatements } = await import('../src/rollup.js');
 await refreshPayouts(db);
 await refreshStatements(db);
+/* A statement the OTHER channel filed for the same person on the same day.
+   Written after the rebuild because refreshStatements owns the 'uber_rest'
+   slice and deletes it whole; every other source is left alone (see
+   src/rollup.js:748). Its figures are deliberately nothing like the Uber row's
+   above, so a test that reads the wrong one cannot pass by coincidence. */
+await q(`INSERT INTO driver_statement_day (platform, fleet_id, driver_name, day,
+           net, tips, salik, cash, source, pseudo)
+         VALUES ('yango','ecosine','Ali Khan','2026-08-20',66,0,0,4,'yango_park',false)`);
 
 const app = express();
 const wrap = (fn) => (req, res) => Promise.resolve(fn(req, res)).catch((e) => res.status(500).json({ error: String(e) }));
@@ -136,11 +155,49 @@ check('the day statement comes back beside the payout',
 check('cash is reported positive, from the surface that carries it',
   Number(r.statement_day.cash) === 140 && r.payout_day.cash_earnings === null,
   JSON.stringify({ s: r.statement_day?.cash, p: r.payout_day?.cash_earnings }));
+/* The route has always returned this and nothing read it, so the page printed
+   four money rows captioned "what the channel says" and named no surface.
+   Asserted as PRESENT and matching the writer in src/rollup.js, not as a
+   spelling: what matters is that the response says which surface filed the
+   figure. */
+check('the day statement names the surface that filed it',
+  typeof r.statement_day.source === 'string' && r.statement_day.source.length > 0,
+  JSON.stringify(r.statement_day?.source));
+
+/* ── the statement belongs to the trip's OWN channel ──────────────────────
+   Measured on production 2026-09-05: /api/trip?platform=yango&id=b42d9ecc…
+   answered statement_day {"net":"342.05",…,"source":"uber_rest"} on a Yango
+   day its own same_day table totals at AED 66.00 — a 5.2x overstatement of
+   Yango, printed as "what the channel says the day's trips earned". The same
+   leak reached Bolt and the hotel channel, neither of which publishes a
+   commission or a payout at all.
+
+   These pin the PLATFORM RELATIONSHIP and not the amounts: whatever the
+   fixture's figures happen to be, a trip's day statement must have been filed
+   on that trip's own channel, and a channel that filed nothing must come back
+   absent rather than carrying somebody else's book. */
+const y = (await get('/api/trip?platform=yango&id=y-3')).body;
+check('a Yango trip is answered with the Yango statement, not the Uber one',
+  y.statement_day != null && y.statement_day.source === 'yango_park',
+  JSON.stringify(y.statement_day));
+check('and none of the Uber row it used to be answered with reaches it',
+  y.statement_day.source !== 'uber_rest'
+  && Number(y.statement_day.net) !== Number(r.statement_day.net)
+  && Number(y.statement_day.cash) !== Number(r.statement_day.cash),
+  JSON.stringify({ yango: y.statement_day, uber: r.statement_day }));
+check('the Uber trip keeps the statement it always had',
+  r.statement_day.source === 'uber_rest' && Number(r.statement_day.net) === 285,
+  JSON.stringify(r.statement_day));
 
 const h = (await get('/api/trip?platform=hotel&id=h-9')).body;
 check('a channel that prices its trips reports the fare on the trip',
   Number(h.trip.price) === 88.5 && h.notes.fare_reported === true
   && h.notes.platform_prices_trips === true);
+/* Same driver, same day, and an Uber statement sitting right there — which is
+   exactly what this booking used to be answered with. A channel that files no
+   day statement gets absence, not another channel's figures. */
+check('a channel that files no day statement gets none of another channel’s',
+  h.statement_day === null, JSON.stringify(h.statement_day));
 
 const e = (await get('/api/trip?platform=uber&id=e-7')).body;
 check('a trip on the other fleet resolves too, and names its own fleet',
@@ -152,6 +209,32 @@ check('missing context is empty rather than fatal',
    earned nothing on look identical at 0, and only one of them is a gap. */
 check('a day no statement covers is null rather than zeroed',
   e.statement_day === null, JSON.stringify(e.statement_day));
+
+/* ── and the page says whose book it is showing ───────────────────────────
+   The route can only make the figure right; the page is where a reader is
+   told what it is. Two things had to change there and both are easy to lose
+   to a later edit, so they are pinned here the way
+   test/trip_raw_redaction.test.mjs pins its caption — on the page source,
+   because nothing in this repo mounts a DOM.
+
+   Pinned as PROPERTIES, not sentences: that the day rows' absent case names
+   the channel rather than saying "the statement" of nobody in particular, and
+   that `statement_day.source` — returned by this route since the day statement
+   was added and read by nothing — reaches the page. The wording of either may
+   be rewritten freely; a rewrite that drops the channel or the surface is the
+   regression. */
+const page = readFileSync('api/public/trip.js', 'utf8');
+const money = page.slice(page.indexOf('── the money'), page.indexOf('── the driver'));
+check('the page names the channel when no statement covers the day',
+  /no \$\{sourceLabel\(t\.platform\)\} statement covers this day/.test(money),
+  'the absent basis no longer names the channel');
+check('and it prints which surface filed the figures it does show',
+  /sd\.source/.test(money) && /el\('p', 'cap'/.test(money),
+  'statement_day.source is unread on the page again');
+/* The operator asked for the errors fixed, not a redesign: the source line
+   lives in the caption idiom the page already uses, inside the money panel. */
+check('in the existing caption style, not a new panel',
+  (money.match(/panel\(/g) || []).length === 1);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 server.close();

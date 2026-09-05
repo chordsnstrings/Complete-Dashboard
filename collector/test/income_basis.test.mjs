@@ -164,5 +164,111 @@ check('and no platform contributes to both halves',
   Math.round((t.accounted_fares + t.accounted_payouts) * 100) / 100 === t.accounted,
   `${t.accounted_fares} + ${t.accounted_payouts} vs ${t.accounted}`);
 
+console.log('\na channel that reports both, where the payout covers only part of the window');
+
+/* THE defect this section exists for. The 'fares' branch had no
+   `payouts == null` guard, so a channel holding a real payout was reported on
+   its GROSS fares the moment payout coverage slipped under 80% — and said in
+   words that it reports no payout at all.
+
+   Production 2026-09-05, the same uber row read at two window lengths.
+   /api/revenue?days=240: basis payout, best AED 2,286,096.27, payout coverage
+   88.3%, fleet accounted AED 2,750,609.49. /api/revenue?days=300: basis fares,
+   best AED 8,220,967.15, payout coverage 70.7%, fleet accounted AED
+   8,896,812.27, accounted_payouts down to yango's AED 17,744.50 alone — with
+   payouts AED 2,302,977.73 still sitting on the row. Dragging one control from
+   240 days to 300 raised fleet income 3.2x by changing what the figure MEANT.
+
+   The row below is that production row, field for field. */
+const uberPart = chooseBasis(row({ platform: 'uber', bookings: 165736,
+  chargeable_bookings: 147722, uncharged_bookings: 18014, priced_bookings: 139499,
+  fares: 8220967.15, payouts: 2302977.73, payout_days: 212, booking_days: 300 }), 300);
+check('fare coverage 94.4% and payout coverage 70.7%, as production reads them',
+  uberPart.fare_coverage_pct === 94.4 && uberPart.payout_coverage_pct === 70.7,
+  `${uberPart.fare_coverage_pct} / ${uberPart.payout_coverage_pct}`);
+check('a real payout is not thrown away for the gross fare when coverage dips',
+  uberPart.basis === 'partial_payout' && uberPart.best === 2302977.73,
+  `${uberPart.basis} ${uberPart.best}`);
+check('…so the window does not multiply the channel by 3.6x on its own',
+  uberPart.best !== 8220967.15, String(uberPart.best));
+/* The ordering half of the same defect: 'fares' is tested BEFORE
+   partial_payout, which is how a row holding AED 2.3M reached it. The guard is
+   what settles it — a row with a payout can now only reach the payout branch
+   or partial_payout, whichever order those sit in. Pinned as the property
+   rather than as a branch order, because the property is what matters. */
+check('no row that holds a payout can land on the fares basis at all',
+  [uber, yango, partial, uberPart].every((r) => !(r.payouts != null && r.basis === 'fares')),
+  [uber, yango, partial, uberPart].map((r) => `${r.platform}:${r.basis}`).join(' '));
+
+console.log('\nand the note is true of the row it is printed about');
+
+check('the part-covered row is not told it reports no payout',
+  !/no payout covering the window/.test(uberPart.basis_note), uberPart.basis_note);
+check('it states the days the payout actually covers, and they are the row’s',
+  /covering only 212 of the 300 day\(s\)/.test(uberPart.basis_note)
+  && /\(70\.7%\)/.test(uberPart.basis_note), uberPart.basis_note);
+/* "the rest of this channel's money has not been collected yet" beside a fares
+   column of AED 8,220,967.15 reads as though that AED 8.2M were the missing
+   part of this payout. It is the other kind of money — gross of a commission
+   measured at 25% — over the whole window, not the uncovered end of it. */
+check('…and names the fares beside it as the gross they are, not the remainder',
+  /139499 of 165736 bookings are the gross/.test(uberPart.basis_note)
+  && /not the uncollected remainder/.test(uberPart.basis_note), uberPart.basis_note);
+/* And where there are no fares to say it about, it says nothing about them —
+   production's 365-day uber row before the fare backfill reached it. */
+check('a part-covered row with no fares says nothing about fares',
+  !/gross/.test(partial.basis_note) && /covering only 209 of the 365/.test(partial.basis_note),
+  partial.basis_note);
+
+/* The other side of the guard: a channel that genuinely reports no payout is
+   still counted on its fares, and the sentence claiming so is now true of
+   every row that can reach it. */
+check('a channel with no payout row at all is still counted on its fares',
+  hotel.payouts == null && hotel.basis === 'fares' && hotel.best === 130218.92,
+  `${hotel.basis} ${hotel.best}`);
+check('…and only such a row is ever told the channel reports no payout',
+  [uber, hotel, yango, partial, thin, bolt, uberPart]
+    .every((r) => !/reports no payout covering the window/.test(r.basis_note || '')
+      || r.payouts == null),
+  [uber, hotel, yango, partial, thin, bolt, uberPart]
+    .filter((r) => /reports no payout/.test(r.basis_note || ''))
+    .map((r) => `${r.platform}:${r.payouts}`).join(' '));
+
+console.log('\nthe fleet total over the window that used to triple it');
+
+/* Production's four channels at days=300. The old rule made the fleet
+   AED 8,896,812.27 of which AED 8,879,067.77 was gross fare; the payout half
+   was yango's AED 17,744.50 on its own. */
+const at300 = fleetIncome([
+  row({ platform: 'uber', bookings: 165736, chargeable_bookings: 147722,
+    uncharged_bookings: 18014, priced_bookings: 139499, fares: 8220967.15,
+    payouts: 2302977.73, payout_days: 212, booking_days: 300 }),
+  row({ platform: 'bolt', bookings: 22000, chargeable_bookings: 11000,
+    uncharged_bookings: 11000, priced_bookings: 10989, fares: 519641.7,
+    booking_days: 300 }),
+  row({ platform: 'hotel', bookings: 1700, chargeable_bookings: 1650,
+    uncharged_bookings: 50, priced_bookings: 1635, fares: 138458.92, booking_days: 300 }),
+  row({ platform: 'yango', bookings: 200, chargeable_bookings: 200,
+    uncharged_bookings: 0, priced_bookings: 200, fares: 12000, payouts: 17744.5,
+    payout_days: 100, booking_days: 100 }),
+], 300);
+check('the fleet counts uber on its payout, not on AED 8.2M of gross fare',
+  at300.accounted === 2978822.85, String(at300.accounted));
+check('…which is not the AED 8,896,812.27 production printed',
+  at300.accounted !== 8896812.27, String(at300.accounted));
+check('the payout half is no longer yango alone',
+  at300.accounted_payouts === 2320722.23, String(at300.accounted_payouts));
+check('the fare half is the two channels that report no payout',
+  at300.accounted_fares === 658100.62, String(at300.accounted_fares));
+/* A part-covered payout is present money over a stated fraction of the days,
+   so uber's bookings belong in undercovered, never in dark. */
+check('uber’s bookings are reported as under-covered, not as dark',
+  at300.undercovered_bookings === 165736 && at300.undercovered_payouts === 2302977.73
+  && at300.undercovered_platforms.join() === 'uber',
+  `${at300.undercovered_bookings} / ${at300.undercovered_payouts}`);
+check('and the two halves still add to the whole',
+  Math.round((at300.accounted_fares + at300.accounted_payouts) * 100) / 100 === at300.accounted,
+  `${at300.accounted_fares} + ${at300.accounted_payouts} vs ${at300.accounted}`);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

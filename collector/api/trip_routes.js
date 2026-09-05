@@ -177,6 +177,37 @@ export function tripRoutes(app, { q, wrap }) {
          carried, and the same one src/rollup.js:781 records finding against
          2,375 driver-days of real statements. $3 is the name folded the way
          the stored name_key is folded, or null where the trip names nobody. */
+      /* …AND ON THE CHANNEL, which is what the name match cost us.
+         ───────────────────────────────────────────────────────────────────
+         driver_statement_day is keyed (platform, fleet_id, name_key, day,
+         source) — the platform is part of its identity — and this predicate
+         named every column of that key except the platform. Folding the day
+         by name alone therefore answered a trip on ANY channel with whatever
+         book the person's name appeared in, and on this fleet that is Uber's:
+         `source = 'uber_rest'` is the only non-ledger writer src/rollup.js:829
+         has.
+
+         Measured on production 2026-09-05:
+         /api/trip?platform=yango&id=b42d9eccb3193b9899cdd147a6594d5e —
+         Aliyan Khalil, 2026-09-01 — answered statement_day
+         {"net":"342.05","tips":"1.14","salik":"2.09","cash":"4.88",
+          "source":"uber_rest"}, and the page printed AED 342.05 under "Net
+         fare that day" captioned "what the channel says the day's trips
+         earned, after its commission". That same response's `same_day` lists
+         the driver's whole Yango day as three bookings of AED 48.00, 12.00
+         and 6.00 — AED 66.00, so the figure presented as Yango's overstated
+         Yango by 5.2x. The same leak reached Bolt (AED 156.59 of net, AED
+         5.98 of driver-held cash) and the hotel channel, neither of which
+         publishes a commission or a payout at all. Anyone reconciling a
+         non-Uber channel per driver-day was reading Uber's book.
+
+         So the platform joins the predicate as $4. Where the channel files no
+         statement the aggregate now returns a row of nulls, statement_day
+         below turns that into null, and the page says which channel filed
+         nothing rather than borrowing another one's — the difference between
+         "Yango does not report this" and a number. Uber trips are untouched:
+         they were already matching the only rows this predicate could
+         legitimately reach. */
       (t.driver_ext_id || t.driver_name) && day ? q(
         `SELECT round(sum(net)::numeric,2)   AS net,
                 round(sum(tips)::numeric,2)  AS tips,
@@ -185,9 +216,10 @@ export function tripRoutes(app, { q, wrap }) {
                 min(source) AS source
          FROM driver_statement_day
          WHERE source <> 'ledger' AND NOT pseudo AND day = $2::date
+           AND platform = $4
            AND (($1::text IS NOT NULL AND driver_ext_id = $1)
                 OR ($3::text IS NOT NULL AND btrim(name_key) = $3))`,
-        [t.driver_ext_id || null, day, stmtName(t.driver_name)]) : [],
+        [t.driver_ext_id || null, day, stmtName(t.driver_name), t.platform]) : [],
     ]);
 
     res.json({
@@ -256,7 +288,13 @@ export function tripRoutes(app, { q, wrap }) {
       payout_day: payout[0] || null,
       /* Null when no component covers the day, rather than a row of zeroes —
          "the statement does not reach this day" and "the driver earned
-         nothing" are different facts and the page says which. */
+         nothing" are different facts and the page says which. Now that the
+         predicate above is per channel, null also carries a third fact — the
+         channel files no day statement at all, which is true of Yango, Bolt
+         and the hotel channel — and the page distinguishes that one too. The
+         `source` this row carries is the surface that filed the figure, and
+         the page prints it, because "what the channel says" is only checkable
+         if the reader can see which of its surfaces said it. */
       statement_day: statement[0]?.net == null ? null : statement[0],
       same_day: sameDay,
       /* Named rather than inferred from an empty array: "no tracker reported

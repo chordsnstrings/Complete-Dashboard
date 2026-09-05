@@ -359,6 +359,79 @@ check('date-only `to` includes the whole day', narrow.days_worked === 1, String(
     u.hours_on_job_days === 2, String(u.hours_on_job_days));
 }
 
+/* ── payout coverage is measured against the days worked, not the calendar ──
+   /api/driver/kpis built its per-channel rows from a SELECT that never asked
+   for booking_days — the identical omission /api/vehicle/kpis carried, and
+   coverage() in api/income_sql.js reads booking_days > 0 ? booking_days :
+   windowDays, so a missing column silently divides the payout's day count by
+   the length of the CALENDAR window. A person who worked seven days of a
+   fortnight and holds a statement covering all seven read 50% instead of
+   100%, dropped out of the payout branch, and had their income reported as
+   the platform's GROSS fares — money that is gross of a commission measured
+   at exactly 25% on every priced Uber row and that nobody ever received.
+   Swept across the vehicle ledger the same defect put AED 64,548.64 of excess
+   on 45 of 98 plates for 2026-08; the driver ledger divides the same payouts
+   the same wrong way.
+
+   Its own database and its own person, because the fixture above is wired
+   into a dozen assertions about identity folding and percentile peers and an
+   extra driver would move all of them. Zayn works the first seven days of a
+   fourteen-day window and is paid for exactly those seven, so the two
+   denominators are 7 and 14 and the verdict differs between them. His trips
+   carry a fare as well, which is what makes the wrong denominator expensive
+   rather than merely mislabelled: AED 1,400 of gross fares stand beside the
+   AED 3,500 that actually arrived. */
+console.log('\npayout coverage is measured over the days the channel worked');
+{
+  const mix = new PGlite();
+  await applySchema(mix);
+  const mq = (t, pr = []) => mix.query(t, pr).then((r) => r.rows);
+  for (let d = 1; d <= 7; d++) {
+    for (const h of [9, 15]) {
+      await mq(
+        `INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+           requested_at,ended_at,distance_km,status,price)
+         VALUES ('uber',$1,'ecosine','M200','p-zayn','Zayn Malik',$2,$3,12,'completed',100)`,
+        [`z${d}-${h}`,
+          `2026-08-0${d}T${h}:00:00+04:00`, `2026-08-0${d}T${h}:40:00+04:00`]);
+    }
+  }
+  await mq(`INSERT INTO driver_performance (platform,fleet_id,driver_ext_id,driver_name,plate,
+              period_start,period_end,trips,distance_km,earnings,cash_earnings)
+            VALUES ('uber','ecosine','p-zayn','Zayn Malik','M200',
+                    '2026-08-01','2026-08-07',14,168,3500,0)`);
+  await refreshPayouts(mix);
+
+  const mixApp = express();
+  driverRoutes(mixApp, { q: mq, wrap, endOfDay });
+  const mixServer = mixApp.listen(0);
+  const mixPort = mixServer.address().port;
+  const z = await (await fetch(`http://127.0.0.1:${mixPort}`
+    + '/api/driver/kpis?id=p-zayn&from=2026-08-01&to=2026-08-14')).json();
+
+  /* The fixture has to be the shape the defect needs or the checks under it
+     pass for the wrong reason: seven worked days inside a fourteen-day window,
+     a statement over those same seven, and fares on every booking. */
+  check('the fixture really does work half the window and get paid for all of it',
+    z.days_worked === 7 && z.trips === 14 && Number(z.priced_trips) === 14,
+    JSON.stringify([z.days_worked, z.trips, z.priced_trips]));
+  /* The payout is the money. A fare on a commission channel is the gross the
+     rider paid; this person's channel was paid for every day they worked, so
+     there is no coverage shortfall to report and nothing to fall back to. */
+  check('a payout covering every day worked is the basis, so the income is the net payout',
+    Number(z.accounted) === Number(z.accounted_payouts) && z.accounted_fares == null,
+    JSON.stringify([z.accounted, z.accounted_fares, z.accounted_payouts]));
+  /* And the same verdict from the other side: none of it may be filed as
+     money that has not been collected. Against the 14-day calendar this read
+     50% and all fourteen bookings were reported as uncollected. */
+  check('and none of it is reported as money still to be collected',
+    z.undercovered_bookings === 0 && z.undercovered_payouts == null,
+    JSON.stringify([z.undercovered_bookings, z.undercovered_payouts,
+      z.undercovered_platforms]));
+
+  mixServer.close(); await mix.close();
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -22,6 +22,29 @@ const OUTCOME_TONE = { completed: 'ok', not_completed: 'warn' };
 const coord = (a, b) => (a == null || b == null ? null
   : `${Number(a).toFixed(5)}, ${Number(b).toFixed(5)}`);
 
+/* WHICH SURFACE FILED THE DAY'S FIGURES.
+   ─────────────────────────────────────────────────────────────────────────
+   /api/trip has returned `statement_day.source` since the day statement was
+   added and this page has never read it — the only `.source` it touched was
+   the telemetry Feed column below. So four money rows captioned "what the
+   channel says" named no surface at all, and a caption that cannot be traced
+   to a feed is not checkable: it was exactly that untraceability that let
+   Uber's book print itself on Yango and Bolt pages for as long as it did.
+   src/rollup.js:829 writes 'uber_rest' as the only non-ledger source today,
+   and api/reconcile_routes.js:23 calls that surface Uber's earner-payments
+   components, so the two agree on the words.
+
+   A source this map does not know is printed as its own key rather than
+   dropped or smoothed over. A database key at a reader is a small ugliness;
+   a figure whose provenance the page quietly declined to state is the thing
+   this whole panel exists to prevent. */
+const STMT_SURFACE = {
+  uber_rest: 'Uber’s earner-payments components',
+  ledger: 'the operator’s imported ledger',
+};
+const stmtSurface = (s) => STMT_SURFACE[String(s || '').toLowerCase()]
+  || (s ? `the ${s} feed` : 'a surface the record does not name');
+
 export async function renderTrip(root, platform, id) {
   root.innerHTML = '';
   if (!platform || !id) {
@@ -110,6 +133,11 @@ export async function renderTrip(root, platform, id) {
      payout figure is left alone: it is what reached the bank, and that is a
      different question from what the day was made of. */
   const cash = sd?.cash != null ? Number(sd.cash) : null;
+  /* One sentence, written once and used in all four "that day" rows — the
+     same grouping argument tableFrom's own absent-note makes: four columns
+     sharing one answer, printed four times in four different wordings, read
+     as four separate faults. */
+  const noStmt = `no ${sourceLabel(t.platform)} statement covers this day`;
   mp.body.append(tableFrom([
     { what: 'Fare on this booking', v: t.price != null ? money(t.price, t.currency || 'AED', 2) : null,
       basis: t.price != null
@@ -154,20 +182,38 @@ export async function renderTrip(root, platform, id) {
     /* The day, as the channel itself breaks it down. Each row is null rather
        than zero where the statement does not reach the day, because a driver
        who was not paid and a day nobody reported on look identical at 0. */
+    /* AND "THE CHANNEL" IS NAMED, because for months it was the wrong one.
+       ───────────────────────────────────────────────────────────────────────
+       api/trip_routes.js folded the day statement by driver and date and not
+       by platform, so a Yango, Bolt or hotel trip was answered with the same
+       person's UBER statement and these four rows printed it under "what the
+       channel says". Measured on production 2026-09-05: the Yango page for
+       Aliyan Khalil on 2026-09-01 showed AED 342.05 of net against a Yango day
+       its own booking table lists as AED 48.00 + 12.00 + 6.00 = AED 66.00.
+       The route now filters on the trip's platform, so `sd` is this channel's
+       statement or it is nothing — and the captions here say WHOSE, because a
+       caption that says "the channel" is unfalsifiable in exactly the way that
+       let the wrong book sit there unnoticed.
+
+       The absent sentence is written to be true of both ways a channel can
+       have nothing to say: one that files no day statement at all, which is
+       every channel but Uber on this fleet, and Uber on a date its
+       earner-payments surface no longer answers for. Either way the cell is a
+       dash with a reason beside it and never a zero. */
     { what: 'Net fare that day', v: sd?.net != null ? money(sd.net, 'AED', 2) : null,
-      basis: sd ? 'what the channel says the day’s trips earned, after its commission'
-        : 'no statement covers this day' },
+      basis: sd ? `what ${sourceLabel(t.platform)} says the day’s trips earned, after its commission`
+        : noStmt },
     { what: 'Tips that day', v: sd?.tips != null ? money(sd.tips, 'AED', 2) : null,
       basis: sd ? (Number(sd.tips) ? 'riders’ tips, on top of the fares'
-        : 'no rider tipped this driver that day') : 'no statement covers this day' },
+        : 'no rider tipped this driver that day') : noStmt },
     { what: 'Salik reimbursed that day', v: sd?.salik != null ? money(sd.salik, 'AED', 2) : null,
       basis: sd ? (Number(sd.salik) ? 'tolls the channel paid back'
-        : 'no toll was reimbursed that day') : 'no statement covers this day' },
+        : 'no toll was reimbursed that day') : noStmt },
     /* The basis has to describe what is in the cell, not what would be there.
        Written unconditionally it said "part of the figure above" beside an
        em dash, which describes a number that is not on the page. */
     { what: 'Cash the driver held that day', v: cash != null ? money(cash, 'AED', 2) : null,
-      basis: !sd ? 'no statement covers this day'
+      basis: !sd ? noStmt
         : (cash === null ? 'the statement for this day reports no cash collected'
           : cash === 0 ? 'every fare that day was paid in the app'
             : 'already in their hand, so the channel keeps it back from the payout') },
@@ -177,6 +223,21 @@ export async function renderTrip(root, platform, id) {
       ? '<span class="ent-off">—</span>' : r.v) },
     { label: 'What it measures', key: 'basis' },
   ], { compact: true }));
+  /* …and where those four rows came from, in the caption style this page
+     already uses for provenance. The route returns `statement_day.source` and
+     nothing rendered it, so the reader could see a figure attributed to "the
+     channel" and had no way to ask which of that channel's surfaces filed it —
+     the gap that hid Uber's book on three other channels' pages. Stated
+     either way round: which surface filed it, or that this channel filed
+     nothing and the figures are therefore absent rather than borrowed. */
+  const dayName = t.local_day ? dayStr(t.local_day) : 'this trip’s day';
+  mp.body.append(el('p', 'cap', sd
+    ? `The four “that day” figures are ${esc(sourceLabel(t.platform))}’s own statement for `
+      + `${esc(dayName)}, filed by ${esc(stmtSurface(sd.source))} — a figure for the whole `
+      + 'day, not for this booking.'
+    : `${esc(sourceLabel(t.platform))} filed no statement covering ${esc(dayName)}, so the four `
+      + '“that day” figures are absent rather than taken from another channel’s book. This driver may '
+      + 'well have a statement elsewhere for this date; it would not be a measurement of this channel.'));
   /* The identity, checked on the page rather than asserted in a caption.
      ───────────────────────────────────────────────────────────────────────
      #reconcile proves `bank ≈ net + tips + salik − cash` month by month, to

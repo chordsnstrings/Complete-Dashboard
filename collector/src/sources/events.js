@@ -269,6 +269,16 @@ export async function detectBreaks() {
      the first trips of the new month arrive. */
   const openMonth = dubaiMonth();
 
+  /* Every (metric, grain, platform, period_from, period_to) this run decided is
+     still a break, and the platforms it was in a position to decide anything
+     about at all. The third DELETE below removes the rows that are missing from
+     `confirmed` — see the comment on it for why the run has to keep this list
+     rather than trust the table. `covered` is read off byPlatform, which is
+     built from the trip table a few lines above, so it names exactly the
+     platforms whose monthly series this run actually recomputed. */
+  const confirmed = [];
+  const covered = Object.keys(byPlatform);
+
   let n = 0;
   for (const [platform, series] of Object.entries(byPlatform)) {
     for (const [m, b] of series) {
@@ -304,12 +314,23 @@ export async function detectBreaks() {
          WHERE starts_on <= $2 AND coalesce(ends_on, starts_on) >= $1
          ORDER BY confidence DESC NULLS LAST LIMIT 8`, [fromDate, lastDayOf(b.m)]);
 
+      /* detected_at is passed rather than left to the column default because
+         upsert() builds its DO UPDATE SET from the keys of this object, so a
+         column that is not named here is inserted once and never touched
+         again — a row re-confirmed by every run since would still carry the
+         date it first appeared. Nothing on #causes prints it; it is read when
+         someone asks of a stored row "was this still true at the last run, or
+         is it left over", which is the whole question the DELETE below exists
+         to answer, and the answer is worth more from a timestamp than from
+         inference. */
       await upsert('metric_break', {
         metric: 'trips', grain: 'month', platform, fleet_id: null,
         period_from: fromDate, period_to: toDate,
         value_from: a.trips, value_to: b.trips,
         ...verdict, candidate_events: JSON.stringify(events),
+        detected_at: new Date(),
       }, ['metric', 'grain', 'platform', 'period_from', 'period_to']);
+      confirmed.push(`trips|month|${platform}|${fromDate}|${toDate}`);
       n++;
     }
   }
@@ -337,6 +358,69 @@ export async function detectBreaks() {
   if (stale.rowCount) {
     log.info(SRC, 'cleared breaks measured against an unfinished month',
       { removed: stale.rowCount, month: openMonth });
+  }
+
+  /* And — the general case the two DELETEs above are each one instance of — the
+     ones this run no longer recognises at all.
+     ─────────────────────────────────────────────────────────────────────────
+     metric_break is written by upsert and read by /api/breaks, and until this
+     statement existed nothing ever removed a pair that had stopped qualifying.
+     A row is only rewritten while breakBetween still returns a verdict for it,
+     so the moment a backfill fills in the months behind it, or a re-pull
+     restates a month, or the pair simply falls back under the 30% threshold,
+     the old numbers stop being recomputed and are served for ever.
+
+     MEASURED, production /api/breaks against /api/trend/monthly on 2026-09-05.
+     Thirty-four stored rows, of which nine disagree with the live series, four
+     of those with the sign inverted:
+
+       fms  2025-11 -> 12  stored    714 ->  4,537  +535.4%   live 16,074 -> 11,865  -26.2%
+       fms  2025-12 -> 01  stored  4,537 ->    119   -97.4%   live 11,865 -> 13,674  +15.2%
+       fms  2026-01 -> 02  stored    119 ->  5,671 +4,665.5%  live 13,674 -> 11,724  -14.3%
+       fms  2026-04 -> 05  stored  6,296 ->  3,576   -43.2%   live  6,485 ->  7,781  +20.0%
+       fms  2026-05 -> 06  stored  3,576 ->  7,444  +108.2%   live  7,781 ->  7,445   -4.3%
+       uber 2026-05 -> 06  stored  6,647 -> 10,040   +51.0%   live  9,707 -> 10,047   +3.5%
+
+     Five of the twelve cards #causes renders are wrong on those numbers, and
+     the page contradicts itself in one screen: its own KPI tile reads
+     "LARGEST MOVE +1,029%" directly above a card list whose largest card is
+     "+115,800%" — fms 2024-09 -> 10, 6 trips to 6,954, a boundary row from
+     before the FMS history was backfilled. The tile is computed from the live
+     series and the cards are read from this table, so the two only agree when
+     this table is a function of the series, which is what deleting the
+     unconfirmed rows makes it.
+
+     WHAT THIS IS SCOPED TO, and why the scope is not optional. A DELETE that
+     said only `grain = 'month'` would turn a stale-row bug into a data-loss
+     bug, because "not confirmed by this run" and "not true" are only the same
+     statement over the space the run actually examined. This run examines
+     metric 'trips' at grain 'month' with fleet_id NULL — those three are
+     literals in the upsert above — for the platforms in `covered`, and no
+     others. So the statement is fenced on all four. A fleet-scoped row, a
+     'week' row, a 'revenue' row, or a row for a platform with no trips in the
+     table was never a candidate for the upsert and is not this run's to judge;
+     it survives. In particular, if the trip table is empty or unreadable,
+     `covered` is empty, `platform IN (…)` matches nothing, and a run that
+     measured nothing deletes nothing — which is the failure mode that matters,
+     since a wrong break row is a correctable embarrassment and a wiped table
+     is not.
+
+     The key list is passed as JSON rather than as a text array so that the
+     same statement runs unchanged on the driver in production and on PGlite in
+     test/break_month_grain.test.mjs. NOT IN over an empty set is true, so a
+     platform that was examined and yielded no qualifying pair correctly loses
+     all of its rows. */
+  const unconfirmed = await pool.query(
+    `DELETE FROM metric_break
+     WHERE grain = 'month' AND metric = 'trips' AND fleet_id IS NULL
+       AND platform IN (SELECT jsonb_array_elements_text($1::jsonb))
+       AND metric || '|' || grain || '|' || platform || '|'
+           || period_from::text || '|' || period_to::text
+           NOT IN (SELECT jsonb_array_elements_text($2::jsonb))`,
+    [JSON.stringify(covered), JSON.stringify(confirmed)]);
+  if (unconfirmed.rowCount) {
+    log.info(SRC, 'cleared breaks the current series no longer supports',
+      { removed: unconfirmed.rowCount, kept: confirmed.length, platforms: covered.length });
   }
 
   return n;

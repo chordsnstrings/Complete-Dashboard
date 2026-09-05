@@ -261,6 +261,98 @@ const COLS = (keyCol) => [
       : `<span class="dim">— ${esc(noMatchReason(r))}</span>`) },
 ];
 
+/* The page's headline, as a pure function of the endpoint's answer.
+   ─────────────────────────────────────────────────────────────────────────
+   The verdict band used to re-derive its own gap from the rows: every row
+   carrying both an expected_covered and a bank_covered was summed, and the
+   difference became the first and largest number on the page. That predicate
+   is not the endpoint's. api/reconcile_routes.js:594 reconciles a row only
+   when `r.delta != null && !r.statement_partial && !r.period_cut` — a row can
+   carry both halves and still be marked not comparable, because Uber will no
+   longer serve part of that month's statement (statement_partial) or because
+   the compared span cuts an open report period so one side is a weekly
+   average and the other a measurement (period_cut). The page greys exactly
+   those rows in the table, and the banner above them added them back.
+
+   Measured on production 2026-09-05, /api/reconcile over every month on
+   record: totals.delta 117,563.54 over totals.reconciled_rows 6, against a
+   locally re-derived 400,593.74 over 8 rows. So the banner read AED 400,594
+   and "8 months of 24 can be reconciled at all" roughly 150 pixels above a
+   Gap tile reading +AED 117,564 over "6 months" — the same screen, the same
+   quantity, 3.4x apart, with the banner overstating platform variance by
+   re-adding the two months the page itself greys out. An operator would have
+   been chasing Uber for AED 283k of apparent overpayment that is entirely
+   this product's own collection horizon.
+
+   This is the second time this band has drifted from the tile beneath it. The
+   first was the same mistake one step earlier — it subtracted whole-month
+   bank_payout from statement-limited expected_payout and read AED 664,898
+   against a Gap tile showing AED 625,589, the 39,309 being money wired on days
+   the statement never reached, AED 21,520 of it from 6-8 February alone. That
+   round moved the band onto the covered halves and stopped there, which fixed
+   the arithmetic and left the row SET wrong. Deriving anything here is the
+   defect; the endpoint is the only place that knows which rows it reconciled.
+
+   The fix is to stop deriving: the gap is t.delta, the count is
+   t.reconciled_rows, and the two halves are t.bank_covered and
+   t.expected_covered — which is what the Gap tile a few lines below already
+   reads, so the two can no longer drift. And the rows the endpoint excluded
+   are named in the sub-line rather than silently dropped, because a headline
+   that quietly leaves two months out is the same failure pointing the other
+   way — the reader has to be told which months are missing from it and why.
+
+   Exported because the branch is the thing worth testing: nothing in a
+   rendered band distinguishes "the page computed this" from "the page
+   computed the wrong set and printed a plausible number". */
+export function headlineVerdict(d, month = null) {
+  const t = (d && d.totals) || {};
+  const rows = (d && d.rows) || [];
+  const periods = rows.length;
+  const unit = month ? 'day' : 'month';
+  const withExpected = rows.filter((r) => r.expected_payout != null).length;
+  const withBank = rows.filter((r) => r.bank_payout != null).length;
+
+  /* The endpoint's own figures, verbatim. `comparable` is how many periods it
+     reconciled and `gap` is the delta it measured over exactly those; when it
+     reconciled nothing, delta is null and there is no gap to print. */
+  const comparable = Number(t.reconciled_rows) || 0;
+  const gap = comparable && t.delta != null ? Number(t.delta) : null;
+  const excluded = Number(t.not_comparable_rows) || 0;
+  const reasons = Array.isArray(t.not_comparable_reasons) ? t.not_comparable_reasons : [];
+
+  /* Named, not counted away. The endpoint hands back one reason per distinct
+     cause; joined into the sentence they read as the two sentences an
+     operator needs — "we cannot fetch it" and "it is not finished yet" — and
+     neither of them is a discrepancy anybody can act on. */
+  const why = reasons.length
+    ? ` ${plural(excluded, 'It is', 'They are')} left out of the figure above because `
+      + `${reasons.join(', and ')} — `
+      + `${reasons.length === 1 ? 'which is not' : 'none of which is'} a discrepancy to chase.`
+    : '';
+  const held = excluded
+    ? ` A further ${countOf(excluded, unit)} ${plural(excluded, 'carries', 'carry')} both sides `
+      + `and still cannot be compared.${why}`
+    : '';
+
+  return {
+    claim: comparable
+      ? `${countOf(comparable, unit)} of ${fmt(periods)} can be reconciled at all`
+      : 'Nothing in this range can be reconciled',
+    figure: gap != null ? money(gap) : `0 of ${fmt(periods)}`,
+    unit: gap != null ? (gap >= 0 ? 'more wired than owed' : 'less wired than owed') : 'comparable',
+    tone: gap != null ? (Math.abs(gap) > 1000 ? 'warn' : null) : 'warn',
+    meta: `${fmt(periods)} ${plural(periods, unit)} on record`,
+    sub: `${fmt(withExpected)} ${plural(withExpected, unit)} carry an expected payout and `
+      + `${fmt(withBank)} carry a bank payout — the two are collected from different surfaces `
+      + `and only where both exist is there anything to compare.${held}`,
+    /* The two numbers the band is made of, so a test can assert the band
+       against the endpoint rather than against the sentence it renders. */
+    gap,
+    comparable,
+    excluded,
+  };
+}
+
 export async function renderReconcile(root, month) {
   root.innerHTML = '';
   if (month != null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
@@ -328,41 +420,12 @@ export async function renderReconcile(root, month) {
      periods can be compared at all. Expected payout needs a collected payout
      breakdown and exists for one month of thirteen; bank payout needs only a
      statement and exists for seven. A page that leads with a variance computed
-     over the overlap invites it to be read as the whole year's. */
-  {
-    /* Over the COVERED pairs, not the raw month columns.
-       ─────────────────────────────────────────────────────────────────────
-       bank_payout is a whole month; expected_payout only reaches the days the
-       statement covers. Subtracting one from the other is the exact failure
-       api/reconcile_routes.js:118 exists to prevent — "a whole-month statement
-       against a whole-month bank payout … reported the platform overpaying by
-       1,449%" — and the table row was fixed while this tile, the first and
-       largest number on the page, was not.
+     over the overlap invites it to be read as the whole year's.
 
-       Measured on production: this tile read AED 664,898 against the Gap tile
-       a few hundred pixels away reading AED 625,589. The 39,309 difference is
-       exactly sum(bank_payout − bank_covered) — money wired on days with no
-       statement at all, counted here as "more wired than owed". February alone
-       contributed AED 21,520 from 6–8 February, three days the statement never
-       reached.
-
-       The endpoint already computes the honest figure over the driver-days
-       both sides describe, and the Gap tile already uses it. */
-    const both = d.rows.filter((r) => r.expected_covered != null && r.bank_covered != null);
-    const gap = both.reduce((a, r) => a + ((+r.bank_covered || 0) - (+r.expected_covered || 0)), 0);
-    verdict(host, {
-      claim: both.length
-        ? `${countOf(both.length, unit)} of ${fmt(periods)} can be reconciled at all`
-        : `Nothing in this range can be reconciled`,
-      figure: both.length ? money(gap) : `0 of ${fmt(periods)}`,
-      unit: both.length ? (gap >= 0 ? 'more wired than owed' : 'less wired than owed') : 'comparable',
-      tone: both.length ? (Math.abs(gap) > 1000 ? 'warn' : null) : 'warn',
-      meta: `${fmt(periods)} ${plural(periods, unit)} on record`,
-      sub: `${fmt(withExpected)} ${plural(withExpected, unit)} carry an expected payout and `
-        + `${fmt(withBank)} carry a bank payout — the two are collected from different surfaces `
-        + 'and only where both exist is there anything to compare.',
-    });
-  }
+     Every number in the band comes from headlineVerdict above, which reads the
+     endpoint's own totals rather than re-deriving them from the rows — see the
+     block comment there for the 3.4x overstatement that cost. */
+  verdict(host, headlineVerdict(d, month));
 
   host.append(kpiRow([
     { label: 'Trips', value: t.trips != null ? fmt(t.trips) : '—',

@@ -577,7 +577,33 @@ app.get('/api/kpis', wrap(async (req, res) => {
        explicitly rather than left to coverage()'s fallback, which divides by
        every offer and made Bolt read 63.8% covered on a month where it priced
        312 of its 313 completed rides. */
-    chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings });
+    chargeable_bookings: f.chargeable_bookings, uncharged_bookings: f.uncharged_bookings,
+    /* The days this channel actually booked, which is the denominator PAYOUT
+       coverage is taken over — coverage() in api/income_sql.js falls back to
+       the calendar length of the window when the row does not carry it, and
+       this fold was the one caller that did not.
+       ─────────────────────────────────────────────────────────────────────
+       What that cost, measured on production on 2026-09-05. GET
+       /api/kpis?from=2026-09-01&to=2026-09-30 returned accounted 168,213.30,
+       all of it accounted_fares, accounted_payouts null and Uber on a fares
+       basis; GET /api/revenue over the identical window — same rows, same
+       income_sql — returned accounted 125,188.63 with Uber on basis=payout,
+       best=109,113.52, booking_days=5. Uber had booked five days of a
+       thirty-day September and been paid for all five, so its payout coverage
+       is 100%; dividing by the calendar instead made it 5/30 = 16.7%, under
+       chooseBasis's 80% bar, and the channel fell through to its GROSS fares.
+       The Overview 'Money in' tile therefore read AED 168,213 for a fleet
+       whose income over those days was AED 125,189 — a 34.4% overstatement,
+       and precisely the commission Uber takes before the fleet is paid.
+       Latent on the default view, which clamps to today and so has no calendar
+       tail to divide by; live the moment a reader picks a date range, because
+       api/public/data.js sends explicit from/to.
+       One field, because the SQL already selects it (api/income_sql.js) and
+       the summary below already reads booking_days off these same rows — it
+       was only ever missing from the object handed to fleetIncome. Spelled the
+       same way /api/revenue and the fold further down this file spell it, so
+       the two routes cannot disagree about a window again. */
+    booking_days: f.booking_days });
   for (const y of payRows) Object.assign(plat(y.platform), {
     payouts: num(y.payouts), payout_days: y.payout_days ?? 0,
     payout_drivers: y.drivers, payout_cash: num(y.cash) });
@@ -3766,10 +3792,49 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
      Marked from the RECORD's span, never from trip density: a month with
      genuinely quiet days is a quiet month, and excluding it would hide exactly
      the thing worth seeing. */
-  const [span = {}] = await q(
-    `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
-     FROM trip_norm WHERE ($1::text IS NULL OR platform=$1)
-       AND ($2::text IS NULL OR fleet_id=$2)`, [req.query.platform || null, trendFleet]);
+  /* The BOOKING record's span, because that is the span every other reader of
+     partiality measures against, and this one was measuring against a
+     different one.
+     ────────────────────────────────────────────────────────────────────────
+     trip_norm holds telematics journeys beside bookings — an FMS row is the
+     tracker describing the same car, not a ride anyone ordered — and the two
+     feeds start and stop on different days. Unfiltered, the min/max here is
+     whichever feed reaches furthest, so a month whose bookings cover thirteen
+     days reads as whole if telematics ran to the end of it. /api/forecast asks
+     the same question of rollup_day WHERE bookings > 0, falling back to
+     trip_norm WHERE is_booking (api/forecast_routes.js), and got the other
+     answer: December 2024 is partial_month=false here and partial there, for
+     the same month of the same record.
+     What the disagreement cost, measured before this line changed. #causes
+     splits the supply history into thirds and compares the ends. Counting
+     Dec 24 as whole leaves 21 months, thirds of 7, and the panel concluded
+     +25% bookings against +18% drivers and +22% per driver — "Both sides moved
+     together, so neither explains the other". Dropping it as partial leaves 20
+     months, thirds of 6: -16% bookings, +4% drivers, -7% per driver — output
+     per driver is FALLING. One thirteen-day month, treated as whole, inverted
+     the central conclusion of the page whose job is explaining the numbers.
+     Asked of rollup_day first and of trip_norm only as a fallback, which is
+     the same pair of queries in the same order that /api/forecast makes — not
+     a stylistic echo. is_booking is `platform <> 'fms'`, a predicate the
+     expression index on the local day (sql/schema_v7.sql:60) cannot serve, so
+     bolting it onto the bare min/max here would turn a two-row index probe
+     into a sequential scan of every trip ever collected on a route that takes
+     no window. rollup_day holds one row per day per channel with the booking
+     count on it, so the same span costs a few thousand rows; the trip_norm
+     form stays underneath it for a fresh database, where the rollup has not
+     run and being slow beats being empty. Taking the answer from the same
+     place forecast takes it is what makes the two agree structurally rather
+     than by both being written correctly twice. */
+  let [span = {}] = await q(
+    `SELECT to_char(min(day),'YYYY-MM-DD') a, to_char(max(day),'YYYY-MM-DD') b
+     FROM rollup_day WHERE platform = coalesce($1,'*') AND fleet_id = coalesce($2,'*')
+       AND bookings > 0`, [req.query.platform || null, trendFleet]);
+  if (!span.a) {
+    [span = {}] = await q(
+      `SELECT to_char(min(local_day),'YYYY-MM-DD') a, to_char(max(local_day),'YYYY-MM-DD') b
+       FROM trip_norm WHERE is_booking AND ($1::text IS NULL OR platform=$1)
+         AND ($2::text IS NULL OR fleet_id=$2)`, [req.query.platform || null, trendFleet]);
+  }
   const spanFrom = span.a || null, spanTo = span.b || null;
   const lastOf = (ym) => {
     const [y, mo] = ym.split('-').map(Number);

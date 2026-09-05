@@ -171,6 +171,104 @@ check('an event in the second half of the later month is a candidate for it',
   ev.some((e) => e.title === 'Something happened mid-month'),
   JSON.stringify(ev.map((e) => e.title)));
 
+/* ── 3. a pair that has STOPPED qualifying leaves the table ──────────────
+   ─────────────────────────────────────────────────────────────────────────
+   The third fault, and the one that put wrong numbers on #causes rather than
+   merely extra ones. metric_break is only ever written while breakBetween
+   still returns a verdict, so a row whose pair has since stopped qualifying —
+   because the months behind it were backfilled, because a month was re-pulled,
+   or because the move fell back under the 30% threshold — was never rewritten
+   and never removed. It was simply served for ever.
+
+   MEASURED, production /api/breaks against /api/trend/monthly on 2026-09-05:
+   nine of thirty-four stored rows disagreed with the live series, four of them
+   with the sign inverted — fms 2025-12 -> 2026-01 was stored as 4,537 -> 119,
+   a 97.4% collapse, against a live 11,865 -> 13,674, a 15.2% RISE — and the
+   page contradicted itself, a KPI tile reading "LARGEST MOVE +1,029%" directly
+   above a card reading "+115,800%".
+
+   Both directions are asserted here, because the fix for the first is a DELETE
+   and a DELETE with the wrong fence is a worse bug than the one it fixes: a
+   row the run had no way to judge must survive it. */
+console.log('\nrows the run no longer confirms go; rows it never examined stay');
+
+const M3 = M(3), M4 = M(4);
+
+/* Stale, and of exactly the production shape: a well-formed month-over-month
+   pair, both months complete, for platforms the run DOES examine — but neither
+   platform has a trip in M3, so no verdict is reached for either pair and both
+   rows are unconfirmed. */
+await q(`INSERT INTO metric_break (metric, grain, platform, period_from, period_to,
+           value_from, value_to, change_pct, attribution)
+         VALUES ('trips','month','tzreal',$1,$2,900,120,-0.8667,'demand'),
+                ('trips','month','tzopen',$1,$2,400,900,1.25,'mixed')`,
+  [`${M3}-01`, `${M2}-01`]);
+
+/* Four rows outside the space this run recomputes. detectBreaks writes metric
+   'trips' at grain 'month' with fleet_id NULL for the platforms present in the
+   trip table, and nothing else, so none of these was ever a candidate for its
+   upsert and none of them is its to delete. 'tzabsent' is the important one:
+   a platform whose trips have gone from the table must not have its history
+   silently erased by a run that could not see it. */
+await q(`INSERT INTO metric_break (metric, grain, platform, fleet_id, period_from, period_to,
+           value_from, value_to, change_pct, attribution)
+         VALUES ('trips','week','tzreal',NULL,$1,$2,300,90,-0.70,'demand'),
+                ('trips','month','tzabsent',NULL,$3,$4,900,120,-0.8667,'demand'),
+                ('trips','month','tzreal','ecosine',$5,$6,900,120,-0.8667,'demand'),
+                ('revenue','month','tzreal',NULL,$3,$4,9000,1200,-0.8667,'demand')`,
+  [`${M2}-01`, `${M2}-08`, `${M3}-01`, `${M2}-01`, `${M4}-01`, `${M3}-01`]);
+
+const written2 = await detectBreaks();
+const after = await q(`SELECT metric, grain, platform, fleet_id,
+                              period_from::text pf, period_to::text pt, value_from, value_to
+                       FROM metric_break ORDER BY metric, grain, platform, period_from`);
+console.log(`second detectBreaks() wrote ${written2}; metric_break now holds:`);
+for (const b of after) {
+  console.log(`  ${b.metric.padEnd(7)} ${b.grain.padEnd(5)} ${b.platform.padEnd(8)}`
+    + ` fleet=${String(b.fleet_id).padEnd(7)} ${b.pf} -> ${b.pt}  ${b.value_from} -> ${b.value_to}`);
+}
+const has = (f) => after.some(f);
+
+check('a stored break the run no longer confirms is gone from the table',
+  !has((b) => b.grain === 'month' && b.metric === 'trips' && b.fleet_id === null
+              && b.platform === 'tzreal' && b.pf === `${M3}-01`),
+  'this is the fms 2025-12 -> 2026-01 row: stored -97.4%, live +15.2%');
+check('…including one for a platform that produced no breaks at all this run',
+  !has((b) => b.platform === 'tzopen' && b.pf === `${M3}-01`),
+  'an examined platform with an empty result set still gets its stale rows cleared');
+check('the pair that does still qualify survives a second run',
+  after.filter((b) => b.metric === 'trips' && b.grain === 'month'
+                      && b.platform === 'tzreal' && b.fleet_id === null).length === 1
+  && has((b) => b.platform === 'tzreal' && b.pf === `${M2}-01` && b.value_from === 200
+                && b.value_to === 50),
+  JSON.stringify(after.filter((b) => b.platform === 'tzreal')));
+check('and the second run is idempotent — it rewrote the same one break',
+  written2 === written, `${written2} vs ${written}`);
+
+check('a row at a grain this run does not compute survives it',
+  has((b) => b.grain === 'week' && b.platform === 'tzreal'),
+  'detectBreaks recomputes grain=month only; a week row is not its to judge');
+check('a row for a platform absent from the trip table survives it',
+  has((b) => b.platform === 'tzabsent'),
+  'a platform the run could not see must not be erased by the run');
+check('a fleet-scoped row survives a run that only writes fleet_id NULL',
+  has((b) => b.fleet_id === 'ecosine'),
+  'the fleet chip on #causes reads these');
+check('a row for another metric survives it',
+  has((b) => b.metric === 'revenue'),
+  'the run measured trips; it said nothing about revenue');
+
+/* The guard against the fence being widened later. If the trip table is empty
+   the run examines no platform, reaches no verdict, and must therefore delete
+   nothing — a run that measured nothing deleting everything is how a
+   stale-row bug becomes a data-loss bug. */
+await q('DELETE FROM trip');
+const before = (await q('SELECT count(*)::int n FROM metric_break'))[0].n;
+await detectBreaks();
+const survived = (await q('SELECT count(*)::int n FROM metric_break'))[0].n;
+check('a run with no trips at all deletes nothing', survived === before,
+  `${before} rows before, ${survived} after`);
+
 console.log('\nthe statement itself, not just its result');
 
 const src = readFileSync('src/sources/events.js', 'utf8');
