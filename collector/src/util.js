@@ -65,11 +65,12 @@ export function* dateChunks(from, to, maxDays = 31) {
    ── the one caller this reasoning does NOT cover ─────────────────────────
    "Clamping the date without clamping the key" is a statement about a writer
    whose key IS the window. driver_performance is one; so is the quality grid.
-   pullTripFares is not: its only write is an UPDATE of price on a trip row
-   keyed by the trip's own UUID, so a part-week report smears nothing — it
-   prices the trips it covers and says nothing about the rest. That walk
-   therefore reaches the running week on purpose, clamped to the window's own
-   end, and test/uber_running_week.test.mjs holds down that it is the only one.
+   The fare walk — fareWeeks, and the pullTripFaresAcross that consumes it — is
+   not: its only write is an UPDATE of price on a trip row keyed by the trip's
+   own UUID, so a part-week report smears nothing — it prices the trips it
+   covers and says nothing about the rest. That walk therefore reaches the
+   running week on purpose, clamped to the window's own end, and
+   test/uber_running_week.test.mjs holds down that it is the only one.
 
    ── and the comparison is a DUBAI one ────────────────────────────────────
    `w.end` is a UTC midnight, so `w.end < now` called this week closed from

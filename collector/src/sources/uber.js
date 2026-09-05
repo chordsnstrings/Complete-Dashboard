@@ -456,9 +456,14 @@ export function csvToPayments(csv) {
    window the trip report covered, and inventing a row for it would create a
    booking with no time, no plate and no driver that every count in the product
    would then include. */
-async function pullTripFares(from, to, onStep, checkpoint = null) {
-  let total = 0;
-  const chunks = [];
+/* The weeks this walk asks for, running week first, closed weeks newest-first.
+
+   Lifted out of the walk because the walk is no longer per fleet: both orgs
+   ask for the same calendar, and pullTripFaresAcross drives them through it
+   together. Computing the list once also makes `of` — the denominator an
+   operator reads on the Settings page — the number of weeks rather than the
+   number of weeks times the number of fleets. */
+export function fareWeeks(from, to) {
   const closed = [...closedWeeks(from, to)].reverse();
   /* The week the range reaches that has not ended. weekChunks yields every
      week the range touches; closedWeeks yields the subset that has finished,
@@ -473,108 +478,185 @@ async function pullTripFares(from, to, onStep, checkpoint = null) {
   const end = new Date(to);
   const running = [...weekChunks(from, to)]
     .filter((w) => !done.has(+w.start) && w.start <= end)
-    .map((w) => ({ ...w, end: w.end > end ? end : w.end }));
-  const weeks = [...running, ...closed];
-  let consecutiveFailures = 0;
-  for (const w of weeks) {
-    const ps = iso(w.start), pe = iso(w.end);
-    const isOpen = !done.has(+w.start);
-    const chunk = { from: ps, to: pe, rows: 0, error: null, open: isOpen || undefined };
-    /* The key carries which fare column this pass writes, not just which week
-       it covers. Checkpoints live for the length of a job and a long backfill
-       survives several container restarts, so a job that already collected a
-       week under the old leaf-column reading would skip it forever and leave
-       those weeks understated. Changing what a window MEANS has to change its
-       key, or resuming silently keeps the old answer. */
-    const key = `fares:branch ${ps}..${pe}`;
-    /* A running week is never checkpointed and so is never skipped — see the
-       header. It is asked again on every pass until it closes. */
-    if (!isOpen && checkpoint?.has(key)) {
-      chunk.skipped = true; chunks.push(chunk); continue;
-    }
-    await onStep?.({ window: `fares ${ps}..${pe}`, index: chunks.length, of: weeks.length,
-      rows_so_far: total });
-    try {
-      const id = await generateReport(w.start, w.end, 0, PAYMENTS_REPORT);
-      const url = await downloadReport(id);
-      const { data: csv } = await http(url, { expect: 'text', timeoutMs: 180000 });
-      const { trips, settlements } = csvToPayments(csv);
-      /* UPDATE, never upsert. See the header above: a Trip UUID we do not hold
-         is a trip outside the collected window, and the row must not be
-         invented. The count of rows that matched is what tells an operator
-         whether the two reports actually describe the same trips. */
-      let priced = 0;
-      for (const t of trips) {
-        if (t.fare == null && t.earnings == null) continue;
-        const { rowCount } = await pool.query(
-          `UPDATE trip SET price = $3, currency = coalesce(currency, 'AED'),
-                  raw = coalesce(raw, '{}'::jsonb) || $4::jsonb
-             WHERE platform = 'uber' AND external_id = $2 AND fleet_id = $1`,
-          [org().fleet, t.external_id, t.fare,
-            JSON.stringify({ uber_payments: {
-              fare: t.fare, fare_base: t.fare_base, earnings: t.earnings,
-              service_fee: t.service_fee, cash_collected: t.cash, tip: t.tip,
-              adjustment: t.adjustment, transactions: t.txns } })]);
-        priced += rowCount;
-      }
-      total += priced;
-      chunk.rows = priced;
-      /* Both numbers, because they answer different questions. `rows` is what
-         landed; `orders` and `unmatched` say whether the payments report and
-         the trip report agree about which trips exist, which is the check that
-         catches a window collected by one and not the other. */
-      chunk.orders = trips.length;
-      chunk.unmatched = trips.length - priced;
-      chunk.settlements = settlements.length;
-      log.info(SRC, `fares ${ps}..${pe}`, { orders: trips.length, priced,
-        unmatched: trips.length - priced, settlements: settlements.length });
-      consecutiveFailures = 0;
-    } catch (err) {
-      const msg = String(err);
-      /* A RUNNING week is a speculative ask, so its refusal is never a hole.
-         Uber may not serve a payments report for a week it has not settled,
-         and if it does not, that is an answer rather than a failure — the
-         closed weeks are asked immediately after and would report any real
-         problem (an expired cookie, a dead endpoint) on their own. Held here
-         so a nightly ask for the current week cannot make every run read
-         partial for the life of the week. */
-      const expected = isOpen || /invalid date range|retention|out of range/i.test(msg);
-      /* Rate limiting is its OWN case and is not a hole. This report has a
-         generation cap separate from the three-in-flight one, and a run that
-         hits it has not failed to collect the week — it has been told to come
-         back. Recorded as an error so the run reads partial, but never
-         checkpointed, so the next pass asks again. */
-      const throttled = /rate-limit|generation limit|too many ongoing/i.test(msg);
-      chunk.error = isOpen ? `the week is still running: ${msg.slice(0, 140)}`
-        : expected ? `outside retention: ${msg.slice(0, 160)}`
-          : throttled ? `rate-limited, will retry next run: ${msg.slice(0, 120)}`
-            : msg.slice(0, 300);
-      chunk.expected = expected;
-      chunk.throttled = throttled;
-      log[expected || throttled ? 'info' : 'error'](SRC,
-        `fare chunk ${ps}..${pe} ${isOpen ? 'running week, not served' : expected ? 'outside retention' : throttled ? 'rate-limited' : 'FAILED'}`,
-        { err: msg.slice(0, 200) });
-      if (!expected && !throttled) consecutiveFailures++;
-      /* A throttle on the RUNNING week must not cost the closed ones. It is
-         the first ask of the pass and the only speculative one; everywhere
-         else the cap is per run and the remaining weeks would hit it too.
+    .map((w) => ({ ...w, end: w.end > end ? end : w.end, isOpen: true }));
+  return [...running, ...closed.map((w) => ({ ...w, isOpen: false }))];
+}
 
-         The chunk is pushed BEFORE the break, and that is a fix rather than a
-         tidy-up: `break` from inside this catch skipped the push at the foot
-         of the loop, so a fares pass refused outright recorded no chunk at all
-         and the run reported itself ok. An operator reading /api/status saw a
-         healthy Uber run with no fares in it and nothing saying why — the same
-         class of silence as the 299-day hole the trip walk's comment
-         describes. */
-      if (throttled && !isOpen) { chunks.push(chunk); break; }
-    }
-    chunks.push(chunk);
-    /* Never for the running week: it is not finished, and marking it done
-       would freeze a part-week answer for the rest of the job. */
-    if (!isOpen && (!chunk.error || chunk.expected)) await checkpoint?.mark(key, chunk.rows);
-    await sleep(consecutiveFailures ? 20000 : 8000);
+/* The order the walk asks in: every fleet on a week before any fleet moves on
+   to the next one.
+
+   Pure, and exported, because the ORDER is the entire fix and the walk that
+   consumes it cannot be tested — every step of it is a report that costs
+   minutes at Uber. What a test can hold down is the property that makes the
+   fix a fix: at no point in the sequence has one fleet been asked about more
+   weeks than another, plus or minus the one week in hand. A walk that fails
+   that property is a walk where a job cut short leaves one fleet complete and
+   the other empty, which is the state Egari was actually in. */
+export function* fareTasks(orgs, weeks) {
+  for (const w of weeks) for (const o of orgs) yield { w, o };
+}
+
+/* One fleet, one week. The caller owns the accumulation because the
+   accumulation is per fleet and the walk is not. */
+async function collectFareWeek(w, onStep, checkpoint, state) {
+  const ps = iso(w.start), pe = iso(w.end);
+  const isOpen = w.isOpen;
+  const chunk = { from: ps, to: pe, rows: 0, error: null, open: isOpen || undefined };
+  /* The key carries which fare column this pass writes, not just which week
+     it covers. Checkpoints live for the length of a job and a long backfill
+     survives several container restarts, so a job that already collected a
+     week under the old leaf-column reading would skip it forever and leave
+     those weeks understated. Changing what a window MEANS has to change its
+     key, or resuming silently keeps the old answer. */
+  const key = `fares:branch ${ps}..${pe}`;
+  /* A running week is never checkpointed and so is never skipped — see the
+     header. It is asked again on every pass until it closes. */
+  if (!isOpen && checkpoint?.has(key)) {
+    chunk.skipped = true; state.chunks.push(chunk); return chunk;
   }
-  return { total, chunks };
+  /* The fleet is named in the step now that two of them walk the same week
+     one after the other: without it an operator watching a backfill sees the
+     same window twice and reads it as the job having stalled. */
+  await onStep?.({ window: `fares ${ps}..${pe}`, fleet: org().fleet,
+    index: state.chunks.length, of: state.of, rows_so_far: state.total });
+  try {
+    const id = await generateReport(w.start, w.end, 0, PAYMENTS_REPORT);
+    const url = await downloadReport(id);
+    const { data: csv } = await http(url, { expect: 'text', timeoutMs: 180000 });
+    const { trips, settlements } = csvToPayments(csv);
+    /* UPDATE, never upsert. See the header above: a Trip UUID we do not hold
+       is a trip outside the collected window, and the row must not be
+       invented. The count of rows that matched is what tells an operator
+       whether the two reports actually describe the same trips. */
+    let priced = 0;
+    for (const t of trips) {
+      if (t.fare == null && t.earnings == null) continue;
+      const { rowCount } = await pool.query(
+        `UPDATE trip SET price = $3, currency = coalesce(currency, 'AED'),
+                raw = coalesce(raw, '{}'::jsonb) || $4::jsonb
+           WHERE platform = 'uber' AND external_id = $2 AND fleet_id = $1`,
+        [org().fleet, t.external_id, t.fare,
+          JSON.stringify({ uber_payments: {
+            fare: t.fare, fare_base: t.fare_base, earnings: t.earnings,
+            service_fee: t.service_fee, cash_collected: t.cash, tip: t.tip,
+            adjustment: t.adjustment, transactions: t.txns } })]);
+      priced += rowCount;
+    }
+    state.total += priced;
+    chunk.rows = priced;
+    /* Both numbers, because they answer different questions. `rows` is what
+       landed; `orders` and `unmatched` say whether the payments report and
+       the trip report agree about which trips exist, which is the check that
+       catches a window collected by one and not the other. */
+    chunk.orders = trips.length;
+    chunk.unmatched = trips.length - priced;
+    chunk.settlements = settlements.length;
+    log.info(SRC, `fares ${org().fleet} ${ps}..${pe}`, { orders: trips.length, priced,
+      unmatched: trips.length - priced, settlements: settlements.length });
+    state.consecutiveFailures = 0;
+  } catch (err) {
+    const msg = String(err);
+    /* A RUNNING week is a speculative ask, so its refusal is never a hole.
+       Uber may not serve a payments report for a week it has not settled,
+       and if it does not, that is an answer rather than a failure — the
+       closed weeks are asked immediately after and would report any real
+       problem (an expired cookie, a dead endpoint) on their own. Held here
+       so a nightly ask for the current week cannot make every run read
+       partial for the life of the week. */
+    const expected = isOpen || /invalid date range|retention|out of range/i.test(msg);
+    /* Rate limiting is its OWN case and is not a hole. This report has a
+       generation cap separate from the three-in-flight one, and a run that
+       hits it has not failed to collect the week — it has been told to come
+       back. Recorded as an error so the run reads partial, but never
+       checkpointed, so the next pass asks again. */
+    const throttled = /rate-limit|generation limit|too many ongoing/i.test(msg);
+    chunk.error = isOpen ? `the week is still running: ${msg.slice(0, 140)}`
+      : expected ? `outside retention: ${msg.slice(0, 160)}`
+        : throttled ? `rate-limited, will retry next run: ${msg.slice(0, 120)}`
+          : msg.slice(0, 300);
+    chunk.expected = expected;
+    chunk.throttled = throttled;
+    log[expected || throttled ? 'info' : 'error'](SRC,
+      `fare chunk ${org().fleet} ${ps}..${pe} ${isOpen ? 'running week, not served' : expected ? 'outside retention' : throttled ? 'rate-limited' : 'FAILED'}`,
+      { err: msg.slice(0, 200) });
+    if (!expected && !throttled) state.consecutiveFailures++;
+    /* A throttle on the RUNNING week must not cost the closed ones. It is
+       the first ask of the pass and the only speculative one; everywhere
+       else the cap is per run and the remaining weeks would hit it too.
+
+       The chunk is pushed BEFORE the walk stops, and that is a fix rather
+       than a tidy-up: `break` from inside this catch skipped the push at the
+       foot of the loop, so a fares pass refused outright recorded no chunk at
+       all and the run reported itself ok. An operator reading /api/status saw
+       a healthy Uber run with no fares in it and nothing saying why — the
+       same class of silence as the 299-day hole the trip walk's comment
+       describes.
+
+       It stops THIS FLEET and not the walk. The two orgs hold separate
+       supplier sessions and the generation counter is the provider's, per
+       supplier — so a cap reached asking as Ecosine is not evidence about
+       Egari. If it turns out to be one counter across both, the other fleet
+       throttles on its own next window and stops itself, one request later:
+       the cost of being wrong here is a single request, and the cost of
+       assuming the opposite is the fleet that was never asked. */
+    if (throttled && !isOpen) {
+      state.stopped = true; state.chunks.push(chunk); return chunk;
+    }
+  }
+  state.chunks.push(chunk);
+  /* Never for the running week: it is not finished, and marking it done
+     would freeze a part-week answer for the rest of the job. */
+  if (!isOpen && (!chunk.error || chunk.expected)) await checkpoint?.mark(key, chunk.rows);
+  await sleep(state.consecutiveFailures ? 20000 : 8000);
+  return chunk;
+}
+
+/* Both fleets through the same calendar, week by week, together.
+   ─────────────────────────────────────────────────────────────────────────
+   This used to be one full walk per fleet, run one after the other from
+   collect(), and the cost of that was measurable and one-sided: on 5 September
+   2026 Ecosine carried a fare on 99.9% of its chargeable Uber bookings in
+   every one of the twelve months Uber still serves, and Egari carried one on
+   0% of every month before the current one. Not because Egari's reports are
+   refused — they are served, and the weeks that have been asked for came back
+   full — but because nothing ever asked. A backfill walks ~105 weekly windows
+   per fleet at roughly a minute each plus a paced sleep, the worker restarts
+   whenever the app deploys, and Egari's walk is behind all of Ecosine's. Job
+   50 died at Ecosine week 51 and had to be resumed to reach Egari at all.
+
+   Interleaved, a job that dies leaves the two fleets the same distance back
+   instead of one complete and one empty, and the first hour of any backfill
+   covers the most recent weeks of BOTH. The provider cost is identical — the
+   same windows, the same number of reports — only the order changes.
+
+   The order within a week is the org order, which is stable, so a resumed job
+   asks in the same sequence it did before and the checkpoint still lands on
+   the windows it describes. */
+async function pullTripFaresAcross(orgs, from, to, onStep, ckFor) {
+  const weeks = fareWeeks(from, to);
+  const state = new Map(orgs.map((o) => [o.fleet,
+    { total: 0, chunks: [], consecutiveFailures: 0, stopped: false, of: weeks.length }]));
+  log.info(SRC, 'fares walk', { weeks: weeks.length, fleets: orgs.map((o) => o.fleet).join(',') });
+  const prev = cur;
+  try {
+    for (const { w, o } of fareTasks(orgs, weeks)) {
+      const st = state.get(o.fleet);
+      if (st.stopped) continue;
+      cur = o;
+      /* collectFareWeek catches the provider; this catches everything else —
+         a checkpoint write that fails, an onStep that throws. One fleet's bad
+         turn must not end the other fleet's walk, which is the whole point of
+         interleaving them. */
+      try { await collectFareWeek(w, onStep, ckFor(o), st); }
+      catch (e) {
+        st.stopped = true;
+        st.chunks.push({ from: iso(w.start), to: iso(w.end), rows: 0,
+          error: `fare walk stopped: ${String(e).slice(0, 200)}` });
+        log.error(SRC, `fare walk stopped (${o.fleet})`, { err: String(e).slice(0, 200) });
+      }
+    }
+  } finally { cur = prev; }
+  return new Map([...state].map(([f, s]) => [f, { total: s.total, chunks: s.chunks }]));
 }
 
 // Pull historical trips one month at a time. Sequential is necessary but not
@@ -1626,90 +1708,133 @@ async function pullLiveOrg(o) {
 }
 
 export async function collect({ from, to, mode, onStep, fleet = null, checkpoint = null }) {
-  /* One full pass per configured org, sequentially, each under its own run
-     row — so the Sources page shows uber/ecosine and uber/egari separately
-     and a dead cookie on one fleet reads as that fleet's failure, not as half
-     the numbers quietly missing from a shared one. Sequential on purpose:
-     the report pipeline's three-in-flight cap is per org, but the two
-     sessions share this process's connection pool and the API's patience. */
-  for (const o of uberOrgs(fleet)) {
-    cur = o;
-    /* What is already written and committed, so a throw reports it rather
-       than zero. */
-    let written = 0;
-    try {
-      /* The checkpoint is per ORG as well as per window: the two fleets walk
-         the same calendar, so a bare window name would let Egari's run be
-         skipped because Ecosine had already done that month. */
-      const ck = checkpoint && {
-        has: (u) => checkpoint.has(`${o.fleet}:${u}`),
-        mark: (u, n) => checkpoint.mark(`${o.fleet}:${u}`, n),
-      };
-      const trips = await pullTrips(from, to, onStep, ck);
-      written += trips.total;
-      const perf = await pullEarnerBreakdowns(from, to, onStep, ck);
-      written += perf.total;
-      /* The per-trip fare, after the trips exist and before quality.
-         ─────────────────────────────────────────────────────────────────────
-         AFTER pullTrips because it UPDATEs rows that pull created and never
-         inserts its own — a payments row for a trip we do not hold is skipped,
-         and the count of skipped rows is what tells an operator the two
-         reports disagree about which trips exist.
+  /* Phases across the orgs, not one whole pass per org.
+     ─────────────────────────────────────────────────────────────────────────
+     Each configured org still gets its own run row — so the Sources page
+     shows uber/ecosine and uber/egari separately and a dead cookie on one
+     fleet reads as that fleet's failure, not as half the numbers quietly
+     missing from a shared one — and the two are still worked sequentially,
+     because the report pipeline's three-in-flight cap is per org but the two
+     sessions share this process's connection pool and the API's patience.
 
-         BEFORE quality for the same reason quality runs last: money is the
-         product, and a run that exhausts the provider's report slots should
-         end having collected it.
+     What changed is the grain of "sequentially". A pass per org meant the
+     second fleet waited out the FIRST fleet's entire history before it was
+     asked anything, and on a walk of ~105 weekly windows per source that is
+     hours — longer than the worker survives between deploys. The measured
+     cost is in pullTripFaresAcross: eleven months where Ecosine had a fare on
+     99.9% of its bookings and Egari had one on none of them, because Egari's
+     walk was always behind. Phases put both fleets through the same stage
+     before either moves on, so a run that is cut short is cut short evenly. */
+  const orgs = uberOrgs(fleet);
+  /* The checkpoint is per ORG as well as per window: the two fleets walk
+     the same calendar, so a bare window name would let Egari's run be
+     skipped because Ecosine had already done that month. */
+  const ckFor = (o) => checkpoint && {
+    has: (u) => checkpoint.has(`${o.fleet}:${u}`),
+    mark: (u, n) => checkpoint.mark(`${o.fleet}:${u}`, n),
+  };
+  const empty = () => ({ total: 0, chunks: [] });
+  /* One accumulator per org, filled by the phases below and reported at the
+     foot. `written` is what has already been written and committed, so a
+     throw reports it rather than zero. */
+  const st = new Map(orgs.map((o) => [o.fleet, { o, written: 0, error: null,
+    trips: empty(), perf: empty(), fares: empty(), qual: empty() }]));
+  /* rows_written, not 0. src/db.js stores `run.rows_written || 0`, so omitting
+     it told the status page that a run which had already written and committed
+     thousands of rows wrote none — and "collected nothing" is the sentence
+     that sends somebody hunting a fault that is not there. What landed,
+     landed. Written the moment the fleet fails rather than at the foot: the
+     phases below can run for hours, and an operator watching a backfill needs
+     to see a dead session when it dies, not when the other fleet finishes. */
+  const fail = async (s, e) => {
+    s.error = e;
+    await logRun({ source: SRC, fleet_id: s.o.fleet, mode, window_start: from, window_end: to,
+      status: 'error', rows_written: s.written, error: String(e) });
+    log.error(SRC, `failed (${s.o.fleet})`, { err: String(e) });
+  };
+  /* A fleet that has already failed sits out the rest of the phases, which is
+     what the per-org try/catch did when the pass was per org: a fleet whose
+     session is dead has nothing to gain from three more surfaces asking. */
+  const phase = async (s, name, fn) => {
+    if (s.error) return;
+    cur = s.o;
+    try { const r = await fn(); s[name] = r; s.written += r.total || 0; }
+    catch (e) { await fail(s, e); }
+    finally { cur = null; }
+  };
 
-         Not on the incremental. The payments report has a generation cap of
-         its own, separate from the three-in-flight one, and a half-hourly
-         three-day window would spend it on a week that has not closed — the
-         fares land when the week does, which is what the nightly catch-up and
-         the weekly backfill are for. */
-      const fares = mode === 'incremental'
-        ? { total: 0, chunks: [] }
-        : await pullTripFares(from, to, onStep, ck);
-      written += fares.total;
-      /* Quality LAST, and never on the half-hourly incremental.
-         ─────────────────────────────────────────────────────────────────────
-         Two reports per week per fleet, minutes each, against a cap of three
-         in flight per org. On the incremental — a three-day window, every
-         thirty minutes — that is four reports an hour of the day, for a week
-         that has not changed since the last pass, taken from the same three
-         slots the trip and earnings pulls need. The nightly catch-up walks
-         thirty days and the weekly backfill walks the horizon, which is where
-         a report this expensive belongs.
+  /* 1. Trips, for every fleet. FIRST because the fare walk UPDATEs rows this
+        creates and never inserts its own. */
+  for (const s of st.values()) await phase(s, 'trips', () => pullTrips(from, to, onStep, ckFor(s.o)));
 
-         Last in the pass for the same reason: trips and earnings are the
-         product, acceptance and ratings make it rankable, and a run that runs
-         out of slots should end having collected the money. */
-      const qual = mode === 'incremental'
-        ? { total: 0, chunks: [] }
-        : await pullDriverQuality(from, to, onStep, ck);
-      written += qual.total;
-      // Every sub-source's windows, so a run that fetched every trip and no
-      // earnings reads as partial rather than as ok.
-      const chunks = [...trips.chunks, ...perf.chunks, ...fares.chunks, ...qual.chunks];
-      // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
-      // are still missing", and it is the difference between a hole that is
-      // visible and one that is not.
-      await logRun({ source: SRC, fleet_id: o.fleet, mode,
-        window_start: from, window_end: to,
-        rows_written: trips.total + perf.total + fares.total + qual.total,
-        chunks });
-      log.info(SRC, `done (${o.fleet})`, { trips: trips.total, perf, fares: fares.total,
-        quality: qual.total,
-        windows_failed: trips.chunks.filter((c) => c.error).length, of: trips.chunks.length });
-    } catch (e) {
-      /* rows_written, not 0. src/db.js stores `run.rows_written || 0`, so
-         omitting it told the status page that a run which had already written
-         and committed thousands of rows wrote none — and "collected nothing"
-         is the sentence that sends somebody hunting a fault that is not
-         there. What landed, landed. */
-      await logRun({ source: SRC, fleet_id: o.fleet, mode, window_start: from, window_end: to,
-        status: 'error', rows_written: written, error: String(e) });
-      log.error(SRC, `failed (${o.fleet})`, { err: String(e) });
-    } finally {
-      cur = null;
+  /* 2. The per-trip fare, week by week ACROSS the fleets — see
+        pullTripFaresAcross. Not on the incremental: the payments report has a
+        generation cap of its own, separate from the three-in-flight one, and a
+        half-hourly three-day window would spend it on a week that has not
+        closed. The fares land when the week does, which is what the nightly
+        catch-up and the weekly backfill are for. */
+  if (mode !== 'incremental') {
+    const live = [...st.values()].filter((s) => !s.error);
+    if (live.length) {
+      /* The walk itself cannot throw — every step is caught per fleet inside
+         it — so this catches only what precedes the first step: a range that
+         does not parse into weeks. It fails every fleet in the walk, because
+         none of them was asked anything. */
+      try {
+        const per = await pullTripFaresAcross(live.map((s) => s.o), from, to, onStep, ckFor);
+        for (const [f, r] of per) {
+          const s = st.get(f);
+          if (!s) continue;
+          s.fares = r; s.written += r.total;
+        }
+      } catch (e) { for (const s of live) await fail(s, e); }
     }
+  }
+
+  /* 3. The earnings tree, and then quality. Quality LAST, and never on the
+        half-hourly incremental: two reports per week per fleet, minutes each,
+        against a cap of three in flight per org. On the incremental — a
+        three-day window, every thirty minutes — that is four reports an hour
+        of the day, for a week that has not changed since the last pass, taken
+        from the same three slots the trip and earnings pulls need.
+
+        Last for the same reason the fares are second: trips and earnings are
+        the product, acceptance and ratings make it rankable, and a run that
+        runs out of slots should end having collected the money. */
+  for (const s of st.values()) {
+    await phase(s, 'perf', () => pullEarnerBreakdowns(from, to, onStep, ckFor(s.o)));
+  }
+  /* A separate loop, not the tail of the one above. Perf and quality are each
+     a walk of their own, so pairing them per fleet would put the second
+     fleet's earnings behind the first fleet's ratings — the same ordering
+     that left Egari without fares, one surface down. Whole phases keep the
+     fleets level at every boundary. These two are not interleaved week by
+     week the way the fares are: both are bounded by the provider's rolling
+     horizon (192 days, and QUALITY_WEEK_HORIZON weeks) rather than by the
+     whole backfill, so a fleet is minutes behind here and not hours. */
+  if (mode !== 'incremental') {
+    for (const s of st.values()) {
+      await phase(s, 'qual', () => pullDriverQuality(from, to, onStep, ckFor(s.o)));
+    }
+  }
+
+  /* 4. One run row per fleet, at the foot rather than at the end of that
+        fleet's pass — the phases interleave, so there is no such moment any
+        more. The row says the same thing it always did. */
+  for (const s of st.values()) {
+    const o = s.o;
+    // A fleet that failed already has its run row, written when it failed.
+    if (s.error) continue;
+    // Every sub-source's windows, so a run that fetched every trip and no
+    // earnings reads as partial rather than as ok.
+    const chunks = [...s.trips.chunks, ...s.perf.chunks, ...s.fares.chunks, ...s.qual.chunks];
+    // `chunks` is what turns "ok, 1129 rows" into "partial — these nine windows
+    // are still missing", and it is the difference between a hole that is
+    // visible and one that is not.
+    await logRun({ source: SRC, fleet_id: o.fleet, mode,
+      window_start: from, window_end: to, rows_written: s.written, chunks });
+    log.info(SRC, `done (${o.fleet})`, { trips: s.trips.total, perf: s.perf.total,
+      fares: s.fares.total, quality: s.qual.total,
+      windows_failed: s.trips.chunks.filter((c) => c.error).length, of: s.trips.chunks.length });
   }
 }

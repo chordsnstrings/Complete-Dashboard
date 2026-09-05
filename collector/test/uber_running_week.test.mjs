@@ -17,8 +17,10 @@
    today every half hour and Uber answers them.
 
    So the running week is asked for as Monday-to-`to`. This file holds down the
-   four properties that makes correct, on the source rather than on a live
-   provider — the walk is not exported and the report costs minutes at Uber.
+   properties that makes correct. The week LIST is now exported and asserted
+   behaviourally in uber_fares_interleaved.test.mjs; what is checked here is
+   the part of the walk that still cannot be called — every step of it is a
+   report that costs minutes at Uber — so it is checked on the source.
 
    The behavioural half of the same rule, the one a fixture CAN reach, is the
    week arithmetic in src/util.js, which is asserted first. */
@@ -59,10 +61,12 @@ check('…and the clamp leaves a CLOSED week alone',
   closed.every((w) => (w.end > end ? end : w.end).getTime() === w.end.getTime()),
   'a closed week already ends in the past and must not be shortened');
 
-console.log('\nwhat pullTripFares does with it');
+console.log('\nwhat the fare walk does with it');
 
+/* fareWeeks, fareTasks, collectFareWeek and pullTripFaresAcross, which is
+   every line of the fare walk and nothing else. */
 const src = readFileSync('src/sources/uber.js', 'utf8');
-const fn = src.slice(src.indexOf('async function pullTripFares'),
+const fn = src.slice(src.indexOf('export function fareWeeks('),
   src.indexOf('async function pullTrips('));
 check('the fare walk is the part of this file being read',
   fn.length > 500 && /PAYMENTS_REPORT/.test(fn), `${fn.length} chars`);
@@ -74,7 +78,7 @@ check('…clamped to the window rather than to the coming Sunday',
   /end: w\.end > end \? end : w\.end/.test(fn),
   'an unclamped chunk ends in the future and Uber answers "endDate is too late"');
 check('…and asked FIRST, because it is the only week whose data does not exist yet',
-  /const weeks = \[\.\.\.running, \.\.\.closed\]/.test(fn),
+  /return \[\.\.\.running, \.\.\.closed\.map/.test(fn),
   'a closed week missed tonight is already collected; this one is not');
 
 /* The three that stop it doing harm. */
@@ -85,15 +89,21 @@ check('…and never marked done',
   /if \(!isOpen && \(!chunk\.error \|\| chunk\.expected\)\) await checkpoint\?\.mark/.test(fn),
   'marking a part-week answer done would freeze it for the life of the job');
 check('a throttle on it continues rather than abandoning the closed weeks',
-  /if \(throttled && !isOpen\) \{ chunks\.push\(chunk\); break; \}/.test(fn),
+  /if \(throttled && !isOpen\) \{\s*state\.stopped = true;/.test(fn),
   'the speculative ask must not cost the weeks that are actually collectable');
 /* And the chunk is recorded before the break. `break` from inside the catch
    skipped the push at the foot of the loop, so a fares pass refused outright
    recorded nothing and the run reported itself ok — an operator saw a healthy
    Uber run with no fares in it and no reason given. */
 check('…and a throttle that DOES stop the pass is still recorded as a chunk',
-  /chunks\.push\(chunk\); break;/.test(fn),
-  'breaking without pushing makes a refused fares pass invisible on /api/status');
+  /state\.stopped = true; state\.chunks\.push\(chunk\); return chunk;/.test(fn),
+  'stopping without pushing makes a refused fares pass invisible on /api/status');
+/* And it stops that FLEET rather than the walk: the two orgs hold separate
+   supplier sessions, so a cap reached asking as one is not evidence about the
+   other. Before the walk was interleaved there was nothing to distinguish. */
+check('…and it stops that fleet rather than every fleet',
+  !/\bbreak;/.test(fn) && /st\.stopped\) continue;/.test(fn),
+  'a break here would abandon the other fleet\u2019s remaining weeks too');
 
 console.log('\nand the week boundary is the fleet’s, not UTC’s');
 

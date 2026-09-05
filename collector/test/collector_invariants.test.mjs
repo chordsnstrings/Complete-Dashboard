@@ -47,16 +47,43 @@ check('failed windows are named at the end of the run', /trip backfill left hole
    twice. */
 check('the run records every window it attempted, not just a total',
   (uber.match(/return \{ total(: total \+ comps)?, chunks \}/g) || []).length >= 2);
+/* Read off the accumulator rather than off the call sites.
+   ─────────────────────────────────────────────────────────────────────────
+   The previous version of this block derived the sub-sources from the literal
+   `const x = await pullSomething(from, to, onStep, ck)`, which is the shape
+   collect() had while it ran one whole pass per org. Interleaving the fleets
+   turned those into phases and the check went red on a change that does not
+   touch the invariant at all — the second time this block has been broken by
+   its own spelling, and the comment above says why that is the wrong way to
+   write it.
+
+   So the list comes from the ONE place that enumerates the sub-sources: the
+   per-org accumulator every phase writes into. A sub-source that is collected
+   and not accumulated has no name here, which is itself the bug this catches. */
 {
   const collect = uber.slice(uber.indexOf('export async function collect'));
-  const pulls = [...collect.matchAll(/const (\w+) = await pull\w+\(from, to, onStep, ck\)/g)].map((m) => m[1]);
+  const init = collect.match(/const st = new Map\([\s\S]*?\]\)\);/)?.[0] || '';
+  const subs = [...init.matchAll(/(\w+): empty\(\)/g)].map((m) => m[1]);
   const union = collect.match(/const chunks = \[([^\]]*)\]/)?.[1] || '';
+  check('collect() names its sub-sources in one place',
+    subs.length >= 3, `found ${subs.join(', ') || 'none'}`);
   check('and every sub-source in the pass contributes its windows, not just the first',
-    pulls.length >= 2 && pulls.every((v) => union.includes(`...${v}.chunks`)),
-    `pulls ${pulls.join(', ')} — union ${union.trim()}`);
+    subs.length >= 2 && subs.every((v) => union.includes(`...s.${v}.chunks`)),
+    `subs ${subs.join(', ')} — union ${union.trim()}`);
+  /* Each one is filled by something that also adds what it wrote to the run
+     total: either phase(), which does it for every sub-source it drives, or an
+     explicit accumulation beside the assignment. A sub-source filled by
+     neither is one that can write eight thousand rows and report none. */
   check('and its rows reach the run total, so a sub-source cannot write silently',
-    pulls.every((v) => new RegExp(`${v}\\.total`).test(collect)),
+    subs.every((v) => new RegExp(`phase\\(s, '${v}'`).test(collect)
+      || new RegExp(`s\\.${v} = r;[\\s\\S]{0,120}s\\.written \\+= r\\.total`).test(collect)),
     'a run that wrote 8,000 rows and reported 0 is the silence this check exists to break');
+  check('…and phase() is what makes that true for the ones it drives',
+    /s\.written \+= r\.total \|\| 0;/.test(collect),
+    'phase() that does not accumulate makes every sub-source it drives silent');
+  check('and the run row reports that total rather than a recount',
+    (collect.match(/rows_written: s\.written/g) || []).length >= 2,
+    'the error row and the ok row must both say what actually landed');
 }
 /* BOTH sub-sources, not just the trip report. The earner-breakdown query asked
    for a field the response type does not have, so Uber rejected it on every
@@ -64,7 +91,7 @@ check('the run records every window it attempted, not just a total',
    recorded, the run said ok while the fleet's per-driver Uber earnings, the one
    place Uber money exists at all, stayed empty. */
 check('and both of the uber sub-sources contribute their windows to the run',
-  /perf\.chunks/.test(uber) && /rows_written: trips\.total \+ perf\.total/.test(uber));
+  /s\.perf\.chunks/.test(uber) && /s\.trips\.chunks/.test(uber));
 /* It pages through `pageInfo`, and only through `pageInfo`.
    ─────────────────────────────────────────────────────────────────────────
    Two earlier attempts failed and this rule is the difference between them and
