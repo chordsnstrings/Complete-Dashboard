@@ -59,6 +59,16 @@ await db.query(
       SET emirates_id = $1, licence_no = $2, phone = $3, email = $4,
           picture_url = 'https://example.invalid/p.jpg'
     WHERE driver_ext_id = 'u-khalid'`, [EMIRATES, LICENCE, PHONE, EMAIL]);
+/* The PHOTOGRAPH, which since sql/schema_v63.sql is the bytes rather than the
+   address. driver_compliance.picture_url above still holds what Uber returned —
+   a link signed for twelve hours — and that string is deliberately never
+   emitted; what a reader is offered is this origin's address for the copy on
+   file. Both are seeded here so the assertion below tests the right thing: not
+   that some URL survives redaction, but that the photograph does. */
+await db.query(
+  `INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type, byte_len, sha256)
+   VALUES ('uber','u-khalid', $1, 'image/jpeg', 3, 'deadbeef')`,
+  [Buffer.from([0xff, 0xd8, 0xff])]);
 
 const { port, server } = await mountAll(db);
 const get = async (p, headers = {}) => {
@@ -105,7 +115,20 @@ check('what the record HOLDS is reported separately from what was sent',
 console.log('\n── the features the operator asked for survive it ──');
 check('the phone number is still there', ac.phone === PHONE, ac.phone);
 check('the email is still there', ac.email === EMAIL, ac.email);
-check('the picture is still there', /example\.invalid/.test(ac.picture_url || ''), ac.picture_url);
+/* Pinned to the PHOTOGRAPH, not to the string. This read
+   /example\.invalid/.test(ac.picture_url) — asserting that whatever Uber's own
+   column happened to hold came back out — so it would have passed for as long
+   as the product kept handing readers a twelve-hour signed CloudFront URL that
+   was 403 by the time anybody clicked it, and it failed the moment that stopped.
+   What the operator asked for is a face on the page. The property is that an
+   anonymous caller is still offered one. */
+check('the picture is still there', ac.picture_url === '/api/driver/photo/uber/u-khalid',
+  ac.picture_url);
+check('…and it is this origin’s address, not a link this product cannot re-sign',
+  typeof ac.picture_url === 'string' && ac.picture_url.startsWith('/'),
+  ac.picture_url);
+check('…while Uber’s own expiring url never leaves',
+  !/example\.invalid/.test(anon.text), (anon.text.match(/example\.invalid[^"]{0,40}/) || [''])[0]);
 check('the name is still there', /Khalid/.test(ac.full_name || ''), ac.full_name);
 /* The EXPIRY is the whole point of the compliance page and is not a document
    number. Redacting it would answer a security finding by deleting the
