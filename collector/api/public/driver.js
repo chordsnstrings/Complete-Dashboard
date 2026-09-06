@@ -17,7 +17,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
-  sourceLabel, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
+  sourceLabel, completionTone, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
   avatar, moneyInTile, faresTile, alertRateFigure, splitAlerts,
   UBER_FARE_WHY } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
@@ -2048,7 +2048,13 @@ export async function renderDriverDirectory(root) {
         ? `${money(r.revenue)}${r.priced_trips != null
           ? `<span class="dim" title="bookings of theirs that report a fare"> · ${fmt(r.priced_trips)}</span>` : ''}`
         : `<span class="ent-off" title="${UBER_FARE_WHY}. Until this week is collected the money for it is in Paid">—</span>`) },
-    { label: 'Completion', key: 'completion_pct', num: true, render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
+    /* The verdict in the CELL, at the same thresholds the driver page's own
+       tile has always used. 434 rows of bare percentages give a reader nothing
+       to scan for; the whole reason to open this table is to find the people
+       whose week went badly. */
+    { label: 'Completion', key: 'completion_pct', num: true,
+      cellCls: (r) => { const t = completionTone(r.completion_pct); return t ? `v-${t}` : ''; },
+      render: (r) => (r.completion_pct != null ? pct(r.completion_pct) : '—') },
     /* Measured on the live fleet: rating is null for all 360 people, because
        nothing in the collector writes it — Uber's roster endpoint returns
        onboarding status and a vehicle, not a score, and the earnings breakdown

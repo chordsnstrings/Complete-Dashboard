@@ -115,16 +115,16 @@ await page.goto(`http://127.0.0.1:${server.address().port}/?ui=desktop#revenue?$
   { waitUntil: 'domcontentloaded' });
 await page.waitForTimeout(2000);
 for (let i = 0; i < 30; i++) {
-  const ready = await page.evaluate(() => {
-    const h = [...document.querySelectorAll('h3')].find((x) => /What each channel/i.test(x.textContent));
-    return !!h?.closest('.panel')?.querySelector('tbody tr');
-  });
+  const ready = await page.evaluate(() =>
+    !!document.querySelector('[data-panel="revenue-channels"] tbody tr'));
   if (ready) break;
   await page.waitForTimeout(1000);
 }
+/* Located by the panel's HANDLE. Matching /What each channel/ against the <h3>
+   made eight assertions about commission columns fail the moment that heading
+   was reworded for the people who read it — see panel()'s `key` in ui.js. */
 const t = await page.evaluate(() => {
-  const h = [...document.querySelectorAll('h3')].find((x) => /What each channel/i.test(x.textContent));
-  const el = h?.closest('.panel');
+  const el = document.querySelector('[data-panel="revenue-channels"]');
   if (!el) return null;
   const w = el.querySelector('.tscroll');
   return {
@@ -157,8 +157,7 @@ check('the priced channel still shows its own fares and claims no commission',
    columns this change is about. On production after the line breaks the cut
    is 46px with only Why beyond the edge, down from 322px. */
 const hidden = await page.evaluate(() => {
-  const h = [...document.querySelectorAll('h3')].find((x) => /What each channel/i.test(x.textContent));
-  const w = h?.closest('.panel')?.querySelector('.tscroll');
+  const w = document.querySelector('[data-panel="revenue-channels"] .tscroll');
   if (!w) return null;
   const edge = w.getBoundingClientRect().right;
   return [...w.querySelectorAll('thead th')]

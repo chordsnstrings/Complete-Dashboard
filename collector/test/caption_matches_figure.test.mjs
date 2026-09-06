@@ -51,6 +51,7 @@
    The whole test drives the real api/public against fixtures, so a regression
    in the page or in the router fails here. */
 import express from 'express';
+import { readFileSync } from 'node:fs';
 import { launchChromium } from './browser.mjs';
 
 let pass = 0, fail = 0;
@@ -275,8 +276,20 @@ check('an address carrying markup is escaped, not executed',
    EMPTY address is not a mistyped one. */
 await open('', () => [...document.querySelectorAll('.kpi .l')].length > 0);
 const landing = await headerOf();
-check('an empty address still lands on Unit economics',
-  landing.title === 'Unit economics', `title "${landing.title}"`);
+/* Pinned to the DESTINATION, not to its title. This line used to assert
+   `landing.title === 'Unit economics'`, which made it a test about the wording
+   of a page name — so renaming that page for the dispatchers who read it broke
+   an assertion that was actually about routing. The property is: an empty
+   address renders whatever app.js declares as LANDING, and is not treated as a
+   mistyped one. */
+const LANDING = (readFileSync(new URL('../api/public/app.js', import.meta.url), 'utf8')
+  .match(/export const LANDING = '([a-z-]+)'/) || [])[1];
+check('app.js names one landing destination', !!LANDING, String(LANDING));
+await open(`#${LANDING}`, () => [...document.querySelectorAll('.kpi .l')].length > 0);
+const named = await headerOf();
+check('an empty address lands on the declared landing page, not the not-found one',
+  landing.title === named.title && !/not found|unrecognised/i.test(landing.title),
+  `empty "${landing.title}" vs #${LANDING} "${named.title}"`);
 
 /* …and the controls the not-found state hides come back. Nothing else in the
    app sets #fGrain's display, so hiding it without setting it both ways would

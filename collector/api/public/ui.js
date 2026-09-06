@@ -15,8 +15,21 @@ export const el = (tag, cls, html) => {
 };
 export const esc = (s) => String(s ?? '').replace(/[<>&"]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
 
-export function panel(title, cap) {
+/* `key` is a STABLE HANDLE, and it exists because the heading is not one.
+   ─────────────────────────────────────────────────────────────────────────
+   Four browser tests located their panel by matching prose against the <h3>
+   — /What each channel/, /earning most per day/ — and a pass over the copy
+   that renamed those headings for the readers who have to use them broke all
+   four at once, reporting eight failures that described nothing wrong with
+   the product. A test pinned to a sentence is a test that forbids improving
+   the sentence.
+
+   So a panel a test needs to find carries a name that is not shown to anybody
+   and therefore never needs rewording. Optional: the three hundred panels
+   nothing asserts on are unchanged. */
+export function panel(title, cap, key) {
   const p = el('div', 'panel');
+  if (key) p.dataset.panel = key;
   if (title) p.append(el('h3', null, title));
   if (cap) p.append(el('p', 'cap', cap));
   /* .pbody, not a bare div: a panel that holds more than one thing — a note,
@@ -276,7 +289,10 @@ export function tableFrom(rows, cols, { compact = false, sortable = false,
   }).join('')}</tr></thead>`;
 
   const body = (list) => `<tbody>${list.map((r) => `<tr>${cols.map((c) =>
-    `<td class="${c.num ? 'num' : ''}">${c.render ? c.render(r) : plainCell(c, r)}</td>`)
+    /* `cellCls` lets a column give ONE cell a verdict — a completion rate below
+       the threshold reads as bad in the cell rather than only in a tile far
+       above the table. Returns a class name or nothing. */
+    `<td class="${[c.num ? 'num' : '', (c.cellCls && c.cellCls(r)) || ''].filter(Boolean).join(' ')}">${c.render ? c.render(r) : plainCell(c, r)}</td>`)
     .join('')}</tr>`).join('')}</tbody>`;
 
   /* The caller's row-level handlers index into the array it passed, so the
@@ -511,8 +527,11 @@ export function kpiRow(items) {
     const to = k.to || (k.cohort ? href('cohort', k.cohort) : null);
     const tag = to ? 'a' : 'div';
     const attr = to ? ` href="${to}"` : '';
+    /* See panel()'s `key`: a tile a test has to find needs a handle that is not
+       its label, or the label can never be improved. */
+    const kk = k.key ? ` data-kpi="${esc(k.key)}"` : '';
     return `
-    <${tag} class="kpi${k.tone ? ' t-' + k.tone : ''}${to ? ' kpi-open' : ''}"${attr}>
+    <${tag} class="kpi${k.tone ? ' t-' + k.tone : ''}${to ? ' kpi-open' : ''}"${attr}${kk}>
       <div class="l">${esc(k.label)}</div>
       <div class="n num${long}">${k.html || esc(k.value ?? '—')}</div>
       ${k.sub ? `<div class="s">${esc(k.sub)}</div>` : ''}
@@ -695,6 +714,36 @@ export const SOURCE_LABEL = {
      the #sources Source column. */
   uber_fleet: 'Uber fleet',
 };
+/* One threshold for "how did this go", used by every surface that judges it.
+   ─────────────────────────────────────────────────────────────────────────
+   The driver page's Completion TILE has judged at 95 and 85 since it was
+   written; the drivers DIRECTORY prints the same measure as a bare percentage
+   with no verdict at all, so a reader scanning 434 rows for the people who
+   need a conversation has nothing to scan for. Two surfaces, one measure, and
+   only one of them had an opinion.
+
+   Stated once here. A rate nobody measured has no verdict — an absent figure
+   must not be painted as a bad one. */
+export const completionTone = (v) => (v == null || v === '' || !Number.isFinite(Number(v))
+  ? null : Number(v) >= 95 ? 'good' : Number(v) >= 85 ? 'warn' : 'critical');
+
+/* A source's own colour, as a token.
+   ─────────────────────────────────────────────────────────────────────────
+   Beside SOURCE_LABEL because they answer the same question about the same
+   keys and drifting apart would mean a chart drawing Yango in Bolt's green.
+   The values live in app.css (--ch-*) so all three theme states resolve; this
+   map only says which key takes which token.
+
+   Returns null for anything unmapped, and every caller falls through to the
+   categorical palette on null — a channel nobody has assigned a colour is
+   better drawn in a neutral series colour than in a guess at a brand. */
+export const SOURCE_TOKEN = {
+  uber: '--ch-uber', uber_fleet: '--ch-uber',
+  yango: '--ch-yango', bolt: '--ch-bolt', hotel: '--ch-hotel',
+  fms: '--ch-fms', cabman: '--ch-cabman',
+};
+export const sourceToken = (s) => SOURCE_TOKEN[String(s || '').toLowerCase()] || null;
+
 /* An enum value written for a person. The rule engine stores `critical`,
    `compliance`, `vehicle`; printed as a tile's value they are the largest text
    on the page and were lowercase with underscores in them. */

@@ -292,6 +292,7 @@ const open = async (hash, ready) => {
   await page.waitForTimeout(600);
 };
 const readTiles = () => page.evaluate(() => [...document.querySelectorAll('.kpi')].map((k) => ({
+  key: k.dataset.kpi || null,
   label: k.querySelector('.l')?.textContent.trim() || '',
   value: k.querySelector('.n')?.textContent.trim() || '',
   sub: k.querySelector('.s')?.textContent.trim() || '',
@@ -437,11 +438,15 @@ check('…and those 22,180 bookings are not also filed as having no money value'
 
 /* ── 3. the idle tile names the base its money was measured over ─────────── */
 console.log('\n#unit pairs its idle days with the base the cost was measured over');
+/* Both tiles by their HANDLE rather than their label. Pinned to the label,
+   this block asserted that a tile called "Idle vehicle-days" exists — a
+   sentence nobody in a yard says, and one the copy pass replaced with "Days a
+   car sat idle". See kpiRow()'s `key` in api/public/ui.js. */
 await open('#unit?days=2',
-  () => [...document.querySelectorAll('.kpi .l')].some((l) => /Idle vehicle-days/.test(l.textContent)));
+  () => !!document.querySelector('[data-kpi="unit-idle-days"]'));
 const unitTiles = await tiles();
-const idleTile = unitTiles.find((k) => k.label === 'Idle vehicle-days');
-const perDay = unitTiles.find((k) => k.label === 'Per earning vehicle-day');
+const idleTile = unitTiles.find((k) => k.key === 'unit-idle-days');
+const perDay = unitTiles.find((k) => k.key === 'unit-aed-per-earning-day');
 check('the tile is there and counts every idle day', idleTile?.value === '289',
   `value "${idleTile?.value}"`);
 check('…and does not pair that count with a bare figure',

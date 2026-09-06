@@ -63,15 +63,19 @@ const panels = async (hash) => {
   await page.goto(`${base}/?ui=desktop${hash}`, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
   for (let i = 0; i < 30; i++) {
-    const ready = await page.evaluate(() => [...document.querySelectorAll('.panel h3')]
-      .some((h) => /earning most per day/i.test(h.textContent)));
+    const ready = await page.evaluate(() => !!document.querySelector('[data-panel="unit-cars-top"]'));
     if (ready) break;
     await page.waitForTimeout(1000);
   }
   await page.waitForTimeout(1200);
+  /* Keyed on the panel's HANDLE, not on its heading. The first version of this
+     helper keyed the map by the <h3> text, so rewording four headings for the
+     dispatchers who read them failed nine assertions that had nothing to say
+     about ranking gates. See panel()'s `key` in api/public/ui.js. */
   return page.evaluate(() => Object.fromEntries([...document.querySelectorAll('.panel')]
-    .map((p) => [p.querySelector('h3')?.textContent?.trim() || '?',
+    .map((p) => [p.dataset.panel || p.querySelector('h3')?.textContent?.trim() || '?',
       { cap: p.querySelector('p.cap')?.textContent || '',
+        title: p.querySelector('h3')?.textContent?.trim() || '',
         rows: p.querySelectorAll('tbody tr').length,
         text: p.innerText.replace(/\s+/g, ' ').slice(0, 200) }])));
 };
@@ -80,10 +84,9 @@ const panels = async (hash) => {
    calendar-month default is in for the first ten days of every month. */
 console.log('\na window shorter than ten days still ranks');
 const p = await panels('#unit?from=2026-08-10&to=2026-08-13');
-const RANKED = ['Assets earning most per day worked', 'Assets earning least per day worked',
-  'People earning most per day worked', 'People earning least per day worked'];
+const RANKED = ['unit-cars-top', 'unit-cars-bottom', 'unit-drivers-top', 'unit-drivers-bottom'];
 for (const name of RANKED) {
-  check(`"${name}" has rows`, (p[name]?.rows || 0) > 0,
+  check(`"${p[name]?.title || name}" has rows`, (p[name]?.rows || 0) > 0,
     `${p[name]?.rows} rows — ${p[name]?.text?.slice(0, 90)}`);
 }
 /* The gate that was actually applied, printed. "At least 10" over a four-day

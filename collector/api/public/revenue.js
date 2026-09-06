@@ -319,7 +319,8 @@ export async function renderRevenue(root) {
 
   /* ── per channel ─────────────────────────────────────────────────────── */
   const p = panel('Money by channel',
-    'Two kinds of money, kept apart. "Basis" is which one this row is, and how far it can be trusted.');
+    'Two kinds of money, kept apart. "Basis" is which one this row is, and how far it can be trusted.',
+    'revenue-channels');
   p.body.append(tableFrom(live, [
     /* The channel name carries which channel it is, and the link discarded it
        — all three names opened the same unfiltered #platforms, whose own

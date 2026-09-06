@@ -39,7 +39,7 @@
 
 import { areaChart, hbars, scatter, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, pill, entity,
-  dayStr, money, pct, sourceLabel, countOf, plural, verdict,
+  dayStr, money, pct, sourceLabel, sourceToken, countOf, plural, verdict,
   alertRateFigure } from './ui.js';
 import { q, href, state } from './data.js';
 import { makeMap, fitTo } from './map.js';
@@ -183,11 +183,11 @@ async function moneyTab(root) {
      least 10" over a three-day window was a sentence about a different page. */
   const best = panel('Cars earning most per day worked',
     'Enough earning days to carry a rate, so a car that worked once for a good fare does not lead '
-    + 'the fleet.');
+    + 'the fleet.', 'unit-cars-top');
   g2.append(best.panel);
   const worst = panel('Cars earning least per day worked',
     'The same threshold. These held a driver and produced almost nothing — the row above the ones '
-    + 'that produced nothing at all.');
+    + 'that produced nothing at all.', 'unit-cars-bottom');
   g2.append(worst.panel);
 
   const dead = panel('Insured cars that earned nothing',
@@ -200,10 +200,12 @@ async function moneyTab(root) {
   root.append(mapP.panel);
 
   const g3 = el('div', 'grid g2'); root.append(g3);
-  const pbest = panel('Drivers earning most per day worked', 'Enough days driven to carry a rate');
+  const pbest = panel('Drivers earning most per day worked', 'Enough days driven to carry a rate',
+    'unit-drivers-top');
   g3.append(pbest.panel);
   const pworst = panel('Drivers earning least per day worked',
-    'The same threshold. They worked the days, the money per day is what is low');
+    'The same threshold. They worked the days, the money per day is what is low',
+    'unit-drivers-bottom');
   g3.append(pworst.panel);
 
   [conc.body, chan.body, best.body, worst.body, dead.body, mapP.body, pbest.body, pworst.body]
@@ -353,7 +355,8 @@ async function moneyTab(root) {
               ? ` A further ${money(t.unplaced_payouts)} could not be placed on any car at all.`
               : '')
           : '') },
-    { label: 'Money per car per earning day', value: money(t.aed_per_earning_day, 'AED', 0),
+    { key: 'unit-aed-per-earning-day',
+      label: 'Money per car per earning day', value: money(t.aed_per_earning_day, 'AED', 0),
       sub: `over ${fmt(t.earning_vehicle_days)} days a car actually earned` },
     { label: 'Per km', value: money(t.aed_per_km, 'AED', 2),
       sub: `over ${fmt(t.km)} booked km` },
@@ -407,7 +410,8 @@ async function moneyTab(root) {
       const pricedIdle = A.rows.reduce((a, r) => a
         + (r.forgone_at_own_rate != null ? (+r.idle_days || 0) : 0), 0);
       const unpricedIdle = Math.max(0, (t.idle_vehicle_days || 0) - pricedIdle);
-      return { label: 'Days a car sat idle', value: fmt(t.idle_vehicle_days),
+      return { key: 'unit-idle-days',
+        label: 'Days a car sat idle', value: fmt(t.idle_vehicle_days),
         tone: 'warn',
         sub: t.forgone_at_own_rate
           ? `${money(t.forgone_at_own_rate)} over the ${fmt(pricedIdle)} of them held by a car that `
@@ -469,8 +473,9 @@ async function moneyTab(root) {
   if (!yields.length) {
     empty(chan.body, 'No channel reports both money and distance in this range');
   } else {
-    hbars(chan.body, yields.map((p) => ({ label: sourceLabel(p.platform), n: p.aed_per_km })),
-      { color: '--b500', valueFmt: (v) => money(v, 'AED', 2),
+    hbars(chan.body, yields.map((p) => ({ ...p, label: sourceLabel(p.platform), n: p.aed_per_km })),
+      { colorFor: (d) => sourceToken(d.platform), color: '--b500',
+        valueFmt: (v) => money(v, 'AED', 2),
         onClick: () => { location.hash = href('revenue'); } });
     /* The basis rides in the channel's own cell rather than in a fifth column.
        It is the caveat that makes the comparison readable, and as a column it

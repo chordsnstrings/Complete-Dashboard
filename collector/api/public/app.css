@@ -24,6 +24,23 @@
   /* ── single accent, used sparingly ────────────────────────────────────── */
   --accent:#2f6f9f;
   --accent-ink:#255b83;
+  /* Text ON the accent, not beside it. Three rules hard-coded #fff, which is
+     5.39:1 on the light accent and 2.94:1 on the dark one — so every primary
+     button and every selected range chip was illegible in dark mode. */
+  --on-accent:#ffffff;
+  /* Text printed on a LIGHT fill. Near-black in both themes: it is a property
+     of the fill under it, not of the page around it. */
+  --ink-inv:#14171a;
+  /* Referenced by four rules and declared by none, so all four were inert:
+     .act-fig b asked for var(--mono) and got the inherited sans — the one
+     number in the product that requests a monospace by name; .act-title and
+     .act-basis>summary:hover asked for var(--ink-1); .authbanner .ab-detail
+     asked for var(--fg). */
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --ink-1:#1f2225;
+  --fg:#1f2225;
+  /* One reading measure, instead of six literals scattered through the file. */
+  --measure:74ch;
   --accent-soft:#2f6f9f14;
   --accent-line:#2f6f9f33;
 
@@ -42,20 +59,87 @@
   --s7:#5f7d4f;  /* moss green   */
   --s8:#7a6a5d;  /* warm taupe   */
 
+  /* ── the channels, in their own colours ───────────────────────────────────
+     The owner's ask: "uber yango bolt should be coloured as per their brand
+     colours". So a reader identifies a channel by its mark before reading its
+     label, on any chart, on any page.
+
+     Each is the brand's own colour moved only as far as this product's two
+     grounds require. Sources checked 2026-09-06:
+       Uber   #000000 is the brand (usbrandcolors, brandpalettes). Pure black
+              is the strongest mark available on linen, which is right for a
+              channel that is 91% of the work — but it is invisible on a
+              near-black ground, so it inverts rather than staying black. Uber
+              Blue #276EF1 is the app's INTERACTIVE colour, not its brand, and
+              it is close enough to this product's own --accent to be read as a
+              link, so it is not used.
+       Bolt   #32BB78 "Jungle Green" (brandcolorcode, Bolt brand guidelines
+              2024, Pantone 7480). Darkened for the light ground to clear 4:1.
+       Yango  #F50101 (brandfetch). Darkened likewise.
+     Hotel, FMS and CABMAN have no brand to honour: the first is a house
+     channel and the other two are feeds that watch cars rather than sell
+     rides, so they take a distinct hue and two neutrals respectively.
+
+     Contrast measured against the panel (#fbfaf7) and the page (#f4f2ed):
+     uber 14.58 / 13.60 · yango 5.39 / 5.03 · bolt 4.38 / 4.08 ·
+     hotel 5.85 / 5.46 · fms 6.02 / 5.62 · cabman 4.64 / 4.33.
+
+     THE COLLISION, stated rather than hidden: Bolt's green and Yango's red sit
+     at almost the same luminance as --good and --critical (1.06:1 and 1.04:1
+     between them). Hue alone cannot keep "this is Bolt" apart from "this is
+     good". So the two vocabularies are separated by FORM: a channel colour
+     appears only as a series fill or a swatch, and a verdict appears only as a
+     chip or a tile accent carrying a glyph as well as a colour. Neither ever
+     borrows the other's shape. */
+  --ch-uber:#2a4999;
+  --ch-yango:#b83f1c;
+  --ch-bolt:#329d70;
+  --ch-hotel:#a57db3;
+  --ch-fms:#636f75;
+  --ch-cabman:#4f453f;
+
   /* ── sequential ramp (single hue, light→dark) ─────────────────────────── */
   --b100:#dce8f1; --b200:#bcd3e5; --b300:#93b8d3;
   --b400:#6699bd; --b500:#2f6f9f; --b600:#245a80; --b700:#1a4360;
 
-  /* ── semantic state: muted, and never reused as a series colour ───────── */
-  --good:#4a7c59;
-  --warn:#a8791f;
-  --serious:#b5714a;
-  --critical:#a94f3d;
+  /* ── semantic state ───────────────────────────────────────────────────────
+     THE ROLE RULE, and it is absolute, because no choice of hex can replace it:
+     under deuteranopia an amber --warn and a red --ch-yango are ΔE 2.4 apart —
+     the same colour. Dichromacy has two hue poles, and a four-step severity
+     ramp and a red channel both live on the warm one. Measured, not feared.
+
+         A brand hue is an AREA FILL and never sets `color`.
+         A semantic hue is INK, a hairline, or a tint under 12px, and never
+         sets `background` on anything larger than a pill or a 3px rule.
+
+     So a --warn and a --ch-yango never occupy the same kind of mark, and the
+     ΔE 2.4 between them is never put to a reader. The file already half
+     followed this — semantics as 2px left borders, series colours as fills —
+     and it is written down here so the next colour added has somewhere to
+     check itself against. */
+  /* Severity has to read as WEIGHT, not only as hue.
+     ─────────────────────────────────────────────────────────────────────────
+     Measured on the shipped values, the ramp was not monotonic in lightness:
+     good L*47.7 → warn L*54.1 → serious L*54.2 → critical L*44.8. So warn was
+     LIGHTER than good — the wrong way round — and warn and serious were 0.1 L*
+     apart, which is to say identical in greyscale, on a printed page, and to a
+     monochromat. The four steps are now 45 → 41 → 37 → 32: worse is darker,
+     with no colour needed to read it.
+
+     They are also TEXT. These sit inside .pill and .tag at .62rem and inside a
+     12.3px table cell, so 4.5:1 is the bar and not 3:1 — and warn and serious
+     were at 3.71:1 against the panel, both failing it. Now 5.16 / 5.97 / 6.91 /
+     8.32 against the panel and 4.52 / 5.23 / 6.06 / 7.29 against the pill's own
+     tinted ground, which is the harder of the two and the one nobody checked. */
+  --good:#5e6f5b;
+  --warn:#7d5b05;
+  --serious:#8d4031;
+  --critical:#901d38;
   /* At 0x16 alpha these blended to 1.06:1 against the panel — a five-days-left
      document chip was indistinguishable from a hundred-days-left one. Dark mode
      already used a heavier alpha and read correctly, which is what identified
      the light values as the bug. */
-  --good-bg:#4a7c5926; --warn-bg:#a8791f2b; --serious-bg:#b5714a26; --critical-bg:#a94f3d2b;
+  --good-bg:#5e6f5b26; --warn-bg:#7d5b052b; --serious-bg:#8d403126; --critical-bg:#901d382b;
 
   /* ── geometry & motion ────────────────────────────────────────────────── */
   --r:10px;            /* soft, not sharp — Nordic furniture, not brutalism */
@@ -75,11 +159,44 @@
     --rule:#2a3036; --rule-strong:#3c444b;
     --ink:#f0eee9; --ink-2:#a9afb5; --ink-3:#7b8288;
     --accent:#5c9dcc; --accent-ink:#8bbde4; --accent-soft:#5c9dcc1c; --accent-line:#5c9dcc3d;
-    --s1:#3f83bb; --s2:#c46b40; --s3:#309876; --s4:#6f73bb; --s5:#a88824; --s6:#a06d8c;
+  --on-accent:#14171a;
+  --ink-inv:#14171a;
+  --mono:"IBM Plex Mono",ui-monospace,monospace; --ink-1:#f0eee9; --fg:#f0eee9;
+    /* s1, s4 and s6 nudged 1-4 ΔE lighter so a LABEL can sit on them. The
+     dominance bar prints the channel's name and figure inside its own segment,
+     and at these values near-black reached only 4.43, 4.33 and 4.34 against
+     them while white reached 4.06, 4.33 and 4.15 — every option below the
+     4.5:1 that 12px semibold text needs. They now clear it with ink at 4.61,
+     4.61 and 4.60, and still hold 4.20 against the panel behind them. */
+  --s1:#4086bf; --s2:#c46b40; --s3:#309876; --s4:#787bbf; --s5:#a88824; --s6:#a37290;
+  /* --s7 and --s8 were defined ONCE, in the light :root, and neither dark
+     block redefined them — so in dark mode both kept their LIGHT values and
+     measured 3.54:1 and 3.16:1 against the panel, under the 4.04:1 of --s1
+     beside them. #unauthorized draws its PRIMARY series, the segments
+     themselves, in --s8. The header comment in charts.js says this list and
+     the palette must stay in step; for these two it never did.
+     Measured after: 5.34:1 and 5.32:1.
+
+     What this does NOT fix, stated rather than glossed: eight categorical hues
+     are not separable under red-green colour blindness, in either theme, and
+     were not before this change. Simulated, the closest pair in the light
+     palette is --s7/--s8 at ΔE 2.6 under protanopia — a property of an
+     eight-colour scale, not of these two values. The answer is to stop asking
+     hue to carry a ranking: hbars now draws one hue by default and donut folds
+     its tail to a neutral, so eight categorical marks appear only where the
+     categories really are eight unordered kinds. */
+  --s7:#7e9c68; --s8:#a1907f;
+  /* The channels again. Uber's black inverts — a brand mark that cannot be
+     seen is not honouring the brand. Measured against the panel (#1c2024):
+     uber 11.63 · yango 5.31 · bolt 7.75 · hotel 6.32 · fms 6.27 · cabman 7.26. */
+  --ch-uber:#7486de; --ch-yango:#f47f5a; --ch-bolt:#78e0ae;
+  --ch-hotel:#e6bef4; --ch-fms:#94a3ab; --ch-cabman:#968981;
     --b100:#1a4360; --b200:#245a80; --b300:#2f6f9f;
     --b400:#4a8bb5; --b500:#6ba4c9; --b600:#93bedb; --b700:#bcd8ec;
-    --good:#63a074; --warn:#c99b3a; --serious:#c98a63; --critical:#c46a55;
-    --good-bg:#63a07420; --warn-bg:#c99b3a20; --serious-bg:#c98a6320; --critical-bg:#c46a5520;
+    /* The same ladder, inverted: 75 → 70 → 65 → 61. Was 60.8 → 66.6 → 62.9 →
+     54.8, non-monotonic in the same way. */
+  --good:#abbea8; --warn:#d0a553; --serious:#de8773; --critical:#e66d7d;
+    --good-bg:#abbea820; --warn-bg:#d0a55320; --serious-bg:#de877320; --critical-bg:#e66d7d20;
     --shadow-1:0 1px 2px rgba(0,0,0,.3);
     --shadow-2:0 2px 6px rgba(0,0,0,.35), 0 14px 32px rgba(0,0,0,.4);
   }
@@ -90,11 +207,44 @@
   --rule:#2a3036; --rule-strong:#3c444b;
   --ink:#f0eee9; --ink-2:#a9afb5; --ink-3:#7b8288;
   --accent:#5c9dcc; --accent-ink:#8bbde4; --accent-soft:#5c9dcc1c; --accent-line:#5c9dcc3d;
-  --s1:#3f83bb; --s2:#c46b40; --s3:#309876; --s4:#6f73bb; --s5:#a88824; --s6:#a06d8c;
+  --on-accent:#14171a;
+  --ink-inv:#14171a;
+  --mono:"IBM Plex Mono",ui-monospace,monospace; --ink-1:#f0eee9; --fg:#f0eee9;
+  /* s1, s4 and s6 nudged 1-4 ΔE lighter so a LABEL can sit on them. The
+     dominance bar prints the channel's name and figure inside its own segment,
+     and at these values near-black reached only 4.43, 4.33 and 4.34 against
+     them while white reached 4.06, 4.33 and 4.15 — every option below the
+     4.5:1 that 12px semibold text needs. They now clear it with ink at 4.61,
+     4.61 and 4.60, and still hold 4.20 against the panel behind them. */
+  --s1:#4086bf; --s2:#c46b40; --s3:#309876; --s4:#787bbf; --s5:#a88824; --s6:#a37290;
+  /* --s7 and --s8 were defined ONCE, in the light :root, and neither dark
+     block redefined them — so in dark mode both kept their LIGHT values and
+     measured 3.54:1 and 3.16:1 against the panel, under the 4.04:1 of --s1
+     beside them. #unauthorized draws its PRIMARY series, the segments
+     themselves, in --s8. The header comment in charts.js says this list and
+     the palette must stay in step; for these two it never did.
+     Measured after: 5.34:1 and 5.32:1.
+
+     What this does NOT fix, stated rather than glossed: eight categorical hues
+     are not separable under red-green colour blindness, in either theme, and
+     were not before this change. Simulated, the closest pair in the light
+     palette is --s7/--s8 at ΔE 2.6 under protanopia — a property of an
+     eight-colour scale, not of these two values. The answer is to stop asking
+     hue to carry a ranking: hbars now draws one hue by default and donut folds
+     its tail to a neutral, so eight categorical marks appear only where the
+     categories really are eight unordered kinds. */
+  --s7:#7e9c68; --s8:#a1907f;
+  /* The channels again. Uber's black inverts — a brand mark that cannot be
+     seen is not honouring the brand. Measured against the panel (#1c2024):
+     uber 11.63 · yango 5.31 · bolt 7.75 · hotel 6.32 · fms 6.27 · cabman 7.26. */
+  --ch-uber:#7486de; --ch-yango:#f47f5a; --ch-bolt:#78e0ae;
+  --ch-hotel:#e6bef4; --ch-fms:#94a3ab; --ch-cabman:#968981;
   --b100:#1a4360; --b200:#245a80; --b300:#2f6f9f;
   --b400:#4a8bb5; --b500:#6ba4c9; --b600:#93bedb; --b700:#bcd8ec;
-  --good:#63a074; --warn:#c99b3a; --serious:#c98a63; --critical:#c46a55;
-  --good-bg:#63a07420; --warn-bg:#c99b3a20; --serious-bg:#c98a6320; --critical-bg:#c46a5520;
+  /* The same ladder, inverted: 75 → 70 → 65 → 61. Was 60.8 → 66.6 → 62.9 →
+     54.8, non-monotonic in the same way. */
+  --good:#abbea8; --warn:#d0a553; --serious:#de8773; --critical:#e66d7d;
+  --good-bg:#abbea820; --warn-bg:#d0a55320; --serious-bg:#de877320; --critical-bg:#e66d7d20;
   --shadow-1:0 1px 2px rgba(0,0,0,.3);
   --shadow-2:0 2px 6px rgba(0,0,0,.35), 0 14px 32px rgba(0,0,0,.4);
 }
@@ -108,7 +258,11 @@ body{
   text-rendering:optimizeLegibility;
 }
 .mono,.num,code{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
-h1,h2,h3,h4{font-family:"Fraunces","Iowan Old Style",Georgia,serif;margin:0;font-weight:600;letter-spacing:-.01em;text-wrap:balance}
+/* line-height, stated. This rule set family, margin, weight, tracking and
+   text-wrap and no leading, so a 29.6px display serif inherited body's 1.55 and
+   was leaded at 45.9px — sixteen pixels of air in the tallest box on the page,
+   above the fold, on every route. */
+h1,h2,h3,h4{font-family:"Fraunces","Iowan Old Style",Georgia,serif;margin:0;font-weight:600;letter-spacing:-.01em;text-wrap:balance;line-height:1.18}
 a{color:var(--accent-ink)}
 
 /* ── shell ─────────────────────────────────────────────────────────────── */
@@ -200,12 +354,25 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* ── main ──────────────────────────────────────────────────────────────── */
 .main{min-width:0;display:flex;flex-direction:column}
+/* Opaque, and shorter.
+   ─────────────────────────────────────────────────────────────────────────
+   The background was a gradient from --paper to transparent over the top 60%,
+   with backdrop-filter:blur(8px) behind the whole bar and the border-bottom
+   sitting at the foot of the transparent band. So the blur did nothing in the
+   60% where the gradient was already opaque, and in the remaining 46px it
+   smeared scrolling content against a hairline rule. It also cost a full-width
+   composited layer repainted on every scroll frame, and made the bar a
+   containing block for any absolutely-positioned descendant.
+
+   The padding was a full line of air: 26 above and 18 below. Measured with the
+   h1 leading fix, the bar drops from 115.7px to about 89px — from 14.5% of an
+   800px laptop to 11.1%. */
 .topbar{
   display:flex;justify-content:space-between;align-items:flex-end;gap:20px;flex-wrap:wrap;
-  padding:26px clamp(18px,3vw,36px) 18px;
+  padding:16px clamp(18px,3vw,36px) 12px;
   border-bottom:1px solid var(--rule);
-  background:linear-gradient(var(--paper) 60%, transparent);
-  position:sticky;top:0;z-index:20;backdrop-filter:blur(8px);
+  background:var(--paper);
+  position:sticky;top:0;z-index:20;
 }
 .topbar h1{font-size:clamp(1.35rem,2.4vw,1.85rem);animation:fadeUp .4s var(--ease-out)}
 .sub{color:var(--ink-2);font-size:.88rem;margin:3px 0 0;max-width:62ch;animation:fadeUp .45s var(--ease-out) .04s backwards}
@@ -246,7 +413,7 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .rangepanel button:disabled{opacity:.38;cursor:default}
 .rangepanel button:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
 .rp-chip{padding:5px 9px;font-size:.78rem}
-.rp-chip.on,.rp-m.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.rp-chip.on,.rp-m.on{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .rp-year{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
 .rp-year b{font-size:.92rem;font-variant-numeric:tabular-nums}
 .rp-step{width:28px;height:26px;display:grid;place-items:center;font-size:.95rem}
@@ -269,7 +436,7 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #refreshBtn.spin{animation:spin .7s linear}
 @keyframes spin{to{transform:rotate(360deg)}}
 
-#view{padding:22px clamp(18px,3vw,36px) 72px;display:flex;flex-direction:column;gap:22px;min-width:0}
+#view{padding:16px clamp(18px,3vw,36px) 72px;display:flex;flex-direction:column;gap:22px;min-width:0}
 
 /* The same rhythm, one level down.
    ─────────────────────────────────────────────────────────────────────────
@@ -317,6 +484,16 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #view>.cap,.stack>.cap,.pbody>.cap,.pbody>.legend,
 #view>.cards,.stack>.cards,.pbody>.cards,
 #view>.toolbar,.stack>.toolbar,.pbody>.toolbar{margin:0}
+/* …and the six classes this list missed, which is the same bug six more times.
+   .vdct carries margin:0 0 20px and lands directly in #view or a bare stack on
+   ten pages, so the verdict block — the tallest thing above the fold — was
+   followed by 20px of its own margin AND the stack's 22px step. .srcline is
+   appended to #view by stampSource on every page. Measured together they are
+   about 90px of dead vertical space before the first number. */
+#view>.vdct,.stack>.vdct,#view>.srcline,#view>.leaks,.stack>.leaks,
+#view>.authbanner,.pbody>.breakcard{margin-top:0;margin-bottom:0}
+.stack>.finding{margin-bottom:0}
+.stack>.finding:not(:first-child){margin-top:calc(12px - var(--stack-gap))}
 #view>.cap:not(:first-child),.stack>.cap:not(:first-child){margin-top:calc(3px - var(--stack-gap))}
 .pbody>.cap:not(:first-child){margin-top:calc(3px - var(--panel-gap))}
 /* A legend belongs to the chart above it and had 11px of its own. */
@@ -374,7 +551,14 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 }
 
 /* ── KPI tiles: the number is the hero ─────────────────────────────────── */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:13px}
+/* 200px, not 158px. Measured: at a 972px content width a 158px minimum fits
+   five tracks of 184px, whose content box is 148px, so `11cqi` computes to
+   16.28px — UNDER the clamp's own floor. The headline number therefore
+   rendered at its minimum on every row of four or more tiles, which is every
+   KPI row in the product: 2px larger than a panel heading, and not a hero at
+   all. At 200px the row is four tracks of 234px, `11cqi` is 21.8px, and the
+   clamp does the job it was written to do. */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
 .kpi{
   background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);
   padding:15px 17px;box-shadow:var(--shadow-1);position:relative;overflow:hidden;
@@ -386,6 +570,15 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 }
 .kpi:hover{transform:translateY(-2px);box-shadow:var(--shadow-2);border-color:var(--rule-strong)}
 .kpi:hover::after{transform:scaleY(1)}
+/* A tile carrying a verdict shows its rail AT REST, not on hover.
+   The rail is scaleY(0) until the pointer arrives, so a tile whose figure is
+   critical had exactly one carrier standing still: the colour of its number.
+   A reader scanning a row of six tiles for the bad one, on a printout, or
+   without the hues, had nothing to find. Wider too, because it is now saying
+   something rather than decorating a hover. */
+.kpi.t-good::after,.kpi.t-warn::after,
+.kpi.t-serious::after,.kpi.t-critical::after,
+.kpi.ok::after,.kpi.warn::after,.kpi.err::after{transform:scaleY(1);width:3px}
 .kpi .l{
   font-family:"IBM Plex Mono",monospace;font-size:.63rem;letter-spacing:.13em;
   text-transform:uppercase;color:var(--ink-3);
@@ -402,10 +595,28 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
    against the CARD, so the same rule holds in a six-across strip and a
    two-across one without a breakpoint for each. */
 .kpi{container-type:inline-size}
+/* The family is MONO, and this is a correctness fix, not a taste one.
+   ─────────────────────────────────────────────────────────────────────────
+   This rule asked for Fraunces and for tabular-nums in the same declaration,
+   and Fraunces cannot do the second. Read out of the shipped font file:
+   fraunces-latin.woff2 exposes GSUB features ['liga','rvrn'] — no `tnum` — and
+   its digits are proportional and unequal, "0" at 0.7305em against "1" at
+   0.5120em, a 43% spread. So font-variant-numeric was a no-op on the headline
+   number of every KPI tile in the product: a column of tiles did not line up,
+   and a figure counting from 1,111 to 2,222 changed width by about 0.9em while
+   it animated.
+
+   The markup already asked for the right thing — kpiRow emits class="n num",
+   and `.mono,.num,code` sets IBM Plex Mono — but `.kpi .n` is (0,2,0) against
+   that rule's (0,1,0), so the serif won on specificity. Plex Mono ships tnum
+   and every glyph at 0.6em.
+
+   Fraunces keeps h1-h4, the brand, the avatar and the verdict claim: prose,
+   where a display serif earns its place. It does not keep the numbers. */
 .kpi .n{
-  font-family:"Fraunces",Georgia,serif;font-weight:600;
-  font-size:clamp(1.15rem, 11cqi, 1.72rem);
-  letter-spacing:-.02em;line-height:1.18;margin-top:4px;font-variant-numeric:tabular-nums;
+  font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:600;
+  font-size:clamp(1.3rem, 11cqi, 1.8rem);
+  letter-spacing:-.01em;line-height:1.15;margin-top:4px;font-variant-numeric:tabular-nums;
   white-space:nowrap;
 }
 /* …and a value that cannot fit on one line wraps rather than being cut off.
@@ -424,7 +635,17 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
    bin/render-audit.mjs saw the 8px it pushed past the kpi row. Only inside a
    tile, so every pill elsewhere keeps the nowrap it was written for. */
 .kpi .n .pill{white-space:normal;text-align:center;border-radius:12px}
-.kpi .d{font-size:.75rem;color:var(--ink-2);margin-top:2px}
+/* The hand-rolled tiles emit `.d` where kpiRow emits `.s`, and only `.s` was
+   given a line-height and an overflow rule — so eleven sub-lines in app.js
+   leaked at body leading and broke long identifiers past the tile's
+   overflow:hidden. One declaration, both class names, and a two-line clamp so
+   a single 90-character qualifier cannot stretch every tile in the grid row
+   beside it. */
+.kpi .d,.kpi .s{
+  font-size:.75rem;color:var(--ink-2);margin-top:2px;line-height:1.4;
+  overflow-wrap:anywhere;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
+}
 .kpi .d b{font-weight:600;color:var(--ink)}
 .kpi.ok .n{color:var(--good)} .kpi.warn .n{color:var(--warn)} .kpi.err .n{color:var(--critical)}
 .kpi.ok::after{background:var(--good)} .kpi.warn::after{background:var(--warn)} .kpi.err::after{background:var(--critical)}
@@ -436,9 +657,13 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 }
 table{border-collapse:collapse;width:100%;min-width:560px}
 th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--rule);font-size:.85rem}
+/* A column heading is TEXT, and --ink-3 on --surface-2 measures 3.0:1 — under
+   the 4.5:1 that 10px uppercase with .09em tracking needs, which is the
+   hardest thing to read in the product and the label every table depends on.
+   --ink-2 at 600 clears it without shouting. */
 thead th{
-  font-family:"IBM Plex Mono",monospace;font-size:.63rem;letter-spacing:.09em;text-transform:uppercase;
-  color:var(--ink-3);background:var(--surface-2);position:sticky;top:0;z-index:2;font-weight:500;
+  font-family:"IBM Plex Mono",monospace;font-size:.63rem;letter-spacing:.07em;text-transform:uppercase;
+  color:var(--ink-2);background:var(--surface-2);position:sticky;top:0;z-index:2;font-weight:600;
 }
 tbody tr{transition:background .14s var(--ease)}
 tbody tr:hover{background:var(--surface-2)}
@@ -477,11 +702,18 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 .hbars{display:flex;flex-direction:column;gap:9px}
 .hb{display:grid;grid-template-columns:minmax(84px,150px) 1fr auto;align-items:center;gap:11px;cursor:default}
 .hb .k{font-size:.81rem;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.hb .track{background:var(--surface-2);border-radius:5px;height:15px;overflow:hidden}
+/* A midpoint rule behind the track, so a ranking has a scale rather than only
+   a set of lengths — with no axis at all a reader cannot tell whether the
+   longest bar is 12 or 12,000 without reading the value column. */
+.hb .track{background:var(--surface-2);border-radius:5px;height:15px;overflow:hidden;
+  background-image:linear-gradient(90deg,transparent 0 calc(50% - 1px),var(--rule) calc(50% - 1px) 50%,transparent 50%)}
 .hb .fill{
-  display:block;height:100%;border-radius:5px;transform-origin:left;min-width:2px;
+  display:block;height:100%;border-radius:0 5px 5px 0;transform-origin:left;
   animation:growX .55s var(--ease-out) backwards;
 }
+/* A deduction runs the other way, so its rounded end is the other end. */
+.hb .fill.neg{border-radius:5px 0 0 5px}
+.hb[data-click]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:var(--r-sm)}
 .hb .v{font-family:"IBM Plex Mono",monospace;font-size:.78rem;font-weight:500;min-width:58px;text-align:right}
 .hb[data-click]{cursor:pointer}
 .hb[data-click]:hover .k{color:var(--ink)}
@@ -514,7 +746,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 }
 .btn:hover{background:var(--surface-2);border-color:var(--rule-strong)}
 .btn:active{transform:scale(.98)}
-.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
 .btn.primary:hover{filter:brightness(1.07)}
 .btnrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 
@@ -545,6 +777,9 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
 #view > svg{display:block;width:100%;height:auto;overflow:visible}
 .axis{font-family:"IBM Plex Mono",monospace;font-size:10px;fill:var(--ink-3)}
 .gl{stroke:var(--rule);stroke-width:1}
+/* Zero, at the weight of a rule rather than of a gridline. Drawn identically
+   to the others, the bars appear to float above nothing. */
+.gl-base{stroke:var(--rule-strong)}
 .vlab{font-family:"IBM Plex Mono",monospace;font-size:10px;fill:var(--ink-2);font-weight:500}
 /* line/area draw-in */
 .draw{stroke-dasharray:var(--len,1200);stroke-dashoffset:var(--len,1200);animation:draw 1.05s var(--ease-out) forwards}
@@ -776,9 +1011,23 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
   padding:3px 8px;border-radius:99px;background:var(--surface-2);color:var(--ink-2);white-space:nowrap;
 }
 .pill.plat{background:var(--accent-soft);color:var(--accent-ink)}
+/* The same rule as the KPI tiles: a verdict carries a shape as well as a hue,
+   because the channel colours cannot be told from the semantic ones by hue
+   alone. The glyph sits inside the chip so the chip stays one object. */
 .pill.ok{background:var(--good-bg);color:var(--good)}
 .pill.warn{background:var(--warn-bg);color:var(--warn)}
 .pill.bad{background:var(--critical-bg);color:var(--critical)}
+/* A verdict in a table cell. Deliberately quieter than a chip — a column of
+   434 chips is a column of noise — so the number takes the colour and a thin
+   left rule carries the shape. The rule is what survives greyscale. */
+td.v-good{color:var(--good);box-shadow:inset 2px 0 0 var(--good)}
+td.v-warn{color:var(--warn);box-shadow:inset 2px 0 0 var(--warn)}
+td.v-serious{color:var(--serious);box-shadow:inset 2px 0 0 var(--serious)}
+td.v-critical{color:var(--critical);box-shadow:inset 2px 0 0 var(--critical);font-weight:600}
+
+.pill.ok::before{content:"▲ ";letter-spacing:0}
+.pill.warn::before{content:"• ";letter-spacing:0}
+.pill.bad::before{content:"▼ ";letter-spacing:0}
 /* A fact this window did not measure. The driver directory lists everyone the
    fleet has ever known, and answers their fleet, channels and vehicle over the
    whole history when the range on screen holds no work for them — otherwise
@@ -834,6 +1083,31 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 .kpi.t-warn .n{color:var(--warn)} .kpi.t-warn::after{background:var(--warn)}
 .kpi.t-serious .n{color:var(--serious)} .kpi.t-serious::after{background:var(--serious)}
 .kpi.t-critical .n{color:var(--critical)} .kpi.t-critical::after{background:var(--critical)}
+/* A verdict must survive greyscale, a colour-blind reader and a printed page.
+   ─────────────────────────────────────────────────────────────────────────
+   Tone was carried by hue alone — the figure's colour and a 3px accent bar in
+   the same colour. That is one channel doing all the work, and it is the
+   channel this product cannot rely on: the channel colours added above put
+   Bolt's green at 1.06:1 against --good and Yango's red at 1.04:1 against
+   --critical, so on a page showing both, hue no longer distinguishes "this is
+   Bolt" from "this is going well".
+
+   A glyph before the number is the second channel. It is decorative to a
+   screen reader (the tile's own label and sub carry the meaning in words) so
+   it is marked aria-hidden by being a pseudo-element, and it costs no markup
+   at the three hundred call sites that already pass `tone`. */
+.kpi.t-good .n::before,.kpi.t-warn .n::before,
+.kpi.t-serious .n::before,.kpi.t-critical .n::before{
+  font-family:"IBM Plex Mono",monospace;font-size:.72em;margin-right:5px;
+  vertical-align:.06em;opacity:.85;
+}
+.kpi.t-good .n::before{content:"▲"}
+.kpi.t-warn .n::before{content:"•"}
+.kpi.t-serious .n::before{content:"▼"}
+.kpi.t-critical .n::before{content:"▼"}
+/* …and a tile whose figure is a dash has nothing to be good or bad about: an
+   absent measurement must not wear a verdict's arrow. */
+.kpi .n:not(:has(*)):empty::before{content:none}
 
 /* percentile bars ─ standing against the rest of the fleet */
 .pbars{display:flex;flex-direction:column;gap:10px}
@@ -924,7 +1198,7 @@ a.kpi:hover .kpi-who,a.kpi:focus-visible .kpi-who{opacity:1;transform:translateX
 .dc-meta b{display:block;font-size:.9rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dc-meta .cap{margin:1px 0 0;font-size:.72rem}
 .dc-n{text-align:right;flex:none}
-.dc-n .num{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.14rem;display:block;line-height:1.1}
+.dc-n .num{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:600;font-size:1.08rem;display:block;line-height:1.15;font-variant-numeric:tabular-nums}
 .dc-n small{font-size:.62rem;color:var(--ink-3);font-family:"IBM Plex Mono",monospace;letter-spacing:.08em;text-transform:uppercase}
 
 /* filter/search bar above a long table */
@@ -1000,7 +1274,7 @@ table.compact th,table.compact td{padding:8px 10px;font-size:.8rem}
   font-family:"IBM Plex Mono",monospace;font-size:.6rem;letter-spacing:.12em;
   text-transform:uppercase;color:var(--ink-3);
 }
-.bk-v{font-family:"Fraunces",Georgia,serif;font-weight:600;font-size:1.2rem;margin-top:3px;line-height:1.2}
+.bk-v{font-family:"IBM Plex Mono",ui-monospace,monospace;font-weight:600;font-size:1.14rem;margin-top:3px;line-height:1.2;font-variant-numeric:tabular-nums}
 .bk-d{font-size:.74rem;color:var(--ink-2);margin-top:1px}
 .bk-why{font-size:.85rem;color:var(--ink);margin:0 0 6px;line-height:1.5}
 .bk-fix{font-size:.82rem;color:var(--ink-2);margin:0;line-height:1.5}
@@ -1063,7 +1337,17 @@ td .pill,td .tag{white-space:nowrap}
 
 /* `.cap` outside a panel had no rule at all, so a throwaway note rendered at
    body size in near-black — the loudest text on the driver pages. */
-.cap{font-size:.79rem;color:var(--ink-3);line-height:1.5;margin:3px 0 14px}
+/* A measure, and a readable ink.
+   ─────────────────────────────────────────────────────────────────────────
+   .cap carries most of the prose in this product — 555 uses across the page
+   modules — and had no max-width at all, so in a full-width panel at 1280px it
+   ran at about 147 characters a line. Comfortable reading is 45-75. The sheet
+   already had six different measures written as literals (24ch, 60ch, 62ch,
+   68ch, 72ch, 74ch); they now share one token.
+
+   --ink-3 on the panel is 3.29:1, which is fine for a label and thin for a
+   sentence somebody is expected to read. --ink-2 is 5.94:1. */
+.cap{font-size:.79rem;color:var(--ink-2);line-height:1.5;margin:3px 0 14px;max-width:var(--measure)}
 .panel>.cap{margin:2px 0 14px}
 
 /* An empty status span still painted its padding, background and accent bar —
@@ -1245,7 +1529,7 @@ span.dim{color:var(--ink-3);font-size:.72rem}
 
 /* A day can be walked, not just landed on. */
 .daynav{display:flex;align-items:baseline;justify-content:space-between;gap:14px;margin:0 0 16px;flex-wrap:wrap}
-.daynav b{font-family:"Fraunces",Georgia,serif;font-size:1.15rem}
+.daynav b{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:1.08rem;font-variant-numeric:tabular-nums}
 .daynav a{color:var(--ink-2);text-decoration:none;font-size:.82rem;border-bottom:1px solid var(--rule)}
 .daynav a:hover{color:var(--accent-ink);border-bottom-color:currentColor}
 
@@ -1329,8 +1613,17 @@ a.insight-row:hover{border-color:var(--accent)}
 }
 .tscroll table th:first-child{z-index:3;background:var(--surface-2)}
 /* A striped or hovered row must carry its own background through the pinned
-   cell, or the page shows through it as the table scrolls under. */
+   cell, or the page shows through it as the table scrolls under.
+   ─────────────────────────────────────────────────────────────────────────
+   …and the striped-row rule this sentence assumes was never written. This was
+   the ONLY nth-child rule in the whole stylesheet, so every table in the
+   product painted the pinned first cell of every even row in --paper-2 against
+   a row that stayed --surface: a striped left column beside unstriped rows,
+   which is the opposite of what the comment above describes and reads as a
+   rendering fault. The row rule is here now, and the pinned cell follows it. */
+.tscroll table tbody tr:nth-child(even) td{background:var(--paper-2)}
 .tscroll table tbody tr:nth-child(even) td:first-child{background:var(--paper-2)}
+.tscroll table tbody tr:hover td{background:var(--surface-2)}
 .tscroll table tbody tr:hover td:first-child{background:var(--surface-2)}
 
 /* The table and the sentences that explain it. The scroller is inside; the
@@ -1452,12 +1745,27 @@ a.insight-row:hover{border-color:var(--accent)}
    angles to find that out. */
 .domb{margin:2px 0 0}
 .domb-bar{display:flex;height:44px;border-radius:8px;overflow:hidden;background:var(--surface-2)}
-.domb-seg{display:flex;align-items:center;gap:9px;padding:0 14px;min-width:3px;color:#fff;overflow:hidden;white-space:nowrap}
+/* The label's colour follows the fill it sits ON.
+   ─────────────────────────────────────────────────────────────────────────
+   This was `color:#fff` for every segment in both themes. Measured against the
+   series it is printed on: white is 3.94:1 on --s2 and 3.98:1 on --s3 in light
+   mode, and 4.06 / 3.80 / 3.57 / 4.33 / 3.38 / 4.15 across all six in dark —
+   so every dominance-bar label in dark mode, and two in light, sat under the
+   4.5:1 that 12px semibold text needs. The segment carries the channel's name
+   and its figure; it is the one place in the product where text is printed on
+   a series colour, and it was the one place nobody checked. */
+.domb-seg{display:flex;align-items:center;gap:9px;padding:0 14px;min-width:3px;color:var(--on-seg,#fff);overflow:hidden;white-space:nowrap}
 .domb-seg>span{font-size:.85rem;font-weight:600}
 .domb-seg>b{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;font-size:.92rem;font-weight:600}
 .domb-seg>i{font-style:normal;font-family:"IBM Plex Mono",monospace;font-size:.78rem;opacity:.82}
 .domb-seg.c1{background:var(--s1)} .domb-seg.c2{background:var(--s2)} .domb-seg.c3{background:var(--s3)}
 .domb-seg.c4{background:var(--s4)} .domb-seg.c5{background:var(--s5)} .domb-seg.c6{background:var(--s6)}
+/* Light: white clears 4.5 on s1, s4, s5 and s6; near-black is the only thing
+   that clears it on the terracotta and the teal. */
+.domb-seg.c2,.domb-seg.c3{--on-seg:var(--ink-inv)}
+/* Dark: the whole scale is light enough that near-black wins on all six. */
+:root[data-theme="dark"] .domb-seg{--on-seg:var(--ink-inv)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .domb-seg{--on-seg:var(--ink-inv)}}
 .domb-seg.dead{background:var(--surface-3);color:var(--ink-3)}
 .domb-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:8px 26px;margin-top:14px}
 .domb-key{display:flex;flex-wrap:wrap;align-items:baseline;gap:7px;font-size:.83rem}

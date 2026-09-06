@@ -182,10 +182,37 @@ check('no vehicle map frames bounds with degree padding', !/\.pad\(/.test(strip(
    charts.js emits .k/.track/.fill/.v; the CSS once styled .lab/.bar-cell, so
    every horizontal bar in the dashboard rendered as text with no bar. */
 const chartsJs = readFileSync('api/public/charts.js', 'utf8');
-check('hbars emits the classes the CSS styles', /class="fill"/.test(chartsJs) && /\.hb \.fill\{/.test(cssTxt));
+const { niceTicks } = await import('../api/public/charts.js');
+check('hbars emits the classes the CSS styles', /class="fill\$\{|class="fill"/.test(chartsJs) && /\.hb \.fill\{/.test(cssTxt));
 check('bar tracks are styled', /\.hb \.track\{/.test(cssTxt));
 check('legend swatches have a size', /\.legend i\{|\.sw,\.legend i\{/.test(cssTxt));
-check('axis ticks dedupe on small integer ranges', /function ticks\(/.test(chartsJs));
+/* Pinned to the PROPERTY, not to a function name. This read
+   `/function ticks\(/` — so it passed for as long as a function happened to be
+   called `ticks`, and failed the moment the axis was rewritten to produce
+   round numbers, while asserting nothing at all about deduping. What it is
+   actually about is the integer branch: a maximum of 3 must not draw four
+   evenly spaced ticks that round onto the same number twice. */
+{
+  /* hi=2 is the case that BITES. At hi=3 the general rule happens to land on
+     0,1,2,3 too, so an assertion there passes with the integer branch deleted;
+     at hi=2 the general rule gives a 0.5 step and prints "0, 0.5, 1, 1.5, 2"
+     for a count of two things. */
+  const marks = niceTicks(0, 2, 4);
+  check('axis ticks dedupe on small integer ranges',
+    marks.length === new Set(marks).size && marks.join(',') === '0,1,2', marks.join(','));
+  const big = niceTicks(0, 999, 4);
+  check('…and a large range snaps to numbers a reader can hold',
+    big.every((v) => Number.isInteger(v / 250)), big.join(','));
+  /* The top mark must CLEAR the peak, or the caller — which scales the plot to
+     the last mark — draws the tallest bar outside its own plot. The first cut
+     of this helper returned 0/250/500/750 for a peak of 999 and would have put
+     that bar a third of the way past the top gridline. */
+  for (const hi of [2, 3, 47.5, 999, 47842, 0.83, 145036, 88.3]) {
+    const t = niceTicks(0, hi, 4);
+    check(`the scale for ${hi} contains it rather than clipping it`,
+      t[t.length - 1] >= hi, t.join(','));
+  }
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

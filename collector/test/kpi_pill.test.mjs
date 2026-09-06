@@ -30,12 +30,12 @@ await page.goto(`http://127.0.0.1:${port}/index.html`, { waitUntil: 'domcontentl
 
 /* Five tiles at 1180px is the layout #reconcile/2026-08 draws, and 164px is
    the column it gives each of them. */
-const measure = async (value) => page.evaluate(async (v) => {
+const measure = async (value, width = '873px') => page.evaluate(async ([v, w]) => {
   const ui = await import('/ui.js');
   document.querySelector('#kpihost')?.remove();
   const host = document.createElement('div');
   host.id = 'kpihost';
-  host.style.width = '873px';
+  host.style.width = w;
   document.body.append(host);
   host.append(ui.kpiRow([
     { label: 'Trips', value: '13,390', sub: 'bookings over Aug 2026' },
@@ -53,10 +53,13 @@ const measure = async (value) => page.evaluate(async (v) => {
     tileOver: gap.scrollWidth - gap.clientWidth,
     worst: Math.max(...tiles.map((t) => t.scrollWidth - t.clientWidth)),
     lines: Math.round(gap.querySelector('.pill').getBoundingClientRect().height),
+    /* Whether the PILL itself is clipped, which is the thing this file is
+       about. Line count was only ever a proxy for it. */
+    pillOver: gap.querySelector('.pill').scrollWidth - gap.querySelector('.pill').clientWidth,
     text: gap.querySelector('.n').textContent.trim(),
     long: gap.querySelector('.n').classList.contains('long'),
   };
-}, value);
+}, [value, width]);
 
 console.log('\na pill as a KPI value stays inside its tile');
 const wide = await measure('+AED 228,060 · 114.5%');
@@ -64,8 +67,16 @@ check('the value is judged long, so the wrapping rule applies at all',
   wide.long, JSON.stringify(wide));
 check('the tile does not overflow', wide.tileOver <= 1, `+${wide.tileOver}px`);
 check('and neither does the row it sits in', wide.rowOver <= 1, `+${wide.rowOver}px`);
-check('the pill took a second line rather than being cut', wide.lines > 26,
-  `${wide.lines}px tall — one line is about 20px`);
+/* Not cut — which is the property, and wrapping was only one way to get it.
+   This line used to read `wide.lines > 26`, asserting the pill took a SECOND
+   LINE. That was true only because the tile was too narrow to hold it: at a
+   158px grid minimum, 873px gave five columns of 164px. The minimum is now
+   200px (measured: at 158 the `11cqi` clamp on the headline number computed
+   below its own floor, so no KPI figure in the product ever reached its
+   intended size), 873px gives four columns of 209px, and the pill fits on one
+   line. Fitting is a better outcome than wrapping, and the old assertion
+   forbade it. */
+check('the pill is not cut off', wide.pillOver <= 1, `+${wide.pillOver}px`);
 check('and the whole figure is still there, to the last digit',
   wide.text === '+AED 228,060 · 114.5%', JSON.stringify(wide.text));
 
@@ -77,6 +88,16 @@ check('no tile overflows', worse.worst <= 1, `+${worse.worst}px`);
 check('the row does not either', worse.rowOver <= 1, `+${worse.rowOver}px`);
 check('and nothing is lost from the value',
   worse.text === '−AED 1,284,905 · 1,449.2%', JSON.stringify(worse.text));
+
+/* …and the rule that permits the wrap still exists.
+   Asserted directly rather than by measuring a wrap, because a tile wide
+   enough not to need one cannot demonstrate it — and a stylesheet that had
+   lost `.kpi .n .pill{white-space:normal}` would then pass every check above
+   until some future column got narrower again. */
+console.log('\nand the rule that lets it wrap is still in the sheet');
+const ws = await page.evaluate(() =>
+  getComputedStyle(document.querySelector('#kpihost .kpi .n .pill')).whiteSpace);
+check('a pill used as a KPI value is allowed to wrap', ws === 'normal', ws);
 
 /* The other direction: an ordinary pill, in a table cell, must still refuse to
    wrap. That nowrap is why a status badge is one line wherever it appears, and

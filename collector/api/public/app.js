@@ -5,7 +5,7 @@
 import { barChart, gapBars, areaChart, donut, hbars, heatmap, scatter, stackedBar, fmt, empty, showTip, hideTip } from './charts.js';
 import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
-  sourceLabel, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
+  sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
   UBER_FARE_WHY } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
@@ -264,6 +264,14 @@ function componentTree(components) {
   }
   return host;
 }
+
+/* Where an EMPTY address goes.
+   ─────────────────────────────────────────────────────────────────────────
+   Named rather than inlined in the router, because two things need to agree
+   about it: applyRoute below, and the test that proves an empty address is not
+   treated as a mistyped one. That test used to assert the landing page's TITLE
+   — so it forbade ever renaming the page it was not actually about. */
+export const LANDING = 'unit';
 
 const VIEWS = [
   { id: 'unit', label: 'Money per car and driver', ic: '◆', grp: 'Money', sub: 'What each car and driver earned per day, per km and per trip, including zero earners' },
@@ -793,13 +801,19 @@ V.overview = async (root) => {
      which are the only places on this page a channel is not written the way
      the product writes it everywhere else. The raw value is kept on the row so
      the click still filters by it. */
+  /* Each slice in its channel's own colour — Uber's near-black, Bolt's green,
+     Yango's red — so the ring is read before its legend is. `key` holds the
+     raw platform, which is what the token map is keyed on; a channel with no
+     colour of its own falls through to the categorical palette. */
   donut(mix.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
-    { onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'platforms', param: null, sub: null }) });
+    { colorFor: (d) => sourceToken(d.key),
+      aria: 'Bookings by channel',
+      onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'platforms', param: null, sub: null }) });
   mix.body.append(el('p', 'cap', 'Click a slice to filter the dashboard to that channel and open it.'));
   hbars(prod.body, byProd.slice(0, 6).map((r) => {
     const [plat, tier] = String(r.label || '').split(/:\s*/);
-    return { ...r, label: tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label) };
-  }), { signed: false });
+    return { ...r, plat, label: tier ? `${sourceLabel(plat)} · ${tierLabel(tier)}` : sourceLabel(r.label) };
+  }), { signed: false, colorFor: (d) => sourceToken(d.plat) });
   paymentDonut(pay.body, payDetail);
   /* Folded to OUTCOMES before charting. Charted raw, `completed` and
      `complete` were two slices of the same thing and three spellings of
@@ -1912,7 +1926,9 @@ async function platformShare(root) {
 
   /* Same raw-label donut as the one on the fleet's front page. */
   donut(share.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
-    { onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'drivers', param: null, sub: null }) });
+    { colorFor: (d) => sourceToken(d.key),
+      aria: 'Share of bookings by channel',
+      onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'drivers', param: null, sub: null }) });
   share.body.append(el('p', 'cap', 'Click a slice to filter the whole dashboard to that platform and open its drivers.'));
   donut(fleetMix.body, byFleet);
   cov.body.innerHTML = '';
@@ -5992,7 +6008,7 @@ function applyRoute() {
      showing a real figure as though they had arrived at the one they asked
      for. `notfound` keeps the address so the page can name it; the correct
      destination for #hotels, for the record, is #corporate. */
-  state.view = known ? r.view : (r.view ? 'notfound' : 'unit');
+  state.view = known ? r.view : (r.view ? 'notfound' : LANDING);
   state.missing = known || !r.view ? null : location.hash.replace(/^#/, '');
   state.param = r.param; state.sub = r.sub;
   // The address is the authority. A link with no filter in it means the

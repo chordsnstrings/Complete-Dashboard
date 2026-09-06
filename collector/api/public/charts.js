@@ -10,12 +10,20 @@ import { TZ, dubaiDay } from './tz.js';
 export const CAT = ['--s1', '--s2', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
 export const SEQ = ['--b100', '--b200', '--b300', '--b400', '--b500', '--b600', '--b700'];
 
+/* The class, not an inline opacity.
+   ─────────────────────────────────────────────────────────────────────────
+   app.css has carried `#tt.on{opacity:1;transform:none}` for as long as the
+   tooltip has existed and nothing ever added the class — this set
+   `style.opacity` directly instead. An inline opacity beats the rule, so the
+   tooltip appeared, and `transform:translateY(3px)` never came off: every
+   chart tooltip in the product has rendered three pixels below where it was
+   meant to settle, in the position it was supposed to animate out of. */
 export function showTip(html, e) {
-  const t = tt(); t.innerHTML = html; t.style.opacity = 1;
+  const t = tt(); t.innerHTML = html; t.classList.add('on');
   t.style.left = Math.min(e.clientX + 14, innerWidth - t.offsetWidth - 12) + 'px';
   t.style.top = Math.max(e.clientY - 36, 8) + 'px';
 }
-export function hideTip() { tt().style.opacity = 0; }
+export function hideTip() { tt().classList.remove('on'); }
 const esc = (s) => String(s ?? '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
 /* `isNaN(Infinity)` is false and `Number('') === 0`, so the old guards let a
    division by zero through as "∞" — and, where a tile colours by threshold,
@@ -33,6 +41,20 @@ export const dec = (n, d = 1) => (n == null || n === '' || !Number.isFinite(Numb
   ? '—' : Number(n).toLocaleString(undefined,
     { minimumFractionDigits: d, maximumFractionDigits: d }));
 
+/* A name for a chart, or no role at all.
+   ─────────────────────────────────────────────────────────────────────────
+   Every svg here was `role="img"` with nothing naming it. That is worse than
+   leaving the role off: role="img" PRUNES the subtree, so the <text> axis
+   labels a screen reader would otherwise have read are hidden, and all that is
+   announced is the word "image". Where a caller can say what the chart shows,
+   the role stays and carries the name; where it cannot, the role goes and the
+   text inside stays reachable. */
+function name(svg, label) {
+  if (label) { svg.setAttribute('role', 'img'); svg.setAttribute('aria-label', label); }
+  else svg.removeAttribute('role');
+  return svg;
+}
+
 function interactive(el, label, onClick) {
   el.style.cursor = onClick ? 'pointer' : 'crosshair';
   el.addEventListener('mousemove', (e) => showTip(label, e));
@@ -40,19 +62,95 @@ function interactive(el, label, onClick) {
   if (onClick) el.addEventListener('click', (e) => { hideTip(); onClick(e); });
 }
 
-/* ── vertical bars (magnitude over time / category) ── */
-/* Gridline values for an axis. With a small integer maximum (a count of 0–3,
-   say) four evenly-spaced ticks round to the same number twice — "1, 1, 0, 0"
-   down the side, which reads as a broken chart. Fall back to integer steps
-   whenever the range is small enough for that to be exact. */
-function ticks(max, n = 3) {
-  if (max <= n) {
-    const out = [];
-    for (let v = 0; v <= Math.ceil(max); v++) out.push(v);
-    return out;
+/* ── the shared axis ───────────────────────────────────────────────────────
+   Four charts drew the same gridline loop — barChart, gapBars, areaChart and,
+   in a variant, scatter — three of them character for character. The x-label
+   thinning rule was written twice and the fix for labels printing on top of
+   each other ("22:0023:00") reached only one copy. The integer-tick fallback
+   was ported into areaChart by hand and never into scatter, which still
+   rounds its axis to integers and so labels a sub-1 AED/km series "0 / 0 / 1
+   / 1". One place, one behaviour. */
+
+/* Round numbers a reader can hold.
+   ─────────────────────────────────────────────────────────────────────────
+   The old ticks() returned max × i / n, and every caller inflated the max
+   first (× 1.12, × 1.14), so a series peaking at 999 drew gridlines labelled
+   0 / 373 / 746 / 1,119. Arithmetically exact, and not a scale anybody reads.
+   Snapping the STEP to 1, 2, 2.5 or 5 times a power of ten gives 0 / 250 /
+   500 / 750 / 1,000 and needs no headroom fudge, because rounding the step up
+   already clears the peak. */
+export function niceTicks(lo, hi, target = 4) {
+  if (!(hi > lo)) return [0, 1];
+  const span = hi - lo, rough = span / target;
+  /* A small integer range gets integer steps. Four evenly spaced ticks over a
+     maximum of 3 round onto the same number twice — "1, 1, 0, 0" down the
+     side, which reads as a broken chart. */
+  if (span <= target && Number.isInteger(hi) && lo === 0) {
+    return Array.from({ length: Math.ceil(hi) + 1 }, (_, i) => i);
   }
-  return Array.from({ length: n + 1 }, (_, i) => (max * i) / n);
+  const mag = 10 ** Math.floor(Math.log10(rough));
+  const step = ([1, 2, 2.5, 5, 10].find((m) => m * mag >= rough) || 10) * mag;
+  /* The top mark must be AT OR ABOVE the peak, because the caller scales the
+     plot to it. Stopping at the last step below the peak — 0/250/500/750 for a
+     series topping out at 999 — puts the tallest bar 33% outside its own plot.
+     Rounding the ceiling UP to a step boundary is also what replaces the old
+     × 1.12 headroom fudge: the space above the peak is a consequence of using
+     round numbers, not an arbitrary margin. */
+  const top = Math.ceil(hi / step) * step;
+  const out = [];
+  for (let v = Math.floor(lo / step) * step; v <= top + step * 1e-9; v += step) {
+    // toPrecision kills the float drift that turns a 0.1 step into
+    // 0.30000000000000004 and prints it as a gridline label.
+    out.push(+v.toPrecision(12));
+  }
+  return out;
 }
+
+/* Draws the y axis and RETURNS the scale it drew, so no caller computes a
+   maximum twice and then disagrees with its own gridlines.
+
+   `fixedMax` states what the measure's ceiling IS — a share cannot exceed
+   100% — and suppresses the headroom, because a gridline above a value the
+   series cannot take is a scale that lies about the range. That rule existed
+   in areaChart alone; it now covers every chart that asks for it. */
+export function yAxis(svg, { hi, pl, pr, pt, ih, W, fmt: f = fmt,
+  fixedMax = null, target = 4, baseline = true }) {
+  const marks = fixedMax != null && fixedMax > 0
+    ? Array.from({ length: target }, (_, i) => (fixedMax * i) / (target - 1))
+    /* An all-zero series gets ONE line at the baseline: repeating "0" four
+       times up the side asserts a scale that has no values on it. */
+    : !(hi > 0) ? [0]
+      : niceTicks(0, hi, target);
+  const max = marks[marks.length - 1] || 1;
+  marks.forEach((v) => {
+    const gy = pt + ih - ih * (v / max);
+    /* Zero is not just another gridline. Drawn at the same weight as the
+       others, the bars appear to float above nothing. */
+    svg.append(mk('line', { class: baseline && v === 0 ? 'gl gl-base' : 'gl',
+      x1: pl, y1: gy, x2: W - pr, y2: gy }),
+      txt(pl - 7, gy + 3, f(v), 'axis', 'end'));
+  });
+  return { max, marks };
+}
+
+/* One thinning rule for every time axis, tail guard included.
+   ─────────────────────────────────────────────────────────────────────────
+   On a 24-bar chart `every` is 2, so 22:00 is drawn by the rule and 23:00 by
+   the forced-last-label exception, and the two print on top of each other as
+   "22:0023:00". barChart carried the guard; gapBars, which draws the busiest
+   charts in the product, did not. */
+export function xTickIndices(n, target = 12) {
+  const every = Math.max(1, Math.ceil(n / target));
+  const lastThinned = Math.floor((n - 1) / every) * every;
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const isTail = i === n - 1 && (n - 1) - lastThinned >= every;
+    if (i % every === 0 || isTail) out.push(i);
+  }
+  return out;
+}
+
+/* ── vertical bars (magnitude over time / category) ── */
 
 /* `colorFor` picks a colour per bar. It exists so a series can mark ONE bar as
    the subject — the day page draws the fortnight around a date and the date
@@ -72,25 +170,31 @@ function ticks(max, n = 3) {
    the larger of the two maxima to both. Everywhere else the default — scale to
    this series — is still what a single chart wants. */
 export function barChart(host, data, { x, y, label, color = '--b400', colorFor, onClick,
-  valueFmt = (v) => fmt(v), lo = null, hi = null, max: fixedMax = null } = {}) {
+  valueFmt = (v) => fmt(v), lo = null, hi = null, max: fixedMax = null, aria = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
-  const raw = fixedMax != null && fixedMax > 0 ? fixedMax
-    : Math.max(...data.map((d) => Math.max(+d[y] || 0, hi ? +d[hi] || 0 : 0))) || 1;
-  const marks = ticks(raw <= 3 ? raw : raw * 1.12);
-  const max = marks[marks.length - 1] || 1;
-  const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length, bw = Math.min(step * 0.62, 44);
-  const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
-  marks.forEach((v) => {
-    const gy = pt + ih - ih * (v / max);
-    svg.append(mk('line', { class: 'gl', x1: pl, y1: gy, x2: W - pr, y2: gy }),
-      txt(pl - 7, gy + 3, valueFmt(v >= 10 ? Math.round(v) : +v.toFixed(1)), 'axis', 'end'));
-  });
+  const raw = Math.max(...data.map((d) => Math.max(+d[y] || 0, hi ? +d[hi] || 0 : 0))) || 1;
+  const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length;
+  /* The gap tracks the count. 0.62 was one ratio for every series, which is
+     too tight under ten bars and too loose over sixty; and the floor stops a
+     ninety-bar chart drawing 4.6px bars with a 3px corner radius, which is an
+     ellipse rather than a bar. */
+  const pad = data.length <= 12 ? 0.28 : data.length <= 40 ? 0.18 : 0.10;
+  const bw = Math.max(Math.min(step * (1 - pad), 44), 1.5);
+  const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
+  const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: valueFmt, fixedMax });
+  const xAt = new Set(xTickIndices(data.length));
   data.forEach((d, i) => {
     const h = ih * (+d[y]) / max, bx = pl + step * i + (step - bw) / 2, by = pt + ih - h;
     const fill = (colorFor && colorFor(d, i)) || color;
-    const r = mk('rect', { x: bx, y: by, width: bw, height: Math.max(h, 1), rx: 3, fill: `var(${fill})`, 'data-rise': '' });
+    /* A real zero draws NOTHING, and only a real zero. `Math.max(h, 1)` gave
+       every zero a 1px stub indistinguishable from a value too small to see —
+       and the same stub to a day nobody measured, which is a different fact. */
+    const bh = +d[y] === 0 ? 0 : Math.max(h, 1);
+    const r = mk('rect', { x: bx, y: by, width: bw, height: bh,
+      // A radius wider than half the bar rounds it into a lozenge.
+      rx: Math.min(3, bw / 2, bh / 2), fill: `var(${fill})`, 'data-rise': '' });
     const hasRange = lo && hi && d[lo] != null && d[hi] != null;
     interactive(r, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>${label ? ' ' + label : ''}`
       + (hasRange ? `<br>somewhere between ${valueFmt(d[lo])} and ${valueFmt(d[hi])}` : ''),
@@ -106,18 +210,9 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
     }
     // Past ~16 bars the labels used to be dropped entirely, so the default
     // 30-day range showed a chart with no dates at all under a caption inviting
-    // you to click a specific day. Thin them instead, the way areaChart does.
-    const every = Math.max(1, Math.ceil(data.length / 12));
-    /* …and the forced last label is dropped when thinning already drew one
-       right next to it. On a 24-bar chart every is 2, so 22:00 is drawn by the
-       rule and 23:00 by the exception — and the two print on top of each other
-       as "22:0023:00". Only draw the tail when it is a full step clear of the
-       last thinned label. */
-    const lastThinned = Math.floor((data.length - 1) / every) * every;
-    const isTail = i === data.length - 1 && (data.length - 1) - lastThinned >= every;
-    if (i % every === 0 || isTail) {
-      svg.append(txt(bx + bw / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
-    }
+    // you to click a specific day. Thinned by the shared rule — see
+    // xTickIndices, which carries the tail guard gapBars was missing.
+    if (xAt.has(i)) svg.append(txt(bx + bw / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
   });
   host.append(svg);
 }
@@ -169,35 +264,44 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
 
      Opt-out rather than opt-in: `inProgress: false` for a series where the
      last bucket is not a day in progress. */
-  inProgress = true } = {}) {
+  inProgress = true, aria = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
   const vals = data.filter((d) => !d[gapKey]).map((d) => +d[y] || 0);
   const raw = Math.max(...vals, secondary ? Math.max(...data.map((d) => +d[secondary] || 0)) : 0) || 1;
-  const marks = ticks(raw <= 3 ? raw : raw * 1.12);
-  const max = marks[marks.length - 1] || 1;
-  const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length, bw = Math.min(step * 0.62, 44);
-  const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+  const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length;
+  const pad = data.length <= 12 ? 0.28 : data.length <= 40 ? 0.18 : 0.10;
+  const bw = Math.max(Math.min(step * (1 - pad), 44), 1.5);
+  const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
 
-  // One hatch pattern, reused by every void band.
+  /* One hatch pattern per CHART, not per page.
+     The id was the fixed string "gapHatch", and two gapBars on one page — the
+     Overview renders an areaChart and a gapBars into the same panel body, and
+     two of these can co-exist across a re-render — make two elements with the
+     same DOM id. Every `url(#gapHatch)` then resolves to whichever came first,
+     so the second chart's voids are drawn with the first chart's pattern, in
+     the first chart's coordinate space. areaChart has always namespaced its
+     gradient id; this never did. */
+  const hid = 'gh' + Math.random().toString(36).slice(2, 7);
   const defs = mk('defs');
-  const pat = mk('pattern', { id: 'gapHatch', width: 6, height: 6, patternUnits: 'userSpaceOnUse',
-    patternTransform: 'rotate(45)' });
+  /* Two crossing lines in a 6×6 tile, and no patternTransform. A rotation on a
+     userSpaceOnUse pattern turns about the origin, so the hatch phase differed
+     with each band's x position and adjacent voids did not line up — which
+     reads as noise rather than as one texture. */
+  const pat = mk('pattern', { id: hid, width: 6, height: 6, patternUnits: 'userSpaceOnUse' });
   pat.append(mk('rect', { width: 6, height: 6, fill: 'var(--surface-2)' }),
-    mk('line', { x1: 0, y1: 0, x2: 0, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 2 }));
+    mk('line', { x1: 0, y1: 0, x2: 6, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 1 }),
+    mk('line', { x1: 6, y1: 0, x2: 0, y2: 6, stroke: 'var(--rule-strong)', 'stroke-width': 1 }));
   defs.append(pat); svg.append(defs);
 
-  marks.forEach((v) => {
-    const gy = pt + ih - ih * (v / max);
-    svg.append(mk('line', { class: 'gl', x1: pl, y1: gy, x2: W - pr, y2: gy }),
-      txt(pl - 7, gy + 3, valueFmt(v >= 10 ? Math.round(v) : +v.toFixed(1)), 'axis', 'end'));
-  });
+  const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: valueFmt });
+  const xAt = new Set(xTickIndices(data.length));
 
   data.forEach((d, i) => {
     const bx = pl + step * i;
     if (d[gapKey]) {
-      const band = mk('rect', { x: bx, y: pt, width: Math.max(step, 1), height: ih, fill: 'url(#gapHatch)' });
+      const band = mk('rect', { x: bx, y: pt, width: Math.max(step, 1), height: ih, fill: `url(#${hid})` });
       interactive(band, `${esc(d[x])} — <b>${esc(gapLabel)}</b>${
         d.silent_sources ? `<br>silent: ${esc([].concat(d.silent_sources).join(', '))}` : ''}`);
       svg.append(band);
@@ -205,8 +309,13 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
     }
     if (secondary && +d[secondary] > 0) {
       const sh = ih * (+d[secondary]) / max;
+      /* An OUTLINE, not a paler solid. Drawn as a fill it competes with the
+         foreground bar for figure and ground, and on the unauthorised-segments
+         chart the foreground is --s8, which had no dark-mode value at all. An
+         outline loses that contest by construction, in either theme. */
       svg.append(mk('rect', { x: bx + (step - bw) / 2 - 2, y: pt + ih - sh, width: bw + 4,
-        height: Math.max(sh, 1), rx: 3, fill: 'var(--surface-3)' }));
+        height: Math.max(sh, 1), rx: 3, fill: 'none',
+        stroke: 'var(--rule-strong)', 'stroke-width': 1 }));
     }
     const h = ih * (+d[y]) / max, cx = bx + (step - bw) / 2, by = pt + ih - h;
     /* Hollow, not hatched: hatching already means "nobody collected this day",
@@ -234,10 +343,10 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
       secondary && +d[secondary] ? `<br>${fmt(d[secondary])} ${esc(secondaryLabel)}` : ''}`,
     onClick && (() => onClick(d)));
     svg.append(r);
-    const every = Math.max(1, Math.ceil(data.length / 12));
-    if (i % every === 0 || i === data.length - 1) {
-      svg.append(txt(bx + step / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
-    }
+    /* The shared rule, which carries the tail guard this function never had:
+       on a 24-bucket chart the thinning drew 22:00 and the forced last label
+       drew 23:00, and the two printed on top of each other. */
+    if (xAt.has(i)) svg.append(txt(bx + step / 2, H - 10, shortLabel(d[x]), 'axis', 'middle'));
   });
   host.append(svg);
 
@@ -288,55 +397,97 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
    cumulative SHARE topped out at 100% drew a gridline labelled 114%, which is
    a value the series cannot take. Given, the headroom is skipped and the axis
    says what the measure's maximum actually is. */
-export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) => fmt(v), onClick, max: fixedMax } = {}) {
+export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) => fmt(v), onClick, max: fixedMax, aria = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 30;
-  const vals = data.map((d) => +d[y] || 0);
-  const peak = Math.max(...vals);
-  /* The same integer-tick treatment barChart already had. Four evenly-spaced
-     ticks over a maximum of 1 round onto two values — a property with one
-     booking drew a y-axis reading "0 / 0 / 1 / 1", and an all-zero series drew
-     "AED 0 / AED 0 / AED 1 / AED 1" beneath a line that never leaves zero.
-     A fixed max is honoured exactly, because it states what the measure's
-     ceiling IS (a share cannot exceed 100%) and headroom above it would draw a
-     gridline at a value the series cannot take. */
-  const marks = fixedMax ? [0, 1, 2, 3].map((i) => (fixedMax * i) / 3)
-    : peak <= 0 ? [0, 1]
-      : ticks(peak <= 3 ? peak : peak * 1.14);
-  const max = marks[marks.length - 1] || 1;
+  // The scale is set by what was MEASURED. An unmeasured point is not a zero
+  // and must not pull the axis, any more than it may pull the line.
+  const vals = data.map((d) => Number(d[y])).filter(Number.isFinite);
+  const peak = vals.length ? Math.max(...vals) : 0;
   const iw = W - pl - pr, ih = H - pt - pb;
   const X = (i) => pl + (data.length === 1 ? iw / 2 : iw * i / (data.length - 1));
+  const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
+  const { max } = yAxis(svg, { hi: peak, pl, pr, pt, ih, W, fmt: valueFmt, fixedMax });
   const Y = (v) => pt + ih - ih * v / max;
-  const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
-  // An all-zero series gets ONE line at the baseline: repeating "0" four times
-  // up the side asserts a scale that has no values on it.
-  (peak <= 0 && !fixedMax ? [0] : marks).forEach((v) => {
-    const gy = pt + ih - ih * (v / max);
-    svg.append(mk('line', { class: 'gl', x1: pl, y1: gy, x2: W - pr, y2: gy }),
-      txt(pl - 7, gy + 3, valueFmt(v >= 10 ? Math.round(v) : +v.toFixed(1)), 'axis', 'end'));
-  });
   const id = 'g' + Math.random().toString(36).slice(2, 7);
   const defs = mk('defs'); const lg = mk('linearGradient', { id, x1: 0, x2: 0, y1: 0, y2: 1 });
   lg.append(mk('stop', { offset: 0, 'stop-color': `var(${color})`, 'stop-opacity': .30 }),
     mk('stop', { offset: 1, 'stop-color': `var(${color})`, 'stop-opacity': 0 }));
   defs.append(lg); svg.append(defs);
-  let line = '', area = `M ${X(0)} ${pt + ih}`;
-  data.forEach((d, i) => { const px = X(i), py = Y(+d[y]); line += (i ? ' L ' : 'M ') + px + ' ' + py; area += ` L ${px} ${py}`; });
-  area += ` L ${X(data.length - 1)} ${pt + ih} Z`;
-  svg.append(mk('path', { d: area, fill: `url(#${id})`, 'data-fade': '' }),
-    mk('path', { d: line, fill: 'none', stroke: `var(${color})`, 'stroke-width': 2, 'stroke-linejoin': 'round', 'data-draw': '' }));
+
+  /* The line BREAKS where nobody measured.
+     ─────────────────────────────────────────────────────────────────────────
+     This used to read `+d[y] || 0`, so a day with no reading was drawn at the
+     baseline with the gradient filled down to it — the visual signature of a
+     collapse, for a day on which nothing was known either way. gapBars has
+     always refused to do that with a bar; a line has no excuse either. So the
+     series is split into runs of consecutive measured points, each run drawn
+     as its own line and its own fill, and a dashed connector spans the hole so
+     the eye still follows the series without reading the gap as a fall.
+
+     One caller was already compensating for this in its own arguments — the
+     Overview passes `r.rate == null ? 0 : r.rate` — and a caller compensating
+     for its library is a library with the wrong contract. */
+  const measured = (v) => v != null && v !== '' && Number.isFinite(Number(v));
+  const runs = [];
   data.forEach((d, i) => {
+    if (!measured(d[y])) { runs.push(null); return; }
+    const last = runs[runs.length - 1];
+    if (Array.isArray(last)) last.push(i); else runs.push([i]);
+  });
+  const segs = runs.filter(Array.isArray);
+  segs.forEach((idx, n) => {
+    /* A run of ONE is a dot, not nothing. `M x y` with no following command
+       strokes nothing at all, and the area path collapses to zero width — so
+       a series with a single measurement drew gridlines, one x label and an
+       empty plot. A vehicle with one earning day is reachable from two pages. */
+    if (idx.length === 1) {
+      const i = idx[0];
+      svg.append(mk('circle', { cx: X(i), cy: Y(+data[i][y]), r: 3.5,
+        fill: `var(${color})`, stroke: 'var(--surface)', 'stroke-width': 2, 'data-fade': '' }));
+      return;
+    }
+    let line = '', area = `M ${X(idx[0])} ${pt + ih}`;
+    idx.forEach((i, k) => {
+      const px = X(i), py = Y(+data[i][y]);
+      line += (k ? ' L ' : 'M ') + px + ' ' + py; area += ` L ${px} ${py}`;
+    });
+    area += ` L ${X(idx[idx.length - 1])} ${pt + ih} Z`;
+    svg.append(mk('path', { d: area, fill: `url(#${id})`, 'data-fade': '' }),
+      mk('path', { d: line, fill: 'none', stroke: `var(${color})`, 'stroke-width': 2,
+        'stroke-linejoin': 'round', 'stroke-linecap': 'round', 'data-draw': '' }));
+    // …and the hole before this run, named as a hole rather than drawn as a value.
+    const prev = segs[n - 1];
+    if (prev) {
+      const a = prev[prev.length - 1], b = idx[0];
+      svg.append(mk('line', { x1: X(a), y1: Y(+data[a][y]), x2: X(b), y2: Y(+data[b][y]),
+        stroke: 'var(--rule-strong)', 'stroke-width': 1.4, 'stroke-dasharray': '4 3' }));
+    }
+  });
+  /* Where the series ENDS, marked. A reader scanning a trend is looking for
+     the latest value and it was the one point on the line with nothing on it. */
+  const lastSeg = segs[segs.length - 1];
+  if (lastSeg && lastSeg.length > 1) {
+    const i = lastSeg[lastSeg.length - 1], px = X(i), py = Y(+data[i][y]);
+    svg.append(mk('circle', { cx: px, cy: py, r: 3.5, fill: `var(${color})`,
+      stroke: 'var(--surface)', 'stroke-width': 2, 'data-fade': '' }));
+  }
+  data.forEach((d, i) => {
+    if (!measured(d[y])) {
+      const c0 = mk('rect', { x: X(i) - 5, y: pt, width: 10, height: ih, fill: 'transparent' });
+      interactive(c0, `${esc(d[x])} — <b>not measured</b>`);
+      svg.append(c0);
+      return;
+    }
     const c = mk('circle', { cx: X(i), cy: Y(+d[y]), r: 9, fill: 'transparent' });
     interactive(c, `${esc(d[x])} — <b>${valueFmt(d[y])}</b>`, onClick && (() => onClick(d)));
     svg.append(c);
   });
-  // Named `xTicks`, not `ticks` — a local `const ticks` here shadows the
-  // module-level helper of the same name across the WHOLE function scope, so
-  // the axis code above would throw before its first gridline.
-  const xTicks = data.length <= 8 ? data.map((_, i) => i)
-    : [0, Math.floor(data.length / 3), Math.floor(2 * data.length / 3), data.length - 1];
-  xTicks.forEach((i) => svg.append(txt(X(i), H - 8, shortLabel(data[i][x]), 'axis', 'middle')));
+  // The same thinning rule the bars use, so two time axes in one panel column
+  // do not disagree about how often a date is worth printing.
+  xTickIndices(data.length).forEach((i) =>
+    svg.append(txt(X(i), H - 8, shortLabel(data[i][x]), 'axis', 'middle')));
   host.append(svg);
 }
 
@@ -347,8 +498,15 @@ export function areaChart(host, data, { x, y, color = '--b400', valueFmt = (v) =
    navigated and three, covering 51% of the ring, did nothing while inviting
    the click. A slice with nowhere to go keeps the hover tooltip and loses the
    pointer. */
-export function donut(host, data, { label = 'label', value = 'n', onClick, max = 8,
-  clickable = null } = {}) {
+/* `max` defaults to CAT.length − 1, not CAT.length.
+   ─────────────────────────────────────────────────────────────────────────
+   At 8 the folded tail made a NINTH entry, and CAT[8 % 8] is CAT[0] — so
+   "Other (11)" was drawn in exactly the colour of the largest slice, and the
+   legend printed the same swatch twice with two different numbers beside it.
+   Verified by evaluating the expression. Seven categories plus the fold is
+   eight marks, which is what the palette has. */
+export function donut(host, data, { label = 'label', value = 'n', onClick,
+  max = CAT.length - 1, colorFor = null, clickable = null, aria = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   /* The tail is FOLDED, never dropped. This used to render the first eight
@@ -365,12 +523,22 @@ export function donut(host, data, { label = 'label', value = 'n', onClick, max =
   }
   const tot = shown.reduce((a, d) => a + +d[value], 0) || 1;
   const S = 190, r = 74, ir = 47, cx = S / 2, cy = S / 2;
-  const svg = mk('svg', { viewBox: `0 0 ${S} ${S}`, role: 'img', class: 'donut', style: 'margin:0 auto;display:block' });
+  const svg = name(mk('svg', { viewBox: `0 0 ${S} ${S}`, class: 'donut', style: 'margin:0 auto;display:block' }), aria);
   let a0 = -Math.PI / 2;
   shown.forEach((d, i) => {
-    const frac = +d[value] / tot, a1 = a0 + frac * Math.PI * 2, gap = 0.016;
-    const p = arc(cx, cy, r, ir, a0 + gap, Math.max(a1 - gap, a0 + gap));
-    const path = mk('path', { d: p, fill: `var(${CAT[i % CAT.length]})`, 'data-fade': '' });
+    const frac = +d[value] / tot, a1 = a0 + frac * Math.PI * 2;
+    /* A separator in PIXELS, not in radians.
+       The gap was a constant 0.016 rad trimmed off both ends, which is nothing
+       on a large slice and everything on a small one: a 0.4% slice spans about
+       0.025 rad and lost 0.032 to the trim, so it collapsed to a zero-width
+       sliver — invisible on the ring while still carrying a real number in the
+       legend. A hairline stroke in the panel colour separates the arcs without
+       taking any of their sweep. */
+    const p = arc(cx, cy, r, ir, a0, a1);
+    /* The fold is not a category and must not take a category's colour. */
+    const fillVar = d._tail ? '--ink-3' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length];
+    const path = mk('path', { d: p, fill: `var(${fillVar})`,
+      stroke: 'var(--surface)', 'stroke-width': 1.5, 'data-fade': '' });
     interactive(path, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(frac * 100).toFixed(1)}%)${
       d._tail ? `<br><span style="opacity:.8">${esc(d._tail.slice(0, 10).join(' · '))}</span>` : ''}`,
     onClick && !d._tail && (!clickable || clickable(d)) && (() => onClick(d)));
@@ -380,8 +548,11 @@ export function donut(host, data, { label = 'label', value = 'n', onClick, max =
     txt(cx, cy + 14, 'total', 'axis', 'middle'));
   host.append(svg);
   const leg = document.createElement('div'); leg.className = 'legend';
+  // The legend reads the SAME expression the ring did, so a swatch can never
+  // name a colour the arc beside it is not drawn in.
+  const swatchOf = (d, i) => (d._tail ? '--ink-3' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
   leg.innerHTML = shown.map((d, i) =>
-    `<span><i class="sw" style="background:var(${CAT[i % CAT.length]})"></i>${esc(d[label])} · <b class="num">${fmt(d[value])}</b></span>`).join('');
+    `<span><i class="sw" style="background:var(${swatchOf(d, i)})"></i>${esc(d[label])} · <b class="num">${fmt(d[value])}</b></span>`).join('');
   host.append(leg);
 }
 
@@ -396,8 +567,21 @@ export function donut(host, data, { label = 'label', value = 'n', onClick, max =
    credit. Scaling against max(|value|) and colouring the negatives separately
    makes the same numbers read as what they are. `signed:false` keeps the old
    magnitude behaviour for series that genuinely cannot go below zero. */
+/* One hue, unless a caller says otherwise.
+   ─────────────────────────────────────────────────────────────────────────
+   This drew a RANKING in eight categorical colours that recycled at row nine,
+   so a twelve-row list of corridors had rows 1 and 9 in the same hue while the
+   colour itself encoded nothing at all — bar length already carries the
+   magnitude, and a second channel that says nothing reads as a grouping that
+   is not there. `categorical: true` is the opt-in for the rare series whose
+   rows genuinely are unordered kinds. */
 export function hbars(host, data, { label = 'label', value = 'n', color, seq = false, onClick,
   valueFmt = (v) => fmt(v), signed = true, negColor = '--s2', legend = null,
+  categorical = false,
+  /* Per-row colour, for the one case where hue carries a fact rather than
+     decoration: a row that IS a channel is drawn in that channel's colour.
+     Returns a token name, or nothing to fall through to the rules below. */
+  colorFor = null,
   // A row may opt out of navigation individually — see `donut`, same reason.
   clickable = null } = {}) {
   host.innerHTML = '';
@@ -410,13 +594,30 @@ export function hbars(host, data, { label = 'label', value = 'n', color, seq = f
     const v = +d[value] || 0;
     const neg = anyNeg && v < 0;
     const row = document.createElement('div'); row.className = 'hb';
+    /* The ramp must span the ROWS. `SEQ[Math.max(6 - i, 2)]` walked down four
+       steps and then stuck: a fourteen-row list came out b700 b600 b500 b400
+       and then ten identical b300s, which is a ramp that stops ramping exactly
+       where the reader is still looking. */
+    const ramp = SEQ[Math.min(6, Math.max(2,
+      Math.round((1 - i / Math.max(data.length - 1, 1)) * 6)))];
+    const own = colorFor && colorFor(d, i);
     const c = neg ? `var(${negColor})`
-      : color ? `var(${color})` : seq ? `var(${SEQ[Math.max(6 - i, 2)]})` : `var(${CAT[i % CAT.length]})`;
-    const w = Math.min(100, Math.abs(v) / max * 100);
+      : own ? `var(${own})`
+        : color ? `var(${color})`
+          : seq ? `var(${ramp})`
+            : categorical ? `var(${CAT[i % CAT.length]})` : 'var(--b400)';
+    /* A true zero draws no bar. `min-width:2px` in the stylesheet gave zero the
+       same stub as a value too small to see. */
+    const w = v === 0 ? 0 : Math.max(Math.min(100, Math.abs(v) / max * 100), 0.6);
     row.innerHTML = `<div class="k" title="${esc(d[label])}">${esc(d[label])}</div>
-      <div class="track"><div class="fill" style="width:${w.toFixed(1)}%;background:${c}"></div></div>
-      <div class="v num">${neg ? '−' : ''}${valueFmt(Math.abs(v))}</div>`;
+      <div class="track"><div class="fill${neg ? ' neg' : ''}" style="width:${w.toFixed(1)}%;background:${c}"></div></div>
+      <div class="v num">${v === 0 ? '0' : `${neg ? '−' : ''}${valueFmt(Math.abs(v))}`}</div>`;
     const go = onClick && (!clickable || clickable(d)) ? () => onClick(d) : null;
+    /* The stylesheet has styled `.hb[data-click]` — cursor, the hover ring on
+       the label and track, the active press — since these rows became
+       clickable, and nothing ever set the attribute, so four rules matched
+       nothing and every clickable row was missing its whole hover state. */
+    if (go) { row.setAttribute('data-click', ''); row.tabIndex = 0; row.setAttribute('role', 'button'); }
     interactive(row, `${esc(d[label])} — <b>${neg ? '−' : ''}${valueFmt(Math.abs(v))}</b>`, go);
     wrap.append(row);
   });
@@ -439,14 +640,14 @@ export function hbars(host, data, { label = 'label', value = 'n', color, seq = f
    never-seen were shaded identically; they are now a distinct empty cell and
    a legend entry of their own. */
 export function heatmap(host, rows, { onClick, unit = 'trips',
-  valueFmt = (v) => fmt(v), legend = true } = {}) {
+  valueFmt = (v) => fmt(v), legend = true, aria = null } = {}) {
   host.innerHTML = '';
   if (!rows.length) return empty(host);
   const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
   const grid = {}; let max = 0;
   rows.forEach((r) => { grid[`${r.dow}-${r.h}`] = r.trips; max = Math.max(max, +r.trips || 0); });
   const W = 760, cell = 26, lw = 40, H = 7 * cell + 26;
-  const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
+  const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
   for (let d = 0; d < 7; d++) {
     svg.append(txt(lw - 8, d * cell + 17, DOW[d], 'axis', 'end'));
     for (let h = 0; h < 24; h++) {
@@ -483,46 +684,121 @@ export function heatmap(host, rows, { onClick, unit = 'trips',
 }
 
 /* ── scatter (two measures per entity) ── */
-export function scatter(host, data, { x, y, label, xLabel, yLabel, onClick } = {}) {
+/* `yLabel` was accepted, used in the tooltip, and never drawn.
+   ─────────────────────────────────────────────────────────────────────────
+   #unit passes yLabel 'money in (AED)' and the y axis was a bare column of
+   numbers. `refLine` is the other half of the same omission: that page's
+   caption tells the reader "a dot well below that line is doing distance that
+   is not being paid for", and this function drew no line of any kind. A
+   caption that names a mark the chart does not draw is worse than no caption.
+
+   The axes were also rounded to integers — `fmt(Math.round(ymax * i / 3))` —
+   which areaChart fixed for itself and nobody carried here, so a fleet with
+   sub-1 AED/km rates read "0 / 0 / 1 / 1" up the side. */
+export function scatter(host, data, { x, y, label, xLabel, yLabel, onClick,
+  xFmt = (v) => fmt(v), yFmt = (v) => fmt(v), refLine = null, aria = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
   const W = 720, H = 280, pl = 52, pr = 16, pt = 16, pb = 40;
   const xs = data.map((d) => +d[x]), ys = data.map((d) => +d[y]);
-  const xmax = Math.max(...xs) * 1.1 || 1, ymax = Math.max(...ys) * 1.1 || 1;
+  /* Guarded against a single non-finite value.
+     `Math.max(...xs)` over an array holding one NaN is NaN; NaN * 1.1 is NaN;
+     `NaN || 1` is 1 — and every dot then has cx = NaN, so the whole chart
+     silently draws nothing at all. Two call sites already work around this in
+     their own arguments, which is how a library announces a missing guard. */
+  const fin = (a) => a.filter(Number.isFinite);
+  const xmax = (Math.max(...fin(xs), 0) || 1) * 1.1;
+  const ymax = (Math.max(...fin(ys), 0) || 1) * 1.1;
   const iw = W - pl - pr, ih = H - pt - pb;
-  const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
-  for (let i = 0; i <= 3; i++) {
-    const gy = pt + ih - ih * i / 3;
-    svg.append(mk('line', { class: 'gl', x1: pl, y1: gy, x2: W - pr, y2: gy }),
-      txt(pl - 7, gy + 3, fmt(Math.round(ymax * i / 3)), 'axis', 'end'));
+  const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
+  const { max: yTop } = yAxis(svg, { hi: ymax, pl, pr, pt, ih, W, fmt: yFmt });
+  /* Vertical gridlines too. The x tick VALUES were printed with nothing above
+     them, so reading a dot's x meant tracing across empty space. */
+  const xMarks = niceTicks(0, xmax, 4);
+  const xTop = xMarks[xMarks.length - 1] || 1;
+  xMarks.forEach((v) => {
+    const gx = pl + iw * (v / xTop);
+    svg.append(mk('line', { class: 'gl', x1: gx, y1: pt, x2: gx, y2: pt + ih }),
+      txt(gx, H - 22, xFmt(v), 'axis', 'middle'));
+  });
+  // The line the caller's own caption promises, when it supplies the slope.
+  if (refLine && Number.isFinite(+refLine.slope)) {
+    svg.append(mk('line', { x1: pl, y1: pt + ih,
+      x2: pl + iw, y2: pt + ih - ih * Math.min(1, (xTop * +refLine.slope) / yTop),
+      stroke: 'var(--ink-3)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }));
   }
   data.forEach((d) => {
-    const cx = pl + iw * (+d[x]) / xmax, cy = pt + ih - ih * (+d[y]) / ymax;
-    const c = mk('circle', { cx, cy, r: 5, fill: 'var(--s1)', 'fill-opacity': .75, stroke: 'var(--surface)', 'stroke-width': 1.5 });
-    interactive(c, `${esc(d[label])} — ${xLabel}: <b>${fmt(d[x])}</b>, ${yLabel}: <b>${fmt(d[y])}</b>`, onClick && (() => onClick(d)));
+    if (!Number.isFinite(+d[x]) || !Number.isFinite(+d[y])) return;
+    const cx = pl + iw * (+d[x]) / xTop, cy = pt + ih - ih * (+d[y]) / yTop;
+    const c = mk('circle', { cx, cy, r: 4.5, fill: 'var(--s1)', 'fill-opacity': .6, stroke: 'var(--surface)', 'stroke-width': 1.5 });
+    interactive(c, `${esc(d[label])} — ${xLabel}: <b>${xFmt(d[x])}</b>, ${yLabel}: <b>${yFmt(d[y])}</b>`, onClick && (() => onClick(d)));
     svg.append(c);
   });
   svg.append(txt(pl + iw / 2, H - 8, xLabel, 'axis', 'middle'));
-  [0, 1, 2, 3].forEach((i) => svg.append(txt(pl + iw * i / 3, H - 22, fmt(Math.round(xmax * i / 3)), 'axis', 'middle')));
+  if (yLabel) {
+    const yt = txt(0, 0, yLabel, 'axis', 'middle');
+    yt.setAttribute('transform', `translate(13,${pt + ih / 2}) rotate(-90)`);
+    svg.append(yt);
+  }
   host.append(svg);
 }
 
 /* ── stacked bar (one row, composition) ── */
-export function stackedBar(host, data, { label = 'label', value = 'n' } = {}) {
+/* One bar divided, not a row of pills.
+   ─────────────────────────────────────────────────────────────────────────
+   Every segment carried rx:2 and a 1px gap either side, so a composition bar —
+   whose whole job is to look like ONE thing cut up — read as a line of
+   separate chips. The outer corners are rounded once, by a clip path, and the
+   internal boundaries are hairlines in the panel colour.
+
+   Two arithmetic guards, both of which produced a plausible wrong picture. A
+   null value made `+d[value] / tot * W` NaN, so the segment vanished with
+   width="NaN" while the remaining segments still filled the bar — a class
+   silently dropped and the rest renormalised to 100%, which is exactly the
+   failure the Overview's own comment describes. And a segment under 1.5% drew
+   a hairline nobody can point at while still taking a full legend entry with a
+   real number beside it; those fold into a trailing Other, as donut folds its
+   tail, and the fold is neutral because it is not a category. */
+export function stackedBar(host, data, { label = 'label', value = 'n', onClick,
+  clickable = null, valueFmt = (v) => fmt(v), colorFor = null, aria = null } = {}) {
   host.innerHTML = '';
   if (!data.length) return empty(host);
-  const tot = data.reduce((a, d) => a + +d[value], 0) || 1;
-  const W = 400, H = 26; let x = 0;
-  const svg = mk('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img' });
-  data.forEach((d, i) => {
-    const w = +d[value] / tot * W;
-    const r = mk('rect', { x: x + (x ? 1 : 0), y: 0, width: Math.max(w - 1, 1), height: H, rx: 2, fill: `var(${CAT[i % CAT.length]})`, 'data-fade': '' });
-    interactive(r, `${esc(d[label])} — <b>${fmt(d[value])}</b> (${(+d[value] / tot * 100).toFixed(1)}%)`);
-    svg.append(r); x += w;
+  const num = (d) => (Number.isFinite(+d[value]) ? +d[value] : 0);
+  const tot0 = data.reduce((a, d) => a + num(d), 0) || 1;
+  const big = data.filter((d) => num(d) / tot0 >= 0.015);
+  const small = data.filter((d) => num(d) / tot0 < 0.015 && num(d) > 0);
+  const rows = small.length
+    ? [...big, { [label]: `Other (${small.length})`, [value]: small.reduce((a, d) => a + num(d), 0),
+      _tail: small.map((d) => `${d[label]} ${fmt(num(d))}`) }]
+    : big;
+  const tot = rows.reduce((a, d) => a + num(d), 0) || 1;
+  const W = 400, H = 30, R = 5; let x = 0;
+  const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
+  const cid = 'sb' + Math.random().toString(36).slice(2, 7);
+  const defs = mk('defs'), cp = mk('clipPath', { id: cid });
+  cp.append(mk('rect', { x: 0, y: 0, width: W, height: H, rx: R }));
+  defs.append(cp); svg.append(defs);
+  const g = mk('g', { 'clip-path': `url(#${cid})` });
+  const swatchOf = (d, i) => (d._tail ? '--ink-3' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
+  rows.forEach((d, i) => {
+    const w = num(d) / tot * W, pct = num(d) / tot * 100;
+    const r = mk('rect', { x, y: 0, width: w, height: H, fill: `var(${swatchOf(d, i)})`,
+      stroke: 'var(--surface)', 'stroke-width': 1.5, 'data-fade': '' });
+    interactive(r, `${esc(d[label])} — <b>${valueFmt(num(d))}</b> (${pct.toFixed(1)}%)`
+      + (d._tail ? `<br><span style="opacity:.8">${esc(d._tail.slice(0, 10).join(' · '))}</span>` : ''),
+    onClick && !d._tail && (!clickable || clickable(d)) && (() => onClick(d)));
+    g.append(r);
+    // The share, on the bar, where a segment is wide enough to hold it.
+    if (pct >= 12) {
+      g.append(txt(x + w / 2, H / 2 + 4, `${pct.toFixed(0)}%`, 'vlab', 'middle',
+        'fill:var(--surface);font-weight:600'));
+    }
+    x += w;
   });
+  svg.append(g);
   host.append(svg);
   const leg = document.createElement('div'); leg.className = 'legend';
-  leg.innerHTML = data.map((d, i) => `<span><i class="sw" style="background:var(${CAT[i % CAT.length]})"></i>${esc(d[label])} · <b class="num">${(+d[value] / tot * 100).toFixed(1)}%</b></span>`).join('');
+  leg.innerHTML = rows.map((d, i) => `<span><i class="sw" style="background:var(${swatchOf(d, i)})"></i>${esc(d[label])} · <b class="num">${(num(d) / tot * 100).toFixed(1)}%</b></span>`).join('');
   host.append(leg);
 }
 
