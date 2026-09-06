@@ -33,7 +33,8 @@ import express from 'express';
 import { readFileSync } from 'node:fs';
 import { win, winDays } from '../api/window.js';
 import { isAdmin } from '../api/admin_gate.js';
-import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote } from '../api/redact.js';
+import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote,
+  withPhotos } from '../api/redact.js';
 import { vehicleLatest } from '../api/custody_sql.js';
 import { exportRoutes } from '../api/export_routes.js';
 import { responseCache } from '../api/cache.js';
@@ -231,10 +232,15 @@ function complianceApp() {
     if (/GROUP BY 1 HAVING/.test(sql)) {
       return [{ platform: 'hotel', n: 123, of_n: 132 }, { platform: 'uber', n: 0, of_n: 157 }];
     }
+    /* The photograph store, keys only. One of the two drivers has bytes on
+       file and one does not, which is what makes the assertions below able to
+       tell 'this product holds a photograph of this person' from 'it does
+       not' — the distinction the route exists to draw. */
+    if (/FROM driver_photo/.test(sql)) return [{ platform: 'uber', driver_ext_id: 'u-2' }];
     throw new Error(`unexpected SQL in the compliance route: ${sql.slice(0, 80)}`);
   };
   return (app) => mount(app, F_COMPLIANCE, { q, wrap, isAdmin, vehicleLatest,
-    IDENTITY_DOCS, stripIdentity, withheldNote });
+    IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos });
 }
 
 console.log('\n/api/compliance/drivers — 123 Emirates IDs to anyone who knew the URL');
@@ -257,6 +263,24 @@ console.log('\n/api/compliance/drivers — 123 Emirates IDs to anyone who knew t
   check('phone survives redaction on every row',
     anon.body.drivers.every((r) => 'phone' in r) && anon.body.drivers[0].phone === '971563951581');
   check('email survives redaction', anon.body.drivers[1].email === 'shahab@example.ae');
+  /* The PHOTOGRAPH is the third thing the operator asked for, and it is the one
+     that was quietly not being delivered: both rows arrive from the database
+     with picture_url null or holding Uber's twelve-hour signed CloudFront link,
+     and neither is something a reader can open. What must leave this route is
+     this origin's own address, and only for the driver whose bytes we actually
+     hold. The stub gives bytes for u-2 and none for h-1, so the two cases are
+     separated here rather than assumed. */
+  check('the driver whose photograph we hold is offered our address for it',
+    anon.body.drivers[1].picture_url === '/api/driver/photo/uber/u-2',
+    String(anon.body.drivers[1].picture_url));
+  check('…and the driver whose photograph we do not hold is offered nothing',
+    anon.body.drivers[0].picture_url === null, String(anon.body.drivers[0].picture_url));
+  check('…and an admin is given the same address, not the expiring one',
+    admin.body.drivers[1].picture_url === '/api/driver/photo/uber/u-2',
+    String(admin.body.drivers[1].picture_url));
+  check('no caller is handed a url on a host this product cannot re-sign',
+    !/cloudfront|Signature=|Key-Pair-Id/i.test(anon.text + admin.text),
+    (((anon.text + admin.text).match(/https?:\/\/[^"]{0,60}/) || [''])[0]));
   check('the name survives redaction', anon.body.drivers[0].full_name === 'SAYED KAMAL SAYED MIR');
   // The page's whole job survives.
   check('licence_expires survives — "whose licence lapses on Thursday" still answerable',
