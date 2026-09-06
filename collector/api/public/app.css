@@ -556,9 +556,15 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
    16.28px — UNDER the clamp's own floor. The headline number therefore
    rendered at its minimum on every row of four or more tiles, which is every
    KPI row in the product: 2px larger than a panel heading, and not a hero at
-   all. At 200px the row is four tracks of 234px, `11cqi` is 21.8px, and the
-   clamp does the job it was written to do. */
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+   all.
+
+   200px was the first cut and it was too wide: measured on production, the
+   Overview's SIX tiles no longer fitted one row at 1440px, so the sixth sat
+   alone beside 800px of empty grid — a worse fault than the one being fixed.
+   172px keeps all six on one row at 1440 (6x172 + 5x12 = 1092 inside 1204) and
+   still raises the clamp's floor from 1.15rem to 1.3rem, so the figure is
+   larger than it was at every width. */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(172px,1fr));gap:12px}
 .kpi{
   background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);
   padding:15px 17px;box-shadow:var(--shadow-1);position:relative;overflow:hidden;
@@ -638,13 +644,17 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 /* The hand-rolled tiles emit `.d` where kpiRow emits `.s`, and only `.s` was
    given a line-height and an overflow rule — so eleven sub-lines in app.js
    leaked at body leading and broke long identifiers past the tile's
-   overflow:hidden. One declaration, both class names, and a two-line clamp so
-   a single 90-character qualifier cannot stretch every tile in the grid row
-   beside it. */
+   overflow:hidden. One declaration, both class names.
+
+   No line clamp. The first cut of this had -webkit-line-clamp:3, to stop one
+   long qualifier stretching every tile in its grid row — and on production it
+   cut the Overview's Money-in tile at "on-trip net AED...", ending a figure
+   mid-digits. A row that is taller than it needs to be is untidy; a number cut
+   off with nothing to say it was cut is the failure this product spends its
+   time removing. The row can be tall. */
 .kpi .d,.kpi .s{
   font-size:.75rem;color:var(--ink-2);margin-top:2px;line-height:1.4;
   overflow-wrap:anywhere;
-  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;
 }
 .kpi .d b{font-weight:600;color:var(--ink)}
 .kpi.ok .n{color:var(--good)} .kpi.warn .n{color:var(--warn)} .kpi.err .n{color:var(--critical)}
