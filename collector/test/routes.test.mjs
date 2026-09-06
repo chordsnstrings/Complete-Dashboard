@@ -79,7 +79,14 @@ check('map panel carries the opt-out class', /panel mapwrap/.test(jsTxt));
 const mapTxt = readFileSync('api/public/map.js', 'utf8');
 check('leaflet is vendored, not CDN',
   /vendor\/leaflet\.js/.test(mapTxt) && !/unpkg\.com|cdnjs|jsdelivr/.test(mapTxt + htmlTxt));
-check('nav css targets the real markup (a, .grp)', /#nav a\{/.test(cssTxt) && /#nav \.grp\{/.test(cssTxt));
+/* `.grp` is gone with the collapsing groups it headed — six rail rows need no
+   headings. The property this line is about is that the stylesheet targets the
+   markup renderNav actually emits, so it is pinned to what that is now: an
+   anchor, an icon, and a label span the icons-only rail can hide. */
+check('nav css targets the real markup (a, .ic, .lb)',
+  /#nav a\{/.test(cssTxt) && /#nav a \.ic\{/.test(cssTxt));
+check('…and renderNav emits a label element rather than a bare text node',
+  /<span class="lb">/.test(jsTxt));
 check('map view is registered', /id: 'map'/.test(jsTxt));
 
 /* ── the driver detail pages ──────────────────────────────────────────────
@@ -100,12 +107,21 @@ const dataJs = readFileSync('api/public/data.js', 'utf8');
 const mapJs = readFileSync('api/public/map.js', 'utf8');
 check('router parses view/param/sub', /export function parseHash/.test(dataJs));
 check('app applies the parsed route', /applyRoute\(\)/.test(jsTxt));
-// Every detail page must name a top-level parent, or opening it silently
-// unlights the sidebar and the user loses their place.
-check('a detail page keeps its parent lit in the nav',
-  /const PARENT = \{[^}]*driver: 'drivers'[^}]*vehicle: 'vehicles'[^}]*\}/.test(jsTxt));
-check('the property page is a page within Corporate, not a thirteenth destination',
-  /const PARENT = \{[^}]*property: 'corporate'[^}]*\}/.test(jsTxt));
+/* Every detail page must light something in the rail, or opening it silently
+   unlights the sidebar and the reader loses their place.
+
+   These two lines were pinned to the literal text `const PARENT = {`, so they
+   asserted the existence of one particular map rather than the property — and
+   PARENT itself had no entry for `trip` or `cohort`, which meant both of them
+   passed while two real addresses lit nothing at all. The exhaustive version
+   now lives in test/nav_sections.test.mjs, which walks every V handler and
+   every VIEWS id and fails on any that resolves to no section. What is kept
+   here is the shape: a drill-down map exists, and it names a section rather
+   than a page. */
+check('a detail page resolves to a section', /const DRILL_SECTION = \{/.test(jsTxt));
+check('…and the resolver is what the rail and the strip both read',
+  /const sectionOf = \(view, param\)/.test(jsTxt)
+  && /sectionOf\(state\.view, state\.param\)/.test(jsTxt));
 check('breadcrumb element exists', /id="crumb"/.test(htmlTxt));
 
 /* A view that shadows an imported helper passes `node --check` and then blanks

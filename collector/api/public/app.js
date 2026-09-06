@@ -270,120 +270,196 @@ function componentTree(components) {
    Named rather than inlined in the router, because two things need to agree
    about it: applyRoute below, and the test that proves an empty address is not
    treated as a mistyped one. That test used to assert the landing page's TITLE
-   — so it forbade ever renaming the page it was not actually about. */
-export const LANDING = 'unit';
+   — so it forbade ever renaming the page it was not actually about.
+
+   The worklist, not the ledger. Two reasons, and the second is the one that
+   settles it.
+
+   The design this shell is being rebuilt against argues that a fleet's home
+   screen is a worklist rather than a report: you should land on what needs a
+   decision today, not on a summary of last month. That is a matter of taste
+   until you time it. Measured on production on 2026-09-06, over the window the
+   page actually opens on: /api/insights answers in 0.8s and returns 101 open
+   findings; /api/economics/drivers takes 4.8s, /api/kpis 40s cold, and
+   /api/economics/assets 35s — and the ledger fires the last three in parallel,
+   so the first thing anybody saw was eight grey skeletons.
+
+   The worklist is also smaller than its count suggests: those 101 findings are
+   twelve distinct rules, of which 27 are one dormant-vehicle rule and 25 are
+   one expiring-document rule. Twenty-seven dormant cars is one decision, not
+   twenty-seven — which is the next thing to fix on that page, and a better
+   problem to have on a home screen than a two-minute wait. */
+export const LANDING = 'insights';
 
 const VIEWS = [
-  { id: 'unit', label: 'Money per car and driver', ic: '◆', grp: 'Money', sub: 'What each car and driver earned per day, per km and per trip, including zero earners' },
-  { id: 'revenue', label: 'Money by platform', ic: '◇', grp: 'Money', sub: 'What each platform reports about money, and which ones report nothing' },
-  { id: 'provenance', label: 'Money sources', ic: '⑆', grp: 'Money',
+  { id: 'insights', label: 'Action list', ic: '✦', sec: 'Today', sub: 'What needs doing, ranked by what it costs to ignore' },
+  { id: 'playbook', label: 'To-do list', ic: '☑', sec: 'Today', sub: 'Jobs to do this month to earn more, each with the sums behind it' },
+  { id: 'overview', label: 'Fleet activity', ic: '◱', sec: 'Today', sub: 'How many trips the fleet ran, on which platforms, and how they ended' },
+  { id: 'compare', label: 'Today vs yesterday', ic: '⧉', sec: 'Today', sub: 'Two days side by side, both counted up to the same Dubai minute' },
+  { id: 'analyst', label: 'Analyst', ic: '◑', sec: 'Today', sub: 'Claims the model made, checked against the database, with the numbers behind each' },
+  { id: 'unit', label: 'Money per car and driver', ic: '◆', sec: 'Money', sub: 'What each car and driver earned per day, per km and per trip, including zero earners' },
+  { id: 'revenue', label: 'Money by platform', ic: '◇', sec: 'Money', sub: 'What each platform reports about money, and which ones report nothing' },
+  { id: 'provenance', label: 'Money sources', ic: '⑆', sec: 'Money',
     sub: 'Every API call that returned money, and whether the headline figure uses it' },
-  { id: 'reconcile', label: 'Paid vs owed', ic: '⇌', grp: 'Money', sub: 'For each month, what the platforms paid us against what their statements say they owed' },
-  { id: 'finance', label: 'Finance', ic: '◈', grp: 'Money', sub: 'Money in, how riders paid, and every fee, bonus and adjustment on record' },
-  { id: 'settlement', label: 'Cash and unpaid', ic: '◫', grp: 'Money', sub: 'Who pays for the ride, how much cash drivers hold, and what is still unpaid' },
-  { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Money', sub: 'Hotel and company bookings, with the cost of each ride as well as its price' },
-  { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Work', sub: 'How many trips the fleet ran, on which platforms, and how they ended' },
-  { id: 'demand', label: 'Demand', ic: '◷', grp: 'Work', sub: 'When trips happen, by day, hour and weekday' },
+  { id: 'reconcile', label: 'Paid vs owed', ic: '⇌', sec: 'Money', sub: 'For each month, what the platforms paid us against what their statements say they owed' },
+  { id: 'finance', label: 'Finance', ic: '◈', sec: 'Money', sub: 'Money in, how riders paid, and every fee, bonus and adjustment on record' },
+  { id: 'settlement', label: 'Cash and unpaid', ic: '◫', sec: 'Money', sub: 'Who pays for the ride, how much cash drivers hold, and what is still unpaid' },
+  { id: 'corporate', label: 'Corporate & hotels', ic: '❖', sec: 'Money', sub: 'Hotel and company bookings, with the cost of each ride as well as its price' },
+  { id: 'demand', label: 'Demand', ic: '◷', sec: 'Work', sub: 'When trips happen, by day, hour and weekday' },
   /* The record itself, browsable. Every other page here aggregates it; this
      one lists it, which is what an operator wants when they remember a job
      and not a statistic. */
-  { id: 'trips', label: 'Every trip', ic: '≣', grp: 'Work', sub: 'One row per booking, searchable' },
+  { id: 'trips', label: 'Every trip', ic: '≣', sec: 'Work', sub: 'One row per booking, searchable' },
   /* The other half of the market, and the only page in the product that
      measures supply. It sits beside Demand because it is the same axes with
      the other series on them. */
-  { id: 'supply', label: 'Idle hours', ic: '◑', grp: 'Work', sub: 'When and where cars are online with nobody in them' },
-  { id: 'compare', label: 'Today vs yesterday', ic: '⧉', grp: 'Work', sub: 'Two days side by side, both counted up to the same Dubai minute' },
-  { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Work', sub: 'How Uber, Yango and Bolt compare on share, car tier and jobs accepted' },
-  { id: 'corridors', label: 'Popular routes', ic: '⇄', grp: 'Work', sub: 'Which pickup areas feed which drop-off areas' },
-  { id: 'top-performers', label: 'Top performers', ic: '▲', grp: 'People', sub: 'The best drivers of the last complete week, and what they did differently' },
-  { id: 'low-performers', label: 'Low performers', ic: '▼', grp: 'People', sub: 'The weakest drivers of the last complete week, and what the data cannot explain' },
-  { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'People', sub: 'Trips, quality and platform activity for every driver' },
-  { id: 'roster', label: 'Driver roster', ic: '☰', grp: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
-  { id: 'retention', label: 'Joiners & leavers', ic: '⇅', grp: 'People', sub: 'Whether the driver count fell because people left or because nobody joined' },
-  { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'People', sub: 'Driver licences and vehicle papers, and when each one expires' },
-  { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Assets', sub: 'How much each car is used, and how much money it brings in' },
-  { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Assets', sub: 'Trips where the seat sensor saw a rider but no platform has a booking' },
-  { id: 'safety', label: 'Safety', ic: '△', grp: 'Assets', sub: 'Harsh braking, speeding and sharp turns from the car trackers, plus tracker faults' },
-  { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Assets', sub: 'Live vehicle positions, refreshed by CABMAN every 5 minutes' },
-  { id: 'map', label: 'Map & replay', ic: '◍', grp: 'Assets', sub: 'Where every vehicle is now, and where it went on any given day' },
-  { id: 'causes', label: 'Why trips changed', ic: '◔', grp: 'Decide', sub: 'When trips changed sharply, and whether supply or demand moved with it' },
-  { id: 'forecast', label: 'Forecast', ic: '◠', grp: 'Decide', sub: 'Expected trips for next month, day by day, and how uncertain each day is' },
-  { id: 'playbook', label: 'To-do list', ic: '☑', grp: 'Decide', sub: 'Jobs to do this month to earn more, each with the sums behind it' },
-  { id: 'optimise', label: 'Cut waiting time', ic: '◎', grp: 'Decide', sub: 'Which online hours sell, and where drivers wait for the next job' },
-  { id: 'capacity', label: 'Rota gaps', ic: '◫', grp: 'Decide', sub: 'Which hours next month need more drivers than the rota covers today' },
-  { id: 'insights', label: 'Action list', ic: '✦', grp: 'Decide', sub: 'What needs doing, ranked by what it costs to ignore' },
-  { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Decide', sub: 'Claims the model made, checked against the database, with the numbers behind each' },
-  { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Trust', sub: 'Whether each source is still collecting, and how far back it goes' },
-  { id: 'coverage', label: 'Collection gaps', ic: '▦', grp: 'Trust', sub: 'Which days each source collected, and which days are missing' },
-  { id: 'providers', label: 'What each API offers', ic: '⌗', grp: 'Trust', sub: 'Every field each source sends, and the ones we do not store yet' },
-  { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Set up', sub: 'Credentials and collection schedule' },
+  { id: 'supply', label: 'Idle hours', ic: '◑', sec: 'Work', sub: 'When and where cars are online with nobody in them' },
+  { id: 'platforms', label: 'Platforms', ic: '◨', sec: 'Work', sub: 'How Uber, Yango and Bolt compare on share, car tier and jobs accepted' },
+  { id: 'corridors', label: 'Popular routes', ic: '⇄', sec: 'Work', sub: 'Which pickup areas feed which drop-off areas' },
+  { id: 'drivers', label: 'Drivers', ic: '◧', sec: 'People', sub: 'Trips, quality and platform activity for every driver' },
+  { id: 'roster', label: 'Driver roster', ic: '☰', sec: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
+  { id: 'top-performers', label: 'Top performers', ic: '▲', sec: 'People', sub: 'The best drivers of the last complete week, and what they did differently' },
+  { id: 'low-performers', label: 'Low performers', ic: '▼', sec: 'People', sub: 'The weakest drivers of the last complete week, and what the data cannot explain' },
+  { id: 'retention', label: 'Joiners & leavers', ic: '⇅', sec: 'People', sub: 'Whether the driver count fell because people left or because nobody joined' },
+  { id: 'compliance', label: 'Compliance', ic: '❑', sec: 'People', sub: 'Driver licences and vehicle papers, and when each one expires' },
+  { id: 'vehicles', label: 'Vehicles', ic: '▤', sec: 'Fleet', sub: 'How much each car is used, and how much money it brings in' },
+  { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', sec: 'Fleet', sub: 'Trips where the seat sensor saw a rider but no platform has a booking' },
+  { id: 'safety', label: 'Safety', ic: '△', sec: 'Fleet', sub: 'Harsh braking, speeding and sharp turns from the car trackers, plus tracker faults' },
+  { id: 'live', label: 'Live fleet', ic: '◉', sec: 'Fleet', sub: 'Live vehicle positions, refreshed by CABMAN every 5 minutes' },
+  { id: 'map', label: 'Map & replay', ic: '◍', sec: 'Fleet', sub: 'Where every vehicle is now, and where it went on any given day' },
+  { id: 'causes', label: 'Why trips changed', ic: '◔', sec: 'Work', sub: 'When trips changed sharply, and whether supply or demand moved with it' },
+  { id: 'forecast', label: 'Forecast', ic: '◠', sec: 'Work', sub: 'Expected trips for next month, day by day, and how uncertain each day is' },
+  { id: 'optimise', label: 'Cut waiting time', ic: '◎', sec: 'Work', sub: 'Which online hours sell, and where drivers wait for the next job' },
+  { id: 'capacity', label: 'Rota gaps', ic: '◫', sec: 'Work', sub: 'Which hours next month need more drivers than the rota covers today' },
+  { id: 'sources', label: 'Data sources', ic: '⛁', sec: 'Sources', sub: 'Whether each source is still collecting, and how far back it goes' },
+  { id: 'coverage', label: 'Collection gaps', ic: '▦', sec: 'Sources', sub: 'Which days each source collected, and which days are missing' },
+  { id: 'providers', label: 'What each API offers', ic: '⌗', sec: 'Sources', sub: 'Every field each source sends, and the ones we do not store yet' },
+  { id: 'settings', label: 'Settings', ic: '⚙', sec: 'Set up', sub: 'Credentials and collection schedule' },
 ];
 
 /* ─────────── shell ─────────── */
-// A detail page keeps its parent lit in the sidebar — `#driver/…` is a page
-// *within* Drivers, not a thirteenth top-level destination.
-/* Slot, segments and segment are the destinations of the demand heatmap, the
-   capacity rota and every unauthorized drill — three of the eleven modals this
-   product replaced with addresses. They had no VIEWS entry and no PARENT, so
-   every one of them fell through to VIEWS[0] and titled itself "Unit
-   economics", with the breadcrumb hidden and nothing lit in the sidebar. */
-const PARENT = { driver: 'drivers', vehicle: 'vehicles', property: 'corporate', day: 'demand',
-  performer: 'top-performers',
-  action: 'insights', slot: 'demand', segments: 'unauthorized', segment: 'unauthorized' };
+/* Six rows in the rail, not thirty-six.
+   ─────────────────────────────────────────────────────────────────────────
+   Thirty-six destinations do not fit any laptop's sidebar, and the answer to
+   that was seven collapsible groups — which is a way of hiding the problem
+   from whoever is not currently looking at it. On a 13-inch browser with a
+   toolbar #nav gets 522px, so a third of the product sat below a fold that
+   landed in the middle of a group, and the reader's only cure was to shut the
+   parts of the product they were not using.
+
+   Six sections fit. Each one is a destination that lands on its first page,
+   and the pages inside it become a tab bar under the title — so a reader sees
+   the whole product in the rail and the whole SECTION in one strip, instead of
+   thirty-six rows of which they can hold about six.
+
+   The group names went with the mechanism. "Assets" is an accountant's word
+   for the things every other page calls cars, and the phone build has shipped
+   the same tab as Fleet since it was written — two shells naming one thing two
+   ways is the disagreement this product spends its time removing. "Decide"
+   named the reader's INTENT rather than the page's subject, which is why it
+   could absorb seven unlike pages and did. "Trust" is an abstraction over
+   three pages that answer one literal question: which collector ran, what it
+   got, and what it sends. Nobody says "let me check trust"; they say "is the
+   Uber feed up". And "Set up" was a group of one, which is a naming failure
+   rather than a category — Settings moves to the footer beside the theme
+   button. */
+const SECTIONS = [
+  { id: 'Today', ic: '◉', to: 'insights' },
+  { id: 'Money', ic: '◆', to: 'unit' },
+  { id: 'Work', ic: '◱', to: 'demand' },
+  { id: 'People', ic: '◧', to: 'drivers' },
+  { id: 'Fleet', ic: '▤', to: 'vehicles' },
+  { id: 'Sources', ic: '⛁', to: 'sources' },
+];
+
+/* Which section a view belongs to — EVERY view, including the ones with no
+   VIEWS row.
+   ─────────────────────────────────────────────────────────────────────────
+   This replaces PARENT, which mapped a detail page to the top-level page it
+   sits within so the rail could light it. PARENT had entries for driver,
+   vehicle, property, day, performer, action, slot, segments and segment — and
+   none for `trip` or `cohort`, so #trip/<id> and #cohort/<key> lit nothing at
+   all and forced no group open: exactly the defect the comment it carried said
+   had been fixed for the other three.
+
+   Keyed on the section rather than on a parent page, because that is what the
+   rail now shows, and covered by a test that walks every key of V and every
+   VIEWS id — so the next view added cannot repeat it. */
+const DRILL_SECTION = {
+  driver: 'People', performer: 'People', cohort: 'People',
+  vehicle: 'Fleet', segments: 'Fleet', segment: 'Fleet',
+  property: 'Money',
+  day: 'Work', slot: 'Work', trip: 'Work',
+  action: 'Today',
+};
+/* A cohort is reached from six different pages, so its key says where it came
+   from and the rail follows it home rather than guessing. */
+const COHORT_SECTION = { unit: 'Money', settlement: 'Money', tiers: 'Work',
+  vehicles: 'Fleet', safety: 'Fleet', roster: 'People', retention: 'People' };
+const sectionOf = (view, param) => {
+  if (view === 'cohort') {
+    return COHORT_SECTION[String(param || '').split('-')[0]] || DRILL_SECTION.cohort;
+  }
+  return (VIEWS.find((v) => v.id === view) || {}).sec || DRILL_SECTION[view] || null;
+};
 const DOW_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-/* Which groups are open. Measured, not guessed: twenty-nine destinations laid
-   out flat need about 1,250px of nav, and #nav gets 712px on a 900px laptop,
-   570px on a 768px one and 522px on a 13-inch browser with a toolbar. So a
-   third of the product was below the fold at every realistic window height,
-   and the fold landed in the middle of a group.
-
-   Collapsing solves it, but only if the state survives navigation — a sidebar
-   that snaps shut every time you click is worse than a long one. It is kept
-   per browser, and the group holding the current page is ALWAYS open whatever
-   was stored, so no route can be reached and then hidden. */
-const NAV_KEY = 'fleet.nav.open';
-const navOpen = () => {
-  try {
-    const raw = localStorage.getItem(NAV_KEY);
-    if (raw) return new Set(JSON.parse(raw));
-  } catch { /* private window, cleared storage, quota — open everything */ }
-  return null;
-};
-const navToggle = (grp, open) => {
-  const cur = navOpen() || new Set(VIEWS.map((v) => v.grp));
-  open ? cur.add(grp) : cur.delete(grp);
-  try { localStorage.setItem(NAV_KEY, JSON.stringify([...cur])); } catch { /* ignore */ }
-};
-
+/* `fleet.nav.open` is not read any more. Six rows need no collapsing, so the
+   stored set of open groups, the toggle that wrote it, and the group headings
+   it controlled are all gone. The key is deliberately not cleaned out of
+   anybody's localStorage: it costs nothing to leave, and a reader who goes
+   back to an older build of this page still finds their groups as they left
+   them. */
 function renderNav() {
   const nav = $('#nav'); nav.innerHTML = '';
-  const lit = PARENT[state.view] || state.view;
-  const here = (VIEWS.find((v) => v.id === lit) || {}).grp;
-  const stored = navOpen();
-  const groups = [...new Set(VIEWS.map((v) => v.grp))];
-  groups.forEach((grp) => {
-    const items = VIEWS.filter((v) => v.grp === grp);
-    const open = grp === here || (stored ? stored.has(grp) : true);
-    const head = el('button', `grp${open ? ' open' : ''}`,
-      `<span class="caret">${open ? '▾' : '▸'}</span>${grp}`
-      + (open ? '' : `<span class="n">${items.length}</span>`));
-    head.type = 'button';
-    head.setAttribute('aria-expanded', String(open));
-    /* The group of the page you are on cannot be collapsed out from under you:
-       clicking it would hide the thing that is lit. */
-    if (grp === here) head.disabled = true;
-    head.onclick = () => { navToggle(grp, !open); renderNav(); };
-    nav.append(head);
-    if (!open) return;
-    items.forEach((v) => {
-      const a = el('a', v.id === lit ? 'on' : '', `<span class="ic">${v.ic}</span>${v.label}`);
-      a.href = href(v.id);
-      a.title = v.sub || v.label;
-      nav.append(a);
-    });
+  const here = sectionOf(state.view, state.param);
+  SECTIONS.forEach((sec) => {
+    const a = el('a', sec.id === here ? 'on' : '',
+      /* The label in its own element rather than as a bare text node: a text
+         node cannot be selected, and the icons-only rail below needs to hide
+         the words without hiding the mark. */
+      `<span class="ic">${sec.ic}</span><span class="lb">${esc(sec.id)}</span>`);
+    a.href = href(sec.to);
+    /* Every page in the section, named. This was the one place the 36 subtitle
+       sentences were reachable, one at a time, by hovering — they are the best
+       one-line descriptions in the product and they now also appear under the
+       title of the page they describe. */
+    a.title = `${sec.id}: ${VIEWS.filter((v) => v.sec === sec.id).map((v) => v.label).join(' · ')}`;
+    a.setAttribute('aria-label', sec.id);
+    nav.append(a);
   });
 }
+
+/* The pages inside the section you are in, as a strip under the title.
+   ─────────────────────────────────────────────────────────────────────────
+   The rail says which of six parts of the product you are in; this says which
+   page of that part, and shows the others without making the reader open a
+   drawer to find them. Rendered into its own element outside #view, because
+   every view replaces #view wholesale and the strip must not blink on each
+   navigation.
+
+   Settings has no section and no strip: it is reached from the footer. */
+function renderSectionTabs() {
+  const host = $('#sectabs');
+  if (!host) return;
+  const here = sectionOf(state.view, state.param);
+  const items = VIEWS.filter((v) => v.sec === here);
+  if (!here || items.length < 2) { host.innerHTML = ''; host.hidden = true; return; }
+  host.hidden = false;
+  const lit = items.some((v) => v.id === state.view)
+    ? state.view
+    /* A detail page keeps its own page lit: #driver/<id> is a page WITHIN
+       Drivers, and the strip should say so rather than lighting nothing. */
+    : (DRILL_PAGE[state.view] || null);
+  host.innerHTML = `<div class="tabs">${items.map((v) =>
+    `<a class="${v.id === lit ? 'on' : ''}" href="${href(v.id)}" title="${esc(v.sub || v.label)}">`
+    + `<span class="ic">${v.ic}</span>${esc(v.label)}</a>`).join('')}</div>`;
+}
+/* Which page inside the section a drill-down belongs to. Only for lighting the
+   strip — the section itself comes from sectionOf, which covers more keys. */
+const DRILL_PAGE = { driver: 'drivers', performer: 'top-performers', vehicle: 'vehicles',
+  property: 'corporate', day: 'demand', slot: 'demand', trip: 'trips',
+  segments: 'unauthorized', segment: 'unauthorized', action: 'insights' };
 function setHeader(detail) {
   const crumb = $('#crumb');
   if (state.view === 'driver') {
@@ -5504,7 +5580,7 @@ function animateView(root) {
    failure — its errors belong to a page the reader has already left. */
 async function render() {
   const gen = newRender();
-  renderNav(); setHeader(); tzNote();
+  renderNav(); renderSectionTabs(); setHeader(); tzNote();
   const root = $('#view'); root.innerHTML = '';
   root.scrollIntoView?.({ block: 'start' });
   try {
@@ -5984,6 +6060,41 @@ $('#themeBtn').onclick = () => {
   const cur = document.documentElement.getAttribute('data-theme') || 'system';
   applyTheme(THEME_NEXT[cur] || 'system');
 };
+
+/* ── the full page ─────────────────────────────────────────────────────────
+   A per-browser chrome preference, like the theme, and deliberately NOT part
+   of the address: the same URL opened by two people must show the same page,
+   or a link somebody sends is a link to a different thing. The one exception
+   is ?zen=1/?zen=0, read in the pre-paint script in index.html — that is how a
+   wall display or a screenshot run gets a clean shell without a human. */
+const ZEN_KEY = 'fleet.zen';
+function applyZen(on) {
+  const r = document.documentElement;
+  if (on) r.dataset.zen = '1'; else delete r.dataset.zen;
+  try { localStorage.setItem(ZEN_KEY, on ? '1' : '0'); } catch { /* private window */ }
+  const b = $('#zenBtn');
+  if (b) {
+    b.setAttribute('aria-pressed', String(on));
+    b.title = on ? 'Show the sidebar and header (Esc)' : 'Hide everything but the page (f)';
+  }
+  /* Leaflet holds its own idea of the container's size and will not reflow on
+     its own, so a map inside a grid track whose width just changed stays the
+     old width with grey tiles down one side. Fired after the transition rather
+     than during it. */
+  setTimeout(() => window.__fleetMap?.invalidateSize?.(), 260);
+}
+applyZen(document.documentElement.dataset.zen === '1');
+$('#zenBtn').onclick = () => applyZen(document.documentElement.dataset.zen !== '1');
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  /* Every real input in the product is a place where `f` means the letter f —
+     the driver search box and the map's day picker are both on pages this
+     shortcut is most useful on. */
+  const t = e.target;
+  if (/^(input|textarea|select)$/i.test(t.tagName) || t.isContentEditable) return;
+  if (e.key === 'f') { e.preventDefault(); applyZen(document.documentElement.dataset.zen !== '1'); }
+  else if (e.key === 'Escape' && document.documentElement.dataset.zen === '1') applyZen(false);
+});
 /* Routes are `#<view>[/<param>[/<sub>]][?days=&platform=&fleet=]`.
    An unknown view falls back to the overview rather than rendering nothing. */
 function applyRoute() {

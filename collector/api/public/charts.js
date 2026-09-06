@@ -788,10 +788,14 @@ export function stackedBar(host, data, { label = 'label', value = 'n', onClick,
       + (d._tail ? `<br><span style="opacity:.8">${esc(d._tail.slice(0, 10).join(' · '))}</span>` : ''),
     onClick && !d._tail && (!clickable || clickable(d)) && (() => onClick(d)));
     g.append(r);
-    // The share, on the bar, where a segment is wide enough to hold it.
+    /* The share, on the bar, where a segment is wide enough to hold it.
+       Sized in VIEWBOX units against the panel it will be scaled into: this is
+       a 400-unit box drawn at about 310px, so `vlab`'s 10px arrives as 7.75px
+       — smaller than any other text on the page and not worth printing. 14
+       lands at about 11px. */
     if (pct >= 12) {
-      g.append(txt(x + w / 2, H / 2 + 4, `${pct.toFixed(0)}%`, 'vlab', 'middle',
-        'fill:var(--surface);font-weight:600'));
+      g.append(txt(x + w / 2, H / 2 + 5, `${pct.toFixed(0)}%`, 'vlab', 'middle',
+        'fill:var(--surface);font-weight:600;font-size:14px'));
     }
     x += w;
   });

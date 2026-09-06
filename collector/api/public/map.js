@@ -69,6 +69,12 @@ export async function makeMap(node, { zoom = 10 } = {}) {
     zoomControl: true, attributionControl: true, zoomSnap: 0, zoomDelta: 0.5, wheelPxPerZoomLevel: 90,
   }).setView(DUBAI, zoom);
   L.tileLayer(OSM, { attribution: OSM_ATTR, maxZoom: 19 }).addTo(map);
+  /* The shell needs a handle on the live map. Leaflet caches the container's
+     size and does not observe it, so when the full-page view removes the
+     236px rail the map keeps the old width and renders grey down one side.
+     The ResizeObserver below covers the panel settling on first paint; this
+     covers a change the shell makes later. */
+  window.__fleetMap = map;
 
   // Leaflet sizes itself — and its SVG overlay — from the container at creation time.
   // We build the map inside a panel that is still being laid out, so without this the

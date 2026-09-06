@@ -39,6 +39,17 @@
   } catch (e) { /* private mode: the choice just does not stick */ }
   var saved = null;
   try { saved = localStorage.getItem('ui'); } catch (e) { /* as above */ }
+  /* The full-page view, stamped BEFORE the stylesheet, exactly as the theme is
+     — otherwise a reader who left it on watches the sidebar appear and then
+     vanish on every load. ?zen=1 / ?zen=0 overrides and is remembered, the
+     same pattern ?ui= already uses, which is how a wall display or a
+     screenshot run gets a clean shell with nobody touching a control. */
+  try {
+    var z = new URLSearchParams(location.search).get('zen');
+    if (z === '1' || z === '0') localStorage.setItem('fleet.zen', z);
+    var zen = localStorage.getItem('fleet.zen');
+    if (zen === '1') document.documentElement.dataset.zen = '1';
+  } catch (e) { /* private mode: the choice just does not stick */ }
   var pick = q || saved;
   var phone = pick ? pick === 'phone'
     : matchMedia('(max-width: 760px)').matches && matchMedia('(pointer: coarse)').matches;
@@ -77,6 +88,12 @@
     <nav id="nav"></nav>
     <div class="side-foot">
       <button id="themeBtn" title="Toggle theme">◐ theme</button>
+      <!-- Settings was the only member of a group called "Set up", which is a
+           naming failure rather than a category. It is a destination a reader
+           visits twice and never looks for beside Demand, so it sits with the
+           other two things that are about the application rather than about
+           the fleet. -->
+      <a id="settingsLink" class="fresh" href="#settings" title="Credentials and collection schedule">⚙ settings</a>
       <!-- An address, not a paragraph. This block is where a reader learns a
            collector is behind, and the page that says which one and why was one
            click away with no way to take it. -->
@@ -133,12 +150,24 @@
           <option value="ecosine">Ecosine</option><option value="egari">Egari</option>
         </select>
         <button id="refreshBtn" title="Refresh">⟳</button>
+        <!-- Hide everything but the page. Sits in the filter row so it takes
+             the styling the controls beside it already have, and it is the one
+             control that never disappears when it is on — nothing that hides
+             chrome may hide its own way out. -->
+        <button id="zenBtn" type="button" aria-pressed="false"
+                title="Hide the sidebar and header (f)">⛶</button>
         <!-- Every date and time on every page is Dubai's, including when the
              person reading this is not. Stated once here rather than repeated
              on forty panels, and it is a title so hovering gives the window. -->
         <span id="tzNote" class="tz-note" title=""></span>
       </div>
     </header>
+    <!-- The pages inside the section the rail has lit.
+         Outside #view on purpose: every view replaces #view wholesale, and a
+         strip that is rebuilt as part of the page blinks on every navigation
+         when its contents have not changed. Filled by renderSectionTabs() in
+         app.js; hidden on Settings, which has no section. -->
+    <nav id="sectabs" class="sectabs" hidden></nav>
     <!-- Today, live, above every page.
          The window controls above answer "how has it been going"; this answers
          "what is happening now", and the two are different questions. It sits
