@@ -4445,10 +4445,12 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      definition lived in one file and not the other. */
   /* Our own address for the photograph, never Uber's twelve-hour signed one.
      One key-only read over the ids already in hand — no image bytes. */
-  const heldPhotos = new Set((await q(
+  const heldPhotos = new Map((await q(
     `SELECT platform, driver_ext_id FROM driver_photo WHERE driver_ext_id = ANY($1)`,
     [rows.map((r) => r.driver_ext_id).filter(Boolean)]))
-    .map((r) => `${r.platform}\u0000${r.driver_ext_id}`));
+    /* id -> the platform the BYTES are under, not the platform of the
+       compliance row. See withPhotos in api/redact.js. */
+    .map((r) => [r.driver_ext_id, r.platform]));
   const drivers = withPhotos(stripIdentity(rows, admin), heldPhotos);
   /* SAID, not merely absent. api/public/app.js rendered a missing licence
      number as an em-dash captioned "this channel publishes no licence number",

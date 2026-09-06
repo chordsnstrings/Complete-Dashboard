@@ -517,7 +517,24 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                  every one answered 403 behind an <img> that deletes itself.
                  A row in driver_photo means the bytes are on this origin, and
                  the address is built from the key rather than stored. This
-                 reads two key columns and never an image. */
+                 reads two key columns and never an image.
+
+                 dp.platform, not this row's platform. The first cut of this
+                 built the address out of r.platform in the fold below — and
+                 THIS select has no bare platform column at all. It has
+                 platforms (an array), compliance_platform, state_platform;
+                 the other three routes that draw a face happen to select a
+                 scalar platform column, so they worked and this one silently handed
+                 434 of 434 people a null. Measured on production after the
+                 first real profile run: compliance 157 addresses, leaderboard
+                 81, profile 1, directory 0.
+
+                 Taking it from dp is also the correct source on its own terms.
+                 The address must name the row the bytes are actually under; a
+                 person with a hotel compliance record and an Uber photograph
+                 would otherwise be sent to /api/driver/photo/hotel/<id>, which
+                 is a 404 by construction. */
+              dp.platform AS photo_platform,
               (dp.driver_ext_id IS NOT NULL) AS has_photo,
               (dc.licence_expires - now()::date) AS licence_days_left,
               ($5::text IS NOT NULL
@@ -600,12 +617,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
              Uber one has two rows here and only Uber files a photograph, so the
              fold has to keep the account the picture is under rather than
              whichever row happened to seed the person. */
-          _photo: r.has_photo ? { platform: r.platform, id: r.driver_ext_id } : null,
+          _photo: r.has_photo ? { platform: r.photo_platform, id: r.driver_ext_id } : null,
           _days: new Set() });
         continue;
       }
       cur.ids.push(r.driver_ext_id);
-      if (!cur._photo && r.has_photo) cur._photo = { platform: r.platform, id: r.driver_ext_id };
+      if (!cur._photo && r.has_photo) cur._photo = { platform: r.photo_platform, id: r.driver_ext_id };
       cur.trips += r.trips;
       cur.completed += r.completed; cur.bookable += r.bookable;
       cur.priced_trips += r.priced_trips;
@@ -724,7 +741,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          signed URL — see photoHref in api/redact.js. */
       p.picture_url = photoHref(p._photo?.platform, p._photo?.id);
       delete p._days; delete p._multiAccountDays; delete p._grainUnknown; delete p._ratingTrips;
-      delete p._photo; delete p.has_photo;
+      delete p._photo; delete p.has_photo; delete p.photo_platform;
       return {
         ...p,
         // Computed once, over the whole person.
@@ -839,9 +856,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const admin = isAdmin(req);
     /* Our own address for the photograph, never Uber's twelve-hour signed one.
        One key-only read, no bytes. */
-    const held = new Set((await q(
+    const held = new Map((await q(
       `SELECT platform, driver_ext_id FROM driver_photo WHERE driver_ext_id = ANY($1)`,
-      [d.keys])).map((r) => `${r.platform}\u0000${r.driver_ext_id}`));
+      [d.keys])).map((r) => [r.driver_ext_id, r.platform]));
     const compliance = withPhotos(stripIdentity(complianceRows, admin), held);
     /* Which of them this person actually HAS, counted before the values were
        dropped. Without this the page cannot tell "withheld" from "the hotel

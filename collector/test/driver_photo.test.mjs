@@ -118,20 +118,63 @@ for (const [name, path] of [
     (body.match(/"picture_url"\s*:\s*"[^"]{0,60}/) || [''])[0]);
 }
 
-/* And the one that carries the address we DO serve. */
-{
-  const r = await get('/api/compliance/drivers');
-  const rows = (r.body?.drivers || r.body?.rows || []);
-  const shot = rows.find((x) => x.driver_ext_id === 'drv-photo');
-  const bare = rows.find((x) => x.driver_ext_id === 'drv-nopic');
-  check('a driver whose photograph we hold gets this origin’s address for it',
+/* And that they carry the address we DO serve — on EVERY route, not one.
+   ─────────────────────────────────────────────────────────────────────────
+   This positive check used to run against /api/compliance/drivers alone, while
+   the loop above asked the directory only whether it emitted an absolute URL.
+   null satisfies that. So the directory shipped building its address out of
+   r.platform — a column its select does not have — and handed every one of 434
+   people a null, with this file green: 21 passed, 0 failed, against a driver
+   list showing no faces at all. That is the exact shape of a non-biting
+   assertion: the absence of the wrong answer asserted where the presence of
+   the right one was needed.
+
+   Both halves, on both routes. The negative alone cannot tell a fixed route
+   from an empty one. */
+for (const [name, path, key] of [
+  ['the compliance list', '/api/compliance/drivers', 'driver_ext_id'],
+  ['the driver directory', '/api/drivers/directory?days=30', 'driver_ext_id'],
+]) {
+  const r = await get(path);
+  const rows = (r.body?.drivers || r.body?.rows || (Array.isArray(r.body) ? r.body : []));
+  /* The directory FOLDS accounts into people and carries the account ids in
+     `ids`, so a person is found by either. */
+  const has = (x, id) => x[key] === id || (Array.isArray(x.ids) && x.ids.includes(id));
+  const shot = rows.find((x) => has(x, 'drv-photo'));
+  const bare = rows.find((x) => has(x, 'drv-nopic'));
+  check(`${name}: a driver whose photograph we hold gets this origin’s address for it`,
     !!shot && shot.picture_url === '/api/driver/photo/uber/drv-photo',
-    JSON.stringify(shot?.picture_url));
+    `${rows.length} rows, ${JSON.stringify(shot?.picture_url)}`);
   /* The other half, and the reason the first is not enough: a driver whose
      compliance row carries a dead CloudFront URL and whose bytes we do NOT
      hold must get null — not the dead URL, and not somebody else's photo. */
-  check('…and a driver whose photograph we do not hold gets nothing at all',
+  check(`${name}: …and a driver whose photograph we do not hold gets nothing at all`,
     !!bare && bare.picture_url === null, JSON.stringify(bare?.picture_url));
+}
+
+/* The address must name the row the BYTES are under, not the row the reader
+   came in on. A person with a hotel compliance record and an Uber photograph
+   is the case that separates the two: the id is the same, the platform is not,
+   and building the address from the compliance row sends the browser to
+   /api/driver/photo/hotel/<id>, which this product 404s by construction. */
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name)
+         VALUES ('hotel','drv-crossed','Two Records One Face')`);
+await q(`INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type, byte_len, sha256)
+         VALUES ('uber','drv-crossed',$1,'image/jpeg',$2,$3)`,
+  [JPEG, JPEG.length, 'a'.repeat(64)]);
+{
+  const r = await get('/api/compliance/drivers');
+  const rows = (r.body?.drivers || r.body?.rows || []);
+  const crossed = rows.find((x) => x.driver_ext_id === 'drv-crossed');
+  check('the address names the channel the bytes are filed under, not the record’s',
+    !!crossed && crossed.picture_url === '/api/driver/photo/uber/drv-crossed',
+    JSON.stringify(crossed?.picture_url));
+  const live = await raw('/api/driver/photo/uber/drv-crossed');
+  check('…and that address actually serves the image',
+    live.status === 200, String(live.status));
+  const wrong = await raw('/api/driver/photo/hotel/drv-crossed');
+  check('…while the record’s own channel is a 404, which is why it must not be used',
+    wrong.status === 404, String(wrong.status));
 }
 
 console.log('\nthe page can tell the two absences apart');

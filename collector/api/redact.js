@@ -156,12 +156,22 @@ export const photoHref = (platform, id) => (platform && id
   : null);
 
 /* Replace every picture_url with our own, for rows we hold bytes for.
-   `held` is a Set of `<platform>\u0000<driver_ext_id>` keys — built by the
-   caller from one cheap query that reads no bytes at all. */
+   `held` maps driver_ext_id -> the platform the bytes are filed under, built by
+   the caller from one cheap query that reads no bytes at all.
+
+   KEYED ON THE ID, AND THE PLATFORM COMES BACK OUT OF THE MAP. It used to be a
+   Set of `<platform>\u0000<id>` keys probed with the ROW's platform, which
+   quietly requires the compliance record and the photograph to be filed under
+   the same channel. Today they always are, because Uber is the only channel
+   that files a picture at all — so the bug would have waited for the first
+   person with a hotel record and an Uber face and then shown them nothing. The
+   address has to name the row the bytes are actually under; anything else is a
+   404 this product built for itself. The same mistake, in its louder form, put
+   a null on all 434 rows of the driver directory. */
 export function withPhotos(rows, held) {
   return rows.map((r) => {
-    const has = held && held.has(`${r.platform}\u0000${r.driver_ext_id}`);
-    return { ...r, picture_url: has ? photoHref(r.platform, r.driver_ext_id) : null };
+    const platform = held && held.get(r.driver_ext_id);
+    return { ...r, picture_url: platform ? photoHref(platform, r.driver_ext_id) : null };
   });
 }
 
