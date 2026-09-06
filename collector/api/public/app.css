@@ -643,6 +643,25 @@ a.fresh:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   overflow-x:auto;border:1px solid var(--rule);border-radius:var(--r);
   background:var(--surface);box-shadow:var(--shadow-1);
 }
+/* A long table gets a scrollport, so its column headings can stay put.
+   ─────────────────────────────────────────────────────────────────────────
+   `thead th` below has said `position:sticky; top:0` since tables were added
+   here and it had never engaged once. .tscroll sets overflow-x:auto for wide
+   tables, and CSS resolves the other axis of a non-visible overflow to auto —
+   so .tscroll, not the page, is the scrollport a sticky heading sticks inside,
+   and with no height it is exactly as tall as its table and never scrolls.
+   Measured on #drivers: scrollHeight 1568 === clientHeight 1568, and the
+   heading travelled from 892px down the viewport to -939px as the page moved.
+
+   Only on `.tall`, which ui.js's markTall() sets on a table measured to be
+   taller than the reader's viewport — an inner scroll region inside a
+   scrolling page is a real annoyance, and a table that fits on screen never
+   loses its headings to begin with. Opening a fold turns it on; shutting it
+   turns it off.
+
+   min() rather than a flat vh so the box cannot grow taller than a laptop
+   screen on a tall monitor and swallow the panel around it. */
+.tscroll.tall{max-height:min(72vh,820px)}
 table{border-collapse:collapse;width:100%;min-width:560px}
 th,td{padding:10px 14px;text-align:left;border-bottom:1px solid var(--rule);font-size:.85rem}
 /* A column heading is TEXT, and --ink-3 on --surface-2 measures 3.0:1 — under
@@ -1738,6 +1757,25 @@ a.insight-row:hover{border-color:var(--accent)}
 
 /* The table and the sentences that explain it. The scroller is inside; the
    notes are not, so they stay at panel width while the columns scroll. */
+/* A framed box inside a framed box, saying nothing the outer one did not.
+   ─────────────────────────────────────────────────────────────────────────
+   .panel is --surface with a 1px --rule border, a radius and a shadow; so is
+   .tscroll. Put a table in a panel — which is where essentially every table in
+   this product lives — and the reader gets two concentric frames around one
+   thing, on the same background, with no information between them. Measured
+   with a browser over the pages: #drivers had three, #insights and #platforms
+   one each, every one of them a table inside its own panel.
+
+   The panel is the frame. Inside one, the table drops its border, its radius
+   and its shadow and keeps only its background, which the pinned first column
+   needs to stay opaque as the rest scrolls under it. A .tscroll standing on
+   its own — outside any panel — is unchanged and still framed.
+
+   .tall keeps a bottom rule, because that box really does clip its content and
+   a scroll region whose end is invisible reads as a table that simply stops.
+   The sticky heading marks the top; this marks the other edge. */
+.panel .tscroll{border:none;border-radius:0;box-shadow:none}
+.panel .tscroll.tall{border-bottom:1px solid var(--rule)}
 .tblock{min-width:0}
 .tblock > .tsbox{position:relative;min-width:0}
 .tblock > .tsbox > .tscroll{margin-bottom:0}

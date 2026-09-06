@@ -1272,6 +1272,64 @@ export function dominantBar(host, parts, { total = null, unitLabel = '' } = {}) 
   return wrap;
 }
 
+/* Turn the column headings sticky on the tables long enough to need it.
+   ─────────────────────────────────────────────────────────────────────────
+   `thead th` has carried `position:sticky; top:0` for as long as there have
+   been tables here and it has never once engaged. The reason is a CSS rule
+   nobody reads out loud: `.tscroll` sets `overflow-x:auto` for wide tables,
+   and when one axis is not `visible` the other computes to `auto` too — so
+   .tscroll IS the scrollport a sticky header sticks inside, not the page. With
+   no height on it, that scrollport is exactly as tall as its table and never
+   scrolls, so the heading sits at the top of a box that never moves while the
+   PAGE carries the whole thing away. Measured with a browser on #drivers: the
+   header started 892px down the viewport and ended at -939px, and
+   scrollHeight === clientHeight === 1568.
+
+   A max-height makes the box a real scrollport and the existing rule starts
+   working. It is applied only to a table that is genuinely taller than the
+   reader's viewport, because a nested scroll region inside a scrolling page is
+   a genuine annoyance and a table that fits on screen never loses its headings
+   to begin with. Measured on what is on screen, so a folded table gains it the
+   moment the reader opens the long form and loses it again when they shut. */
+/* Taller than the screen, not longer than a row count.
+   A heading is lost at the moment the table outgrows the viewport, and that is
+   a height, not a number of rows: twenty-five rows of one line each fit on a
+   laptop and need nothing, while twenty-five rows carrying a wrapped sentence
+   apiece do not. Measured, so the rule adjusts itself to the reader's screen
+   instead of to an average one. The row floor is there because a very tall
+   table of three rows is a layout to fix rather than a scrollport to add. */
+const STICKY_MIN_ROWS = 12;
+/* SUBSTANTIALLY taller, not marginally. At 0.9 the fifteen-row cross-platform
+   panel on #drivers qualified — it is about 850px in a 900px viewport — and
+   was clipped to nine rows behind a scrollbar, which is a worse read than
+   losing a heading you can still find by scrolling up a screen and a half.
+   The heading is worth a nested scroller when the reader would otherwise be
+   without it for a long stretch, so the table has to be well over a screen. */
+const STICKY_OF_VIEWPORT = 1.6;
+export function markTall(scroller) {
+  /* Every capability checked, because this is an enhancement ON TOP of a fold
+     that has to work without it. foldRows is exercised by test/fold_rows.test
+     against a DOM stub with no querySelector and no layout at all, and it is
+     right that it is: what that file is about is which rows are hidden, and a
+     heading that stays put is not part of that question. A fold must not fail
+     because the thing decorating it could not measure anything. The behaviour
+     itself is asserted in a real browser, in test/sticky_header.test.mjs. */
+  if (typeof scroller?.querySelector !== 'function') return;
+  const table = scroller.querySelector('table');
+  if (typeof table?.querySelectorAll !== 'function') return;
+  const rows = table.querySelectorAll('tbody > tr:not([hidden])').length;
+  const height = Number(table.offsetHeight) || 0;
+  const screen = (typeof window !== 'undefined' && window.innerHeight) || 800;
+  scroller.classList?.toggle?.('tall', rows > STICKY_MIN_ROWS && height > screen * STICKY_OF_VIEWPORT);
+}
+
+/* Every table on a freshly rendered page. Called once after render, so a long
+   table that has no fold at all — the platform records, the statement lines —
+   gets the same headings as a folded one that has been opened. */
+export function markTallTables(root) {
+  root.querySelectorAll('.tscroll').forEach(markTall);
+}
+
 /* ── a table that respects the fold ────────────────────────────────────────
    The drivers table is 361 rows and 44,000 pixels; the roster 280 and 33,000.
    Nobody scrolls either. But truncating to a top ten and calling it "All
@@ -1286,12 +1344,16 @@ export function dominantBar(host, parts, { total = null, unitLabel = '' } = {}) 
    own search box, and that one searches the data rather than the DOM. */
 export function foldRows(host, node, { shown = 10, total, noun = 'row', key = null } = {}) {
   host.append(node);
-  /* tableFrom returns a `div.tscroll` WRAPPING the table, not the table — so
-     reading `node.tBodies` found nothing, the fold returned early, and the
-     drivers page stayed 44,625px with no error anywhere. The second silent
-     no-op of this session: it rendered, it looked right, it did nothing.
-     Accept either, and say so loudly when there is no table at all rather than
-     returning quietly a third time. */
+  /* tableFrom returns a WRAPPER around the table, not the table — so reading
+     `node.tBodies` found nothing, the fold returned early, and the drivers page
+     stayed 44,625px with no error anywhere. The second silent no-op of this
+     function: it rendered, it looked right, it did nothing. Accept either, and
+     say so loudly when there is no table at all rather than returning quietly
+     a third time.
+
+     The wrapper is div.tblock > div.tsbox > div.tscroll > table today. Nothing
+     here should depend on which of those it is — querySelector('table') walks
+     however deep it goes. */
   const table = node?.tagName === 'TABLE' ? node : node?.querySelector?.('table');
   const trs = table?.tBodies?.[0] ? [...table.tBodies[0].rows] : [];
   if (!trs.length) {
@@ -1306,12 +1368,26 @@ export function foldRows(host, node, { shown = 10, total, noun = 'row', key = nu
   const K = key ? `fold:${key}` : null;
   let open = false;
   try { open = K ? localStorage.getItem(K) === 'open' : false; } catch { open = false; }
+  /* The scroll box this table lives in, so opening the long form can also turn
+     on the column headings that follow the reader down it. See markTall.
+
+     DOWN, not up. tableFrom returns div.tblock > div.tsbox > div.tscroll, so
+     the scroller is a DESCENDANT of what this function is handed — closest()
+     alone found nothing and the class was never applied, which is the third
+     silent no-op this one function has been the site of. The comment above
+     still said tableFrom returns the .tscroll itself; it has not since the
+     notes and the edge fades were given their own boxes. Both directions, and
+     the caller may hand over any of the three. */
+  const scroller = node?.classList?.contains('tscroll')
+    ? node
+    : (node?.querySelector?.('.tscroll') || node?.closest?.('.tscroll') || null);
   const apply = () => {
     trs.forEach((tr, i) => { tr.hidden = !open && i >= shown; });
     btn.textContent = open
       ? `Show fewer — the first ${fmt(shown)}`
       : `Show the other ${fmt(hidden)} ${plural(hidden, noun)} →`;
     btn.setAttribute('aria-expanded', String(open));
+    if (scroller) markTall(scroller);
   };
   const btn = el('button', 'foldbtn');
   btn.addEventListener('click', () => {

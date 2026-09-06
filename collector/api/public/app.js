@@ -7,7 +7,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
-  UBER_FARE_WHY } from './ui.js';
+  markTallTables, UBER_FARE_WHY } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
@@ -5588,6 +5588,10 @@ async function render() {
     if (!alive(gen)) return;
     setHeader(detail);                      // detail pages only know their title after fetching
     await stampSource(root, gen);
+    /* Before the animation, because it only adds a class. A table long enough
+       to lose its column headings gets a scrollport so the headings can stay;
+       see markTall in ui.js for why the sticky rule never fired without one. */
+    markTallTables(root);
     animateView(root);
   } catch (e) {
     if (!alive(gen)) return;                // superseded: not this reader's error
