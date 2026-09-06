@@ -179,18 +179,28 @@ await q(`INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type,
 
 console.log('\nthe page can tell the two absences apart');
 
-/* onerror="this.remove()" deleted the img and revealed the initials already
-   painted underneath — so a driver with no photograph and a photograph that
-   403s rendered identically, which is how 156 dead images looked like a normal
-   page for two days. */
-const uiJs = readFileSync(new URL('../api/public/ui.js', import.meta.url), 'utf8');
-const mUiJs = readFileSync(new URL('../api/public/m/ui.js', import.meta.url), 'utf8');
+/* THESE ASSERTIONS USED TO BE GREPS OVER THE SOURCE, AND THEY LIED.
+   ─────────────────────────────────────────────────────────────────────────
+   They read ui.js as text and asked whether 'av-lost' and 'could not be
+   loaded' appear in it. Both did — inside
+
+       onerror="this.remove(); this.parentNode.classList.add('av-lost'); …"
+
+   where remove() detaches the img, `this.parentNode` is null one statement
+   later, and the handler dies with a TypeError before it marks anything. The
+   desktop went on doing precisely what plain onerror="this.remove()" did, and
+   this file reported 29 passed, 0 failed about it. A string in a statement
+   that cannot run is not a behaviour.
+
+   The behaviour is asserted where it can be observed, in test/avatar_lost.test
+   .mjs: a real browser, a real 404, and a question put to the element that
+   ends up on screen. What stays here is the stylesheet — whether the mark has
+   a rendering at all is a fact about the CSS file, and the CSS file is the
+   right place to ask it. */
 const css = readFileSync(new URL('../api/public/app.css', import.meta.url), 'utf8');
-check('a failed photograph marks itself on the desktop', /av-lost/.test(uiJs));
-check('…and on the phone', /av-lost/.test(mUiJs));
-check('…and the mark is styled, not merely applied', /\.av-lost\{/.test(css));
-check('…and it says which absence it is, in words',
-  /could not be loaded/i.test(uiJs) && /could not be loaded/i.test(mUiJs));
+const mCss = readFileSync(new URL('../api/public/m/m.css', import.meta.url), 'utf8');
+check('the mark has a rendering on the desktop', /\.av-lost\{/.test(css));
+check('…and on the phone', /\.av-lost\{/.test(mCss));
 
 console.log('\nan unchanged photograph is not rewritten');
 

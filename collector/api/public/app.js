@@ -7,7 +7,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
-  markTallTables, UBER_FARE_WHY } from './ui.js';
+  markTallTables, kpiTile, UBER_FARE_WHY } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
@@ -796,9 +796,8 @@ V.overview = async (root) => {
       state.platform
         ? `harsh-driving events · not filtered by ${esc(state.platform)} — these come from the tracker, not a channel`
         : `harsh-driving events${k.tracked_vehicles ? ` across ${fmt(k.tracked_vehicles)} tracked vehicles` : ''}`],
-  ].map(([l, n, d]) => (GO[l]
-    ? `<a class="kpi clickable" href="${GO[l]}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></a>`
-    : `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`)).join('');
+  ].map(([l, n, d]) => ({ label: l, html: n, sub: d, to: GO[l] || null, who: false }))
+    .map(kpiTile).join('');
 
   /* ── the verdict ────────────────────────────────────────────────────────
      Written from the figures already fetched, so it cannot disagree with the
@@ -1940,11 +1939,14 @@ V.platforms = async (root) => {
 
 async function platformShare(root) {
   const vHost = el('div'); root.append(vHost);
-  const g = el('div', 'grid g2'); root.append(g);
-  const share = panel('Trips by platform', 'Share of total volume'); g.append(share.panel);
-  const fleetMix = panel('Trips by fleet', 'Ecosine vs Egari'); g.append(fleetMix.panel);
+  /* There is no "Trips by platform" panel any more. It held a donut of the
+     same byPlat the dominant bar in vHost above already draws, under a caption
+     — "Share of total volume" — that is a description of the bar. Two pictures
+     of one number, a hand's width apart. */
+  const fleetMix = panel('Trips by fleet', 'Ecosine vs Egari — the two businesses on these credentials');
+  root.append(fleetMix.panel);
   const cov = panel('Coverage & history depth', 'What each source has actually delivered'); root.append(cov.panel);
-  [share.body, fleetMix.body, cov.body].forEach(loading);
+  [fleetMix.body, cov.body].forEach(loading);
   /* qAll, not api and not q.
      ─────────────────────────────────────────────────────────────────────────
      Bare api() sent no range, and /api/platforms is explicit about what that
@@ -1975,6 +1977,7 @@ async function platformShare(root) {
     const total = v.charted;
     const dead = plats.filter((r) => !byPlat.some((b) => b.label === r.platform)
       && !(+r.window_bookings));
+    const deadNames = [...new Set(dead.map((r) => sourceLabel(r.platform)))];
     verdict(vHost, {
       claim: v.branch === 'single-channel'
         ? `This is a single-channel fleet — ${sourceLabel(v.lead.label)} is ${v.leadPct}% of the work`
@@ -1982,9 +1985,15 @@ async function platformShare(root) {
       figure: v.branch === 'single-channel' ? `${v.leadPct}%` : fmt(total),
       unit: v.branch === 'single-channel' ? `on ${sourceLabel(v.lead.label)}` : 'bookings',
       meta: `${fmt(total)} bookings this window`,
-      sub: dead.length
-        ? `${dead.map((r) => sourceLabel(r.platform)).join(', ')} `
-          + `${dead.length === 1 ? 'is configured and has' : 'are configured and have'} delivered nothing `
+      /* BY CHANNEL, not by row. `plats` has one row per platform PER FLEET, so
+         a feed configured on both businesses is two rows with one name and the
+         sentence read "FMS telematics, FMS telematics are configured and have
+         delivered nothing". A reader is being told which channels are silent;
+         which of the two companies each is silent on is a different question
+         and the table below answers it. */
+      sub: deadNames.length
+        ? `${andList(deadNames)} `
+          + `${deadNames.length === 1 ? 'is configured and has' : 'are configured and have'} delivered nothing `
           + 'in this window — every rate computed "per platform" for those is arithmetic over no rows.'
         : 'Every configured channel delivered bookings in this window.',
       recommend: v.branch === 'single-channel'
@@ -1992,25 +2001,42 @@ async function platformShare(root) {
           + `${v.leadPct}% of its weight. Read the others as samples, not as rates.`
         : null,
     });
+    /* One bar, and it is the control. This page used to draw the same byPlat
+       twice — this bar, and a donut immediately under it — with the bar's own
+       caption reading "click a slice below", sending the reader past the
+       better picture to the one that happened to be clickable. The bar shows
+       what this page is about (one channel carries almost all of the work) at
+       a glance, where a donut asks somebody to compare arc lengths; so the bar
+       became the control and the donut went. */
     dominantBar(vHost, byPlat.map((r, i) => ({
-      label: sourceLabel(r.label), value: shareOf(r), cls: `c${i + 1}`,
+      label: sourceLabel(r.label), key: r.label, value: shareOf(r), cls: `c${i + 1}`,
+      token: sourceToken(r.label),
       note: r.revenue ? `${money(r.revenue)} reported` : 'reports no money on the trip',
-    })).concat(dead.map((r) => ({
-      label: sourceLabel(r.platform), value: 0, cls: 'dead', note: 'no booking in this window',
-    }))), { total, unitLabel: `${fmt(total)} bookings this window · click a slice below to filter the dashboard` });
+    })).concat([...new Map(dead.map((r) => [r.platform, r])).values()].map((r) => ({
+      label: sourceLabel(r.platform), key: r.platform, value: 0, cls: 'dead',
+      note: 'no booking in this window',
+    }))), {
+      total,
+      unitLabel: `${fmt(total)} bookings this window · choose a channel to filter the whole dashboard to it`,
+      /* A channel that delivered nothing in this window is still a real
+         filter — "show me Bolt" answering "Bolt did nothing here" is the
+         answer, and it is one an operator chasing a dead credential wants. */
+      onClick: (d) => setFilter({ platform: d.key, view: 'drivers', param: null, sub: null }),
+    });
   }
 
-  /* Same raw-label donut as the one on the fleet's front page. */
-  donut(share.body, byPlat.map((r) => ({ ...r, key: r.label, label: sourceLabel(r.label) })),
-    { colorFor: (d) => sourceToken(d.key),
-      aria: 'Share of bookings by channel',
-      onClick: (d) => setFilter({ platform: d.key ?? d.label, view: 'drivers', param: null, sub: null }) });
-  share.body.append(el('p', 'cap', 'Click a slice to filter the whole dashboard to that platform and open its drivers.'));
+  /* The donut that used to sit here has gone. It drew the same byPlat as the
+     dominant bar above, in the same window, on the same screen — the page's
+     one main fact stated twice — and it was the weaker telling of it: this
+     fleet is 93% one channel, which a full-width bar shows instantly and a
+     donut turns into a comparison of arc lengths. It survived only because it
+     was the sole thing on the page a reader could click. The bar carries that
+     now, so the duplicate has nothing left to justify it. */
   donut(fleetMix.body, byFleet);
   cov.body.innerHTML = '';
   /* Two different counts, kept apart. This table's number is over the WHOLE
      record and over raw rows — telematics twins of bookings already counted
-     under Uber included — while the donut beside it is bookings in the window.
+     under Uber included — while the bar above it is bookings in the window.
      They were both headed "Trips": 166,579 against 11,092 on one screen, with
      41,809 of the difference being the same journeys counted twice. */
   const hasSplit = plats.some((r) => r.bookings != null || r.rows_seen != null);
@@ -2032,7 +2058,7 @@ async function platformShare(root) {
        seven days and Uber/Ecosine still read 166,814. /api/platforms has
        returned window_bookings all along (7,571 against those 166,814 over
        thirty days); this is the column that makes the control mean something,
-       and the one that lets the table be compared with the donut beside it,
+       and the one that lets the table be compared with the bar above it,
        which has always been the window. */
     /* Only when a range was actually supplied. `windowed` false means the
        endpoint answered over the open window and this column would be the
@@ -2052,11 +2078,11 @@ async function platformShare(root) {
     { label: 'Latest', key: 'latest', render: (r) => dateStr(r.latest) },
   ], { sortable: true, sortId: 'cov', defaultSort: { key: hasSplit ? 'bookings' : 'trips', dir: 'desc' } }));
   cov.body.append(note((hasSplit
-    ? 'The all-time columns are over the whole record and do not match the donut above, which is this '
+    ? 'The all-time columns are over the whole record and do not match the bar above, which is this '
       + 'window; the window column beside them does. '
     : 'Counts are over the whole record, not this window, and they count stored ROWS — an FMS row is '
       + 'the telematics twin of a booking another channel already reported, so adding this column up '
-      + 'double-counts every tracked journey. That is why it does not match the donut above. ')
+      + 'double-counts every tracked journey. That is why it does not match the bar above. ')
     + 'A source that stopped mid-window still shows its full count here; Collection gaps shows which '
     + 'days it actually collected.'));
   const configured = ['uber', 'yango', 'bolt', 'hotel', 'fms'];
@@ -3227,9 +3253,7 @@ V.unauthorized = async (root) => {
      carrying markup is judged by what the reader sees. Without it .kpi .n's
      white-space:nowrap clips "0 stuck · 12 dead" at the card edge — the tile
      is overflow:hidden, so a cut figure gets not even an ellipsis. */
-  ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num${
-    String(n).replace(/<[^>]*>/g, '').trim().length > 12 ? ' long' : ''
-  }">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
+  ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
 
   /* What the figures above actually cover.
      Seat occupancy comes from a five-minute realtime poll with no history
@@ -3415,7 +3439,7 @@ V.live = async (root) => {
       sensed.length
         ? `of the ${fmt(sensed.length)} vehicles whose feed reports a seat sensor`
         : 'no feed here reports a seat sensor'],
-  ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
+  ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
   p.body.innerHTML = '';
   if (!rows.length) { empty(p.body, 'Positions appear once CABMAN credentials are saved in Settings'); return; }
   if (feeds.length) {
@@ -3622,7 +3646,7 @@ V.map = async (root) => {
         sensed.length ? 'of those whose feed reports a seat sensor' : 'no feed here reports a seat sensor'],
       ['Moving', fmt(withGps.filter((r) => +r.speed > 3).length), 'above 3 km/h'],
       ['Stale', fmt(withGps.filter((r) => r.stale).length), `no fix in ${FIX_FRESH_MIN} min`],
-    ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
+    ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
     /* A fourth colour, because "Moving, empty" was asserted for the 82
        vehicles whose feed carries no seat sensor at all. renderJourney has been
        tri-state for a while; renderLive and this legend had not caught up. */
@@ -3693,7 +3717,7 @@ V.map = async (root) => {
          about them. */
       ['Driver', j.driver ? entity('driver', j.driver_id, j.driver) : '—',
         j.driver_trips != null ? j.driver_trips + ' trips that day' : 'from the trip record'],
-    ].map(([l, n, d]) => `<div class="kpi"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
+    ].map(([l, n, d]) => kpiTile({ label: l, html: n, sub: d })).join('');
     legend.innerHTML = (j.occupancy_reported
       ? [['--s3', 'Passenger aboard'], ['--s1', 'Running empty (dashed)']]
       : [['--ink-3', 'Occupancy not reported by this feed']])
@@ -3820,9 +3844,8 @@ V.insights = async (root) => {
       'only findings that carry a real figure'],
     ['Idle capital, modelled', modelled.aed ? 'AED ' + fmt(Math.round(modelled.aed)) : '—',
       modelled.assumption || 'an assumption, not a measurement', 'warn'],
-  ].map(([l, n, d, cls, link]) => (link
-    ? `<a class="kpi clickable ${cls || ''}" href="${link}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></a>`
-    : `<div class="kpi ${cls || ''}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`)).join('');
+  ].map(([l, n, d, cls, link]) =>
+    kpiTile({ label: l, html: n, sub: d, tone: cls || null, to: link || null, who: false })).join('');
 
   if (!all.length) {
     const p0 = panel('Nothing to do right now', 'The engine runs after each collection'); root.append(p0.panel);
@@ -4117,7 +4140,7 @@ V.compliance = async (root) => {
        on a page whose subject is whether the roster can legally drive. */
     ...(dNoDate ? [['No licence date on file', fmt(dNoDate),
       'we cannot say whether these are valid', 'warn']] : []),
-  ].map(([l, n, d, cls]) => `<div class="kpi ${cls}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`).join('');
+  ].map(([l, n, d, cls]) => kpiTile({ label: l, html: n, sub: d, tone: cls || null })).join('');
 
   if (drvPage.caveat) root.append(note(drvPage.caveat));
   /* Said once, above the table, so the Emirates ID column's dashes read as a

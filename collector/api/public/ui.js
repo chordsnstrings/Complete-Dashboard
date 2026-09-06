@@ -517,27 +517,56 @@ const KPI_ONE_LINE = 12;
 
    Rendered as an <a> so it is a real destination: linkable, bookmarkable, and
    openable in a new tab, which a click handler on a div is not. */
-export function kpiRow(items) {
-  const host = el('div', 'kpis');
-  host.innerHTML = items.filter(Boolean).map((k) => {
-    /* Measured on the TEXT, so a value carrying markup is judged by what the
-       reader actually sees rather than by the length of its span tags. */
-    const plain = String(k.html ? k.html.replace(/<[^>]*>/g, '') : (k.value ?? '—'));
-    const long = plain.length > KPI_ONE_LINE ? ' long' : '';
-    const to = k.to || (k.cohort ? href('cohort', k.cohort) : null);
-    const tag = to ? 'a' : 'div';
-    const attr = to ? ` href="${to}"` : '';
-    /* See panel()'s `key`: a tile a test has to find needs a handle that is not
-       its label, or the label can never be improved. */
-    const kk = k.key ? ` data-kpi="${esc(k.key)}"` : '';
-    return `
-    <${tag} class="kpi${k.tone ? ' t-' + k.tone : ''}${to ? ' kpi-open' : ''}"${attr}${kk}>
+/* ONE tile, and the only place a tile is built.
+   ─────────────────────────────────────────────────────────────────────────
+   There were eight more, written inline in app.js as template strings, and
+   every one of them was missing the `long` measurement below — so a value over
+   about twelve characters kept .kpi .n's white-space:nowrap inside a tile that
+   is overflow:hidden and was simply CUT at the card edge, mid-number, with not
+   even an ellipsis to say so. That defect has been found and fixed twice
+   already on single tiles ("+AED 37,286 · 150.9%" on #reconcile, "0 stuck · 12
+   dead" on the tracker page) and each fix repaired one copy of the markup.
+   This is the copy that had to go.
+
+   It also collapses two tone vocabularies. The inline tiles said ok / warn /
+   err; kpiRow says t-good / t-warn / t-serious / t-critical, which is the
+   four-step severity ramp the palette actually has. Both are accepted and both
+   resolve to the ramp, so "err" now reaches --critical by the same route
+   everything else does rather than through a parallel rule.
+
+   `who` is opt-out because "Who exactly? →" is the right invitation on a tile
+   that opens a cohort of PEOPLE and the wrong one on a tile that opens a
+   filtered list of findings. */
+const TONES = { ok: 'good', err: 'critical', good: 'good', warn: 'warn',
+  serious: 'serious', critical: 'critical' };
+export function kpiTile(k) {
+  if (!k) return '';
+  /* Measured on the TEXT, so a value carrying markup is judged by what the
+     reader actually sees rather than by the length of its span tags. */
+  const plain = String(k.html ? k.html.replace(/<[^>]*>/g, '') : (k.value ?? '—'));
+  const long = plain.trim().length > KPI_ONE_LINE ? ' long' : '';
+  const to = k.to || (k.cohort ? href('cohort', k.cohort) : null);
+  const tag = to ? 'a' : 'div';
+  const attr = to ? ` href="${to}"` : '';
+  const tone = TONES[k.tone] ? ` t-${TONES[k.tone]}` : '';
+  /* See panel()'s `key`: a tile a test has to find needs a handle that is not
+     its label, or the label can never be improved. */
+  const kk = k.key ? ` data-kpi="${esc(k.key)}"` : '';
+  return `
+    <${tag} class="kpi${tone}${to ? ' clickable kpi-open' : ''}"${attr}${kk}>
       <div class="l">${esc(k.label)}</div>
       <div class="n num${long}">${k.html || esc(k.value ?? '—')}</div>
       ${k.sub ? `<div class="s">${esc(k.sub)}</div>` : ''}
-      ${to ? '<div class="kpi-who">Who exactly? →</div>' : ''}
+      ${to && k.who !== false ? '<div class="kpi-who">Who exactly? →</div>' : ''}
     </${tag}>`;
-  }).join('');
+}
+
+/** The tiles of a row as one HTML string, for a caller that owns the host. */
+export const kpiTiles = (items) => items.filter(Boolean).map(kpiTile).join('');
+
+export function kpiRow(items) {
+  const host = el('div', 'kpis');
+  host.innerHTML = kpiTiles(items);
   return host;
 }
 
@@ -1246,27 +1275,76 @@ export function verdict(host, { claim, figure, unit, sub, tone = null, recommend
    same thing in one line and leaves room for why it matters.
 
    `parts`: [{ label, value, note, cls }] — cls picks the series colour. */
-export function dominantBar(host, parts, { total = null, unitLabel = '' } = {}) {
+export function dominantBar(host, parts, { total = null, unitLabel = '', onClick = null } = {}) {
   const sum = total ?? parts.reduce((a, p) => a + (+p.value || 0), 0);
   const wrap = el('div', 'domb');
   const bar = el('div', 'domb-bar');
-  bar.innerHTML = parts.filter((p) => +p.value > 0).map((p, i) => {
+  /* A SEGMENT IS A CONTROL WHEN IT DOES SOMETHING, and a real one.
+     ─────────────────────────────────────────────────────────────────────
+     On #platforms this bar and a donut beneath it drew the same byPlat, one
+     above the other — the same fact stated twice, once well and once badly.
+     The bar is the better of the two at the thing that page is about (one
+     channel carries 93% of the work, and a bar shows that at a glance where a
+     donut asks you to compare arc lengths), but the DONUT was the only one
+     that could be clicked, so deleting the duplicate meant deleting the filter
+     control. The bar's own caption even read "click a slice below" — pointing
+     the reader past itself at the chart it duplicated.
+
+     So the segment became what it was already pretending to be. A button, not
+     a span with a click handler: keyboard reachable, focusable and announced,
+     which a div with a listener is none of. */
+  const seg = (p, i) => {
     const pct = sum ? (p.value / sum) * 100 : 0;
     /* The label rides inside the segment only when it fits. Below about a
        tenth of the width it overflows into its neighbour and reads as that
        segment's name, which is worse than no label. */
     const inside = pct >= 18
       ? `<span>${esc(p.label)}</span><b>${fmt(p.value)}</b><i>${pct.toFixed(1)}%</i>` : '';
-    return `<span class="domb-seg ${esc(p.cls || `c${i + 1}`)}" style="width:${pct}%" `
-      + `title="${esc(p.label)} · ${fmt(p.value)} · ${pct.toFixed(1)}%">${inside}</span>`;
-  }).join('');
+    /* The channel's own colour when it has one, and the categorical series
+       otherwise. Uber's blue and Bolt's green mean something to a reader who
+       works with those apps every day; c1..c6 mean the order the rows arrived
+       in.
+
+       A CLASS, not an inline background. The label sits ON the fill, and which
+       ink is legible on a brand colour differs by channel AND by theme —
+       white clears 4.5:1 on Uber's blue and fails on Bolt's green, and in dark
+       mode near-black wins on all six. Only the stylesheet knows which theme
+       is showing, so only the stylesheet can answer that; an inline colour
+       here would be one guess for both. */
+    const chan = p.token ? ` ch-${p.token.replace(/^--ch-/, '')}` : '';
+    const style = ` style="width:${pct}%"`;
+    const cls = `domb-seg${chan || ` ${esc(p.cls || `c${i + 1}`)}`}`;
+    const title = `${p.label} · ${fmt(p.value)} · ${pct.toFixed(1)}%`;
+    return onClick
+      ? `<button type="button" class="${cls}"${style} title="${esc(title)}"`
+        + ` data-part="${i}">${inside}</button>`
+      : `<span class="${cls}"${style} title="${esc(title)}">${inside}</span>`;
+  };
+  const drawn = parts.filter((p) => +p.value > 0);
+  bar.innerHTML = drawn.map(seg).join('');
   wrap.append(bar);
   const keys = el('div', 'domb-keys');
-  keys.innerHTML = parts.map((p, i) =>
-    `<span class="domb-key"><i class="sw ${esc(p.cls || `c${i + 1}`)}"></i>`
-    + `<b>${esc(p.label)} · ${fmt(p.value)}</b>`
-    + (p.note ? `<em>${esc(p.note)}</em>` : '') + '</span>').join('');
+  const sw = (p, i) => (p.token
+    ? `<i class="sw ch-${esc(p.token.replace(/^--ch-/, ''))}"></i>`
+    : `<i class="sw ${esc(p.cls || `c${i + 1}`)}"></i>`);
+  /* The key is a control too. It is the only way to reach a channel whose
+     segment is a two-pixel sliver — which on this fleet is most of them. */
+  keys.innerHTML = parts.map((p, i) => {
+    const body = `${sw(p, i)}<b>${esc(p.label)} · ${fmt(p.value)}</b>`
+      + (p.note ? `<em>${esc(p.note)}</em>` : '');
+    return onClick && p.key != null
+      ? `<button type="button" class="domb-key" data-key="${i}">${body}</button>`
+      : `<span class="domb-key">${body}</span>`;
+  }).join('');
   wrap.append(keys);
+  if (onClick) {
+    bar.querySelectorAll('button[data-part]').forEach((b) => {
+      b.addEventListener('click', () => onClick(drawn[+b.dataset.part]));
+    });
+    keys.querySelectorAll('button[data-key]').forEach((b) => {
+      b.addEventListener('click', () => onClick(parts[+b.dataset.key]));
+    });
+  }
   if (unitLabel) wrap.append(el('p', 'domb-total', esc(unitLabel)));
   host.append(wrap);
   return wrap;
@@ -1435,10 +1513,31 @@ export function avatar(name, pictureUrl, cls = '') {
   const initials = esc(initialsOf(name));
   const k = `av${cls ? ` ${cls}` : ''}`;
   if (!pictureUrl) return `<div class="${k}">${initials}</div>`;
+  /* THE PARENT IS TAKEN BEFORE THE CHILD IS REMOVED, and that is the whole
+     bug this line has carried.
+     ─────────────────────────────────────────────────────────────────────
+     It read `this.remove();this.parentNode.classList.add('av-lost')`.
+     Element.remove() detaches the img, so `this.parentNode` is null on the
+     very next statement and the handler dies with a TypeError before it can
+     mark anything. The class was never added, the title was never set, and
+     the ring and dot in app.css never rendered — so the desktop went on doing
+     exactly what plain `onerror="this.remove()"` used to do: delete the image,
+     reveal the initials underneath, and look like a perfectly normal page.
+     That is the behaviour this whole change set exists to remove, and it
+     survived inside the fix for it.
+
+     Nothing surfaced it. There is no window error handler in api/public, so
+     the TypeError was invisible; and the test that guards this asserted that
+     the string 'av-lost' APPEARS IN THE SOURCE, which it did, in a statement
+     that could never run. Found by loading the real ui.js in a headless
+     browser and asking the rendered element what class it ended up with.
+
+     The phone shell (api/public/m/ui.js) never had the bug: its handler is
+     attached in JS and closes over the tile, so there is no `this` to lose. */
   return `<div class="${k} av-photo">${initials}<img src="${esc(pictureUrl)}" alt=""`
     + ' loading="lazy" referrerpolicy="no-referrer"'
-    + ' onerror="this.remove();this.parentNode.classList.add(\'av-lost\');'
-    + 'this.parentNode.title=\'This driver has a photograph on file and it could not be loaded.\'"'
+    + ' onerror="var p=this.parentNode;this.remove();if(p){p.classList.add(\'av-lost\');'
+    + 'p.title=\'This driver has a photograph on file and it could not be loaded.\';}"'
     + '></div>';
 }
 

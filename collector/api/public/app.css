@@ -1914,6 +1914,48 @@ a.insight-row:hover{border-color:var(--accent)}
 /* Dark: the whole scale is light enough that near-black wins on all six. */
 :root[data-theme="dark"] .domb-seg{--on-seg:var(--ink-inv)}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .domb-seg{--on-seg:var(--ink-inv)}}
+/* The channels in their own colours, and the ink that is legible on each.
+   ─────────────────────────────────────────────────────────────────────────
+   Measured, not chosen. WCAG contrast of white and of --ink-inv against every
+   --ch-* fill, light and dark:
+
+     light   uber 8.36 / 2.26   yango 5.58 / 3.39   bolt 3.39 / 5.57
+             hotel 3.40 / 5.56  fms   5.17 / 3.65   cabman 9.31 / 2.03
+     dark    uber 3.38 / 5.58   yango 2.62 / 7.22   bolt 1.61 / 11.75
+             hotel 1.61 / 11.72 fms   2.60 / 7.27   cabman 3.45 / 5.47
+
+   So in light mode white carries Uber, Yango, FMS and CABMAN and near-black
+   carries Bolt and the hotel channel; in dark mode the whole palette is light
+   enough that near-black wins on all six. Every pairing here clears 4.5:1,
+   which is what 12px semibold on a fill needs. */
+.domb-seg.ch-uber{background:var(--ch-uber)}   .domb-seg.ch-yango{background:var(--ch-yango)}
+.domb-seg.ch-bolt{background:var(--ch-bolt)}   .domb-seg.ch-hotel{background:var(--ch-hotel)}
+.domb-seg.ch-fms{background:var(--ch-fms)}     .domb-seg.ch-cabman{background:var(--ch-cabman)}
+.domb-seg.ch-bolt,.domb-seg.ch-hotel{--on-seg:var(--ink-inv)}
+:root[data-theme="dark"] .domb-seg.ch-uber,:root[data-theme="dark"] .domb-seg.ch-yango,
+:root[data-theme="dark"] .domb-seg.ch-fms,:root[data-theme="dark"] .domb-seg.ch-cabman{--on-seg:var(--ink-inv)}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]) .domb-seg.ch-uber,
+  :root:not([data-theme="light"]) .domb-seg.ch-yango,
+  :root:not([data-theme="light"]) .domb-seg.ch-fms,
+  :root:not([data-theme="light"]) .domb-seg.ch-cabman{--on-seg:var(--ink-inv)}
+}
+.sw.ch-uber{background:var(--ch-uber)}   .sw.ch-yango{background:var(--ch-yango)}
+.sw.ch-bolt{background:var(--ch-bolt)}   .sw.ch-hotel{background:var(--ch-hotel)}
+.sw.ch-fms{background:var(--ch-fms)}     .sw.ch-cabman{background:var(--ch-cabman)}
+
+/* A segment that filters the dashboard is a button, so it has to look and
+   behave like one — and a <button> brings a browser default border, padding
+   and font that would break the bar apart if they were left in place. */
+button.domb-seg{border:0;font:inherit;cursor:pointer;height:100%;
+  transition:filter .16s var(--ease),box-shadow .16s var(--ease)}
+button.domb-seg:hover{filter:brightness(1.08)}
+button.domb-seg:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+button.domb-key{all:unset;display:flex;flex-wrap:wrap;align-items:baseline;gap:7px;
+  font-size:.83rem;cursor:pointer;border-radius:var(--r-sm);padding:2px 4px;margin:-2px -4px;
+  transition:background .16s var(--ease)}
+button.domb-key:hover{background:var(--surface-2)}
+button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .domb-seg.dead{background:var(--surface-3);color:var(--ink-3)}
 .domb-keys{display:grid;grid-template-columns:repeat(auto-fit,minmax(15rem,1fr));gap:8px 26px;margin-top:14px}
 .domb-key{display:flex;flex-wrap:wrap;align-items:baseline;gap:7px;font-size:.83rem}
