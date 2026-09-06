@@ -772,10 +772,28 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       res.set('x-photo', 'none on file for this driver');
       return res.status(404).json({ error: 'no photo on file for this driver' });
     }
+    /* The declared type is checked HERE as well as at the point it was stored.
+       ─────────────────────────────────────────────────────────────────────
+       These bytes came from a host we do not run, and this route hands them
+       back on our own origin — so a content type of image/svg+xml or text/html
+       would be a script running as this site. src/sources/uber_profile.js has
+       an allowlist and will not write one; the reason to repeat it is that the
+       guarantee then lives where the header is written rather than one module
+       away, and a future writer to this table inherits it. nosniff closes the
+       other half: a browser that ignores the declared type and sniffs the body
+       can reach the same place from a file that is a valid image AND a valid
+       HTML document. */
+    const TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    if (!TYPES.has(row.content_type)) {
+      res.set('x-photo', `stored type ${row.content_type} is not one this route will serve`);
+      return res.status(415).json({ error: 'the stored photograph is not an image type this route serves' });
+    }
     const etag = `"${row.sha256}"`;
     res.set('etag', etag);
     res.set('cache-control', 'private, max-age=86400, stale-while-revalidate=604800');
     res.set('content-type', row.content_type);
+    res.set('x-content-type-options', 'nosniff');
+    res.set('content-disposition', 'inline');
     res.set('x-photo-fetched', new Date(row.fetched_at).toISOString());
     if (req.get('if-none-match') === etag) return res.status(304).end();
     res.set('content-length', String(row.byte_len));

@@ -69,6 +69,24 @@ const again = await raw('/api/driver/photo/uber/drv-photo', { 'if-none-match': e
 check('…and a reader who already has it gets 304, not the bytes again',
   again.status === 304, String(again.status));
 
+/* Bytes from a host we do not run, served back on our own origin. An
+   image/svg+xml or a text/html body would be a script with this site's cookies
+   and this site's origin; sniffing gets to the same place from a file that is a
+   valid JPEG and a valid HTML document at once. Both doors are checked. */
+check('…and the browser is told not to guess the type for itself',
+  String(hit.headers.get('x-content-type-options') || '').toLowerCase() === 'nosniff',
+  String(hit.headers.get('x-content-type-options')));
+
+await q(`INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type, byte_len, sha256)
+         VALUES ('uber','drv-markup',$1,'image/svg+xml',$2,$3)`,
+  [Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>1</script></svg>'), 62, 'f'.repeat(64)]);
+const markup = await raw('/api/driver/photo/uber/drv-markup');
+check('a stored row whose type is not a raster image is refused, not served',
+  markup.status === 415, String(markup.status));
+check('…and it is refused before the body is written',
+  !/svg/i.test(String(markup.headers.get('content-type') || '')),
+  String(markup.headers.get('content-type')));
+
 console.log('\na driver with no photograph is an absence with a reason');
 
 const none = await get('/api/driver/photo/uber/nobody');

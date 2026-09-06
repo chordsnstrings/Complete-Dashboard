@@ -68,6 +68,7 @@ const EXEMPT = {
   '/api/vehicle/drivers': 'the day-by-day form of /api/vehicle/drivers-detail, which is what the page draws; '
     + 'kept for the same reason, and it 404s an unknown plate now rather than rendering it as a car that '
     + 'did nothing',
+  '/api/driver/photo/:platform/:id': 'the driver photographs, and the one route whose address the pages never spell. It is minted server-side by photoHref() in api/redact.js and reaches the browser as the picture_url field of a driver row, so an <img> asks for it without any file under api/public ever naming it — this check reads the page sources, and there is nothing there to read. Its reachability is proven instead by test/driver_photo.test.mjs, which asserts that the directory and the profile both emit exactly this address and that neither emits Uber\u2019s expiring one',
   '/api/vehicles': 'the busiest-first form of /api/vehicles/directory, which is what both panels on '
     + '#vehicles now read — the directory already returns plate and trips for every vehicle, and asking '
     + 'the same question twice cost 12s of a 44s cold load at a 365-day window. Kept as a route because '
