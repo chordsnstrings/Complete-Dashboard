@@ -1214,6 +1214,13 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
        SELECT t.person_key AS person,
             max(n.driver_name) AS driver_name,
             (array_agg(DISTINCT n.driver_ext_id) FILTER (WHERE n.driver_ext_id IS NOT NULL))[1] AS driver_ext_id,
+            /* ALL of them, not just the one above. array_agg(DISTINCT …) sorts,
+               so [1] is the alphabetically smallest of a person's account ids —
+               fine as the id to address them by, wrong as the only place to
+               look for something filed under an account. The photograph join
+               below used it and therefore found nothing for anybody whose Uber
+               account happens to sort second. */
+            array_agg(DISTINCT n.driver_ext_id) FILTER (WHERE n.driver_ext_id IS NOT NULL) AS ext_ids,
             array_remove(array_agg(DISTINCT n.platform), NULL) AS platforms,
             count(DISTINCT n.driver_ext_id)::int accounts,
             mode() WITHIN GROUP (ORDER BY n.plate) AS plate,
@@ -1312,9 +1319,12 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
        FROM people
        LEFT JOIN pay ON pay.person = people.person
        LEFT JOIN dmoney dm ON dm.person = people.person
+       /* ANY of the person's accounts, and LATERAL … LIMIT 1 so that however
+          many match, exactly one row comes back and the people row cannot be
+          duplicated by its own decoration. */
        LEFT JOIN LATERAL (
          SELECT dp.platform, dp.driver_ext_id FROM driver_photo dp
-          WHERE dp.driver_ext_id = people.driver_ext_id
+          WHERE dp.driver_ext_id = ANY(people.ext_ids)
           LIMIT 1) pic ON true
        ORDER BY completed_trips DESC, trips DESC LIMIT 100`, p);
   const people = rows.length ? rows[0]._people : 0;
@@ -1324,7 +1334,7 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
      production it was 12.2% of this response's entire body. */
   for (const r of rows) {
     r.picture_url = photoHref(r.photo_platform, r.photo_id);
-    delete r._people; delete r.photo_platform; delete r.photo_id;
+    delete r._people; delete r.photo_platform; delete r.photo_id; delete r.ext_ids;
   }
   res.json({ rows, people: people || rows.length, shown: rows.length,
     truncated: people > rows.length });

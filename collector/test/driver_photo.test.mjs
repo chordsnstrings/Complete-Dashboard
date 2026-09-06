@@ -177,6 +177,87 @@ await q(`INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type,
     wrong.status === 404, String(wrong.status));
 }
 
+/* A PHOTOGRAPH FILED UNDER ONE ACCOUNT BELONGS TO THE WHOLE PERSON, and
+   decorating a row must never change what the row counts.
+   ─────────────────────────────────────────────────────────────────────────
+   Both of these are properties of the JOIN, and both were wrong in the
+   opposite direction from each other.
+
+   The leaderboard groups a person's several platform accounts onto one row and
+   addresses them by `(array_agg(DISTINCT driver_ext_id))[1]` — which, because
+   array_agg(DISTINCT …) sorts, is the ALPHABETICALLY SMALLEST of their ids. It
+   then looked for their photograph under that id alone, so anybody whose Uber
+   account sorts second had no face on the fleet's most-read table while their
+   photograph sat in the database.
+
+   The directory had the reverse fault: a plain LEFT JOIN on driver_ext_id,
+   against a table keyed (platform, driver_ext_id). A second photo row for one
+   id returns the person's WORK row twice, and the fold adds trips up. Nothing
+   writes a second row today, because Uber is the only channel that files a
+   picture — so this is a bug that waits. */
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name)
+         VALUES ('uber','zz-second-account','Sorts Last')`);
+/* THREE TRIPS, and the number is the point. The directory folds a person's
+   accounts into one row, so a join that returns their work row twice does not
+   show up as two rows — it shows up as six trips where there are three, on the
+   page an operator reads to decide who is working. An assertion that only
+   counted rows would have passed against the bug; this one counts the trips. */
+for (const [i, day] of ['2026-09-02', '2026-09-03', '2026-09-04'].entries()) {
+  await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+             requested_at, ended_at, status, distance_km)
+           VALUES ('uber',$1,'ecosine','L777','zz-second-account','Sorts Last',
+                   $2::timestamptz, $2::timestamptz + interval '20 minutes', 'completed', 10)`,
+  [`zz-trip-${i}`, `${day}T09:00:00+04:00`]);
+}
+await q(`INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type, byte_len, sha256)
+         VALUES ('uber','zz-second-account',$1,'image/jpeg',$2,$3),
+                ('hotel','zz-second-account',$1,$4,$2,$5)`,
+  [JPEG, JPEG.length, 'b'.repeat(64), 'image/png', 'c'.repeat(64)]);
+{
+  const r = await get('/api/compliance/drivers');
+  const rows = (r.body?.drivers || r.body?.rows || []);
+  const two = rows.filter((x) => x.driver_ext_id === 'zz-second-account');
+  check('a driver with two photo rows appears once, not twice',
+    two.length === 1, `${two.length} rows`);
+  check('…and is offered an address for the photograph',
+    two[0]?.picture_url === '/api/driver/photo/uber/zz-second-account'
+      || two[0]?.picture_url === '/api/driver/photo/hotel/zz-second-account',
+    JSON.stringify(two[0]?.picture_url));
+}
+{
+  /* THE LEADERBOARD, where the person is addressed by the smallest of their
+     account ids. The photograph here is filed under 'zz-second-account', which
+     sorts after 'aa-first-account' — so a lookup that used the addressing id
+     alone finds nothing, while the fleet's most-read table shows two letters
+     for somebody whose face is in the database. */
+  await q(`INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+             requested_at, ended_at, status, distance_km)
+           VALUES ('bolt','aa-trip-1','ecosine','L777','aa-first-account','Sorts Last',
+                   '2026-09-05T09:00:00+04:00','2026-09-05T09:20:00+04:00','completed',10)`);
+  const r = await get('/api/drivers/leaderboard?days=30');
+  const rows = (r.body?.rows || []);
+  const who = rows.find((x) => /Sorts Last/.test(x.driver_name || ''));
+  check('a photograph filed under a person’s OTHER account still reaches them',
+    !!who && /^\/api\/driver\/photo\//.test(who.picture_url || ''),
+    `${rows.length} rows · ${JSON.stringify(who && { n: who.driver_name, a: who.accounts, p: who.picture_url })}`);
+  check('…and they are still one row, not one per account',
+    rows.filter((x) => /Sorts Last/.test(x.driver_name || '')).length === 1,
+    String(rows.filter((x) => /Sorts Last/.test(x.driver_name || '')).length));
+}
+{
+  const r = await get('/api/drivers/directory?days=30');
+  const rows = (r.body?.drivers || r.body?.rows || (Array.isArray(r.body) ? r.body : []));
+  const hit = rows.filter((x) => x.driver_ext_id === 'zz-second-account'
+    || (Array.isArray(x.ids) && x.ids.includes('zz-second-account')));
+  check('the directory does not list them twice either', hit.length <= 1, `${hit.length} rows`);
+  /* FOUR: three on the Uber account that carries the photograph and one on the
+     Bolt account seeded for the leaderboard case above, folded into the one
+     person they both belong to. The photo row count must not touch it. */
+  check('…and their trip count is not inflated by having a photograph',
+    hit.length === 1 && Number(hit[0].trips) === 4,
+    `trips ${JSON.stringify(hit[0]?.trips)} — four were seeded`);
+}
+
 console.log('\nthe page can tell the two absences apart');
 
 /* THESE ASSERTIONS USED TO BE GREPS OVER THE SOURCE, AND THEY LIED.
@@ -202,21 +283,23 @@ const mCss = readFileSync(new URL('../api/public/m/m.css', import.meta.url), 'ut
 check('the mark has a rendering on the desktop', /\.av-lost\{/.test(css));
 check('…and on the phone', /\.av-lost\{/.test(mCss));
 
-console.log('\nan unchanged photograph is not rewritten');
+/* THE COLLECTOR'S OWN GUARANTEES ARE ASSERTED IN test/photo_fetch.test.mjs,
+   BY RUNNING IT.
+   ─────────────────────────────────────────────────────────────────────────
+   Four checks used to live here, and all four were regexes over
+   src/sources/uber_profile.js — /await fetch\(c\.picture_url/,
+   /catch \{ failed\+\+; \}/ and two more. They pass for as long as the line is
+   present and say nothing whatever about whether it works, and they cannot see
+   a bound that is MISSING: the timeout this collector did not have was
+   invisible to every one of them, and so were the 512KB limit and the
+   content-type allowlist, either of which could have been deleted with this
+   file still green.
 
-/* A weekly pass over 157 drivers that rewrote every row would put 3MB through
-   the WAL to store what is already there. The collector compares digests. */
-const src = readFileSync(new URL('../src/sources/uber_profile.js', import.meta.url), 'utf8');
-check('the collector reads the digests it already holds',
-  /SELECT driver_ext_id, sha256 FROM driver_photo/.test(src));
-check('…and skips a photograph whose bytes have not changed',
-  /known\.get\([^)]*\) === sha/.test(src));
-check('and it fetches the image while the signed url still works',
-  /await fetch\(c\.picture_url/.test(src) && /fetchPhotos\(real\)/.test(src));
-/* A CDN that refuses one image must not fail a run that has just written 157
-   compliance rows. */
-check('…without failing the run when one image refuses',
-  /catch \{ failed\+\+; \}/.test(src));
+   fetchPhotos is exported now and run against a local server that answers the
+   way a CDN can misbehave — with an image, with a web page, with something
+   enormous, with a lie about its own size, and with nothing at all. Deleting
+   the allowlist puts text/html in the table; deleting the timeout hangs the
+   run past ninety seconds. Neither is a thing a grep can notice. */
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

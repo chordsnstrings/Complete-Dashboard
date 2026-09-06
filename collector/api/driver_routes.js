@@ -535,7 +535,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                  would otherwise be sent to /api/driver/photo/hotel/<id>, which
                  is a 404 by construction. */
               dp.platform AS photo_platform,
-              (dp.driver_ext_id IS NOT NULL) AS has_photo,
+              (dp.platform IS NOT NULL) AS has_photo,
               (dc.licence_expires - now()::date) AS licence_days_left,
               ($5::text IS NOT NULL
                AND to_char(dc.licence_expires,'YYYY-MM-DD') = $5) AS licence_placeholder,
@@ -563,7 +563,15 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        LEFT JOIN dmoney dm ON dm.driver_ext_id = who.driver_ext_id
        LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
-       LEFT JOIN driver_photo dp ON dp.driver_ext_id = who.driver_ext_id
+       /* LATERAL … LIMIT 1, not a plain join. driver_photo's key is
+          (platform, driver_ext_id), so one account id can carry a row per
+          channel — and a plain LEFT JOIN on the id alone would then return
+          that person's work row TWICE, which the fold below adds up. A
+          decoration that changes the trip count is not a decoration. One row
+          out, however many are in. */
+       LEFT JOIN LATERAL (
+         SELECT p2.platform FROM driver_photo p2
+          WHERE p2.driver_ext_id = who.driver_ext_id LIMIT 1) dp ON true
        LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
        ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 800`, [...P, placeholderDate]);
 

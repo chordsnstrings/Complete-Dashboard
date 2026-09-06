@@ -207,9 +207,16 @@ async function driverIdsFor(o) {
    miss leaves the previous copy in place — an old photograph of the right
    person is better than none — and is counted for the log line. */
 const PHOTO_MAX_BYTES = 512 * 1024;
+const PHOTO_TIMEOUT_MS = 15000;
 const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
 
-async function fetchPhotos(contacts) {
+/* Exported so it can be RUN. Every guarantee below — the type allowlist, the
+   size bound, the digest skip, the timeout, the swallow — was asserted by a
+   regex over this file's own text, which passes for as long as the line is
+   present and says nothing about whether it works. A local server answering
+   the way a CDN can misbehave is the only thing that can tell.
+   See test/photo_fetch.test.mjs. */
+export async function fetchPhotos(contacts) {
   const want = contacts.filter((c) => c.picture_url);
   if (!want.length) return { stored: 0, unchanged: 0, failed: 0 };
 
@@ -229,11 +236,32 @@ async function fetchPhotos(contacts) {
     try {
       /* Plain fetch, not http(): this is a CDN object on a signed URL, not the
          Uber gateway, and it must not carry the portal's cookies or headers.
-         The signature is the whole authorisation. */
-      const r = await fetch(c.picture_url, { redirect: 'follow' });
+         The signature is the whole authorisation.
+
+         BOUNDED, which it was not. Every other outbound call in this collector
+         goes through src/http.js and gets an AbortController — the GraphQL leg
+         forty lines up asks for timeoutMs 30000 — and this was the one bare
+         fetch() in all of src/. Node's stock headersTimeout and bodyTimeout are
+         300s each, so one CDN object refusing to finish could hold this loop
+         for five minutes, and this loop runs once per driver inside
+         writeProfiles, ahead of the rating-history write and ahead of the
+         checkpoint. A stalled image therefore stops the whole pass, silently:
+         the job's progress heartbeat stops advancing and nothing is marked
+         done. Fifteen seconds is generous for a 90kb object. */
+      const r = await fetch(c.picture_url, {
+        redirect: 'follow', signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS),
+      });
       if (!r.ok) { failed++; continue; }
       const type = String(r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
       if (!PHOTO_TYPES.has(type)) { failed++; continue; }
+      /* The declared length is read BEFORE the body. arrayBuffer() pulls the
+         whole response into the worker's heap and only then is it measured, so
+         a mis-served 400MB object is refused after it has already been paid
+         for. content-length is not a guarantee — a chunked response has none,
+         and the check below still runs on what actually arrived — but when it
+         is present and absurd there is no reason to read the body at all. */
+      const declared = Number(r.headers.get('content-length') || 0);
+      if (declared > PHOTO_MAX_BYTES) { failed++; continue; }
       const buf = Buffer.from(await r.arrayBuffer());
       /* A bound, because this writes to a shared database from a response we
          do not control. Uber's avatars are 300x300 and about 4-45kb; half a
