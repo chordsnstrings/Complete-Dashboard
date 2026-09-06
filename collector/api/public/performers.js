@@ -118,7 +118,7 @@ export async function renderPerformers(root, band) {
     `Money in per day worked, over the last complete week. At least ${MIN_DAYS} days `
     + `and ${MIN_BOOKINGS} bookings — click any row for the week in detail.`);
   root.append(listP.panel);
-  const shapeP = panel('What the two ends look like',
+  const shapeP = panel('Best and worst, side by side',
     'The same measures for the ranked group, best and worst, side by side');
   root.append(shapeP.panel);
   const outP = panel('Not ranked', 'Too little of the week to carry a rate — listed, not sorted');

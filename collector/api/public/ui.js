@@ -1395,7 +1395,7 @@ export function alertRateFigure(r, { digits = 1 } = {}) {
   const why = r?.alerts_per_100km_absent ?? r?.per_100km_absent ?? null;
   if (v == null || !Number.isFinite(Number(v))) {
     return { measured: false, value: null, text: '\u2014',
-      title: why || 'not measured — nothing here says how far this was driven while the '
+      title: why || 'Not measured. Nothing here says how far this car drove while the '
         + 'alert feed was up' };
   }
   const n = Number(v);

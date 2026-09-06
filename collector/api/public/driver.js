@@ -599,17 +599,17 @@ function identityCard(p) {
 async function tabOverview(root, id, prof) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
-  const stand = panel('Standing in the fleet', 'Percentile against every driver with 5+ trips in this window'); g1.append(stand.panel);
+  const stand = panel('How they rank in the fleet', 'Ranked against every driver with 5 or more trips in this window'); g1.append(stand.panel);
   /* Lifetime, on a page whose every other panel is the selected window — and
      sorted by days held, so the car this person is driving today sat fourth
      behind three they gave back in March. The window is stated and the sort
      is by recency. */
-  const veh = panel('Vehicles held — over the whole record',
-    'Not this window. Newest custody first, so the car they are in now is the first row.');
+  const veh = panel('Cars they have held (whole record)',
+    'Not this window. Newest first, so the car they hold now is the top row.');
   g1.append(veh.panel);
   const g2 = el('div', 'grid g2'); root.append(g2);
   const start = panel('When the day starts', 'First trip of each working day'); g2.append(start.panel);
-  const hm = panel('Weekday × hour', 'Where this driver’s trips actually fall'); g2.append(hm.panel);
+  const hm = panel('Which days and hours they work', 'When this driver’s trips actually happen'); g2.append(hm.panel);
   const vol = panel('Trips per day', 'Completed and cancelled, day by day'); root.append(vol.panel);
   [stand.body, veh.body, start.body, hm.body, vol.body].forEach(loading);
 
@@ -1105,10 +1105,10 @@ async function tabTerritory(root, id) {
 async function tabEarnings(root, id, prof) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
-  const comp = panel('Earnings components', 'As the platform breaks them down — fares, tips, tolls, adjustments'); g.append(comp.panel);
+  const comp = panel('What made up the pay', 'Fares, tips, tolls and adjustments, as the platform reports them'); g.append(comp.panel);
   const pay = panel('How riders paid', 'Card vs cash changes what actually reaches the fleet'); g.append(pay.panel);
   const line = panel('Revenue by day', 'Booked fare value from the trip record'); root.append(line.panel);
-  const per = panel('Platform payout periods', 'The statements each platform published for this driver'); root.append(per.panel);
+  const per = panel('What each platform paid', 'The statements each platform published for this driver'); root.append(per.panel);
   [comp.body, pay.body, line.body, per.body].forEach(loading);
 
   const [e, mix, daily, k] = await Promise.all([
@@ -1399,7 +1399,7 @@ async function tabQuality(root, id) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
   const cx = panel('Non-completed trips', 'Who cancelled, and how often'); g.append(cx.panel);
-  const ev = panel('Harsh-driving events', 'From the telematics layer, attributed on days this driver held the vehicle'); g.append(ev.panel);
+  const ev = panel('Harsh driving', 'From the tracker, on the days this driver held the car'); g.append(ev.panel);
   const line = panel('Cancellations by day', 'One bar per day — hover for the day’s total'); root.append(line.panel);
   [cx.body, ev.body, line.body].forEach(loading);
 
@@ -1802,8 +1802,7 @@ export async function renderDriverDirectory(root) {
      licence, which is precisely who an operator opens this page to find. The
      vehicle directory beside it does the opposite on purpose and says so. */
   const tblP = panel('All drivers',
-    'Everyone on the books, including people with no trip in this window — those are the ones worth '
-    + 'finding. Sorted by trips; click any row for the full detail.');
+    'Everyone on the books, even people with no trip in this window. Click a row to open it.');
   root.append(tblP.panel);
   loading(tblP.body); loading(grid);
 

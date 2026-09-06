@@ -813,7 +813,7 @@ async function more(deck) {
   ]);
   deck.append(el('p', 'm-sec', 'On the desktop'));
   rows(deck, ['provenance', 'insights', 'compliance', 'demand', 'map', 'settings'].map((v) => row({
-    title: { provenance: 'Where the money came from', insights: 'Action list',
+    title: { provenance: 'Money sources', insights: 'Action list',
       compliance: 'Compliance', demand: 'Demand', map: 'Map & replay', settings: 'Settings' }[v],
     sub: 'built for a bigger screen', value: '›', to: href(v),
   })));

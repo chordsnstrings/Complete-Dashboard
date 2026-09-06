@@ -50,7 +50,7 @@ const refusal = (s) => {
    read a config path that does not exist, and the page showed an Uber-shaped
    silence. */
 function host_note(root, unconfigured) {
-  const { panel: p, body } = panel('Providers that could not be probed',
+  const { panel: p, body } = panel('Providers we did not ask',
     'Nothing was asked of these, so their absence from the tables below says nothing about what they offer.');
   body.append(tableFrom(unconfigured, [
     { label: 'Provider', key: 'provider' },
@@ -206,7 +206,7 @@ export async function renderProviders(root) {
   }
 
   if (refused.length) {
-    const { panel: p, body } = panel('Surfaces that did not answer',
+    const { panel: p, body } = panel('Feeds that did not answer',
       'A credential that has expired looks exactly like a provider that is down until somebody reads the '
       + 'status code. Each of these returned a refusal; none of them is evidence about what the provider offers.');
     body.append(tableFrom(refused, [

@@ -34,8 +34,8 @@ export const COHORTS = {
     from: 'unit', fromLabel: 'Unit economics',
     label: 'Earned nothing',
     question: 'Who is on the books, took no booking and was paid nothing?',
-    why: 'Every rate on Unit economics divides by the people who earned. These are the '
-      + 'people the denominator leaves out, and the reason the two per-driver figures differ.',
+    why: 'Every rate on Money per car per day divides by the people who earned. These are the '
+      + 'people left out of that divide, and the reason the two per-driver figures differ.',
     test: (r) => r.band === 'idle',
   },
   'unit-no-hours': {
@@ -139,7 +139,7 @@ export const COHORTS = {
      disagree about which bucket somebody is in. */
   'roster-idle': {
     kind: 'driver', source: '/api/roster', pick: 'people', chips: true,
-    from: 'roster', fromLabel: 'Roster & supply',
+    from: 'roster', fromLabel: 'Driver roster',
     label: 'Able to earn, earning nothing',
     question: 'Who may legally drive on some platform and took no booking in this window?',
     why: 'Capacity the fleet already carries. A licence and a slot standing still.',
@@ -147,7 +147,7 @@ export const COHORTS = {
   },
   'roster-never-started': {
     kind: 'driver', source: '/api/roster', pick: 'people', chips: true,
-    from: 'roster', fromLabel: 'Roster & supply',
+    from: 'roster', fromLabel: 'Driver roster',
     label: 'Recruited, never driven',
     question: 'Who has a roster record and has never taken a booking on any channel, ever?',
     why: 'Recruitment that never converted. The window does not matter for these — they '
@@ -156,7 +156,7 @@ export const COHORTS = {
   },
   'roster-pipeline': {
     kind: 'driver', source: '/api/roster', pick: 'people', chips: true,
-    from: 'roster', fromLabel: 'Roster & supply',
+    from: 'roster', fromLabel: 'Driver roster',
     label: 'Still waiting to start',
     question: 'Who is onboarding or waitlisted?',
     why: 'Nobody here can earn yet. How long each has been waiting is the number that '
@@ -165,7 +165,7 @@ export const COHORTS = {
   },
   'roster-blocked': {
     kind: 'driver', source: '/api/roster', pick: 'people', chips: true,
-    from: 'roster', fromLabel: 'Roster & supply',
+    from: 'roster', fromLabel: 'Driver roster',
     label: 'Stopped everywhere',
     question: 'Who is not permitted to work on any platform they hold?',
     why: 'A leaver the fleet may not have recorded as one — and some of them are still '
@@ -174,7 +174,7 @@ export const COHORTS = {
   },
   'roster-blocked-holding': {
     kind: 'driver', source: '/api/roster', pick: 'people', chips: true,
-    from: 'roster', fromLabel: 'Roster & supply',
+    from: 'roster', fromLabel: 'Driver roster',
     label: 'Holding a car while stopped',
     question: 'Who cannot drive on any platform and still has a vehicle attached to them?',
     why: 'The car earns nothing and still depreciates, insures and parks. This is the '
@@ -183,7 +183,7 @@ export const COHORTS = {
   },
   'roster-unclassified': {
     kind: 'driver', source: '/api/roster', pick: 'people', chips: true,
-    from: 'roster', fromLabel: 'Roster & supply',
+    from: 'roster', fromLabel: 'Driver roster',
     label: 'Standing not reported',
     question: 'Whose standing did no provider describe in a word we recognise?',
     why: 'A gap in what we know, not a fact about the person. Filing them anywhere else '

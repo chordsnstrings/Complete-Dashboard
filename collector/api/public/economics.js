@@ -45,7 +45,7 @@ import { q, href, state } from './data.js';
 import { makeMap, fitTo } from './map.js';
 
 export const UNIT_TABS = [
-  { id: 'overview', label: 'The money', ic: '◆' },
+  { id: 'overview', label: 'Money in', ic: '◆' },
   { id: 'assets', label: 'Every vehicle', ic: '▤' },
   { id: 'drivers', label: 'Every driver', ic: '◧' },
 ];
@@ -157,13 +157,11 @@ async function moneyTab(root) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
 
   const g1 = el('div', 'grid g23'); root.append(g1);
-  const conc = panel('Where the money is concentrated',
-    'Vehicles ranked by what they earned, cumulative. A steep start means a few assets carry the '
-    + 'fleet; a straight line means every car pulls the same weight. Click for the full ledger.');
+  const conc = panel('Which cars earn the money',
+    'A steep line means a few cars earn most of it. Click a point to open that car.');
   g1.append(conc.panel);
-  const chan = panel('What each channel yields per kilometre',
-    'Money in over booked distance. Compare a channel with itself over time — not with the one '
-    + 'beside it: a payout is net of the platform’s commission and a fare is not.');
+  const chan = panel('Money per km, by channel',
+    'Compare a channel with itself over time. A payout is after commission, a fare is not.');
   g1.append(chan.panel);
 
   const g2 = el('div', 'grid g2'); root.append(g2);
@@ -183,33 +181,29 @@ async function moneyTab(root) {
      the day itself rather than showing four empty panels. Every caption and
      every empty state below prints the gate it actually used, because "at
      least 10" over a three-day window was a sentence about a different page. */
-  const best = panel('Assets earning most per day worked',
+  const best = panel('Cars earning most per day worked',
     'Enough earning days to carry a rate, so a car that worked once for a good fare does not lead '
     + 'the fleet.');
   g2.append(best.panel);
-  const worst = panel('Assets earning least per day worked',
+  const worst = panel('Cars earning least per day worked',
     'The same threshold. These held a driver and produced almost nothing — the row above the ones '
     + 'that produced nothing at all.');
   g2.append(worst.panel);
 
-  const dead = panel('Held, insured, earning nothing',
-    'No money in this window, and papers that have not expired — the fleet is paying to keep these '
-    + 'road-legal and getting nothing back. This is the closest this database gets to a loss: there '
-    + 'is no cost table anywhere in this product, so what these cost cannot be stated, only that '
-    + 'they earned nothing.');
+  const dead = panel('Insured cars that earned nothing',
+    'Papers still valid, no money in this window. This product holds no cost data.');
   root.append(dead.panel);
 
-  const mapP = panel('Where the fleet is sitting',
-    'Every vehicle at its last known fix, coloured by whether it earned in this window. A cluster '
-    + 'of idle cars in one place is a yard problem; idle cars scattered are a driver problem.');
+  const mapP = panel('Where each car was last seen',
+    'Each car at its last known position, coloured by whether it earned in this window.');
   mapP.panel.classList.add('mapwrap');
   root.append(mapP.panel);
 
   const g3 = el('div', 'grid g2'); root.append(g3);
-  const pbest = panel('People earning most per day worked', 'Enough days driven to carry a rate');
+  const pbest = panel('Drivers earning most per day worked', 'Enough days driven to carry a rate');
   g3.append(pbest.panel);
-  const pworst = panel('People earning least per day worked',
-    'The same threshold — the shifts are not the problem here, the yield is');
+  const pworst = panel('Drivers earning least per day worked',
+    'The same threshold. They worked the days, the money per day is what is low');
   g3.append(pworst.panel);
 
   [conc.body, chan.body, best.body, worst.body, dead.body, mapP.body, pbest.body, pworst.body]
@@ -338,7 +332,7 @@ async function moneyTab(root) {
        basis choice can differ from the fleet-level one, so summing the plates
        gives a number a few thousand dirhams away from what Finance reports,
        and until now neither page mentioned the other. The tile names both. */
-    { label: 'Money placed on assets', value: money(t.money),
+    { label: 'Money placed on cars', value: money(t.money),
       sub: `${money(t.fares || 0)} in fares · ${money(t.payouts || 0)} of platform payouts placed `
         + `on the days each driver actually drove · over ${fmt(A.window_days)} days`
         /* The reason, not the aside. This clause used to offer unplaced_payouts
@@ -359,8 +353,8 @@ async function moneyTab(root) {
               ? ` A further ${money(t.unplaced_payouts)} could not be placed on any car at all.`
               : '')
           : '') },
-    { label: 'Per earning vehicle-day', value: money(t.aed_per_earning_day, 'AED', 0),
-      sub: `${fmt(t.earning_vehicle_days)} vehicle-days actually earned` },
+    { label: 'Money per car per earning day', value: money(t.aed_per_earning_day, 'AED', 0),
+      sub: `over ${fmt(t.earning_vehicle_days)} days a car actually earned` },
     { label: 'Per km', value: money(t.aed_per_km, 'AED', 2),
       sub: `over ${fmt(t.km)} booked km` },
     /* The bookings PLACED ON AN ASSET, which is fewer than the fleet's — a
@@ -371,7 +365,7 @@ async function moneyTab(root) {
        base rather than letting a reader read it as the fleet's total. */
     { label: 'Per booking', value: money(t.aed_per_booking, 'AED', 2),
       sub: `over ${fmt(t.bookings)} bookings that a vehicle can be named for` },
-    { label: 'Assets earning', value: `${fmt(t.earning)} / ${fmt(t.vehicles)}`,
+    { label: 'Cars earning', value: `${fmt(t.earning)} / ${fmt(t.vehicles)}`,
       tone: t.earning === t.vehicles ? 'good'
         : t.vehicles - t.earning > t.vehicles / 4 ? 'critical' : 'warn',
       sub: `${fmt(t.moved_unpaid)} moved without earning · ${fmt(t.still)} never moved`,
@@ -413,7 +407,7 @@ async function moneyTab(root) {
       const pricedIdle = A.rows.reduce((a, r) => a
         + (r.forgone_at_own_rate != null ? (+r.idle_days || 0) : 0), 0);
       const unpricedIdle = Math.max(0, (t.idle_vehicle_days || 0) - pricedIdle);
-      return { label: 'Idle vehicle-days', value: fmt(t.idle_vehicle_days),
+      return { label: 'Days a car sat idle', value: fmt(t.idle_vehicle_days),
         tone: 'warn',
         sub: t.forgone_at_own_rate
           ? `${money(t.forgone_at_own_rate)} over the ${fmt(pricedIdle)} of them held by a car that `
@@ -440,11 +434,9 @@ async function moneyTab(root) {
      that and finds nothing explaining it has to assume one of the two pages is
      broken, which is a worse outcome than either number. Stated where the
      larger figure is, with the mechanism rather than a hedge. */
-  root.append(note('This page places money on ASSETS, so a weekly payout is spread over the days '
-    + 'its driver actually drove. Revenue by channel spreads the same payout over the seven '
-    + 'calendar days of its period. Both are honest and they agree over a long window; a window '
-    + 'that cuts through a payout period counts more of it here than there, which is why the two '
-    + 'totals separate as the range gets shorter. Neither figure is the other one rounded.'));
+  root.append(note('This page puts a weekly payout on the days the driver actually drove. Money by platform '
+    + 'spreads the same payout over all seven days of the period. Both are right, so the two '
+    + 'totals differ most over a short range.'));
 
   /* Concentration: one series, so no legend — the title names it. Cumulative
      share against rank, which is a curve and therefore an area rather than
@@ -535,11 +527,10 @@ async function moneyTab(root) {
     ? ` The window is ${nDays(days, 'day')}, so the usual ten would rank nobody.` : '';
   capOf(best.panel, `At least ${nDays(gate, 'earning day')}, so a car that worked once for a good `
     + `fare does not lead the fleet.${short}`);
-  capOf(worst.panel, `The same threshold. These held a driver and produced almost nothing — the row `
-    + 'above the ones that produced nothing at all.');
+  capOf(worst.panel, 'The same threshold. These held a driver and earned almost nothing.');
   capOf(pbest.panel, `At least ${nDays(gate, 'day')} driven.${short}`);
-  capOf(pworst.panel, `At least ${nDays(gate, 'day')} driven — the shifts are not the problem here, `
-    + 'the yield is.');
+  capOf(pworst.panel, `At least ${nDays(gate, 'day')} driven. They worked the days, the money per `
+    + 'day is what is low.');
 
   const rated = A.rows.filter((r) => r.days_earning >= gate && r.aed_per_earning_day != null)
     .sort((a, b) => b.aed_per_earning_day - a.aed_per_earning_day);
@@ -728,10 +719,8 @@ async function assetsTab(root) {
   bar.innerHTML = '<input id="ueq" type="search" placeholder="Search by plate, make, model or driver…">'
     + '<span class="chips" id="ueb"></span><span class="cap" id="uen"></span>';
   root.append(bar);
-  const sc = panel('Distance against money',
-    'One dot per vehicle. The diagonal is the fleet’s rate per kilometre — below it a car is '
-    + 'covering ground that is not paying, above it the work is unusually well priced. Click a dot '
-    + 'to open the asset.');
+  const sc = panel('Km driven against money earned',
+    'One dot per car. Below the line, a car drives km that do not pay. Click to open it.');
   root.append(sc.panel);
   const tblP = panel('Every vehicle', 'Click a column to rank by it. Click a row to open the asset.');
   root.append(tblP.panel);

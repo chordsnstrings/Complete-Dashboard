@@ -266,16 +266,16 @@ function componentTree(components) {
 }
 
 const VIEWS = [
-  { id: 'unit', label: 'Unit economics', ic: '◆', grp: 'Money', sub: 'What every vehicle and every driver earned per day worked, per km and per booking — and which of them earned nothing' },
-  { id: 'revenue', label: 'Revenue by channel', ic: '◇', grp: 'Money', sub: 'What each platform actually tells us about money — and which ones tell us nothing' },
-  { id: 'provenance', label: 'Where the money came from', ic: '⑆', grp: 'Money',
-    sub: 'Every API call that returned money, what it returned, and whether the headline uses it' },
-  { id: 'reconcile', label: 'Reconciliation', ic: '⇌', grp: 'Money', sub: 'Every month on record: what the platforms wired against what their own statements say they owed' },
-  { id: 'finance', label: 'Finance', ic: '◈', grp: 'Money', sub: 'Revenue, payment mix and the transaction ledger' },
-  { id: 'settlement', label: 'Settlement', ic: '◫', grp: 'Money', sub: 'Who settles the fare and when — cash in hand, and what is outstanding' },
-  { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Money', sub: 'The channel that reports a cost, a property, a guest and the driver’s starting point' },
-  { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Work', sub: 'Volume, mix and quality across every platform — the work behind the money' },
-  { id: 'demand', label: 'Demand', ic: '◷', grp: 'Work', sub: 'When trips happen — by day, hour and weekday' },
+  { id: 'unit', label: 'Money per car and driver', ic: '◆', grp: 'Money', sub: 'What each car and driver earned per day, per km and per trip, including zero earners' },
+  { id: 'revenue', label: 'Money by platform', ic: '◇', grp: 'Money', sub: 'What each platform reports about money, and which ones report nothing' },
+  { id: 'provenance', label: 'Money sources', ic: '⑆', grp: 'Money',
+    sub: 'Every API call that returned money, and whether the headline figure uses it' },
+  { id: 'reconcile', label: 'Paid vs owed', ic: '⇌', grp: 'Money', sub: 'For each month, what the platforms paid us against what their statements say they owed' },
+  { id: 'finance', label: 'Finance', ic: '◈', grp: 'Money', sub: 'Money in, how riders paid, and every fee, bonus and adjustment on record' },
+  { id: 'settlement', label: 'Cash and unpaid', ic: '◫', grp: 'Money', sub: 'Who pays for the ride, how much cash drivers hold, and what is still unpaid' },
+  { id: 'corporate', label: 'Corporate & hotels', ic: '❖', grp: 'Money', sub: 'Hotel and company bookings, with the cost of each ride as well as its price' },
+  { id: 'overview', label: 'Fleet activity', ic: '◱', grp: 'Work', sub: 'How many trips the fleet ran, on which platforms, and how they ended' },
+  { id: 'demand', label: 'Demand', ic: '◷', grp: 'Work', sub: 'When trips happen, by day, hour and weekday' },
   /* The record itself, browsable. Every other page here aggregates it; this
      one lists it, which is what an operator wants when they remember a job
      and not a statistic. */
@@ -283,31 +283,31 @@ const VIEWS = [
   /* The other half of the market, and the only page in the product that
      measures supply. It sits beside Demand because it is the same axes with
      the other series on them. */
-  { id: 'supply', label: 'Supply vs demand', ic: '◑', grp: 'Work', sub: 'Where and when the fleet is online and nobody is in the car — the hours we pay for and do not sell' },
-  { id: 'compare', label: 'Today vs yesterday', ic: '⧉', grp: 'Work', sub: 'Two days beside each other, cut at the same Dubai minute so a partial today is not read as a collapse' },
-  { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Work', sub: 'Uber vs Yango vs Bolt — share, product tier and the acceptance funnel' },
-  { id: 'corridors', label: 'Corridors', ic: '⇄', grp: 'Work', sub: 'Where jobs start and end, rolled up from the addresses every channel returns' },
-  { id: 'top-performers', label: 'Top performers', ic: '▲', grp: 'People', sub: 'Who last complete week went well for, and what they did differently' },
-  { id: 'low-performers', label: 'Low performers', ic: '▼', grp: 'People', sub: 'Who it did not — with what the data cannot tell you about why' },
-  { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'People', sub: 'Per-driver output, quality and cross-platform activity' },
-  { id: 'roster', label: 'Roster & supply', ic: '☰', grp: 'People', sub: 'Who is on the books across all four platforms, and who is earning nothing' },
-  { id: 'retention', label: 'Joiners & leavers', ic: '⇅', grp: 'People', sub: 'Whether a falling driver count is people leaving or nobody arriving — a headcount cannot tell them apart' },
-  { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'People', sub: 'Documents and licences with an expiry date attached' },
-  { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Assets', sub: 'Utilisation and revenue per vehicle' },
-  { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Assets', sub: 'Seat occupied, vehicle moved — but no booking on any channel' },
-  { id: 'safety', label: 'Safety', ic: '△', grp: 'Assets', sub: 'Harsh-driving events from the telematics layer' },
-  { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Assets', sub: 'Realtime positions — CABMAN refreshes every 5 minutes' },
+  { id: 'supply', label: 'Idle hours', ic: '◑', grp: 'Work', sub: 'When and where cars are online with nobody in them' },
+  { id: 'compare', label: 'Today vs yesterday', ic: '⧉', grp: 'Work', sub: 'Two days side by side, both counted up to the same Dubai minute' },
+  { id: 'platforms', label: 'Platforms', ic: '◨', grp: 'Work', sub: 'How Uber, Yango and Bolt compare on share, car tier and jobs accepted' },
+  { id: 'corridors', label: 'Popular routes', ic: '⇄', grp: 'Work', sub: 'Which pickup areas feed which drop-off areas' },
+  { id: 'top-performers', label: 'Top performers', ic: '▲', grp: 'People', sub: 'The best drivers of the last complete week, and what they did differently' },
+  { id: 'low-performers', label: 'Low performers', ic: '▼', grp: 'People', sub: 'The weakest drivers of the last complete week, and what the data cannot explain' },
+  { id: 'drivers', label: 'Drivers', ic: '◧', grp: 'People', sub: 'Trips, quality and platform activity for every driver' },
+  { id: 'roster', label: 'Driver roster', ic: '☰', grp: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
+  { id: 'retention', label: 'Joiners & leavers', ic: '⇅', grp: 'People', sub: 'Whether the driver count fell because people left or because nobody joined' },
+  { id: 'compliance', label: 'Compliance', ic: '❑', grp: 'People', sub: 'Driver licences and vehicle papers, and when each one expires' },
+  { id: 'vehicles', label: 'Vehicles', ic: '▤', grp: 'Assets', sub: 'How much each car is used, and how much money it brings in' },
+  { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', grp: 'Assets', sub: 'Trips where the seat sensor saw a rider but no platform has a booking' },
+  { id: 'safety', label: 'Safety', ic: '△', grp: 'Assets', sub: 'Harsh braking, speeding and sharp turns from the car trackers, plus tracker faults' },
+  { id: 'live', label: 'Live fleet', ic: '◉', grp: 'Assets', sub: 'Live vehicle positions, refreshed by CABMAN every 5 minutes' },
   { id: 'map', label: 'Map & replay', ic: '◍', grp: 'Assets', sub: 'Where every vehicle is now, and where it went on any given day' },
-  { id: 'causes', label: 'Why it moved', ic: '◔', grp: 'Decide', sub: 'Structural breaks split into supply and demand, against what was happening in the world' },
-  { id: 'forecast', label: 'Forecast', ic: '◠', grp: 'Decide', sub: 'What next month looks like, day by day, and how much of that is a guess' },
-  { id: 'playbook', label: 'To-do list', ic: '☑', grp: 'Decide', sub: 'What to do this month to earn more — each item with the arithmetic that sized it' },
-  { id: 'optimise', label: 'Optimise', ic: '◎', grp: 'Decide', sub: 'The most trips for the least downtime — when an online hour sells, and where the waiting happens' },
-  { id: 'capacity', label: 'Rota gaps', ic: '◫', grp: 'Decide', sub: 'Where next month’s forecast work lands, against who currently covers that hour' },
+  { id: 'causes', label: 'Why trips changed', ic: '◔', grp: 'Decide', sub: 'When trips changed sharply, and whether supply or demand moved with it' },
+  { id: 'forecast', label: 'Forecast', ic: '◠', grp: 'Decide', sub: 'Expected trips for next month, day by day, and how uncertain each day is' },
+  { id: 'playbook', label: 'To-do list', ic: '☑', grp: 'Decide', sub: 'Jobs to do this month to earn more, each with the sums behind it' },
+  { id: 'optimise', label: 'Cut waiting time', ic: '◎', grp: 'Decide', sub: 'Which online hours sell, and where drivers wait for the next job' },
+  { id: 'capacity', label: 'Rota gaps', ic: '◫', grp: 'Decide', sub: 'Which hours next month need more drivers than the rota covers today' },
   { id: 'insights', label: 'Action list', ic: '✦', grp: 'Decide', sub: 'What needs doing, ranked by what it costs to ignore' },
-  { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Decide', sub: 'Claims a model proposed and the database judged — with the numbers that decided each one' },
-  { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Trust', sub: 'Collector health, coverage and history depth' },
-  { id: 'coverage', label: 'Collection gaps', ic: '▦', grp: 'Trust', sub: 'Which days each source actually collected — a hole here makes every rate across it wrong' },
-  { id: 'providers', label: 'What each API offers', ic: '⌗', grp: 'Trust', sub: 'Every field each provider sends, and the ones we currently have nowhere to put' },
+  { id: 'analyst', label: 'Analyst', ic: '◑', grp: 'Decide', sub: 'Claims the model made, checked against the database, with the numbers behind each' },
+  { id: 'sources', label: 'Data sources', ic: '⛁', grp: 'Trust', sub: 'Whether each source is still collecting, and how far back it goes' },
+  { id: 'coverage', label: 'Collection gaps', ic: '▦', grp: 'Trust', sub: 'Which days each source collected, and which days are missing' },
+  { id: 'providers', label: 'What each API offers', ic: '⌗', grp: 'Trust', sub: 'Every field each source sends, and the ones we do not store yet' },
   { id: 'settings', label: 'Settings', ic: '⚙', grp: 'Set up', sub: 'Credentials and collection schedule' },
 ];
 
@@ -598,7 +598,7 @@ V.notfound = async (root) => {
         + near.map((v) => `<a class="ent" href="${href(v.id)}">${esc(v.label)}</a>`).join(' · ')
         + '</p>'
       : '')
-    + `<p class="cap">Or start at <a class="ent" href="${href('unit')}">Unit economics</a>, `
+    + `<p class="cap">Or start at <a class="ent" href="${href('unit')}">Money per car and driver</a>, `
     + 'or pick a page from the list on the left.</p>';
   root.append(p);
 };
@@ -746,7 +746,7 @@ V.overview = async (root) => {
       meta = `${fmt(k.drivers)} drivers · ${fmt(k.vehicles)} vehicles`;
       if (v.branch === 'single-channel') {
         recommend = `Every rate on this page is ${sourceLabel(v.lead.label)}'s rate wearing the fleet's `
-          + 'name. Revenue by channel shows what each one actually reports.';
+          + 'name. Money by platform shows what each one actually reports.';
       }
     }
     /* What changed, when there is a like-for-like span to compare against.
@@ -1001,10 +1001,10 @@ V.demand = async (root) => {
     'Bookings per Dubai-local day, with telematics journeys behind them. A day nobody collected is '
     + 'hatched rather than drawn as zero. Click a bar to open that day.');
   g.append(daily.panel);
-  const ctxP = panel('Volume against the weather and the calendar',
-    'Dubai demand is weather- and calendar-driven: heat empties the streets, rain floods them, and Ramadan moves the whole day. This puts the two side by side so a dip has a candidate explanation rather than a shrug.');
+  const ctxP = panel('Trips against weather and holidays',
+    'Heat, rain and Ramadan all move Dubai demand. This puts trips and weather side by side so a dip has a possible reason.');
   root.append(ctxP.panel);
-  const hm = panel('Weekday × hour heatmap', 'Darker = busier. Click a cell for that slot'); root.append(hm.panel);
+  const hm = panel('Busiest hours of the week', 'Darker = busier. Click a cell for that hour'); root.append(hm.panel);
   [hourly.body, daily.body, ctxP.body, hm.body].forEach(loading);
 
   const gen = currentGen();
@@ -1113,7 +1113,7 @@ V.demand = async (root) => {
       ? `<a class="lnk" href="${href('overview')}">Fleet activity</a> counts the journeys behind the `
         + `bookings · <a class="lnk" href="${href('map')}">Map &amp; replay</a> shows where they went.`
       : `<a class="lnk" href="${href('sources')}">Data sources</a> names which collector is failing and why `
-        + `· <a class="lnk" href="${href('revenue')}">Revenue by channel</a> shows what this channel does report.`;
+        + `· <a class="lnk" href="${href('revenue')}">Money by platform</a> shows what this channel does report.`;
     box.append(links);
     root.insertBefore(box, root.firstChild);
   }
@@ -1751,7 +1751,7 @@ V.vehicles = async (root) => {
   const tierP2 = q('/api/product/by-vehicle').catch(() => []);
   const rows = (await dirP) || [];
   if (!alive(gen)) return;
-  const spread = panel('Fleet spread', 'How trips distribute across the fleet — a long tail here means assets carrying no load');
+  const spread = panel('Fleet spread', 'How trips are spread across the fleet. A long tail means cars carrying no work.');
   root.append(spread.panel); loading(spread.body);
   const tierP = panel('Which assets serve which tier',
     'Uber Black and Comfort earn several times what UberX does per trip, so tier is an allocation decision. This is which cars are actually taking that work.');
@@ -2055,7 +2055,7 @@ async function platformTiers(root) {
       : 'No premium tier ran in this window, in any part of the day.'));
   }
   g.append(tp.panel);
-  const gp = panel('Distance from the best car of the same model',
+  const gp = panel('Gap to the best car of the same model',
     'Not a shortfall against a standard — the benchmark IS one of these cars, so the leader is at zero '
     + 'and everybody else is behind by definition. Useful as a spread, not as a list of failures.');
   if (under.length) {
@@ -2149,7 +2149,7 @@ async function platformFunnel(root) {
     { label: 'Platform commission', value: money(sum('commission_cost')),
       sub: 'what the channel kept' },
   ]));
-  const fnp = panel(`Offer and completion, per driver-period — ${countOf(live.length, 'record')}`,
+  const fnp = panel(`Jobs offered and completed, per driver — ${countOf(live.length, 'record')}`,
     'One row per driver per reporting period, as the channel published it. Rates within a row are '
     + 'sound; the periods overlap, so a column does not add up across rows.');
   root.append(fnp.panel);
@@ -2263,7 +2263,7 @@ V.finance = async (root) => {
     + 'behind that walk while the hotel and Yango bookings, which are priced on the trip itself, '
     + 'have always been here.');
   g2.append(tier.panel);
-  const comp = panel('Earnings components', 'How the platform breaks a payout down: fares, tips, promotions, and what it deducts'); g2.append(comp.panel);
+  const comp = panel('What makes up a payout', 'Fares, tips, promotions and what the platform deducts'); g2.append(comp.panel);
   const tips = panel('Tips by driver', 'Service quality expressed in money. Riders tip the experience, not the route.'); root.append(tips.panel);
   const led = panel('Ledger by category', 'Platform fees, bonuses and adjustments'); root.append(led.panel);
   [rev.body, pay.body, tier.body, comp.body, tips.body, led.body].forEach(loading);
@@ -3011,8 +3011,8 @@ V.unauthorized = async (root) => {
   const vuHost = el('div'); root.append(vuHost);
   const kh = el('div', 'kpis'); root.append(kh);
   const g = el('div', 'grid g23'); root.append(g);
-  const trend = panel('Occupancy per day', 'Unexplained intervals against every occupancy interval seen'); g.append(trend.panel);
-  const verdicts = panel('How segments resolve', 'Every seat-occupancy interval, classified'); g.append(verdicts.panel);
+  const trend = panel('Unexplained trips per day', 'Trips with no booking, against every trip the seat sensor saw'); g.append(trend.panel);
+  const verdicts = panel('What each flagged trip turned out to be', 'Every trip the seat sensor saw, and what explains it'); g.append(verdicts.panel);
   const veh = panel('Vehicles with unexplained trips', 'Ranked by count — click to inspect'); root.append(veh.panel);
   const list = panel('Flagged segments', 'Click a row for the full evidence trail'); root.append(list.panel);
   const health = panel('Seat-sensor health', 'A dead or stuck pad makes the numbers above unreliable'); root.append(health.panel);
@@ -3733,7 +3733,7 @@ V.insights = async (root) => {
     : `<div class="kpi ${cls || ''}"><div class="l">${l}</div><div class="n num">${n}</div><div class="d">${esc(d)}</div></div>`)).join('');
 
   if (!all.length) {
-    const p0 = panel('Nothing to action', 'The engine runs after each collection'); root.append(p0.panel);
+    const p0 = panel('Nothing to do right now', 'The engine runs after each collection'); root.append(p0.panel);
     empty(p0.body, 'No findings yet — either the fleet is clean, or the collectors have not completed a cycle.');
     return;
   }
@@ -3798,7 +3798,7 @@ V.insights = async (root) => {
     });
   }
 
-  const listPanel = panel('Ranked actions', 'Most consequential first — click any row for the evidence behind it');
+  const listPanel = panel('Ranked actions', 'Biggest first. Click any row for the evidence behind it');
   root.append(listPanel.panel);
 
   const SEV = { critical: 'err', warning: 'warn', info: 'info', good: 'ok' };
@@ -4363,7 +4363,7 @@ V.sources = async (root) => {
      an acceptable trade while the rollups are actually running. A stale number
      served instantly is worse than a slow one, because nothing about it looks
      wrong, so the age of each is on the page. */
-  const ru = panel('Precomputed aggregates',
+  const ru = panel('Pre-built summaries',
     'Trend, Forecast and Retention read these rather than aggregating every trip on each load. '
     + 'Rebuilt after every collection and every fifteen minutes.');
   root.append(ru.panel);

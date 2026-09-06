@@ -132,7 +132,7 @@ export async function renderCoverage(root) {
      and compares Uber's Trip UUIDs against the ones we stored. */
   {
     const rows = (ver && ver.windows) || [];
-    const { panel: vp, body: vb } = panel('Checked against Uber, not against ourselves',
+    const { panel: vp, body: vb } = panel('Checked against Uber’s own report',
       'Uber’s own trip report for a window we already hold, matched booking by booking on Uber’s '
       + 'own trip id');
     root.append(vp);
@@ -289,7 +289,7 @@ export async function renderCoverage(root) {
   const cov = await q('/api/coverage').catch(() => ({}));
   const moneyGaps = cov.earnings_gaps || [];
   if (moneyGaps.length) {
-    const { panel: mp, body: mb } = panel('Work we hold no money for',
+    const { panel: mp, body: mb } = panel('Trips with no earnings data',
       'Where a platform\u2019s trip feed reaches further back than its earnings API will serve');
     mb.append(tableFrom(moneyGaps, [
       { label: 'Platform', key: 'platform', render: (r) => sourceLabel(r.platform) },
@@ -316,9 +316,9 @@ export async function renderCoverage(root) {
      the wrong reading costs a week. */
   const shared = c.shared_silence || [];
   if (shared.length) {
-    const { panel: sp, body: sb } = panel('Windows where every source went quiet at once',
-      'Two or more independent providers, each inside its own collecting span, each seeing nothing — '
-      + 'and nothing else seeing anything either');
+    const { panel: sp, body: sb } = panel('Stretches when every source went quiet',
+      'Two or more separate providers, each inside its own collecting span, each seeing nothing. '
+      + 'Nothing else saw anything either.');
     root.append(sp);
     sb.append(tableFrom(shared, [
       { label: 'From', key: 'from', render: (r) => dayStr(r.from) },

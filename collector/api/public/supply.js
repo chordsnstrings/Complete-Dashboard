@@ -93,7 +93,7 @@ function balanceGrid(host, cells) {
 export async function renderSupply(root) {
   root.innerHTML = '';
   const vHost = el('div'); root.append(vHost);
-  const gridP = panel('Every hour of the week, by how well the supply sold',
+  const gridP = panel('Which hours sell the drivers you are paying for',
     'Jobs per online hour. Two slots with ten jobs are the same colour on a demand heatmap and '
     + 'opposite problems here — one had four drivers online and one had forty.');
   root.append(gridP.panel);

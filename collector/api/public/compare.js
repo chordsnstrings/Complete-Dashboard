@@ -96,7 +96,7 @@ export async function renderCompare(root, aParam, bParam) {
      whole page: at 2fr of a 2:1 split the last three columns were cut off at
      the panel edge, so "first trip", "cancelled" and the vehicle — the columns
      that explain a fall — were the ones nobody could see. */
-  const movedP = panel('Who moved',
+  const movedP = panel('Who drove more, who drove less',
     'Every person who drove on either day, ordered by how much their booking count changed');
   root.append(movedP.panel);
 

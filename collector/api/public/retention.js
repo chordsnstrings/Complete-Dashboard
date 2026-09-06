@@ -211,7 +211,7 @@ export async function renderRetention(root) {
   }
 
   /* ── the flow ─────────────────────────────────────────────────────────── */
-  const { panel: fp, body: fb } = panel('Where the headcount goes each month',
+  const { panel: fp, body: fb } = panel('Drivers joining and leaving each month',
     'Arrivals split into genuinely new and returning after a gap. A driver counts as active in a month '
     + 'when they took at least one booking in it.');
   root.append(fp);
@@ -235,7 +235,7 @@ export async function renderRetention(root) {
   ], { compact: true, sortable: true, sortId: 'flow', defaultSort: { key: 'm', dir: 'asc' } }));
 
   /* ── the cohort table ─────────────────────────────────────────────────── */
-  const { panel: cp, body: cb } = panel('Of the drivers who started in each month, how many were still working later',
+  const { panel: cp, body: cb } = panel('How long each month’s new drivers stayed',
     'Each row follows one intake group. Reading down a column compares groups at the same age.');
   root.append(cp);
 

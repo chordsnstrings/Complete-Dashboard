@@ -155,7 +155,7 @@ export async function renderOptimise(root) {
   /* When to be out. The heatmap the rota is written against — jobs won per
      online hour, so a cell is a RATE and a thin Tuesday does not out-rank a
      busy one just for being busy. */
-  const hm = panel('When an online hour actually sells',
+  const hm = panel('Best hours to be online',
     'Jobs won per hour online, by weekday and hour. Darker is a better hour to be working. '
     + 'A rate, not a count — an hour with two drivers and one job beats an hour with twenty and five.');
   root.append(hm.panel);
@@ -229,7 +229,7 @@ export async function renderOptimise(root) {
   } else empty(w.body, 'No vehicle completed two bookings in this window.');
 
   /* The area arithmetic, second, with its flaw stated before the table. */
-  const m = panel('Work that started where no car was standing',
+  const m = panel('Jobs that started where no car was waiting',
     'Bookings beginning in an area, against cars that finished a trip there in the hour before.');
   root.append(m.panel);
   m.body.append(note('Read this one carefully. An area here is text parsed out of an address, and '

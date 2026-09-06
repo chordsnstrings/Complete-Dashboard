@@ -225,7 +225,7 @@ const FILTER = {
 
   if (tab === 'all') {
     const g = el('div', 'grid g2'); host.append(g);
-    const { panel: p1, body: b1 } = panel('Everyone, by what they are doing', null);
+    const { panel: p1, body: b1 } = panel('What everyone is doing', null);
     const counts = Object.keys(CAT).map((k) => ({ label: CAT[k].label, n: d.people.filter((x) => x.category === k).length }))
       .filter((x) => x.n);
     /* Every slice has a destination now. Three of six navigated and three —
@@ -481,7 +481,7 @@ async function rosterStates(host) {
       sub: (d.no_state_reported || []).map((r) => sourceLabel(r.platform)).join(', ') || 'none' },
   ]));
   if ((d.unrecognised_words || []).length) {
-    const { panel: p, body } = panel('States we did not recognise',
+    const { panel: p, body } = panel('Words we could not match',
       'The provider sent a word and we have no mapping for it. These are kept as written rather than '
       + 'guessed into a bucket — guessing wrong here describes somebody’s employment incorrectly — and '
       + 'each one is a mapping that could be added.');

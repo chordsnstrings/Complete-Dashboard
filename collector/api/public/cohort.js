@@ -225,9 +225,9 @@ export async function renderCohort(root, key) {
   }
   const vHost = el('div'); root.append(vHost); loading(vHost);
   const kpiHost = el('div'); root.append(kpiHost);
-  const tblP = panel('Every one of them', 'Ranked by what is at stake, and each openable in full');
+  const tblP = panel('The full list', 'Ranked by what is at stake. Click a row to open it.');
   root.append(tblP.panel); loading(tblP.body);
-  const cardsP = panel('What every source says',
+  const cardsP = panel('What each system holds',
     'One card per member, with every system that holds anything about them on the same screen');
   root.append(cardsP.panel); loading(cardsP.body);
 

@@ -19,7 +19,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, note, entity,
 import { q, href, state } from './data.js';
 
 export const SETTLE_TABS = [
-  { id: 'mix', label: 'How fares settle', ic: '◈' },
+  { id: 'mix', label: 'How fares are paid', ic: '◈' },
   { id: 'cash', label: 'Cash in hand', ic: '◧' },
   { id: 'receivables', label: 'Outstanding', ic: '❑' },
 ];
@@ -145,7 +145,7 @@ async function settleMix(host) {
     })(),
   ]));
 
-  const { panel: p0, body: b0 } = panel('Every booking, by settlement route', null);
+  const { panel: p0, body: b0 } = panel('Every booking, by how it was paid', null);
   stackedBar(b0, s.classes.map((c) => ({ label: c.label, n: c.trips })));
   host.append(p0);
 

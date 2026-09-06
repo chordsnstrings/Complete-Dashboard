@@ -117,7 +117,7 @@ export async function renderSegments(root, kind, value) {
   const g = el('div', 'grid g3'); root.append(g);
 
   // ── verdict, as the distribution AND as the filter ──────────────────────
-  const vp = panel('Verdict', 'Every occupancy interval gets one — click to filter');
+  const vp = panel('What we decided', 'Every occupancy interval gets one. Click a slice to filter.');
   g.append(vp.panel);
   if (vf.length) {
     donut(vp.body, vf.map((r) => ({ label: r.key, n: r.n })), {

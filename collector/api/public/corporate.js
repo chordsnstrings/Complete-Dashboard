@@ -35,8 +35,8 @@ export const CORP_TABS = [
   { id: 'overview', label: 'Overview', ic: '◱' },
   { id: 'properties', label: 'Properties', ic: '❑' },
   { id: 'guests', label: 'Passengers', ic: '◧' },
-  { id: 'leakage', label: 'Leakage', ic: '⚠' },
-  { id: 'approach', label: 'Approach legs', ic: '◍' },
+  { id: 'leakage', label: 'Money lost', ic: '⚠' },
+  { id: 'approach', label: 'Empty km', ic: '◍' },
 ];
 
 const grid = (cls = 'grid') => el('div', cls);
@@ -118,7 +118,7 @@ async function corpOverview(host) {
     /* With the share of bookings it was measured on. "889 km" is a total over
        whatever fraction reported both ends, and the fraction was returned and
        not shown. */
-    { label: 'Unpaid approach', value: s.deadhead_km == null ? '—' : `${fmt(s.deadhead_km)} km`,
+    { label: 'Empty km before pickup', value: s.deadhead_km == null ? '—' : `${fmt(s.deadhead_km)} km`,
       sub: [s.deadhead_ratio_pct != null ? `${pct(s.deadhead_ratio_pct, 1)} of paid distance` : null,
         s.deadhead_measured_pct != null
           ? `measured on ${pct(s.deadhead_measured_pct, 0)} of bookings`
@@ -171,7 +171,7 @@ async function corpOverview(host) {
        the sum of each property's squared share, out of 10,000 — and without
        the scale beside it the number says nothing to anyone who has not met
        one before. */
-    { label: 'Client concentration', value: s.concentration_hhi == null ? '—' : fmt(s.concentration_hhi),
+    { label: 'How much rests on one client', value: s.concentration_hhi == null ? '—' : fmt(s.concentration_hhi),
       sub: s.top_property
         ? `${s.top_property} is ${pct(s.top_property_share_pct, 0)} · Herfindahl index out of 10,000, `
           + `where above 2,500 is a concentrated book and ${fmt(10000)} is a single client`
@@ -216,7 +216,7 @@ async function corpOverview(host) {
     donut(body, rows.map((r) => ({ label: String(r.label).replace(/^hotel: /, '').replace(/_/g, ' '), n: r.n })));
   });
 
-  add(g, 'The unpaid approach leg', 'Straight-line distance from where the driver set off to where the passenger got in.', async (body) => {
+  add(g, 'Empty km before pickup, by time of day', 'Straight-line distance from where the driver set off to the pickup.', async (body) => {
     const rows = await q('/api/corporate/approach', { by: 'daypart' });
     body.innerHTML = '';
     if (!rows.length) return empty(body, 'No booking in this range records where the driver set off from');
@@ -226,7 +226,7 @@ async function corpOverview(host) {
     });
     body.append(el('p', 'cap', 'Approach only — driver to pickup. A straight line understates road '
       + 'distance, so treat these as a floor, and the return leg (usually the larger of the two) is on '
-      + 'the Approach legs tab. It is the only measure of positioning cost anywhere in this dataset.'));
+      + 'the Empty km tab. It is the only measure of positioning cost anywhere in this dataset.'));
   });
 
   add(g, 'Booked ahead or called on the spot', null, async (body) => {
@@ -239,7 +239,7 @@ async function corpOverview(host) {
       + 'That share is how much of the day can be planned rather than reacted to.'));
   });
 
-  add(g, 'What is going wrong', 'Every booking that cost money and should not have.', async (body) => {
+  add(g, 'Where money is being lost', 'Every booking that cost money and should not have.', async (body) => {
     const l = await q('/api/corporate/leakage');
     body.innerHTML = '';
     const live = l.kinds.filter((k) => k.n > 0);
@@ -562,9 +562,9 @@ async function corpApproach(host) {
   }), { approach: 0, ret: 0, both: 0, bothN: 0, stranded: 0 });
 
   body.append(kpiRow([
-    { label: 'Approach — driver to pickup', value: `${fmt(tot.approach, 1)} km`,
+    { label: 'Empty km before pickup', value: `${fmt(tot.approach, 1)} km`,
       sub: 'the leg this page used to report on its own' },
-    { label: 'Return — drop-off to wherever they ended up',
+    { label: 'Empty km after drop-off',
       value: anyReturn ? `${fmt(tot.ret, 1)} km` : '—',
       sub: anyReturn ? 'never measured until now' : 'this channel reports no driver end position',
       tone: tot.ret > tot.approach ? 'critical' : tot.ret > 0 ? 'warn' : null },
@@ -583,10 +583,8 @@ async function corpApproach(host) {
   /* Titled for what it draws. "Unpaid kilometres, both directions" sat over a
      chart of one leg, corrected by a caption underneath — a heading that has
      to be walked back by the sentence below it is a heading that is wrong. */
-  const { panel: p, body: chart } = panel('The approach leg, by ' + by,
-    'Driver to pickup only. The return leg — usually the larger of the two — is the column beside it '
-    + 'in the table below, because a group with only one leg measured cannot be summed with one that '
-    + 'has both.');
+  const { panel: p, body: chart } = panel('Empty km before pickup, by ' + by,
+    'Driver to pickup only. The return leg is a separate column in the table below.');
   hbars(chart, rows.slice(0, 15).map((r) => ({ label: r.label, n: +r.deadhead_km || 0 })),
     { valueFmt: (v) => `${fmt(v, 1)} km`, color: '--s3', signed: false });
   chart.append(el('p', 'cap', rows.length > 15
@@ -655,8 +653,8 @@ async function corpApproach(host) {
      operational counterpart to the corridor view: not where work happens, but
      which drop-off points cost the most to walk away from. */
   if (stranding.length) {
-    const { panel: sp, body: sb } = panel('Drop-off points that leave a driver furthest from the next job',
-      'Ranked by how far the driver had to travel after the passenger got out. At least three measured drops each.');
+    const { panel: sp, body: sb } = panel('Drop-off areas with the longest empty drive after',
+      'How far the driver drove after the passenger got out. At least three measured drops each.');
     body.append(sp);
     hbars(sb, stranding.slice(0, 12).map((r) => ({ label: r.place, n: +r.avg_return_km || 0 })),
       { valueFmt: (v) => `${fmt(v, 2)} km`, color: '--s8' });

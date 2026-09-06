@@ -430,7 +430,7 @@ export function headlineVerdict(d, month = null) {
 export async function renderReconcile(root, month) {
   root.innerHTML = '';
   if (month != null && !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
-    return empty(root, 'A reconciliation address is #reconcile/<YYYY-MM>.');
+    return empty(root, 'A month page address looks like #reconcile/2026-08.');
   }
   const host = el('div', 'stack'); root.append(host); loading(host);
 

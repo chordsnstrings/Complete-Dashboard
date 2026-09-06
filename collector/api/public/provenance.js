@@ -105,9 +105,9 @@ export async function renderProvenance(root) {
         sub: knowsBasis
           ? `one figure per channel — ${counted.map((r) => sourceLabel(r.platform))
             .filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'none'} — chosen from the calls below`
-          : 'Revenue by channel did not answer, so this page cannot say which calls it used' }
+          : 'Money by platform did not answer, so this page cannot say which calls it used' }
       : { label: 'What Finance counts', value: '—',
-        sub: 'Revenue by channel did not answer, so this page cannot say which calls it used' },
+        sub: 'Money by platform did not answer, so this page cannot say which calls it used' },
   ]));
 
   const cols = [
@@ -162,7 +162,7 @@ export async function renderProvenance(root) {
       if (r.kind === 'component') return 'a line INSIDE a payout that is already counted — adding it would count the same money twice';
       if (r.kind === 'ledger') return 'money moving between the fleet and the platform, which is neither a fare nor a payout';
       if (r.kind === 'statement') return 'the operator’s own import, for months the APIs no longer serve';
-      if (!knowsBasis) return 'Revenue by channel did not answer, so this page cannot say';
+      if (!knowsBasis) return 'Money by platform did not answer, so this page cannot say';
       const c = chosen.get(r.platform);
       if (c && c !== r.kind) {
         return `this channel’s headline uses its ${c === 'fare' ? 'fares' : 'payouts'} — a payout is `
@@ -173,7 +173,7 @@ export async function renderProvenance(root) {
          difference between a rule and a failure. */
       const b = basisOf.get(r.platform);
       if (b === 'none') return 'no figure from this channel covers enough of the window for the headline to stand on it';
-      if (b == null) return 'Revenue by channel reported nothing for this channel at all';
+      if (b == null) return 'Money by platform reported nothing for this channel at all';
       return `the headline records this channel’s basis as “${esc(words(b))}”, which this call is not`;
     };
     const p2 = panel(`Held out of the headline — ${fmt(held.length)} of ${fmt(d.rows.length)}`,
@@ -190,7 +190,7 @@ export async function renderProvenance(root) {
   /* The provider's own vocabulary. "AED 406,893 of Uber payout" is not an
      answer to what the fleet was paid FOR. */
   if (d.categories?.length) {
-    const p3 = panel('What the money was called, in the provider’s own words',
+    const p3 = panel('The provider’s own names for the money',
       'The named lines inside the payouts and the ledger. These are a TREE in the provider’s own '
       + 'shape — your earnings contains fare, tip and the rest — so this says what the money was '
       + 'called and their sum is not a total of anything. Two of Uber’s APIs describe the same '

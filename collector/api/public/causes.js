@@ -229,11 +229,11 @@ export async function renderCauses(root) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const trend = panel('Trips per month', 'Click a month to see what was happening. Hatched columns are months we hold no data for.');
   root.append(trend.panel);
-  const gapP = panel('Coverage gaps', 'Stretches with no trips from any source — these are collection holes, not quiet months');
+  const gapP = panel('Coverage gaps', 'Stretches with no trips from any source. These are collection holes, not quiet months.');
   const g = el('div', 'grid g23'); root.append(g);
-  const brk = panel('Structural breaks', 'Month-over-month moves above 30%, split into supply and demand'); g.append(brk.panel);
+  const brk = panel('Big jumps between months', 'Moves above 30% from one month to the next, split into drivers and work'); g.append(brk.panel);
   g.append(gapP.panel);
-  const evP = panel('Known context', 'Seasonal, religious and regional events that move Dubai demand'); root.append(evP.panel);
+  const evP = panel('What was on in Dubai', 'Holidays, seasons and events that change how much work there is'); root.append(evP.panel);
   [trend.body, brk.body, gapP.body, evP.body].forEach(loading);
 
   /* The chips, sent. Both of these bind fleet and platform server-side — the
@@ -308,10 +308,10 @@ export async function renderCauses(root) {
       sub: (t.gaps || []).length ? `${(t.gaps || []).reduce((a, x) => a + x.months, 0)} months with no data` : 'complete run',
       tone: (t.gaps || []).length ? 'warn' : 'good' },
     { label: 'Trips in record', value: fmt(totalTrips), sub: `across ${observed.length} months` },
-    { label: 'Driver attribution', value: `${attributable.length} of ${observed.length}`,
+    { label: 'Months that name a driver', value: `${attributable.length} of ${observed.length}`,
       sub: 'months where trips name a driver',
       tone: attributable.length === observed.length ? 'good' : 'warn' },
-    { label: 'Structural breaks', value: fmt((t.breaks || []).length),
+    { label: 'Big jumps between months', value: fmt((t.breaks || []).length),
       sub: artifacts.length
         ? `moves above 30% between adjacent months — ${fmt(artifacts.length)} of them `
           + `${plural(artifacts.length, 'touches', 'touch')} a partial month`
@@ -370,7 +370,7 @@ export async function renderCauses(root) {
     const p0 = mean(firstThird, per), p1 = mean(lastThird, per);
     const move = (a, b) => (a ? Math.round(((b - a) / a) * 100) : null);
 
-    const { panel: sp, body: sb } = panel('Supply or demand, over the whole record',
+    const { panel: sp, body: sb } = panel('Fewer drivers, or less work?',
       `First ${firstThird.length} attributable months against the last ${lastThird.length}. `
       + 'Trips per driver is the number that separates the two: it holds steady when the fleet '
       + 'loses people and falls when the work stops arriving.');

@@ -66,11 +66,11 @@ export async function renderCorridors(root) {
   const g = el('div', 'grid'); root.append(g);
   const { panel: p1, body: b1 } = panel('Where jobs start', 'Pickup area, all channels combined.');
   g.append(p1); loading(b1);
-  const { panel: p2, body: b2 } = panel('Morning wave or evening wave',
+  const { panel: p2, body: b2 } = panel('Morning areas and evening areas',
     'Each area against the 50/50 line. A bar reaching left is an area that mostly produces work before 09:00; '
     + 'right is an area that mostly produces it after 16:00.');
   g.append(p2); loading(b2);
-  const { panel: p3, body: b3 } = panel('Corridors', 'Pickup area → drop-off area, seen at least three times.');
+  const { panel: p3, body: b3 } = panel('Common routes', 'Pickup area to drop-off area, seen at least three times.');
   root.append(p3); loading(b3);
 
   let c;
@@ -200,7 +200,7 @@ export async function renderCorridors(root) {
       sub: named.length > SHOWN
         ? `${fmt(SHOWN)} drawn below, of ${fmt(named.length)} the server returned`
         : `all ${fmt(named.length)} drawn below` },
-    { label: 'Corridors seen 3+ times', value: fmt(t.corridors_3plus ?? c.corridors.length),
+    { label: 'Routes seen 3+ times', value: fmt(t.corridors_3plus ?? c.corridors.length),
       sub: t.corridors_all ? `of ${fmt(t.corridors_all)} distinct origin–destination pairs` : null },
     /* One denominator for every share on this page.
        ─────────────────────────────────────────────────────────────────────

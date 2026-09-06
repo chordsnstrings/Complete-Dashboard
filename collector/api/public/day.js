@@ -220,7 +220,7 @@ export async function renderDay(root, day, onDetail) {
 
   /* Unexplained occupancy on this day — the evidence, not a count. */
   if (d.segments.length) {
-    const sp = panel('Unexplained occupancy',
+    const sp = panel('Seat occupied, no booking found',
       'A seat was occupied and the vehicle moved. Only `unauthorized` is an accusation; the rest are '
       + 'journeys the evidence cannot settle either way.');
     sp.body.append(tableFrom(d.segments, [
@@ -306,7 +306,7 @@ export async function renderDay(root, day, onDetail) {
   }
   root.append(dp.panel);
 
-  const vp = panel('What moved', 'Bookings and telematics journeys per vehicle. A vehicle with journeys and no bookings drove without a fare behind it.');
+  const vp = panel('Which cars moved', 'Bookings and tracker journeys per car. A car with journeys and no bookings drove with no fare behind it.');
   vp.body.append(tableFrom(d.vehicles, [
     { label: 'Vehicle', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     { label: 'Bookings', key: 'bookings', num: true },
@@ -327,7 +327,7 @@ export async function renderDay(root, day, onDetail) {
 
   /* Context and coverage last: the reader has the day by now, and these say how
      much of it to believe. */
-  const cp = panel('The day itself', 'Weather and calendar, and what each source collected.');
+  const cp = panel('Weather, and what was collected', 'The weather and calendar for this day, and what each source sent.');
   const c = d.context || {};
   const bits = [
     c.temp_max != null ? `${fmt(c.temp_max)}°C high, ${fmt(c.temp_min)}°C low` : null,

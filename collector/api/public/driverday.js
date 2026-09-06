@@ -155,7 +155,7 @@ export async function renderDriverDay(root, id, day) {
   bandP.body.append(lg);
 
   /* ── the day as a list ─────────────────────────────────────────────────── */
-  const listP = panel('Every job, and what happened between them',
+  const listP = panel('Every job, and the gaps between them',
     'Each waiting block carries where the tracker saw the car and how much of that time it '
     + 'was stationary. A block with no position is one the tracker did not cover.');
   root.append(listP.panel);

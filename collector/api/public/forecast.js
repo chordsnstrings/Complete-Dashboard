@@ -129,7 +129,7 @@ export async function renderForecast(root) {
 
   /* ── the forecast checking itself ──────────────────────────────────────── */
   if (ip) {
-    const { panel: p, body } = panel(`${MONTH(ip.m)} so far — the forecast marking its own work`,
+    const { panel: p, body } = panel(`${MONTH(ip.m)} so far, against what was forecast`,
       'The month in progress is the only out-of-sample evidence there is. A forecast nobody ever scores is a decoration.');
     root.append(p);
     body.append(kpiRow([

@@ -105,7 +105,7 @@ async function tabOverview(root, plate, prof) {
   const vol = panel('Trips and idle days', 'A bar per day. Days with a tracker fix but no trip are the ones that cost money.'); g1.append(vol.panel);
   const who = panel('Who has driven it', 'By trips in this window'); g1.append(who.panel);
   const g2 = el('div', 'grid g3'); root.append(g2);
-  const prod = panel('Service tier', 'Which product this asset serves'); g2.append(prod.panel);
+  const prod = panel('Service type', 'Which service this car works'); g2.append(prod.panel);
   const plat = panel('Platform', 'Where its work comes from'); g2.append(plat.panel);
   const pay = panel('Payment', 'Card vs cash'); g2.append(pay.panel);
   const rev = panel('Revenue by day', 'Booked fare value'); root.append(rev.panel);
@@ -256,8 +256,8 @@ async function tabOverview(root, plate, prof) {
 
 /* ── tab: drivers ────────────────────────────────────────────────────────── */
 async function tabDrivers(root, plate) {
-  const tot = panel('Drivers who have held this vehicle', 'Totals across the window — click through to a driver’s pages'); root.append(tot.panel);
-  const tl = panel('Custody day by day', 'Every day, and who was holding it. More than one row on a day is a handover.'); root.append(tl.panel);
+  const tot = panel('Who has held this car', 'Totals for this window. Click a name to open that driver.'); root.append(tot.panel);
+  const tl = panel('Who held it, day by day', 'More than one row on a day means the car changed hands.'); root.append(tl.panel);
   [tot.body, tl.body].forEach(loading);
   const dd = await qAll('/api/vehicle/drivers-detail', { plate });
 
@@ -326,14 +326,13 @@ async function tabMovement(root, plate) {
   const g = el('div', 'grid g2'); root.append(g);
   /* The four tiles above are ONE replayed day; these four panels are the whole
      window. They sat on one screen with nothing to say the periods differ. */
-  const verd = panel('Movement accounted for — across the window',
-    'Every period the vehicle moved in the selected range, matched against a booking. Not the single day '
-    + 'replayed above.');
+  const verd = panel('Movement matched to a booking (whole window)',
+    'Every period the car moved in this range, matched against a booking. Not the day above.');
   g.append(verd.panel);
-  const park = panel('Where it sits — across the window',
-    'Clusters of stationary fixes over the whole range: depot, rank, or somebody’s street.');
+  const park = panel('Where it parks (whole window)',
+    'Places the car stood still: depot, rank, or somebody’s street.');
   g.append(park.panel);
-  const seg = panel('Movement periods — across the window', 'Newest first'); root.append(seg.panel);
+  const seg = panel('Movement periods (whole window)', 'Newest first'); root.append(seg.panel);
   [verd.body, park.body, seg.body].forEach(loading);
 
   const mv = await qAll('/api/vehicle/movement', { plate });
@@ -659,8 +658,8 @@ async function tabEarnings(root, plate) {
 async function tabSafety(root, plate) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g = el('div', 'grid g2'); root.append(g);
-  const types = panel('Event types', 'What the telematics box flagged'); g.append(types.panel);
-  const drv = panel('Attributed to a driver', 'By whoever held the vehicle on the day of the event'); g.append(drv.panel);
+  const types = panel('Event types', 'What the tracker flagged'); g.append(types.panel);
+  const drv = panel('Which driver was holding it', 'The person who held the car on the day of the event'); g.append(drv.panel);
   const line = panel('Events by day', ''); root.append(line.panel);
   const recent = panel('Recent events', 'Newest first, with location where the device reported one'); root.append(recent.panel);
   [types.body, drv.body, line.body, recent.body].forEach(loading);
@@ -1112,10 +1111,10 @@ export async function renderVehicleDirectory(root) {
     <span class="cap" id="vdn"></span>`;
   root.append(bar);
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
-  const hoP = panel('Between drivers',
-    'Hours a car stood still between one driver\'s last drop-off and the next driver\'s first pickup'); root.append(hoP.panel);
+  const hoP = panel('Idle hours between drivers',
+    'Hours a car stood still between one driver dropping off and the next picking up'); root.append(hoP.panel);
   loading(hoP.body);
-  const tblP = panel('Every vehicle', 'Including assets with no trips in this window — those are the ones worth finding'); root.append(tblP.panel);
+  const tblP = panel('Every vehicle', 'Includes cars with no trips in this window. Those are the ones worth finding.'); root.append(tblP.panel);
   loading(tblP.body);
 
   const [rows, fleet] = await Promise.all([

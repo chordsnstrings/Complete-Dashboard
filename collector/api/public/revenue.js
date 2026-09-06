@@ -191,7 +191,7 @@ export async function renderRevenue(root) {
           : (t.dark_pct >= 10 || (t.undercovered_pct || 0) >= 10) ? 'warn' : 'good' },
     { label: 'Fares charged', value: t.fares != null ? money(t.fares) : '—',
       sub: `gross, over the ${fmt(t.priced_bookings)} bookings that report one` },
-    { label: 'Bank reconciliation', value: t.payouts != null ? money(t.payouts) : '—',
+    { label: 'Paid into the bank', value: t.payouts != null ? money(t.payouts) : '—',
       sub: 'what the platforms wired to the bank — net of commission AND of cash already collected' },
     { label: 'On-trip revenue', value: t.statement_net != null ? money(t.statement_net) : '—',
       sub: t.statement_net != null
@@ -312,13 +312,13 @@ export async function renderRevenue(root) {
      from, and what was held out of the total. They answer the two halves of
      the same question and neither was reachable from the other. */
   const trail = el('p', 'cap');
-  trail.innerHTML = `<a class="lnk" href="${href('provenance')}">Where the money came from</a>`
+  trail.innerHTML = `<a class="lnk" href="${href('provenance')}">Money sources</a>`
     + ' lists every API call behind these figures — what each one returned, at what grain, and '
     + 'which of them this page counted.';
   host.append(trail);
 
   /* ── per channel ─────────────────────────────────────────────────────── */
-  const p = panel('What each channel tells us',
+  const p = panel('Money by channel',
     'Two kinds of money, kept apart. "Basis" is which one this row is, and how far it can be trusted.');
   p.body.append(tableFrom(live, [
     /* The channel name carries which channel it is, and the link discarded it
@@ -443,7 +443,7 @@ export async function renderRevenue(root) {
   p.body.append(el('p', 'cap',
     'Three views of the same money, never added together. A fare is what the rider was charged. '
     + 'On-trip revenue is gross minus the platform’s commission — what the fleet EARNED, from the '
-    + 'platform’s own statement reports. The bank reconciliation is what actually reached the '
+    + 'platform’s own statement reports. Paid into the bank is what actually reached the '
     + 'account: on-trip net minus cash the drivers already collected, plus tips and toll '
     + 'reimbursements. '
     + (bothSides.length && expected

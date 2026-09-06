@@ -196,7 +196,7 @@ async function analystRules(host) {
     { label: 'Significance threshold', value: `p < ${m.maxP}`,
       sub: 'where a test applies at all' },
   ]));
-  const { panel: p1, body: b1 } = panel('What can be measured',
+  const { panel: p1, body: b1 } = panel('Numbers the model can check',
     'A claim about anything not on this list cannot be checked, so it is never shown as a finding.');
   b1.append(tableFrom(r.metrics, [
     { label: 'Metric', key: 'label' },
@@ -206,7 +206,7 @@ async function analystRules(host) {
     { label: 'Defined over', key: 'defined_over', render: (x) => `<code>${esc(x.defined_over)}</code>` },
   ]));
   host.append(p1);
-  const { panel: p2, body: b2 } = panel('What can be sliced',
+  const { panel: p2, body: b2 } = panel('Groups the model can compare',
     'The model names one of these and one value of it. It never writes a query.');
   b2.innerHTML = `<div class="chips">${r.dimensions.map((d) => `<span class="chip">${esc(d)}</span>`).join('')}</div>`;
   host.append(p2);
@@ -216,7 +216,7 @@ async function analystRules(host) {
      what each of them CONTAINED when the brief was built — and it is the
      difference between a reader thinking the analyst ignored their worst
      vehicle and seeing that the vehicle cleared the floor and was offered. */
-  const { panel: pc, body: bc } = panel('What the model was given, this window',
+  const { panel: pc, body: bc } = panel('What the model could pick from, this window',
     'Every segment with at least the minimum records behind it, and where each metric is defined '
     + 'at all. A metric carried by one platform alone has no complement to compare against, so a '
     + 'claim about that platform cannot be settled and is never shown.');
