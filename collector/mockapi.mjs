@@ -419,6 +419,13 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
       lifetime_trips: i === 5 ? 0 : 1400 - i * 120,
       days_since_last_trip: i === 5 ? null : (i === 0 ? 2 : 40 + i * 30),
       activity_by_name: i === 1 || i === 2,
+      /* WHICH documents this row's record holds — never what they are. The
+         real endpoint counts this before redaction drops the values, so the
+         page can print "withheld" only about a document that exists; without
+         it the roster said "withheld" in every cell, including for the people
+         no channel has ever filed a number for. One of these six has no
+         Emirates ID, so both branches render. */
+      identity_held: i === 3 ? ['licence_no'] : ['licence_no', 'emirates_id'],
       // A licence expiring is a CAR that stops earning. The row names it.
       vehicle: { plate: plates[i % plates.length], day: '2026-08-21' } })),
     { platform: 'bolt', driver_ext_id: 'd2', full_name: 'Abdelmohsen Said', phone: '+9715000001',
@@ -426,6 +433,8 @@ app.get('/api/compliance/drivers', (_, r) => r.json({
       /* Bolt files no compliance record at all upstream, so this is null and
          the dash must read as a fact about the channel. */
       emirates_id: null,
+      /* Bolt files no identity number, so this row holds only the licence. */
+      identity_held: ['licence_no'],
       licence_no: 'AE1802580', licence_no_placeholder: false,
       licence_expires: '2026-09-20', days_left: 30, state: 'suspended',
       fleet_id: 'egari', licence_placeholder: false,
