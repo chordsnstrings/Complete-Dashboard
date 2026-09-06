@@ -218,6 +218,67 @@ check('the store stops growing at its cap rather than until the process dies',
 check('and the hit rate is visible, so a cache that stopped working can be seen',
   st.hit > 0 && st.miss > 0, JSON.stringify(st));
 
+/* ── what survives when the cache is full ─────────────────────────────────
+   Production on 2026-09-06 reported 2,781 entries holding 66,851,649 bytes of
+   a 67,108,864 cap: 99.6% full, evicting on nearly every write, against hit 73
+   and miss 9,205. A full cache is not the bug — a 64MB bound on a 512MB box is
+   the point of the bound. What decides whether a full cache is worth having is
+   WHICH entry it drops, and the eviction loop walks a Map from the front, so
+   it drops the oldest WRITE. Nothing about being read entered into it, and the
+   landing page's two heaviest answers are written by the warm sweep the moment
+   a collection lands and read by a person some minutes later — behind every
+   window anyone tried in between.
+
+   This holds the cache to least-recently-READ. It is written to bite: with the
+   touch removed from the hit path the final assertion fails, because under
+   insertion order the entry read three times is precisely the one evicted. */
+{
+  const PAD = 'x'.repeat(200);
+  /* Sized from the real body rather than guessed, so the capacity is exactly
+     five however the serialiser pads it. A guessed cap that happens to hold six
+     makes every assertion below pass without eviction ever running. */
+  const ENTRY = JSON.stringify({ pad: PAD, n: '0' }).length;
+  const lru = responseCache({ pool, ttlMs: 0, maxBytes: ENTRY * 5 + 10 });
+  const app4 = express();
+  app4.use('/api', lru);
+  app4.get('/api/thing', (req, res) => res.json({ pad: PAD, n: String(req.query.n) }));
+  const s4 = app4.listen(0);
+  const p4 = s4.address().port;
+  lru.setPort(p4);
+  const g4 = async (n) => {
+    const r = await fetch(`http://127.0.0.1:${p4}/api/thing?n=${n}`);
+    await r.text();
+    return r.headers.get('x-cache');
+  };
+
+  for (let i = 0; i < 5; i++) await g4(i);          // fills it exactly
+  check('five entries fill the cache to its cap and no further',
+    lru.stats().entries === 5, JSON.stringify(lru.audit()));
+
+  // Read the OLDEST entry, three times. Under insertion order this changes
+  // nothing at all; under read order it becomes the youngest.
+  const reads = [await g4(0), await g4(0), await g4(0)];
+  check('re-reading an entry that is still current is a hit, not a rewrite',
+    reads.every((c) => c === 'hit'), reads.join(','));
+
+  await g4(5);                                      // one write, one eviction
+  check('a full cache still holds exactly its capacity after another write',
+    lru.stats().entries === 5, JSON.stringify(lru.audit()));
+
+  /* The assertion this whole block exists for. n=0 was written first and read
+     last; n=1 was written second and never read again. Exactly one of them
+     survived the write above, and which one is the policy. */
+  check('the entry that was read is the one still held',
+    await g4(0) === 'hit', 'n=0 was evicted despite being the most recently read');
+  check('and the entry nobody came back to is the one dropped',
+    await g4(1) === 'miss', 'n=1 survived, so nothing was actually evicted');
+
+  const a4 = lru.audit();
+  check('and the byte counter still equals what is held',
+    a4.counted === a4.actual, JSON.stringify(a4));
+  s4.close();
+}
+
 /* Disabled means disabled — this is the lever for diagnosing a page that looks
    stale, and a lever that does not move is worse than none. */
 const app2 = express();

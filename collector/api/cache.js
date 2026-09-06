@@ -71,6 +71,31 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
      later. */
   const refreshing = new Set();
 
+  /* Read order, not write order.
+     ─────────────────────────────────────────────────────────────────────────
+     Eviction below walks the Map from the front, and a Map iterates in
+     INSERTION order — so without this the cache is FIFO, and the age of an
+     entry is the only thing that decides whether it survives. Nothing about
+     how often it is read enters into it.
+
+     That is the wrong policy for this product, and measurably so. Production
+     on 2026-09-06 reported hit 73, stale 140, miss 9,205 against 2,781 entries
+     holding 66,851,649 bytes of a 67,108,864 cap — a cache 99.6% full, which
+     is to say a cache evicting on nearly every write. api/warm.js refills the
+     landing page's two heaviest answers (/api/economics/drivers at 480kb and
+     /api/economics/assets at 275kb, per window) as soon as a collection moves
+     the version; every exploratory request written after them pushed them out
+     again before the person starting their shift arrived, so the first load of
+     the first screen was a full aggregate every time — the exact cost this
+     cache exists to remove.
+
+     Moving a key to the back of the Map when it is READ makes the same
+     eviction loop least-recently-used, which keeps the handful of answers
+     everybody opens and drops the long tail of windows one person tried once.
+     Both paths touch: a stale serve is a read, and its background refresh can
+     fail — a rewrite is not guaranteed to follow. */
+  const touch = (key, entry) => { store.delete(key); store.set(key, entry); };
+
   /* The version is the latest finish time of anything that writes: a collection
      run, or a rollup. Re-read at most every ttlMs, so the cache costs one small
      query per half minute rather than one per request — and that query is the
@@ -121,6 +146,7 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
 
     if (hit && hit.version === v) {
       stats.hit++;
+      touch(key, hit);
       res.set('x-cache', 'hit');
       res.set('content-type', hit.type);
       return res.send(hit.body);
@@ -142,6 +168,7 @@ export function responseCache({ pool, ttlMs = 30000, enabled = true, port,
        each starting their own copy of the same aggregate. */
     if (hit && !warm) {
       stats.stale++;
+      touch(key, hit);
       res.set('x-cache', 'stale');
       res.set('x-cache-age', String(Math.round((Date.now() - hit.at) / 1000)));
       res.set('content-type', hit.type);
