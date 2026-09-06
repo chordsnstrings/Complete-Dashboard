@@ -114,6 +114,66 @@ verified by reintroducing the dangling name and watching it fail.
 **A suite passing tells you the tests agree with the code. Only a screenshot
 tells you the page renders.**
 
+## Batch 3 — the medium and large criticals
+
+**written + committed. NOT yet deployed.** Six lanes, disjoint files, each read
+by an adversarial verifier. Two were not refuted, three were refuted on real
+defects since fixed, and one lane honestly reported **not fixed** — see below.
+
+| # | what it did | state |
+|---|---|---|
+| C13/C19/C25 | one stray 4-day Uber window displaced the settled week on six August days, publishing AED 44,903 of false gap and cutting Ecosine's on-trip revenue ~AED 53,000 | fixed, **not refuted** |
+| C14 | 59.6% of `occupancy_segment` was superseded fragments — 3,513 intervals where 1,409 journeys happened | fixed, **not refuted** |
+| C23 | the asset ledger ignored the fleet chip — Egari shown owning 273 vehicles and 102 idle, 63 of which earned | fixed; verifier refuted, defects closed |
+| C18 | 132 CABMAN plates seen once and never again, counted as live fleet | fixed; verifier refuted, defects closed |
+| C17 | all 219 authorisation objects are `pending` with a null approver, rendered as a green "yes" | fixed; verifier refuted, defects closed |
+| C24 | 62 of 171 drivers are one human filed twice | **NOT fixed — staged only** |
+
+### C24 is staged, not live, and that is deliberate
+
+The lane verified **50 additional merge pairs** with per-pair evidence (shared
+plates, shared days, interleaving, channels) and **refused 3** with reasons —
+including a pair with *"241 simultaneous trips in two different cars across 70
+days"* and one marked UNDECIDABLE for having no shared vehicle at all. That
+refusal list is the evidence the rule discriminates rather than merging anything
+that rhymes.
+
+They are exported as `PENDING` and are **inert**: `ALIAS_KEY` still holds the
+original 3, and `identityCase()` still emits only those. Activating them is not
+a code change — `person_key` is a **stored generated column** built by
+`sql/schema_v53.sql`, so switching it on means a migration that recomputes the
+column across 364,015 rows and changes who the product says drove what, for 50
+named people, on pages that name them.
+
+That is worth doing and worth doing **on its own**, with its own verification
+and its own deploy, rather than buried in a batch of five other changes. Until
+then the headcount still reads 171 and the register records why.
+
+### What the verifiers caught this round
+
+The same species as last time — a figure fixed and then given a reason that is
+false — plus one genuinely dangerous gap:
+
+- **The plate half of the segment `DELETE` was unpinned.** Removing
+  `plate = ANY($1)` entirely left all 17 assertions passing, because the two
+  fixture plates were separated by the *window*, not the plate list. The
+  scenario it defends — a plate holding a segment in the window whose tracker
+  has since gone dark — needed a second reporting plate to keep the pass
+  non-empty. With that seeded, a plate-blind DELETE erases a real journey:
+  `[] was [{L44307, 05:20→06:00, verdict partial, fixes 9}]`.
+- **`stamp` let the last profile row win.** `vehicle_profile`'s key is
+  `(platform, vehicle_ext_id)`, so a car known to two channels arrives twice; a
+  plate stamped `ecosine` on its Uber row and unstamped on its CABMAN row
+  resolved to null — dropping it from its own fleet and counting it as
+  unplaceable. `unassigned` counted profile *rows*, not distinct plates.
+- **The collector announced an effect the product had not implemented.**
+  `departed_reason` ended "so they are no longer counted as fleet" while
+  `/api/kpis` still reported `tracked_vehicles` 265 and the directory 273 rows,
+  because no route reads the field yet.
+- **A comment cited evidence its endpoint cannot give.** It claimed "/api/trip
+  says each of those two bookings carries no partner_id" — `/api/trip` returns
+  no `partner_id` at all. The property lives in `raw.hotel`.
+
 ## `docs/COVERAGE.md` — two corrections
 
 Commit `80ddcad`. Both were mine, both written the day before, and both pointed

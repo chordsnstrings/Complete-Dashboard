@@ -285,6 +285,60 @@ export function economicsRoutes(app, { q, wrap, range }) {
          is, whether its papers are current, whether the tracker still hears
          from it, and who is holding it. Small tables, joined onto the plate
          register so a vehicle with no trips at all still gets a row. */
+      /* AND NARROWED BY THE FLEET CHIP, which it was not, and deciding what a
+         fleet's assets ARE is the hard half of that.
+         ──────────────────────────────────────────────────────────────────
+         Every other query on this endpoint binds the fleet — `w` narrows trips
+         by t.fleet_id and the attributed payouts narrow by att.fleet_id — and
+         this one did not, so the plate register stayed fleet-wide while all
+         the work hung on it was narrowed to one fleet. Choosing Egari on #unit
+         therefore listed Ecosine's cars with their earnings stripped off.
+         Measured on production 2026-09-05 at days=30, before this change:
+         /api/economics/assets?fleet=egari answered 273 rows of which 98 were
+         stamped ecosine and 135 carried no stamp at all, "assets earning 33 /
+         273" for a fleet that holds 40 plates, and an insured-and-idle count
+         of 98 — 95 of them belonging to the other fleet, and 69 of those 98
+         had earned AED 392,522.48 in the identical window with no chip on. The
+         tile the page itself calls the closest this database gets to a loss
+         was manufacturing one, and the named list under it sent the operator
+         after another fleet's plates.
+
+         Which column decides the fleet is the awkward part, and neither answer
+         is clean on its own. 135 of the 273 plates here carry no fleet_id in
+         `vehicle` or in `vehicle_profile` — and that count is still moving, it
+         read 134 a few minutes later while the roster backfills — so a bare
+         coalesce(v.fleet_id, vp.fleet_id) = $4 throws away half the register.
+         Defining the population by what the fleet's trips reached instead
+         throws away the idle cars, which are the rows this page exists for —
+         Egari has seven
+         plates that took nothing whatever in the window, and they would vanish
+         from the one view whose entire subject is vehicles that earn nothing.
+         Worse, the work reaches six Ecosine-registered cars whose FMS journeys
+         are stamped egari while their bookings are stamped ecosine; those six
+         earned AED 42,587.67 as Ecosine cars in that window and would have
+         been printed under the Egari chip as "moved without earning".
+
+         So the stamp decides wherever it exists and the work decides only
+         where it does not: a plate registered to another fleet is out even
+         when this fleet's trips reach it, and an unstamped plate is in only if
+         they do. What that rule costs is measurable and it is nothing — asked
+         over the whole year to 2026-09-06, every one of the 138 plates that
+         took a booking or a telematics journey carries a stamp, and not one of
+         the unstamped plates moved in twelve months. They are old plates left
+         behind in the trip history, tracker rows and expired documents.
+         Neither fleet can be told to go and look at them, so a chip leaves
+         them out and `totals.unassigned_vehicles` counts them back rather than
+         letting a third of the register go missing in silence.
+
+         The predicate keeps the unstamped plates in the result and the fold
+         below decides them, because "did this fleet's work reach this plate"
+         is a fact the work query already carries and this one would have to
+         re-read the window's trips to learn. That split means the fold alone
+         would give the right answer and this predicate is what stops 233 of
+         the 273 rows being joined against five tables and shipped only to be
+         discarded. $4 is the fleet: $3 is cov.days here, not the platform, so
+         the parameter list this query is called with is NOT the endpoint's
+         `p`. */
       q(`WITH RECURSIVE driven AS (
            (SELECT min(plate) AS plate FROM trip WHERE plate IS NOT NULL AND plate <> '')
            UNION ALL
@@ -353,7 +407,10 @@ export function economicsRoutes(app, { q, wrap, range }) {
          LEFT JOIN al  ON al.plate  = p.plate
          LEFT JOIN vehicle v ON v.plate = p.plate
          LEFT JOIN vehicle_profile vp ON vp.plate = p.plate
-         LEFT JOIN vehicle_current_driver cd ON cd.plate = p.plate`, [from, to, cov.days]),
+         LEFT JOIN vehicle_current_driver cd ON cd.plate = p.plate
+         WHERE $4::text IS NULL
+            OR coalesce(v.fleet_id, vp.fleet_id) = $4
+            OR coalesce(v.fleet_id, vp.fleet_id) IS NULL`, [from, to, cov.days, p[3]]),
 
       /* Payout periods that reach no vehicle at all, because their driver has
          no custody day inside the period. Reported rather than dropped: the
@@ -373,6 +430,55 @@ export function economicsRoutes(app, { q, wrap, range }) {
       moneyCoverage(from, to),
     ]);
 
+    /* The chip's asset population, decided once and applied to all three
+       sources.
+       ─────────────────────────────────────────────────────────────────────
+       `stamp` is what vehicle/vehicle_profile say a plate belongs to — the
+       answer wherever it exists — and `touched` is the set of plates the
+       fleet-bound work and payout queries actually reached, which decides the
+       plates carrying no stamp. A plate the register did not return at all
+       under a chip is one registered to the OTHER fleet, and it stays out even
+       though the work reached it: on production those are six Ecosine cars
+       whose FMS journeys are stamped egari, and letting the work resurrect
+       them would have put six of another fleet's earners on the Egari list
+       reading "moved without earning". With no chip `mine` is true of
+       everything and all three arrays are the arrays that arrived. */
+    const fleet = p[3];
+    /* One plate, several profile rows. vehicle_profile's primary key is
+       (platform, vehicle_ext_id) with only a non-unique index on plate
+       (sql/schema_v5.sql:23-42), so a car known to two channels arrives here
+       twice — and `new Map(decor.map(...))` let the LAST of those rows win.
+       A plate stamped 'ecosine' on its Uber row and unstamped on its CABMAN row
+       resolved to null, which dropped it out of `mine()` for its own fleet and
+       counted it below as a plate nothing can place. Any non-null stamp wins
+       instead: a fleet recorded on one channel's record is a fact about the
+       car, not about the channel that happened to be read last. */
+    const stamp = new Map();
+    for (const d of decor) {
+      if (!stamp.has(d.plate) || (stamp.get(d.plate) == null && d.fleet_id)) {
+        stamp.set(d.plate, d.fleet_id || null);
+      }
+    }
+    const touched = new Set([...work.map((w) => w.plate),
+      ...attributed.map((a) => a.plate)]);
+    const mine = (plate) => !fleet || stamp.get(plate) === fleet
+      || (stamp.has(plate) && stamp.get(plate) == null && touched.has(plate));
+    const assetDecor = decor.filter((d) => mine(d.plate));
+    const assetWork = work.filter((w) => mine(w.plate));
+    const assetAttributed = attributed.filter((a) => mine(a.plate));
+    /* The register plates a chip cannot place on either fleet: no fleet on the
+       vehicle record and no work under the chosen one. Counted rather than
+       dropped in silence, so a reader who notices that the two fleets do not
+       add up to the unfiltered register can see what the difference is. */
+    /* Distinct PLATES, not decor rows, and read off `stamp` rather than off the
+       row in hand — for the same duplication as above. Counting rows made this
+       figure larger than the register it is a subset of, and testing the row's
+       own fleet_id counted a properly stamped plate as unplaceable whenever one
+       of its other channel records carried no fleet. */
+    const unassigned = fleet
+      ? [...stamp.keys()].filter((pl) => stamp.get(pl) == null && !touched.has(pl)).length
+      : 0;
+
     const byPlate = new Map();
     const row = (plate) => {
       if (!byPlate.has(plate)) {
@@ -386,8 +492,8 @@ export function economicsRoutes(app, { q, wrap, range }) {
       }
       return byPlate.get(plate);
     };
-    for (const d of decor) Object.assign(row(d.plate), d, { fleet_id: d.fleet_id || null });
-    for (const w of work) {
+    for (const d of assetDecor) Object.assign(row(d.plate), d, { fleet_id: d.fleet_id || null });
+    for (const w of assetWork) {
       const r = row(w.plate);
       Object.assign(r, {
         bookings: w.bookings, telematics_journeys: w.telematics_journeys,
@@ -452,7 +558,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
       }
       return r.platforms.get(name);
     };
-    for (const w of work) {
+    for (const w of assetWork) {
       for (const c of (w.channels || [])) {
         /* booking_days is carried, not merely selected, and it is load-bearing.
            coverage() in api/income_sql.js reads booking_days > 0 ?
@@ -474,7 +580,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
         });
       }
     }
-    for (const a of attributed) {
+    for (const a of assetAttributed) {
       Object.assign(plat(row(a.plate), a.platform), {
         payouts: n(a.payouts), payout_days: a.payout_days,
       });
@@ -681,6 +787,25 @@ export function economicsRoutes(app, { q, wrap, range }) {
           ? 'An unplaced payout belongs to a driver who held no vehicle in that period, '
             + 'so there is no custody row to read a fleet from — the figure is withheld '
             + 'rather than reported against one fleet.'
+          : null,
+        /* The plates a fleet chip leaves out of the register above, and why.
+           ─────────────────────────────────────────────────────────────────
+           Null with no chip on, where the register is whole and nothing has
+           been left out. Under a chip these are plates with no fleet on their
+           vehicle record that the chosen fleet's trips and payouts never
+           reached, so nothing in this database says whose they are — 135 of
+           the 273 on production, none of which took a booking or a telematics
+           journey in the whole year to 2026-09-06. They are counted here
+           rather than added to one fleet, because a plate assigned to a fleet
+           on no evidence is the same error this narrowing was written to fix,
+           only quieter. */
+        unassigned_vehicles: unassigned || null,
+        unassigned_note: unassigned
+          ? `${unassigned} ${unassigned === 1 ? 'plate in the register carries'
+            : 'plates in the register carry'} no fleet on `
+            + `${unassigned === 1 ? 'its' : 'their'} vehicle record and did no work under this `
+            + `fleet in the window, so nothing places ${unassigned === 1 ? 'it' : 'them'} on `
+            + 'either fleet — left out of this view rather than counted against one.'
           : null,
       },
       coverage,

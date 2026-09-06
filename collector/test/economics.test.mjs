@@ -426,5 +426,148 @@ check('the people ledger says the same about the same channel',
 
 partApi.server.close(); await part.close();
 
+/* ── the fleet chip has to reach the ASSET REGISTER, not only the work ────
+   #unit is the product's landing page and every figure on it came off this
+   endpoint's plate register, which was built fleet-wide while the work hung
+   on it was narrowed to the chosen fleet. Picking a fleet therefore listed
+   the OTHER fleet's cars with their earnings stripped off, and the tile the
+   page calls the closest this database gets to a loss counted them.
+
+   Measured on production 2026-09-05 at days=30 before the fix:
+   ?fleet=egari answered 273 rows — 98 stamped ecosine, 135 stamped nothing —
+   "assets earning 33 / 273" for a fleet holding 40 plates, and 98 insured and
+   idle against 29 with no chip on, 69 of the 98 having earned AED 392,522.48
+   in the very same window unfiltered.
+
+   The fixture below is that shape in miniature, and it carries the two cases
+   that make the narrowing a judgement rather than a one-liner: plates with no
+   fleet on their vehicle record at all (135 of the 273 on production), and a
+   plate REGISTERED to one fleet whose telematics journeys are stamped with
+   the other (six on production, AED 42,587.67 of the first fleet's money). */
+const fl = new PGlite();
+await applySchema(fl);
+const fq = (t, a = []) => fl.query(t, a);
+
+/* Six plates, one per role the narrowing has to get right. */
+const ROLE = {
+  G_EARNS: 'G00001',   // registered egari, earns under egari      → in the chip
+  G_IDLE: 'G00002',    // registered egari, no work at all, papers → in the chip
+  C_EARNS: 'C00001',   // registered ecosine, earns, papers current → OUT
+  C_CROSS: 'C00002',   // registered ecosine, earns as ecosine, but its FMS
+                       //   journeys are stamped egari                → OUT
+  U_EGARI: 'U00001',   // no vehicle record at all, earns under egari → in
+  U_ECO: 'U00002',     // no vehicle record, earns under ecosine      → OUT
+};
+for (const [plate, f] of [[ROLE.G_EARNS, 'egari'], [ROLE.G_IDLE, 'egari'],
+  [ROLE.C_EARNS, 'ecosine'], [ROLE.C_CROSS, 'ecosine']]) {
+  await fq(`INSERT INTO vehicle (plate, fleet_id, make, model, year)
+            VALUES ($1,$2,'Toyota','Camry',2023)`, [plate, f]);
+}
+/* Papers still current on every plate the idle-capital tile could name, so a
+   row that wrongly survives the chip is visible as insured-and-idle rather
+   than merely present. The expiry is far enough out that the row is current
+   whatever day this test is run on. */
+for (const plate of [ROLE.G_IDLE, ROLE.C_EARNS, ROLE.C_CROSS, ROLE.U_ECO]) {
+  await fq(`INSERT INTO vehicle_document (platform, vehicle_ext_id, fleet_id, plate,
+              doc_type, expires_at, status)
+            VALUES ('fms',$1,'ecosine',$2,'insurance','2030-01-01T00:00:00Z','valid')`,
+  [`veh-${plate}`, plate]);
+}
+/* Priced bookings, so money comes off fares and no payout attribution is
+   needed to make these plates earn. */
+let fseq = 0;
+const book = async (plate, fleetId, day) => fq(
+  `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+     requested_at, ended_at, distance_km, status, payment_type, price)
+   VALUES ('hotel',$1,$2,$3,'fd1','Fleet Driver',$4,$5,10,'completed','cashless',100)`,
+  [`fl-${fseq++}`, fleetId, plate, `2026-08-${day}T09:00:00+04:00`,
+    `2026-08-${day}T10:00:00+04:00`]);
+for (const day of ['05', '06', '07']) {
+  await book(ROLE.G_EARNS, 'egari', day);
+  await book(ROLE.C_EARNS, 'ecosine', day);
+  await book(ROLE.C_CROSS, 'ecosine', day);
+  await book(ROLE.U_EGARI, 'egari', day);
+  await book(ROLE.U_ECO, 'ecosine', day);
+  /* The cross-stamped case: the same car's telematics journeys arrive under
+     the other fleet's account. This is what makes "define the fleet by what
+     its work reached" dishonest — it hands an Ecosine earner to Egari as a
+     car that moved and earned nothing. */
+  await fq(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, requested_at, ended_at,
+       distance_km, status)
+     VALUES ('fms',$1,'egari',$2,$3,$4,40,'completed')`,
+    [`flx-${day}`, ROLE.C_CROSS, `2026-08-${day}T06:00:00+04:00`,
+      `2026-08-${day}T20:00:00+04:00`]);
+}
+await rebuildCustody({ from: '2026-08-01', to: '2026-08-31', db: fl });
+const flApi = await mountAll(fl);
+const fget = async (u) => (await flApi.get(u)).body;
+const allF = await fget(`/api/economics/assets?${WIN}`);
+const egF = await fget(`/api/economics/assets?${WIN}&fleet=egari`);
+const plates = (r) => (r.rows || []).map((x) => x.plate).sort();
+
+/* A precondition rather than an assertion about the fix — it passes either
+   way, and it is here so that a fixture which stops producing all six roles
+   fails loudly instead of making every check below vacuously true. */
+check('precondition: the unfiltered register holds every plate this fixture touches',
+  plates(allF).join() === Object.values(ROLE).slice().sort().join(),
+  plates(allF).join());
+
+/* THE DEFECT. Two properties, and the first is the one an operator sees: a
+   fleet's asset population is a subset of the whole register, and nothing in
+   it is stamped for anybody else. */
+check('a fleet chip narrows the asset population',
+  egF.rows.length < allF.rows.length,
+  `${egF.rows.length} rows under the chip against ${allF.rows.length} unfiltered`);
+check('and lists no plate registered to the other fleet',
+  egF.rows.every((r) => r.fleet_id !== 'ecosine'),
+  egF.rows.filter((r) => r.fleet_id === 'ecosine').map((r) => r.plate).join(' '));
+
+/* The population itself, by the role each plate was seeded for: the fleet's
+   own registered cars INCLUDING the one that did nothing — that row is the
+   whole point of this page and a work-defined population would drop it — plus
+   the unregistered plate this fleet's own work reaches, and nothing else. */
+check('the population is the fleet’s registered plates plus the unregistered ones it worked',
+  plates(egF).join() === [ROLE.G_EARNS, ROLE.G_IDLE, ROLE.U_EGARI].sort().join(),
+  plates(egF).join());
+
+/* THE CONSEQUENCE, stated as the tile states it. "Insured and idle" is the
+   page's nearest thing to a loss, and every plate it named under a chip was a
+   car that had earned — its earnings were simply filtered away while its row
+   was not. A plate that earned in the window may never appear on that list. */
+const earnedUnfiltered = new Set((allF.rows || []).filter((r) => r.money > 0)
+  .map((r) => r.plate));
+const idleCapital = (r) => (r.rows || []).filter((x) => !x.money
+  && x.doc_days_left != null && x.doc_days_left >= 0);
+const wronglyIdle = idleCapital(egF).filter((r) => earnedUnfiltered.has(r.plate));
+check('no plate that earned in the window is counted as insured and idle',
+  wronglyIdle.length === 0,
+  wronglyIdle.map((r) => `${r.plate} earned ${allF.rows.find((x) => x.plate === r.plate).money}`)
+    .join(' · '));
+/* And the headline tile the whole page opens with — "Assets earning 33 / 273"
+   under ?fleet=egari on production, where the fleet holds 40 plates. Its denominator has to be the
+   population the chip actually selected, and that population has to be smaller
+   than the whole register or the chip did nothing. */
+check('the headline denominator is the fleet’s own plates, not the whole register',
+  egF.totals.vehicles === egF.rows.length
+    && egF.totals.vehicles < allF.totals.vehicles
+    && egF.totals.earning === egF.rows.filter((r) => r.money > 0).length,
+  `${egF.totals.earning} / ${egF.totals.vehicles} against ${allF.totals.vehicles} unfiltered`);
+
+/* The plates a chip cannot place on either fleet are counted back rather than
+   silently dropped: one here, the unregistered car that worked for the OTHER
+   fleet. Absent, not zero, when there is no chip and nothing was left out. */
+check('the register plates a chip cannot place are counted, with a reason',
+  egF.totals.unassigned_vehicles === 1
+    && (egF.totals.unassigned_note || '').includes(String(egF.totals.unassigned_vehicles))
+    && /no fleet on/.test(egF.totals.unassigned_note || '')
+    && /either fleet/.test(egF.totals.unassigned_note || ''),
+  `${egF.totals.unassigned_vehicles} — ${egF.totals.unassigned_note}`);
+check('and nothing is reported as left out when no fleet is chosen',
+  allF.totals.unassigned_vehicles === null && allF.totals.unassigned_note === null,
+  JSON.stringify([allF.totals.unassigned_vehicles, allF.totals.unassigned_note]));
+
+flApi.server.close(); await fl.close();
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -478,11 +478,21 @@ const W = 'from=2026-08-01&to=2026-08-31';
   check('an approach longer than the ride is flagged',
     by.deadhead_exceeds_fare.n === 1, String(by.deadhead_exceeds_fare.n));
   check('every leakage kind explains why it matters', l.kinds.every((k) => k.why && k.label));
-  // 48 bookings alternate across h1/h1/h1/h2, so h1 holds 36 of them; a third
-  // of those carry an authorisation. Only h1 requires one, so h2's bookings —
-  // and h3's — must not be accused.
+  /* 48 bookings alternate across h1/h1/h1/h2, so h1 holds 36 of them, and the
+     two complimentary rides there are priced at nothing and so never billed.
+     Only h1 requires an authorisation, so h2's bookings — and h3's — must not
+     be accused.
+
+     The bound used to be `< 30`, because a third of h1's bookings carry an
+     authorisation STUB — `{_id: 'a1'}`, no status, nobody's approval — and
+     has_authorization counted a stub as an approval. Since sql/schema_v62.sql
+     it counts a GRANT, this fixture contains none, and so every billed h1
+     booking is accused. Pinned against the property list's own count of h1's
+     billed bookings rather than against the literal 36, so the assertion still
+     says what it means if the fixture grows. */
+  const h1 = (await get(`/api/corporate/properties?${W}`)).find((p) => p.partner_id === 'h1');
   check('a missing authorisation is only counted where the property requires one',
-    by.unauthorized.n > 0 && by.unauthorized.n < 30, String(by.unauthorized.n));
+    by.unauthorized.n === h1.priced, `${by.unauthorized.n} accused of ${h1.priced} billed at h1`);
   check('the count of properties that require approval is reported',
     l.summary.properties_requiring_approval === 1 && l.summary.properties === 3,
     `${l.summary.properties_requiring_approval} of ${l.summary.properties}`);

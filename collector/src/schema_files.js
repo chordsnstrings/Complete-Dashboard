@@ -39,4 +39,14 @@ export const SCHEMA_FILES = [
      existed, and sampled secrets in provider_probe. Guarded by schema_once, so
      it runs once and is a no-op on every boot after. */
   'schema_v59.sql',
+  /* One-time retraction of the occupancy segments a later reconcile pass
+     superseded — left-truncated fragments of journeys already recorded whole,
+     59.9 percent of the table as measured on 2026-09-05. Guarded by
+     schema_once, so it runs once per database and is a no-op afterwards. */
+  'schema_v61.sql',
+  /* trip_ext rebuilt: has_authorization redefined from "an authorization object
+     exists" to "an authorisation was granted", with the state it was really
+     reporting split into authorization_pending and the provider's own word kept
+     in authorization_status. */
+  'schema_v62.sql',
 ];

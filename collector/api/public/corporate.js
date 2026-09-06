@@ -129,11 +129,40 @@ async function corpOverview(host) {
     /* Three figures the summary returns and the page never drew. An
        authorisation rate is the control this channel exists to enforce, and a
        booking that ends outside Dubai is a dispatch problem with an address. */
-    s.authorized_pct != null
-      ? { label: 'Carried an authorisation', value: pct(s.authorized_pct, 1),
-        sub: 'of bookings at properties that require one',
-        tone: s.authorized_pct < 50 ? 'warn' : null }
-      : null,
+    /* THE CAPTION WAS RIGHT AND THE FIGURE ANSWERED A DIFFERENT QUESTION.
+       This printed "12.8%" — 13% when re-measured on production on 2026-09-05
+       over 2026-01-01 → 2026-09-05 — under the words "of bookings at properties
+       that require one", and the figure was 225 authorised over all 1,737
+       bookings on the channel. The caption's own denominator is the 225
+       bookings of "Office", the one property of six whose approval_required is
+       true, so the caption's claim would have read 100%. Neither number was the
+       control this tile exists to report: until sql/schema_v62.sql,
+       has_authorization meant "the provider attached an authorization object",
+       and the provider attaches it when the booking is RAISED. Nought of the
+       225 had been granted by anybody — the only two granted approvals in the
+       whole record arrive under the other key, operatorApproval, and /api/trip
+       says neither of those bookings carries a partner_id at all — and the
+       amber under 50% read as a rate that is low rather than a control nobody
+       is exercising.
+
+       Both halves now say the same thing, the counts are printed beside the
+       rate so the sentence can be checked against them, and a rate of zero
+       where authorisations were raised is critical rather than merely low.
+       Where there is no denominator at all the tile stays and says why —
+       dropping it would leave the page silent about the one control this
+       channel exists to enforce, and the three reasons are different things to
+       do about it. */
+    { label: 'Carried an authorisation',
+      value: s.authorized_pct == null ? '—' : pct(s.authorized_pct, 1),
+      sub: s.authorized_pct == null
+        ? s.authorized_absent_reason
+        : `${fmt(s.authorized_trips)} of ${fmt(s.approval_required_bookings)} bookings at `
+          + 'properties that require one'
+          + (s.authorization_pending_trips
+            ? ` · ${fmt(s.authorization_pending_trips)} raised and never granted` : ''),
+      tone: s.authorized_pct == null ? null
+        : s.authorized_pct === 0 ? 'critical'
+          : s.authorized_pct < 50 ? 'warn' : null },
     s.outside_dubai
       ? { label: 'Ended outside Dubai', value: fmt(s.outside_dubai),
         sub: 'a booking the driver has to come back from empty', tone: 'warn' }
@@ -484,10 +513,19 @@ async function corpLeakage(host, kind = state.sub) {
     { label: 'Km', key: 'distance_km', num: true, render: (r) => fmt(r.distance_km, 1) },
     { label: 'Approach', key: 'deadhead_km', num: true, render: (r) => (r.deadhead_km == null ? '—' : `${fmt(r.deadhead_km, 1)} km`) },
     { label: 'Room', key: 'room_no', absent: ROOM },
+    /* A green "yes" for a stub nobody has approved. has_authorization was
+       object existence, so every one of the 225 Office bookings — raised for
+       approval, approver null, never answered — painted `tag ok` on the leakage
+       table. It reads GRANTED now, and the two ways of not being
+       granted are told apart rather than collapsed into one word: a booking
+       with an authorisation on file shows the provider's own status, so a
+       rejected approval is never labelled pending. */
     { label: 'Authorised', key: 'has_authorization',
       render: (r) => (r.has_authorization
         ? '<span class="tag ok">yes</span>'
-        : '<span class="tag warn">no</span>') },
+        : r.authorization_pending
+          ? `<span class="tag warn">${esc(r.authorization_status || 'raised, not granted')}</span>`
+          : '<span class="tag bad">none on file</span>') },
   ], { sortable: true, sortId: `leak-${kind}`, defaultSort: { key: 'requested_at', dir: 'desc' } }));
 }
 

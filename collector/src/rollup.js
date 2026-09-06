@@ -754,6 +754,21 @@ export const NET_FARE_SQL = `coalesce(
                                        AND parent = 'your_earnings'), 0),
     sum(amount) FILTER (WHERE category = 'net_fare'))`;
 
+/* WHICH SURFACE PRICED THIS PERIOD — the same question, asked as a flag.
+   ─────────────────────────────────────────────────────────────────────────
+   The coalesce above takes its first arm exactly when the period carries a
+   your_earnings row, because that is the only thing that can make the arm
+   non-null; the second arm is the fallback for a period only the REST
+   payments surface has described. So this expression is not a new rule, it is
+   the coalesce's own condition given a name, and the two cannot drift because
+   they are the same test written once. A period where it is true was priced
+   from Uber's own root, which contains every child including ones this
+   mapping has never seen. A period where it is false was priced from net_fare
+   alone, which is the open-payment-period surface and complete only by
+   accident. */
+export const ROOT_PRICED_SQL =
+  `(sum(amount) FILTER (WHERE category = 'your_earnings') IS NOT NULL)`;
+
 /* Derive the ON-TRIP statement days from the earnings components.
    ─────────────────────────────────────────────────────────────────────────
    Two Uber surfaces carry the statement view — net fares, tips, tolls, cash
@@ -784,10 +799,12 @@ export async function refreshStatements(db = pool) {
     await db.query("SET LOCAL statement_timeout = '600000'").catch(() => {});
     await db.query(`DELETE FROM driver_statement_day WHERE source = 'uber_rest'`);
     /* Same resolution as the payout view: periods first, then one winner per
-       day — the FINEST period covering it. The table holds report windows on
-       several grids (weekly now; three-day and longer run-stamps from before
-       the weekly fix), and two grids covering one day must not both spread
-       into it, nor an arbitrary one win. */
+       day. The table holds report windows on several grids (weekly now;
+       three-day and longer run-stamps from before the weekly fix), and two
+       grids covering one day must not both spread into it, nor an arbitrary
+       one win. Which of them wins is the rule spelled out over the `resolved`
+       CTE below — it used to be simply the shortest window, and a shortest
+       window is not the same thing as a finest one. */
     const r = await db.query(`
       WITH per AS (
         SELECT platform, coalesce(fleet_id, 'ecosine') AS fleet_id, driver_ext_id,
@@ -818,13 +835,73 @@ export async function refreshStatements(db = pool) {
                   two sides differ by AED 124.87. Each column is the line the
                   statement itself files, which is all any of them claims. */
                sum(amount) FILTER (WHERE category = 'fare')            AS gross,
-               -sum(amount) FILTER (WHERE category = 'service_fee')    AS fees
+               -sum(amount) FILTER (WHERE category = 'service_fee')    AS fees,
+               /* Not money — the answer to "which surface priced this", carried
+                  beside the money so the resolution below can rank on it. */
+               ${ROOT_PRICED_SQL}                                      AS root_priced
         FROM driver_earnings_component
         WHERE category IN ('net_fare', 'your_earnings', 'taxes_earnings',
                            'tip', 'toll', 'cash_collected', 'fare', 'service_fee')
         GROUP BY platform, fleet_id, driver_ext_id, period_start, period_end
         HAVING ${NET_FARE_SQL} IS NOT NULL
       ),
+      /* A SHORTER WINDOW IS NOT A FINER ONE, AND IT WAS BEING TREATED AS ONE.
+         ───────────────────────────────────────────────────────────────────
+         This picks one winner per driver-day out of every report window that
+         covers it, and the rule used to be the shortest window, full stop.
+         sql/schema_v58.sql had already worked out on the payout side why that
+         is wrong, in its own words — finer there means period_days = 1, not
+         "any shorter span"; Uber files 2, 3 and 4-day windows too, and a stray
+         4-day backfill row must not be allowed to vouch for a week's coverage
+         or to suppress it — and the statement fold never carried the guard
+         across.
+
+         MEASURED on production 2026-09-05, on the week of 17–23 August. Uber's
+         GraphQL breakdown files that whole week once: your_earnings 113,636.23
+         less tip 1,212.01 less taxes -1,985.48 is 114,409.70, which over seven
+         days is 16,344.24 a day — and that is exactly what #reconcile printed
+         for 17 and 18 August, to the fils. The REST payments surface then filed
+         three rolling four-day snapshots over the same week for 53 drivers, all
+         of them Ecosine, out of the 163 that fleet's week names — 19–22 at
+         net_fare 12,726.87, 20–23 at 10,020.85 and 21–24 at 10,638.89, and not
+         one of the three carrying a your_earnings root at all.
+         Being shorter, each of those won its days, and 19–24 August collapsed
+         to 8,243.50 / 8,275.52 / 8,275.52 / 8,275.52 / 7,972.28 / 9,762.57
+         against the 16,344.24 the days either side of them read.
+
+         Nothing on the page greyed those six rows, because statement_partial
+         and period_cut are both false on them and the money really was
+         collected — so api/public/reconcile.js painted a delta of +109.0,
+         +136.3, +169.0, +103.8, +70.8 and +83.3 per cent in red. AED 44,903.26
+         of accusation out of the month's whole AED 64,725.52 gap (re-measured 2026-09-06; the backfill moves this figure by tens of dirhams a day, so the 69.4 per cent is the durable half of the claim) — 69.4 per
+         cent of it — against a platform that had not underpaid — the delta is bank minus expected and is POSITIVE on all six, so the accusation is of overpayment, which is the same artefact read from the other end.
+
+         The fix is the question the coalesce above already answers, asked one
+         level up. The four-day rows are not a finer measurement of the week;
+         they are the OTHER surface's partial view of a period it had not
+         finished describing, which is the same defect the coalesce was swapped
+         to fix and at the same time. So the ranking is: a report that covers
+         exactly one day beats anything coarser, because that is a genuinely
+         finer grain and sql/schema_v58.sql's evidence is that it is the one
+         that reconciles; failing that, the period priced from Uber's own root
+         beats one priced from net_fare alone; and only then does length break
+         the tie, which is what keeps a seven-day week ahead of a run-stamped
+         smear across a month.
+
+         Why the daily test sits ABOVE the surface test and not below it: a
+         report covering a single day needs no help from either surface to be
+         the best description of that day, and this file's own tests already
+         pin it — a measured day supersedes the week containing it even when
+         the week came from GraphQL and the day from REST.
+
+         Why length is still the last word rather than being reversed: over
+         2026-06-01 to 2026-09-14 there is not one period in
+         driver_earnings_component shorter than seven days that carries a
+         your_earnings root — every short window on production is net_fare
+         alone — so the surface flag settles every case the fleet actually has,
+         and reversing length would put a 28-day run-stamped smear ahead of the
+         week inside it, which is the fault sql/schema_v26.sql deletes at the
+         source and test/statement.test.mjs holds down here. */
       resolved AS (
         SELECT DISTINCT ON (p.platform, p.fleet_id, p.driver_ext_id, d.day)
                p.platform, p.fleet_id,
@@ -842,6 +919,8 @@ export async function refreshStatements(db = pool) {
         FROM per p
         CROSS JOIN LATERAL generate_series(p.period_start, p.period_end, interval '1 day') AS d(day)
         ORDER BY p.platform, p.fleet_id, p.driver_ext_id, d.day,
+                 (p.period_end = p.period_start) DESC,
+                 p.root_priced DESC,
                  (p.period_end - p.period_start) ASC, p.period_start ASC
       ),
       /* One person can hold two platform accounts (a real case in this fleet:

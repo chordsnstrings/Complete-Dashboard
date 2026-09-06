@@ -2707,7 +2707,19 @@ app.get('/api/corporate/summary', (_, r) => r.json({
   bookings: 1253, priced: 1245, revenue: 138400, cost: 96200, has_cost: true, avg_fare: 111.2, km: 18600,
   revenue_per_km: 7.44, deadhead_km: 3120, deadhead_measured: 1140, deadhead_measured_pct: 91,
   deadhead_ratio_pct: 16.8, foc_trips: 10, overrun_trips: 7, scheduled_trips: 604, scheduled_pct: 48.2,
-  authorized_trips: 155, authorized_pct: 12.4, missing_trips: 0, guests: 812, properties: 4,
+  /* Authorisation as GRANTED, not as an object that exists. On production every
+     one of the 219 authorisation objects is `pending` with a null approver, so
+     the honest fixture is a channel where the control is raised and never
+     answered: 0 granted of 240 bookings that require approval, 225 of them
+     still pending. authorized_pct is therefore 0 — the tile reads "nobody is
+     exercising this control", which is what it is, and not "a rate that is
+     low". */
+  authorized_trips: 0, authorized_pct: 0, approval_required_bookings: 240,
+  authorization_pending_trips: 225,
+  /* Non-null only when the denominator is zero, so the page can say why the
+     percentage is absent instead of printing 0% of nothing. */
+  authorized_absent_reason: null,
+  missing_trips: 0, guests: 812, properties: 4,
   drivers: 35, vehicles: 35, outside_dubai: 9, zoned: 707, outside_dubai_pct: 1.3,
   concentration_hhi: 3480, top_property: 'Palm Grand', partner_id: 'h-palm', top_property_share_pct: 55.5,
 }));

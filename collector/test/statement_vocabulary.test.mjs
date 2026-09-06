@@ -168,6 +168,69 @@ d = await dayOf('e2', '2026-08-21');
 check('a day the finer period does not cover keeps the week',
   d.length === 1 && near(d[0].net, 700.00 / 7), JSON.stringify(d));
 
+/* ── a SHORTER window is not a FINER one ────────────────────────────────── */
+/* The resolution used to take the shortest period covering a day and stop
+   there, and sql/schema_v58.sql had already established on the payout side why
+   that is wrong: finer means a report covering exactly one day, not any
+   shorter span, because Uber files 2, 3 and 4-day windows too and a stray
+   4-day backfill row must not be allowed to vouch for a week's coverage.
+
+   Measured on production 2026-09-05, the week of 17–23 August. The GraphQL
+   breakdown filed that week once — your_earnings 113,636.23 less tip 1,212.01
+   less taxes -1,985.48, which is 114,409.70, or 16,344.24 a day over seven —
+   and 17 and 18 August printed exactly that. The REST surface then filed three
+   rolling four-day snapshots over the same week for 53 Ecosine drivers out of
+   the 163 that fleet's week names — 19–22 at net_fare 12,726.87, 20–23 at
+   10,020.85 and 21–24 at 10,638.89, not one of them carrying a your_earnings
+   root. Being shorter they won, 19–24
+   August collapsed to between 7,972.28 and 9,762.57 a day, and #reconcile
+   painted six consecutive red rows accusing Uber of overpaying by up to 169%.
+
+   e8 is that shape at fleet scale divided down: a week Uber priced from its own
+   root, a four-day REST snapshot inside it that carries only net_fare, and a
+   second REST window that runs past the end of the week. */
+await comp('ecosine', 'e8', '2026-08-17', '2026-08-23', 'your_earnings', null, 2401.05);
+await comp('ecosine', 'e8', '2026-08-17', '2026-08-23', 'fare', 'your_earnings', 3200.00);
+await comp('ecosine', 'e8', '2026-08-17', '2026-08-23', 'service_fee', 'your_earnings', -800.00);
+await comp('ecosine', 'e8', '2026-08-17', '2026-08-23', 'taxes_earnings', 'your_earnings', -30.00);
+await comp('ecosine', 'e8', '2026-08-17', '2026-08-23', 'tip', 'your_earnings', 20.00);
+await comp('ecosine', 'e8', '2026-08-19', '2026-08-22', 'earnings', null, 500.00);
+await comp('ecosine', 'e8', '2026-08-19', '2026-08-22', 'net_fare', 'earnings', 496.00);
+await comp('ecosine', 'e8', '2026-08-21', '2026-08-24', 'earnings', null, 402.00);
+await comp('ecosine', 'e8', '2026-08-21', '2026-08-24', 'net_fare', 'earnings', 400.00);
+/* One day of that week, priced by the REST surface alone, inside the same
+   week — the grain that IS finer, so that the two cases sit side by side on
+   one driver and cannot be read as the same rule. */
+await comp('ecosine', 'e8', '2026-08-18', '2026-08-18', 'earnings', null, 78.00);
+await comp('ecosine', 'e8', '2026-08-18', '2026-08-18', 'net_fare', 'earnings', 77.00);
+await refreshStatements(db);
+
+/* net = 2401.05 - tip 20.00 - taxes (-30.00) = 2411.05, over seven days. */
+const WEEK_DAY = 2411.05 / 7;
+d = await dayOf('e8', '2026-08-20');
+check('a four-day window does not displace the week covering the same day',
+  d.length === 1 && near(d[0].net, WEEK_DAY), JSON.stringify(d));
+check('…and the day does not carry the four-day window instead',
+  d.length === 1 && !near(d[0].net, 496.00 / 4), JSON.stringify(d));
+d = await dayOf('e8', '2026-08-18');
+check('a report covering exactly one day still supersedes the week containing it',
+  d.length === 1 && near(d[0].net, 77.00), JSON.stringify(d));
+check('…so the rule is the grain and not the surface that priced it',
+  d.length === 1 && !near(d[0].net, WEEK_DAY), JSON.stringify(d));
+/* The correction must not silence the REST surface where it is the only
+   account there is: 24 August lies outside the week, and the four-day window
+   running 21–24 is the only report that reaches it. */
+d = await dayOf('e8', '2026-08-24');
+check('a day past the end of the week keeps the only window that covers it',
+  d.length === 1 && near(d[0].net, 400.00 / 4), JSON.stringify(d));
+/* The divisor a reader is shown has to be the one the money was actually
+   divided by, or #reconcile prints "measured over 4 days" beside a seventh of
+   a week. */
+const basis = await q(`SELECT period_days FROM driver_statement_day
+                        WHERE driver_ext_id='e8' AND day='2026-08-20' AND source='uber_rest'`);
+check('and the day reports the week as its basis, not the four-day window',
+  basis.length === 1 && Number(basis[0].period_days) === 7, JSON.stringify(basis));
+
 /* ── a period with neither root is still dropped ────────────────────────── */
 /* The HAVING exists so that a period carrying only a toll refund does not
    become a statement day claiming the driver earned nothing. */

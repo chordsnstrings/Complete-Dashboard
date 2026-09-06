@@ -3,7 +3,7 @@
 // bookings from every revenue channel (hotel/uber/yango/bolt/fms). Segments with real movement and no
 // matching booking are revenue leakage. See docs/unauthorized-trips.md for the model and the
 // hardware-failure handling this implements.
-import { pool, upsertMany } from './db.js';
+import { pool } from './db.js';
 import { log } from './log.js';
 
 export const RULES = {
@@ -232,6 +232,126 @@ export function clockSkewMin(fixes) {
   return lags.length ? lags[Math.floor(lags.length / 2)] : 0;
 }
 
+/* ONE PASS, ONE ANSWER — a pass owns the window it judged.
+   ─────────────────────────────────────────────────────────────────────────
+   This write was an upsert keyed on (plate, started_at) and nothing else, so
+   occupancy_segment did not hold the current reading of the fleet: it held the
+   UNION of every reconcile pass that has ever run. Two passes that disagree
+   about where a journey begins do not collide on that key — they both survive,
+   as two rows describing one journey.
+
+   Measured on production on 2026-09-05, every day of 2026-08-20..2026-09-05
+   pulled through /api/segments: 3,511 rows, of which 2,102 are intervals lying
+   strictly inside a LONGER segment on the same plate — 59.9 percent of the
+   rows and 51,401 of the 82,639 km. The 30-day tile says 3,512 rather than
+   3,511; the extra one is a journey that had just started on the 6th in Dubai.
+   De-duplicated, the same period is 1,409 segments and 31,238 km. All 2,102 have one shape: the same end as the row that
+   contains them and a LATER start. That is the signature of the cause. `from`
+   here is always a clock offset back from now (src/run.js:114 and the callers
+   above it), so a pass whose window happens to open in the middle of a journey
+   sees only the tail of it, and writes that tail as a journey of its own beside
+   the whole one a wider pass already recorded. L44251 on 2026-08-22 carries
+   both: 16:13:41 → 16:44:56 judged `unauthorized` against bolt,hotel,uber,yango
+   and 16:38:42 → 16:44:56 judged `unverifiable` against hotel,uber,yango.
+
+   The proof that these are different passes rather than different journeys is
+   channels_checked, which is written once per pass from what the window could
+   read. Five distinct values coexist inside this one period today, six when the audit measured it — the count moves as passes age out of the window, which is itself the point, and they coexist
+   on single days — 2026-08-23 alone holds 139 rows reading hotel,uber,yango and
+   56 reading bolt,hotel,uber,yango. One day cannot have been judged against six
+   different channel sets by one authoritative pass.
+
+   What a reader was being shown: 3,511 occupancy intervals where 1,409
+   journeys happened, 1,632 partial against 572, 1,178 authorized against 521,
+   483 stationary against 239, and a daily count for 2026-09-01 of 302 falling
+   to 247 the next day, which reads as a fleet going quiet — de-duplicated it is
+   113 then 96, so the step is duplicates stopping. The accusation count is the
+   one figure this barely moves: exactly 1 of the 59 `unauthorized` rows is a
+   superseded fragment, so that column is inflated by one, not by the 2.5x the
+   segment, km, partial, authorized and stationary totals carry. It is the one
+   row that matters most, though, because it names a person for a journey the
+   current reconciler judges differently.
+
+   THE SCOPE OF THE DELETE, which is the whole risk here.
+   It reaches rows for the plates this pass actually re-derived — the keys of
+   byPlate, which is built from the cabman fixes the window returned — and only
+   rows whose start lies inside the window. Every journey starting in that range
+   on one of those plates was rebuilt from the same telemetry a moment ago, so
+   whatever is there is this pass's own previous answer or an older pass's, and
+   in both cases this pass has just replaced it. It CANNOT reach a plate that
+   produced no fix in the window: a device that was offline leaves no evidence,
+   and evidence we did not look at is not evidence we may retract. It CANNOT
+   reach a row that starts before `from`, which is the journey straddling the
+   left edge — this pass saw only its tail and must not overwrite the fuller
+   reading of it with a shorter one.
+
+   That second exemption is exactly why the DELETE alone does not establish the
+   property this exists for. The straddling row survives, and this pass then
+   writes its own truncated tail beside it, which is the 2,102 rows all over
+   again. So after the insert, one more statement drops rows in the window that
+   a longer row on the same plate already covers end to end. The row that starts
+   earlier and ends no sooner was built where this one was built from a subset
+   of the same fixes, so it is the better-informed of the two and the shorter
+   one is a fragment of it. Rows that merely OVERLAP without one containing the
+   other are left alone: every window here ends at now and reaches a whole
+   number of days back (src/run.js:339-363), so a journey truncated by the right
+   edge is re-derived whole by the next pass rather than left beside itself, and
+   no ordering of these passes produces that shape. Deleting on a guess would be
+   discarding evidence rather than a duplicate.
+
+   The three statements are one transaction because the first is destructive:
+   a delete that commits and an insert that then fails would leave the window
+   empty, which on this page reads as a fleet with nothing to answer for. */
+async function writeWindow(out, { from, to, plates }) {
+  const KEY = ['plate', 'started_at'];
+  if (!plates.length) return 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `DELETE FROM occupancy_segment
+        WHERE plate = ANY($1::text[]) AND started_at BETWEEN $2 AND $3`, [plates, from, to]);
+
+    /* Batched the way upsertMany batches, and for the same reason — Postgres
+       stops at 65535 bound parameters — but inline, because the delete and the
+       insert have to share one client to share one transaction and upsertMany
+       takes its own out of the pool. ON CONFLICT is kept even though the delete
+       above has just cleared the keys: two passes overlapping in time is
+       exactly what this function exists to survive. */
+    if (out.length) {
+      const cols = Object.keys(out[0]);
+      const updates = cols.filter((c) => !KEY.includes(c)).map((c) => `${c}=EXCLUDED.${c}`);
+      const perBatch = Math.max(1, Math.min(200, Math.floor(60000 / cols.length)));
+      for (let i = 0; i < out.length; i += perBatch) {
+        const params = [];
+        const tuples = out.slice(i, i + perBatch).map((r) => `(${cols.map((c) => {
+          params.push(r[c] === undefined ? null : r[c]);
+          return `$${params.length}`;
+        }).join(',')})`);
+        await client.query(
+          `INSERT INTO occupancy_segment (${cols.join(',')}) VALUES ${tuples.join(',')}`
+          + ` ON CONFLICT (${KEY.join(',')}) DO UPDATE SET ${updates.join(', ')}`, params);
+      }
+    }
+
+    // The left-edge sweep described above. coalesce() because ended_at is
+    // nullable in the schema: a row with no end is a point in time, not a
+    // journey reaching forever, and treating it as the latter would let it
+    // swallow the rows around it.
+    const swept = await client.query(
+      `DELETE FROM occupancy_segment d
+        WHERE d.plate = ANY($1::text[]) AND d.started_at BETWEEN $2 AND $3
+          AND EXISTS (SELECT 1 FROM occupancy_segment o
+                       WHERE o.plate = d.plate
+                         AND o.started_at < d.started_at
+                         AND coalesce(o.ended_at, o.started_at) >= coalesce(d.ended_at, d.started_at))`,
+      [plates, from, to]);
+    await client.query('COMMIT');
+    return swept?.rowCount ?? swept?.affectedRows ?? 0;
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; }
+  finally { client.release(); }
+}
+
 export async function reconcile({ from, to }) {
   const { rows: fixes } = await pool.query(
     /* polled_at as well as captured_at. The clock check below needs the gap
@@ -375,10 +495,12 @@ export async function reconcile({ from, to }) {
       });
     }
   }
-  if (out.length) await upsertMany('occupancy_segment', out, ['plate', 'started_at']);
+  const plates = Object.keys(byPlate);
+  const superseded = await writeWindow(out, { from, to, plates });
   const tally = out.reduce((a, s) => (a[s.verdict] = (a[s.verdict] || 0) + 1, a), {});
   log.info('reconcile', 'done', {
     segments: out.length, ...tally,
+    plates: plates.length, superseded,
     unavailable: unavailable.join(',') || 'none',
     clock_skew_min: Math.round(medianLag),
   });

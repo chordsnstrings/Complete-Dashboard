@@ -43,6 +43,30 @@ const share = (n, total) => (total ? round((n / total) * 100, 1) : null);
 const AREA = `nullif(btrim(split_part(%s, ' - ', 2)), '')`;
 export const areaOf = (col) => AREA.replace('%s', col);
 
+/* Which properties run an approval workflow at all, in ONE definition.
+   ─────────────────────────────────────────────────────────────────────────
+   A missing or ungranted authorisation is evidence of something only at a
+   property whose own workflow requires one — measured on production on
+   2026-09-05, one of the six hotel properties declares partner.approval_required
+   and the other five do not, and without the qualifier the leakage category
+   fired on 87% of every booking on the channel. The predicate and the shape of
+   the property list were written inside the leakage handler and the Overview
+   summary needed both as well; a second copy of a rule this load-bearing is a
+   second copy to drift, so they live here and each route reads them. */
+const REQUIRES_APPROVAL = `partner_id IN (
+  SELECT partner_id FROM partner WHERE platform = 'hotel' AND approval_required)`;
+
+/** How many hotel properties require an authorisation, how many have said
+    either way, and how many there are. The three counts a page needs to tell
+    "nobody requires one" from "nobody has told us" from "one does and it is
+    being ignored" — never one number standing in for all three. */
+const approvalShape = async (q) => (await q(
+  `SELECT count(*) FILTER (WHERE approval_required)::int requiring,
+          count(*) FILTER (WHERE approval_required IS NOT NULL)::int declared,
+          count(*)::int properties
+   FROM partner WHERE platform = 'hotel'`))[0]
+  || { requiring: 0, declared: 0, properties: 0 };
+
 export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
   /* ───────────────────────── settlement ─────────────────────────
      Who settles the fare, and when. */
@@ -435,7 +459,9 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               count(*) FILTER (WHERE is_complimentary)::int foc_trips,
               count(*) FILTER (WHERE over_run)::int overrun_trips,
               count(*) FILTER (WHERE is_scheduled)::int scheduled_trips,
-              count(*) FILTER (WHERE has_authorization)::int authorized_trips,
+              count(*) FILTER (WHERE ${REQUIRES_APPROVAL})::int approval_required_bookings,
+              count(*) FILTER (WHERE has_authorization AND ${REQUIRES_APPROVAL})::int authorized_trips,
+              count(*) FILTER (WHERE authorization_pending AND ${REQUIRES_APPROVAL})::int authorization_pending_trips,
               count(*) FILTER (WHERE coalesce(is_missing,false))::int missing_trips,
               count(DISTINCT guest_id)::int guests,
               count(DISTINCT partner_id)::int properties,
@@ -444,6 +470,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               count(*) FILTER (WHERE zone = 'outside-dubai')::int outside_dubai,
               count(*) FILTER (WHERE zone IS NOT NULL)::int zoned
        FROM trip_ext WHERE ${F} AND platform = 'hotel'`, p);
+
+    const approval = await approvalShape(q);
 
     // Client concentration. The Herfindahl index is the standard way to say
     // "how much of this business rests on one customer" in one number, and the
@@ -472,7 +500,54 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       deadhead_ratio_pct: NUM(s.km) > 0 && NUM(s.deadhead_km) != null
         ? round((NUM(s.deadhead_km) / NUM(s.km)) * 100, 1) : null,
       scheduled_pct: share(s.scheduled_trips, s.bookings),
-      authorized_pct: share(s.authorized_trips, s.bookings),
+
+      /* THE AUTHORISATION RATE, OVER THE BOOKINGS ITS OWN CAPTION NAMES.
+         The page prints "of bookings at properties that require one" under this
+         figure and the figure was share(authorized_trips, bookings) — every
+         booking on the channel, whether the property runs an approval workflow
+         or not. Measured on production on 2026-09-05 over 2026-01-01 →
+         2026-09-05: 225 authorised over 1,737 channel bookings printed 13%,
+         while the caption's own denominator is the 225 bookings of "Office",
+         the single property of six whose approval_required is true. The old
+         number was neither the caption's rate nor any other rate an operator
+         has a use for — it was the share of the channel that happens to be one
+         property's business.
+
+         With has_authorization redefined as GRANTED in sql/schema_v62.sql, both
+         halves now say the same thing: how many bookings at properties that
+         require an authorisation actually got one. That is 0 of 225 today —
+         the whole channel holds exactly two granted approvals in the entire
+         record, both under operatorApproval and both dated 2026-09-04, and
+         neither is at the approval-requiring property, so neither is in this
+         denominator.
+
+         HOW THAT LAST FACT WAS CHECKED, because the sentence here first cited
+         /api/trip and that endpoint cannot answer it: the trip object it
+         returns carries no partner_id column at all — plate, driver, times,
+         money and `raw`, and nothing that names the property. The provider
+         puts the property in the booking itself, as raw.hotel (an id, e.g.
+         68a846bb80fe7c13cc244f55) beside raw.company and raw.hotelOperator, so
+         it is the stored record and the partner_id derived from it that answer
+         this, not the response shape. authorization_pending_trips carries the other 225, so the
+         page can say the approvals were raised and never answered rather than
+         never asked for.
+
+         Absent, with the reason, wherever the denominator does not exist —
+         three different reasons, because "no property requires one", "no
+         property has said whether it requires one" and "one does and no booking
+         in this window is at it" are three different things to do about it, and
+         a reader acts on the sentence. */
+      authorized_pct: share(s.authorized_trips, s.approval_required_bookings),
+      authorized_absent_reason: s.approval_required_bookings ? null
+        : !approval.declared
+          ? 'No property on this channel has declared whether it requires an authorisation, so '
+            + 'there is no set of bookings this rate could be measured over. The property list is '
+            + 'read on every collection — if this persists, the channel is not sending the flag.'
+          : !approval.requiring
+            ? `None of the ${approval.properties} properties on this channel requires an `
+              + 'authorisation, so there is no rate to measure. This is not a rate of zero.'
+            : `No booking in this window is at one of the ${approval.requiring} of `
+              + `${approval.properties} properties that require an authorisation.`,
       outside_dubai_pct: share(s.outside_dubai, s.zoned),
       concentration_hhi: hhi,
       top_property: props[0]?.name || null,
@@ -689,19 +764,21 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        is not a finding. The property list carries the flag; the collector now
        keeps it. Where no property has ever declared the flag, the category
        reports zero and says why, rather than accusing everybody. */
-    const [approval] = await q(
-      `SELECT count(*) FILTER (WHERE approval_required)::int requiring,
-              count(*) FILTER (WHERE approval_required IS NOT NULL)::int declared,
-              count(*)::int properties
-       FROM partner WHERE platform = 'hotel'`);
-    const REQUIRES_APPROVAL = `partner_id IN (
-      SELECT partner_id FROM partner WHERE platform = 'hotel' AND approval_required)`;
+    const approval = await approvalShape(q);
 
     const kinds = {
       complimentary: `is_complimentary`,
       overrun: `over_run`,
       unpriced: `price IS NULL AND NOT is_complimentary`,
       zero_priced: `price = 0 AND NOT is_complimentary`,
+      /* Reads GRANTED now, not "an object is attached" — see sql/schema_v62.sql.
+         The predicate is unchanged; what changed underneath it is that
+         has_authorization stopped answering a different question from the one
+         this category asks. On production over 2026-01-01 → 2026-09-05 it
+         answered 0 out of 1,737 while all 225 bookings at the one
+         approval-requiring property had been raised for approval and never
+         granted by anybody — 212 of them billed — and the strip drew that zero
+         as a category that had looked and found nothing. */
       unauthorized: approval?.requiring
         ? `NOT has_authorization AND price IS NOT NULL AND price > 0 AND ${REQUIRES_APPROVAL}`
         : `false`,
@@ -724,7 +801,8 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
       `SELECT external_id, requested_at, ended_at, driver_name, driver_ext_id, plate,
               coalesce(partner_name, partner_id) property, partner_id, product, payment_type,
               settlement_class, price, cost, distance_km, deadhead_km, hours, room_no,
-              trip_purpose, over_run, has_authorization, guest_id
+              trip_purpose, over_run, has_authorization, authorization_pending,
+              authorization_status, guest_id
        FROM trip_ext WHERE ${F} AND platform = 'hotel' AND ${kinds[only]}
        ORDER BY requested_at DESC LIMIT 500`, p) : [];
 
@@ -761,7 +839,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
   const LEAK_LABEL = {
     complimentary: 'Given away', overrun: 'Ran past the booked hours',
     unpriced: 'No fare recorded', zero_priced: 'Priced at zero',
-    unauthorized: 'Charged with no authorisation on file',
+    unauthorized: 'Charged with no approved authorisation',
     deadhead_exceeds_fare: 'Drove further to reach the job than the job itself',
     missing: 'Flagged as a missing trip by the booking system',
   };
@@ -773,9 +851,20 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
     unpriced: 'The booking closed without a fare. Either it was never billed or the price never '
       + 'reached us; both are worth a query.',
     zero_priced: 'A completed booking with a fare of exactly zero that is not marked complimentary.',
-    unauthorized: 'A billed booking with no authorisation object attached, at a property whose own '
-      + 'workflow requires one. Properties that do not use the approval flow are excluded — without '
-      + 'that qualifier this category flagged 87% of every booking on the channel.',
+    /* This said "with no authorisation object attached", which is what the
+       column used to measure and is false of every booking in the category
+       today: the provider attaches the object when the booking is RAISED, and
+       on production on 2026-09-05 all 225 bookings at the one
+       approval-requiring property carried one, 212 of them were billed, and not
+       one had been granted. A
+       reader shown these rows under the old sentence would go looking for a
+       missing object and find one on every row. */
+    unauthorized: 'A billed booking at a property whose own workflow requires an authorisation, '
+      + 'where no authorisation was ever granted. The Authorised column separates the two states a '
+      + 'row can be in — nothing on file at all, or an authorisation raised and never answered, '
+      + 'in the provider’s own word. '
+      + 'Properties that do not use the approval flow are excluded — without that qualifier this '
+      + 'category flagged 87% of every booking on the channel.',
     deadhead_exceeds_fare: 'The unpaid approach leg was longer than the paid ride. Repeated on the '
       + 'same property or daypart, this is a positioning problem, not bad luck.',
     missing: 'The booking system itself flagged this record as incomplete.',
