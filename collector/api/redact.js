@@ -168,10 +168,21 @@ export const photoHref = (platform, id) => (platform && id
    address has to name the row the bytes are actually under; anything else is a
    404 this product built for itself. The same mistake, in its louder form, put
    a null on all 434 rows of the driver directory. */
-export function withPhotos(rows, held) {
+export function withPhotos(rows, held, missed = null) {
   return rows.map((r) => {
     const platform = held && held.get(r.driver_ext_id);
-    return { ...r, picture_url: platform ? photoHref(platform, r.driver_ext_id) : null };
+    /* THREE STATES, NOT TWO. A null picture_url used to mean both "this person
+       has no photograph anywhere" and "Uber has one and we could not fetch it",
+       and the page drew the second as the first — a false statement about the
+       fleet's records, made silently, which is the one thing this product is
+       for removing. photo_absent_reason carries the second; it is null when
+       there is genuinely nothing to say. */
+    const why = !platform && missed ? missed.get(r.driver_ext_id) : null;
+    return {
+      ...r,
+      picture_url: platform ? photoHref(platform, r.driver_ext_id) : null,
+      ...(why ? { photo_absent_reason: why } : {}),
+    };
   });
 }
 

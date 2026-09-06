@@ -258,6 +258,41 @@ await q(`INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type,
     `trips ${JSON.stringify(hit[0]?.trips)} — four were seeded`);
 }
 
+/* THREE STATES, AND THE THIRD ONE IS OURS.
+   ─────────────────────────────────────────────────────────────────────────
+   picture_url null meant both "this person has no photograph anywhere" and
+   "Uber holds one and we could not fetch it", and the page drew the second as
+   the first — a plain initials tile, indistinguishable, saying something false
+   about the fleet's records without a word of warning. The collector already
+   knew: it counted four separate failure modes and put the number in a log
+   line. sql/schema_v64.sql keeps the reason where the boundary can read it. */
+await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name)
+         VALUES ('uber','drv-403','Photograph We Could Not Get')`);
+await q(`INSERT INTO driver_photo_miss (platform, driver_ext_id, reason, source_host)
+         VALUES ('uber','drv-403',
+                 'the host answered 403 — a signed url that has expired reads exactly like this',
+                 'd1w2poirtb3as9.cloudfront.net')`);
+for (const [name, path] of [
+  ['the compliance list', '/api/compliance/drivers'],
+  ['the driver directory', '/api/drivers/directory?days=30'],
+]) {
+  const r = await get(path);
+  const rows = (r.body?.drivers || r.body?.rows || (Array.isArray(r.body) ? r.body : []));
+  const has = (x, id) => x.driver_ext_id === id || (Array.isArray(x.ids) && x.ids.includes(id));
+  const failed = rows.find((x) => has(x, 'drv-403'));
+  const none = rows.find((x) => has(x, 'drv-nopic'));
+  check(`${name}: a photograph we could not fetch still has no address`,
+    !!failed && failed.picture_url === null, JSON.stringify(failed?.picture_url));
+  check(`${name}: …but it says why, in words an operator can act on`,
+    /403/.test(failed?.photo_absent_reason || ''), JSON.stringify(failed?.photo_absent_reason));
+  /* The half that makes it worth having: a driver Uber genuinely has no
+     picture for must NOT carry a reason, or "we could not fetch it" becomes
+     the caption on every faceless row in the fleet. */
+  check(`${name}: …and a driver with no photograph anywhere says nothing`,
+    !!none && none.photo_absent_reason === undefined,
+    JSON.stringify(none?.photo_absent_reason));
+}
+
 console.log('\nthe page can tell the two absences apart');
 
 /* THESE ASSERTIONS USED TO BE GREPS OVER THE SOURCE, AND THEY LIED.

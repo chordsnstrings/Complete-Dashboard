@@ -548,7 +548,7 @@ function identityCard(p) {
   const lastEver = dates('last_trip').pop() || p.span?.last_trip;
 
   wrap.innerHTML = `
-    ${avatar(p.name, c.picture_url)}
+    ${avatar(p.name, c.picture_url, '', c.photo_absent_reason)}
     <div class="idmeta">
       <h2>${esc(p.name || 'Unnamed driver')}</h2>
       <div class="idsub">
@@ -1878,7 +1878,7 @@ export async function renderDriverDirectory(root) {
     c.href = href('driver', r.driver_ext_id);
     c.innerHTML = `
       <div class="rank">${i + 1}</div>
-      ${avatar(r.driver_name, r.picture_url, 'sm')}
+      ${avatar(r.driver_name, r.picture_url, 'sm', r.photo_absent_reason)}
       <div class="dc-meta">
         <b title="${esc(r.driver_name)}">${esc(r.driver_name)}</b>
         <div class="cap">${(r.platforms || []).map(sourceLabel).join(' · ')}${r.plate ? ' · ' + esc(r.plate) : ''}</div>

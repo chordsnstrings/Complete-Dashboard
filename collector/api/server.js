@@ -4461,7 +4461,14 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     /* id -> the platform the BYTES are under, not the platform of the
        compliance row. See withPhotos in api/redact.js. */
     .map((r) => [r.driver_ext_id, r.platform]));
-  const drivers = withPhotos(stripIdentity(rows, admin), heldPhotos);
+  /* And why, for the ones we hold nothing for. One more key-only read over the
+     ids already in hand — see sql/schema_v64.sql for why the two absences must
+     not render the same. */
+  const missedPhotos = new Map((await q(
+    `SELECT driver_ext_id, reason FROM driver_photo_miss WHERE driver_ext_id = ANY($1)`,
+    [rows.map((r) => r.driver_ext_id).filter(Boolean)]))
+    .map((r) => [r.driver_ext_id, r.reason]));
+  const drivers = withPhotos(stripIdentity(rows, admin), heldPhotos, missedPhotos);
   /* SAID, not merely absent. api/public/app.js rendered a missing licence
      number as an em-dash captioned "this channel publishes no licence number",
      which for a WITHHELD one is a false statement about the provider — exactly

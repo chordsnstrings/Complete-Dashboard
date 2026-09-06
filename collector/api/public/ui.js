@@ -1509,9 +1509,24 @@ export const initialsOf = (name) => String(name || '?')
    address for and cannot fetch keeps the initials AND says why on hover, and
    carries a class a render audit can see — because the first case is normal
    and the second is a fault, and they looked identical. */
-export function avatar(name, pictureUrl, cls = '') {
+export function avatar(name, pictureUrl, cls = '', absentReason = null) {
   const initials = esc(initialsOf(name));
   const k = `av${cls ? ` ${cls}` : ''}`;
+  /* THREE STATES. A plain tile means the record holds no photograph, which is
+     the whole truth about that person. A marked tile means one exists and this
+     product does not have it — either the download failed (the reason comes
+     from driver_photo_miss and says what the CDN did) or the bytes are here and
+     the browser could not load them (below). Drawing the first two the same
+     way is a false statement about the fleet's records, made silently, which
+     is the failure this dashboard exists to remove. */
+  if (!pictureUrl && absentReason) {
+    /* aria-label as well as title, and not only for a screen reader: a title is
+       a tooltip, tooltips need hover, and the same markup is read on a touch
+       screen. The mark without the words is a coloured ring meaning nothing. */
+    const words = `Uber holds a photograph of this driver and this product does not: ${absentReason}`;
+    return `<div class="${k} av-lost" title="${esc(words)}" aria-label="${esc(`${name} — ${words}`)}"`
+      + `>${initials}</div>`;
+  }
   if (!pictureUrl) return `<div class="${k}">${initials}</div>`;
   /* THE PARENT IS TAKEN BEFORE THE CHILD IS REMOVED, and that is the whole
      bug this line has carried.
@@ -1537,7 +1552,8 @@ export function avatar(name, pictureUrl, cls = '') {
   return `<div class="${k} av-photo">${initials}<img src="${esc(pictureUrl)}" alt=""`
     + ' loading="lazy" referrerpolicy="no-referrer"'
     + ' onerror="var p=this.parentNode;this.remove();if(p){p.classList.add(\'av-lost\');'
-    + 'p.title=\'This driver has a photograph on file and it could not be loaded.\';}"'
+    + 'p.title=\'This driver has a photograph on file and it could not be loaded.\';'
+    + 'p.setAttribute(\'aria-label\',p.title);}"'
     + '></div>';
 }
 

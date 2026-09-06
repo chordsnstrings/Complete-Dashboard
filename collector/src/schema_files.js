@@ -54,4 +54,5 @@ export const SCHEMA_FILES = [
      runs weekly. Measured: 156 of them expired 4 Sep and every one answers 403.
      A separate table so a bytea never rides along on a contact read. */
   'schema_v63.sql',
+  'schema_v64.sql',
 ];

@@ -85,8 +85,23 @@ export const card = (title, cap) => {
 export const initialsOf = (name) => String(name || '?')
   .split(' ').filter(Boolean).slice(0, 2).map((x) => x[0]).join('').toUpperCase() || '?';
 
-export const avatar = (name, pictureUrl, cls = '') => {
+export const avatar = (name, pictureUrl, cls = '', absentReason = null) => {
   const d = el('div', `m-av${cls ? ` ${cls}` : ''}`, esc(initialsOf(name)));
+  /* Three states, the same three the desktop draws. See avatar() in
+     api/public/ui.js: a plain tile is "no photograph on this person's record",
+     a marked one is "there is one and we do not have it".
+
+     ON A PHONE THE REASON CANNOT BE A TOOLTIP. There is no hover on a touch
+     screen, so title alone puts the words somewhere the reader can never
+     reach. aria-label carries them to a screen reader, and the mark carries
+     the fact to everyone else. */
+  if (!pictureUrl && absentReason) {
+    const words = `Uber holds a photograph of this driver and this product does not: ${absentReason}`;
+    d.classList.add('av-lost');
+    d.title = words;
+    d.setAttribute('aria-label', `${name} — ${words}`);
+    return d;
+  }
   if (!pictureUrl) return d;
   d.classList.add('has-photo');
   const img = el('img');
@@ -101,7 +116,11 @@ export const avatar = (name, pictureUrl, cls = '') => {
   img.onerror = () => {
     img.remove();
     d.classList.add('av-lost');
-    d.title = 'This driver has a photograph on file and it could not be loaded.';
+    const words = 'This driver has a photograph on file and it could not be loaded.';
+    d.title = words;
+    /* A title is a tooltip and a phone has no hover, so on this shell the
+       sentence exists only for a reader who can reach it another way. */
+    d.setAttribute('aria-label', `${name} — ${words}`);
   };
   d.append(img);
   return d;

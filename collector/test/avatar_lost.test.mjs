@@ -69,10 +69,15 @@ for (const [shell, mod, page] of [
     };
     const broken = put(ui.avatar('Jane Doe', '/api/driver/photo/uber/does-not-exist'));
     const none = put(ui.avatar('Jane Doe', null));
+    /* The third state: no address to try, because the collector could not get
+       the bytes — and it knows why. */
+    const unfetched = put(ui.avatar('Jane Doe', null, '',
+      'the host answered 403 — a signed url that has expired reads exactly like this'));
     await wait();
     const read = (e) => ({ cls: e ? e.className : null, title: e ? (e.title || '') : null,
+      aria: e ? (e.getAttribute('aria-label') || '') : null,
       hasImg: !!e?.querySelector('img'), text: e ? e.textContent.trim() : null });
-    return { broken: read(broken), none: read(none) };
+    return { broken: read(broken), none: read(none), unfetched: read(unfetched) };
   }, mod);
 
   check('a photograph that will not load leaves a mark on the tile',
@@ -91,6 +96,26 @@ for (const [shell, mod, page] of [
   check('…and the initials are still underneath either way',
     /JD/.test(out.broken.text || '') && /JD/.test(out.none.text || ''),
     `${out.broken.text} / ${out.none.text}`);
+
+  /* THE THIRD STATE. Two of these three tiles have no photograph on them and
+     they are not the same fact: one is the whole truth about that person's
+     record, the other is a failure of ours that an operator can act on. They
+     rendered identically until sql/schema_v64.sql gave the collector somewhere
+     to write down what the CDN actually said. */
+  check('a photograph we could not fetch is marked, like one that would not load',
+    /av-lost/.test(out.unfetched.cls || ''), JSON.stringify(out.unfetched));
+  check('…and it names what went wrong rather than blaming the browser',
+    /403/.test(out.unfetched.title || ''), JSON.stringify(out.unfetched.title));
+  check('…and it is not the same tile as "no photograph on this record"',
+    out.unfetched.cls !== out.none.cls, `${out.unfetched.cls} vs ${out.none.cls}`);
+  /* A title is a tooltip, and a phone has no hover. The words have to be
+     reachable some other way or the mark is a coloured ring meaning nothing. */
+  /* aria, not title-or-aria. A title is a tooltip and a tooltip needs hover,
+     which a touch screen does not have — and the desktop markup is what a
+     screen reader meets on either. Falling back to the title here would have
+     made this assertion pass on a tile whose only words are unreachable. */
+  check('…and the words are reachable without a mouse',
+    /403/.test(out.unfetched.aria || ''), JSON.stringify(out.unfetched.aria));
   await p.close();
 }
 

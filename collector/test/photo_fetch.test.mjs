@@ -52,10 +52,18 @@ app.get('/good.jpg', (_, res) => res.type('image/jpeg').send(JPEG));
 /* A CDN that has forgotten what it holds and serves a sign-in page with a 200.
    Stored, this becomes markup on our own origin. */
 app.get('/page.html', (_, res) => res.type('text/html').send('<html>sign in</html>'));
-/* Bigger than the bound, and honest about it — refused before the body is read. */
+/* Bigger than the bound, and honest about it — refused before the body is read.
+   `connection: close`, and the socket ended by hand, because this response
+   DELIBERATELY promises 64MB it will never send: left keep-alive, the client
+   reuses that half-spoken socket for the next request and reads a body that is
+   not the one it asked for. That made this file fail about one run in three,
+   on an assertion two blocks away — a fixture bug wearing a product bug's
+   clothes. */
 app.get('/huge-declared.jpg', (_, res) => {
-  res.set('content-type', 'image/jpeg').set('content-length', String(64 * 1024 * 1024));
-  res.end(Buffer.alloc(1024));
+  res.set({ 'content-type': 'image/jpeg', 'content-length': String(64 * 1024 * 1024),
+    connection: 'close' });
+  res.flushHeaders();
+  res.socket.end();
 });
 /* Bigger than the bound and silent about it: chunked, so only what arrives can
    settle it. */
@@ -94,6 +102,32 @@ check('nothing that was served as a web page is in the table',
 check('…and the stored length is the length of what arrived',
   Number(stored[0]?.byte_len) === JPEG.length, `${stored[0]?.byte_len} against ${JPEG.length}`);
 
+console.log('\nand every refusal is written down with its reason');
+
+/* The count used to go into a log line and nowhere else, so the page said
+   "this driver has no photograph" about somebody whose photograph Uber holds.
+   A reason an operator can act on — "the host answered 403" is a signed url
+   that expired, "served as text/html" is a CDN serving a sign-in page — is the
+   difference between a fact about the fleet and a fault in this product. */
+const missed = await q('SELECT driver_ext_id, reason, source_host FROM driver_photo_miss ORDER BY driver_ext_id');
+check('one row per refusal', missed.length === 4, JSON.stringify(missed.map((m) => m.driver_ext_id)));
+check('a 403 says the host refused it',
+  /403/.test(missed.find((m) => m.driver_ext_id === 'dead')?.reason || ''),
+  JSON.stringify(missed.find((m) => m.driver_ext_id === 'dead')?.reason));
+check('a web page says what it was served as',
+  /text\/html/.test(missed.find((m) => m.driver_ext_id === 'markup')?.reason || ''),
+  JSON.stringify(missed.find((m) => m.driver_ext_id === 'markup')?.reason));
+check('an oversized body says so, with the bound',
+  /bytes, past the/.test(missed.find((m) => m.driver_ext_id === 'huge-chunked')?.reason || ''),
+  JSON.stringify(missed.find((m) => m.driver_ext_id === 'huge-chunked')?.reason));
+/* The host, never the query string: the path is a uuid and the query is a
+   signature, and a credential does not belong in a table an operator reads. */
+check('the host is kept and neither the port nor the signature is',
+  missed.every((m) => m.source_host === '127.0.0.1'),
+  JSON.stringify(missed.map((m) => m.source_host)));
+check('and the driver whose image arrived has no note against them',
+  !missed.some((m) => m.driver_ext_id === 'ok-1'), JSON.stringify(missed.map((m) => m.driver_ext_id)));
+
 console.log('\nan unchanged photograph is not written again');
 
 const r2 = await fetchPhotos([contact('ok-1', '/good.jpg')]);
@@ -114,6 +148,20 @@ check('it gives up rather than waiting for ever', took < 60000, `${(took / 1000)
 check('…and counts it as a failure, not a store', r3.failed === 1 && r3.stored === 0, JSON.stringify(r3));
 check('…and the run carries on', typeof r3.stored === 'number', JSON.stringify(r3));
 check('nothing was written for it', (await q("SELECT * FROM driver_photo WHERE driver_ext_id='stalls'")).length === 0);
+
+console.log('\nand a photograph that arrives clears the note that said it had not');
+
+/* Otherwise the page goes on explaining a failure that has since been fixed —
+   which is the same defect as the one this table exists to close, pointing the
+   other way. */
+await q(`INSERT INTO driver_photo_miss (platform, driver_ext_id, reason)
+         VALUES ('uber','recovers','the host answered 403') ON CONFLICT DO NOTHING`);
+const before = await q("SELECT count(*)::int n FROM driver_photo_miss WHERE driver_ext_id='recovers'");
+const r4 = await fetchPhotos([contact('recovers', '/good.jpg')]);
+const cleared = await q("SELECT count(*)::int n FROM driver_photo_miss WHERE driver_ext_id='recovers'");
+check('the note was there to begin with', before[0].n === 1, JSON.stringify(before[0]));
+check('the photograph is stored', r4.stored === 1, JSON.stringify(r4));
+check('…and the note is gone', cleared[0].n === 0, JSON.stringify(cleared[0]));
 
 console.log(`\n  (whole file ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 server.close();

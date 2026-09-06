@@ -231,7 +231,22 @@ export async function fetchPhotos(contacts) {
   const known = new Map(have.map((r) => [r.driver_ext_id, r.sha256]));
 
   const fresh = [];
+  const misses = [];
   let unchanged = 0, failed = 0;
+  /* WHY it failed, not merely that it did. The count went into a log line and
+     the knowledge died there, while the page rendered "this driver has no
+     photograph" about somebody whose photograph Uber holds and we could not
+     fetch. See sql/schema_v64.sql. The host is kept and the query string is
+     not: the path is a uuid and the query is a signature, and neither belongs
+     in a table an operator reads. */
+  const miss = (c, reason) => {
+    failed++;
+    let host = null;
+    try { host = new URL(c.picture_url).hostname; } catch { host = null; }
+    misses.push({ platform: 'uber', driver_ext_id: c.driver_ext_id,
+      reason: String(reason).slice(0, 200), source_host: host,
+      tried_at: new Date().toISOString() });
+  };
   for (const c of want) {
     try {
       /* Plain fetch, not http(): this is a CDN object on a signed URL, not the
@@ -251,9 +266,9 @@ export async function fetchPhotos(contacts) {
       const r = await fetch(c.picture_url, {
         redirect: 'follow', signal: AbortSignal.timeout(PHOTO_TIMEOUT_MS),
       });
-      if (!r.ok) { failed++; continue; }
+      if (!r.ok) { miss(c, `the host answered ${r.status} — a signed url that has expired reads exactly like this`); continue; }
       const type = String(r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-      if (!PHOTO_TYPES.has(type)) { failed++; continue; }
+      if (!PHOTO_TYPES.has(type)) { miss(c, `served as ${type || 'no type at all'}, which this product will not serve back`); continue; }
       /* The declared length is read BEFORE the body. arrayBuffer() pulls the
          whole response into the worker's heap and only then is it measured, so
          a mis-served 400MB object is refused after it has already been paid
@@ -261,21 +276,31 @@ export async function fetchPhotos(contacts) {
          and the check below still runs on what actually arrived — but when it
          is present and absurd there is no reason to read the body at all. */
       const declared = Number(r.headers.get('content-length') || 0);
-      if (declared > PHOTO_MAX_BYTES) { failed++; continue; }
+      if (declared > PHOTO_MAX_BYTES) { miss(c, `declared ${declared} bytes, past the ${PHOTO_MAX_BYTES} this stores`); continue; }
       const buf = Buffer.from(await r.arrayBuffer());
       /* A bound, because this writes to a shared database from a response we
          do not control. Uber's avatars are 300x300 and about 4-45kb; half a
          megabyte is far outside that and is a reason to stop rather than to
          store. */
-      if (!buf.length || buf.length > PHOTO_MAX_BYTES) { failed++; continue; }
+      if (!buf.length || buf.length > PHOTO_MAX_BYTES) { miss(c, buf.length
+        ? `${buf.length} bytes, past the ${PHOTO_MAX_BYTES} this stores`
+        : 'the host answered with an empty body'); continue; }
       const sha = createHash('sha256').update(buf).digest('hex');
       if (known.get(c.driver_ext_id) === sha) { unchanged++; continue; }
       fresh.push({ platform: 'uber', driver_ext_id: c.driver_ext_id,
         bytes: buf, content_type: type, byte_len: buf.length, sha256: sha,
         source_url: c.picture_url, fetched_at: new Date().toISOString() });
-    } catch { failed++; }
+    } catch (e) { miss(c, `the request did not complete: ${String(e && e.name === 'TimeoutError' ? `no answer within ${PHOTO_TIMEOUT_MS}ms` : (e && e.message) || e)}`); }
   }
   if (fresh.length) await upsertMany('driver_photo', fresh, ['platform', 'driver_ext_id']);
+  if (misses.length) await upsertMany('driver_photo_miss', misses, ['platform', 'driver_ext_id']);
+  /* A photograph that arrives clears the note that says it did not. Otherwise
+     the page goes on explaining a failure that has since been repaired. */
+  if (fresh.length) {
+    await pool.query(
+      `DELETE FROM driver_photo_miss WHERE platform = 'uber' AND driver_ext_id = ANY($1)`,
+      [fresh.map((f) => f.driver_ext_id)]);
+  }
   if (fresh.length || failed) {
     log.info('uber_profile', 'photos', { stored: fresh.length, unchanged, failed });
   }

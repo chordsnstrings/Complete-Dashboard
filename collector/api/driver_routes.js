@@ -536,6 +536,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                  is a 404 by construction. */
               dp.platform AS photo_platform,
               (dp.platform IS NOT NULL) AS has_photo,
+              /* And why not, when there is a reason worth telling. Same shape
+                 as dp: one row out however many are in. */
+              pm.reason AS photo_absent_reason,
               (dc.licence_expires - now()::date) AS licence_days_left,
               ($5::text IS NOT NULL
                AND to_char(dc.licence_expires,'YYYY-MM-DD') = $5) AS licence_placeholder,
@@ -572,6 +575,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        LEFT JOIN LATERAL (
          SELECT p2.platform FROM driver_photo p2
           WHERE p2.driver_ext_id = who.driver_ext_id LIMIT 1) dp ON true
+       LEFT JOIN LATERAL (
+         SELECT m2.reason FROM driver_photo_miss m2
+          WHERE m2.driver_ext_id = who.driver_ext_id LIMIT 1) pm ON true
        LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
        ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 800`, [...P, placeholderDate]);
 
@@ -626,11 +632,13 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
              fold has to keep the account the picture is under rather than
              whichever row happened to seed the person. */
           _photo: r.has_photo ? { platform: r.photo_platform, id: r.driver_ext_id } : null,
+          _photoMiss: r.has_photo ? null : (r.photo_absent_reason || null),
           _days: new Set() });
         continue;
       }
       cur.ids.push(r.driver_ext_id);
       if (!cur._photo && r.has_photo) cur._photo = { platform: r.photo_platform, id: r.driver_ext_id };
+      if (!cur._photoMiss && r.photo_absent_reason) cur._photoMiss = r.photo_absent_reason;
       cur.trips += r.trips;
       cur.completed += r.completed; cur.bookable += r.bookable;
       cur.priced_trips += r.priced_trips;
@@ -748,8 +756,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       /* This origin's address for the copy we hold, or null. Never Uber's
          signed URL — see photoHref in api/redact.js. */
       p.picture_url = photoHref(p._photo?.platform, p._photo?.id);
+      /* Only when there is nothing to show AND something to say.
+         Dropped first, because the fold seeds a person with `{ ...r }` and the
+         raw column rides along — so a driver with nothing to explain carried
+         `photo_absent_reason: null`, and a key that is present-and-null is a
+         different claim from a key that is absent. The whole point of this
+         field is that its presence means something. */
+      delete p.photo_absent_reason;
+      if (!p.picture_url && p._photoMiss) p.photo_absent_reason = p._photoMiss;
       delete p._days; delete p._multiAccountDays; delete p._grainUnknown; delete p._ratingTrips;
-      delete p._photo; delete p.has_photo; delete p.photo_platform;
+      delete p._photo; delete p._photoMiss; delete p.has_photo; delete p.photo_platform;
       return {
         ...p,
         // Computed once, over the whole person.
@@ -867,7 +883,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const held = new Map((await q(
       `SELECT platform, driver_ext_id FROM driver_photo WHERE driver_ext_id = ANY($1)`,
       [d.keys])).map((r) => [r.driver_ext_id, r.platform]));
-    const compliance = withPhotos(stripIdentity(complianceRows, admin), held);
+    const missed = new Map((await q(
+      `SELECT driver_ext_id, reason FROM driver_photo_miss WHERE driver_ext_id = ANY($1)`,
+      [d.keys])).map((r) => [r.driver_ext_id, r.reason]));
+    const compliance = withPhotos(stripIdentity(complianceRows, admin), held, missed);
     /* Which of them this person actually HAS, counted before the values were
        dropped. Without this the page cannot tell "withheld" from "the hotel
        channel never filed one", and those are the two states the whole
