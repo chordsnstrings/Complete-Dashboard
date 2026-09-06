@@ -74,10 +74,12 @@ export const card = (title, cap) => {
 /* One sentence and the number it is about. The claim comes first because on a
    phone the first line is often the only line read. */
 /* ── a person's face, or their initials ───────────────────────────────────
-   The initials stay UNDERNEATH the photo rather than being replaced by it: the
-   url is a remote CloudFront object that can 404 long after the row was
-   written, and an avatar that fails to load must degrade to the thing it
-   replaced rather than to an empty box. The img removes itself on error, so
+   The initials stay UNDERNEATH the photo rather than being replaced by it: an
+   avatar that fails to load must degrade to the thing it replaced rather than
+   to an empty box. The url is no longer a remote CloudFront object — it is
+   this product's own /api/driver/photo/… address for bytes it holds, because
+   the CloudFront one authorised for twelve hours and the collector that wrote
+   it runs weekly. The img removes itself on error, so
    the fallback is already painted before it is needed. Same rule as the
    desktop's avatar() in api/public/ui.js. */
 export const initialsOf = (name) => String(name || '?')
@@ -92,7 +94,15 @@ export const avatar = (name, pictureUrl, cls = '') => {
   img.alt = '';
   img.loading = 'lazy';
   img.referrerPolicy = 'no-referrer';
-  img.onerror = () => img.remove();
+  /* Same rule as the desktop's avatar(): a photograph we hold an address for
+     and cannot fetch is a FAULT, and it must not look identical to a driver
+     who simply has no photograph on file. Removing the img alone made 156
+     dead images render as a perfectly normal page for two days. */
+  img.onerror = () => {
+    img.remove();
+    d.classList.add('av-lost');
+    d.title = 'This driver has a photograph on file and it could not be loaded.';
+  };
   d.append(img);
   return d;
 };

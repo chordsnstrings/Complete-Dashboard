@@ -43,6 +43,7 @@ import { uberOrgs } from './uber.js';
 import { authFailure, saysAuth, noteCredential, credentialState } from '../auth_state.js';
 import { log } from '../log.js';
 import { dubaiIso } from '../util.js';
+import { createHash } from 'node:crypto';
 
 const SRC = 'uber_profile';
 const URL_ = `${UBER_WEB_HOST}/graphql`;
@@ -183,6 +184,76 @@ async function driverIdsFor(o) {
   return rows.map((r) => r.driver_ext_id);
 }
 
+/* The bytes, while the key still turns.
+   ─────────────────────────────────────────────────────────────────────────
+   Uber does not hand out a picture. It hands out a twelve-hour pass to one: a
+   CloudFront URL carrying Expires, Key-Pair-Id and Signature. Storing that
+   string in a durable column stores a credential that outlives its own
+   validity by a factor of fourteen — measured on production 2026-09-06, the
+   156 URLs written by the 4 September runs expired 11.9995 hours after those
+   runs finished, and every one of them now answers 403 AccessDenied behind an
+   <img> that deletes itself on error, so the page degrades to initials and
+   says nothing.
+
+   The fix is not a better refresh cadence. Twelve hours of validity cannot be
+   covered by any weekly job, and a job frequent enough to try would re-ask
+   Uber about 157 drivers several times a day to keep 3 MB of images alive.
+   So the image is fetched HERE, in the seconds after the URL arrives, and the
+   bytes are kept. What expires afterwards is a string nobody needs again.
+
+   Deliberately quiet about failure. A photograph is not a fact about the work
+   and this pass exists to collect ratings, bans and papers: a CDN that refuses
+   one image must not fail a run that has just written 157 compliance rows. A
+   miss leaves the previous copy in place — an old photograph of the right
+   person is better than none — and is counted for the log line. */
+const PHOTO_MAX_BYTES = 512 * 1024;
+const PHOTO_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+
+async function fetchPhotos(contacts) {
+  const want = contacts.filter((c) => c.picture_url);
+  if (!want.length) return { stored: 0, unchanged: 0, failed: 0 };
+
+  /* What we already hold, by digest. An unchanged photograph must not be
+     rewritten: 157 rows of 20kb through the WAL every pass, to store what is
+     already there, is the kind of cost that only shows up as a slow database
+     months later. */
+  const { rows: have } = await pool.query(
+    `SELECT driver_ext_id, sha256 FROM driver_photo
+      WHERE platform = 'uber' AND driver_ext_id = ANY($1)`,
+    [want.map((c) => c.driver_ext_id)]);
+  const known = new Map(have.map((r) => [r.driver_ext_id, r.sha256]));
+
+  const fresh = [];
+  let unchanged = 0, failed = 0;
+  for (const c of want) {
+    try {
+      /* Plain fetch, not http(): this is a CDN object on a signed URL, not the
+         Uber gateway, and it must not carry the portal's cookies or headers.
+         The signature is the whole authorisation. */
+      const r = await fetch(c.picture_url, { redirect: 'follow' });
+      if (!r.ok) { failed++; continue; }
+      const type = String(r.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!PHOTO_TYPES.has(type)) { failed++; continue; }
+      const buf = Buffer.from(await r.arrayBuffer());
+      /* A bound, because this writes to a shared database from a response we
+         do not control. Uber's avatars are 300x300 and about 4-45kb; half a
+         megabyte is far outside that and is a reason to stop rather than to
+         store. */
+      if (!buf.length || buf.length > PHOTO_MAX_BYTES) { failed++; continue; }
+      const sha = createHash('sha256').update(buf).digest('hex');
+      if (known.get(c.driver_ext_id) === sha) { unchanged++; continue; }
+      fresh.push({ platform: 'uber', driver_ext_id: c.driver_ext_id,
+        bytes: buf, content_type: type, byte_len: buf.length, sha256: sha,
+        source_url: c.picture_url, fetched_at: new Date().toISOString() });
+    } catch { failed++; }
+  }
+  if (fresh.length) await upsertMany('driver_photo', fresh, ['platform', 'driver_ext_id']);
+  if (fresh.length || failed) {
+    log.info('uber_profile', 'photos', { stored: fresh.length, unchanged, failed });
+  }
+  return { stored: fresh.length, unchanged, failed };
+}
+
 /* The two writes that make a profile durable, so they can happen per batch
    instead of once at the very end of a 160-driver pass. */
 async function writeProfiles(rows, contacts = []) {
@@ -194,6 +265,10 @@ async function writeProfiles(rows, contacts = []) {
      nulls. */
   const real = contacts.filter((c) => c && (c.phone || c.email || c.picture_url));
   if (real.length) await upsertMany('driver_compliance', real, ['platform', 'driver_ext_id']);
+  /* And the PHOTOGRAPH, not the address of one. See fetchPhotos below: the URL
+     we have just stored stops working twelve hours from now, and this is the
+     only moment anybody holds a working one. */
+  await fetchPhotos(real);
   /* And kept, as well as overwritten.
      ─────────────────────────────────────────────────────────────────────
      driver_platform_state answers "what is this driver rated"; it is

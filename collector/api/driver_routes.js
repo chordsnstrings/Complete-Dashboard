@@ -27,7 +27,7 @@ import { areaOf } from './analytics_routes.js';
    place to get it wrong. */
 import { isoDay } from '../src/sources/ledger.js';
 import { isAdmin } from './admin_gate.js';
-import { IDENTITY_DOCS, stripIdentity, withheldNote } from './redact.js';
+import { IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, photoHref } from './redact.js';
 /* The three identities a human verified, id to id — see api/identity_map.js
    for the measurement behind each and why this is a LIST and not a rule. The
    stored person_key already carries them (sql/schema_v53.sql generates it from
@@ -506,10 +506,19 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 AS identity_from_history,
               ev.last_ever, coalesce(ev.lifetime, 0) AS lifetime_trips,
               dc.state, dc.licence_expires, dc.rating,
-              /* The portal's own photo, so every list that draws a person can
-                 draw their face rather than two letters. It rides on the row
-                 the compliance columns already come from. */
-              dc.picture_url,
+              /* Whether this product HOLDS the person's photograph, so every
+                 list that draws them can draw their face rather than two
+                 letters.
+                 ─────────────────────────────────────────────────────────────
+                 Not dc.picture_url. That column holds what Uber returned: a
+                 CloudFront URL signed for twelve hours, written weekly, and
+                 therefore dead for about 93% of its life — measured on
+                 production, 156 of them expired together on 4 September and
+                 every one answered 403 behind an <img> that deletes itself.
+                 A row in driver_photo means the bytes are on this origin, and
+                 the address is built from the key rather than stored. This
+                 reads two key columns and never an image. */
+              (dp.driver_ext_id IS NOT NULL) AS has_photo,
               (dc.licence_expires - now()::date) AS licence_days_left,
               ($5::text IS NOT NULL
                AND to_char(dc.licence_expires,'YYYY-MM-DD') = $5) AS licence_placeholder,
@@ -537,6 +546,7 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        LEFT JOIN dmoney dm ON dm.driver_ext_id = who.driver_ext_id
        LEFT JOIN ever ev ON ev.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_compliance dc ON dc.driver_ext_id = who.driver_ext_id
+       LEFT JOIN driver_photo dp ON dp.driver_ext_id = who.driver_ext_id
        LEFT JOIN driver_platform_state dps ON dps.driver_ext_id = who.driver_ext_id
        ORDER BY coalesce(w.trips, 0) DESC, who.driver_name LIMIT 800`, [...P, placeholderDate]);
 
@@ -586,10 +596,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
              the second makes the person's total unstatable. */
           _grainUnknown: r.money != null && r.money_period_days == null,
           _ratingTrips: r.platform_rating != null ? (r.platform_lifetime_trips || 0) : -1,
+          /* WHICH account carries the face. A person with a hotel record and an
+             Uber one has two rows here and only Uber files a photograph, so the
+             fold has to keep the account the picture is under rather than
+             whichever row happened to seed the person. */
+          _photo: r.has_photo ? { platform: r.platform, id: r.driver_ext_id } : null,
           _days: new Set() });
         continue;
       }
       cur.ids.push(r.driver_ext_id);
+      if (!cur._photo && r.has_photo) cur._photo = { platform: r.platform, id: r.driver_ext_id };
       cur.trips += r.trips;
       cur.completed += r.completed; cur.bookable += r.bookable;
       cur.priced_trips += r.priced_trips;
@@ -704,7 +720,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          here rather than in the fold so the flag cannot survive into the
          payload as a private field somebody starts reading. */
       if (p._grainUnknown) p.money_period_days = null;
+      /* This origin's address for the copy we hold, or null. Never Uber's
+         signed URL — see photoHref in api/redact.js. */
+      p.picture_url = photoHref(p._photo?.platform, p._photo?.id);
       delete p._days; delete p._multiAccountDays; delete p._grainUnknown; delete p._ratingTrips;
+      delete p._photo; delete p.has_photo;
       return {
         ...p,
         // Computed once, over the whole person.
@@ -720,6 +740,48 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
   }));
 
   /* ── who this is: identity, credentials, platforms, tenure ─────────── */
+  /* One driver's photograph, from this product's own store.
+     ─────────────────────────────────────────────────────────────────────────
+     The bytes, not a redirect. A redirect would send the reader back to the
+     CloudFront URL the collector was given, which authorises for twelve hours
+     and is therefore dead by the time almost anybody follows it — that is the
+     whole defect this route exists to close.
+
+     Its own route, and never inlined into a list response. Measured on
+     production, /api/drivers/directory is already 513kb; base64ing 153 avatars
+     into it at about 20kb each would make it 4.6MB, and api/cache.js is
+     byte-bounded at 64MB — fourteen cached copies of one page before the cache
+     starts evicting the rest of the product. An image belongs on a URL a
+     browser can cache by itself.
+
+     Cached hard and validated by digest. The bytes for a given driver change
+     only when Uber's photograph does, which is approximately never, so the
+     ETag is the sha256 and a repeat visit costs a 304. immutable is not used:
+     the address is stable across content changes, so a validator is right and
+     a promise of immutability would be a lie. */
+  app.get('/api/driver/photo/:platform/:id', wrap(async (req, res) => {
+    const rows = await q(
+      `SELECT bytes, content_type, byte_len, sha256, fetched_at
+         FROM driver_photo WHERE platform = $1 AND driver_ext_id = $2`,
+      [String(req.params.platform || '').toLowerCase(), req.params.id]);
+    const row = rows[0];
+    /* 404, and a reason. A driver with no photograph on file is not an error,
+       and the caller — an <img> — cannot read a body, so the reason goes in a
+       header where a person debugging can still find it. */
+    if (!row) {
+      res.set('x-photo', 'none on file for this driver');
+      return res.status(404).json({ error: 'no photo on file for this driver' });
+    }
+    const etag = `"${row.sha256}"`;
+    res.set('etag', etag);
+    res.set('cache-control', 'private, max-age=86400, stale-while-revalidate=604800');
+    res.set('content-type', row.content_type);
+    res.set('x-photo-fetched', new Date(row.fetched_at).toISOString());
+    if (req.get('if-none-match') === etag) return res.status(304).end();
+    res.set('content-length', String(row.byte_len));
+    return res.end(row.bytes);
+  }));
+
   app.get('/api/driver/profile', withDriver(async (req, res, d, p) => {
     const [span] = await q(
       `SELECT min(requested_at) first_trip, max(requested_at) last_trip, count(*)::int trips,
@@ -745,9 +807,24 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               emirates_id, licence_no, licence_expires,
               (licence_expires - now()::date) AS licence_days_left, state, suspension_reason,
               rating, device_brand, device_model, updated_at
-       FROM driver_compliance WHERE driver_ext_id = ANY($1)`, [d.keys]);
+       FROM driver_compliance WHERE driver_ext_id = ANY($1)
+       /* ORDERED, because the driver page reads compliance[0] and this query
+          had no ORDER BY at all — so for a person with both a hotel record and
+          an Uber one, "the first row" was whichever the planner happened to
+          return, and the page could show no photograph, no phone and no email
+          while all three sat in the row behind it. Rows that carry contact
+          details come first, and Uber's come before the rest because it is the
+          only channel that files a photograph. */
+       ORDER BY (picture_url IS NOT NULL) DESC,
+                (coalesce(phone, email) IS NOT NULL) DESC,
+                (platform = 'uber') DESC, platform`, [d.keys]);
     const admin = isAdmin(req);
-    const compliance = stripIdentity(complianceRows, admin);
+    /* Our own address for the photograph, never Uber's twelve-hour signed one.
+       One key-only read, no bytes. */
+    const held = new Set((await q(
+      `SELECT platform, driver_ext_id FROM driver_photo WHERE driver_ext_id = ANY($1)`,
+      [d.keys])).map((r) => `${r.platform}\u0000${r.driver_ext_id}`));
+    const compliance = withPhotos(stripIdentity(complianceRows, admin), held);
     /* Which of them this person actually HAS, counted before the values were
        dropped. Without this the page cannot tell "withheld" from "the hotel
        channel never filed one", and those are the two states the whole

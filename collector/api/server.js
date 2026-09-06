@@ -54,7 +54,7 @@ import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
    is always the one nobody re-reads. Its header is also where the deliberate
    exclusions live — phone and email STAY, because the operator asked for them
    and four pages render them. */
-import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote } from './redact.js';
+import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote, photoHref, withPhotos } from './redact.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
 import { RAW_ALIASES } from '../src/probe.js';
 
@@ -1292,11 +1292,20 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
           AND coalesce(person_key, '') <> ''
         GROUP BY 1
      )
-     /* The person's face, joined on the id the row already carries. LEFT, and
-        DISTINCT ON, because a person with a hotel record and an Uber one has
-        two compliance rows and only Uber's carries a photo — so the one with a
-        picture wins rather than whichever the planner reached first. */
-     SELECT people.*, pic.picture_url, count(*) OVER ()::int AS _people,
+     /* The person's face, joined on the id the row already carries. LEFT,
+        because a person with a hotel record and an Uber one has two compliance
+        rows and only Uber's carries a photo — so the one with a picture wins
+        rather than whichever the planner reached first.
+
+        Joined against driver_photo, not driver_compliance. The column on
+        compliance holds Uber's own signed URL, which authorises for twelve
+        hours and is therefore dead by the time almost any reader arrives;
+        driver_photo holds the bytes this product fetched while that URL still
+        worked. The presence of a row here is exactly the condition under which
+        a servable address exists, so the join IS the test — and it reads two
+        key columns, never the image. */
+     SELECT people.*, pic.platform AS photo_platform, pic.driver_ext_id AS photo_id,
+            count(*) OVER ()::int AS _people,
             pay.payout, coalesce(pay.payout_days, 0) AS payout_days,
             dm.money, coalesce(dm.money_days, 0) AS money_days,
             dm.money_period_days, dm.money_source
@@ -1304,13 +1313,19 @@ app.get('/api/drivers/leaderboard', wrap(async (req, res) => {
        LEFT JOIN pay ON pay.person = people.person
        LEFT JOIN dmoney dm ON dm.person = people.person
        LEFT JOIN LATERAL (
-         SELECT dc.picture_url FROM driver_compliance dc
-          WHERE dc.driver_ext_id = people.driver_ext_id
-            AND dc.picture_url IS NOT NULL
+         SELECT dp.platform, dp.driver_ext_id FROM driver_photo dp
+          WHERE dp.driver_ext_id = people.driver_ext_id
           LIMIT 1) pic ON true
        ORDER BY completed_trips DESC, trips DESC LIMIT 100`, p);
   const people = rows.length ? rows[0]._people : 0;
-  for (const r of rows) delete r._people;
+  /* picture_url is this product's own address for the copy it holds, never
+     Uber's. See photoHref in api/redact.js: the stored URL is 480 bytes of
+     credential that stopped working twelve hours after it was written, and on
+     production it was 12.2% of this response's entire body. */
+  for (const r of rows) {
+    r.picture_url = photoHref(r.photo_platform, r.photo_id);
+    delete r._people; delete r.photo_platform; delete r.photo_id;
+  }
   res.json({ rows, people: people || rows.length, shown: rows.length,
     truncated: people > rows.length });
 }));
@@ -4428,7 +4443,13 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      and /api/driver/profile — which selects the same two columns for one
      person — kept serving them to an anonymous GET for exactly as long as the
      definition lived in one file and not the other. */
-  const drivers = stripIdentity(rows, admin);
+  /* Our own address for the photograph, never Uber's twelve-hour signed one.
+     One key-only read over the ids already in hand — no image bytes. */
+  const heldPhotos = new Set((await q(
+    `SELECT platform, driver_ext_id FROM driver_photo WHERE driver_ext_id = ANY($1)`,
+    [rows.map((r) => r.driver_ext_id).filter(Boolean)]))
+    .map((r) => `${r.platform}\u0000${r.driver_ext_id}`));
+  const drivers = withPhotos(stripIdentity(rows, admin), heldPhotos);
   /* SAID, not merely absent. api/public/app.js rendered a missing licence
      number as an em-dash captioned "this channel publishes no licence number",
      which for a WITHHELD one is a false statement about the provider — exactly

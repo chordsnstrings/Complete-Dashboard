@@ -49,4 +49,9 @@ export const SCHEMA_FILES = [
      reporting split into authorization_pending and the provider's own word kept
      in authorization_status. */
   'schema_v62.sql',
+  /* driver_photo: the image bytes, because driver_compliance.picture_url holds
+     a twelve-hour pre-signed CloudFront URL and the collector that refreshes it
+     runs weekly. Measured: 156 of them expired 4 Sep and every one answers 403.
+     A separate table so a bytea never rides along on a contact read. */
+  'schema_v63.sql',
 ];

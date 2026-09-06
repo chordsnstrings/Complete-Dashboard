@@ -1341,12 +1341,29 @@ export function foldRows(host, node, { shown = 10, total, noun = 'row', key = nu
 export const initialsOf = (name) => String(name || '?')
   .split(' ').filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase() || '?';
 
+/* A photograph that will not load says so, rather than disappearing.
+   ─────────────────────────────────────────────────────────────────────────
+   `onerror="this.remove()"` deleted the <img> and revealed the initials tile
+   already painted underneath — no broken icon, no message, no layout shift. It
+   degraded so cleanly that 156 photographs 403'd for two days on a page that
+   looked entirely normal, and nobody could have told from the screen that
+   anything was wrong. That is the same failure this product spends its time
+   removing everywhere else: an absence rendered as though it were a fact.
+
+   Two states, kept apart. A driver with no photograph on file gets initials
+   and nothing else, which is true. A driver whose photograph we hold an
+   address for and cannot fetch keeps the initials AND says why on hover, and
+   carries a class a render audit can see — because the first case is normal
+   and the second is a fault, and they looked identical. */
 export function avatar(name, pictureUrl, cls = '') {
   const initials = esc(initialsOf(name));
   const k = `av${cls ? ` ${cls}` : ''}`;
   if (!pictureUrl) return `<div class="${k}">${initials}</div>`;
   return `<div class="${k} av-photo">${initials}<img src="${esc(pictureUrl)}" alt=""`
-    + ' loading="lazy" referrerpolicy="no-referrer" onerror="this.remove()"></div>';
+    + ' loading="lazy" referrerpolicy="no-referrer"'
+    + ' onerror="this.remove();this.parentNode.classList.add(\'av-lost\');'
+    + 'this.parentNode.title=\'This driver has a photograph on file and it could not be loaded.\'"'
+    + '></div>';
 }
 
 /* ── what a driver earned, and which record says so ───────────────────────

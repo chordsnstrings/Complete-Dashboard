@@ -133,6 +133,38 @@ export function redactSampleValue(v) {
 
    Phone, email and picture stay, here as everywhere: see "what stays, and why"
    at the top of this file. */
+/* A photograph's ADDRESS, which is this product's own and not Uber's.
+   ─────────────────────────────────────────────────────────────────────────
+   driver_compliance.picture_url holds what the portal returned: a CloudFront
+   URL signed for twelve hours. It is dead within half a day of being written
+   and it is 480 bytes of expired credential — measured on production, 12.2% of
+   the entire /api/drivers/directory response was Expires/Signature/Key-Pair-Id
+   query string that had not worked for two days.
+
+   So it never leaves. What leaves is the address of the copy we hold, which is
+   short, stable, and answers. A driver with no stored photograph gets null,
+   which is what avatar() already draws initials for — the same three states
+   the rest of this file keeps apart: held and served, held and withheld, never
+   collected.
+
+   Applied at the point of emission rather than in the query, because the same
+   rows carry the expiry dates and counts the compliance page derives, and
+   because an administrator reading provenance may still want to know a URL was
+   once stored. */
+export const photoHref = (platform, id) => (platform && id
+  ? `/api/driver/photo/${encodeURIComponent(platform)}/${encodeURIComponent(id)}`
+  : null);
+
+/* Replace every picture_url with our own, for rows we hold bytes for.
+   `held` is a Set of `<platform>\u0000<driver_ext_id>` keys — built by the
+   caller from one cheap query that reads no bytes at all. */
+export function withPhotos(rows, held) {
+  return rows.map((r) => {
+    const has = held && held.has(`${r.platform}\u0000${r.driver_ext_id}`);
+    return { ...r, picture_url: has ? photoHref(r.platform, r.driver_ext_id) : null };
+  });
+}
+
 export const IDENTITY_DOCS = ['licence_no', 'emirates_id'];
 
 /** Drop the identity documents from a row set unless the caller is an admin.

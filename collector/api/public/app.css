@@ -1120,6 +1120,20 @@ td.v-critical{color:var(--critical);box-shadow:inset 2px 0 0 var(--critical);fon
    .pill.bad keeps a mark because it is the only one of the three that is ever
    a verdict rather than a state, and it is an exclamation rather than a
    direction — a suspended driver has not gone "down". */
+/* A photograph on file that could not be fetched.
+   The initials tile underneath is already correct for a driver with no
+   photograph; this is the other case, and it must not look the same. A hairline
+   ring says "something belongs here", quietly enough that a directory of a
+   hundred does not read as a hundred errors. */
+/* INSIDE the tile, because .av-photo is overflow:hidden — a badge hung off the
+   corner would simply be clipped away, which is the failure this rule exists
+   to make visible. */
+.av-lost{box-shadow:inset 0 0 0 1.5px var(--warn)}
+.av-lost::after{
+  content:"";position:absolute;right:3px;bottom:3px;width:6px;height:6px;
+  border-radius:50%;background:var(--warn);
+}
+
 .pill.bad{font-weight:600}
 .pill.bad::before{content:"! ";letter-spacing:0;font-weight:700}
 /* A fact this window did not measure. The driver directory lists everyone the
