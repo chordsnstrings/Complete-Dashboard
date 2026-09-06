@@ -98,6 +98,15 @@ export async function todayLive() {
     money: num(h.accounted),
     moneyFares: num(h.accounted_fares),
     moneyPayouts: num(h.accounted_payouts),
+    /* Whether the SERVER said there is no money yet, or we never got the field.
+       num() collapses both to null and the tile then printed "no channel has
+       been credited yet today" either way — which is a claim about the fleet's
+       morning, and it was false on a phone whose cached copy of this file
+       predated the `money` field: /api/day was answering accounted 2616.27 at
+       the moment the tile said nobody had been credited. `accounted` is a key
+       /api/day always sends, so its ABSENCE means the payload did not reach
+       this code intact, and that is a different sentence. */
+    moneyAnswered: h.accounted !== undefined,
     km: num(h.booked_km),
     drivers: num(h.drivers),
     vehicles: num(h.vehicles),

@@ -27,6 +27,7 @@ const app = readFileSync('api/public/app.js', 'utf8');
 const phone = readFileSync('api/public/m/screens.js', 'utf8');
 const html = readFileSync('api/public/index.html', 'utf8');
 const css = readFileSync('api/public/app.css', 'utf8');
+const server = readFileSync('api/server.js', 'utf8');
 
 console.log('\nthe figure it shows is a measurement of today');
 
@@ -54,6 +55,22 @@ check('…which never travels without its two halves named',
   /moneyFares: num\(h\.accounted_fares\)/.test(mod)
   && /moneyPayouts: num\(h\.accounted_payouts\)/.test(mod),
   'a total whose composition is unstated is the figure this product exists to stop printing');
+/* A stale module is a real state, not a hypothetical: on 2026-09-06 a phone
+   rendered a new m/screens.js against a cached today.js with no `money` field
+   and printed "no channel has been credited yet today" while /api/day was
+   answering 2616.27. The two absences must not share a sentence. */
+check('the module reports whether the server answered at all, not just the value',
+  /moneyAnswered: h\.accounted !== undefined/.test(mod),
+  'a missing field and a nil figure are different facts');
+check('…and the phone says the true one for each',
+  /moneyAnswered/.test(phone) && /did not load/.test(phone));
+/* And the header that made it possible. A module served
+   stale-while-revalidate is USED stale, so two modules of one program drift
+   apart for as long as the window allows — seven days, as shipped. */
+check('code revalidates before use, so the module graph cannot run mixed versions',
+  /\.\(\?:js\|mjs\|css\)\$/.test(server) && /index\.html'\) \|\| code/.test(server),
+  'js/css must not carry stale-while-revalidate');
+
 check('both shells print money in, from the one module',
   /label: 'Money in'/.test(phone) && /fact\('money in'/.test(app),
   'the phone and the desktop disagreeing about today is what this module exists to prevent');

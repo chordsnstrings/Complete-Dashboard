@@ -5305,7 +5305,32 @@ app.use(express.static(join(__dir, 'public'), {
       res.setHeader('Service-Worker-Allowed', '/');
       return;
     }
-    res.setHeader('Cache-Control', path.endsWith('index.html')
+    /* THE MODULE GRAPH MUST NOT RUN MIXED VERSIONS.
+       ─────────────────────────────────────────────────────────────────
+       Every .js here was served `max-age=300, stale-while-revalidate=604800`,
+       and the paragraph above claimed that "picks up a deploy within one page
+       load". It does not. stale-while-revalidate means the browser USES the
+       stale copy now and fetches the new one for NEXT time — and each module
+       is its own cache entry with its own freshness, so they drift apart.
+
+       Measured on a real phone, 2026-09-06 06:36 Dubai, nine hours after the
+       deploy that added the tile: the Today card rendered MONEY IN as an
+       em-dash reading "no channel has been credited yet today", while a second
+       card on the same screen read AED 2,616 and /api/day returned
+       accounted 2616.27 on every one of six consecutive calls. The page was
+       running a NEW api/public/m/screens.js — the tile is in it — against an
+       OLD api/public/today.js, which has no `money` field to give it. Two
+       figures for today on one screen, from one deploy, for up to seven days.
+
+       So code revalidates and content does not. A .js or .css file is part of
+       one program and is checked before use: max-age=0 costs a conditional
+       request that answers 304 in a few bytes, and buys the guarantee that
+       every module on screen came from the same deploy. /vendor and /fonts are
+       unaffected — they are mounted above with immutable, being content that no
+       deploy alters. index.html keeps revalidating for the reason already
+       given: serving it stale is how a deploy fails to arrive at all. */
+    const code = /\.(?:js|mjs|css)$/i.test(path);
+    res.setHeader('Cache-Control', path.endsWith('index.html') || code
       ? 'public, max-age=0, must-revalidate'
       : 'public, max-age=300, stale-while-revalidate=604800');
   },

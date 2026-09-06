@@ -137,7 +137,9 @@ async function today(deck, ctx) {
            disagrees with the one beside it. */
         { label: 'Money in', value: now.money != null ? money(now.money) : '\u2014',
           sub: now.money == null
-            ? 'no channel has been credited yet today'
+            ? (now.moneyAnswered
+              ? 'no channel has been credited yet today'
+              : 'this figure did not load — reload the page')
             /* fmt, not money: the currency is already on the value above, and
                repeating it twice more wrapped the sub onto a second line and
                made this tile taller than the one beside it. */
