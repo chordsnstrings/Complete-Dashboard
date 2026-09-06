@@ -116,18 +116,46 @@ tells you the page renders.**
 
 ## Batch 3 — the medium and large criticals
 
-**written + committed. NOT yet deployed.** Six lanes, disjoint files, each read
-by an adversarial verifier. Two were not refuted, three were refuted on real
-defects since fixed, and one lane honestly reported **not fixed** — see below.
+Commit `d46af3d`. **Deployed and proven on production 2026-09-06**, except C18
+and C24 — both named below with exactly what remains.
 
-| # | what it did | state |
+| # | before | after, re-measured |
 |---|---|---|
-| C13/C19/C25 | one stray 4-day Uber window displaced the settled week on six August days, publishing AED 44,903 of false gap and cutting Ecosine's on-trip revenue ~AED 53,000 | fixed, **not refuted** |
-| C14 | 59.6% of `occupancy_segment` was superseded fragments — 3,513 intervals where 1,409 journeys happened | fixed, **not refuted** |
-| C23 | the asset ledger ignored the fleet chip — Egari shown owning 273 vehicles and 102 idle, 63 of which earned | fixed; verifier refuted, defects closed |
-| C18 | 132 CABMAN plates seen once and never again, counted as live fleet | fixed; verifier refuted, defects closed |
-| C17 | all 219 authorisation objects are `pending` with a null approver, rendered as a green "yes" | fixed; verifier refuted, defects closed |
-| C24 | 62 of 171 drivers are one human filed twice | **NOT fixed — staged only** |
+| C13/C19/C25 | six August days on a 4/7 grid publishing AED 44,903 of gap nobody owed | **grid 7/7**; the days' `ontrip_net` 8,243 → **16,344.24**; delta_pct +169.0 → +34.6; **month delta 64,725.52 → 24,261.78, 19.0% → 6.4%**; Ecosine on-trip revenue 281,621.58 → **331,319.48** |
+| C14 | 3,513 occupancy intervals where 1,409 journeys happened | **1,412 segments**; partial 1,632 → 572, authorized 1,178 → 522, and `unauthorized` 59 → **58** — exactly the "inflated by one, not 2.5x" the audit predicted |
+| C23 | Egari shown owning **273** vehicles, 29 earning | Egari **40 / 33**, Ecosine **98 / 69**, unassigned 135 — and 40 + 98 + 135 = **273 exactly** |
+| C17 | "Carried an authorisation 12.8%", 155 counted as authorised | `authorized_trips` **0**, `pending` **225**, `approval_required` **225**, pct **0** |
+| C18 | 132 phantom plates in the fleet-size denominator | **PARTIAL — see below** |
+| C24 | 62 of 171 drivers are one human twice | **STAGED, not live — see below** |
+
+The two money predictions were made before the deploy and hit almost exactly:
+the audit predicted August would land at "24,432.69 / 6.4%" and it reads
+24,261.78 / 6.4%; the verifier independently derived Ecosine's on-trip revenue
+at 331,319.47 and it reads **331,319.48**.
+
+18 of 18 pages render. `#reconcile/2026-08` now headlines **AED 24,262** and
+`#unauthorized` reports 5 unexplained journeys over 91 km rather than totals
+built from 3,284 intervals.
+
+### C18 is partial, and the remaining half is not verifiable today
+
+The collector half landed: `src/sources/cabman.js` now keeps a roster in
+`source_state`, admits a plate after `ADMIT_POLLS` (3) consecutive polls and
+departs it after `DEPART_POLLS` (**288** — a full day at five-minute polls),
+and raises an alarm when the payload collapses against the roster it holds.
+
+But **no plate can be marked departed for roughly 24 hours by design**, and no
+route reads the field yet. Measured after the deploy: `tracked_vehicles` still
+**265**, `/api/live` still returns 175 CABMAN rows across four `polled_at`
+cohorts, `departed` flagged on **0**. So the denominator has not moved.
+
+Wiring the API side blind — while its input is provably empty — is exactly the
+unverifiable change this whole exercise avoids, so it is not done. What it needs,
+from the lane's own report: `api/server.js` (`tracked_vehicles`,
+`silent_vehicles`), `api/vehicle_routes.js` (the directory and its cohort tiles),
+`api/cohort_routes.js`, `api/economics_routes.js` and `api/playbook_routes.js`
+must read the roster's departed set and **state the exclusion** rather than
+silently dropping the plates. Re-check after the first departures land.
 
 ### C24 is staged, not live, and that is deliberate
 
