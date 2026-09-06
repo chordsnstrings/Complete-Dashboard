@@ -825,6 +825,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        can reach the same place from a file that is a valid image AND a valid
        HTML document. */
     const TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif']);
+    /* nosniff FIRST, so it is on the refusal too. It used to be set after this
+       branch had already returned, which left the one response most likely to
+       be sniffed — the one carrying a type we would not serve — as the only
+       response that did not say not to guess. */
+    res.set('x-content-type-options', 'nosniff');
     if (!TYPES.has(row.content_type)) {
       res.set('x-photo', `stored type ${row.content_type} is not one this route will serve`);
       return res.status(415).json({ error: 'the stored photograph is not an image type this route serves' });
@@ -833,7 +838,6 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     res.set('etag', etag);
     res.set('cache-control', 'private, max-age=86400, stale-while-revalidate=604800');
     res.set('content-type', row.content_type);
-    res.set('x-content-type-options', 'nosniff');
     res.set('content-disposition', 'inline');
     res.set('x-photo-fetched', new Date(row.fetched_at).toISOString());
     if (req.get('if-none-match') === etag) return res.status(304).end();

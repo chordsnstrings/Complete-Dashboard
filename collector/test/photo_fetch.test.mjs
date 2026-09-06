@@ -22,6 +22,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import express from 'express';
+import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -162,6 +163,29 @@ const cleared = await q("SELECT count(*)::int n FROM driver_photo_miss WHERE dri
 check('the note was there to begin with', before[0].n === 1, JSON.stringify(before[0]));
 check('the photograph is stored', r4.stored === 1, JSON.stringify(r4));
 check('…and the note is gone', cleared[0].n === 0, JSON.stringify(cleared[0]));
+
+console.log('\nand the photographs cannot take the rest of the pass down with them');
+
+/* fetchPhotos has two database statements of its own — the digest read and the
+   bulk write — and neither is inside the per-image try/catch, which covers only
+   the HTTP leg. It used to run BETWEEN the compliance write and the rating
+   history, so an error from either escaped writeProfiles, past a rating history
+   that had not been written yet, into collect()'s catch, and abandoned the rest
+   of that fleet's drivers. The module's own header says a CDN that refuses one
+   image must not fail a run that has just written 157 compliance rows — true of
+   the HTTP leg, not of the two writes around it.
+
+   Asserted on the source's ORDER and on the guard, because the failure is
+   about which statement runs before which and there is no way to observe that
+   from the outside without a database that can be made to fail on one table. */
+const mod = readFileSync(new URL('../src/sources/uber_profile.js', import.meta.url), 'utf8');
+const iRating = mod.indexOf("upsertMany('driver_rating_history'");
+const iPhotos = mod.indexOf('await fetchPhotos(real)');
+check('the ratings are written before the photographs are fetched',
+  iRating > 0 && iPhotos > iRating, `rating at ${iRating}, photos at ${iPhotos}`);
+check('…and the photograph pass cannot throw out of writeProfiles',
+  /try \{\s*await fetchPhotos\(real\);\s*\} catch/.test(mod),
+  mod.slice(Math.max(0, iPhotos - 60), iPhotos + 90));
 
 console.log(`\n  (whole file ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 server.close();

@@ -68,6 +68,24 @@ check('it carries an ETag, and the ETag is the digest',
 const again = await raw('/api/driver/photo/uber/drv-photo', { 'if-none-match': etag });
 check('…and a reader who already has it gets 304, not the bytes again',
   again.status === 304, String(again.status));
+/* THE OTHER HALF, and without it the assertion above is not about the digest.
+   ─────────────────────────────────────────────────────────────────────────
+   Asking for a 304 when the validator MATCHES pins "a conditional request can
+   produce a 304", which is also true of `if (req.get('if-none-match'))` —
+   304 to anybody who asks. Under that implementation every browser that has
+   ever cached a driver's avatar is pinned to the first copy it saw: the
+   collector stores new bytes under a new sha256, the reader sends its stale
+   validator, gets an empty 304, and shows the old face for ever with nothing
+   on screen to say so. The property is that the DIGEST is the validator, and
+   only a non-matching one can tell. */
+const stale = await raw('/api/driver/photo/uber/drv-photo',
+  { 'if-none-match': `"${'f'.repeat(64)}"` });
+check('…while a reader holding a different digest is given the bytes',
+  stale.status === 200, String(stale.status));
+const staleBody = Buffer.from(await stale.arrayBuffer());
+check('…the real ones, in full', staleBody.equals(JPEG), `${staleBody.length} bytes`);
+check('…and the ETag it gets back is the digest of what it was sent',
+  String(stale.headers.get('etag') || '').includes(DIGEST), String(stale.headers.get('etag')));
 
 /* Bytes from a host we do not run, served back on our own origin. An
    image/svg+xml or a text/html body would be a script with this site's cookies
@@ -83,9 +101,21 @@ await q(`INSERT INTO driver_photo (platform, driver_ext_id, bytes, content_type,
 const markup = await raw('/api/driver/photo/uber/drv-markup');
 check('a stored row whose type is not a raster image is refused, not served',
   markup.status === 415, String(markup.status));
+/* THE BODY, not the content-type header. This assertion is named "refused
+   before the body is written" and it used to read a header — which is
+   satisfied by `res.status(415).send(row.bytes)`, an implementation that
+   writes the markup to this origin under a type that merely does not contain
+   the substring "svg". The bytes are what must not arrive, so the bytes are
+   what is read. */
+const markupBody = await markup.text();
 check('…and it is refused before the body is written',
-  !/svg/i.test(String(markup.headers.get('content-type') || '')),
-  String(markup.headers.get('content-type')));
+  !/<svg|<script/i.test(markupBody) && markupBody.length < 500, markupBody.slice(0, 120));
+/* And the refusal itself carries nosniff. The header was set after the 415
+   returned, so the one response most likely to be sniffed was the one response
+   that did not say not to. */
+check('…and the refusal still tells the browser not to guess',
+  String(markup.headers.get('x-content-type-options') || '').toLowerCase() === 'nosniff',
+  String(markup.headers.get('x-content-type-options')));
 
 console.log('\na driver with no photograph is an absence with a reason');
 

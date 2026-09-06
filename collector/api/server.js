@@ -4468,7 +4468,25 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     `SELECT driver_ext_id, reason FROM driver_photo_miss WHERE driver_ext_id = ANY($1)`,
     [rows.map((r) => r.driver_ext_id).filter(Boolean)]))
     .map((r) => [r.driver_ext_id, r.reason]));
-  const drivers = withPhotos(stripIdentity(rows, admin), heldPhotos, missedPhotos);
+  /* WHICH DOCUMENTS THIS PERSON ACTUALLY HAS, counted before the values go.
+     ─────────────────────────────────────────────────────────────────────
+     identity_withheld below names the COLUMNS that were removed, and it is
+     the same list for every row — so the page rendered the word "withheld"
+     in all 289 Licence cells and all 289 Emirates ID cells. Measured on
+     production: 123 rows carry an Emirates ID and 94 a licence number. For
+     the other 166 and 195 the page was stating that this product is holding
+     back a document it does not have, which is the same confusion between
+     "never sent" and "not shown" the withheld caption was introduced to fix,
+     pointing the other way.
+
+     /api/driver/profile has answered this per person since the day the gate
+     closed (identity_held, api/driver_routes.js); the roster never gained the
+     equivalent. This is it: computed from the untouched rows, so it says what
+     the record holds and never what the value is. */
+  const heldDocs = new Map(rows.map((r) => [r,
+    IDENTITY_DOCS.filter((c) => String(r[c] ?? '').trim() !== '')]));
+  const drivers = withPhotos(stripIdentity(rows, admin), heldPhotos, missedPhotos)
+    .map((d, i) => ({ ...d, identity_held: admin ? null : heldDocs.get(rows[i]) }));
   /* SAID, not merely absent. api/public/app.js rendered a missing licence
      number as an em-dash captioned "this channel publishes no licence number",
      which for a WITHHELD one is a false statement about the provider — exactly

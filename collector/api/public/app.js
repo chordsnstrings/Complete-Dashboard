@@ -4249,8 +4249,29 @@ V.compliance = async (root) => {
       render: (r) => {
         /* Withheld before absent, because a withheld column is empty for
            EVERYBODY and would otherwise read as a roster with no licences
-           filed — the strongest possible version of the wrong story. */
-        if (withheld.has('licence_no')) {
+           filed — the strongest possible version of the wrong story.
+
+           BUT ONLY FOR A ROW THAT HAS ONE. identity_withheld names the COLUMN,
+           and the column is removed for every row, so this branch printed
+           "withheld" in all 289 cells — telling a reader that this product is
+           holding back a licence number for the 195 people no channel has ever
+           filed one for. That is the same confusion between "never sent" and
+           "not shown" that the withheld caption was written to fix, pointing
+           the other way. identity_held is counted per row on the server before
+           the values are dropped, so it says what the record holds and never
+           what it is.
+
+           The placeholder check comes first for a row we DO hold, because
+           "not filled in" is the more useful of the two true things: 94 of
+           these numbers are the identical string 123456, and calling that
+           withheld hides the one fact that makes the roster uncheckable. */
+        const held = new Set(r.identity_held || []);
+        if (withheld.has('licence_no') && held.has('licence_no')) {
+          if (r.licence_no_placeholder) {
+            return `<span class="tag dim" title="every licence number on this roster is this same `
+              + 'string — the source\u2019s own default, written when the field was never filled '
+              + 'in">not filled in</span>';
+          }
           return `<span class="tag dim" title="${esc(withheldWhy)}">withheld</span>`;
         }
         if (!r.licence_no) {
@@ -4280,7 +4301,10 @@ V.compliance = async (root) => {
        dash to imply missing paperwork. */
     { label: 'Emirates ID', key: 'emirates_id',
       render: (r) => {
-        if (withheld.has('emirates_id')) {
+        /* Withheld only for a row that HAS one — see the Licence cell above.
+           123 of 289 carry an Emirates ID; the other 166 were being told their
+           number was being held back by a product that has never had it. */
+        if (withheld.has('emirates_id') && new Set(r.identity_held || []).has('emirates_id')) {
           return `<span class="tag dim" title="${esc(withheldWhy)}">withheld</span>`;
         }
         return (r.emirates_id

@@ -318,10 +318,6 @@ async function writeProfiles(rows, contacts = []) {
      nulls. */
   const real = contacts.filter((c) => c && (c.phone || c.email || c.picture_url));
   if (real.length) await upsertMany('driver_compliance', real, ['platform', 'driver_ext_id']);
-  /* And the PHOTOGRAPH, not the address of one. See fetchPhotos below: the URL
-     we have just stored stops working twelve hours from now, and this is the
-     only moment anybody holds a working one. */
-  await fetchPhotos(real);
   /* And kept, as well as overwritten.
      ─────────────────────────────────────────────────────────────────────
      driver_platform_state answers "what is this driver rated"; it is
@@ -341,6 +337,30 @@ async function writeProfiles(rows, contacts = []) {
     fleet_id: r.fleet_id, rating: r.rating, lifetime_trips: r.lifetime_trips,
     is_banned: r.is_banned, compliance_status: r.compliance_status,
   })), ['platform', 'driver_ext_id', 'observed_on']);
+
+  /* AND THE PHOTOGRAPH — last, and unable to fail the pass.
+     ─────────────────────────────────────────────────────────────────────
+     The URL just stored on driver_compliance stops working twelve hours from
+     now, so this is the only moment anybody holds a working one; that is why
+     it happens inside the pass at all rather than on a schedule of its own.
+
+     But it is the least important thing this pass collects, and it used to run
+     BETWEEN the compliance write and the rating history — with its own two
+     database statements outside the per-image try/catch, so an error from
+     either would propagate out of writeProfiles, past the rating history that
+     had not been written yet, into collect()'s catch, and abandon the rest of
+     that fleet's drivers. The module's own header says a CDN that refuses one
+     image must not fail a run that has just written 157 compliance rows; that
+     was true of the HTTP leg and not of the two writes around it.
+
+     So: after everything that matters, and wrapped. A photograph nobody could
+     store is a log line and a row in driver_photo_miss, never a pass that ends
+     early with ratings missing for the week. */
+  try {
+    await fetchPhotos(real);
+  } catch (e) {
+    log.warn(SRC, 'photos', { err: String(e && e.message ? e.message : e).slice(0, 160) });
+  }
 }
 
 async function pullOrg(o, { checkpoint = null, onStep = null } = {}) {

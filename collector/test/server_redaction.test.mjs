@@ -255,6 +255,39 @@ console.log('\n/api/compliance/drivers — 123 Emirates IDs to anyone who knew t
     anon.text.slice(0, 200));
   // The columns go — the KEY is absent, not merely null, so a page can tell
   // "withheld" from "the provider sent an empty string".
+  /* WITHHELD ONLY ABOUT A DOCUMENT THAT EXISTS.
+     ─────────────────────────────────────────────────────────────────────
+     identity_withheld names the COLUMNS that were removed and is the same
+     list for every row, so the page printed "withheld" in all 289 Licence
+     cells and all 289 Emirates ID cells. Measured on production, 123 rows
+     carry an Emirates ID and 94 a licence number — so for 166 people and 195
+     people respectively the roster stated that this product is holding back a
+     document it has never had. That is the confusion between "never sent" and
+     "not shown" the caption exists to prevent, pointing the other way.
+
+     identity_held is the per-row answer, counted before the values are
+     dropped. The fixture has one row with a licence and an Emirates ID and one
+     with neither, so the two cases are separated here rather than assumed. */
+  const withPapers = anon.body.drivers.find((r) => r.driver_ext_id === 'h-1');
+  const without = anon.body.drivers.find((r) => r.driver_ext_id === 'u-2');
+  check('a row whose record holds the documents says so',
+    !!withPapers && Array.isArray(withPapers.identity_held)
+      && withPapers.identity_held.includes('licence_no')
+      && withPapers.identity_held.includes('emirates_id'),
+    JSON.stringify(withPapers?.identity_held));
+  check('…and a row whose record holds neither claims neither',
+    !!without && Array.isArray(without.identity_held) && without.identity_held.length === 0,
+    JSON.stringify(without?.identity_held));
+  /* And it says WHICH, never what: the whole point is that the value is gone. */
+  check('…without the value coming back through it',
+    !JSON.stringify(anon.body.drivers).includes('784-1977-5137316-4')
+      && !/"identity_held":\[[^\]]*123456/.test(anon.text),
+    JSON.stringify(withPapers?.identity_held));
+  /* An administrator is given the values, so there is nothing to caption. */
+  check('an administrator is told nothing was withheld at all',
+    admin.body.drivers.every((r) => r.identity_held === null),
+    JSON.stringify(admin.body.drivers.map((r) => r.identity_held)));
+
   check('anonymous rows carry no licence_no key at all',
     anon.body.drivers.every((r) => !('licence_no' in r)), JSON.stringify(anon.body.drivers[0]));
   check('anonymous rows carry no emirates_id key at all',
