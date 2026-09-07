@@ -1109,12 +1109,29 @@ driver's 222 tracker fixes.
 * **A floor applied in SQL before a fold in JavaScript is a floor on the wrong
   thing.** `/api/driver/standing` had `GROUP BY 1 HAVING count(*) >= 5` keyed
   on a provider ACCOUNT and folded to people three hundred lines later, so a
-  person with four accounts of three bookings was not in the cohort at all —
-  104 people qualified over 2026-09-01..09-07 and the endpoint reported 97.
-  One of the seven was then told "5 trips … which is fewer than the five a
-  ranking needs". Whenever a threshold and a grouping live in different
-  languages, check they are talking about the same row.
+  person with three accounts of under five bookings was not in the cohort at
+  all. Over 2026-09-01..09-07 the folded population is 98 and the endpoint
+  reported 97; it reports 98 now. That one person was then told "5 trips …
+  which is fewer than the five a ranking needs". Whenever a threshold and a
+  grouping live in different languages, check they are talking about the same
+  row.
 * **A page that prints a count from endpoint A beside a threshold applied by
   endpoint B will eventually assert something false about the relation between
   them.** Return the count the decision was made on (`trips_in_window`) and the
   threshold that was used (`peer_floor`), and let the copy state those.
+* **`/api/drivers/directory`'s row count is not a headcount.** It keys on the
+  provider ACCOUNT — `coalesce(nullif(btrim(driver_ext_id), ''), 'name:' ||
+  person_key)` — while the leaderboard beside it groups on `t.person_key`. Over
+  2026-09-01..09-07, 20 of the 122 rows with bookings are 10 people listed
+  twice, with the SAME `person_key` printed on both rows. Never use its row
+  count as a population, and never compare its per-window `trips` with a
+  profile's: for one person those read 5 and 44. (This trap produced a wrong
+  number in a commit message and in two of these notes before it was caught —
+  the claim "104 people have 5+ bookings" was 104 rows, six of them duplicates,
+  98 people. The correct figure reconciled exactly with the endpoint under
+  test, which is what exposed the duplication.)
+* **Reconcile a fix's own number after deploying it, not only before.** The
+  before-figure here was measured against a different grain than the after-
+  figure, and only re-measuring both against the deployed API showed it — and
+  then explained the residual as a real defect rather than leaving a six-person
+  gap unexplained in the notes.

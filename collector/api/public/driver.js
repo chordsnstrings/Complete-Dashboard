@@ -69,10 +69,15 @@ const ordinal = (n) => {
 const METRIC_UNIT = { km: 'km', distance: 'km', revenue: 'AED', earnings: 'AED',
   fare: 'AED', trips: 'trips', bookings: 'bookings', days: 'days', hours: 'h',
   rate: '%', pct: '%', completion: '%', cancellation: '%', acceptance: '%', rating: '★' };
+/* And never the word the label already said. The unit exists to disambiguate a
+   bare number, so "Bookings (bookings)" disambiguates nothing — and at 1440px
+   the longer one clipped to "Bookings a working day (b…", an ellipsis earned
+   by a word the row had already used. Both appeared the moment the trips row
+   was renamed from "Trips completed" to what it actually counts. */
 const unitFor = (m) => {
-  if (m.unit) return m.unit;
   const l = String(m.label || '').toLowerCase();
-  return Object.entries(METRIC_UNIT).find(([k]) => l.includes(k))?.[1] || '';
+  const u = m.unit || Object.entries(METRIC_UNIT).find(([k]) => l.includes(k))?.[1] || '';
+  return u && l.includes(String(u).toLowerCase()) ? '' : u;
 };
 
 function percentileBars(host, metrics, opts = {}) {
@@ -102,15 +107,20 @@ function percentileBars(host, metrics, opts = {}) {
         <i style="width:${p}%;background:var(${tone});animation-delay:${i * 55}ms"></i>
         <span class="pb-mid" title="fleet median"></span>
       </div>
-      <div class="pb-v num">${p}<small>${ordinal(p)}</small></div>`;
-    row.title = `${m.label}: ${fmt(m.value, 1)}${u ? ' ' + u : ''} — fleet median `
-      + `${fmt(m.median, 1)}${u ? ' ' + u : ''}`
-      + (sn.tied
-        ? `. ${fmt(m.tied)} of the ${fmt(m.population)} compared hold this same value, so the `
+      <div class="pb-v num">${sn.tied ? '<small>tied</small>' : `${p}<small>${ordinal(p)}</small>`}</div>`;
+    /* Assembled as sentences and joined, not concatenated with leading full
+       stops: three optional clauses each carrying its own '.' produced
+       "Bottom 8%.. Lower is better here" on the cancellation row. */
+    row.title = [
+      `${m.label}: ${fmt(m.value, 1)}${u ? ' ' + u : ''} — fleet median `
+        + `${fmt(m.median, 1)}${u ? ' ' + u : ''}.`,
+      sn.tied
+        ? `${fmt(m.tied)} of the ${fmt(m.population)} compared hold this same value, so the `
           + 'percentile is a tie rather than a rank.'
-        : sn.text ? `. ${sn.text[0].toUpperCase()}${sn.text.slice(1)}.` : '')
-      + (inverted ? '. Lower is better here, so a high percentile means FEWER of them.' : '')
-      + (opts.note && /revenue|fare|earn/i.test(m.label || '') ? ` ${opts.note}` : '');
+        : sn.text ? `${sn.text[0].toUpperCase()}${sn.text.slice(1)}.` : '',
+      inverted ? 'Lower is better here, so a high percentile means FEWER of them.' : '',
+      opts.note && /revenue|fare|earn/i.test(m.label || '') ? opts.note : '',
+    ].filter(Boolean).join(' ');
     wrap.append(row);
   });
   host.append(wrap);

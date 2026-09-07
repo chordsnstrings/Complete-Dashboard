@@ -5,9 +5,13 @@
    four are the panel describing a different measurement from the one it made.
 
      · The five-trip floor ran on the ACCOUNT, before the fold that turns a
-       person's several platform accounts into one row. /api/drivers/directory
-       holds 104 people with 5+ bookings over 2026-09-01..09-07; this endpoint
-       reported n_peers 97.
+       person's several platform accounts into one row. Over 2026-09-01..09-07
+       the folded population is 98 people and this endpoint reported 97; it
+       reports 98 now. (/api/drivers/directory returns 104 ROWS at 5+ bookings,
+       six of which are a second row for a person already in the list — the
+       first draft of this note compared that row count with a headcount and
+       claimed seven people were missing. One was.) On 2026-09-06, where no
+       row is duplicated, the cohort went 51 → 53 against the directory's 53.
      · Muhammad Asif Amir Zada (6640364) has 5 bookings over 3 accounts, none
        reaching 5. He was unranked, and the page printed "5 trips in this
        window, which is fewer than the five a ranking needs".
@@ -56,7 +60,9 @@ console.log('\nthe floor is on the person, not on one of their accounts');
   check('the measurement that proved it is written down',
     /Five is not fewer than five/.test(routes)
       && /6640364/.test(routes)
-      && /104 people with 5 or more/.test(routes));
+      && /distinct people\s+98/.test(routes)
+      && /The 104 is a row count, not a headcount/.test(routes),
+    'the first version of this note compared a row count with a headcount');
 }
 
 console.log('\na count of bookings is not a count of completions');
@@ -148,6 +154,23 @@ console.log('\nboth shells ask the same helper, so they cannot drift');
     'a tied value was painted --critical, the colour of the worst thing on the page');
   check('…and says why on hover',
     /hold this same value, so the/.test(desk));
+  check('…and prints "tied" where the ordinal would be a lie',
+    /sn\.tied \? '<small>tied<\/small>'/.test(desk),
+    '"0th" at a glance is the claim the tooltip then has to take back');
+  /* The relabel to "Bookings" made unitFor append "(bookings)" to a row that
+     had just said the word, and at 1440px the longer of the two clipped to
+     "Bookings a working day (b…". Measured on the production render. */
+  /* Stripped of comments first: the block explaining this fix necessarily
+     QUOTES the broken string, and a scan that reads the comment finds the
+     defect it was written about. */
+  const deskBare = desk.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+  check('the hover sentence cannot collect a double full stop',
+    /\]\.filter\(Boolean\)\.join\(' '\);/.test(deskBare)
+      && !/'\. Lower is better here/.test(deskBare),
+    '"Bottom 8%.. Lower is better here" was on the cancellation row');
+  check('a unit the label already said is not printed again',
+    /u && l\.includes\(String\(u\)\.toLowerCase\(\)\) \? '' : u/.test(desk),
+    '"Bookings (bookings)" disambiguates nothing and cost the row its width');
   check('the panel subtitle no longer carries its own copy of the floor',
     !/5 or more trips in this window/.test(desk),
     'a number the response cannot reach is a number that goes stale silently');

@@ -2275,10 +2275,25 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      A person with four accounts of three trips has twelve trips and was not in
      the cohort at all.
 
-     Measured on production 2026-09-01..09-07: /api/drivers/directory, which
-     folds to people, holds 104 people with 5 or more trips. This endpoint
-     reported n_peers 97. Seven people are ranked against a cohort they belong
-     in, and — worse — are told they are not rankable on their own page.
+     Measured on production 2026-09-01..09-07, then RE-measured after the fix,
+     because the first comparison was between two different things:
+
+       /api/drivers/directory rows with 5+ bookings            104
+       …of which are a SECOND row for a person already listed    6
+       distinct people                                          98
+       n_peers this endpoint reported                           97
+       n_peers it reports now                                   98
+
+     The 104 is a row count, not a headcount. The directory keys on the
+     provider ACCOUNT — coalesce(nullif(btrim(driver_ext_id), ''), 'name:' ||
+     person_key), :450 — so six people appear on two rows apiece with the SAME
+     person_key printed on both. Subtract those and the folded population is
+     98, which is exactly what this endpoint returns once its floor stops
+     running per account. On a one-day window there is nothing to subtract and
+     the two agree outright: 2026-09-06 went 51 → 53 against the directory's 53.
+
+     So one person was missing from that week's cohort, not seven. One is
+     enough, because of what the page then told him.
 
      Muhammad Asif Amir Zada (6640364) is one of them: 5 trips over 3 accounts,
      none of them reaching 5, so /api/driver/standing returned metrics [] and
