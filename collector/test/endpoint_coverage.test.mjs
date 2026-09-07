@@ -59,6 +59,12 @@ const EXEMPT = {
     + 'Trip UUIDs against ours, by hand and for a week at a time. The PAGE reads /api/coverage/verified, '
     + 'which is where the nightly audit job stores the same comparison for whole months — a report costs '
     + 'minutes at the provider and cannot be produced inside a page load',
+  '/api/probe/yango/keyapi': 'operator tool: asks whether Yango\u2019s key-based Fleet API — '
+    + 'fleet-api.yango.tech, X-API-Key and X-Client-ID, no cookie — will answer this park, and '
+    + 'which of four written-down client id shapes it accepts. It exists because the cookie route '
+    + 'is refused at Yandex\u2019s edge from this host and no credential can move that; the key '
+    + 'route has no session in it and nothing to re-paste weekly. Not a page: it answers whether a '
+    + 'collector COULD be pointed there',
   '/api/probe/yango': 'operator tool: has this HOST report its own request to Yango — the park '
     + 'id\u2019s shape, whether it matches the one the session cookie itself names, and the two '
     + 'status codes with and without the cookie. It exists because the same request answered 200 '

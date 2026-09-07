@@ -22,7 +22,7 @@ import { http, qs } from '../src/http.js';
 import { pool } from '../src/db.js';
 import { uberOAuthToken, uberWebHeaders, UBER_WEB_HOST } from '../src/auth/uber.js';
 import { probeEarnerWindow, auditTripWindow, uberOrgs } from '../src/sources/uber.js';
-import { loadSettings } from '../src/settings.js';
+import { loadSettings, get } from '../src/settings.js';
 /* The fleet's clock, for the two default windows below. src/util.js owns the
    +04:00 arithmetic and every other server-side day key already goes through
    it or through Postgres's AT TIME ZONE 'Asia/Dubai'; a fourth private copy of
@@ -1541,6 +1541,82 @@ export function probeRoutes(app, { wrap }) {
       note: 'Shapes only. The park id is not a secret — the settings catalogue marks it so, and '
         + 'the collector prints it in full in its own refusal hint — and no value here can be '
         + 'replayed against Yango.',
+    });
+  }));
+
+  /* The other door: Yango's key-based Fleet API, which has no session in it.
+     ═════════════════════════════════════════════════════════════════════════
+     fleet.yango.com authenticates with a Yandex browser session, and Yandex's
+     edge refuses that session when it is replayed from this host. Measured
+     2026-09-07 through /api/probe/yango: with the cookie, HTTP 403 whose body
+     is an HTML page served from cdn.yandex.net; without it, HTTP 401 as JSON
+     from the API itself. Every refusal the Yango API makes is JSON, so the
+     HTML page is something in front of it — and the same request from another
+     network answers 200 with live orders. No credential can move that, and a
+     re-pasted cookie is a week of collection at best.
+
+     fleet-api.yango.tech is the route that does not have the problem:
+     X-API-Key and X-Client-ID, no cookie, nothing bound to a network and
+     nothing to re-paste. The fleet already holds the key. What is missing is
+     the client id, and this route answers whether the key works at all and
+     which client id shape the provider accepts — because the documentation
+     gives the header and not its format.
+
+     The candidates are WRITTEN HERE, not taken from the caller: a stored
+     YANGO_CLIENT_ID if one has been pasted, then the three shapes Yango's
+     fleet products use. Same rule as the Uber tier probe above — the caller
+     chooses nothing, and what is not in this list is not tried. */
+  app.get('/api/probe/yango/keyapi', wrap(async (req, res) => {
+    await loadSettings();
+    const park = config.yango.parkId || '';
+    const key = config.yango.apiKey || '';
+    if (!park || !key) {
+      return res.status(400).json({ error: 'YANGO_PARK_ID and YANGO_API_KEY must both be set' });
+    }
+    const stored = get('YANGO_CLIENT_ID') || null;
+    const candidates = [
+      ...(stored ? [{ label: 'the stored YANGO_CLIENT_ID', value: stored }] : []),
+      { label: 'taxi/park/<park id>', value: `taxi/park/${park}` },
+      { label: 'the park id alone', value: park },
+      { label: 'fleet/<park id>', value: `fleet/${park}` },
+    ];
+    const url = 'https://fleet-api.yango.tech/v1/parks/driver-profiles/list';
+    const body = JSON.stringify({ query: { park: { id: park } }, limit: 1 });
+    const tried = [];
+    for (const c of candidates) {
+      try {
+        const { status, data } = await http(url, {
+          method: 'POST', timeoutMs: 30000, retries: 0,
+          headers: {
+            'X-API-Key': key, 'X-Client-ID': c.value,
+            'content-type': 'application/json', 'Accept-Language': 'en',
+          },
+          body,
+        });
+        const isJson = typeof data === 'object' && data !== null;
+        tried.push({ shape: c.label, status,
+          answered_by: isJson ? 'the API (a JSON answer)' : 'something in front of the API (an HTML page)',
+          body_starts: (typeof data === 'string' ? data : JSON.stringify(data ?? null)).slice(0, 240) });
+      } catch (e) {
+        tried.push({ shape: c.label, status: null, error: String(e.message || e).slice(0, 160) });
+      }
+    }
+    const won = tried.find((t) => t.status === 200);
+    res.json({
+      url, park_id: { len: park.length, head: park.slice(0, 4), tail: park.slice(-4) },
+      api_key: { len: key.length, head: key.slice(0, 4), tail: key.slice(-4) },
+      client_id_stored: !!stored,
+      tried,
+      reading: won
+        ? `the key API answers this park with the client id shaped "${won.shape}" — Yango can be `
+          + 'collected without a cookie, and the weekly paste can stop'
+        : tried.every((t) => t.status === 401 || t.status === 403)
+          ? 'the key alone is refused by every client id shape tried. Either the key is not '
+            + 'entitled to this park on the fleet API, or the real client id is a value only the '
+            + 'Yango portal can show — paste it as YANGO_CLIENT_ID and run this again'
+          : 'no shape answered 200; read the bodies above, they carry the provider\u2019s own words',
+      note: 'Read-only: one list call, one park, four written-down client id shapes. Nothing the '
+        + 'caller sends becomes part of the request.',
     });
   }));
 

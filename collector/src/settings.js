@@ -126,7 +126,17 @@ export const SETTING_DEFS = [
 
   { key: 'YANGO_PARK_ID', group: 'Yango', label: 'Park id', secret: false },
   { key: 'YANGO_API_KEY', group: 'Yango', label: 'API key', secret: true },
-  { key: 'YANGO_COOKIE', group: 'Yango', label: 'Yandex session cookie', secret: true, hint: 'Expires — re-paste from a logged-in fleet.yango.com session' },
+  { key: 'YANGO_COOKIE', group: 'Yango', label: 'Yandex session cookie', secret: true, hint: 'Expires — re-paste from a logged-in fleet.yango.com session. Yandex refuses a session replayed from this host: see /api/probe/yango' },
+  /* The second half of the KEY-BASED route, which needs no session at all.
+     fleet.yango.com authenticates with a Yandex browser session, and Yandex's
+     edge refuses that session when it is replayed from this host — measured
+     2026-09-07, an HTML 403 from cdn.yandex.net in front of an API that
+     answers JSON to everything else. fleet-api.yango.tech is the other door:
+     X-API-Key and X-Client-ID, no cookie, nothing to re-paste weekly and
+     nothing bound to a network. The key is already set; this is the piece
+     that is missing. */
+  { key: 'YANGO_CLIENT_ID', group: 'Yango', label: 'Fleet API client id', secret: false,
+    hint: 'For fleet-api.yango.tech, which needs no cookie — issued with the API key in the Yango fleet portal' },
 
   { key: 'BOLT_CLIENT_ID', group: 'Bolt', label: 'OAuth client id', secret: false },
   { key: 'BOLT_CLIENT_SECRET', group: 'Bolt', label: 'OAuth client secret', secret: true },
