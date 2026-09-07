@@ -143,6 +143,14 @@ check('…neither end says highest or lowest of a VALUE',
   !/(highest|lowest) in the fleet/.test(bare(sharedUiSrc)),
   'the percentile is a rank; the value may run either way');
 
+/* "1 days worked", under a tile reading 10, on the production render of a
+   one-day window — in three places, all of them `${n} days worked` written
+   out. This file already has countOfDays for exactly this. */
+check('a count of one day is not "1 days"',
+  !/\$\{[a-zA-Z0-9_.?]+days_worked\} days worked/.test(bare(screensSrc))
+    && (bare(screensSrc).match(/countOfDays\(/g) || []).length >= 4,
+  'seen on production 2026-09-06 in the profile header and both Bookings tiles');
+
 /* ── the PWA files ──────────────────────────────────────────────────────── */
 const manifest = JSON.parse(readFileSync(`${PUB}/manifest.webmanifest`, 'utf8'));
 check('the manifest names the app', !!manifest.name && !!manifest.short_name);

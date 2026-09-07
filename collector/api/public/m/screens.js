@@ -885,7 +885,7 @@ async function driver(deck, ctx) {
     name: profile.name || id,
     photo: c.picture_url || null,
     sub: `${(profile.platforms || []).join(', ') || 'no channel'}`
-      + `${profile.span?.days_worked ? ` \u00b7 ${profile.span.days_worked} days worked` : ''}`
+      + `${profile.span?.days_worked ? ` \u00b7 ${countOfDays(profile.span.days_worked)} worked` : ''}`
       + `${(profile.ids || []).length > 1 ? ` \u00b7 ${profile.ids.length} platform accounts` : ''}`,
   });
 
@@ -901,7 +901,7 @@ async function driver(deck, ctx) {
   }
 
   stats(deck, [
-    { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${k.days_worked} days worked` : null },
+    { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${countOfDays(k.days_worked)} worked` : null },
     /* NOT k.revenue. Uber's trip export carries no fare column, so `revenue` is
        null for most of this fleet however much they earned — and this tile
        printed a dash for a driver with 48 bookings, AED 22,925 paid out and
@@ -1042,7 +1042,7 @@ async function vehicle(deck, ctx) {
   });
 
   stats(deck, [
-    { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${k.days_worked} days worked` : null },
+    { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${countOfDays(k.days_worked)} worked` : null },
     { label: 'Fares', value: money(n(k.revenue)), sub: k.avg_fare ? `${money(n(k.avg_fare))} a booking` : null },
     /* Same rule, same helper — /api/vehicle/kpis spells the denominator
        measured_trips rather than trips_with_distance and avgKmSub reads both. */
