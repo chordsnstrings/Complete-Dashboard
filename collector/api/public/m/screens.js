@@ -64,6 +64,11 @@ export function titleFor(view, param) {
     analyst: ['Analyst', 'Claims the data was asked to settle'],
     optimise: ['Optimise', 'Where the next trip is'],
     insights: ['Action list', 'Built for a bigger screen'],
+    /* The one finding page, which the action list links straight into and
+       which had no entry here at all — so a phone opening a finding got a
+       header reading "action", the router's word, over a screen that names
+       people and asks somebody to ring them. */
+    action: ['Finding', 'One flag, and who it is about'],
     compliance: ['Compliance', 'Built for a bigger screen'],
     demand: ['Demand', 'Built for a bigger screen'],
     map: ['Map & replay', 'Built for a bigger screen'],

@@ -55,6 +55,9 @@ import { adminGate, isAdmin, redactSettings } from './admin_gate.js';
    exclusions live — phone and email STAY, because the operator asked for them
    and four pages render them. */
 import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldNote, photoHref, withPhotos } from './redact.js';
+/* Who a finding is about, resolved from the ids the rule engine already
+   stored. api/insight_people.js carries the reasoning and the query. */
+import { refIds, peopleFor, attachPeople } from './insight_people.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
 import { RAW_ALIASES } from '../src/probe.js';
 
@@ -3630,8 +3633,38 @@ app.get('/api/insights', wrap(async (req, res) => {
               computed_at DESC, impact_aed DESC NULLS LAST
      LIMIT ${INSIGHT_LIMIT + 1}`, [sev, cat, code, entity, fleet, from, to]);
   const truncated = rows.length > INSIGHT_LIMIT;
+  const served = rows.slice(0, INSIGHT_LIMIT).map(({ still_found, cleared, ...r }) => r);
+  /* Resolve the ids a finding carries into the people they name.
+     ─────────────────────────────────────────────────────────────────────────
+     `refs` has been stored, served and ignored since sql/schema_v31.sql. The
+     rule that fills it is the most severe finding this product raises — "10
+     drivers were online but completed no trips" — and its action ("check
+     whether they were genuinely available") cannot be taken from a count. The
+     ids were already in the payload; a bare uuid is no more actionable than
+     the count, so they are resolved here into a name, a phone number, a
+     photograph, the vehicle held, the un-clipped moment the shift opened and
+     when the person last completed anything.
+
+     Per finding, not per response: the online span is read against THAT
+     finding's window, and unioning two windows would blend two shifts into
+     one. There is at most a handful of findings carrying refs, and a response
+     with none pays nothing — refIds() returns empty and no query runs. */
+  for (const r of served) {
+    const ids = refIds([r]);
+    if (!ids.length) continue;
+    try {
+      const people = await peopleFor(q, ids, { from: r.window_start, to: r.window_end });
+      attachPeople([r], new Map(people.map((p) => [p.driver_ext_id, p])), photoHref);
+    } catch (e) {
+      /* A finding that cannot be enriched is still a finding. The ids stay
+         exactly as the rule wrote them and the page renders what it has —
+         losing the whole action list because one join failed would be the
+         worse outcome by a distance. */
+      log?.warn?.({ err: String(e), code: r.code }, 'insight refs not resolved');
+    }
+  }
   res.json({
-    insights: rows.slice(0, INSIGHT_LIMIT).map(({ still_found, cleared, ...r }) => r),
+    insights: served,
     truncated, limit: INSIGHT_LIMIT,
     /* How many findings the rules have stopped emitting since they last wrote
        them. Returned rather than silently dropped: a to-do list that shortens

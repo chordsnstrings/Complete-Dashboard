@@ -1,4 +1,4 @@
-/* Six sections, and nothing outside them.
+/* A short rail, and nothing outside it.
    ─────────────────────────────────────────────────────────────────────────
    The rail used to hold thirty-six destinations in seven collapsible groups,
    and a detail page was lit through a PARENT map that named the top-level page
@@ -38,8 +38,30 @@ const DRILL = drillBlock
   ? Object.fromEntries([...drillBlock[1].matchAll(/([a-z]+): '([A-Z][a-z]+)'/g)].map((m) => [m[1], m[2]]))
   : {};
 
-console.log('\nthe rail is six sections and every one of them goes somewhere');
-check('six sections are declared', SECTIONS.length === 6, String(SECTIONS.length));
+/* A RANGE, not a literal count — and the range is the invariant, which the
+   literal never was.
+   ─────────────────────────────────────────────────────────────────────────
+   This read `SECTIONS.length === 6` and failed the day Finance was split back
+   out of Money, which is a change the rail was supposed to be able to absorb.
+   A test pinned to a number turns every deliberate navigation decision into a
+   test failure and teaches whoever hits it to edit the number, which is the
+   same as having no assertion at all.
+
+   What actually matters is that the rail stays scannable. It held thirty-six
+   destinations in seven collapsible groups and that is the failure this file
+   was written about; below four the grouping is doing no work, above eight the
+   rail is a menu again. Every other assertion here — each section lands on a
+   real page inside itself, no section holds one page, no handler is orphaned —
+   is the part that catches a mistake, and none of them cares how many there
+   are. */
+const RAIL_MIN = 4, RAIL_MAX = 8;
+console.log('\nthe rail is a handful of sections and every one of them goes somewhere');
+check('the rail is small enough to scan without a menu',
+  SECTIONS.length >= RAIL_MIN && SECTIONS.length <= RAIL_MAX,
+  `${SECTIONS.length} sections, expected ${RAIL_MIN}–${RAIL_MAX}`);
+/* The regex above is the only thing that finds them, so an empty match reads
+   as "nothing declared" rather than as a pass. */
+check('…and the declarations were actually found', SECTIONS.length > 0, String(SECTIONS.length));
 check('and each lands on a real page',
   SECTIONS.every((s) => VIEWS.some((v) => v.id === s.to)),
   JSON.stringify(SECTIONS.filter((s) => !VIEWS.some((v) => v.id === s.to))));

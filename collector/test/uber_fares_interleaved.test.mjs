@@ -48,6 +48,24 @@ check('the closed ones follow it newest first',
 check('…so a truncated walk keeps the weeks a reader is looking at',
   iso(weeks[1].start) === '2026-08-24' && iso(weeks.at(-1).start) === '2026-06-01',
   `${iso(weeks[1].start)} … ${iso(weeks.at(-1).start)}`);
+/* And the answer is about the RANGE, not about the day the suite runs.
+   ─────────────────────────────────────────────────────────────────────────
+   Every assertion above pins a fixed range ending Friday 2026-09-04, and all
+   of them passed for six days and failed on the seventh: fareWeeks let
+   closedWeeks default `now` to the wall clock, so the week containing the
+   range's end stopped being open the moment that Sunday passed in the real
+   world. The range had not changed. A test that is green only during the week
+   it was written is not a test, and a collector whose plan for a two-year-old
+   backfill depends on today's date is not answering the question it was
+   asked. */
+const later = new Date('2027-03-01T00:00:00Z');
+const stale = fareWeeks(FROM, TO, later);
+check('the plan for a fixed range does not change with the wall clock',
+  fareWeeks(FROM, TO).map((w) => `${iso(w.start)}${w.isOpen ? '*' : ''}`).join()
+  === fareWeeks(FROM, TO, TO).map((w) => `${iso(w.start)}${w.isOpen ? '*' : ''}`).join());
+check('…and an explicit later "now" is the only thing that closes the last week',
+  stale.filter((w) => w.isOpen).length === 0 && stale.length === weeks.length,
+  JSON.stringify(stale.filter((w) => w.isOpen).map((w) => iso(w.start))));
 
 console.log('\nand the two fleets go through them together');
 

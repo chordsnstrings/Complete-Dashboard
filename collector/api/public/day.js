@@ -12,7 +12,7 @@ import { TZ } from './tz.js';
 
 import { barChart, donut, hbars, empty, fmt } from './charts.js';
 import { el, esc, panel, loading, tableFrom, kpiRow, note, pill, entity,
-  dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel, signed,
+  dayStr, dtStr, timeStr, money, pct, custody, sourceLabel, tierLabel, payRoute, signed,
   UBER_FARE } from './ui.js';
 import { api, href, state } from './data.js';
 
@@ -194,7 +194,7 @@ export async function renderDay(root, day, onDetail) {
 
   if (d.settlement.length) {
     add('How the fares settled', 'Only the channels that report a payment route appear.', (b) => {
-      hbars(b, d.settlement.map((r) => ({ label: r.settlement_class, n: r.n })), {
+      hbars(b, d.settlement.map((r) => ({ label: payRoute(r.settlement_class), n: r.n })), {
         onClick: () => { location.hash = href('settlement'); } });
     });
   }

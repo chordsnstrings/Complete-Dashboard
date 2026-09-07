@@ -35,6 +35,14 @@ import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldN
    maps every one of them. Injected rather than stubbed because the whole point
    is that both readers use the same table. */
 import { RAW_ALIASES } from '../src/probe.js';
+/* Who a finding is about, resolved from insight.refs. Real rather than
+   stubbed: /api/insights now joins those ids to people, and a stub here would
+   let the join come back broken with every route test still green. */
+import { refIds, peopleFor, attachPeople } from '../api/insight_people.js';
+/* The structured logger. Injected because the mounted slice now uses it — an
+   identifier the slice references and this list does not name is a
+   ReferenceError the harness reports as an empty body. */
+import { log } from '../src/log.js';
 /* The shared gap-finder, injected rather than stubbed for the same reason the
    alias tables are: /api/coverage reports continuity for the datasets
    source_day_coverage does not cover, and a stub here would let a regression
@@ -99,6 +107,7 @@ export async function mountAll(db, { serverRoutes = true } = {}) {
     grainOf, previousWindow, foldGrain, GRAINS, PERIODS, isPeriod, periodPartial,
     isAdmin, redactSettings, secretField, redactSampleValue, RAW_ALIASES, spanGaps,
     IDENTITY_DOCS, stripIdentity, withheldNote, photoHref, withPhotos,
+    refIds, peopleFor, attachPeople, log,
     recordImport, spanOf, tallyBatch, takeTally,
     LEDGER_CADENCE, ledgerSilence,
     FIX_FRESH: "interval '30 minutes'",

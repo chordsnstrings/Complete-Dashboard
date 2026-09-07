@@ -613,14 +613,45 @@ export function donut(host, data, { label = 'label', value = 'n', onClick,
   });
   svg.append(txt(cx, cy - 2, fmt(tot), 'vlab', 'middle', 'font-size:19px;font-weight:600;fill:var(--ink)'),
     txt(cx, cy + 14, 'total', 'axis', 'middle'));
-  host.append(svg);
-  const leg = document.createElement('div'); leg.className = 'legend';
+  /* The ring beside its own key, rather than above a single line of swatches.
+     ─────────────────────────────────────────────────────────────────────────
+     A 190px ring centred in a 1,132px panel with one line of text under it
+     leaves nine hundred pixels of nothing, and the day page carried two of
+     them one under the other. The space was not merely empty, it was
+     information the chart already had and did not print: a legend reading
+     "Uber · 487" makes the reader divide by the total in their head, and the
+     share was only ever available by hovering — which a touch screen cannot
+     do at all.
+
+     So the key is a column beside the ring, and each row carries the count,
+     the share, and a bar of that share. `flex-wrap` puts it back underneath
+     when the host is narrow, which is what happens inside a three-up grid and
+     on a phone, so nothing has to know how wide its container is. */
+  const wrap = document.createElement('div'); wrap.className = 'dnut';
+  wrap.append(svg);
+  const leg = document.createElement('div'); leg.className = 'legend dnut-keys';
   // The legend reads the SAME expression the ring did, so a swatch can never
   // name a colour the arc beside it is not drawn in.
   const swatchOf = (d, i) => (d._tail ? '--ink-3' : (colorFor && colorFor(d, i)) || CAT[i % CAT.length]);
-  leg.innerHTML = shown.map((d, i) =>
-    `<span><i class="sw" style="background:var(${swatchOf(d, i)})"></i>${esc(d[label])} · <b class="num">${fmt(d[value])}</b></span>`).join('');
-  host.append(leg);
+  leg.innerHTML = shown.map((d, i) => {
+    const share = (+d[value] / tot) * 100;
+    /* One decimal below ten per cent, none above: "42.7%" and "3.1%" both read
+       at a glance, "42.68%" does not, and a slice under a tenth of a per cent
+       reads "<0.1%" rather than rounding to a zero it is not. */
+    const pc = share < 0.05 ? '<0.1%' : `${share.toFixed(share < 10 ? 1 : 0)}%`;
+    /* The tooltip sits on the LABEL, not on the row: the row is
+       `display:contents` so it has no box of its own to hover. */
+    const t = d._tail ? ` title="${esc(d._tail.slice(0, 10).join(' · '))}"` : '';
+    return '<span class="dk">'
+      + `<i class="sw" style="background:var(${swatchOf(d, i)})"></i>`
+      + `<span class="dk-l"${t}>${esc(d[label])}</span>`
+      + `<span class="dk-t"><span class="dk-f" style="width:${Math.max(share, 0.6).toFixed(1)}%;`
+      + `background:var(${swatchOf(d, i)})"></span></span>`
+      + `<b class="num dk-n">${fmt(d[value])}</b>`
+      + `<span class="num dk-p">${pc}</span></span>`;
+  }).join('');
+  wrap.append(leg);
+  host.append(wrap);
 }
 
 /* ── horizontal bars (ranking) ── */

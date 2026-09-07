@@ -468,8 +468,31 @@ export function csvToPayments(csv) {
    together. Computing the list once also makes `of` — the denominator an
    operator reads on the Settings page — the number of weeks rather than the
    number of weeks times the number of fleets. */
-export function fareWeeks(from, to) {
-  const closed = [...closedWeeks(from, to)].reverse();
+/* `now` defaults to the END OF THE RANGE, not to the wall clock.
+   ─────────────────────────────────────────────────────────────────────────
+   This read `closedWeeks(from, to)` and let that function default `now` to
+   `new Date()`, which made the whole result depend on when it was called
+   rather than on what it was asked. Two consequences, one cosmetic and one
+   not:
+
+     test/uber_fares_interleaved.test.mjs pins a fixed range ending Friday
+     2026-09-04 and asserts that the week containing it is the open one. It
+     passed for six days and failed on the seventh, when the wall clock moved
+     past that week's Sunday — a test that is green only during the week it
+     was written is not a test.
+
+     And a BACKFILL asked for a range that ended two years ago got the same
+     treatment: every week in it is closed by the wall clock, which is the
+     right answer, but it arrived by accident. Asked for a range ending
+     mid-week two years ago, the honest answer is that the week containing
+     that end was still running AT THAT POINT, and clamping it to the range's
+     own end is exactly what the clamp below already does.
+
+   In production `to` is the moment the collector runs, so nothing about the
+   scheduled behaviour changes. What changes is that the function now answers
+   a question about its arguments. */
+export function fareWeeks(from, to, now = to) {
+  const closed = [...closedWeeks(from, to, now)].reverse();
   /* The week the range reaches that has not ended. weekChunks yields every
      week the range touches; closedWeeks yields the subset that has finished,
      so the difference is at most one — and it is the one this walk used to

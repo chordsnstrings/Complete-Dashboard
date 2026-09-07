@@ -7,7 +7,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, custody, custodyAsOf,
   sourceLabel, sourceToken, tierLabel, plural, countOf, UBER_FARE, sentence, exportRow,
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
-  markTallTables, kpiTile, UBER_FARE_WHY } from './ui.js';
+  markTallTables, kpiTile, fitKpis, UBER_FARE_WHY } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
 import { todayLive, todayLede, FARES_LAG } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
@@ -22,6 +22,7 @@ import { renderCohort } from './cohort.js';
 import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
 import { renderTrips } from './trips.js';
+import { peopleCards, peopleResolved, namesLine } from './people.js';
 import { renderProvenance } from './provenance.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
 import { renderTrip } from './trip.js';
@@ -1740,6 +1741,24 @@ V.action = async (root) => {
   const act = panel('What to do', 'The smallest useful next step.');
   act.body.innerHTML = `<p style="margin:0">${esc(r.action || '')}</p>`;
   root.append(act.panel);
+  /* The people the finding is about, immediately under the instruction that
+     asks somebody to contact them. Above the sibling table deliberately: "who
+     do I ring" is the question this page is opened with, and it was answering
+     it with a number. */
+  const refs = Array.isArray(r.refs) ? r.refs.filter((x) => x && x.driver_ext_id) : [];
+  if (refs.length) {
+    const resolved = peopleResolved(refs);
+    const who = panel(countOf(refs.length, 'driver') + ' named by this finding',
+      resolved === refs.length
+        ? 'Everything needed to make the call, from the record we already hold.'
+        : resolved
+          ? `${fmt(resolved)} of ${fmt(refs.length)} could be resolved to a person — the rest are `
+            + 'accounts the rule saw that no channel has filed a name or a contact for.'
+          : 'The rule named these accounts; no channel has filed a name or a contact for any of '
+            + 'them, so what follows is what we hold and no more.');
+    who.body.append(peopleCards(refs));
+    root.append(who.panel);
+  }
   if (view && r.entity_id) {
     root.append(note(`Open the ${r.entity_type} to see everything else known about it — this finding `
       + 'is one reading, and the page beside it is the rest of them.'));
@@ -3972,6 +3991,7 @@ V.insights = async (root) => {
         <div class="insight-main">
           <div class="insight-title">${esc(r.title)}</div>
           <div class="insight-action">${esc(r.action || '')}</div>
+          ${namesLine(r)}
         </div>
         <div class="insight-meta">
           ${view && r.entity_id ? `<span class="tag">${esc(r.entity_type)} ${esc(r.entity_id).slice(0, 14)}</span>`
@@ -5660,6 +5680,7 @@ async function render() {
        to lose its column headings gets a scrollport so the headings can stay;
        see markTall in ui.js for why the sticky rule never fired without one. */
     markTallTables(root);
+    fitKpis(root);
     animateView(root);
   } catch (e) {
     if (!alive(gen)) return;                // superseded: not this reader's error

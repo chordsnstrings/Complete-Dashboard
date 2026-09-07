@@ -564,9 +564,57 @@ export function kpiTile(k) {
 /** The tiles of a row as one HTML string, for a caller that owns the host. */
 export const kpiTiles = (items) => items.filter(Boolean).map(kpiTile).join('');
 
+/* How many columns leave the fewest empty cells on the last row.
+   ─────────────────────────────────────────────────────────────────────────
+   The grid was `repeat(auto-fit, minmax(172px, 1fr))`, which on a 1,132px
+   page is six columns whatever the tile count. The day page has eight tiles,
+   so it drew six and then two, with four cells of nothing beside them — the
+   single loudest thing on the page and the first thing anybody calls ugly.
+
+   Auto-fit cannot know this: it packs as many as fit and stops. The count is
+   known here, so the minimum track size becomes a SHARE of the row and
+   auto-fit lands on the number we asked for — while still collapsing to fewer
+   columns on a narrow screen, because the 172px floor wins there.
+
+   Between four and six, because three columns of 370px tiles is not an
+   improvement on a ragged row and seven is narrower than the figures inside
+   them. Fewest orphans wins; a tie goes to the wider row, which keeps eight
+   tiles at 4 + 4 and eleven at 6 + 5. */
+export function kpiCols(n) {
+  if (n <= 4) return Math.max(n, 1);
+  let best = 6, bestGap = Infinity;
+  for (let c = 4; c <= 6; c++) {
+    const gap = (c - (n % c)) % c;
+    if (gap < bestGap || (gap === bestGap && c > best)) { best = c; bestGap = gap; }
+  }
+  return best;
+}
+
+/* The same count, applied to a row somebody built with innerHTML.
+   ─────────────────────────────────────────────────────────────────────────
+   kpiRow() sets --kpi-n when it builds the row, which covers every caller
+   that uses it. #insights does not: it writes `kh.innerHTML = […].map(kpiTile)`
+   into a .kpis it made earlier, so its five tiles sat in a six-column grid
+   with one empty cell. Rather than convert that call site and wait for the
+   next one, the page sweeps for .kpis after every render — the same shape
+   markTallTables() uses, and for the same reason: a rule that depends on how
+   many children something has cannot live in the stylesheet. */
+export function fitKpis(root) {
+  if (!root || typeof root.querySelectorAll !== 'function') return;
+  for (const k of root.querySelectorAll('.kpis')) {
+    const n = k.children.length;
+    if (n) k.style.setProperty('--kpi-n', String(kpiCols(n)));
+  }
+}
+
 export function kpiRow(items) {
   const host = el('div', 'kpis');
   host.innerHTML = kpiTiles(items);
+  /* Counted from what was RENDERED, not from `items`: kpiTiles drops the
+     nulls callers pass for a tile that has nothing to say, and a column count
+     derived from the list before that happens is a count of tiles that are
+     not on the screen. */
+  host.style.setProperty('--kpi-n', String(kpiCols(host.children.length)));
   return host;
 }
 
@@ -904,6 +952,27 @@ export const tierLabel = (t) => {
   if (!/^[a-z0-9]+(_[a-z0-9]+)+$/.test(s)) return s;      // already human, or a proper name
   return s.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 };
+
+/* A payment route, named the way the product names it everywhere else.
+   ─────────────────────────────────────────────────────────────────────────
+   The day page charted `off_platform`, `on_account` and `complimentary` as
+   the database spells them, beside "card" and "cash" in lower case — six
+   plain words and two enum values in the same eight-row chart. Every other
+   page that shows these routes writes them out; this is that vocabulary in
+   one place so the pages cannot drift apart again.
+
+   The fold from a PROVIDER's word ("braintree", "room-charge", "posted-for-
+   salary") to one of these classes happens on the server and in app.js's own
+   CLASS map. This is the last step only: class to English. Anything not in
+   the table falls through to tierLabel, which turns an unknown snake_case
+   enum into words rather than printing it raw. */
+export const PAY_ROUTE = {
+  card: 'Card', wallet: 'Wallet', cash: 'Cash',
+  on_account: 'On account', salary: 'Salary deduction',
+  off_platform: 'Settled off-platform', adjustment: 'Adjustment',
+  complimentary: 'Complimentary', unknown: 'Route not reported',
+};
+export const payRoute = (c) => PAY_ROUTE[String(c ?? '').trim().toLowerCase()] || tierLabel(c);
 
 /* "yango is missing 1 days" and "1 have no record of ever being requested".
    Takes the count so the caller cannot forget to look at it. */
