@@ -25,25 +25,55 @@ const FOLD = "regexp_replace(\n"
 
 export function render() {
   const tpl = identityCase('driver_ext_id', FOLD);
-  const probe = MERGES[0].merge.id;
-  return `-- ── three people who were on the roster twice, folded onto one key each ─────
+  /* The "already applied" probe, and why it cannot be the FIRST merge id.
+     ─────────────────────────────────────────────────────────────────────────
+     It was `MERGES[0].merge.id`, which is a fine test for "has this file ever
+     run" and a silently wrong one for "is this file's register the one the
+     column carries". The first entry is the oldest merge and it survives every
+     later edit, so the day the register grew from three pairs to ninety-three
+     the guard still matched, every table was skipped, and person_key would
+     have gone on folding ninety people apart while api/identity_map.js said
+     otherwise — the exact drift test/identity_merge.test.mjs exists to catch,
+     arriving through the one path that test cannot see.
+
+     The probe is the LAST alias id instead: appended as the register grows, so
+     a column built from an older register never contains it and always
+     rebuilds. Belt and braces with the count of WHEN clauses, because two
+     registers of the same length that end on the same pair are the same
+     register. */
+  const aliasIds = MERGES.flatMap((m) => (m.merge?.ids || [m.merge?.id]).filter(Boolean));
+  const probe = aliasIds[aliasIds.length - 1];
+  const whens = aliasIds.length;
+  return `-- ── ${MERGES.length} people who were on the roster more than once, folded onto one key each ──
 -- ---------------------------------------------------------------------------
--- person_key is what every surface in this product groups people by, and until
--- now it was the folded NAME and nothing else: lowercase, collapse runs of
+-- person_key is what every surface in this product groups people by, and it
+-- was the folded NAME and nothing else: lowercase, collapse runs of
 -- whitespace, collapse an adjacent repeated word (sql/schema_v20.sql for trip,
 -- driver_platform_state and vehicle_driver_day; v42 for the earnings
 -- components; v51 for the statements and payouts).
 --
--- That fold cannot see three duplicates an operator asked about, and MUST NOT
--- be taught to. Two are the same names in the opposite order ("Aliyan khalil"
--- on Uber against "Khalil Aliyan" on Yango; "Moses Arthur" on Uber against
--- "Arthur Moses" on Bolt) and the third is one transliterated vowel ("Shehzad
--- Ahmad Ghulam Muhammad" on Uber against "Shehzad Ahmed Ghulam Muhammad" on the
--- hotel channel). Every rule loose enough to catch them is loose enough to
--- merge two men: this product's own test/roster_twin.test.mjs pins "Muhammad
--- Khalid Gul" and "Muhammad Khalid" apart as two humans on two cars, and a
--- word-order rule would join "Gul Muhammad Khalid" to either of them the day
--- such a row arrives.
+-- That fold cannot see the duplicates this fleet actually has, and MUST NOT be
+-- taught to. Some are the same names in the opposite order ("Aliyan khalil" on
+-- Uber against "Khalil Aliyan" on Yango) and one is a transliterated vowel
+-- ("Shehzad Ahmad" against "Shehzad Ahmed"). Most are the shape the roster
+-- produces every day: Bolt and the hotel channel file the full legal name and
+-- Uber drops the middle one — "Zubair Khan Shaukat Ali" against "Zubair Khan
+-- Ali", "Zia Ali Said Muhammad" against "Zia Ali Muhammad". Every rule loose
+-- enough to catch those is loose enough to merge two men: this product's own
+-- test/roster_twin.test.mjs pins "Muhammad Khalid Gul" and "Muhammad Khalid"
+-- apart as two humans on two cars, and a subsequence rule would join them.
+--
+-- So the merge is a LIST, and each entry says what decided it. Two kinds sit
+-- in it now. Some were checked one pair at a time against production — shared
+-- plates, interleaved custody days, the gap between one record handing a car
+-- to the other. The rest were found by src/identity_link.js on a phone number
+-- both channels filed against the same person, which over the 289 roster rows
+-- appears on no more than two records and never twice within one channel.
+-- Twenty-six people were found by both, independently.
+--
+-- What is NOT here is any pair with a contradiction: a day on which both
+-- records took a trip at the same time. Five carry one, they stay in PENDING,
+-- and a simultaneous trip outranks a shared phone every time.
 --
 -- So the merge is a LIST of verified ids, not a rule. api/identity_map.js holds
 -- it together with the measurement that decided each one. THIS FILE IS
@@ -92,7 +122,11 @@ BEGIN
        WHERE c.table_schema = current_schema()
          AND c.table_name   = t.tbl
          AND c.column_name  = 'person_key'
-         AND c.generation_expression LIKE '%${probe}%');
+         AND c.generation_expression LIKE '%${probe}%'
+         -- …and carries as many merges as this register has, so a column built
+         -- from a SUPERSET that happens to end on the same pair still rebuilds.
+         AND (length(c.generation_expression)
+              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = ${whens});
     EXECUTE format('ALTER TABLE %I DROP COLUMN IF EXISTS person_key', t.tbl);
     EXECUTE format('ALTER TABLE %I ADD COLUMN person_key text GENERATED ALWAYS AS (%s) STORED',
                    t.tbl, format(tpl, t.namecol));
