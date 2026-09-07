@@ -41,7 +41,7 @@ import { authRoutes } from './auth_routes.js';
 import { exportRoutes } from './export_routes.js';
 import { supplyRoutes } from './supply_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
-import { revenueRoutes } from './revenue_routes.js';
+import { revenueRoutes, receiptRoutes } from './revenue_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
 import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
@@ -5248,6 +5248,10 @@ retentionRoutes(app, { q, wrap });
    the join between the forecast and the rota. */
 capacityRoutes(app, { q, wrap });
 revenueRoutes(app, { q, wrap, range });
+/* The finance team's own register, kept beside the revenue routes because it
+   reads the same table and must not drift from how that table's restatements
+   are decided. */
+receiptRoutes(app, { q, wrap, range });
 
 /* The month-by-month check that the platform's numbers add up: bank payout
    against on-trip net + tips + salik − cash, the identity the July 2026

@@ -190,13 +190,29 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
                 sum(price) AS cash_value,
                 array_agg(DISTINCT platform) platforms,
                 array_remove(array_agg(DISTINCT plate), NULL) plates,
-                max(requested_at) last_cash_trip
+                max(requested_at) last_cash_trip,
+                /* The normalised name, folded ONCE per holder.
+                   ────────────────────────────────────────────────────────
+                   This was computed inside the lateral below, which means it
+                   was recomputed for every row of driver_statement_day the
+                   lateral scanned, for every holder — on production that is
+                   about four hundred people against a year of statement days,
+                   so a regexp_replace ran tens of millions of times to answer
+                   one page. Measured 2026-09-07 on the default (all-time)
+                   window: 97 and 102 seconds on two runs, and a 500 from the
+                   gateway on a third, which is what this page actually served
+                   the first time it was asked today.
+
+                   Folding it here changes no figure — it is the same
+                   expression against the same column — and it is the only
+                   place it can be folded, because a LATERAL cannot see a
+                   sibling's output. */
+                lower(regexp_replace(coalesce(driver_name, '(unnamed)'), '\\s+', ' ', 'g')) AS _nk
            FROM trip_ext
           WHERE ${FB} AND driver_holds_cash
           GROUP BY 1, 2),
        joined AS (
-         SELECT h.*, s.statement_cash, s.statement_days,
-                lower(regexp_replace(h.driver_name, '\\s+', ' ', 'g')) AS _nk
+         SELECT h.*, s.statement_cash, s.statement_days
          FROM holders h
          /* WHO is holding it, not just how much of it we can price.
             ──────────────────────────────────────────────────────────────
@@ -229,7 +245,7 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
               AND d.day BETWEEN $1::date AND $2::date
               AND ($3::text IS NULL OR d.platform = $3)
               AND ($4::text IS NULL OR d.fleet_id = $4)
-              AND (d.name_key = lower(regexp_replace(h.driver_name, '\\s+', ' ', 'g'))
+              AND (d.name_key = h._nk
                    OR (h.driver_ext_id IS NOT NULL AND d.driver_ext_id = h.driver_ext_id))
          ) s ON true
        ),

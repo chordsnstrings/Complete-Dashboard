@@ -25,7 +25,7 @@ import { todayLive, todayLede, FARES_LAG } from '../today.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
-  { id: 'money', route: 'money', label: 'Money', ic: '◈', owns: ['money', 'finance', 'platforms'] },
+  { id: 'money', route: 'money', label: 'Money', ic: '◈', owns: ['money', 'finance', 'receipts', 'platforms'] },
   { id: 'people', route: 'people', label: 'People', ic: '◧', owns: ['people', 'drivers', 'driver'] },
   { id: 'fleet', route: 'fleet', label: 'Fleet', ic: '▤', owns: ['fleet', 'vehicles', 'vehicle'] },
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
@@ -69,6 +69,7 @@ export function titleFor(view, param) {
        header reading "action", the router's word, over a screen that names
        people and asks somebody to ring them. */
     action: ['Finding', 'One flag, and who it is about'],
+    receipts: ['What landed', 'Every figure a provider filed'],
     compliance: ['Compliance', 'Built for a bigger screen'],
     demand: ['Demand', 'Built for a bigger screen'],
     map: ['Map & replay', 'Built for a bigger screen'],

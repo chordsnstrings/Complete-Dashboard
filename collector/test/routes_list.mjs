@@ -33,7 +33,7 @@ export const ROUTES = [
   'cohort/vehicles-moved-no-booking', 'cohort/roster-blocked', 'cohort/not-a-cohort',
   'cohort/retention-stopped', 'cohort/safety-drivers', 'cohort/settlement-cash', 'cohort/tiers-behind',
   'platforms', 'platforms/tiers', 'platforms/funnel',
-  'corridors', 'finance', 'settlement', 'settlement/cash', 'settlement/receivables',
+  'corridors', 'finance', 'receipts', 'settlement', 'settlement/cash', 'settlement/receivables',
   'corporate', 'corporate/properties', 'corporate/guests',
   'corporate/leakage', 'corporate/leakage/complimentary',
   'corporate/approach', 'corporate/approach/daypart',

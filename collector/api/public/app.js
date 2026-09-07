@@ -24,6 +24,7 @@ import { renderCauses } from './causes.js';
 import { renderTrips } from './trips.js';
 import { peopleCards, peopleResolved, namesLine } from './people.js';
 import { renderProvenance } from './provenance.js';
+import { renderReceipts } from './receipts.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
 import { renderTrip } from './trip.js';
 import { renderSettlement, SETTLE_TABS } from './settlement.js';
@@ -302,6 +303,10 @@ const VIEWS = [
   { id: 'revenue', label: 'Money by platform', ic: '◇', sec: 'Money', sub: 'What each platform reports about money, and which ones report nothing' },
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', sec: 'Money', sub: 'Hotel and company bookings, with the cost of each ride as well as its price' },
   { id: 'finance', label: 'Money in and out', ic: '◈', sec: 'Finance', sub: 'Money in, how riders paid, and every fee, bonus and adjustment on record' },
+  /* The register the finance team asked for in as many words: "how much got
+     into the account, which date, from the source exactly". Above Bank
+     reconciliation because it is what reconciliation is done AGAINST. */
+  { id: 'receipts', label: 'What landed, and when', ic: '⑉', sec: 'Finance', sub: 'Every figure a provider filed — the dates it covers, what it was for, and when it reached us' },
   { id: 'reconcile', label: 'Bank reconciliation', ic: '⇌', sec: 'Finance', sub: 'For each month, what the platforms paid us against what their statements say they owed' },
   { id: 'settlement', label: 'Cash and unpaid', ic: '◫', sec: 'Finance', sub: 'Who pays for the ride, how much cash drivers hold, and what is still unpaid' },
   { id: 'provenance', label: 'Where each figure came from', ic: '⌗', sec: 'Finance',
@@ -1816,6 +1821,7 @@ V.retention = async (root) => renderRetention(root);
 V.optimise = async (root) => renderOptimise(root);
 V.capacity = async (root) => renderCapacity(root);
 V.trips = async (root) => renderTrips(root);
+V.receipts = async (root) => renderReceipts(root);
 V.provenance = async (root) => renderProvenance(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */
 V.unit = async (root) => renderEconomics(root);

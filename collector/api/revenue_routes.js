@@ -33,6 +33,192 @@ import { chooseBasis, fleetIncome, platformStatements } from './income_sql.js';
 import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
 import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
 
+/* ── the receipts register ────────────────────────────────────────────────
+   "How much got into the account, which date, from the source exactly."
+
+   The finance team's question is not the dashboard's. A dashboard asks what a
+   month was worth; a finance team asks which document said so, covering which
+   dates, for how much, and when it arrived — because that is what a bank line
+   is reconciled against and what next month's figure is predicted from.
+
+   /api/finance/provenance already answers "where did the total come from" at
+   the level of the API surface: Uber payout, AED 406,893, 1,204 rows. That is
+   the right shape for a reader checking a headline and the wrong shape for
+   somebody being asked when the money landed. This returns the PERIODS
+   themselves — one row per document the provider filed — so "Uber, 31 Aug to
+   6 Sep, AED 17,749.24, first seen 7 Sep" is a line somebody can tick.
+
+   Three disciplines, all of them inherited from money_event's own header and
+   none of them optional:
+
+     THE GRAIN IS THE PROVIDER'S. A weekly statement is one row covering seven
+     days, never seven daily figures. `days` says how many days each row
+     covers, so a reader can see at a glance which figures are dated and which
+     are a week's worth of money attributed to a week.
+
+     A RESTATEMENT IS NOT A RECEIPT. Providers re-file: the same money, for an
+     overlapping period, sent again. Summing those double-counts, and dropping
+     them hides a thing the provider actually did. So an overlapping row is
+     FLAGGED and its amount is reported separately, and the month totals below
+     exclude it — with the excluded figure returned beside them, so the
+     subtraction is visible rather than implied.
+
+     A MONTH IS NOT A PERIOD. A weekly statement straddles month ends five
+     times a year. The month rollup therefore reports which months each row
+     touches and does not pretend a 31 Aug – 6 Sep statement is August money;
+     it is reported under the month its period ENDS in, and the count of
+     straddling rows is returned so the page can say how much of the month is
+     carried by them. */
+export function receiptRoutes(app, { q, wrap, range }) {
+  /* The two CTEs both queries below share, written once.
+     ─────────────────────────────────────────────────────────────────────────
+     `restated` is the same test /api/finance/provenance applies, deliberately:
+     two pages disagreeing about which rows are a re-file would be worse than
+     either being wrong, and it is the property both of them turn on. Only the
+     kinds that REPORT A PERIOD are eligible — a fare row is one trip and a
+     ledger row is one transaction, so two on a day are two events rather than
+     one restated.
+
+     `superseded` is the half provenance does not need and this page cannot do
+     without, and getting it wrong the obvious way understates a month by more
+     than double-counting overstates it.
+
+     A restatement marks BOTH sides. The weekly filing and the three daily rows
+     that re-serve three of its days all overlap something, so all four are
+     `restated` — which is correct, because either one alone is the truth and
+     the row cannot say which. Excluding every restated row from a total
+     therefore does not remove the duplicate: it removes the money. Measured on
+     the fixture in test/receipts_register.test.mjs, September came to AED
+     7,549.24 against a true 16,549.24, with 12,600 reported as excluded — a
+     figure that is wrong in the direction nobody checks, because a total that
+     is too small looks like a quiet month.
+
+     So one side has to win, by a rule stated out loud. The rule is the
+     provider's own canonical filing: the LONGEST period wins, and among equal
+     periods the one filed most recently. That is the same rule
+     sql/schema_v58.sql applies to statements and the same one the August
+     reconciliation gap turned on — a four-day REST window superseding the full
+     week already held is exactly this mistake in the other direction.
+
+     The self-join is over the contested rows only. A row that supersedes a
+     contested row overlaps it and is therefore contested itself, so both sides
+     of the join live in that small set — the provenance route's warning about
+     a quadratic self-join over two hundred thousand rows does not apply. */
+  const MARKED = `
+       w AS (
+         SELECT * FROM money_event
+          WHERE period_start <= $2::date AND period_end >= $1::date
+            AND ($3::text IS NULL OR platform = $3)
+            AND ($4::text IS NULL OR fleet_id = $4)
+       ),
+       marked AS (
+         SELECT w.*,
+                kind IN ('payout', 'component', 'statement') AND (
+                  coalesce(max(period_end) OVER g_prev >= period_start, false)
+                  OR coalesce(min(period_start) OVER g_next <= period_end, false)
+                ) AS restated
+           FROM w
+         WINDOW g_prev AS (PARTITION BY source, platform, kind, category, driver_ext_id, external_ref
+                           ORDER BY period_start
+                           ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),
+                g_next AS (PARTITION BY source, platform, kind, category, driver_ext_id, external_ref
+                           ORDER BY period_start
+                           ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING)
+       ),
+       contested AS (SELECT * FROM marked WHERE restated),
+       judged AS (
+         SELECT m.*,
+                m.restated AND EXISTS (
+                  SELECT 1 FROM contested o
+                   WHERE o.source = m.source AND o.platform = m.platform
+                     AND o.kind = m.kind AND o.category = m.category
+                     AND o.driver_ext_id = m.driver_ext_id
+                     AND o.external_ref = m.external_ref
+                     AND o.period_start <= m.period_end AND o.period_end >= m.period_start
+                     AND ((o.period_end - o.period_start) > (m.period_end - m.period_start)
+                          OR ((o.period_end - o.period_start) = (m.period_end - m.period_start)
+                              AND coalesce(o.ingested_at, 'epoch'::timestamptz)
+                                > coalesce(m.ingested_at, 'epoch'::timestamptz)))
+                ) AS superseded
+           FROM marked m
+       )`;
+
+  app.get('/api/finance/receipts', wrap(async (req, res) => {
+    const p = range(req);
+    const rows = await q(
+      `WITH ${MARKED}
+       SELECT source, platform, fleet_id, kind,
+              period_start, period_end,
+              (period_end - period_start + 1)::int AS days,
+              (period_start = period_end) AS is_daily,
+              count(*)::int rows_seen,
+              count(DISTINCT driver_ext_id) FILTER (WHERE driver_ext_id <> '')::int drivers,
+              count(DISTINCT category) FILTER (WHERE category <> '')::int categories,
+              round(sum(amount)::numeric, 2) AS amount,
+              round(sum(amount) FILTER (WHERE amount > 0)::numeric, 2) AS credits,
+              round(sum(amount) FILTER (WHERE amount < 0)::numeric, 2) AS debits,
+              bool_or(restated) AS restated,
+              /* Superseded, not merely contested: this is the flag the page
+                 puts against a row to say it is NOT in the month total, and
+                 the two are different rows. */
+              bool_and(superseded) AS superseded,
+              round(sum(amount) FILTER (WHERE superseded)::numeric, 2) AS superseded_amount,
+              /* WHEN IT ARRIVED, which is a different date from the period it
+                 covers and the one that answers "why did last week's figure
+                 change overnight". A provider files late; the money is dated
+                 to the work, the knowledge is dated to the file. */
+              min(ingested_at) AS first_seen, max(ingested_at) AS last_seen,
+              /* The month it is booked to — the convention has to be stated
+                 somewhere and this is the only place that can state it with
+                 the dates still attached. */
+              date_trunc('month', period_end)::date AS month,
+              (date_trunc('month', period_start) <> date_trunc('month', period_end)) AS straddles_month
+         FROM judged
+        GROUP BY source, platform, fleet_id, kind, period_start, period_end
+        ORDER BY period_end DESC, period_start DESC, sum(abs(amount)) DESC NULLS LAST
+        LIMIT 600`, p);
+
+    /* The month rollup a forecast will eventually read. Built from the same
+       judged set rather than from `rows`, so the LIMIT above cannot silently
+       shorten a total — a capped list feeding a sum is how a figure quietly
+       becomes about the first six hundred rows. */
+    const months = await q(
+      `WITH ${MARKED}
+       SELECT date_trunc('month', period_end)::date AS month, platform, kind,
+              round(sum(amount) FILTER (WHERE NOT superseded)::numeric, 2) AS amount,
+              round(sum(amount) FILTER (WHERE superseded)::numeric, 2) AS superseded_amount,
+              count(*)::int rows_seen,
+              count(DISTINCT (period_start, period_end))::int periods,
+              count(DISTINCT (period_start, period_end)) FILTER (WHERE superseded)::int superseded_periods,
+              count(DISTINCT (period_start, period_end))
+                FILTER (WHERE date_trunc('month', period_start)
+                          <> date_trunc('month', period_end))::int straddling,
+              min(period_start) AS covers_from, max(period_end) AS covers_to
+         FROM judged
+        GROUP BY 1, 2, 3
+        ORDER BY 1 DESC, sum(abs(amount)) DESC NULLS LAST`, p);
+
+    res.json({
+      window: { from: p[0], to: p[1] },
+      rows, months,
+      truncated: rows.length >= 600,
+      note: 'One row per document a provider filed, at the grain the provider filed it. '
+        + 'A weekly statement is one row covering seven days — it is never divided into daily '
+        + 'figures here, because nobody measured those. "First seen" is when the document '
+        + 'reached us, which is a different date from the period it covers.',
+      restated_note: 'A provider that re-files an overlapping period sends the same money '
+        + 'twice, and the two filings mark each other — neither row can say on its own which '
+        + 'is the truth. So one wins by a stated rule: the longest period, being the '
+        + 'provider\u2019s own canonical filing, and among equal periods the one filed most '
+        + 'recently. The loser stays in the register, marked, and is left out of the month '
+        + 'totals with its amount shown beside them.',
+      month_note: 'A period is booked to the month it ENDS in. Five weeks a year straddle a '
+        + 'month end; the number of those is given per month so a reader can see how much of '
+        + 'the total is carried by them.',
+    });
+  }));
+}
+
 export function revenueRoutes(app, { q, wrap, range }) {
   /* ── where every figure came from ──────────────────────────────────────
      One row per API surface, per channel, per kind of money — what that call
