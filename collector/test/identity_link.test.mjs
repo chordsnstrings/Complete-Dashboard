@@ -238,8 +238,20 @@ console.log('\nthe directory folds the two records into one row');
   /* THE HALF A PAGE MUST PRINT. 166 of 434 directory rows carry no phone on
      any record; a list of links that says nothing about them reads as a clean
      roster. */
-  check('…and how many roster records it could not see',
-    links.body.coverage && typeof links.body.coverage.without_phone === 'number',
+  /* THE FIGURE THAT MUST NOT REASSURE. Counted against the roster it is 289 of
+     289 and reports "0 accounts it cannot see", which is the most comforting
+     possible number and answers itself — a roster row is by definition a
+     record we hold contact details for. It has to be counted against the
+     accounts the product actually counts work for, where Bolt (which files no
+     phone at all) is the blind spot. */
+  check('…and how many ACCOUNTS it could not see',
+    links.body.coverage && typeof links.body.coverage.without_phone === 'number'
+    && typeof links.body.coverage.accounts === 'number',
+    JSON.stringify(links.body.coverage));
+  check('…counted against the accounts, not against the roster that answers itself',
+    links.body.coverage.accounts >= links.body.coverage.with_phone
+    && links.body.coverage.without_phone
+       === links.body.coverage.accounts - links.body.coverage.with_phone,
     JSON.stringify(links.body.coverage));
   check('…and that a link does not move the stored person_key',
     /does not move person_key/.test(links.body.applies_note || ''), links.body.applies_note);

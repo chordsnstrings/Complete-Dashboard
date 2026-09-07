@@ -296,11 +296,38 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      and says nothing about that reads as "the roster is now clean". */
   app.get('/api/drivers/identity-links', wrap(async (req, res) => {
     const links = await identityLinks(q);
+    /* The reach, counted against the ACCOUNTS THE PRODUCT KNOWS — not against
+       the roster.
+       ─────────────────────────────────────────────────────────────────────
+       The first version of this counted driver_compliance rows with a phone
+       against driver_compliance rows, which is 289 of 289 and reported
+       "0 records it cannot see". That is the most reassuring possible number
+       and it is meaningless: a roster row is by definition a record we hold
+       contact details for, so the question answers itself.
+
+       The figure that matters is how many driver ACCOUNTS this rule cannot
+       see at all. driver_lifetime carries one row per account the product has
+       ever counted work for — Bolt records included, and Bolt files no phone
+       anywhere — so the difference is the real blind spot. Measured
+       2026-09-07 from the directory: 166 of 434 people carried no phone on any
+       of their records, 93 of them Bolt-only, with 80,443 trips between them. */
     const [cov] = await q(
-      `SELECT count(*)::int AS roster_rows,
-              count(*) FILTER (WHERE phone IS NOT NULL AND btrim(phone) <> '')::int AS with_phone,
-              count(DISTINCT platform)::int AS channels
-         FROM driver_compliance`);
+      `WITH phoned AS (
+         SELECT DISTINCT driver_ext_id FROM driver_compliance
+          WHERE phone IS NOT NULL AND btrim(phone) <> ''
+            AND driver_ext_id IS NOT NULL AND btrim(driver_ext_id) <> ''
+       ),
+       accounts AS (
+         SELECT driver_ext_id FROM driver_lifetime
+          WHERE driver_ext_id IS NOT NULL AND btrim(driver_ext_id) <> ''
+         UNION
+         SELECT driver_ext_id FROM driver_platform_state
+          WHERE driver_ext_id IS NOT NULL AND btrim(driver_ext_id) <> ''
+       )
+       SELECT (SELECT count(*)::int FROM driver_compliance) AS roster_rows,
+              count(*)::int AS accounts,
+              count(*) FILTER (WHERE p.driver_ext_id IS NOT NULL)::int AS with_phone
+         FROM accounts a LEFT JOIN phoned p USING (driver_ext_id)`);
     /* The rejected ones are returned SEPARATELY rather than filtered away: an
        operator who overruled the rule should be able to see that they did, and
        a link that keeps coming back is a conversation the page should carry. */
@@ -313,8 +340,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       rejected,
       coverage: {
         roster_rows: cov?.roster_rows ?? 0,
+        accounts: cov?.accounts ?? 0,
         with_phone: cov?.with_phone ?? 0,
-        without_phone: (cov?.roster_rows ?? 0) - (cov?.with_phone ?? 0),
+        without_phone: Math.max(0, (cov?.accounts ?? 0) - (cov?.with_phone ?? 0)),
       },
       basis_note: 'Two records the roster gave the same phone number, on two different '
         + 'channels. A number on three records links nobody, and neither does one that '

@@ -4235,7 +4235,7 @@ app.get('/api/drivers/identity-links', (_, r) => r.json({
       phone_tail: '3311', rejected_reason: 'two brothers on one handset — settled by a phone call',
       last_seen_at: '2026-09-07T09:10:00.000Z' },
   ],
-  coverage: { roster_rows: 289, with_phone: 289, without_phone: 145 },
+  coverage: { roster_rows: 289, accounts: 434, with_phone: 268, without_phone: 166 },
   basis_note: 'Two records the roster gave the same phone number, on two different channels. '
     + 'A number on three records links nobody, and neither does one that appears twice within '
     + 'a single channel.',

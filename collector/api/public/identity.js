@@ -57,13 +57,15 @@ export async function renderIdentity(root) {
       sub: needed.length === links.length
         ? 'every one of them a pair no name rule could have reached'
         : `${fmt(needed.length)} of them could not have been joined by name` },
-    { label: 'Roster records with a phone', value: fmt(cov.with_phone ?? 0),
-      sub: `of ${fmt(cov.roster_rows ?? 0)} — this rule can only see a record that carries one` },
+    { label: 'Accounts carrying a phone', value: fmt(cov.with_phone ?? 0),
+      sub: `of ${fmt(cov.accounts ?? 0)} the product counts work for — this rule can only see `
+        + 'an account that carries one' },
     /* THE LIMIT, as a tile rather than a footnote. It is the figure that stops
        this page being read as a clean bill of health. */
     cov.without_phone
-      ? { label: 'Records it cannot see', value: fmt(cov.without_phone),
-        sub: 'no phone number on file, so nothing here says anything about them',
+      ? { label: 'Accounts it cannot see', value: fmt(cov.without_phone),
+        sub: 'no phone number on any of their records — mostly Bolt, which files none at all, '
+          + 'so nothing on this page says anything about them',
         tone: 'warn' }
       : null,
     rejected.length
