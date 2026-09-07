@@ -539,6 +539,66 @@ Bolt has no phone in `driver_platform_state` at all; Bolt records reach Uber
 transitively, because Bolt and the hotel channel file the same full name and
 the existing name fold already joins those two.
 
+### Yango has a second door, and it does not want a cookie — measured 2026-09-07
+
+`fleet.yango.com` is the web console and wants a Yandex session. It has
+answered **403 with an HTML page from a CDN edge** since 2026-09-06 — and
+every Yango *API* refusal is JSON, so the HTML is something in front of the
+API, not the API. The park is provably right: `/api/fleet/ui/v1/parks/users/
+profile` returns 200 and names "ECOSINE TRANSPORTS LLC". The same call
+answers **401 with the cookie removed**, and from one origin that pair is
+unreachable unless an edge is doing the refusing.
+
+`https://fleet-api.yango.tech` is a **different product** — Yango's own Fleet
+API, keyed rather than cookied. The `YANGO_API_KEY` we already store opens it:
+
+| header | value |
+|---|---|
+| `X-API-Key` | the stored `YANGO_API_KEY` |
+| `X-Client-ID` | `taxi/park/<park id>` — **this exact shape**; the bare park id and `fleet/<park id>` both get `403 invalid client id or api key` |
+
+Measured from production, no cookie anywhere:
+
+| path | | |
+|---|---|---|
+| `POST /v1/parks/driver-profiles/list` | **200** | 145 drivers |
+| `POST /v1/parks/cars/list` | **200** | 104 cars, **with VINs** |
+| `POST /v1/parks/orders/list` | **200** | trips, cursor-paged |
+| `POST /v1/parks/transactions/list` | 404 | `path_not_found` |
+| `POST /v1/parks/transactions/categories/list` | 404 | `path_not_found` |
+| `POST /v1/parks/summary/drivers/list` | 404 | `path_not_found` |
+
+`/api/probe/yango/keyapi` re-measures all of this on demand and returns the
+field names two levels deep. Run it before writing any mapper.
+
+**The shapes differ from the console's.** This host nests what
+`/api/reports-api/v1/orders/list` kept flat:
+
+| trip column | console field | key API field |
+|---|---|---|
+| `driver_ext_id` | `driver_id` | `driver_profile.id` |
+| `driver_name` | `driver_full_name` | `driver_profile.name` (same single string, same word-order trap) |
+| `plate` | `car_license_number` | `car.license` (object) — `car.callsign` is the reliable fallback |
+| `pickup_addr` | `address_from` (string) | `address_from.address`, with `.lat`/`.lon` beside it |
+| `dropoff_addr` | `address_to` | last of `route_points[].address` |
+| `distance_km` | `mileage` (number) | `mileage` (**string**) |
+| `price` | `price` (number) | `price` (**string**) |
+| — | — | `events[]` = `{event_at, order_status}`, the per-order status trail |
+
+`driver-profiles/list` gives the **decomposed** name (`driver_profile.
+first_name` + `last_name`) that the word-order fix needs, plus
+`driver_profile.phones[]`, `driver_profile.driver_license`,
+`current_status.status`, `accounts[].balance`, and `car.vin`.
+
+**What the key API cannot replace.** The weekly per-driver aggregate
+(`driver_performance`) and the payment ledger (`ledger_entry`) have no
+endpoint on this host. The aggregate could be recomputed from the orders —
+except that `price_platform_commission` is not in an order, so the earnings
+would be **gross**, which is the exact defect
+`src/sources/yango.js` was fixed for (Yango's commission is ~24%: Aliyan
+Khalil, August 2026, gross 3,069.00 against -749.58). Do not synthesise it.
+Those two stay absent with a reason until the console session works again.
+
 ---
 
 ## Known holes, with owners
@@ -546,7 +606,9 @@ the existing name fold already joins those two.
 | what | state | needs |
 |---|---|---|
 | Bolt Ecosine roster | `BOLT_CLIENT_ID is not entitled to company_id 142868` — the same token reads 142897 (Egari), so the secret is fine | the fleet-integration app in the Bolt portal to be granted 142868 |
-| Yango Ecosine | `YANGO_PARK_ID` → HTTP 403 (401 without a cookie) | park entitlement |
+| Yango Ecosine, console | `fleet.yango.com` → HTTP 403, an HTML page from a CDN edge; 401 with the cookie removed. NOT the park: `parks/users/profile` returns 200 and names the company | a session Yango's edge will accept — or nothing, for the two surfaces below |
+| Yango weekly driver aggregate + payment ledger | no endpoint on `fleet-api.yango.tech` (404), and the orders carry no commission field, so recomputing them would report **gross** as net | the console session, or a Yango endpoint that has them |
+| Yango trips, roster, cars | **not a hole any more** — `fleet-api.yango.tech` answers all three with the stored key and no cookie | the collector repointed at it |
 | Uber fares, Apr–Aug 2025 | 60–97% — **recoverable**, and this row said "permanently" until 2026-09-05 | a retry that keeps the reportId: eight weeks Uber generated and we timed out downloading, inside retention, re-failed every Sunday because the failure is not checkpointed |
 | Uber "offline payment" trips | tracked, unexplained | Uber documentation |
 
