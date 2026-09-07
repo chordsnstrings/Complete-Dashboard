@@ -1434,6 +1434,103 @@ export function probeRoutes(app, { wrap }) {
      rows a day — could not be verified without a way to ask for a single
      alert day. Sending a multi-hour backfill to find out is not verification;
      it is hoping. */
+  /* What this HOST actually sends to Yango, and what Yango answers it.
+     ═════════════════════════════════════════════════════════════════════════
+     Yango has been red for a day with "HTTP 403; without a cookie: HTTP 401",
+     and the fleet's own credentials have been checked twice from outside and
+     found sound. Measured 2026-09-07, minutes apart, with production's stored
+     YANGO_PARK_ID and YANGO_COOKIE confirmed updated at 08:11:14Z: the same
+     URL, method, headers and body, with the same park id and the same session,
+     answered HTTP 200 with live orders from one host and HTTP 403 from this
+     one. Both hosts answer 401 with the cookie removed.
+
+     That leaves two possibilities and no way to tell them apart from outside:
+     this host is holding a different park id from the one that works, or this
+     host is the thing being refused. The difference decides whether somebody
+     spends an afternoon re-pasting credentials or an afternoon on egress, and
+     guessing wrong costs the day.
+
+     So the host reports its own request. It returns SHAPES, never values: the
+     park id's length and first and last four characters — which is not a
+     secret, `secret: false` in the settings catalogue, and is printed in full
+     by the collector's own refusal hint already — the cookie's length and the
+     account name inside it, and the two status codes with the first line of
+     each body. Nothing here can be replayed by whoever reads it.
+
+     Read-only and allowlisted: one endpoint, the collector's own, with the
+     collector's own headers. There is no caller-supplied URL. */
+  app.get('/api/probe/yango', wrap(async (req, res) => {
+    await loadSettings();
+    const park = config.yango.parkId || '';
+    const cookie = config.yango.cookie || '';
+    const key = config.yango.apiKey || '';
+    /* The account the session belongs to, which is the one fact that makes a
+       cookie identifiable without exposing it — and the one an operator needs
+       to answer "whose session is this?". Same expression src/sources/yango.js
+       uses for its hint. */
+    const account = (cookie.match(/yandex_login=([^;]+)/) || [])[1] || null;
+    const parkInCookie = (cookie.match(/park_id=([0-9a-f]{32})/) || [])[1] || null;
+    const shape = (v) => (v
+      ? { len: v.length, head: v.slice(0, 4), tail: v.slice(-4) }
+      : { len: 0, head: null, tail: null });
+
+    const day = (n) => dubaiIso(new Date(Date.now() - n * 864e5));
+    const url = `${config.yango.base}/api/reports-api/v1/orders/list`;
+    const body = JSON.stringify({
+      date_type: 'booked_at',
+      date_from: `${day(1)}T00:00:00+04:00`, date_to: `${day(0)}T23:59:59+04:00`,
+    });
+    const ask = async (withCookie) => {
+      try {
+        const { status, data } = await http(url, {
+          method: 'POST', timeoutMs: 30000, retries: 0,
+          headers: {
+            'X-Park-Id': park, 'X-API-Key': key,
+            'content-type': 'application/json', 'Accept-Language': 'en',
+            ...(withCookie && cookie ? { cookie } : {}),
+          },
+          body,
+        });
+        const first = typeof data === 'string' ? data.slice(0, 120)
+          : JSON.stringify(data ?? null).slice(0, 120);
+        return { status, body_starts: first };
+      } catch (e) { return { status: null, error: String(e.message || e).slice(0, 140) }; }
+    };
+    const withCookie = await ask(true);
+    const bare = await ask(false);
+
+    res.json({
+      host: 'this deployment',
+      url,
+      park_id: shape(park),
+      /* THE COMPARISON THIS ROUTE EXISTS FOR. A session cookie names the park
+         it was captured in. If the stored park id is not that one, the
+         credential is what is wrong and nothing about egress matters. */
+      park_id_matches_the_cookie: parkInCookie ? (parkInCookie === park) : null,
+      park_id_in_cookie: shape(parkInCookie || ''),
+      cookie: { ...shape(cookie), account },
+      api_key: shape(key),
+      with_cookie: withCookie,
+      without_cookie: bare,
+      /* The reading, spelled out, because the pair of status codes is the
+         whole diagnosis and nobody should have to remember which pair means
+         what. */
+      reading: withCookie.status === 200
+        ? 'this host is accepted — Yango is collecting'
+        : withCookie.status === 403 && bare.status === 401
+          ? 'the park id clears the pre-auth gate and the session authenticates; a 403 after '
+            + 'that is entitlement or origin, not the cookie. Re-pasting the same account\u2019s '
+            + 'session cannot change it'
+          : withCookie.status === bare.status
+            ? 'the same refusal arrives with no cookie at all, so the session is not what is '
+              + 'being rejected — check the park id and the API key'
+            : 'an unfamiliar pair; read the two bodies above',
+      note: 'Shapes only. The park id is not a secret — the settings catalogue marks it so, and '
+        + 'the collector prints it in full in its own refusal hint — and no value here can be '
+        + 'replayed against Yango.',
+    });
+  }));
+
   app.get('/api/probe/fms/window', wrap(async (req, res) => {
     await loadSettings();
     const from = String(req.query.from || '').slice(0, 10);

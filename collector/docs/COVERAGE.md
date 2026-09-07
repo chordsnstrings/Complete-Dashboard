@@ -342,6 +342,60 @@ the useful field.
 
 ---
 
+## How many cars are there? 138 — measured over all 273 plates, 2026-09-07
+
+The operator's standing question: "the L plate can be multiple, but VIN number
+is unique. We do not have 273 cars."
+
+Every one of the 273 plates in `/api/vehicles/directory` was fetched through
+`/api/vehicle/profile?plate=` and cross-referenced against its own directory
+row. No sampling, no errors, 273 of 273.
+
+| | plates | bookings | telematics journeys |
+|---|---|---|---|
+| **VIN, and it has worked** | **138** | 364,184 | 222,415 |
+| no VIN, has old bookings | 3 | 1,052 | 0 |
+| no VIN, never seen at all | **132** | 0 | 0 |
+
+**The fleet is 138 cars.** The 132 with neither a VIN nor a single booking nor a
+single telematics journey are the CABMAN phantoms recorded as C18 in
+`docs/FIXLIST-2026-09-05.md` — plates that entered on three historical polls,
+produced one fix each, and have been counted as live fleet ever since. The
+three remaining are cars that left before Uber's vehicle profile was collected:
+their last bookings are 2025-05-01, 2025-09-03 and 2025-11-09.
+
+### The VIN does not deduplicate — it identifies
+
+The hypothesis was that one car wears several plates and the VIN would collapse
+them. It does not, on the data we hold: **138 plates carry a VIN, there are 138
+distinct VINs, and not one appears on two plates.** Plate to VIN is 1:1 across
+the whole covered half.
+
+What the VIN turns out to be is an almost perfect answer to a different and
+more useful question — *is this row a car at all*:
+
+* every plate with a VIN has work (138 of 138);
+* every plate with work today has a VIN;
+* 132 of the 135 without one have never been seen doing anything.
+
+So "has a VIN" is a cleaner fleet-membership test than any activity window, and
+it is one a page can state in a sentence.
+
+### Where the VIN comes from, and the half that has none
+
+All 138 come from Uber's vehicle profile (`vehicle_profile.vin`, read through
+`coalesce(v.vin, vp.vin)` at `api/vehicle_routes.js:661`). No other channel has
+supplied one: the count by source platform is `{uber: 138}`. The fleet is 68
+Tesla Model Y, 45 BYD Han EV, 11 Polestar 4, 10 Tesla Model 3, 2 Lexus ES and 2
+Toyota Highlander.
+
+That means VIN coverage is exactly Uber's vehicle roster. A car Uber does not
+list would have no VIN and would fail the membership test above however busy it
+is — worth re-measuring before the test is used to exclude anything, because
+today the two sets happen to coincide and that is a fact about this fleet.
+
+---
+
 ## One person, two rows: the phone is the join nothing uses — measured 2026-09-07
 
 Reported from the product: "Muhammad Khalifa Afzal Khalid has uber trips, but it
