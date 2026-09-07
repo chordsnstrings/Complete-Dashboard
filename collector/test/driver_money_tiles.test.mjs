@@ -227,5 +227,101 @@ console.log('\nthe server returns the grain, so the tile is not guessing');
     'this file already refused the same view\'s hours for this reason');
 }
 
+console.log('\nMoney in and the other record of the same days');
+{
+  /* THE PAGE CONTRADICTED ITSELF AND SAID NOTHING.
+     ───────────────────────────────────────────────────────────────────────
+     `accounted` is per channel the PAYOUT where one exists and the fares
+     where it does not; it never reads a statement. driver_day.money — the
+     Money column the same profile prints day by day, and the figure the
+     People list ranks on — is per channel the STATEMENT'S NET where a channel
+     filed one and its fares where it did not; it never reads a payout.
+
+     Measured on production 2026-09-07 for the driver this came in about,
+     2026-09-01..09-07: the tile read AED 2,946.62, the seven daily rows of
+     the same window summed to AED 3,231.88. Fleet-wide over 2026-08-01..
+     08-31, /api/drivers/leaderboard returns both columns on one row and ALL
+     91 people carrying both disagreed — AED 513,264 of money against AED
+     410,017 of payout, 20% apart, which is the cash share income_sql.js:135
+     predicts. Neither figure changes here. */
+  const WEEK = { accounted: 2946.62, accounted_fares: 311, accounted_payouts: 2635.62,
+    accounted_platforms: ['bolt', 'uber', 'yango'],
+    payout_period_days: 7, window_days: 7,
+    day_money: 3231.88, day_money_days: 7, day_money_period_days: 7,
+    day_money_source: 'mixed' };
+  const t = moneyInTile(WEEK);
+  check('the tile still shows the figure it is made of', t.value.includes('2,947'), t.value);
+  check('…and no longer hides the other record of the same days',
+    /3,232/.test(t.sub), t.sub);
+  check('…naming where that one came from',
+    /statements and fares together/.test(t.sub), t.sub);
+  check('…and what separates the two records',
+    /gross minus commission/.test(t.sub) && /reached the bank/.test(t.sub), t.sub);
+  check('…marked long, or the phone drops the caption it was given',
+    t.long === true);
+
+  /* The explanatory half is gated on the two records actually BEING the ones
+     the sentence describes. A page that prints "a statement's net is gross
+     minus commission" over a figure no statement touched is this same defect
+     in a new place. */
+  const noStmt = moneyInTile({ ...WEEK, day_money_source: 'fares', day_money: 3231.88 });
+  check('a fares-only day record is named as fares',
+    /the fares on the bookings/.test(noStmt.sub), noStmt.sub);
+  check('…and no commission sentence is printed over it',
+    !/gross minus commission/.test(noStmt.sub), noStmt.sub);
+  const noPayout = moneyInTile({ ...WEEK, accounted_payouts: null, accounted_fares: 2946.62 });
+  check('…nor where this figure took no payout',
+    !/reached the bank/.test(noPayout.sub), noPayout.sub);
+  check('…though the other record is still named',
+    /3,232/.test(noPayout.sub), noPayout.sub);
+
+  /* Silence where they agree: a sentence that fires on every driver whatever
+     the data says is decoration, and the reader stops reading it. */
+  const same = moneyInTile({ ...WEEK, day_money: 2946.62 });
+  check('nothing is said where the two records agree',
+    !/day-by-day/.test(same.sub), same.sub);
+  check('…and rounding noise is not a disagreement',
+    !/day-by-day/.test(moneyInTile({ ...WEEK, day_money: 2946.9 }).sub));
+  check('a missing day record says nothing rather than guessing',
+    !/day-by-day/.test(moneyInTile({ ...WEEK, day_money: null }).sub));
+  check('…and a non-numeric one cannot reach the sentence',
+    !/day-by-day/.test(moneyInTile({ ...WEEK, day_money: 'n/a' }).sub));
+
+  /* Both clauses can be true at once — a one-day window over a weekly payout
+     that also disagrees with the day record — and the tile owes the reader
+     both, in that order: its own grain first, then the other record. */
+  const day = moneyInTile({ ...WEEK, window_days: 1, day_money: 448.44, accounted: 311.52 });
+  check('the grain clause and the other-record clause both survive together',
+    /payout period shared evenly/.test(day.sub) && /day-by-day/.test(day.sub), day.sub);
+  check('…the tile’s own grain first',
+    day.sub.indexOf('payout period shared') < day.sub.indexOf('day-by-day'), day.sub);
+}
+
+console.log('\nthe server returns the other record, so the tile is not recomputing it');
+{
+  const routes = readFileSync('api/driver_routes.js', 'utf8');
+  /* The alias and the predicate in ONE statement. Matching the predicate
+     alone passes against the UNCHANGED file — /api/driver/daily's own k CTE
+     reads driver_day with exactly these bounds — and an assertion that is
+     already true before the fix has proved nothing. Verified by reverting the
+     route and watching this line go red. */
+  check('/api/driver/kpis reads driver_day for the same person and window',
+    /AS day_money,[\s\S]{0,1600}?FROM driver_day\s*\n\s*WHERE driver_ext_id = ANY\(\$3\) AND day BETWEEN \$1::date AND \$2::date/
+      .test(routes), 'the same predicate /api/driver/daily uses, inside the kpis query')
+  check('…and returns it under its own name',
+    /day_money: num\(dday\?\.day_money\)/.test(routes));
+  check('…with the source, so the caption can name it',
+    /day_money_source: dday\?\.day_money_source/.test(routes));
+  check('…and the grain, which is not defaulted to 7',
+    /bool_or\(money IS NOT NULL AND money_period_days IS NULL\) THEN NULL/.test(routes),
+    'src/rollup.js refuses to guess it and so does this');
+  /* The reason this is read from driver_day rather than recomputed: a third
+     definition of the money is what the fix is FOR. */
+  check('the reasoning is written down where the query is',
+    /THE OTHER FIGURE THIS SAME PAGE PRINTS FOR THE SAME DAYS/.test(routes)
+      && /no third definition of the money enters the/.test(routes),
+    'the phrase wraps in the source; match up to the wrap, not across it');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

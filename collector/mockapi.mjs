@@ -966,6 +966,19 @@ app.get('/api/driver/kpis', (req, r) => {
     payout_periods: i % 2 ? 2 : 1,
     payout_from: dayISO(21), payout_to: dayISO(1),
     window_days: 1,
+    /* THE OTHER RECORD OF THE SAME DAYS. driver_day.money is statements-where-
+       filed and fares-where-not; `accounted` beside it is payouts-where-filed
+       and fares-where-not, and the two disagreed for every one of the 91
+       people who carried both over August on production. moneyInTile now says
+       so, and both branches have to be reachable from the fixture or a browser
+       test passes by never rendering the sentence: every other driver here
+       differs from their own accounted, the rest match it exactly. */
+    day_money: i % 2
+      ? 9800 - i * 500 + Math.round(d.reduce((a, x) => a + x.revenue, 0)) + 640
+      : 9800 - i * 500 + Math.round(d.reduce((a, x) => a + x.revenue, 0)),
+    day_money_days: 7,
+    day_money_period_days: i % 2 ? 7 : 1,
+    day_money_source: i % 2 ? 'statement' : 'fares',
     /* Money in, and the two halves it is made of. Deliberately dominated by the
        payout: on this fleet a driver's fares are the few hotel bookings they
        happened to take, so a fixture where the halves are comparable would let

@@ -1523,6 +1523,55 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
           AND category IN ('fare', 'net_fare')
           AND period_start >= $1::date AND period_end <= $2::date`, p);
 
+    /* THE OTHER FIGURE THIS SAME PAGE PRINTS FOR THE SAME DAYS.
+       ─────────────────────────────────────────────────────────────────────
+       The Money in tile above is fleetIncome's `accounted`: per channel, the
+       PAYOUT where a payout exists and the fares where it does not
+       (api/income_sql.js:511). It never reads a statement. The Activity tab
+       three tabs across prints a Money column that is driver_day.money: per
+       channel, the STATEMENT'S NET where a channel filed one and its fares
+       where it did not (src/rollup.js:1126). It never reads a payout.
+
+       Two disjoint halves of the same evidence, both labelled money, on one
+       page, with nothing on the screen to say they are different records.
+
+       Measured on production for the driver this came in about, 2026-09-01..
+       09-07: the tile reads AED 2,946.62 and the table beneath it sums to AED
+       3,231.88 over the identical seven days. Fleet-wide the gap is not an
+       edge case — /api/drivers/leaderboard carries both columns in one row,
+       and over 2026-08-01..08-31 all 91 people who have both disagree, AED
+       513,264 of money against AED 410,017 of payout, 20% apart.
+
+       Neither figure is wrong and this does not change either of them.
+       income_sql.js:135 already says what separates them: "A payout is what
+       the platform wires to the bank (net of the cash drivers already
+       collected, plus tips and tolls); the statement net is gross minus
+       commission, the figure an operator means by 'what did we earn' …
+       showing one where a reader expects the other is how that difference
+       gets reported as a bug." It was reported as a bug.
+
+       So the tile discloses it, in the shape faresTile already uses for the
+       trip-priced fares it does not add. Returned rather than recomputed on
+       the client, and taken with the SAME predicate and the same CASE as the
+       `k` CTE of /api/driver/daily (line 1655) — same table, same person
+       array, same window — so the number named here is the number the table
+       on this page prints, and no third definition of the money enters the
+       product. */
+    const [dday] = await q(
+      `SELECT round(sum(money)::numeric, 2)                        AS day_money,
+              count(*) FILTER (WHERE money IS NOT NULL)::int       AS day_money_days,
+              /* NULL, not 7, where any contributing statement does not record
+                 its own window. Guessing the grain is the same class of
+                 mistake as guessing the money (src/rollup.js:1133). */
+              CASE WHEN bool_or(money IS NOT NULL AND money_period_days IS NULL) THEN NULL
+                   ELSE max(money_period_days) END                 AS day_money_period_days,
+              CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
+                   THEN 'mixed'
+                   ELSE max(money_source) FILTER (WHERE money_source <> 'none') END
+                                                                   AS day_money_source
+         FROM driver_day
+        WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date`, p);
+
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
     const hoursOnJob = num(kept?.on_job_h);
@@ -1545,6 +1594,14 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          one. The page knows its own dates, but the comparison is a statement
          about the DATA's grain and belongs beside the data that has it. */
       window_days: windowDays,
+      /* The Activity tab's own Money column, summed over this same window, so
+         the tile can name the figure the page prints three tabs across rather
+         than leaving a reader to find the difference themselves. Numbers, not
+         the NUMERIC strings pg returns, because the tile compares them. */
+      day_money: num(dday?.day_money),
+      day_money_days: dday?.day_money_days ?? null,
+      day_money_period_days: dday?.day_money_period_days ?? null,
+      day_money_source: dday?.day_money_source ?? null,
       hours_online: hoursOnline,
       /* on_job, not on_trip: request to dropoff, which contains the approach
          and the rider's wait. No feed here separates them. */

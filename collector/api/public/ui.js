@@ -1685,8 +1685,64 @@ export function moneyInTile(k, { label = 'Money in' } = {}) {
     ? ` \u2014 a ${fmt(periodDays)}-day payout period shared evenly across its days, `
       + `not what was paid for ${windowDays === 1 ? 'this one' : 'these ' + fmt(windowDays)}`
     : '';
-  return { label, value: money(k.accounted), long: !!why,
-    sub: `${parts.join(' \u00b7 ')}${from ? `, from ${from}` : ''}${why}` };
+  /* AND THE OTHER FIGURE THE SAME PAGE PRINTS FOR THE SAME DAYS.
+     ─────────────────────────────────────────────────────────────────────────
+     `accounted` is per channel the PAYOUT where a payout exists and the fares
+     where it does not (api/income_sql.js:511). It never reads a statement.
+     The Activity tab on this same profile prints a Money column that is
+     driver_day.money — per channel the STATEMENT'S NET where a channel filed
+     one and its fares where it did not (src/rollup.js:1126). That never reads
+     a payout. Two disjoint halves of the same evidence, both labelled money,
+     on one page, and until now nothing on the screen said they were different
+     records.
+
+     Measured on production for the driver this came in about, 2026-09-01..
+     09-07: this tile read AED 2,946.62 while the table under Activity summed
+     to AED 3,231.88 over the identical seven days. Fleet-wide it is not an
+     edge case — /api/drivers/leaderboard returns both columns on one row, and
+     over August every one of the 91 people carrying both disagreed: AED
+     513,264 of money against AED 410,017 of payout, 20% apart. That 20% is
+     the cash share income_sql.js:135 predicts, which is also where the
+     vocabulary below comes from: "a payout is what the platform wires to the
+     bank (net of the cash drivers already collected, plus tips and tolls);
+     the statement net is gross minus commission … showing one where a reader
+     expects the other is how that difference gets reported as a bug."
+
+     NEITHER NUMBER CHANGES. Which of them IS "money in" is a decision about
+     what this fleet means by the phrase, and taking it silently inside a
+     caption would be the same mistake in a new place. What changes is that
+     the tile stops being silent about the other figure sitting in the same
+     response — named without pointing at a tab, because the phone's driver
+     screen has no Activity tab and this component draws on both shells
+     (api/public/m/screens.js:911, api/public/driver.js:671).
+
+     The explanatory half is gated on both records actually being the ones the
+     sentence describes: it fires only where day_money came from statements
+     (alone or mixed) AND this figure was taken on payouts. Where the two
+     differ for some other pairing the tile names the other figure and its
+     source and stops, rather than printing a reason that is not the true one. */
+  /* `!= null` BEFORE Number(), because Number(null) is 0 and 0 is finite.
+     Without it a driver whose days carry no money at all — every one of the
+     eight people in the fleet-wide sweep who had a payout and no day record —
+     would have been told "the day-by-day record for the same days holds AED
+     0", which is an absence rendered as a figure and then given a reason.
+     That is the one thing this dashboard exists not to do. */
+  const dm = k.day_money == null ? NaN : Number(k.day_money);
+  const acc = k.accounted == null ? NaN : Number(k.accounted);
+  const differs = Number.isFinite(dm) && Number.isFinite(acc) && Math.abs(dm - acc) >= 1;
+  const DAY_SRC = { statement: 'the platform statements',
+    fares: 'the fares on the bookings', mixed: 'statements and fares together' };
+  const viaStatement = k.day_money_source === 'statement' || k.day_money_source === 'mixed';
+  const other = differs
+    ? ` \u2014 the day-by-day record for the same days holds ${money(dm)}, from `
+      + `${DAY_SRC[k.day_money_source] || 'the daily ledger'}`
+      + (viaStatement && k.accounted_payouts
+        ? `, and a statement\u2019s net is gross minus commission where a payout is what `
+          + `reached the bank after the cash drivers had already taken theirs`
+        : '')
+    : '';
+  return { label, value: money(k.accounted), long: !!(why || other),
+    sub: `${parts.join(' \u00b7 ')}${from ? `, from ${from}` : ''}${why}${other}` };
 }
 
 export function faresTile(k) {

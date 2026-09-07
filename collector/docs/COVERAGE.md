@@ -1066,3 +1066,29 @@ driver's 222 tracker fixes.
   the fleet page about the same channel on the same day. Check whether a dark
   booking is an unpriced ride or a ride that never ran before calling it a
   money hole.
+* **`accounted` and `driver_day.money` are built from disjoint halves of the
+  same evidence, and both are labelled money.** `fleetIncome.accounted`
+  (`api/income_sql.js:511`) takes each channel's PAYOUT where one exists and
+  its fares where it does not; it never reads a statement.
+  `driver_day.money` (`src/rollup.js:1126`) takes each channel's STATEMENT NET
+  where one was filed and its fares where it was not; it never reads a payout.
+  They are two records of the same work, and they disagree by the cash share —
+  measured over 2026-08-01..08-31 on `/api/drivers/leaderboard`, which returns
+  both on one row, **all 91 people who carry both disagree**: AED 513,264 of
+  money against AED 410,017 of payout. `api/income_sql.js:135` predicted the
+  size and the consequence in a comment before anyone hit it. Before writing a
+  money figure onto a page, know which of the two it is and say so on the
+  screen; a page carrying both owes the reader the difference.
+* **`Number(null)` is 0, and 0 is finite.** A guard written
+  `Number.isFinite(Number(k.field))` passes for a null field and renders an
+  absence as a figure — then gives it a reason, which is the one thing this
+  dashboard exists not to do. Test `x == null` before `Number()`, not after.
+  Caught by a test, not by review, and only because the test asserted the
+  ABSENT case rather than the present one.
+* **A source-scanning assertion can be satisfied by a different route in the
+  same file.** `api/driver_routes.js` has two queries over `driver_day` with an
+  identical predicate, so `/FROM driver_day\s*\n\s*WHERE driver_ext_id = ANY\(\$3\)/`
+  passed against the file *before* the fix landed. Anchor such a regex on
+  something only the new code has — an alias, a returned field name — and prove
+  it by reverting and watching it go red. Two vacuous assertions have now been
+  caught this way in one week.
