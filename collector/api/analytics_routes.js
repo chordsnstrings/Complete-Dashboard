@@ -35,13 +35,32 @@ const round = (v, d = 2) => (v == null || !Number.isFinite(Number(v)) ? null
   : Math.round(Number(v) * 10 ** d) / 10 ** d);
 const share = (n, total) => (total ? round((n / total) * 100, 1) : null);
 
-/* An address here is a formatted string, not a structured place. The second
-   dash-separated segment is the community in the overwhelming majority of the
-   Dubai addresses these providers return ("01 Cluster E - Al Thanyah Fifth -
-   Dubai - UAE"), so it is the coarsest key that still means something. Where
-   the format does not hold, the whole string is kept rather than guessed at. */
-const AREA = `nullif(btrim(split_part(%s, ' - ', 2)), '')`;
-export const areaOf = (col) => AREA.replace('%s', col);
+/* An address here is a formatted string, not a structured place, and picking
+   the area out of it is one rule that lives in sql/schema_v67.sql as
+   place_area() so the read API, the gazetteer builder and any future caller
+   cannot drift apart on what "area" means.
+
+   It used to be the SECOND dash-separated segment, and that was wrong in a way
+   the Territory tab rendered under the heading "area". Measured against real
+   production addresses on 2026-09-07:
+
+     Cluster T - Al Thanyah Fifth - Jumeirah Lakes Towers - Dubai - UAE
+       second segment: "Al Thanyah Fifth"        (a sub-community)
+     4538+544 - Al Falak St - Al Safouh Second - Dubai Internet City - Dubai - UAE
+       second segment: "Al Falak St"             (a street)
+     Sheraton Hotel, Mall of The Emirates - Level 2 - Sheikh Zayed Rd -
+       Al Barsha First - Al Barsha - Dubai - UAE
+       second segment: "Level 2"                 (a floor of a hotel)
+
+   place_area() takes the third segment from the END — the one before city and
+   country — which on those three is "Jumeirah Lakes Towers", "Dubai Internet
+   City" and "Al Barsha". Counting from the end is also what survives an
+   address that is not in English, and a meaningful share of them are not:
+
+     Boulevard Street - برج خليفة - Burj Residence Phase I & II - دبي - 阿拉伯联合酋长国
+
+   The whole reasoning, and what NULL means, is in the migration. */
+export const areaOf = (col) => `place_area(${col})`;
 
 /* Which properties run an approval workflow at all, in ONE definition.
    ─────────────────────────────────────────────────────────────────────────

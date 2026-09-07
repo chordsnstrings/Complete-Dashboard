@@ -18,6 +18,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { applySchema } from './schema.mjs';
 import { mountAll } from './mount.mjs';
+import { areaOf } from '../api/analytics_routes.js';
 import { seedFleet } from './fixture.mjs';
 import express from 'express';
 import { readFileSync } from 'node:fs';
@@ -388,7 +389,20 @@ console.log('\ncash exposure aggregates the window once');
    a corridor seen twice rather than three times, and a fleet working more
    corridors than the page is allowed to show. */
 {
-  const AREA = (c) => `nullif(btrim(split_part(${c}, ' - ', 2)), '')`;
+  /* The area rule is IMPORTED, not restated.
+     ─────────────────────────────────────────────────────────────────────
+     This block's own preamble says the frozen side is written out here "so no
+     copy of it can drift", and then it kept a hand-copied
+     split_part(addr, ' - ', 2) — which is a copy, and it duly drifted. When
+     the shipping rule moved to place_area() (the third segment from the end,
+     because the second is a street on a six-segment address and a hotel floor
+     on a seven-segment one), this reference query went on grouping by the old
+     one and reported six false failures.
+
+     What is frozen here is the SHAPE of the old aggregate — which columns,
+     which filters, which HAVING — not the definition of an area. That belongs
+     to one file and this asks that file for it. */
+  const AREA = (c) => areaOf(c);
   /* is_booking, because the endpoint counts DEMAND. It used to count raw
      trips, so FMS telematics rows — the tracker's own record of journeys the
      ride platforms already reported — were charted as corridors: at days=7 on

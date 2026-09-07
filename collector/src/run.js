@@ -16,6 +16,7 @@ import { runAnalyst } from './analyst.js';
 import { probeAll } from './probe.js';
 import { rebuildCustody } from './custody.js';
 import { refreshIdentityLinks } from './identity_link.js';
+import { refreshPlaceCells } from './places.js';
 import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
 import { monthsAgo, daysAgo, iso, dubaiIso } from './util.js';
@@ -240,6 +241,17 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = 
   try {
     await refreshIdentityLinks();
   } catch (e) { log.error('run', 'identity links', { err: String(e) }); }
+  /* What each patch of ground is called, learned from the trips that landed
+     above. After the pulls, because the gazetteer is built FROM trip endpoints
+     and a cell the fleet drove for the first time today should be nameable
+     today; before the rollups, because nothing downstream reads it — it is
+     answered at request time, per fix, on the driver page.
+
+     Its own try/catch for the same reason as every step here: a coordinate we
+     cannot name is a caption that says so, not a run that stops. */
+  try {
+    await refreshPlaceCells();
+  } catch (e) { log.error('run', 'place cells', { err: String(e) }); }
   /* Precompute the aggregates that have no window. /api/trend/monthly,
      /api/forecast and /api/retention each group the ENTIRE trip history, so
      nothing about a request can narrow them — but the answer is the same for

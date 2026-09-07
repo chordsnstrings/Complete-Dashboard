@@ -69,4 +69,10 @@ export const SCHEMA_FILES = [
      read API were written as though one-row-per-plate were a property of the
      table. It was a property of who was filling it. */
   'schema_v66.sql',
+  /* place_area() + place_cell: no source gives both a name and a coordinate —
+     Uber has 315,505 addresses and no fixes, FMS has 222,543 fixes and an
+     address beside each one. The gazetteer is built from FMS's pairs so that a
+     telematics position can be reported as somewhere a person can picture
+     rather than as "25.112, 55.139". */
+  'schema_v67.sql',
 ];

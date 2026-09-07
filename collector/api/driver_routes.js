@@ -2020,16 +2020,97 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        per-gap rollups because the gaps are computed on the client from the
        jobs, and doing it twice in two places is how the two stop agreeing. */
     const plates = [...new Set(trips.map((t) => t.plate).filter(Boolean))];
+    /* Every fix carries the name of the ground it sits on, joined out of the
+       gazetteer (sql/schema_v67.sql). A decimal pair is not an answer to
+       "where was the car waiting" — nobody reads 25.112, 55.139 and pictures
+       Jumeirah Lakes Towers — and no provider gives us both a fix and a name:
+       Uber has 315,505 addresses and no coordinates, FMS has 222,543
+       coordinates each with an address beside it. place_cell is that second
+       set, folded to half-kilometre cells.
+
+       LEFT JOIN, and the count of votes comes back with the name, because a
+       cell one trip named is not the same claim as a cell four hundred trips
+       agree on and the page has to be able to say which it is holding. A cell
+       nothing has ever named returns NULL and renders as unnamed. */
     const fixes = plates.length ? await q(
-      `SELECT plate,
-              (extract(hour FROM captured_at AT TIME ZONE 'Asia/Dubai') * 60
-               + extract(minute FROM captured_at AT TIME ZONE 'Asia/Dubai'))::int AS m,
-              lat, lng, speed
-         FROM telemetry_snapshot
-        WHERE plate = ANY($1)
-          AND (captured_at AT TIME ZONE 'Asia/Dubai')::date = $2::date
-          AND lat IS NOT NULL AND lng IS NOT NULL
-        ORDER BY captured_at`, [plates, day]) : [];
+      `SELECT s.plate,
+              (extract(hour FROM s.captured_at AT TIME ZONE 'Asia/Dubai') * 60
+               + extract(minute FROM s.captured_at AT TIME ZONE 'Asia/Dubai'))::int AS m,
+              s.lat, s.lng, s.speed,
+              pc.area, pc.n AS area_votes, pc.observations AS area_seen
+         FROM telemetry_snapshot s
+         LEFT JOIN place_cell pc
+           ON pc.cell_lat = round(s.lat / 0.005)::int
+          AND pc.cell_lng = round(s.lng / 0.005)::int
+        WHERE s.plate = ANY($1)
+          AND (s.captured_at AT TIME ZONE 'Asia/Dubai')::date = $2::date
+          AND s.lat IS NOT NULL AND s.lng IS NOT NULL
+        ORDER BY s.captured_at`, [plates, day]) : [];
+
+    /* WHERE the shift began, which Uber will not tell us.
+       ─────────────────────────────────────────────────────────────────────
+       "Where does this person go online" is the question an operator asks
+       about supply, and driver_timeline_event has a lat/lon column for it.
+       Measured on production 2026-09-07: 197,687 timeline events and lat is
+       null on every single one, even though the collector's GraphQL query asks
+       for rootLocation. Uber accepts the field and returns nothing in it.
+
+       So the position comes from the other side of the same car. The tracker
+       reports the plate every few minutes all day; the fix nearest in time to
+       the moment the driver went online is where they were when they did it,
+       and the gazetteer names it.
+
+       Nearest IN TIME, with the gap reported rather than hidden — a fix four
+       minutes before the span is a good answer and a fix fifty minutes before
+       is not the same claim. Beyond half an hour there is no honest answer at
+       all and the span says so instead of borrowing a distant fix. */
+    const ONLINE_FIX_TOLERANCE_MIN = 30;
+    const namedFixes = fixes.filter((f) => f.area);
+    const placeAt = (minute) => {
+      if (!fixes.length) {
+        return { where: null, why: plates.length
+          ? 'the tracker recorded no position for this car on this day'
+          : 'no vehicle is attached to this day, so there is no position feed' };
+      }
+      if (!namedFixes.length) {
+        return { where: null, why: 'the tracker saw the car, but no trip has ever named this ground' };
+      }
+      let best = null;
+      for (const f of namedFixes) {
+        const gap = Math.abs(f.m - minute);
+        if (!best || gap < best.gap) best = { gap, f };
+      }
+      if (!best || best.gap > ONLINE_FIX_TOLERANCE_MIN) {
+        return { where: null, why: `the nearest named position is ${best.gap} minutes away, too far to call it the same place` };
+      }
+      return {
+        where: best.f.area,
+        within_min: best.gap,
+        lat: best.f.lat,
+        lng: best.f.lng,
+        votes: best.f.area_votes,
+        of: best.f.area_seen,
+        why: null,
+      };
+    };
+
+    /* One row per span, so a shift split by a break reads as two starts rather
+       than one — where somebody comes back online is as much a supply fact as
+       where they started. */
+    const onlinePlaced = online.map((o) => ({ ...o, went_online: placeAt(o.s) }));
+
+    /* And the summary the page leads with: the areas this person actually
+       started from, most used first. Counted over spans, not over minutes: the
+       question is how often they choose that place, not how long they stayed. */
+    const startTally = new Map();
+    for (const o of onlinePlaced) {
+      const a = o.went_online?.where;
+      if (!a) continue;
+      startTally.set(a, (startTally.get(a) || 0) + 1);
+    }
+    const goesOnlineIn = [...startTally.entries()]
+      .map(([area, spans]) => ({ area, spans }))
+      .sort((a, b) => b.spans - a.spans || a.area.localeCompare(b.area));
 
     res.json({
       day,
@@ -2043,8 +2124,19 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
            src/rollup.js:711. */
         e: t.e == null ? null : (t.past_midnight ? 1440 : Math.max(t.e, t.s)),
       })),
-      online,
+      online: onlinePlaced,
       fixes,
+      /* Which areas this person went online in today, and how many of the
+         day's spans could not be placed at all — never a list that quietly
+         omits what it could not answer. */
+      goes_online_in: goesOnlineIn,
+      online_spans_unplaced: onlinePlaced.filter((o) => !o.went_online?.where).length,
+      /* What the place names are and are not, said once by the API so every
+         renderer says the same thing. */
+      place_basis: 'Uber returns no coordinates — not on trips, not on the online timeline — so where '
+        + 'someone went online is read from the tracker in the same car, at the fix nearest in time. '
+        + 'The area name comes from the fleet\'s own history: every FMS trip arrives with both a '
+        + 'position and an address, and those pairs name the ground within about half a kilometre.',
       /* Said by the API so every renderer says the same thing. */
       basis: 'A job runs from the request to the dropoff, so it contains the drive to the rider. '
         + 'The gaps between jobs are waiting; where the tracker saw the car during one, its '

@@ -148,8 +148,12 @@ export function dayRoutes(app, { q, wrap }) {
                 count(*) FILTER (WHERE is_booking)::int bookings
          FROM trip_ext WHERE local_day BETWEEN $1::date - 7 AND $1::date + 7
          GROUP BY 1 ORDER BY 1`, p),
-      q(`SELECT coalesce(nullif(btrim(split_part(pickup_addr, ' - ', 2)), ''), '(unrecorded)') AS from_area,
-                coalesce(nullif(btrim(split_part(dropoff_addr, ' - ', 2)), ''), '(unrecorded)') AS to_area,
+      /* place_area(), not a second hand-rolled copy of the rule. This file had
+         its own split_part(...,2), which named a street or a hotel floor as the
+         "area" on exactly the addresses the sibling analytics named correctly —
+         two pages disagreeing about the same trip. See api/analytics_routes.js. */
+      q(`SELECT coalesce(place_area(pickup_addr), '(unrecorded)') AS from_area,
+                coalesce(place_area(dropoff_addr), '(unrecorded)') AS to_area,
                 count(*)::int trips
          FROM trip_ext WHERE ${D} AND (pickup_addr IS NOT NULL OR dropoff_addr IS NOT NULL)
          GROUP BY 1, 2 ORDER BY trips DESC LIMIT 20`, p),

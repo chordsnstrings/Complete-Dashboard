@@ -735,6 +735,73 @@ and the number of plates carrying no VIN stated rather than implied.
 
 ---
 
+## Places: who gives a name, who gives a position — measured 2026-09-07
+
+Nobody gives both. Counted on production through `/api/coverage`:
+
+| dataset | rows | with a coordinate | with an address |
+|---|---:|---:|---|
+| `trip:uber` | 315,505 | **0** | yes, on effectively all |
+| `timeline:uber` | 197,687 | **0** | n/a |
+| `trip:fms` | 222,543 | **222,543 (100%)** | yes, beside every fix |
+| `trip:bolt` | 48,382 | 0 | no |
+| `trip:hotel` | 1,786 | 1,234 (69%) | yes |
+| `trip:yango` | 50 | 11 (22%) | yes |
+
+Two consequences, and both shape how the driver page answers "where".
+
+**Uber's driver timeline has a `lat`/`lon` column and it is null on all 197,687
+rows.** `src/sources/uber_timeline.js` asks for `rootLocation { latitude
+longitude }` in the GraphQL query and Uber accepts the field without ever
+filling it. So the obvious answer to "where did this person go online" — the
+coordinate on the ONLINE transition — does not exist. `/api/driver/day` reads
+the position from the tracker in the same car, at the fix nearest in time to
+the transition, and reports how many minutes away that fix was. Beyond thirty
+minutes it returns no place and says why, rather than borrowing a stale one.
+
+**The gazetteer is the fleet's own history, not a geocoding service.** FMS is
+the telematics box in these cars and it reverse-geocodes every fix it reports,
+so 222,543 trips arrive with two labelled endpoints each. `src/places.js` folds
+those pairs into `place_cell` (sql/schema_v67.sql): one row per ~0.5 km cell
+holding the modal area name, the votes for it, and the votes cast. It covers
+exactly the roads this fleet drives, and every name it returns already appears
+on a trip in this database — so a place on the driver page and the same place
+on the Territory tab cannot be spelled two different ways. It cannot name a
+coordinate the fleet has never driven near, and it says so rather than reaching
+for the nearest thing it has.
+
+`refreshPlaceCells()` runs once per collector pass, after the pulls and before
+the rollups, and rebuilds the table whole. A merge would be wrong: it cannot
+express a name *losing* a vote, so an address corrected upstream would leave
+the old name outvoting its own replacement for ever.
+
+### What counts as the area in an address
+
+Every provider returns the same dash-separated shape, most specific first,
+ending in city then country. The area is the **third segment from the end**,
+which is `place_area()` in sql/schema_v67.sql. Measured against real production
+strings, against what the read API used to do (the second segment from the
+front):
+
+| address | third from end | second from front |
+|---|---|---|
+| `Cluster T - Al Thanyah Fifth - Jumeirah Lakes Towers - Dubai - UAE` | Jumeirah Lakes Towers | Al Thanyah Fifth |
+| `4538+544 - Al Falak St - Al Safouh Second - Dubai Internet City - Dubai - UAE` | Dubai Internet City | **Al Falak St** — a street |
+| `Sheraton Hotel, Mall of The Emirates - Level 2 - … - Al Barsha - Dubai - UAE` | Al Barsha | **Level 2** — a floor |
+| `Al Thanyah Second - Dubai - United Arab Emirates` | Al Thanyah Second | **Dubai** — the emirate |
+
+Counting from the end is also the only version that survives an address that is
+not in English, and a real share of them are not:
+
+    Boulevard Street - برج خليفة - Burj Residence Phase I & II - دبي - 阿拉伯联合酋长国
+
+A rule that recognises "Dubai" and "United Arab Emirates" by name drops that
+row entirely. Position does not care what alphabet the city is written in.
+
+Fewer than three segments means there is no area in the string — `Mall of
+Emirates Al Barsha 1 AE` arrives with no separators at all — and that is NULL,
+reported as unnamed rather than guessed at.
+
 ## Traps that have cost time more than once
 
 * **A migration that DROPs a column fails on production and passes in the
@@ -878,3 +945,26 @@ and the number of plates carrying no VIN stated rather than implied.
   explains why it is forbidden.** `!/\bVACUUM\b/` on `schema_v53.sql` failed
   against the *fixed* file, because the fix documents why `VACUUM` is absent.
   Strip `--` comments before scanning SQL for what must not be in it.
+* **A provider that accepts a field is not a provider that fills it.** Uber's
+  driver timeline takes `rootLocation { latitude longitude }` in the GraphQL
+  query, returns 200, and leaves lat null on all 197,687 rows on production.
+  The column existed in our schema for months and nothing read it, so nothing
+  noticed. Before building on a field a provider "supports", count how many
+  rows actually carry it — `/api/coverage` exists for exactly this.
+* **The second dash-separated segment of an address is not the area.** It is a
+  street on a six-segment address, a floor of a hotel on a seven-segment one,
+  and the emirate on a three-segment one — and all three were rendered under
+  the heading "area" on the Territory tab and in the corridor analytics. The
+  area is the third segment from the END. Counting from the front also breaks
+  on the addresses whose city and country come back in Arabic or Chinese;
+  counting from the end does not care.
+* **A rebuild on every collector pass is a rebuild forty-eight times a day.**
+  The gazetteer scans both endpoints of every positioned trip — 445,000 rows
+  and growing — and the collector's incremental runs every thirty minutes. On
+  a one-vCPU managed Postgres shared with every dashboard query, that is the
+  kind of statement that grows into the pool's two-minute timeout while
+  relearning a map of Dubai that changed by a few cells.
+  `refreshPlaceCells()` skips a table younger than `PLACE_CELL_MAX_AGE_HOURS`
+  (6), and always builds an empty one so a fresh database is named on its first
+  pass. Ask what a derived table is a map OF before deciding how often it needs
+  rebuilding.

@@ -2318,14 +2318,36 @@ app.get('/api/driver/day', (req, r) => {
       trip(2, mins(12, 38), mins(12, 47), { product: 'Comfort', payment_type: 'apple_pay' }),
       trip(3, mins(13, 7), mins(13, 23)),
     ],
-    online: [{ s: mins(9, 20), e: mins(19, 35) }],
+    /* Two spans, one placed and one not, because the page has to render both
+       and a fixture where everything resolves would hide the absent case —
+       which on production is the common one for a night shift with no tracker
+       coverage. */
+    online: [
+      { s: mins(9, 20), e: mins(19, 35),
+        went_online: { where: 'Dubai Marina', within_min: 4, lat: 25.247, lng: 55.347,
+          votes: 312, of: 340, why: null } },
+      { s: mins(21, 10), e: mins(23, 40),
+        went_online: { where: null,
+          why: 'the nearest named position is 96 minutes away, too far to call it the same place' } },
+    ],
     fixes: [
-      { plate: 'A 12345', m: mins(10, 10), lat: 25.247, lng: 55.347, speed: 0 },
-      { plate: 'A 12345', m: mins(11, 10), lat: 25.247, lng: 55.347, speed: 0 },
-      { plate: 'A 12345', m: mins(12, 10), lat: 25.251, lng: 55.352, speed: 14 },
+      { plate: 'A 12345', m: mins(10, 10), lat: 25.247, lng: 55.347, speed: 0,
+        area: 'Dubai Marina', area_votes: 312, area_seen: 340 },
+      { plate: 'A 12345', m: mins(11, 10), lat: 25.247, lng: 55.347, speed: 0,
+        area: 'Dubai Marina', area_votes: 312, area_seen: 340 },
+      /* One fix on ground nothing has ever named — the caption for it is a
+         sentence, not a blank. */
+      { plate: 'A 12345', m: mins(12, 10), lat: 25.251, lng: 55.352, speed: 14,
+        area: null, area_votes: null, area_seen: null },
     ],
     basis: 'A job runs from the request to the dropoff, so it contains the drive to the rider.',
     online_known: true,
+    goes_online_in: [{ area: 'Dubai Marina', spans: 1 }],
+    online_spans_unplaced: 1,
+    place_basis: 'Uber returns no coordinates — not on trips, not on the online timeline — so where '
+      + 'someone went online is read from the tracker in the same car, at the fix nearest in time. '
+      + 'The area name comes from the fleet\'s own history: every FMS trip arrives with both a '
+      + 'position and an address, and those pairs name the ground within about half a kilometre.',
   });
 });
 

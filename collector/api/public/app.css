@@ -2123,6 +2123,11 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
 .dday-ontot{font-family:"IBM Plex Mono",monospace;font-size:var(--t4);color:var(--ink-3);flex:0 0 auto}
 .dday-online{position:relative;flex:1 1 auto;height:8px;background:var(--surface-2);border-radius:4px}
 .dday-online>i{position:absolute;top:0;height:8px;border-radius:4px;background:var(--s1);opacity:.55}
+/* Where the shift started, under the bar that says when it did. Indented to
+   the same column as the bar itself so it reads as a caption on that row and
+   not as a new fact about the day. */
+.dday-onwhere{margin-top:8px;padding-left:calc(9rem + 12px);font-size:var(--t4);color:var(--ink-2)}
+.dday-onbasis{margin-top:4px;padding-left:calc(9rem + 12px);font-size:var(--t5);max-width:62ch;line-height:1.5}
 .sw.waitsw{background:var(--surface-3)} .sw.onsw{background:var(--s1);opacity:.55}
 .sw.cx{background:var(--critical)} .sw.j{background:var(--s1)}
 
@@ -2165,6 +2170,7 @@ button.domb-key:focus-visible{outline:2px solid var(--accent);outline-offset:1px
   .dday-job{grid-template-columns:52px 1fr;gap:10px}
   .dday-open{grid-column:2;justify-self:start;margin-top:6px}
   .dday-onlab{min-width:6rem}
+  .dday-onwhere,.dday-onbasis{padding-left:0}
 }
 /* A shift row is an address. */
 a.shift.clickable{text-decoration:none;color:inherit;border-radius:6px;transition:background .16s var(--ease)}

@@ -51,11 +51,23 @@ function gapMotion(fixes, from, to) {
     const sp = inGap[i].speed;
     if (sp != null ? sp <= 3 : metres(inGap[i - 1], inGap[i]) < 60) still++;
   }
+  /* Where the waiting HAPPENED, in words. The modal area over the gap's own
+     fixes rather than the area of the middle one: a car that leaves an area
+     halfway through a gap should be reported as having waited in the one it
+     spent most of the gap in, and a single stray fix on the far side of a
+     boundary should not rename the whole block. `share` comes back with it so
+     a block split evenly between two areas can say so instead of picking. */
+  const tally = new Map();
+  for (const f of inGap) if (f.area) tally.set(f.area, (tally.get(f.area) || 0) + 1);
+  const top = [...tally.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
   return {
     fixes: inGap.length,
     still: Math.round((still / (inGap.length - 1)) * 100),
     km: moved / 1000,
     at: inGap[Math.floor(inGap.length / 2)],
+    area: top ? top[0] : null,
+    area_share: top ? Math.round((top[1] / inGap.length) * 100) : null,
+    areas: tally.size,
   };
 }
 
@@ -145,6 +157,31 @@ export async function renderDriverDay(root, id, day) {
     row.append(ob);
     row.append(el('span', 'dday-ontot', dur(onlineMin)));
     bandP.body.append(row);
+
+    /* WHERE they went online, which is the supply question the bar above
+       cannot answer. Uber returns no coordinates on the timeline, so this is
+       the tracker's position at the moment of each transition — the API says
+       so in place_basis and this repeats it, because a number whose basis is
+       not on the same screen as the number is a number nobody can check.
+
+       Every span is accounted for: the ones that could be placed, by area,
+       and the ones that could not, counted. A list that silently dropped the
+       unplaceable spans would read as though the fleet knew more than it does. */
+    const starts = d.goes_online_in || [];
+    const unplaced = d.online_spans_unplaced || 0;
+    if (starts.length || unplaced) {
+      const wl = el('div', 'dday-onwhere');
+      const said = starts.map((a) =>
+        `<b>${esc(a.area)}</b><span class="dim"> ${a.spans}×</span>`).join('<span class="dim"> · </span>');
+      wl.innerHTML = (starts.length
+        ? `went online in ${said}`
+        : '<span class="dim">where they went online could not be established</span>')
+        + (unplaced
+          ? `<span class="dim"> · ${unplaced} ${unplaced === 1 ? 'span' : 'spans'} could not be placed</span>`
+          : '');
+      bandP.body.append(wl);
+      if (d.place_basis) bandP.body.append(el('div', 'dday-onbasis dim', d.place_basis));
+    }
   }
   const lg = el('div', 'lgnd');
   lg.innerHTML = '<span><i class="sw j"></i>on a job</span>'
@@ -175,7 +212,19 @@ export async function renderDriverDay(root, id, day) {
       row.append(head);
       if (mo && mo.still != null) {
         const where = el('div', 'dday-where');
-        where.innerHTML = `<b>${mo.still}%</b> of fixes stationary`
+        /* The place first, because it is the thing a person can act on. The
+           coordinates stay, dimmed, because they are what the tracker actually
+           said and somebody checking the name against a map needs them.
+
+           An area the fixes disagree about is reported as the majority AND the
+           disagreement — "mostly Al Barsha" — rather than as a clean answer,
+           and an area nothing has ever named says so instead of vanishing. */
+        const place = mo.area
+          ? `<b>${esc(mo.area)}</b>${mo.areas > 1 && mo.area_share < 70
+            ? ` <span class="dim">mostly — ${mo.area_share}% of the fixes here</span>` : ''} · `
+          : '<span class="dim">no trip has ever named this ground</span> · ';
+        where.innerHTML = place
+          + `<b>${mo.still}%</b> of fixes stationary`
           + ` · moved <b>${esc(fmt(mo.km, 1))}</b> km`
           + `<span class="dim mono"> ${esc((mo.at.lat).toFixed(3))}, ${esc((mo.at.lng).toFixed(3))}</span>`
           /* Only when there IS a plate. The fix came from the tracker on a car,
