@@ -1676,10 +1676,14 @@ export function moneyInTile(k, { label = 'Money in' } = {}) {
      { label, value, sub, tone, href, long } (api/public/m/ui.js:150) and would
      have dropped a note silently, which is a caption that exists in the source
      and nowhere on the screen. */
+  /* No count of periods in the sentence: payout_periods is DISTINCT
+     (platform, period_start, period_end), so two channels filing the same week
+     make it 2 — a number that reads as two stretches of time and is not one.
+     The GRAIN is what the caption is for, and one channel or four, the grain
+     is the same. Hyphenated, because "a 7 days payout period" is not English. */
   const why = shared
-    ? ` \u2014 a ${countOf(periodDays, 'day')} payout ${(k.payout_periods || 1) > 1
-      ? `period (${fmt(k.payout_periods)} of them)` : 'period'} shared evenly across its days, `
-      + `not what was paid for ${windowDays === 1 ? 'this one' : 'these'}`
+    ? ` \u2014 a ${fmt(periodDays)}-day payout period shared evenly across its days, `
+      + `not what was paid for ${windowDays === 1 ? 'this one' : 'these ' + fmt(windowDays)}`
     : '';
   return { label, value: money(k.accounted), long: !!why,
     sub: `${parts.join(' \u00b7 ')}${from ? `, from ${from}` : ''}${why}` };
@@ -1691,9 +1695,24 @@ export function faresTile(k) {
       sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' };
   }
   if (k && k.statement_fares) {
+    /* The "no trip here carries a fare" clause is CONDITIONAL, and was not.
+       ─────────────────────────────────────────────────────────────────────
+       This branch fires whenever a statement covers the window, whatever the
+       trip feed holds — so it printed that sentence over trips that plainly do
+       carry fares. It is the same falsehood the branch below was fixed for,
+       and fixing only that one left this one saying it: measured on production,
+       1,881 priced bookings sat behind the claim that none of them was priced.
+
+       The rest of the sentence stays exactly as it was, because it is true
+       either way: the payout beside this tile came out of this gross. */
+    const alsoPriced = Number(k.revenue);
+    const onTrips = Number.isFinite(alsoPriced) && alsoPriced > 0;
     return { label: 'Fares', value: money(k.statement_fares),
       sub: `the platform's own figure, over ${countOf(k.statement_fare_periods, 'weekly statement')}`
-        + ' \u2014 no trip here carries a fare, and the payout beside it came out of this' };
+        + (onTrips
+          ? ` \u2014 the trip feed prices ${money(alsoPriced)} of its own over `
+            + `${countOf(k.priced_trips, 'booking')}, and the payout beside it came out of this`
+          : ' \u2014 no trip here carries a fare, and the payout beside it came out of this') };
   }
   /* THE FARES THE TRIP FEED PRICED, which are not accounted_fares and are not
      nothing.

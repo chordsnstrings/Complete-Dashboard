@@ -68,9 +68,23 @@ console.log('\nFares: the tile may not deny fares the same response carries');
   console.log('\n  the earlier branches still win where they apply');
   check('accounted_fares still leads when a channel was counted on fares',
     faresTile({ ...SEP6, accounted_fares: 139 }).value.includes('139'));
+  const withStmt = faresTile({ ...SEP6, statement_fares: 12638.71, statement_fare_periods: 7 });
   check('the statement figure still leads over raw trip revenue',
-    /weekly statement/.test(faresTile({ ...SEP6, statement_fares: 12638.71,
-      statement_fare_periods: 7 }).sub));
+    /weekly statement/.test(withStmt.sub));
+  /* The branch-2 clause was the SAME falsehood, and the first version of this
+     fix landed on branch 3 only — this test blessed it by asserting nothing
+     about the sentence. Measured on production: 1,881 priced bookings behind
+     the claim that no trip carried a fare. */
+  check('…and it no longer claims no trip carries a fare when trips do',
+    !/no trip here carries a fare/.test(withStmt.sub), withStmt.sub);
+  check('…it names what the trip feed priced instead',
+    /trip feed prices/.test(withStmt.sub) && /415/.test(withStmt.sub), withStmt.sub);
+  check('…and still says the payout came out of the gross',
+    /payout beside it came out of this/.test(withStmt.sub));
+  const stmtOnly = faresTile({ trips: 9, revenue: null, accounted_fares: null,
+    statement_fares: 5000, statement_fare_periods: 2 });
+  check('a statement over trips that really carry no fare keeps the true sentence',
+    /no trip here carries a fare/.test(stmtOnly.sub), stmtOnly.sub);
 }
 
 console.log('\nMoney in: "paid out" has to mean paid out');
@@ -81,7 +95,12 @@ console.log('\nMoney in: "paid out" has to mean paid out');
     !/paid out/.test(t.sub),
     'driver_payout_day.earnings is period earnings divided by the period\'s days');
   check('…it says the period it was shared out of',
-    /7 days? payout period/.test(t.sub), t.sub);
+    /7-day payout period/.test(t.sub), t.sub);
+  /* payout_periods is DISTINCT (platform, period_start, period_end), so two
+     channels filing one week make it 2 — the caption must not print that as a
+     number of time periods. */
+  check('…without printing a per-channel period count as a number of periods',
+    !/2 of them/.test(t.sub), t.sub);
   check('…and that the share was even, not measured',
     /shared evenly across its days/.test(t.sub), t.sub);
   check('…and that it is not what was paid for the day being shown',
