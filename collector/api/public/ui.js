@@ -1643,13 +1643,46 @@ export function moneyInTile(k, { label = 'Money in' } = {}) {
     return { label, value: '\u2014',
       sub: 'no fare and no payout statement covers this window' };
   }
+  /* "PAID OUT" HAS TO MEAN PAID OUT.
+     ─────────────────────────────────────────────────────────────────────────
+     driver_payout_day.earnings is a period's earnings divided by that period's
+     days (sql/schema_v23.sql:61). Summed over a window that CONTAINS whole
+     periods it is exact — the days add back to the period to the fils. Summed
+     over a window narrower than a period it is a share, apportioned evenly
+     across days nobody worked evenly.
+
+     api/driver_routes.js already refuses that arithmetic for the same view's
+     hours, on the stated grounds that it is "a week divided by seven and
+     printed as a measurement" — and it put 428.8 hours against a driver with
+     twelve trips. The money column is divided by the identical expression and
+     had no such qualification anywhere on the page. Measured on production
+     2026-09-06: a one-day tile read "AED 312 paid out" for a figure no payout
+     paid on that day; the AED 311.52 is a slice of longer periods, and the
+     seven days of that week sum to the AED 2,635.62 the week actually paid.
+
+     The number is not changed, because the number is right. What changes is
+     that a window finer than the grain of its own money now says so. */
+  const periodDays = Number(k.payout_period_days);
+  const windowDays = Number(k.window_days);
+  const shared = k.accounted_payouts && Number.isFinite(periodDays)
+    && Number.isFinite(windowDays) && periodDays > windowDays;
   const parts = [
     k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
-    k.accounted_payouts ? `${money(k.accounted_payouts)} paid out` : null,
+    k.accounted_payouts
+      ? `${money(k.accounted_payouts)} ${shared ? 'of payouts' : 'paid out'}` : null,
   ].filter(Boolean);
   const from = (k.accounted_platforms || []).map(sourceLabel).join(', ');
-  return { label, value: money(k.accounted),
-    sub: `${parts.join(' \u00b7 ')}${from ? `, from ${from}` : ''}` };
+  /* Into `sub`, not into a `note` field: the mobile tile renderer takes
+     { label, value, sub, tone, href, long } (api/public/m/ui.js:150) and would
+     have dropped a note silently, which is a caption that exists in the source
+     and nowhere on the screen. */
+  const why = shared
+    ? ` \u2014 a ${countOf(periodDays, 'day')} payout ${(k.payout_periods || 1) > 1
+      ? `period (${fmt(k.payout_periods)} of them)` : 'period'} shared evenly across its days, `
+      + `not what was paid for ${windowDays === 1 ? 'this one' : 'these'}`
+    : '';
+  return { label, value: money(k.accounted), long: !!why,
+    sub: `${parts.join(' \u00b7 ')}${from ? `, from ${from}` : ''}${why}` };
 }
 
 export function faresTile(k) {
@@ -1661,6 +1694,37 @@ export function faresTile(k) {
     return { label: 'Fares', value: money(k.statement_fares),
       sub: `the platform's own figure, over ${countOf(k.statement_fare_periods, 'weekly statement')}`
         + ' \u2014 no trip here carries a fare, and the payout beside it came out of this' };
+  }
+  /* THE FARES THE TRIP FEED PRICED, which are not accounted_fares and are not
+     nothing.
+     ─────────────────────────────────────────────────────────────────────────
+     accounted_fares is null whenever every channel in the window was counted
+     on its PAYOUT — which is correct, and deliberate: fleetIncome picks one
+     basis per channel so a fare and the payout that fare became are never
+     added together (api/income_sql.js:515). But this tile read that null as
+     "there are no fares", and printed a sentence denying the existence of
+     money sitting in the very same response under `revenue`.
+
+     Measured on production 2026-09-06, over every driver who worked that day:
+     70 of 87 were shown "no trip carries a fare and no statement reports one"
+     while their responses carried AED 24,731.32 of fares across 415 priced
+     bookings. The driver the report came in about read "\u2014" beside
+     revenue 415.23 on 7 of 10 bookings.
+
+     The suppression was right and the sentence was false, which is the worst
+     of the three states this product recognises: absent is honest, present is
+     honest, and absent WITH A REASON THAT IS NOT THE TRUE ONE is neither. So
+     the figure is shown, with its denominator, and with why it is not added to
+     the money beside it. */
+  const priced = Number(k?.revenue);
+  if (Number.isFinite(priced) && priced > 0) {
+    const on = (k.priced_trips != null && k.trips != null
+      && Number(k.priced_trips) !== Number(k.trips))
+      ? `on ${fmt(k.priced_trips)} of ${countOf(k.trips, 'booking')}`
+      : 'on every booking here';
+    return { label: 'Fares', value: money(priced),
+      sub: `${on} \u2014 not added to Money in, which counts each channel once `
+        + 'and takes its payout where it has one' };
   }
   return { label: 'Fares', value: '\u2014',
     sub: 'no trip carries a fare and no statement reports one' };

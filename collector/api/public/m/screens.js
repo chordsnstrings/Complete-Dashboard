@@ -19,7 +19,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
 import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile,
-  alertRateFigure, splitAlerts } from '../ui.js';
+  alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock } from '../tz.js';
 import { todayLive, todayLede, FARES_LAG } from '../today.js';
 
@@ -913,7 +913,16 @@ async function driver(deck, ctx) {
     { label: 'Completed', value: k.completion_pct != null ? `${n(k.completion_pct)}%` : '\u2014',
       sub: k.not_completed != null ? `${fmt(k.not_completed)} did not` : null,
       tone: n(k.completion_pct) >= 90 ? 'good' : n(k.completion_pct) >= 80 ? null : 'warn' },
-    { label: 'Distance', value: `${fmt(k.km)} km`, sub: k.avg_km ? `${n(k.avg_km)} km a booking` : null },
+    /* avgKmSub, not "N km a booking". avg_km is kilometres per booking THAT
+       REPORTS A DISTANCE and the tile beside it counts every booking — the
+       helper in ui.js exists for exactly this and its own comment records that
+       the phone was ported without it. Measured on production over every
+       driver who worked 2026-09-06: 39 of 87 have a distance denominator
+       smaller than their booking count, overstating by 26% at the median and
+       by 197% at the worst (10 km over 3 bookings, 1 of them measured, printed
+       as "9.9 km a booking"). The driver this came in about read "16.7 km a
+       booking" for 100 km over 10 bookings, which is 10.0. */
+    { label: 'Distance', value: `${fmt(k.km)} km`, sub: avgKmSub(k), long: true },
   ]);
 
   const series = (daily || []).map((d) => n(d.trips) || 0);
@@ -1033,7 +1042,9 @@ async function vehicle(deck, ctx) {
   stats(deck, [
     { label: 'Bookings', value: fmt(k.trips), sub: k.days_worked ? `${k.days_worked} days worked` : null },
     { label: 'Fares', value: money(n(k.revenue)), sub: k.avg_fare ? `${money(n(k.avg_fare))} a booking` : null },
-    { label: 'Distance', value: `${fmt(k.km)} km`, sub: k.avg_km ? `${n(k.avg_km)} km a booking` : null },
+    /* Same rule, same helper — /api/vehicle/kpis spells the denominator
+       measured_trips rather than trips_with_distance and avgKmSub reads both. */
+    { label: 'Distance', value: `${fmt(k.km)} km`, sub: avgKmSub(k), long: true },
     { label: 'Drivers', value: fmt(k.attributed_drivers ?? unwrap(drivers).total),
       sub: 'held this car' },
   ]);

@@ -1200,7 +1200,30 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       `SELECT round(avg(acceptance_rate)::numeric,3) acceptance_rate,
               round(avg(cancellation_rate)::numeric,3) cancellation_rate,
               round(sum(earnings)::numeric,2) reported_earnings,
-              round(sum(cash_earnings)::numeric,2) cash_earnings
+              round(sum(cash_earnings)::numeric,2) cash_earnings,
+              /* THE GRAIN THE MONEY WAS FILED AT, returned beside the money.
+                 ───────────────────────────────────────────────────────────
+                 driver_payout_day.earnings is period earnings divided by the
+                 period's days (sql/schema_v23.sql:61). Over a window that
+                 contains whole periods that is exact. Over a window NARROWER
+                 than a period it is a share, apportioned evenly across days
+                 the driver did not work evenly.
+
+                 This file already refuses that arithmetic for hours, forty
+                 lines below, on the grounds that the same view's hours_online
+                 is "a week divided by seven and printed as a measurement".
+                 The money column is divided by the identical expression and
+                 was printed with no such qualification: on production
+                 2026-09-06 a driver's one-day tile read "AED 312 paid out"
+                 for a figure no payout ever paid on that day.
+
+                 The money is not changed — it is correct, and the days sum
+                 back to the period exactly. What was missing is the grain, so
+                 the tile can say what it is holding. */
+              max(period_days)::int payout_period_days,
+              count(DISTINCT (platform, period_start, period_end))::int payout_periods,
+              min(period_start) payout_from,
+              max(period_end) payout_to
        /* Day grain, and the window applied to the day. Summed over
           driver_performance this counted the same payout week two and three
           times — the provider is asked for overlapping report windows and the
@@ -1493,6 +1516,11 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     const utilisation = hoursOnline && hoursOnJob != null
       ? +((hoursOnJob / hoursOnline) * 100).toFixed(1) : null;
     res.json({ ...t, ...shift, ...perf, ...fleetIncome([...byPlat.values()], windowDays),
+      /* The length of the window the caller asked for, so a tile can compare it
+         with payout_period_days above and tell a whole payout from a share of
+         one. The page knows its own dates, but the comparison is a statement
+         about the DATA's grain and belongs beside the data that has it. */
+      window_days: windowDays,
       hours_online: hoursOnline,
       /* on_job, not on_trip: request to dropoff, which contains the approach
          and the rider's wait. No feed here separates them. */

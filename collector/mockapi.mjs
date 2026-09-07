@@ -955,6 +955,17 @@ app.get('/api/driver/kpis', (req, r) => {
       over_trips: 120 - i * 6,
       from: +(4.97 - i * 0.07 - ((i % 3) - 1) * 0.04).toFixed(2), to: +(4.97 - i * 0.07).toFixed(2) },
     reported_earnings: 9800 - i * 500, cash_earnings: 1200,
+    /* THE GRAIN THE PAYOUT WAS FILED AT, beside the payout.
+       driver_payout_day divides a period's earnings evenly across its days, so
+       a window narrower than a period holds a share rather than a payment, and
+       moneyInTile says which it is holding. The fixture makes BOTH branches
+       reachable: every other driver is on a 7-day period against this
+       fixture's window, and the rest report a period no longer than it, so a
+       browser test cannot pass by only ever rendering one sentence. */
+    payout_period_days: i % 2 ? 7 : 1,
+    payout_periods: i % 2 ? 2 : 1,
+    payout_from: dayISO(21), payout_to: dayISO(1),
+    window_days: 1,
     /* Money in, and the two halves it is made of. Deliberately dominated by the
        payout: on this fleet a driver's fares are the few hotel bookings they
        happened to take, so a fixture where the halves are comparable would let
