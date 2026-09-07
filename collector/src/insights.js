@@ -913,9 +913,31 @@ async function vehicleDocuments() {
    Uber computes acceptance/cancellation/completion against its own targets and names
    the drivers who miss. That is a second opinion on data we cannot see ourselves. */
 async function platformFlags() {
+  /* ONE ROW PER RECOMMENDATION PER FLEET, AND THE NEWEST ONE.
+     ─────────────────────────────────────────────────────────────────────
+     This read twenty rows newest-first and wrote every one of them through
+     put(), whose fleet arbiter is (code, entity_type, entity_id) and whose
+     entity_id here was the literal 'all'. So each row overwrote the one
+     before it and the LAST written — the OLDEST in the batch — was the row
+     that survived. Measured on production: the run at 2026-09-07T04:38Z
+     happened after Uber published a 09-07 recommendation at 04:01Z and still
+     left the 09-06 one on the board. The operator was reading a superseded
+     snapshot with a fresh computed_at on it.
+
+     The same collision crossed the two fleets: both Uber orgs write
+     entity_id 'all', so one fleet's drivers silently replaced the other's.
+     That is the identical defect this file already fixed for
+     tracker_feed_dark — "Nine ecosine vehicles became seven egari ones" —
+     and it was reintroduced here two rules later.
+
+     DISTINCT ON keeps the newest period per (type, fleet); entity_id below
+     carries the fleet so the two cannot collide again. */
   const rows = await q(
-    `SELECT rec_type, period_start, period_end, org_value, target_value, flagged_count, flagged, fleet_id
-     FROM platform_recommendation ORDER BY period_end DESC NULLS LAST LIMIT 20`);
+    `SELECT DISTINCT ON (rec_type, fleet_id)
+            rec_type, period_start, period_end, org_value, target_value,
+            flagged_count, flagged, fleet_id
+       FROM platform_recommendation
+      ORDER BY rec_type, fleet_id, period_end DESC NULLS LAST, updated_at DESC NULLS LAST`);
   let n = 0;
   for (const r of rows) {
     let flagged = [];
@@ -926,17 +948,75 @@ async function platformFlags() {
 
     if (/TRIP_COMPLETION/.test(kind)) {
       // online, but produced nothing — the sharpest supply-side waste signal there is
-      const idle = flagged.filter((f) => Number(f.value) === 0);
+      const idleRaw = flagged.filter((f) => Number(f.value) === 0);
+      if (!idleRaw.length) continue;
+      /* CHECKED AGAINST OUR OWN RECORD BEFORE ANYBODY IS ACCUSED.
+         ─────────────────────────────────────────────────────────────────
+         Uber's getRecommendations is a SNAPSHOT it republishes DURING the
+         day, about the day in progress — and this rule read it as a verdict
+         on a finished one. Measured on production 2026-09-07: the board's
+         most severe finding named eight drivers as "online but completed no
+         trips" on 6 September. Against our own trip_norm those eight
+         completed SEVENTY-ONE bookings between them — 16, 14, 10, 9, 8, 6,
+         4 and 4 — and Uber's "13.5 hours online in total" was 109 hours
+         measured. Every one of them was active, could earn, and was rated
+         between 4.85 and 4.99 over hundreds of lifetime trips. The rule was
+         calling the fleet's best drivers dead weight, at critical severity,
+         above every real finding on the list.
+
+         The mechanism is plain once seen: Uber published the figure at
+         roughly 08:01 Dubai about a day that had barely started, so a driver
+         who went online at 07:49 and completed his first booking at 09:01 is
+         "1.2 hours online, zero trips" in that snapshot and a full day's work
+         by evening. A second opinion is worth having, but not one this
+         product repeats without checking the half of the answer it holds
+         itself.
+
+         So the accusation is dropped for anybody our own record shows
+         completing a booking in that period. What is left is the case the
+         rule was written for and is genuinely worth an operator's morning:
+         somebody Uber saw online and neither Uber nor we saw finish a job. */
+      const ids = idleRaw.map((f) => f.driver_ext_id).filter(Boolean);
+      const worked = new Set((ids.length ? await q(
+        `SELECT DISTINCT driver_ext_id FROM trip_norm
+          WHERE driver_ext_id = ANY($1)
+            AND outcome = 'completed'
+            AND (requested_at AT TIME ZONE 'Asia/Dubai')::date
+                BETWEEN $2::date AND $3::date`,
+        [ids, isoDay(r.period_start), isoDay(r.period_end)]) : [])
+        .map((x) => x.driver_ext_id));
+      const idle = idleRaw.filter((f) => !worked.has(f.driver_ext_id));
       if (!idle.length) continue;
       const hours = idle.reduce((a, f) => a + (f.online_hours || 0), 0);
+      /* SAID, not implied. The period this is drawn from may still be running
+         — Uber republishes it through the day — and "completed no trips" about
+         an hour-old morning is a different claim from the same words about a
+         closed day. The reader is told which they are looking at. */
+      const openPeriod = isoDay(r.period_end) >= dubaiIso().slice(0, 10);
       await put({
-        code: 'drivers_online_no_trips', severity: 'critical', category: 'utilisation',
-        entity_type: 'fleet', entity_id: 'all', fleet_id: r.fleet_id,
-        title: `${n_(idle.length, 'driver')} ${s_(idle.length, 'was', 'were')} online but completed no trips`,
+        code: 'drivers_online_no_trips',
+        /* An in-progress morning is not a critical finding. It becomes one
+           when the day it describes has closed and the answer is final. */
+        severity: openPeriod ? 'warning' : 'critical', category: 'utilisation',
+        entity_type: 'fleet', entity_id: r.fleet_id || 'all', fleet_id: r.fleet_id,
+        title: openPeriod
+          ? `${n_(idle.length, 'driver')} online so far today with nothing completed yet`
+          : `${n_(idle.length, 'driver')} ${s_(idle.length, 'was', 'were')} online but completed no trips`,
         detail: `Uber flagged ${n_(idle.length, 'driver')} logged in for about ${hours.toFixed(1)} `
-          + `hours in total with zero completed trips (${isoDay(r.period_start)}). Paid-for supply `
-          + 'that produced nothing.',
-        action: `Check whether they were genuinely available, sitting in a dead zone, or logged in without intending to work.`,
+          + `hours with no completed trip (${isoDay(r.period_start)}), and our own booking record `
+          + `agrees — ${s_(idle.length, 'this driver', 'these drivers')} finished nothing in that `
+          + 'period on any channel.'
+          + (idleRaw.length > idle.length
+            ? ` ${n_(idleRaw.length - idle.length, 'other driver')} Uber flagged the same way `
+              + `${s_(idleRaw.length - idle.length, 'is', 'are')} not listed here: they did complete `
+              + 'bookings, and Uber publishes this figure during the day about the day in progress.'
+            : '')
+          + (openPeriod
+            ? ' This period has not closed yet, so it is a reading of the day so far rather than a verdict on it.'
+            : ' Paid-for supply that produced nothing.'),
+        action: openPeriod
+          ? 'Worth a look rather than a call — the day is still running. If the same names are here this evening, ask what stopped them.'
+          : 'Check whether they were genuinely available, sitting in a dead zone, or logged in without intending to work.',
         impact_aed: null, metric: idle.length,
         /* WHO. This is the most severe finding on the list and it rendered with
            no anchors: seven people named in a sentence and identified nowhere,
