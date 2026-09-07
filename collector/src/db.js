@@ -114,16 +114,58 @@ async function ledger() {
 
    The key is arbitrary and must only be stable. It is held on ONE checked-out
    client for the whole run, because an advisory lock is session-scoped and a
-   pooled query would release it the moment that query's client went back. */
+   pooled query would release it the moment that query's client went back.
+
+   ── and the lock wait is itself a statement ────────────────────────────────
+   The first version of this took the lock on a client straight out of the
+   pool, which arms every session with statement_timeout (120s, see
+   poolConfig). pg_advisory_lock BLOCKS, and a blocked statement is still a
+   statement: Postgres cancelled the WAIT at two minutes. The catch around it
+   swallowed that and let the boot carry on WITHOUT the lock — the exact
+   fail-open this code exists to prevent. Measured on production 2026-09-07,
+   the boot after it shipped:
+
+     api       15:11:02  INFO  [db] migrated schema_v53.sql {"ms":123022}
+     collector 15:13:00  ERROR [db] migration schema_v53.sql failed
+                               {"ms":120510,"err":"statement timeout"}
+
+   Subtract the durations: the API ran v53 from 15:09:00 to 15:11:02 and the
+   collector started its own copy at 15:10:59.94 — 120 seconds after it began
+   waiting, and two seconds BEFORE the API committed. Both rewrote the trip
+   table at once. The API's won, the collector's rolled back, and the fleet
+   paid for the second rewrite in bloat: /api/kpis over the full window went
+   from about a second to 48.
+
+   So the migration session raises its own timeout before it reaches for the
+   lock, and the migrations then run ON that same client rather than through
+   the pool — because the file legitimately takes longer than an API query is
+   ever allowed to: v53 took 123 seconds, which is already past the pool's
+   limit and only survived because no single statement inside it crossed.
+
+   It is a large finite number rather than 0. Unlimited would mean a migration
+   that genuinely hangs takes the boot with it and never says why. */
 const MIGRATE_LOCK = 0x5f16534e;
+const MIGRATE_TIMEOUT_MS = Number(process.env.MIGRATE_STATEMENT_TIMEOUT_MS || 900000);
 
 export async function migrate() {
-  const gate = await pool.connect().catch(() => null);
+  let gate = await pool.connect().catch(() => null);
   if (gate) {
-    try { await gate.query('SELECT pg_advisory_lock($1)', [MIGRATE_LOCK]); } catch { /* fall through */ }
+    await gate.query(`SET statement_timeout = ${Number(MIGRATE_TIMEOUT_MS) || 900000}`).catch(() => {});
+    try {
+      await gate.query('SELECT pg_advisory_lock($1)', [MIGRATE_LOCK]);
+    } catch (e) {
+      /* With the timeout raised this is a dead connection, not a wait that ran
+         long. Migrating unlocked is the lesser evil — a concurrent run loses a
+         rewrite and retries next boot, whereas refusing to migrate would leave
+         this service answering against a schema it has not applied — but it is
+         never silent, because it is how the 48-second regression above got in. */
+      log.error('db', 'migration lock unavailable — migrating WITHOUT it', { err: String(e).slice(0, 200) });
+      gate.release();
+      gate = null;
+    }
   }
   try {
-    return await runMigrations();
+    return await runMigrations(gate);
   } finally {
     if (gate) {
       await gate.query('SELECT pg_advisory_unlock($1)', [MIGRATE_LOCK]).catch(() => {});
@@ -132,7 +174,11 @@ export async function migrate() {
   }
 }
 
-async function runMigrations() {
+/* `client` is the locked session when there is one, so a migration runs under
+   MIGRATE_TIMEOUT_MS rather than the API's query budget. Falls back to the
+   pool when the lock could not be taken. */
+async function runMigrations(client) {
+  const db = client || pool;
   let applied;
   try {
     applied = await ledger();
@@ -150,11 +196,11 @@ async function runMigrations() {
     if (applied.get(f) === sha) { skipped += 1; continue; }
     const t0 = Date.now();
     try {
-      await pool.query(sql);
+      await db.query(sql);
       const ms = Date.now() - t0;
       ran += 1;
       log.info('db', `migrated ${f}`, { ms });
-      await pool.query(
+      await db.query(
         `INSERT INTO schema_applied (file, sha, applied_at, ms) VALUES ($1, $2, now(), $3)
          ON CONFLICT (file) DO UPDATE SET sha = EXCLUDED.sha, applied_at = now(), ms = EXCLUDED.ms`,
         [f, sha, ms]).catch(() => { /* no ledger: still migrated, just not recorded */ });

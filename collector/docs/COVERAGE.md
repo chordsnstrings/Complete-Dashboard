@@ -854,3 +854,27 @@ and the number of plates carrying no VIN stated rather than implied.
   watch the test go red; three of the four went red and this one did not. Assert
   the thing is *present* in the shape you want, not merely that the wrong shape
   is absent.
+* **A lock wait is a statement, so `statement_timeout` cancels it.** The pool
+  arms every session with 120s (`poolConfig` in `src/db.js`). `pg_advisory_lock`
+  blocks, and Postgres cancelled the *wait* at two minutes; the `catch` around
+  it swallowed the cancellation and the boot carried on without the lock —
+  which is precisely the fail-open the lock was added to prevent. It is
+  invisible in the log unless you subtract durations from timestamps: on
+  2026-09-07 the API ran `schema_v53.sql` from 15:09:00 to 15:11:02 and the
+  collector started its own copy at 15:10:59.94, two seconds before the API
+  committed. Raise `statement_timeout` on the migration session *before*
+  reaching for the lock, and never swallow a failure to take it.
+* **A table that has just been rewritten has no statistics at all.** Re-adding
+  a generated column rewrites the heap, and Postgres does not sample the result
+  — it waits for autovacuum, which on `basic-xxs` is a long wait. Every plan
+  over `person_key` was then costed against a table the planner believed was
+  empty: `/api/kpis` over the full window went from about a second to 48, on
+  unchanged SQL and unchanged data. `ANALYZE` at the end of the migration costs
+  single-digit seconds against a two-minute rewrite. `VACUUM` cannot go there —
+  `pool.query()` sends a multi-statement file as one implicit transaction and
+  `VACUUM` is illegal inside one — so the bloat from a rolled-back concurrent
+  rewrite is left to autovacuum.
+* **A test that greps a file for a forbidden word finds it in the comment that
+  explains why it is forbidden.** `!/\bVACUUM\b/` on `schema_v53.sql` failed
+  against the *fixed* file, because the fix documents why `VACUUM` is absent.
+  Strip `--` comments before scanning SQL for what must not be in it.

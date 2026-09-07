@@ -173,5 +173,64 @@ console.log('\nonly one process migrates at a time');
     'a service that skipped migrations would serve against a schema it has not applied');
 }
 
+/* ── the wait is a statement, and the pool times statements out ────────────
+   The first version of the lock was defeated by the very setting the pool
+   exists to apply. statement_timeout cancelled pg_advisory_lock's WAIT at two
+   minutes and the catch let the boot continue unlocked, so both containers
+   rewrote the trip table at once. Everything here is about that. */
+{
+  const src = readFileSync('src/db.js', 'utf8');
+  const gate = src.slice(src.indexOf('export async function migrate()'),
+                         src.indexOf('async function runMigrations'));
+
+  check('the migration session raises statement_timeout BEFORE it waits for the lock',
+    gate.indexOf('SET statement_timeout') >= 0
+      && gate.indexOf('SET statement_timeout') < gate.indexOf('pg_advisory_lock'),
+    'a blocked lock wait is still a statement — the pool cancelled it at 120s and the boot went on unlocked');
+
+  check('…to a finite budget, not to 0',
+    /statement_timeout = \$\{[^}]*MIGRATE_TIMEOUT_MS/.test(gate) && /MIGRATE_TIMEOUT_MS = Number\(/.test(src),
+    'unlimited means a migration that truly hangs takes the boot with it and never says why');
+
+  check('a lock it cannot take is LOGGED, never swallowed',
+    /catch \(e\) \{[\s\S]{0,900}?log\.error\('db', 'migration lock unavailable/.test(gate),
+    'the empty catch is how the concurrent rewrite got in; silence is the defect, not the fallback');
+
+  check('the migrations themselves run on the locked client, not through the pool',
+    /runMigrations\(gate\)/.test(gate) && /async function runMigrations\(client\)[\s\S]{0,300}?const db = client \|\| pool/.test(src),
+    'schema_v53.sql takes 123s, which is already past the pool\'s 120s budget for a query');
+
+  const body = src.slice(src.indexOf('async function runMigrations'));
+  const loop = body.slice(0, body.indexOf('export async function upsert'));
+  check('…so no statement inside the migration loop still says pool.query',
+    !/pool\.query/.test(loop),
+    'one straggler would run that file under the API\'s timeout again');
+}
+
+/* ── a rewritten table has no statistics ──────────────────────────────────── */
+{
+  const v53 = readFileSync('sql/schema_v53.sql', 'utf8');
+  const gen = readFileSync('bin/gen-schema-v53.mjs', 'utf8');
+  const REWRITTEN = ['trip', 'driver_platform_state', 'vehicle_driver_day',
+                     'money_event', 'driver_statement_day', 'driver_payout_day'];
+  for (const t of REWRITTEN) {
+    check(`schema_v53 ANALYZEs ${t} after rebuilding its generated column`,
+      new RegExp(`ANALYZE ${t};`).test(v53),
+      'the planner costed every person_key plan against a table it believed was empty — 48s on /api/kpis');
+  }
+  check('…and the ANALYZEs come from the generator, not a hand edit',
+    REWRITTEN.every((t) => new RegExp(`ANALYZE ${t};`).test(gen)),
+    'sql/schema_v53.sql is generated; a hand edit is overwritten by the next run');
+  check('…placed after the rebuild, so they sample the new column',
+    v53.indexOf('ANALYZE trip;') > v53.indexOf('$mig$;'),
+    'statistics taken before the rewrite describe the table that is about to be replaced');
+  /* Comments stripped first: this file EXPLAINS why VACUUM is absent, and a
+     naive scan of the raw text finds the explanation and calls it the defect. */
+  const v53sql = v53.split('\n').filter((l) => !/^\s*--/.test(l)).join('\n');
+  check('VACUUM is NOT in the file',
+    !/\bVACUUM\b/.test(v53sql),
+    'the file is sent as one multi-statement query, which is an implicit transaction, and VACUUM cannot run in one');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

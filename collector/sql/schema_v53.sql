@@ -776,3 +776,26 @@ CREATE INDEX IF NOT EXISTS trip_econ_day_idx
   ON trip (((requested_at AT TIME ZONE 'Asia/Dubai')::date))
   INCLUDE (plate, platform, fleet_id, person_key, driver_ext_id, driver_name,
            status, payment_type, price, distance_km, requested_at);
+
+-- ── and then tell the planner what it is looking at ───────────────────────
+-- Re-adding a generated column rewrites the whole table, and a rewritten table
+-- arrives with no statistics at all: no row estimate, no n_distinct for
+-- person_key, no correlation. Postgres does not sample it on the spot, it
+-- waits for autovacuum, and on a basic-xxs instance that wait is long.
+--
+-- Measured on production 2026-09-07, the boot this file first applied:
+-- /api/kpis over the full window went from roughly a second to 48, on
+-- unchanged query text and unchanged data. Every plan over person_key was
+-- being costed against a table the planner believed was empty.
+--
+-- ANALYZE is cheap next to the rewrite that precedes it (single-digit seconds
+-- against two minutes), it is legal inside the implicit transaction this file
+-- runs in — unlike VACUUM, which is not, and which autovacuum will do in its
+-- own time — and it runs even on the cheap path where the guard above skipped
+-- the rebuild, which costs one sample and keeps a re-run honest.
+ANALYZE trip;
+ANALYZE driver_platform_state;
+ANALYZE vehicle_driver_day;
+ANALYZE money_event;
+ANALYZE driver_statement_day;
+ANALYZE driver_payout_day;
