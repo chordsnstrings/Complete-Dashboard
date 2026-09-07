@@ -92,6 +92,43 @@ console.log('\nthe cases the old rule silently got wrong');
   check('NULL is NULL', await area(null) === null);
 }
 
+console.log('\nthe two things the first version got wrong (sql/schema_v68.sql)');
+{
+  /* Every string here was read off production on 2026-09-07, out of the
+     gazetteer schema_v67 actually built: 4,855 cells over 709 names, and some
+     of those "names" were "9", "1", "4762VVF" and "D71". */
+  console.log('\n  blank segments are punctuation, not places');
+  check('a run of empty segments does not shift the count past the community',
+    await area('45HMWX6 - Madinat Jumeirah -  1 -  - United Arab Emirates,') === 'Madinat Jumeirah',
+    'counting three from the end over the RAW split landed on "1" — 69 of one driver\'s 222 fixes');
+  check('…even when what is left is only just long enough',
+    await area('Barsha Road Saleh Bin Lahej Building Shop #5 -  -  1 -  - United Arab Emirates,')
+      === 'Barsha Road Saleh Bin Lahej Building Shop #5');
+
+  console.log('\n  a code is not a place name');
+  for (const [addr, what] of [
+    ['57VWG8 - Dubai - United Arab Emirates,', 'a plus code'],
+    ['3583+3W3 - Dubai - United Arab Emirates,', 'a plus code with its separator'],
+    ['4762VVF - Dubai - United Arab Emirates,', 'a plus code'],
+    ['D71 - Dubai - United Arab Emirates, ', 'a road designation'],
+    ['E 11 - Dubai - United Arab Emirates', 'a road designation with a space'],
+    ['9 - Dubai - United Arab Emirates', 'a bare number'],
+  ]) {
+    check(`${what} returns NULL rather than being printed as an area`,
+      await area(addr) === null, `got ${JSON.stringify(await area(addr))}`);
+  }
+
+  console.log('\n  …but a coarse TRUE answer is still an answer');
+  check('a street is kept — a person can picture it',
+    await area('X - Y - Sheikh Zayed Rd - Dubai - UAE') === 'Sheikh Zayed Rd',
+    'the house rule refuses codes, not coarseness');
+  check('an all-caps name with no digit is kept',
+    await area('Tower - JLT - Dubai - UAE') === 'JLT');
+  check('a community whose name ENDS in a number is kept',
+    await area('Villa 4 - Al Barsha 1 - Dubai - UAE') === 'Al Barsha 1',
+    '"Al Barsha 1" is a real community; "1" is not');
+}
+
 console.log('\nthe gazetteer: what the fleet\'s own history calls each patch of ground');
 {
   const { refreshPlaceCells, cellOf, CELL, IN_UAE } = await import('../src/places.js');
@@ -175,6 +212,18 @@ console.log('\n  and it is not rebuilt on every collector pass');
   const empty = await refreshPlaceCells(db);
   check('…and an empty table is always built, so a fresh database is named on the first pass',
     !empty.skipped);
+}
+
+console.log('\n  a change to the RULE forces a rebuild');
+{
+  const v68 = readFileSync('sql/schema_v68.sql', 'utf8');
+  check('schema_v68 empties place_cell',
+    /DELETE FROM place_cell;/.test(v68),
+    'the six-hour freshness guard would otherwise serve names built by the old rule until it expired');
+  check('…and it REPLACEs the function rather than editing schema_v67',
+    /CREATE OR REPLACE FUNCTION place_area/.test(v68)
+      && !/CREATE OR REPLACE FUNCTION place_area/.test(readFileSync('sql/schema_v67.sql', 'utf8').replace(/^--.*$/gm, '').split('COMMENT ON FUNCTION')[1] || ''),
+    'migrations replay from the start and the ledger skips shas it has seen — editing v67 would do nothing on production');
 }
 
 console.log('\nthe driver day: where somebody went online, in words');

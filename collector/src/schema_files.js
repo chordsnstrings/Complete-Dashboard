@@ -75,4 +75,10 @@ export const SCHEMA_FILES = [
      telematics position can be reported as somewhere a person can picture
      rather than as "25.112, 55.139". */
   'schema_v67.sql',
+  /* place_area(), corrected against the gazetteer v67 actually built: blank
+     segments were shifting the count past the community ("45HMWX6 - Madinat
+     Jumeirah -  1 -  - UAE" resolved to "1"), and a plus code or road number
+     in a three-segment address was being returned as a place name. Empties the
+     gazetteer so the next collector pass rebuilds it under the new rule. */
+  'schema_v68.sql',
 ];

@@ -802,6 +802,29 @@ Fewer than three segments means there is no area in the string — `Mall of
 Emirates Al Barsha 1 AE` arrives with no separators at all — and that is NULL,
 reported as unnamed rather than guessed at.
 
+Two corrections after the first gazetteer was built and looked at
+(sql/schema_v68.sql), both found by reading the names it produced:
+
+* **Blank segments are punctuation and are dropped before counting.** FMS emits
+  runs of them, and counting from the end over the raw split walks straight
+  past the community that is sitting in the string:
+  `45HMWX6 - Madinat Jumeirah -  1 -  - United Arab Emirates,` resolved to
+  `1` — 69 of one driver's 222 fixes on a single day.
+* **A candidate carrying a digit, no lowercase letter and no space is a code,
+  not a community**, and so is a bare number with or without a road letter in
+  front of it. `57VWG8`, `3583+3W3`, `D71`, `E 11`, `9`. Those return NULL, so
+  the observation leaves the gazetteer entirely and the *second* most voted
+  name in that cell — usually a real one — wins it. A cell with no nameable
+  candidate stays unnamed.
+
+The filter is deliberately loose about what it keeps: `Sheikh Zayed Rd` is a
+street rather than a community, but it is a place a person can picture, and a
+true coarse answer beats no answer. Only codes and bare numbers are refused.
+
+Measured on production 2026-09-07, the first build under the v67 rule:
+**4,855 cells, 709 distinct names, 410,627 observations**, naming 221 of one
+driver's 222 tracker fixes.
+
 ## Traps that have cost time more than once
 
 * **A migration that DROPs a column fails on production and passes in the
@@ -968,3 +991,10 @@ reported as unnamed rather than guessed at.
   (6), and always builds an empty one so a fresh database is named on its first
   pass. Ask what a derived table is a map OF before deciding how often it needs
   rebuilding.
+* **A derived table built by a rule the rule then changes must be emptied by
+  the migration that changes it.** `place_cell` is guarded by a six-hour
+  freshness check, so correcting `place_area()` in sql/schema_v68.sql would
+  have left production serving names built by the old rule until the guard
+  expired — long after the deploy "succeeded". The migration ends with
+  `DELETE FROM place_cell`, because `refreshPlaceCells()` always rebuilds an
+  empty table whatever its age.
