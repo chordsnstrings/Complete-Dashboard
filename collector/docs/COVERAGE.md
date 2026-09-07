@@ -405,6 +405,32 @@ hotel record has 0 trips, 0 custody rows and 0 money … settled by a phone call
 not by this file"), so it is a case the register could not decide, not one it
 decided against. REFUSED must still win over the rule regardless.
 
+### What was built for it, and where it stops
+
+`src/identity_link.js` recomputes the links on every collector run and writes
+them to `driver_identity_link` (sql/schema_v65.sql) with the evidence that
+decided each. It fails closed: a number on three records links nobody, and
+neither does one that appears twice inside a channel — both identify a handset
+rather than a person, and being wrong in that direction merges two people's
+work and money, which is not a mistake a page can help a reader notice.
+
+`api/identity_links.js` applies them at the API boundary, in this precedence:
+
+    the register (a person checked it)  →  the roster link (a rule ran)
+      →  the stored person_key  →  the folded name
+
+A rejection recorded by an operator survives every later run, and a REFUSED
+pair never enters the table at all.
+
+**Where it stops, and this is the part a finance figure depends on:** a link
+folds the driver directory and the driver pages. It does **not** move
+`person_key`, which is a stored generated column over 364,015 rows built from
+`api/identity_map.js`, so every rollup, statement fold and money surface still
+counts the two records apart. `bin/promote-links.mjs` prints the unpromoted
+links as register entries for a human to review; pasting them in and running
+`bin/gen-schema-v53.mjs` is what moves the stored column. `#identity` prints
+this distinction rather than implying the fold is complete.
+
 ### The limit, stated
 
 166 of the 434 directory rows carry **no phone on any of their records** — 93
