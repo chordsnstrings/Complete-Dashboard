@@ -90,11 +90,35 @@ const post = async (path, body) => {
              is read out of the cookie because "sign in as somebody who owns
              this park" is unactionable if the operator cannot see who they
              are currently signed in as. */
+          /* AND THE FOURTH POSSIBILITY, which is the one that turned out to be
+             true and which this sentence did not name.
+             ─────────────────────────────────────────────────────────────
+             Measured 2026-09-07, minutes apart, with production's stored
+             YANGO_PARK_ID and YANGO_COOKIE confirmed updated at 08:11:14Z:
+
+               the same URL, method, headers and body, with the same park id
+               and the same session, answered HTTP 200 with live orders from
+               one host and HTTP 403 from the deployed app.
+
+             Both hosts get 401 with the cookie removed, so the park id clears
+             the pre-auth gate from both — an unrecognised park refuses 403
+             with AND without a session, which is the other branch. And the
+             API key is inert on this host: the same call returns a
+             byte-identical 200 with a junk key and with no key header at all.
+
+             That leaves nothing about the credentials. What differs is where
+             the call comes FROM, and no amount of re-pasting changes a
+             caller's address. Naming it matters because the three suspects
+             this sentence used to list are all things an operator can go and
+             fix, and they would have spent the afternoon fixing them. */
           ? ` — with no cookie this call answers HTTP ${bare.status} instead, so the session IS`
             + ` being read and authenticates${yangoAccount() ? ` as ${yangoAccount()}` : ''};`
             + ` a 403 after that is about entitlement, not the session — either this account is`
             + ` not on park ${config.yango.parkId}, or YANGO_PARK_ID or YANGO_API_KEY names a`
-            + ' park it cannot see. Re-pasting the same account\u2019s cookie will not change it'
+            + ' park it cannot see, or the refusal is of this HOST rather than of any credential:'
+            + ' the same call with the same three credentials has been measured returning 200'
+            + ' from a different network on the same day. Re-pasting the same account\u2019s'
+            + ' cookie will not change any of the four'
           : ' — and the cookie-free comparison did not complete, so which credential is being'
             + ' refused is not yet established';
       /* The cookie is recorded as WORKING when it demonstrably worked.

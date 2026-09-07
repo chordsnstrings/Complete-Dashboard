@@ -84,9 +84,67 @@ async function checkUber({ value, org_uuid }) {
 }
 
 /* ── Bolt: does this refresh token still mint an access token? ──────────── */
+/* THE ONE CHECK THAT SPENDS WHAT IT TESTS.
+   ═══════════════════════════════════════════════════════════════════════════
+   Every other check in this file is a read. Bolt's is not, and that broke the
+   whole paste flow in a way that looked like the operator's fault.
+
+   The portal's getAccessToken ROTATES the refresh token and invalidates the
+   one presented — src/sources/bolt.js:201-217 documents it and persists the
+   successor for exactly this reason. This function called the same endpoint
+   and kept only `access_token`, so the reported symptom was precisely:
+
+     paste a fresh token, press Read  →  "pass", and the token is now spent
+     press Apply                      →  the same value is presented again,
+                                         the portal answers with the jti of
+                                         the token that superseded it, the
+                                         verdict is 'fail', and NOTHING IS
+                                         WRITTEN.
+
+   The operator sees a token that verified a second ago refuse to save, and
+   the only advice on screen is to capture another one — which is then spent
+   the same way, forever. Two changes close it.
+
+   ── the successor is what gets stored ───────────────────────────────────
+   The check returns `keys`, the same multi-key mechanism the Uber OAuth
+   application uses, naming the ROTATED token rather than the spent paste. So
+   what lands in the settings store is the credential that actually works.
+
+   ── and a second look at the same paste is answered from the first ──────
+   `spent` remembers, for fifteen minutes, which successor a presented token
+   rotated into. The Apply click presents the same spent value, finds it here,
+   and gets the truth — this paste was good, and here is what it became —
+   without a second exchange that would spend the successor as well. It is
+   deliberately in memory rather than in the settings store: it holds a live
+   credential, the two clicks are seconds apart, and a process restart in
+   between costs one re-paste rather than leaving a secret at rest in a row
+   nothing would ever clean up.
+
+   The TTL is short for the same reason. A token remembered here is one the
+   product has already stored under its own key; this map only exists so the
+   second half of one operator action can see what the first half did. */
+const BOLT_SPENT_TTL_MS = 15 * 60_000;
+const spent = new Map();
+
+const rememberRotation = (presented, successor, fleet) => {
+  spent.set(presented, { successor, fleet, at: Date.now() });
+  /* Bounded, because this is keyed on operator input. Anything older than the
+     window is dead weight and, being a credential, is not worth keeping a
+     moment past its use. */
+  for (const [k, v] of spent) if (Date.now() - v.at > BOLT_SPENT_TTL_MS) spent.delete(k);
+};
+
 async function checkBolt({ value, fleet }) {
   const company = (config.bolt.companies || []).find((c) => c.fleet === fleet);
   if (!company) return { verdict: 'fail', detail: `no Bolt company is configured for ${fleet}` };
+  const key = keyFor('BOLT_REFRESH_TOKEN', fleet);
+  const carry = (successor) => (key && successor ? { keys: { [key]: successor } } : {});
+  const prior = spent.get(value);
+  if (prior && prior.fleet === fleet && Date.now() - prior.at < BOLT_SPENT_TTL_MS) {
+    return { ...verdict(true, `already exchanged a moment ago for company ${company.companyId} — `
+      + 'the portal rotates this token on use, so what will be stored is the one it handed back, '
+      + 'not the value pasted'), ...carry(prior.successor) };
+  }
   try {
     const { data } = await http(`${config.bolt.portalBase}/getAccessToken?language=en-us&version=FO.3.856&brand=bolt`, {
       method: 'POST', timeoutMs: 30000, retries: 0,
@@ -94,8 +152,35 @@ async function checkBolt({ value, fleet }) {
       body: JSON.stringify({ refresh_token: value, company: { company_id: company.companyId, company_type: 'fleet_company' } }),
     });
     const at = data?.data?.access_token || data?.access_token;
-    if (at) return verdict(true, `the portal minted an access token for company ${company.companyId}`);
-    return verdict(false, String(data?.message || data?.error_data?.hint || JSON.stringify(data)).slice(0, 200));
+    if (at) {
+      /* A portal that returns no successor has not rotated, so the presented
+         value is still the live one and storing it is correct. */
+      const next = data?.data?.refresh_token || data?.refresh_token || null;
+      const successor = next && next !== value ? next : value;
+      rememberRotation(value, successor, fleet);
+      return { ...verdict(true, `the portal minted an access token for company ${company.companyId}`
+        + (successor !== value ? ' and rotated the refresh token — the successor is what gets stored' : '')),
+      ...carry(successor) };
+    }
+    /* BOTH the message and the hint, because the message is the same word for
+       two different failures and the hint is the only thing that tells them
+       apart — src/sources/bolt.js:212-216 records the probe that established
+       it. `message` alone reads REFRESH_TOKEN_INVALID whether the signature is
+       broken or the token was simply used already, and those need opposite
+       advice: capture a new one, versus somebody already spent this one and
+       the successor is what to look for. This returned `message || hint`, so
+       the half that discriminates was the half that never printed. */
+    const hint = data?.error_hint || data?.error_data?.hint || null;
+    const spentAlready = hint && /^[0-9a-f-]{16,}$/i.test(String(hint));
+    return verdict(false, [
+      String(data?.message || JSON.stringify(data)).slice(0, 120),
+      hint && `hint=${String(hint).slice(0, 60)}`,
+      data?.code != null && `code=${data.code}`,
+      spentAlready
+        ? '— the portal is naming the token that replaced this one, so this paste has already '
+          + 'been exchanged somewhere; capture a fresh one from the portal'
+        : null,
+    ].filter(Boolean).join(' ').slice(0, 300));
   } catch (e) {
     if (unreachable(e)) return { verdict: 'unknown', detail: `the Bolt portal could not be reached: ${String(e.message).slice(0, 120)}` };
     return verdict(false, String(e.message || e).slice(0, 200));
