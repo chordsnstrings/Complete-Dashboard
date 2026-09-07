@@ -342,6 +342,84 @@ the useful field.
 
 ---
 
+## One person, two rows: the phone is the join nothing uses — measured 2026-09-07
+
+Reported from the product: "Muhammad Khalifa Afzal Khalid has uber trips, but it
+doesn't show that uber is there. it only shows bolt trips."
+
+He does have Uber trips. The roster carries both records and the same phone
+number on each:
+
+| channel | id | name |
+|---|---|---|
+| hotel | `67483c64055e070d79100112` | MUHAMMAD KHALIFA AFZAL KHALID |
+| uber | `76ede4ae-768b-4126-804b-0b5c88043682` | Muhammad Khalid |
+
+The Uber account carries **4,461 trips over 302 days on 8 vehicles**, statement
+gross AED 38,380.87, fees AED 9,596.02, cash AED 3,895.03. The row an operator
+sees for him reports **822 trips and AED 15,636**, on Bolt.
+
+### Why the fold cannot see it
+
+`personFold` (api/custody_sql.js) decides two records are one person from the
+NAME — case, whitespace, an adjacent repeated word — and api/identity_map.js
+argues at length, correctly, that it must never learn to do more. The pattern
+here is that **Bolt and the hotel channel file the full legal name and Uber
+files a shortened one**, with the middle (father's) name dropped:
+
+    Zubair Khan Shaukat Ali      / Zubair Khan Ali
+    Nauman Hassan Shida Muhammad / Nauman Hassan Muhammad
+    Zia Ali Said Muhammad        / Zia Ali Muhammad
+
+A subsequence rule would join those — and would also join `Muhammad Khalid` to
+`Muhammad Khalid Gul`, who are two different men with 77 simultaneous trips on
+two plates, refused by hand in api/identity_map.js. The name cannot settle it.
+The phone can, and it is already stored on `driver_compliance` for both sides.
+
+### The measurement
+
+Over the 289 roster rows (`/api/compliance/drivers`, 157 Uber + 132 hotel):
+
+| | |
+|---|---|
+| distinct phone numbers | 217 |
+| phones on more than two rows | **0** |
+| phones on two rows of the SAME platform | **0** |
+| phones shared across two platforms | **72** |
+| …of which the two names differ, so no name fold can reach them | **61** |
+| …still rendering as two separate directory rows | **58** |
+| trips sitting on the smaller row of those pairs | **13,056** |
+| money likewise | **AED 393,731** |
+
+Every phone maps to exactly one or two records, and never twice within a
+channel, so on this roster the phone is a clean one-to-one cross-channel join.
+
+### And it agrees with the refusals
+
+Of the three pairs a human investigated and declined to merge, the phone rule
+keeps two apart — `Muhammad Naeem Khan`/`Mohammad Naeem Khan` and
+`Muhammad Khalid Gul`/`Muhammad Khalid` both have different numbers, which is
+the whole point. The third, `Sanaullah Sher Zamin`/`Sana Ullah Sher Zamin`,
+shares a phone; that entry is marked UNDECIDABLE rather than refused ("the
+hotel record has 0 trips, 0 custody rows and 0 money … settled by a phone call,
+not by this file"), so it is a case the register could not decide, not one it
+decided against. REFUSED must still win over the rule regardless.
+
+### The limit, stated
+
+166 of the 434 directory rows carry **no phone on any of their records** — 93
+Bolt-only, 51 Uber-only (Uber accounts that appear in trips but not in the
+compliance roster), 15 already spanning both — and 80,443 trips sit on them.
+The phone rule is blind to every one of those. It polices the 268 rows that
+carry a phone and says nothing about the rest, and a page built on it has to
+say so rather than implying the roster is now clean.
+
+Bolt has no phone in `driver_platform_state` at all; Bolt records reach Uber
+transitively, because Bolt and the hotel channel file the same full name and
+the existing name fold already joins those two.
+
+---
+
 ## Known holes, with owners
 
 | what | state | needs |
