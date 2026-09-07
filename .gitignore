@@ -1,2 +1,14 @@
 scratchpad/
 *.local
+
+# Scratch files written by audit subagents while a workflow runs.
+# ─────────────────────────────────────────────────────────────────────────
+# A workflow agent measuring the UI stands up a throwaway express shell to
+# serve the working tree against a fixture or the production mirror, and
+# writes it beside the code it is measuring. They are transient by
+# construction — a leading underscore is the convention they already use —
+# and committing one would put a hard-coded absolute path and a scratch
+# server into the product. Ignored so a running workflow does not leave the
+# tree dirty, and so nobody mistakes one for work.
+collector/_*.mjs
+collector/.__*.mjs
