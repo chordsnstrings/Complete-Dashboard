@@ -998,3 +998,41 @@ driver's 222 tracker fixes.
   expired — long after the deploy "succeeded". The migration ends with
   `DELETE FROM place_cell`, because `refreshPlaceCells()` always rebuilds an
   empty table whatever its age.
+* **A window bound widened to 23:59:59.999 is not a whole day, and rounding it
+  makes one.** `win()` in `api/driver_routes.js` widens the upper bound so a
+  timestamp comparison catches the whole last day. Differencing that against a
+  bare lower bound gives 0.99999 of a day, and
+  `Math.round(diff / 86400000) + 1` — the usual inclusive day count — turned
+  that into TWO days for a one-day window, eight for a week, thirty-one for a
+  month. It was invisible while the value was only passed to `coverage()`,
+  where it is merely the fallback base for a channel with payouts and no
+  bookings; it became obvious the moment the figure was returned to the client.
+  Truncate both bounds to their date before differencing. Returning an internal
+  figure to the page is a cheap way to find out whether it was ever right.
+* **`accounted_fares` being null does not mean there are no fares.**
+  `fleetIncome` picks ONE basis per channel so a fare and the payout that fare
+  became are never summed, so `accounted_fares` is null whenever every channel
+  in the window was counted on its payout — while `revenue` in the same
+  response holds what the trip feed priced. The Fares tile read the null as
+  "there are none" and printed a sentence saying so: measured on production
+  2026-09-06, 70 of the 87 drivers who worked that day were shown "no trip
+  carries a fare and no statement reports one" over AED 24,731.32 of fares on
+  415 priced bookings. Suppressing a figure and denying it exists are different
+  things.
+* **`driver_payout_day.earnings` is a period divided by its days**
+  (`sql/schema_v23.sql:61`), exactly like the `hours_online` column this
+  codebase already refuses to sum. Over a window containing whole periods it is
+  exact — the seven days of a week sum to the week to within two fils — but a
+  window narrower than a period holds a SHARE, spread evenly across days nobody
+  worked evenly, and a tile calling that "paid out" is naming a payment that
+  never happened on that day. `/api/driver/kpis` returns `payout_period_days`,
+  `payout_periods` and `window_days` so the caption can tell the two apart.
+* **`String(v).slice(0, 10)` on a pg DATE gives "Tue Oct 0".** node-postgres
+  hands a DATE back as a JS Date, and `String(new Date())` is
+  `"Tue Oct 01 2026 00:00:00 GMT+0400"` — so the usual ISO-day slice silently
+  produces a weekday. `test/driver_day_keys.test.mjs` bans the shape in
+  `api/driver_routes.js` outright and caught the window-length fix above on its
+  first full run, even though both of that fix's inputs are query-string text
+  today and it would have worked. Use `isoDay()` from `src/sources/ledger.js`,
+  which takes a string or a Date. A guard that holds only while nobody changes
+  where a value comes from is not a guard.

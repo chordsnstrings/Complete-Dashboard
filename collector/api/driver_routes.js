@@ -1389,7 +1389,31 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       booking_days: f.booking_days });
     for (const y of payByPlat) Object.assign(plat(y.platform), {
       payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
-    const windowDays = Math.round((Date.parse(p[1]) - Date.parse(p[0])) / 86400000) + 1;
+    /* DAYS IN THE WINDOW, counted on the days and not on the timestamps.
+       ─────────────────────────────────────────────────────────────────────
+       win() widens the upper bound to 23:59:59.999 (see DAYWIN above), so the
+       difference between the two bounds is 0.99999 of a day for a single-day
+       window, not 0. Rounding that to 1 and adding the inclusive +1 gave TWO
+       days for one day, eight for a week, thirty-one for a month — every
+       window one day too long.
+
+       Surfaced by returning the figure: /api/driver/kpis?from=2026-09-06&
+       to=2026-09-06 answered window_days 2. It had been feeding coverage()
+       silently since it was written, where it is the base a payout's coverage
+       is divided by whenever a channel has payouts and no bookings in the
+       window (api/income_sql.js:163) — so exactly those channels reported a
+       coverage percentage lower than the truth.
+
+       Both bounds truncated to their date first, which is the grain every
+       predicate in this file already compares on — through isoDay(), not
+       String(v).slice(0, 10). test/driver_day_keys.test.mjs bans that shape in
+       this module and caught this on the first run: a pg DATE through String()
+       is "Tue Oct 01 2026 …", so slicing it yields "Tue Oct 0". These two
+       bounds are query-string text today and the slice would have worked, but
+       a guard that only holds while nobody changes where the value comes from
+       is not a guard. isoDay() takes both shapes. */
+    const windowDays = Math.round(
+      (Date.parse(`${isoDay(p[1])}T00:00:00Z`) - Date.parse(`${isoDay(p[0])}T00:00:00Z`)) / 86400000) + 1;
 
     /* What the platforms say about the PERSON, not about the window.
        ─────────────────────────────────────────────────────────────────────

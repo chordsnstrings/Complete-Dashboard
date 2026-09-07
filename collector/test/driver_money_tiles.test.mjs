@@ -121,6 +121,36 @@ console.log('\nDistance: the caption names the denominator it used');
     'the driver profile and the vehicle profile');
 }
 
+console.log('\nthe window is as long as the window');
+{
+  const routes = readFileSync('api/driver_routes.js', 'utf8');
+  /* win() widens the upper bound to 23:59:59.999, so differencing the two
+     bounds and adding the inclusive +1 counted every window one day too long.
+     Returning window_days is what made it visible: a single-day request
+     answered 2. It had been the base coverage() divides a payout by whenever a
+     channel has payouts and no bookings, so those channels under-reported. */
+  check('both bounds are truncated to their date before being differenced',
+    /isoDay\(p\[1\]\)/.test(routes) && /isoDay\(p\[0\]\)/.test(routes),
+    'differencing a widened 23:59:59.999 bound against a bare date is 0.99999 of a day');
+  /* Through isoDay, not String().slice(0, 10) — test/driver_day_keys.test.mjs
+     bans that shape in this module because a pg DATE through String() reads
+     "Tue Oct 01 2026 …", and it caught this fix on its first full run. */
+  check('…through isoDay, which handles a Date as well as a string',
+    !/const dayOf = \(v\) => String\(v\)\.slice/.test(routes));
+  check('…and the off-by-one is written down where it was made',
+    /every\s+window one day too long/.test(routes));
+
+  /* The arithmetic itself, so a future edit cannot quietly reintroduce it. */
+  const { isoDay } = await import('../src/sources/ledger.js');
+  const days = (a, b) => Math.round(
+    (Date.parse(`${isoDay(b)}T00:00:00Z`) - Date.parse(`${isoDay(a)}T00:00:00Z`)) / 86400000) + 1;
+  check('one day is one day', days('2026-09-06', '2026-09-06 23:59:59.999') === 1,
+    String(days('2026-09-06', '2026-09-06 23:59:59.999')));
+  check('a week is seven', days('2026-09-01', '2026-09-07 23:59:59.999') === 7);
+  check('and a month is thirty-one, not thirty-two',
+    days('2026-08-08', '2026-09-07 23:59:59.999') === 31);
+}
+
 console.log('\nthe server returns the grain, so the tile is not guessing');
 {
   const routes = readFileSync('api/driver_routes.js', 'utf8');
