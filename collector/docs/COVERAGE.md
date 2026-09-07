@@ -521,6 +521,39 @@ record that has never filed a trip — 56 of the register's 130 alias ids are
 Bolt standings and hotel ObjectIds carrying a phone and no work — which is
 precisely why no name fold could ever have reached them.
 
+### Promoting a link — 2026-09-07
+
+`bin/promote-links.mjs` now does the whole transcription:
+
+    node bin/promote-links.mjs            # print the entries, change nothing
+    node bin/promote-links.mjs --count    # how many are waiting
+    node bin/promote-links.mjs --write    # append them and regenerate the SQL
+
+`--write` appends to `FROM_ROSTER` and runs `bin/gen-schema-v53.mjs`. The
+register's guard runs at IMPORT, so a batch that would merge a refused pair,
+move a key or map one record onto two people throws there and the schema is
+never regenerated. **Read the printed entries first** — the tool does the
+typing, not the deciding.
+
+Three rules it exists to get right, all of which were got wrong by hand first:
+
+* **The survivor is the register's, not the rule's.** `identity_link.js` picks
+  the fuller name, which is right when neither record is known and wrong the
+  moment one of them is an entry — the rule proposed "Raja Khalil Ahmed Raja
+  Nouman Khalil" as the survivor of a man the register files as "Raja Nouman
+  Ahmed", which would have moved a key every stored row carries.
+* **A pair somebody has ruled on is not re-raised.** `identity_link.js`
+  honoured `REFUSED` and not `PENDING` — and PENDING is not "nobody has looked
+  yet", it is *verified and deliberately not applied* over a simultaneous trip
+  in two cars. Two of the five share a phone, so the rule proposed one of them
+  (Tariq Afzal) the day the Yango roster landed. Fixed at the rule, with the
+  tool as a second net.
+* **It refuses to write rather than guess.** If it cannot find the end of
+  `FROM_ROSTER` exactly, it exits non-zero and writes nothing.
+
+The register went **93 entries over 90 people → 130 over 124** on 2026-09-07,
+which is the 37 the Yango roster's phone numbers made reachable.
+
 **A promotion is one-way from the links page.** Rejecting a promoted link
 takes it off `#identity` and leaves the two records folded, because the fold
 now lives in the stored column. Undoing one means editing

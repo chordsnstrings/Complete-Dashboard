@@ -87,9 +87,15 @@ const OLD_ID = /^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{
 check('…and not one of them is a shape the register used to accept',
   numeral.every((i) => !OLD_ID.test(i)));
 check('the module imports anyway — the guard runs at import, so this is the assertion',
-  MERGES.length === 93 && PENDING.length === 5, `${MERGES.length} applied, ${PENDING.length} pending`);
-check('and the three sweeps are all still in it, each at the size it came in at',
-  HAND.length === 3 && SWEPT.length === 50 && PHONE.length === 45,
+  MERGES.length === 130 && PENDING.length === 5, `${MERGES.length} applied, ${PENDING.length} pending`);
+/* The phone sweep is the one that grows: it re-runs on every roster pull, and
+   the roster grows when a channel starts filing compliance rows. It went 45 to
+   82 on 2026-09-07, when the Yango collector moved to fleet-api.yango.tech and
+   gave 145 drivers a phone number for the first time. The other two are closed
+   sets — a hand check and a one-off custody sweep — so a change in either is a
+   change nobody scheduled. */
+check('and the three sweeps are all still in it, at the sizes they came in at',
+  HAND.length === 3 && SWEPT.length === 50 && PHONE.length === 82,
   `${HAND.length} hand / ${SWEPT.length} swept / ${PHONE.length} phone`);
 check('every id on either list is one of the four shapes production issues',
   ALL.every((m) => [m.keep.id, ...ids(m)].every(
@@ -178,7 +184,7 @@ check('…and none of them claims a custody measurement it never made',
   const REACHES = (m) => foldName(m.keep.name) === foldName(m.merge.name);
   const folds = PHONE.filter(REACHES);
   check('a pair whose names already fold says so rather than claiming the phone was needed',
-    folds.length === 12 && folds.every((m) => m.evidence.includes('already fold together')),
+    folds.length === 16 && folds.every((m) => m.evidence.includes('already fold together')),
     `${folds.length} such pairs: ${folds.map((m) => m.key).slice(0, 3).join(', ')}`);
   check('…and a pair whose names do not fold says that instead',
     PHONE.filter((m) => !REACHES(m)).every((m) => m.evidence.includes('do not fold together')
@@ -233,8 +239,8 @@ check('…and an entry that would join a refused pair does not load',
    are on the list twice, found by two sweeps independently — but they must
    name the same surviving record, or the key has quietly merged two men whose
    folded names happen to match. */
-check('a key may carry two entries, and three of them do',
-  new Set(MERGES.map((m) => m.key)).size === 90,
+check('a key may carry more than one entry, and six of them do',
+  new Set(MERGES.map((m) => m.key)).size === 124,
   `${new Set(MERGES.map((m) => m.key)).size} keys over ${MERGES.length} entries`);
 check('…but two entries claiming one key for two different survivors do not load',
   (await loadsWith("  {\n    key: 'abidullah safi',\n    keep:  { id: 'dae09063-88a3-432e-b39f-969d8de7992b'",
@@ -287,9 +293,14 @@ console.log('\nnothing is applied that the database has not been told about');
    entries carrying a hundred and thirty aliases — the SQL would have been
    right and the assertion would have been measuring nothing. */
 const WHENS = (identityCase('driver_ext_id', 'x').match(/WHEN /g) || []).length;
+/* Derived on both sides. The literal was 130 and the register reached 167 the
+   next time it grew — a number pinned in two places goes stale in one of them,
+   which is the whole reason this counts ALIAS IDS and not entries. The floor is
+   the real claim: the SQL carries more WHENs than there are entries, because an
+   alias is often two provider records. */
 check('identityCase emits one WHEN per alias id the register applies',
-  WHENS === MERGES.flatMap(ids).length && WHENS === 130,
-  `${WHENS} WHENs against ${MERGES.flatMap(ids).length} alias ids`);
+  WHENS === MERGES.flatMap(ids).length && WHENS > MERGES.length,
+  `${WHENS} WHENs against ${MERGES.flatMap(ids).length} alias ids, ${MERGES.length} entries`);
 check('…and not one WHEN for anything held back',
   [...PENDING_ALIAS_KEY.keys()].every((i) => !identityCase('driver_ext_id', 'x').includes(`'${i}'`)),
   'a pending entry in the SQL would count 123 people on one page and 173 on another');
@@ -299,6 +310,41 @@ check('sql/schema_v53.sql is still byte-for-byte what the generator emits',
   readFileSync(new URL('../sql/schema_v53.sql', import.meta.url), 'utf8') === render());
 check('no pending id is resolved by anything a route calls',
   [...PENDING_ALIAS_KEY.keys()].every((i) => !ALIAS_KEY.has(i)));
+
+/* ══ 7. the tool that does the typing ═════════════════════════════════
+   ─────────────────────────────────────────────────────────────────────────
+   Promotion is a person's decision and stays one. The TYPING was never a
+   decision and was manual anyway: reading rows off a page, working out which
+   the register already holds, writing them in its shape without a typo, and
+   remembering that some attach to an existing entry rather than opening a new
+   one. bin/promote-links.mjs does that, and these are the three rules it must
+   not get wrong — asserted over the source because the tool needs a database
+   and this file deliberately needs none. */
+console.log('\nthe promotion tool does the typing and not the deciding');
+{
+  const tool = readFileSync(new URL('../bin/promote-links.mjs', import.meta.url), 'utf8');
+  /* 1. The survivor is the REGISTER'S, not the rule's. src/identity_link.js
+     picks the fuller name, which is right when neither record is known and
+     wrong the moment one of them is an entry: taking the rule's survivor would
+     move a key that every stored row already carries. */
+  check('it keeps the register\'s surviving record when one side is already held',
+    /const known = a \|\| c;/.test(tool) && /keep: \{ id: known\.keep\.id/.test(tool),
+    'the rule prefers the fuller name; the register prefers the key that already exists');
+  /* 2. It must not re-propose what somebody has ruled on — both verdicts. */
+  check('it skips pairs held back in PENDING as well as refused ones',
+    /heldBack\.has\(/.test(tool) && /refused\.has\(/.test(tool));
+  /* 3. It must not write anything it cannot place exactly. A tool that edits
+     the wrong half of the register is worse than one that does nothing. */
+  check('it refuses to write rather than guess where the list ends',
+    /could not find the end of FROM_ROSTER/.test(tool) && /process\.exit\(1\)/.test(tool));
+  check('…and regenerates the SQL after it writes, so the two cannot drift',
+    /gen-schema-v53\.mjs/.test(tool));
+  /* And the guard is what stops a bad batch: it runs at IMPORT, so a --write
+     that would merge a refused pair or move a key throws before the schema is
+     regenerated. This file's own loadsWith checks above are that guard. */
+  check('the register it writes into guards itself at import',
+    /assertRegister\(\);/.test(SRC));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

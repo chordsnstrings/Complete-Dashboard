@@ -1,4 +1,4 @@
--- ── 93 people who were on the roster more than once, folded onto one key each ──
+-- ── 130 people who were on the roster more than once, folded onto one key each ──
 -- ---------------------------------------------------------------------------
 -- person_key is what every surface in this product groups people by, and it
 -- was the folded NAME and nothing else: lowercase, collapse runs of
@@ -316,6 +316,117 @@
 -- a83f63fc-88bb-4bbd-9ee3-55d5aeb00e8c (uber "Zubair Khan Ali")
 --   -> 67483c64055e070d791000e4 (hotel "ZUBAIR KHAN SHAUKAT ALI") = 'zubair khan shaukat ali'
 --   verified 2026-09-07 on a shared phone
+-- 1d910e38d0a5451ea5b4c45df2706c5e (yango "AAMIR KHAN")
+--   -> efa5df29-c8ac-47d7-9ce2-be046f5d3a0f (uber "Aamir Khan Amin") = 'aamir khan amin'
+--   verified 2026-09-07 on a shared phone
+-- 48de0d9f0a7c493f83724bae1f8dd257 (yango "Abdul Basit Aman")
+--   -> 6d609028-a86c-4cee-92ef-7bae26e0cca8 (uber "Abdul Basit Aman") = 'abdul basit aman'
+--   verified 2026-09-07 on a shared phone
+-- 1427dd41041346988c05065cee86c47f (yango "ABDUL HANNAN")
+--   -> 67483c64055e070d79100105 (hotel "ABDUL HANNAN MOMIN HUMAYOUN HABIB MOMIN") = 'abdul hannan momin humayoun habib momin'
+--   verified 2026-09-07 on a shared phone
+-- d5eb68b8397a449d82003ddf3faa52fa (yango "ABDULLAH AHMAD")
+--   -> 67483c64055e070d7910010e (hotel "ABDULLAH AHMAD AHMAD ULLAH KHAN") = 'abdullah ahmad ullah khan'
+--   verified 2026-09-07 on a shared phone
+-- d6d4e1cb-296f-4ef5-8270-3653ef546a02 (uber "Abubakar Saddique Shah")
+--   -> 5779be46aefa4bacaa413aa861219444 (yango "Abu Bakar Saddique Kamil Shah") = 'abu bakar saddique kamil shah'
+--   verified 2026-09-07 on a shared phone
+-- d694b0919c1d4b639642771c0119509e (yango "ALI REHMAN")
+--   -> ae28ff72-760c-4259-815a-6c9fef953d46 (uber "Ali Rahman Karim") = 'ali rahman karim'
+--   verified 2026-09-07 on a shared phone
+-- d9b2de76-b535-4b23-a714-7e31724e50d2 (uber "Muhammad Naeem Khan")
+--   -> 1ffc17512bae40d2a6899f35aad12789 (yango "Amir Muhammad Khan Muhammad Naeem Khan") = 'amir muhammad khan muhammad naeem khan'
+--   verified 2026-09-07 on a shared phone
+-- c7a289421a5848ee9bfacf71b133fc24 (yango "AMSHID KHAN")
+--   -> e6fd4328-b270-4e7e-bff8-2c6e0f290a28 (uber "Amshid Khan Khan") = 'amshid khan'
+--   verified 2026-09-07 on a shared phone
+-- ca4b038d57a146698bca6c1b1e0a999a (yango "Arbab Hassan Rab Nawaz")
+--   -> 68766dbe03051f14d95a8210 (hotel "Arbab Hassan Rab Nawaz") = 'arbab hassan rab nawaz'
+--   verified 2026-09-07 on a shared phone
+-- 6d1b7b15e277440cafcaf9a8e8983f8d (yango "ATIF SHABIR")
+--   -> 67483c64055e070d791000fe (hotel "ATIF SHABIR MUHAMMAD SHABIR") = 'atif shabir muhammad shabir'
+--   verified 2026-09-07 on a shared phone
+-- ed0cc768ec3d46f4b8932dfbf24f12f3 (yango "BILAL AHMAD")
+--   -> 67483c64055e070d79100106 (hotel "BILAL AHMAD HAJI REHMAN") = 'bilal ahmad haji rehman'
+--   verified 2026-09-07 on a shared phone
+-- 3c0d36fd2caf48fbb45a10e8cf9aab1d (yango "DANISH REHMAN")
+--   -> 67483c64055e070d79100111 (hotel "DANISH REHMAN HAJI REHMAN") = 'danish rehman haji rehman'
+--   verified 2026-09-07 on a shared phone
+-- 449077790a0e4ac5a64585d4eb68eda1 (yango "DURGA PRASAD")
+--   -> 67483c64055e070d791000cb (hotel "DURGA PRASAD BASYAL") = 'durga prasad basyal'
+--   verified 2026-09-07 on a shared phone
+-- 2948d032d7df4ad4827f611d296430c8 (yango "HAMZA KHAN")
+--   -> 12293989-e71b-4ff1-9e99-85274479fab1 (uber "Hamza Khan Khan") = 'hamza khan'
+--   verified 2026-09-07 on a shared phone
+-- d22a7087f9ac42119cbe936749cd0bf1 (yango "Ifraz Ghulam Ahmed Ahmed")
+--   -> 68766c6303051f14d95a81ed (hotel "Ifraz Ahmed Ghulam Ahmed") = 'ifraz ahmed ghulam ahmed'
+--   verified 2026-09-07 on a shared phone
+-- fa7219517bf24cefb719ec1b28e9a913 (yango "MAHAZ AHMAD")
+--   -> f1bbe420-bd7f-43e0-b8d4-8ecd5e8f4719 (uber "Mahaz Ahmad Darwaish Khan") = 'mahaz ahmad darwaish khan'
+--   verified 2026-09-07 on a shared phone
+-- 735cc1574bfd46de8cfa7ed449d371f8 (yango "Matiullah Khan Sharif Khan")
+--   -> 67483c64055e070d791000f7 (hotel "MATI ULLAH SHARIF KHAN") = 'mati ullah sharif khan'
+--   verified 2026-09-07 on a shared phone
+-- 9d77089bcf574517850372f447977d30 (yango "MIRZA ABDULLAH")
+--   -> 67483c64055e070d7910010d (hotel "MIRZA ABDULLAH BAIG MIRZA ZAHID BAIG") = 'mirza abdullah baig mirza zahid baig'
+--   verified 2026-09-07 on a shared phone
+-- 4688f7772f494801902447e10c6df649 (yango "MOHAMMAD MOKDASSEL")
+--   -> 67483c64055e070d79100125 (hotel "MOHAMMAD MOKDASSEL MD OBAIDULLAH") = 'mohammad mokdassel md obaidullah'
+--   verified 2026-09-07 on a shared phone
+-- ffe3cfced8554932a6faf50538e944bf (yango "MUHAMMAD MASOOD")
+--   -> 67483c64055e070d791000d7 (hotel "MUHAMMAD MASOOD KISHBAR KHAN") = 'muhammad masood kishbar khan'
+--   verified 2026-09-07 on a shared phone
+-- e3cd308b2b5f48e19877b924b48bbb9d (yango "MUHAMMAD NADEEM")
+--   -> 1936ced0-ccd5-4db0-b07f-ab084cee7bd9 (uber "Muhammad Nadeem Ajmal") = 'muhammad nadeem ajmal'
+--   verified 2026-09-07 on a shared phone
+-- 97d930a906e74d5d8d6fc25d75c2a128 (yango "MUHAMMAD RAHIM")
+--   -> 67483c64055e070d79100103 (hotel "MUHAMMAD RAHIM MUHAMMAD SALEEM") = 'muhammad rahim muhammad saleem'
+--   verified 2026-09-07 on a shared phone
+-- 983dc9bfe04d4bd48729325ddaa42c0d (yango "Muhammad Shafiq")
+--   -> 011fdd5b-54af-453e-aa17-b6f86c5fe11f (uber "Muhammad Shafiq Raziq") = 'muhammad shafiq raziq'
+--   verified 2026-09-07 on a shared phone
+-- 6589d771-fe78-4c9a-bc9d-686c39a91e4c (uber "Muhammad Zeeshan Shahid")
+--   -> 4d57e153e6ff455782e4954a7862099a (yango "Muhammad Zeeshan Muhammad Shahid") = 'muhammad zeeshan muhammad shahid'
+--   verified 2026-09-07 on a shared phone
+-- cfad6f03a439432e8fa6f9c8fe89edcb (yango "Raja Khalil Ahmed Raja Nouman Khalil")
+--   -> 37723dc3-b5f7-49ce-9c80-495bf5a2b49b (uber "Raja Nouman Ahmed") = 'raja nouman ahmed'
+--   verified 2026-09-07 on a shared phone
+-- 3629dde64f684e2abdcc0aeb1487632a (yango "RAKIBUL ALAM RAIHAN")
+--   -> 67483c64055e070d791000cc (hotel "RAKIBUL ALAM RAIHAN MD SHOFIQUL ALAM") = 'rakibul alam raihan md shofiqul alam'
+--   verified 2026-09-07 on a shared phone
+-- ebe0dcf0-c554-4320-9f36-e61c17713d8d (uber "Rashid Ali Hussain")
+--   -> 43183d548e3e487b9a5227705ace4719 (yango "Rashid Ali Haji Hussain") = 'rashid ali haji hussain'
+--   verified 2026-09-07 on a shared phone
+-- 67352587e6664d86b723b25eb7dbd89e (yango "RIZWAN ULLAH")
+--   -> 67483c64055e070d79100118 (hotel "Rizwan Ullah Muzamil Khan") = 'rizwan ullah muzamil khan'
+--   verified 2026-09-07 on a shared phone
+-- ba329c7a6ac34245acf074c3250bc555 (yango "ROY VELLESPEN")
+--   -> 3d3e3fa2-2e8c-43a9-8bf0-6b12dc3e26fe (uber "Roy Vellespen Ocdol") = 'roy vellespen ocdol'
+--   verified 2026-09-07 on a shared phone
+-- 13f61bb13eae43c3b0cf5d4af1c736d8 (yango "Sajid Ayaz")
+--   -> 67483c64055e070d79100113 (hotel "SAJID AYAZ AYAZ AHMED") = 'sajid ayaz ahmed'
+--   verified 2026-09-07 on a shared phone
+-- 36b941b820be498c907628b253adb32b (yango "SAMEH TALAAT")
+--   -> 67483c64055e070d7910010f (hotel "SAMEH TALAAT ABDELMAKSOUD ABDELSAMIE") = 'sameh talaat abdelmaksoud abdelsamie'
+--   verified 2026-09-07 on a shared phone
+-- f7d8a0ff324641b1bc96c649290da826 (yango "Sikandar Tariq")
+--   -> 39042c26-8985-4f99-af1c-a990a63834e6 (uber "Sikandar Tariq Hussain") = 'sikandar tariq hussain'
+--   verified 2026-09-07 on a shared phone
+-- cf3a1777da6f49bb814d7cd3ec8f92fd (yango "SUMON AHMED")
+--   -> 67483c64055e070d791000c8 (hotel "SUMON AHMED KHAN NIZAM UDDIN KHAN") = 'sumon ahmed khan nizam uddin khan'
+--   verified 2026-09-07 on a shared phone
+-- cac5cfedf0df4f90a0086cefc297d535 (yango "UMAR KAYANI")
+--   -> 67483c64055e070d791000da (hotel "UMAR KAYANI NASIR WAHEED KAYANI") = 'umar kayani nasir waheed kayani'
+--   verified 2026-09-07 on a shared phone
+-- 563467d09d3d4f629b8b65e9c67d591f (yango "Umer Naveed")
+--   -> 67483c64055e070d791000db (hotel "UMER NAVEED ABDUL QADIR") = 'umer naveed abdul qadir'
+--   verified 2026-09-07 on a shared phone
+-- 5d42345bcf4440df93645a54aedb9bc6 (yango "WAJID AKBAR")
+--   -> 00dc098e-2f65-4b6b-9fbd-47305cdb18e0 (uber "Wajid Akbar Khan") = 'wajid akbar khan'
+--   verified 2026-09-07 on a shared phone
+-- b14f2b04795c411b8c01b2edc2a37774 (yango "ZAIN ALI GHULAM")
+--   -> 67483c64055e070d79100120 (hotel "ZAIN ALI GHULAM HASSNAIN") = 'zain ali ghulam hassnain'
+--   verified 2026-09-07 on a shared phone
 --
 -- The canonical key of each pair is the folded name of the SURVIVING record,
 -- unchanged. No key in this database moves except the alias record's, which
@@ -466,6 +577,43 @@ DECLARE
          WHEN '362aca28-e48d-4c09-bce2-f5fe23266723' THEN 'zain ul abideen muhammad irfan'
          WHEN '4ce6eea7-ea84-49d9-b6c5-14f67d3f5cc3' THEN 'zia ali said muhammad'
          WHEN 'a83f63fc-88bb-4bbd-9ee3-55d5aeb00e8c' THEN 'zubair khan shaukat ali'
+         WHEN '1d910e38d0a5451ea5b4c45df2706c5e' THEN 'aamir khan amin'
+         WHEN '48de0d9f0a7c493f83724bae1f8dd257' THEN 'abdul basit aman'
+         WHEN '1427dd41041346988c05065cee86c47f' THEN 'abdul hannan momin humayoun habib momin'
+         WHEN 'd5eb68b8397a449d82003ddf3faa52fa' THEN 'abdullah ahmad ullah khan'
+         WHEN 'd6d4e1cb-296f-4ef5-8270-3653ef546a02' THEN 'abu bakar saddique kamil shah'
+         WHEN 'd694b0919c1d4b639642771c0119509e' THEN 'ali rahman karim'
+         WHEN 'd9b2de76-b535-4b23-a714-7e31724e50d2' THEN 'amir muhammad khan muhammad naeem khan'
+         WHEN 'c7a289421a5848ee9bfacf71b133fc24' THEN 'amshid khan'
+         WHEN 'ca4b038d57a146698bca6c1b1e0a999a' THEN 'arbab hassan rab nawaz'
+         WHEN '6d1b7b15e277440cafcaf9a8e8983f8d' THEN 'atif shabir muhammad shabir'
+         WHEN 'ed0cc768ec3d46f4b8932dfbf24f12f3' THEN 'bilal ahmad haji rehman'
+         WHEN '3c0d36fd2caf48fbb45a10e8cf9aab1d' THEN 'danish rehman haji rehman'
+         WHEN '449077790a0e4ac5a64585d4eb68eda1' THEN 'durga prasad basyal'
+         WHEN '2948d032d7df4ad4827f611d296430c8' THEN 'hamza khan'
+         WHEN 'd22a7087f9ac42119cbe936749cd0bf1' THEN 'ifraz ahmed ghulam ahmed'
+         WHEN 'fa7219517bf24cefb719ec1b28e9a913' THEN 'mahaz ahmad darwaish khan'
+         WHEN '735cc1574bfd46de8cfa7ed449d371f8' THEN 'mati ullah sharif khan'
+         WHEN '9d77089bcf574517850372f447977d30' THEN 'mirza abdullah baig mirza zahid baig'
+         WHEN '4688f7772f494801902447e10c6df649' THEN 'mohammad mokdassel md obaidullah'
+         WHEN 'ffe3cfced8554932a6faf50538e944bf' THEN 'muhammad masood kishbar khan'
+         WHEN 'e3cd308b2b5f48e19877b924b48bbb9d' THEN 'muhammad nadeem ajmal'
+         WHEN '97d930a906e74d5d8d6fc25d75c2a128' THEN 'muhammad rahim muhammad saleem'
+         WHEN '983dc9bfe04d4bd48729325ddaa42c0d' THEN 'muhammad shafiq raziq'
+         WHEN '6589d771-fe78-4c9a-bc9d-686c39a91e4c' THEN 'muhammad zeeshan muhammad shahid'
+         WHEN 'cfad6f03a439432e8fa6f9c8fe89edcb' THEN 'raja nouman ahmed'
+         WHEN '3629dde64f684e2abdcc0aeb1487632a' THEN 'rakibul alam raihan md shofiqul alam'
+         WHEN 'ebe0dcf0-c554-4320-9f36-e61c17713d8d' THEN 'rashid ali haji hussain'
+         WHEN '67352587e6664d86b723b25eb7dbd89e' THEN 'rizwan ullah muzamil khan'
+         WHEN 'ba329c7a6ac34245acf074c3250bc555' THEN 'roy vellespen ocdol'
+         WHEN '13f61bb13eae43c3b0cf5d4af1c736d8' THEN 'sajid ayaz ahmed'
+         WHEN '36b941b820be498c907628b253adb32b' THEN 'sameh talaat abdelmaksoud abdelsamie'
+         WHEN 'f7d8a0ff324641b1bc96c649290da826' THEN 'sikandar tariq hussain'
+         WHEN 'cf3a1777da6f49bb814d7cd3ec8f92fd' THEN 'sumon ahmed khan nizam uddin khan'
+         WHEN 'cac5cfedf0df4f90a0086cefc297d535' THEN 'umar kayani nasir waheed kayani'
+         WHEN '563467d09d3d4f629b8b65e9c67d591f' THEN 'umer naveed abdul qadir'
+         WHEN '5d42345bcf4440df93645a54aedb9bc6' THEN 'wajid akbar khan'
+         WHEN 'b14f2b04795c411b8c01b2edc2a37774' THEN 'zain ali ghulam hassnain'
          ELSE regexp_replace(
              btrim(regexp_replace(lower(%I), '\s+', ' ', 'g')),
              '(\m\w+)( \1)+', '\1', 'g') END$tpl$;
@@ -487,11 +635,11 @@ BEGIN
        WHERE c.table_schema = current_schema()
          AND c.table_name   = t.tbl
          AND c.column_name  = 'person_key'
-         AND c.generation_expression LIKE '%a83f63fc-88bb-4bbd-9ee3-55d5aeb00e8c%'
+         AND c.generation_expression LIKE '%b14f2b04795c411b8c01b2edc2a37774%'
          -- …and carries as many merges as this register has, so a column built
          -- from a SUPERSET that happens to end on the same pair still rebuilds.
          AND (length(c.generation_expression)
-              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 130);
+              - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = 167);
     EXECUTE format('ALTER TABLE %I DROP COLUMN IF EXISTS person_key', t.tbl);
     EXECUTE format('ALTER TABLE %I ADD COLUMN person_key text GENERATED ALWAYS AS (%s) STORED',
                    t.tbl, format(tpl, t.namecol));

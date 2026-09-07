@@ -173,6 +173,59 @@ check('a confirmation survives it too',
   conf.confirmed_at !== null && conf.confirmed_by === 'ops',
   JSON.stringify(conf));
 
+/* A DECISION SOMEBODY HAS ALREADY MADE IS NOT RE-RAISED.
+   ─────────────────────────────────────────────────────────────────────────
+   REFUSED and PENDING are two different verdicts and both are verdicts. This
+   rule honoured the first and not the second — and PENDING is not "nobody has
+   looked yet", it is VERIFIED AND DELIBERATELY NOT APPLIED: five pairs where
+   both records took a trip at the same time in two different cars, which is
+   the one observation a shared phone cannot explain away.
+
+   Two of those five also share a phone, so the rule proposed them anyway. On
+   2026-09-07, with the Yango roster newly landed, it put Tariq Afzal in front
+   of a reviewer again — a pair api/identity_map.js had already settled, with
+   none of the reasoning that settled it attached. A rule that re-raises a
+   closed decision is a rule nobody trusts the second time. */
+{
+  const { PENDING, REFUSED } = await import('../api/identity_map.js');
+  const idsOf = (m) => (m.merge?.ids || [m.merge?.id]).filter(Boolean);
+  const heldBack = PENDING[0];
+  const [ka, kb] = [heldBack.keep.id, idsOf(heldBack)[0]];
+  const held = linksFrom([
+    { platform: 'uber', driver_ext_id: ka, full_name: heldBack.keep.name, phone: '971500001111' },
+    { platform: 'yango', driver_ext_id: kb, full_name: heldBack.merge.name, phone: '971500001111' },
+  ]);
+  check('a pair held back over a simultaneous trip is not proposed again',
+    held.links.length === 0, JSON.stringify(held.links.map((l) => l.canonical_name)));
+  check('…and the skip says a person already ruled on it',
+    held.skipped.some((sk) => /already looked at this pair/.test(sk.why)),
+    JSON.stringify(held.skipped.map((sk) => sk.why)));
+  /* Every held-back pair, not just the first — and every id on it, because an
+     alias is often two provider records and pairing only the first two would
+     leave the rest reachable. */
+  const missed = [];
+  for (const m of PENDING) {
+    const all = [m.keep.id, ...idsOf(m)];
+    for (const x of all) for (const y of all) {
+      if (x === y) continue;
+      const r = linksFrom([
+        { platform: 'uber', driver_ext_id: x, full_name: `${m.keep.name} A`, phone: '971500002222' },
+        { platform: 'yango', driver_ext_id: y, full_name: `${m.merge.name} B`, phone: '971500002222' },
+      ]);
+      if (r.links.length) missed.push(`${m.key}: ${x} <-> ${y}`);
+    }
+  }
+  check('…for every held-back pair and every id on it', missed.length === 0, missed.join('; '));
+  /* And the refusals still hold, which is the assertion this one was modelled
+     on — a widening that lost the older guard would be a bad trade. */
+  const ref = REFUSED[0];
+  const r2 = linksFrom([
+    { platform: 'uber', driver_ext_id: ref.a.id, full_name: ref.a.name, phone: '971500003333' },
+    { platform: 'hotel', driver_ext_id: ref.b.id, full_name: ref.b.name, phone: '971500003333' },
+  ]);
+  check('a refused pair is still not proposed either', r2.links.length === 0);
+}
+
 /* A LINK THE RULE STOPS MAKING STOPS BEING APPLIED.
    ─────────────────────────────────────────────────────────────────────────
    The guards above fail CLOSED — a number on three records links nobody — and

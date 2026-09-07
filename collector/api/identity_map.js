@@ -1245,6 +1245,254 @@ const FROM_ROSTER = Object.freeze([
     merge: { id: 'a83f63fc-88bb-4bbd-9ee3-55d5aeb00e8c', name: 'Zubair Khan Ali', channel: 'uber' },
     phoneTail: '1373',
   }),
+
+  /* ── the Yango roster's own thirty-seven, added 2026-09-07 ───────────────
+     The same rule and the same evidence as the forty-five above, on a roster
+     that grew. Until this day the Yango collector wrote no compliance row at
+     all — the console path never did — so its 145 drivers carried no phone
+     number and src/identity_link.js could not see one of them. Pointing the
+     collector at fleet-api.yango.tech gave them phones, and the rule found
+     these the same afternoon.
+
+     They are almost all one shape: Yango files a SHORT name where the hotel
+     channel or Uber files the full one — "ABDUL HANNAN" against "ABDUL HANNAN
+     MOMIN HUMAYOU", "MUHAMMAD MASOOD" against "MUHAMMAD MASOOD KISHBAR KHAN".
+     No fold reaches those, which is exactly why the phone is worth having.
+
+     Three of them attach a Yango id to a person the register already holds,
+     and they attach it to the EXISTING keep rather than to the survivor the
+     rule proposed: the rule prefers the fuller name and would have made
+     "Raja Khalil Ahmed Raja Nouman Khalil" the survivor of a man the register
+     already files as "Raja Nouman Ahmed", moving a key that every stored row
+     already carries. No key in this database moves except an alias record's.
+
+     One the rule proposed is NOT here. Tariq Afzal is in PENDING — verified,
+     and deliberately not applied, over a day on which both records took a trip
+     at the same time in two different cars. src/identity_link.js honoured
+     REFUSED and not PENDING, so it re-raised a decision somebody had already
+     made; that is fixed there, and this is the pair that found it. */
+  fromRoster({
+    key: 'aamir khan amin',
+    keep:  { id: 'efa5df29-c8ac-47d7-9ce2-be046f5d3a0f', name: 'Aamir Khan Amin', channel: 'uber' },
+    merge: { id: '1d910e38d0a5451ea5b4c45df2706c5e', name: 'AAMIR KHAN', channel: 'yango' },
+    phoneTail: '1863',
+  }),
+  fromRoster({
+    key: 'abdul basit aman',
+    keep:  { id: '6d609028-a86c-4cee-92ef-7bae26e0cca8', name: 'Abdul Basit Aman', channel: 'uber' },
+    merge: { id: '48de0d9f0a7c493f83724bae1f8dd257', name: 'Abdul Basit Aman', channel: 'yango' },
+    phoneTail: '1068',
+  }),
+  fromRoster({
+    key: 'abdul hannan momin humayoun habib momin',
+    keep:  { id: '67483c64055e070d79100105', name: 'ABDUL HANNAN MOMIN HUMAYOUN HABIB MOMIN', channel: 'hotel' },
+    merge: { id: '1427dd41041346988c05065cee86c47f', name: 'ABDUL HANNAN', channel: 'yango' },
+    phoneTail: '0068',
+  }),
+  fromRoster({
+    key: 'abdullah ahmad ullah khan',
+    keep:  { id: '67483c64055e070d7910010e', name: 'ABDULLAH AHMAD AHMAD ULLAH KHAN', channel: 'hotel' },
+    merge: { id: 'd5eb68b8397a449d82003ddf3faa52fa', name: 'ABDULLAH AHMAD', channel: 'yango' },
+    phoneTail: '2848',
+  }),
+  fromRoster({
+    key: 'abu bakar saddique kamil shah',
+    keep:  { id: '5779be46aefa4bacaa413aa861219444', name: 'Abu Bakar Saddique Kamil Shah', channel: 'yango' },
+    merge: { id: 'd6d4e1cb-296f-4ef5-8270-3653ef546a02', name: 'Abubakar Saddique Shah', channel: 'uber' },
+    phoneTail: '9846',
+  }),
+  fromRoster({
+    key: 'ali rahman karim',
+    keep:  { id: 'ae28ff72-760c-4259-815a-6c9fef953d46', name: 'Ali Rahman Karim', channel: 'uber' },
+    merge: { id: 'd694b0919c1d4b639642771c0119509e', name: 'ALI REHMAN', channel: 'yango' },
+    phoneTail: '5370',
+  }),
+  fromRoster({
+    key: 'amir muhammad khan muhammad naeem khan',
+    keep:  { id: '1ffc17512bae40d2a6899f35aad12789', name: 'Amir Muhammad Khan Muhammad Naeem Khan', channel: 'yango' },
+    merge: { id: 'd9b2de76-b535-4b23-a714-7e31724e50d2', name: 'Muhammad Naeem Khan', channel: 'uber' },
+    phoneTail: '7627',
+  }),
+  fromRoster({
+    key: 'amshid khan',
+    keep:  { id: 'e6fd4328-b270-4e7e-bff8-2c6e0f290a28', name: 'Amshid Khan Khan', channel: 'uber' },
+    merge: { id: 'c7a289421a5848ee9bfacf71b133fc24', name: 'AMSHID KHAN', channel: 'yango' },
+    phoneTail: '3517',
+  }),
+  fromRoster({
+    key: 'arbab hassan rab nawaz',
+    keep:  { id: '68766dbe03051f14d95a8210', name: 'Arbab Hassan Rab Nawaz', channel: 'hotel' },
+    merge: { id: 'ca4b038d57a146698bca6c1b1e0a999a', name: 'Arbab Hassan Rab Nawaz', channel: 'yango' },
+    phoneTail: '3944',
+  }),
+  fromRoster({
+    key: 'atif shabir muhammad shabir',
+    keep:  { id: '67483c64055e070d791000fe', name: 'ATIF SHABIR MUHAMMAD SHABIR', channel: 'hotel' },
+    merge: { id: '6d1b7b15e277440cafcaf9a8e8983f8d', name: 'ATIF SHABIR', channel: 'yango' },
+    phoneTail: '3576',
+  }),
+  fromRoster({
+    key: 'bilal ahmad haji rehman',
+    keep:  { id: '67483c64055e070d79100106', name: 'BILAL AHMAD HAJI REHMAN', channel: 'hotel' },
+    merge: { id: 'ed0cc768ec3d46f4b8932dfbf24f12f3', name: 'BILAL AHMAD', channel: 'yango' },
+    phoneTail: '2832',
+  }),
+  fromRoster({
+    key: 'danish rehman haji rehman',
+    keep:  { id: '67483c64055e070d79100111', name: 'DANISH REHMAN HAJI REHMAN', channel: 'hotel' },
+    merge: { id: '3c0d36fd2caf48fbb45a10e8cf9aab1d', name: 'DANISH REHMAN', channel: 'yango' },
+    phoneTail: '1879',
+  }),
+  fromRoster({
+    key: 'durga prasad basyal',
+    keep:  { id: '67483c64055e070d791000cb', name: 'DURGA PRASAD BASYAL', channel: 'hotel' },
+    merge: { id: '449077790a0e4ac5a64585d4eb68eda1', name: 'DURGA PRASAD', channel: 'yango' },
+    phoneTail: '3586',
+  }),
+  fromRoster({
+    key: 'hamza khan',
+    keep:  { id: '12293989-e71b-4ff1-9e99-85274479fab1', name: 'Hamza Khan Khan', channel: 'uber' },
+    merge: { id: '2948d032d7df4ad4827f611d296430c8', name: 'HAMZA KHAN', channel: 'yango' },
+    phoneTail: '2997',
+  }),
+  fromRoster({
+    key: 'ifraz ahmed ghulam ahmed',
+    keep:  { id: '68766c6303051f14d95a81ed', name: 'Ifraz Ahmed Ghulam Ahmed', channel: 'hotel' },
+    merge: { id: 'd22a7087f9ac42119cbe936749cd0bf1', name: 'Ifraz Ghulam Ahmed Ahmed', channel: 'yango' },
+    phoneTail: '4860',
+  }),
+  fromRoster({
+    key: 'mahaz ahmad darwaish khan',
+    keep:  { id: 'f1bbe420-bd7f-43e0-b8d4-8ecd5e8f4719', name: 'Mahaz Ahmad Darwaish Khan', channel: 'uber' },
+    merge: { id: 'fa7219517bf24cefb719ec1b28e9a913', name: 'MAHAZ AHMAD', channel: 'yango' },
+    phoneTail: '4462',
+  }),
+  fromRoster({
+    key: 'mati ullah sharif khan',
+    keep:  { id: '67483c64055e070d791000f7', name: 'MATI ULLAH SHARIF KHAN', channel: 'hotel' },
+    merge: { id: '735cc1574bfd46de8cfa7ed449d371f8', name: 'Matiullah Khan Sharif Khan', channel: 'yango' },
+    phoneTail: '9350',
+  }),
+  fromRoster({
+    key: 'mirza abdullah baig mirza zahid baig',
+    keep:  { id: '67483c64055e070d7910010d', name: 'MIRZA ABDULLAH BAIG MIRZA ZAHID BAIG', channel: 'hotel' },
+    merge: { id: '9d77089bcf574517850372f447977d30', name: 'MIRZA ABDULLAH', channel: 'yango' },
+    phoneTail: '7710',
+  }),
+  fromRoster({
+    key: 'mohammad mokdassel md obaidullah',
+    keep:  { id: '67483c64055e070d79100125', name: 'MOHAMMAD MOKDASSEL MD OBAIDULLAH', channel: 'hotel' },
+    merge: { id: '4688f7772f494801902447e10c6df649', name: 'MOHAMMAD MOKDASSEL', channel: 'yango' },
+    phoneTail: '1516',
+  }),
+  fromRoster({
+    key: 'muhammad masood kishbar khan',
+    keep:  { id: '67483c64055e070d791000d7', name: 'MUHAMMAD MASOOD KISHBAR KHAN', channel: 'hotel' },
+    merge: { id: 'ffe3cfced8554932a6faf50538e944bf', name: 'MUHAMMAD MASOOD', channel: 'yango' },
+    phoneTail: '0546',
+  }),
+  fromRoster({
+    key: 'muhammad nadeem ajmal',
+    keep:  { id: '1936ced0-ccd5-4db0-b07f-ab084cee7bd9', name: 'Muhammad Nadeem Ajmal', channel: 'uber' },
+    merge: { id: 'e3cd308b2b5f48e19877b924b48bbb9d', name: 'MUHAMMAD NADEEM', channel: 'yango' },
+    phoneTail: '5854',
+  }),
+  fromRoster({
+    key: 'muhammad rahim muhammad saleem',
+    keep:  { id: '67483c64055e070d79100103', name: 'MUHAMMAD RAHIM MUHAMMAD SALEEM', channel: 'hotel' },
+    merge: { id: '97d930a906e74d5d8d6fc25d75c2a128', name: 'MUHAMMAD RAHIM', channel: 'yango' },
+    phoneTail: '0606',
+  }),
+  fromRoster({
+    key: 'muhammad shafiq raziq',
+    keep:  { id: '011fdd5b-54af-453e-aa17-b6f86c5fe11f', name: 'Muhammad Shafiq Raziq', channel: 'uber' },
+    merge: { id: '983dc9bfe04d4bd48729325ddaa42c0d', name: 'Muhammad Shafiq', channel: 'yango' },
+    phoneTail: '0250',
+  }),
+  fromRoster({
+    key: 'muhammad zeeshan muhammad shahid',
+    keep:  { id: '4d57e153e6ff455782e4954a7862099a', name: 'Muhammad Zeeshan Muhammad Shahid', channel: 'yango' },
+    merge: { id: '6589d771-fe78-4c9a-bc9d-686c39a91e4c', name: 'Muhammad Zeeshan Shahid', channel: 'uber' },
+    phoneTail: '0663',
+  }),
+  fromRoster({
+    key: 'raja nouman ahmed',
+    keep:  { id: '37723dc3-b5f7-49ce-9c80-495bf5a2b49b', name: 'Raja Nouman Ahmed', channel: 'uber' },
+    merge: { id: 'cfad6f03a439432e8fa6f9c8fe89edcb', name: 'Raja Khalil Ahmed Raja Nouman Khalil', channel: 'yango' },
+    phoneTail: '9927',
+  }),
+  fromRoster({
+    key: 'rakibul alam raihan md shofiqul alam',
+    keep:  { id: '67483c64055e070d791000cc', name: 'RAKIBUL ALAM RAIHAN MD SHOFIQUL ALAM', channel: 'hotel' },
+    merge: { id: '3629dde64f684e2abdcc0aeb1487632a', name: 'RAKIBUL ALAM RAIHAN', channel: 'yango' },
+    phoneTail: '4130',
+  }),
+  fromRoster({
+    key: 'rashid ali haji hussain',
+    keep:  { id: '43183d548e3e487b9a5227705ace4719', name: 'Rashid Ali Haji Hussain', channel: 'yango' },
+    merge: { id: 'ebe0dcf0-c554-4320-9f36-e61c17713d8d', name: 'Rashid Ali Hussain', channel: 'uber' },
+    phoneTail: '3884',
+  }),
+  fromRoster({
+    key: 'rizwan ullah muzamil khan',
+    keep:  { id: '67483c64055e070d79100118', name: 'Rizwan Ullah Muzamil Khan', channel: 'hotel' },
+    merge: { id: '67352587e6664d86b723b25eb7dbd89e', name: 'RIZWAN ULLAH', channel: 'yango' },
+    phoneTail: '1420',
+  }),
+  fromRoster({
+    key: 'roy vellespen ocdol',
+    keep:  { id: '3d3e3fa2-2e8c-43a9-8bf0-6b12dc3e26fe', name: 'Roy Vellespen Ocdol', channel: 'uber' },
+    merge: { id: 'ba329c7a6ac34245acf074c3250bc555', name: 'ROY VELLESPEN', channel: 'yango' },
+    phoneTail: '6778',
+  }),
+  fromRoster({
+    key: 'sajid ayaz ahmed',
+    keep:  { id: '67483c64055e070d79100113', name: 'SAJID AYAZ AYAZ AHMED', channel: 'hotel' },
+    merge: { id: '13f61bb13eae43c3b0cf5d4af1c736d8', name: 'Sajid Ayaz', channel: 'yango' },
+    phoneTail: '6984',
+  }),
+  fromRoster({
+    key: 'sameh talaat abdelmaksoud abdelsamie',
+    keep:  { id: '67483c64055e070d7910010f', name: 'SAMEH TALAAT ABDELMAKSOUD ABDELSAMIE', channel: 'hotel' },
+    merge: { id: '36b941b820be498c907628b253adb32b', name: 'SAMEH TALAAT', channel: 'yango' },
+    phoneTail: '5429',
+  }),
+  fromRoster({
+    key: 'sikandar tariq hussain',
+    keep:  { id: '39042c26-8985-4f99-af1c-a990a63834e6', name: 'Sikandar Tariq Hussain', channel: 'uber' },
+    merge: { id: 'f7d8a0ff324641b1bc96c649290da826', name: 'Sikandar Tariq', channel: 'yango' },
+    phoneTail: '4977',
+  }),
+  fromRoster({
+    key: 'sumon ahmed khan nizam uddin khan',
+    keep:  { id: '67483c64055e070d791000c8', name: 'SUMON AHMED KHAN NIZAM UDDIN KHAN', channel: 'hotel' },
+    merge: { id: 'cf3a1777da6f49bb814d7cd3ec8f92fd', name: 'SUMON AHMED', channel: 'yango' },
+    phoneTail: '9052',
+  }),
+  fromRoster({
+    key: 'umar kayani nasir waheed kayani',
+    keep:  { id: '67483c64055e070d791000da', name: 'UMAR KAYANI NASIR WAHEED KAYANI', channel: 'hotel' },
+    merge: { id: 'cac5cfedf0df4f90a0086cefc297d535', name: 'UMAR KAYANI', channel: 'yango' },
+    phoneTail: '0278',
+  }),
+  fromRoster({
+    key: 'umer naveed abdul qadir',
+    keep:  { id: '67483c64055e070d791000db', name: 'UMER NAVEED ABDUL QADIR', channel: 'hotel' },
+    merge: { id: '563467d09d3d4f629b8b65e9c67d591f', name: 'Umer Naveed', channel: 'yango' },
+    phoneTail: '4406',
+  }),
+  fromRoster({
+    key: 'wajid akbar khan',
+    keep:  { id: '00dc098e-2f65-4b6b-9fbd-47305cdb18e0', name: 'Wajid Akbar Khan', channel: 'uber' },
+    merge: { id: '5d42345bcf4440df93645a54aedb9bc6', name: 'WAJID AKBAR', channel: 'yango' },
+    phoneTail: '0628',
+  }),
+  fromRoster({
+    key: 'zain ali ghulam hassnain',
+    keep:  { id: '67483c64055e070d79100120', name: 'ZAIN ALI GHULAM HASSNAIN', channel: 'hotel' },
+    merge: { id: 'b14f2b04795c411b8c01b2edc2a37774', name: 'ZAIN ALI GHULAM', channel: 'yango' },
+    phoneTail: '3866',
+  }),
 ]);
 
 /* ── what is applied, and what is held back ───────────────────────────────

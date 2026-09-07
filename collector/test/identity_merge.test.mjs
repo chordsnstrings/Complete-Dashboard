@@ -86,11 +86,15 @@ const ID_SHAPE = /^[0-9]{4,12}$|^[0-9a-f]{24}$|^[0-9a-f]{32}$|^[0-9a-f]{8}-[0-9a
 /* The sizes, pinned. A register that grows is the normal case and these
    numbers are MEANT to be edited when it does — deliberately, by the person
    who grew it, and never silently by the sweep that produced the new rows. */
-const EXPECT = { merges: 93, pending: 5, refused: 3, people: 90, aliasIds: 130 };
+const EXPECT = { merges: 130, pending: 5, refused: 3, people: 124, aliasIds: 167 };
 /* And by the date each sweep ran, so a batch arriving without the evidence
    shape its method produces shows up as a moved number rather than as
    nothing at all. */
-const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 45 };
+/* The phone sweep re-runs on every roster pull, so its count grows whenever a
+   channel starts filing compliance rows: 45 to 82 when the Yango collector
+   moved to fleet-api.yango.tech and gave 145 drivers a phone for the first
+   time. The other two are closed sets. */
+const BY_DATE = { '2026-09-03': 3, '2026-09-05': 45, '2026-09-07': 82 };
 
 /* The control: a production record the register has never been told about.
    Whatever it does to the ninety, this man's key is his own folded name and
@@ -156,14 +160,30 @@ check('…and is what production already stores for that record',
   const keepsOff = MERGES.filter((m) => !fx.has(m.keep.id));
   const aliasIds = MERGES.flatMap(mergeIds);
   const aliasOn = aliasIds.filter((id) => fx.has(id)).length;
-  check('every surviving record but one is a real id on the production trip directory',
-    keepsOff.length === 1 && keepsOff[0].keep.channel === 'hotel',
+  /* Which CHANNELS a record off the fixture belongs to, rather than how many
+     there are. The fixture is a directory snapshot from 2026-09-03 and the
+     register has grown past it twice since; a count would need editing on every
+     growth and would say nothing when it did. What is worth holding is that a
+     record production never saw filing a trip is always from a channel whose
+     ROSTER we read and whose trips we may not — hotel and yango — and never
+     Uber, whose ids reach us because somebody drove. */
+  check('a surviving record off the trip directory is always a roster-only channel',
+    keepsOff.every((m) => ['hotel', 'yango'].includes(m.keep.channel)),
     keepsOff.map((m) => `${m.keep.id} ${m.keep.channel} "${m.keep.name}"`).join(', '));
   check(`…and ${aliasOn} of the ${aliasIds.length} alias ids are, the rest having filed no trip`,
-    aliasOn === 74 && aliasIds.length === EXPECT.aliasIds, `${aliasOn}/${aliasIds.length}`);
-  check('…but every entry has at least one side production has actually seen',
-    MERGES.every((m) => bothSides(m).some((id) => fx.has(id))),
-    MERGES.filter((m) => !bothSides(m).some((id) => fx.has(id))).map((m) => m.key).join(', '));
+    aliasOn < aliasIds.length && aliasIds.length === EXPECT.aliasIds,
+    `${aliasOn}/${aliasIds.length}`);
+  /* A few entries have NEITHER side on the fixture — a hotel roster row paired
+     with a Yango roster row, two channels whose roster we read. That is not a
+     register that has drifted from production; it is one that has reached
+     people the trip table has never named, which is the entire point of
+     joining on a phone number. Held as a shape, not a count: both sides must
+     be roster-only channels, or the pair really is unaccounted for. */
+  const unseen = MERGES.filter((m) => !bothSides(m).some((id) => fx.has(id)));
+  check('an entry production has never seen at all is a roster row on both sides',
+    unseen.every((m) => ['hotel', 'yango'].includes(m.keep.channel)
+      && ['hotel', 'yango'].includes(m.merge.channel)),
+    unseen.map((m) => `${m.keep.channel}/${m.merge.channel} ${m.key}`).join(', '));
 }
 
 check('the refusals are recorded too, with why', REFUSED.length === EXPECT.refused
@@ -328,10 +348,10 @@ if (!same) {
 check(`over all 395 real names it joins EXACTLY the ${wantJoined.length} groups the register names, and no more`,
   same, 'listed above');
 check(`…which is ${wantJoined.length} of the ${EXPECT.people} people on it — the rest have a second record that never filed a trip`,
-  byKey.size === EXPECT.people && wantJoined.length === 72,
+  byKey.size === EXPECT.people && wantJoined.length === 73,
   `${wantJoined.length} of ${byKey.size}`);
-check('the number of distinct people it reports falls by exactly 73: 395 → 322',
-  before.size === 395 && after.size === 322 && before.size - after.size === 73,
+check('the number of distinct people it reports falls by exactly 74: 395 → 321',
+  before.size === 395 && after.size === 321 && before.size - after.size === 74,
   `${before.size} → ${after.size}`);
 
 console.log('\nand what it must never join');
@@ -605,8 +625,8 @@ check('and the directory lists nine people — three fewer, one per verified pai
 {
   const key = (r, reg) => (reg ? ALIAS_KEY.get(r.id) : null) || r.person_key || foldName(r.name);
   const count = (reg) => new Set(FX.rows.map((r) => key(r, reg))).size;
-  check('over the real 395-row roster the directory goes from 395 rows to 322',
-    count(false) === 395 && count(true) === 322, `${count(false)} → ${count(true)}`);
+  check('over the real 395-row roster the directory goes from 395 rows to 321',
+    count(false) === 395 && count(true) === 321, `${count(false)} → ${count(true)}`);
 }
 
 console.log('\nnothing was lost: the surviving row carries both records');

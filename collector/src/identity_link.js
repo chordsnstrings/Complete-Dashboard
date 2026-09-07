@@ -63,7 +63,7 @@
    same full name and the existing fold already joins those two. */
 import { pool } from './db.js';
 import { log } from './log.js';
-import { foldName, REFUSED } from '../api/identity_map.js';
+import { foldName, REFUSED, PENDING } from '../api/identity_map.js';
 
 const SRC = 'identity';
 
@@ -112,8 +112,30 @@ const survivorOf = (a, b) => {
 
 /* Pairs a human has already ruled on. Both directions, because a refusal is
    about two people and not about an ordering. */
-const refusedPairs = new Set(REFUSED.flatMap((r) => [
-  `${r.a.id}|${r.b.id}`, `${r.b.id}|${r.a.id}`]));
+/* Pairs a person has already ruled on, in BOTH directions of the register's
+   vocabulary — and PENDING belongs here as much as REFUSED does.
+   ─────────────────────────────────────────────────────────────────────────
+   This read REFUSED alone. PENDING is not "not looked at yet": it is VERIFIED
+   AND DELIBERATELY NOT APPLIED — five pairs where both records took a trip at
+   the same time in two different cars, which is the one observation a shared
+   phone cannot explain away. api/identity_map.js says so at length and then
+   holds them back on purpose.
+
+   Two of those five also share a phone number, so this rule proposed them
+   anyway — and on 2026-09-07, with the Yango roster newly landed, it proposed
+   exactly one of them: Tariq Afzal, held back for a contradiction on
+   2026-06-10. A rule that re-raises a decision somebody has already made is
+   not a rule anybody can trust the second time, and it puts the pair back in
+   front of a reviewer with none of the reasoning that settled it.
+
+   An alias may carry SEVERAL ids, so every id on a held-back entry is paired
+   with every other, not just the first two. */
+const ruledOn = [
+  ...REFUSED.map((r) => [r.a.id, r.b.id]),
+  ...PENDING.map((m) => [m.keep.id, ...(m.merge?.ids || [m.merge?.id])].filter(Boolean))
+    .flatMap((ids) => ids.flatMap((x) => ids.filter((y) => y !== x).map((y) => [x, y]))),
+];
+const refusedPairs = new Set(ruledOn.flatMap(([x, y]) => [`${x}|${y}`, `${y}|${x}`]));
 
 /* The candidates, from a roster in memory. Pure, so the whole rule can be
    tested without a database — and so the guards can be exercised against
@@ -148,8 +170,9 @@ export function linksFrom(rows) {
       continue;
     }
     if (refusedPairs.has(`${a.driver_ext_id}|${b.driver_ext_id}`)) {
-      skipped.push({ tail, n: 2, why: 'a person has already looked at this pair and '
-        + 'declined to merge it — see api/identity_map.js' });
+      skipped.push({ tail, n: 2, why: 'a person has already looked at this pair and either '
+        + 'declined to merge it or held it back over a simultaneous trip in two cars '
+        + '— see api/identity_map.js' });
       continue;
     }
     const [keep, alias] = survivorOf(a, b);
