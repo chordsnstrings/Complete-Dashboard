@@ -100,11 +100,47 @@ ${registerComment()}
 -- already in place, so a re-run costs one catalogue lookup per table instead of
 -- a rewrite of the trip table.
 
+-- ── the views that depend on the column, and why they are the whole problem ──
+-- Measured on production 2026-09-07, in the collector's own log:
+--
+--   ERROR [db] migration schema_v53.sql failed
+--     {"err":"cannot drop column person_key of table trip because other objects
+--             depend on it"}
+--
+-- sql/schema_v62.sql defines trip_ext as SELECT t.* over trip, so the view
+-- depends on every column of it INCLUDING person_key, and a DROP COLUMN cannot
+-- get past it. On a fresh database this file runs at position 53 and that view
+-- is created at 62, so there is nothing to block it and the whole suite passes.
+-- On a database that already exists — which is the only kind production has —
+-- every view is already there and this file has been failing silently since the
+-- day v62 shipped. The ledger does not record a failed file, so it retried
+-- every boot, failed every boot, and the stored person_key went on carrying
+-- whatever register was current when v62 landed while api/identity_map.js grew
+-- to a hundred and thirty entries in front of it.
+--
+-- Dropping the views here and leaving them to a later file to recreate does NOT
+-- work: the ledger skips a file whose sha it has already seen, so v62 would
+-- never run again and trip_ext would simply be gone. And writing their
+-- definitions out here would be a second copy of a view this codebase has
+-- already been bitten by keeping two copies of.
+--
+-- So the definitions are read out of the catalogue, the views are dropped, the
+-- columns are rebuilt, and the views are recreated from what was read. Nothing
+-- is duplicated and nothing needs to know which views exist — a view added
+-- tomorrow over any of these six columns is handled by the same code.
+
 DO $mig$
 DECLARE
   t   record;
+  v   record;
   tpl text := $tpl$${tpl}$tpl$;
+  need boolean := false;
+  saved text[] := '{}';
+  stmt text;
 BEGIN
+  /* Nothing is dropped unless something actually needs rebuilding. A boot on a
+     database already carrying this register must not drop and recreate eight
+     views for nothing. */
   FOR t IN SELECT * FROM (VALUES
         ('trip',                 'driver_name'),
         ('driver_platform_state','full_name'),
@@ -127,9 +163,74 @@ BEGIN
          -- from a SUPERSET that happens to end on the same pair still rebuilds.
          AND (length(c.generation_expression)
               - length(replace(c.generation_expression, 'WHEN ', ''))) / 5 = ${whens});
+    need := true;
+  END LOOP;
+  IF NOT need THEN RETURN; END IF;
+
+  /* ── read the dependent views out of the catalogue ──────────────────────
+     Every view built on any of these six person_key columns, and every view
+     built on THOSE, since a view over a view blocks the drop just as firmly.
+     The depth column orders them so a view is recreated after whatever it
+     selects from.
+     Capped at ten levels: a cycle is impossible in Postgres's view graph, and
+     a runaway loop inside a migration is worse than a missing view. */
+  FOR v IN
+    WITH RECURSIVE dep AS (
+      SELECT DISTINCT r.ev_class AS oid, 1 AS depth
+        FROM pg_depend d
+        JOIN pg_rewrite r  ON r.oid = d.objid
+        JOIN pg_class  src ON src.oid = d.refobjid
+        JOIN pg_attribute a ON a.attrelid = src.oid AND a.attnum = d.refobjsubid
+       WHERE a.attname = 'person_key'
+         AND src.relname IN ('trip', 'driver_platform_state', 'vehicle_driver_day',
+                             'money_event', 'driver_statement_day', 'driver_payout_day')
+      UNION ALL
+      SELECT r.ev_class, dep.depth + 1
+        FROM dep
+        JOIN pg_depend d  ON d.refobjid = dep.oid
+        JOIN pg_rewrite r ON r.oid = d.objid AND r.ev_class <> dep.oid
+       WHERE dep.depth < 10
+    )
+    SELECT c.relname AS name, max(dep.depth) AS depth,
+           pg_get_viewdef(c.oid) AS def
+      FROM dep JOIN pg_class c ON c.oid = dep.oid
+     WHERE c.relkind = 'v'
+     GROUP BY c.relname, c.oid
+     ORDER BY 2, 1
+  LOOP
+    saved := saved || format('CREATE VIEW %I AS %s', v.name, v.def);
+    RAISE NOTICE 'person_key rebuild: saving view %', v.name;
+  END LOOP;
+
+  /* Dropped deepest-first, though CASCADE would handle the order — every one
+     of them is in the saved array, so nothing CASCADE takes goes unrecreated. */
+  FOR v IN SELECT unnest AS name FROM unnest(ARRAY(
+      SELECT c.relname FROM pg_class c
+       WHERE c.relkind = 'v' AND c.relnamespace = current_schema()::regnamespace
+         AND format('CREATE VIEW %I AS %s', c.relname, pg_get_viewdef(c.oid)) = ANY(saved)))
+  LOOP
+    EXECUTE format('DROP VIEW IF EXISTS %I CASCADE', v.name);
+  END LOOP;
+
+  /* ── the rebuild itself ─────────────────────────────────────────────── */
+  FOR t IN SELECT * FROM (VALUES
+        ('trip',                 'driver_name'),
+        ('driver_platform_state','full_name'),
+        ('vehicle_driver_day',   'driver_name'),
+        ('money_event',          'driver_name'),
+        ('driver_statement_day', 'driver_name'),
+        ('driver_payout_day',    'driver_name')
+      ) v(tbl, namecol)
+  LOOP
+    CONTINUE WHEN to_regclass(t.tbl) IS NULL;
     EXECUTE format('ALTER TABLE %I DROP COLUMN IF EXISTS person_key', t.tbl);
     EXECUTE format('ALTER TABLE %I ADD COLUMN person_key text GENERATED ALWAYS AS (%s) STORED',
                    t.tbl, format(tpl, t.namecol));
+  END LOOP;
+
+  /* ── and put the views back, shallowest first ───────────────────────── */
+  FOREACH stmt IN ARRAY saved LOOP
+    EXECUTE stmt;
   END LOOP;
 END
 $mig$;

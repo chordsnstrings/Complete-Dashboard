@@ -737,6 +737,22 @@ and the number of plates carrying no VIN stated rather than implied.
 
 ## Traps that have cost time more than once
 
+* **A migration that DROPs a column fails on production and passes in the
+  tests, because the tests build a fresh database.** `sql/schema_v53.sql` drops
+  and re-adds `person_key`; `sql/schema_v62.sql` defines `trip_ext` as
+  `SELECT t.*` over `trip`, so the view depends on that column. On a fresh
+  replay v53 runs at 53 and the view is created at 62 — nothing blocks it. On a
+  database that already exists, every view is already there and the drop is
+  refused. It failed on **every boot since v62 shipped**, the ledger does not
+  record a failed file so nothing accumulated, and the stored `person_key`
+  quietly stayed on an old register while `api/identity_map.js` grew to 130
+  entries in front of it. **The pages folded; the money did not.**
+  The fix reads the dependent view definitions out of `pg_get_viewdef()`, drops
+  them, rebuilds, and recreates them — no second copy of any view, and a view
+  added tomorrow is handled by the same code. Dropping them and leaving a later
+  file to recreate them does NOT work: the ledger skips a file whose sha it has
+  seen, so that file never runs again.
+  **Test a migration against the production SHAPE, not a fresh database.**
 * Backticks inside a JS template literal, and backticks inside a bash heredoc —
   both silently break, differently. **Hit again 2026-09-07**: a prose comment
   written *inside* a SQL template literal quoted `const [spec] =` in backticks

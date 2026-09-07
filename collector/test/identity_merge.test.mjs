@@ -486,6 +486,82 @@ console.log('\nthe migration, run against rows that already carry the old key');
   check('running it a second time changes nothing and rewrites nothing',
     again.map((r) => r.person_key).join('|') === `aliyan khalil|aliyan khalil|${UNTOUCHED.key}`,
     JSON.stringify(again));
+  /* ── the views built on the column, which is how this failed for weeks ──
+     ─────────────────────────────────────────────────────────────────────────
+     Postgres will not drop a column a view selects, and sql/schema_v62.sql
+     defines trip_ext as SELECT t.* over trip — so it depends on person_key.
+     On a FRESH database this file runs at position 53 and that view is created
+     at 62, so the drop is unobstructed and the whole suite passes. On a
+     database that already exists — the only kind production has — every view
+     is already there, and the collector's own log said so on 2026-09-07:
+
+       ERROR [db] migration schema_v53.sql failed
+         {"err":"cannot drop column person_key of table trip because other
+                 objects depend on it"}
+
+     A failed file is not recorded in the ledger, so it retried every boot and
+     failed every boot, and the stored person_key went on carrying whatever
+     register was current when v62 shipped while api/identity_map.js grew to a
+     hundred and thirty entries in front of it. The driver pages folded, in
+     code; every money rollup did not.
+
+     Reproduced here in the production shape rather than the fresh one: an
+     out-of-date column with a view on it AND a view on that view, because a
+     view over a view blocks the drop just as firmly and a fix that handled
+     only the first level would have looked right. */
+  {
+    const dep = new PGlite();
+    const qd = (t, p = []) => dep.query(t, p).then((r) => r.rows);
+    for (const f of SCHEMA_FILES) {
+      await dep.exec(readFileSync(new URL(`../sql/${f}`, import.meta.url), 'utf8'));
+    }
+    /* Put the column back to an older register, with the views rebuilt on top
+       of it — exactly what a database that last applied v53 months ago holds. */
+    await dep.exec('DROP VIEW IF EXISTS trip_ext CASCADE');
+    await dep.exec('ALTER TABLE trip DROP COLUMN person_key');
+    await dep.exec("ALTER TABLE trip ADD COLUMN person_key text "
+      + 'GENERATED ALWAYS AS (lower(driver_name)) STORED');
+    await dep.exec('CREATE VIEW trip_ext AS SELECT t.* FROM trip t');
+    await dep.exec('CREATE VIEW a_view_on_the_view AS SELECT person_key, plate FROM trip_ext');
+    const viewsBefore = (await qd(
+      `SELECT viewname FROM pg_views WHERE schemaname = 'public' ORDER BY 1`)).map((r) => r.viewname);
+    check('the fixture really does block the drop, or this proves nothing',
+      viewsBefore.includes('trip_ext') && viewsBefore.includes('a_view_on_the_view'),
+      viewsBefore.join(', '));
+
+    let threw = null;
+    try {
+      await dep.exec(readFileSync(new URL('../sql/schema_v53.sql', import.meta.url), 'utf8'));
+    } catch (e) { threw = String(e.message || e); }
+    check('the migration runs against a database whose views already exist',
+      threw === null, String(threw).slice(0, 160));
+
+    const viewsAfter = (await qd(
+      `SELECT viewname FROM pg_views WHERE schemaname = 'public' ORDER BY 1`)).map((r) => r.viewname);
+    check('…and every view it had to drop is back, including the one built on a view',
+      viewsBefore.length === viewsAfter.length
+      && viewsBefore.every((v) => viewsAfter.includes(v)),
+      `${viewsBefore.length} before, ${viewsAfter.length} after: `
+      + viewsBefore.filter((v) => !viewsAfter.includes(v)).join(', '));
+
+    const [{ whens }] = await qd(
+      `SELECT (length(generation_expression)
+               - length(replace(generation_expression, 'WHEN ', ''))) / 5 AS whens
+         FROM information_schema.columns
+        WHERE table_name = 'trip' AND column_name = 'person_key'`);
+    check('…and the column carries the register afterwards, not the old expression',
+      Number(whens) === MERGES.flatMap(mergeIds).length,
+      `${whens} WHEN clauses against ${MERGES.flatMap(mergeIds).length} alias ids`);
+    /* Twice, because the ledger records a file that applied and this one is
+       meant to be regenerated whenever the register grows. */
+    await dep.exec(readFileSync(new URL('../sql/schema_v53.sql', import.meta.url), 'utf8'));
+    const viewsTwice = (await qd(
+      `SELECT viewname FROM pg_views WHERE schemaname = 'public' ORDER BY 1`)).map((r) => r.viewname);
+    check('…and running it again drops and recreates nothing, because the guard skips',
+      viewsTwice.length === viewsAfter.length);
+    await dep.close();
+  }
+
   await old.close();
 }
 
