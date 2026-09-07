@@ -28,6 +28,10 @@
    run. And REFUSED pairs never reach the table at all: the discovery side
    excludes them before writing. */
 import { pool } from '../src/db.js';
+/* The same fold personFold emits in SQL and identity_map computes in JS. One
+   spelling of the rule, so a key built here cannot differ from the stored one
+   by a space or a repeated word. */
+import { foldName as fold } from './identity_map.js';
 
 /* Thirty seconds. The table changes once per collector run at most, and the
    directory reads it once per request — re-querying for a map of sixty rows
@@ -79,6 +83,26 @@ export async function identityLinks(q = null, { now = Date.now() } = {}) {
        is the fuller one — the name an operator ringing this person wants, and
        the one their documents match. */
     nameOf: new Map(rows.map((r) => [r.alias_ext_id, r.canonical_name])),
+    /* THE THIRD RECORD.
+       ─────────────────────────────────────────────────────────────────────
+       A link joins two roster records, and a person can have three. Muhammad
+       Khalifa has a Bolt record too, and it is not on driver_compliance at all
+       — Bolt files no phone — so no link names it. It reaches him because Bolt
+       and the hotel channel file the same full name and the name fold already
+       joins those two, which works only while the hotel record is the survivor.
+
+       On today's roster it always is: Uber files the shorter name in every one
+       of the 61 pairs. But that is a fact about this roster and not about the
+       rule, and the day it is not, the Bolt record would keep its own folded
+       name and split off from the person it belongs to — a regression that
+       would look exactly like the bug this whole change is about.
+
+       So the alias's own folded name maps to the canonical key as well. Any
+       record the name fold already grouped with the alias moves with it,
+       whichever side turned out to be the survivor. */
+    byName: new Map(rows
+      .map((r) => [fold(r.alias_name), r.canonical_key])
+      .filter(([k, v]) => k && v && k !== v)),
     partners,
   };
   at = now;
@@ -99,3 +123,9 @@ export const linkedName = (links, id) => (links?.nameOf?.get(id) ?? null);
    register's mergedIds. An unlinked id returns itself and nothing else. */
 export const linkedIds = (links, id) =>
   [...(links?.partners?.get(id) ?? [id])];
+
+/* For a record no link names, but whose folded NAME is the one an alias
+   carries — the third record on a person, reached through the name fold rather
+   than through the roster. Null when nothing matches, which is every record
+   until a link exists. */
+export const linkedByName = (links, key) => (key ? (links?.byName?.get(key) ?? null) : null);

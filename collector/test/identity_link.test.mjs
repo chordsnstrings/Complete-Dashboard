@@ -244,6 +244,41 @@ console.log('\nthe directory folds the two records into one row');
   check('…and that a link does not move the stored person_key',
     /does not move person_key/.test(links.body.applies_note || ''), links.body.applies_note);
 
+  /* THE THIRD RECORD. Bolt files no phone, so no link names his Bolt account;
+     it reaches him because Bolt and the hotel channel file the same full name.
+     That works while the hotel record is the survivor, which on today's roster
+     it always is — and the fold must not depend on that being true. */
+  await db.query(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+                       requested_at, status)
+     VALUES ('bolt','t-b1','ecosine','L44284','6628822',$1,'2026-09-04T10:00:00Z','completed')`,
+    [KHALIFA[0].full_name]);
+  const dir3 = await get(`/api/drivers/directory?${W}`);
+  const three = (dir3.body || []).filter((r) => (r.ids || []).some((i) =>
+    [KHALIFA[0].driver_ext_id, KHALIFA[1].driver_ext_id, '6628822'].includes(i)));
+  check('a third record with no phone still lands on the same person',
+    three.length === 1 && (three[0].ids || []).length === 3,
+    JSON.stringify(three.map((r) => [r.driver_name, r.ids])));
+  check('…and all three channels are on the row',
+    three.length === 1 && ['bolt', 'hotel', 'uber'].every((p) => (three[0].platforms || []).includes(p)),
+    JSON.stringify(three[0]?.platforms));
+
+  /* And the other way round: if the UBER record were the fuller one, the link
+     would run the other way and the Bolt record would carry the alias's name.
+     It has to move with it. */
+  {
+    const { linksFrom } = await import('../src/identity_link.js');
+    const flipped = linksFrom([
+      { platform: 'hotel', driver_ext_id: 'h-short', full_name: 'Short Name', phone: '971500007777' },
+      { platform: 'uber', driver_ext_id: 'u-long', full_name: 'Short Middle Name Longer',
+        phone: '971500007777' },
+    ]);
+    check('the fuller name survives whichever channel filed it',
+      flipped.links[0]?.canonical_ext_id === 'u-long'
+      && flipped.links[0]?.alias_ext_id === 'h-short',
+      JSON.stringify([flipped.links[0]?.canonical_name, flipped.links[0]?.alias_name]));
+  }
+
   /* A rejection has to reach the pages, not just the table. */
   await db.query(`UPDATE driver_identity_link SET rejected = true, rejected_reason = 'two brothers'`);
   clearIdentityLinkCache();

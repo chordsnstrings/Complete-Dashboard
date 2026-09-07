@@ -40,7 +40,7 @@ import { canonicalName, mergedIds, mergedNames, mergedPlatforms, ALIAS_KEY,
 /* The links a roster proved rather than a person checked: two records, two
    channels, one phone number. Consulted AFTER the register, so a human's
    decision always wins — see api/identity_links.js. */
-import { identityLinks, linkedKey, linkedName, linkedIds } from './identity_links.js';
+import { identityLinks, linkedKey, linkedName, linkedIds, linkedByName } from './identity_links.js';
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -702,9 +702,14 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          for one human: "MUHAMMAD KHALIFA AFZAL KHALID" on the hotel roster and
          "Muhammad Khalid" on Uber, one phone number, 4,461 Uber trips reported
          under a row that showed 822. */
+      const own = r.person_key || canonName(r.driver_name);
       const k = ALIAS_KEY.get(r.driver_ext_id)
         || linkedKey(links, r.driver_ext_id)
-        || r.person_key || canonName(r.driver_name);
+        /* …and the third record, which no link names because Bolt files no
+           phone. It reaches the person through the name it shares with the
+           alias — see byName in api/identity_links.js. */
+        || linkedByName(links, own)
+        || own;
       const cur = byName.get(k);
       if (!cur) {
         byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],
