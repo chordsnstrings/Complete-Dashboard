@@ -1609,19 +1609,38 @@ export function probeRoutes(app, { wrap }) {
        the keys the provider actually sent, one level deep, with the type of
        each and nothing of the value. No record, no name, no plate, no id
        leaves this module; the same rule the rest of the file is written to. */
-    const shapeOf = (records) => {
+    /* TWO levels, because one is not enough to write a mapper from. This host
+       nests what the web API kept flat: an order carries `driver_profile` and
+       `car` as objects where the console's own orders/list carried
+       `driver_id`, `driver_full_name` and `car_license_number` as strings.
+       "driver_profile: object" tells a reader the field exists and nothing
+       about which column it fills, which is the question. Depth stops at two:
+       a key path, a type and a count is a schema, and going deeper starts
+       being a record. */
+    const shapeOf = (records, depth = 2) => {
       const seen = new Map();
-      for (const rec of records.slice(0, 20)) {
-        if (!rec || typeof rec !== 'object') continue;
-        for (const [k, v] of Object.entries(rec)) {
+      const walk = (obj, prefix, d) => {
+        for (const [k, v] of Object.entries(obj)) {
+          const path = prefix ? `${prefix}.${k}` : k;
           const t = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
-          const had = seen.get(k);
+          const had = seen.get(path);
           /* "null on the rows we saw" is a different fact from "absent", and a
              collector that maps a column on the strength of one non-null row
              needs to know which it is looking at. */
-          if (!had) seen.set(k, { key: k, types: [t], nonNull: t !== 'null' ? 1 : 0 });
+          if (!had) seen.set(path, { key: path, types: [t], nonNull: t !== 'null' ? 1 : 0 });
           else { if (!had.types.includes(t)) had.types.push(t); if (t !== 'null') had.nonNull += 1; }
+          if (t === 'object' && d > 1) walk(v, path, d - 1);
+          /* An array of objects is the commonest shape here — route_points,
+             accounts, events — and its element shape is what a mapper needs,
+             so the FIRST element is walked under a `[]` path and the rest are
+             not: twenty rows of the same shape say nothing twenty times. */
+          if (t === 'array' && d > 1 && v.length && v[0] && typeof v[0] === 'object'
+              && !Array.isArray(v[0])) walk(v[0], `${path}[]`, d - 1);
         }
+      };
+      for (const rec of records.slice(0, 20)) {
+        if (!rec || typeof rec !== 'object') continue;
+        walk(rec, '', depth);
       }
       return [...seen.values()].map((f) => ({ key: f.key, type: f.types.join('|'),
         non_null_of_sampled: f.nonNull }));
