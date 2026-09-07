@@ -106,6 +106,51 @@ export function niceTicks(lo, hi, target = 4) {
   return out;
 }
 
+/* ── how big to draw, and how much room the labels need ──────────────────
+   THE CHART IS DRAWN AT THE SIZE IT WILL BE SEEN AT.
+   ─────────────────────────────────────────────────────────────────────────
+   Every chart in this product used a fixed `viewBox="0 0 720 240"` and app.css
+   stretched it with width:100%. On a 1440px window the day page's "Through the
+   day" panel is 1090px wide, so that drawing was scaled by 1.514 — and an SVG
+   scales its TEXT along with its geometry. The axis labels are declared at
+   --t2, about 10.1px; they painted at 15.3px. Every gridline, every stroke and
+   every label on the page was half again the size it was designed at, which is
+   most of what "it looks ghastly" was pointing at. A chart in a narrow column
+   had the opposite problem and drew everything too small.
+
+   Measuring the host and drawing into that many user units makes the scale
+   exactly 1, so a 10px label is 10px wherever the chart lands. The fallback is
+   the old 720 for a host that has not been laid out yet — a chart drawn inside
+   a display:none panel measures zero, and zero would collapse the drawing. */
+export function chartBox(host, { ratio = 0.3, min = 190, max = 340, fallback = 720 } = {}) {
+  const w = Math.round(host?.getBoundingClientRect?.().width || 0);
+  const W = w > 240 ? w : fallback;
+  /* Height follows width rather than being fixed, so a chart in a third of a
+     row is not the same 240 units tall as one across the whole page — which is
+     what made narrow charts look like columns of stripes. */
+  return { W, H: Math.round(Math.min(max, Math.max(min, W * ratio))) };
+}
+
+/* THE GUTTER IS MEASURED FROM THE LABELS, not guessed at once and hoped for.
+   ─────────────────────────────────────────────────────────────────────────
+   pl was the constant 46 everywhere, and the label is drawn anchored `end` at
+   pl - 7, so a tick string wider than 39 units starts at a negative x. The day
+   page passed `valueFmt: (v) => `${fmt(v)} bookings`` — one formatter serving
+   both the tooltip and the axis — so its gridlines read "10 bookings", about
+   70 units wide, beginning at x = -31. app.css sets overflow:visible on chart
+   svgs so that painted OUTSIDE the chart and over the panel's edge: measured,
+   four labels spilling 12-21px past the panel at 1440px and again at 1024px.
+
+   Reserving the room the widest label actually needs closes that for every
+   formatter, including ones nobody has written yet. .axis is IBM Plex Mono, so
+   the advance is a constant share of the size and the width is arithmetic
+   rather than a guess: no getComputedTextLength, no reflow, no second pass. */
+const AXIS_EM = 0.6;          // IBM Plex Mono advance, as a share of font-size
+const AXIS_PX = 10.1;         // --t2 at a 16px root
+export const axisGutter = (labels, { minimum = 30 } = {}) => Math.ceil(Math.max(
+  minimum,
+  Math.max(0, ...labels.map((t) => String(t).length)) * AXIS_EM * AXIS_PX + 11));
+
 /* Draws the y axis and RETURNS the scale it drew, so no caller computes a
    maximum twice and then disagrees with its own gridlines.
 
@@ -113,14 +158,22 @@ export function niceTicks(lo, hi, target = 4) {
    100% — and suppresses the headroom, because a gridline above a value the
    series cannot take is a scale that lies about the range. That rule existed
    in areaChart alone; it now covers every chart that asks for it. */
+/* The tick VALUES, alone, so the gutter can be measured from the labels before
+   anything is drawn. Extracted rather than duplicated: a second copy of this
+   rule would be a second answer to "what does this axis say", and the whole
+   point of measuring the gutter is that it matches what lands on the page. */
+export function yTicks({ hi, fixedMax = null, target = 4 }) {
+  if (fixedMax != null && fixedMax > 0) {
+    return Array.from({ length: target }, (_, i) => (fixedMax * i) / (target - 1));
+  }
+  /* An all-zero series gets ONE line at the baseline: repeating "0" four
+     times up the side asserts a scale that has no values on it. */
+  return !(hi > 0) ? [0] : niceTicks(0, hi, target);
+}
+
 export function yAxis(svg, { hi, pl, pr, pt, ih, W, fmt: f = fmt,
   fixedMax = null, target = 4, baseline = true }) {
-  const marks = fixedMax != null && fixedMax > 0
-    ? Array.from({ length: target }, (_, i) => (fixedMax * i) / (target - 1))
-    /* An all-zero series gets ONE line at the baseline: repeating "0" four
-       times up the side asserts a scale that has no values on it. */
-    : !(hi > 0) ? [0]
-      : niceTicks(0, hi, target);
+  const marks = yTicks({ hi, fixedMax, target });
   const max = marks[marks.length - 1] || 1;
   marks.forEach((v) => {
     const gy = pt + ih - ih * (v / max);
@@ -170,11 +223,25 @@ export function xTickIndices(n, target = 12) {
    the larger of the two maxima to both. Everywhere else the default — scale to
    this series — is still what a single chart wants. */
 export function barChart(host, data, { x, y, label, color = '--b400', colorFor, onClick,
-  valueFmt = (v) => fmt(v), lo = null, hi = null, max: fixedMax = null, aria = null } = {}) {
+  valueFmt = (v) => fmt(v), axisFmt = null, lo = null, hi = null,
+  max: fixedMax = null, aria = null } = {}) {
+  /* THE AXIS AND THE TOOLTIP ARE NOT THE SAME FORMATTER, and treating them as
+     one is what put "10 bookings / 20 bookings / 30 bookings" up the side of
+     the day page. A tooltip names a single value and wants its unit; an axis
+     is four labels on one scale and needs the unit said once, not four times.
+     valueFmt still serves the tooltip; axisFmt defaults to the plain number.
+     A caller whose axis genuinely reads better with the unit — money, where
+     "1,240" and "AED 1,240" are different claims — passes axisFmt: money. */
+  axisFmt = axisFmt || ((v) => fmt(v));
   host.innerHTML = '';
   if (!data.length) return empty(host);
-  const W = 720, H = 240, pl = 46, pr = 12, pt = 18, pb = 34;
+  const { W, H } = chartBox(host);
   const raw = Math.max(...data.map((d) => Math.max(+d[y] || 0, hi ? +d[hi] || 0 : 0))) || 1;
+  /* The ticks are worked out BEFORE the gutter, because the gutter is however
+     much room the widest of them needs. Same call the axis makes below, so the
+     two cannot disagree about what will be drawn. */
+  const pl = axisGutter(yTicks({ hi: raw, fixedMax }).map((v) => axisFmt(v)));
+  const pr = 14, pt = 18, pb = 34;
   const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length;
   /* The gap tracks the count. 0.62 was one ratio for every series, which is
      too tight under ten bars and too loose over sixty; and the floor stops a
@@ -183,7 +250,7 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
   const pad = data.length <= 12 ? 0.28 : data.length <= 40 ? 0.18 : 0.10;
   const bw = Math.max(Math.min(step * (1 - pad), 44), 1.5);
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
-  const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: valueFmt, fixedMax });
+  const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: axisFmt, fixedMax });
   const xAt = new Set(xTickIndices(data.length));
   data.forEach((d, i) => {
     const h = ih * (+d[y]) / max, bx = pl + step * i + (step - bw) / 2, by = pt + ih - h;

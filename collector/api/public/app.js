@@ -299,12 +299,12 @@ const VIEWS = [
   { id: 'analyst', label: 'Analyst', ic: '◑', sec: 'Today', sub: 'Claims the model made, checked against the database, with the numbers behind each' },
   { id: 'unit', label: 'Money per car and driver', ic: '◆', sec: 'Money', sub: 'What each car and driver earned per day, per km and per trip, including zero earners' },
   { id: 'revenue', label: 'Money by platform', ic: '◇', sec: 'Money', sub: 'What each platform reports about money, and which ones report nothing' },
-  { id: 'provenance', label: 'Money sources', ic: '⑆', sec: 'Money',
-    sub: 'Every API call that returned money, and whether the headline figure uses it' },
-  { id: 'reconcile', label: 'Paid vs owed', ic: '⇌', sec: 'Money', sub: 'For each month, what the platforms paid us against what their statements say they owed' },
-  { id: 'finance', label: 'Finance', ic: '◈', sec: 'Money', sub: 'Money in, how riders paid, and every fee, bonus and adjustment on record' },
-  { id: 'settlement', label: 'Cash and unpaid', ic: '◫', sec: 'Money', sub: 'Who pays for the ride, how much cash drivers hold, and what is still unpaid' },
   { id: 'corporate', label: 'Corporate & hotels', ic: '❖', sec: 'Money', sub: 'Hotel and company bookings, with the cost of each ride as well as its price' },
+  { id: 'finance', label: 'Money in and out', ic: '◈', sec: 'Finance', sub: 'Money in, how riders paid, and every fee, bonus and adjustment on record' },
+  { id: 'reconcile', label: 'Bank reconciliation', ic: '⇌', sec: 'Finance', sub: 'For each month, what the platforms paid us against what their statements say they owed' },
+  { id: 'settlement', label: 'Cash and unpaid', ic: '◫', sec: 'Finance', sub: 'Who pays for the ride, how much cash drivers hold, and what is still unpaid' },
+  { id: 'provenance', label: 'Where each figure came from', ic: '⌗', sec: 'Finance',
+    sub: 'Every API call that returned money, and whether the headline figure uses it' },
   { id: 'demand', label: 'Demand', ic: '◷', sec: 'Work', sub: 'When trips happen, by day, hour and weekday' },
   /* The record itself, browsable. Every other page here aggregates it; this
      one lists it, which is what an operator wants when they remember a job
@@ -363,9 +363,30 @@ const VIEWS = [
    Uber feed up". And "Set up" was a group of one, which is a naming failure
    rather than a category — Settings moves to the footer beside the theme
    button. */
+/* MONEY AND FINANCE ARE TWO QUESTIONS, and one strip of seven tabs was hiding
+   the second of them.
+   ─────────────────────────────────────────────────────────────────────────
+   Nothing was deleted when the rail went to six rows — all thirty-six pages
+   are still reachable, and test/routes.test.mjs proves it. What went was the
+   ability to FIND them: seven pages sat under Money, and "Paid vs owed" and
+   "Cash and unpaid" are not things a reader looks for under a heading about
+   what each car earns. A tab strip that long reads as a list to skim rather
+   than a set of places to go.
+
+   The split is by the question each page answers, not by whether it has money
+   in it. Money is operations — what the fleet EARNED, per car, per driver, per
+   channel — and it is read to decide who to roster and which car to move.
+   Finance is the books: what was invoiced against what arrived, what is still
+   owed, what cash a driver is holding, and where each figure came from. It is
+   read to close a month.
+
+   That second set is also the one this fleet will forecast from, which is the
+   other reason it wants a place of its own rather than four tabs deep in a
+   strip about utilisation. */
 const SECTIONS = [
   { id: 'Today', ic: '◉', to: 'insights' },
   { id: 'Money', ic: '◆', to: 'unit' },
+  { id: 'Finance', ic: '⑆', to: 'finance' },
   { id: 'Work', ic: '◱', to: 'demand' },
   { id: 'People', ic: '◧', to: 'drivers' },
   { id: 'Fleet', ic: '▤', to: 'vehicles' },
@@ -394,7 +415,7 @@ const DRILL_SECTION = {
 };
 /* A cohort is reached from six different pages, so its key says where it came
    from and the rail follows it home rather than guessing. */
-const COHORT_SECTION = { unit: 'Money', settlement: 'Money', tiers: 'Work',
+const COHORT_SECTION = { unit: 'Money', settlement: 'Finance', tiers: 'Work',
   vehicles: 'Fleet', safety: 'Fleet', roster: 'People', retention: 'People' };
 const sectionOf = (view, param) => {
   if (view === 'cohort') {
