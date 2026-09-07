@@ -18,7 +18,7 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './ch
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
   sourceLabel, completionTone, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
-  avatar, moneyInTile, faresTile, alertRateFigure, splitAlerts,
+  avatar, moneyInTile, faresTile, alertRateFigure, splitAlerts, standingNote,
   UBER_FARE_WHY } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
@@ -81,7 +81,18 @@ function percentileBars(host, metrics, opts = {}) {
   const wrap = el('div', 'pbars');
   metrics.forEach((m, i) => {
     const p = Math.max(0, Math.min(100, m.percentile));
-    const tone = p >= 75 ? '--good' : p >= 40 ? '--s1' : p >= 20 ? '--warn' : '--critical';
+    /* A TIE IS NOT A RANK, AND IT IS CERTAINLY NOT A FAILING.
+       On a one-day window nearly everybody has days_worked 1, so nobody is
+       below anybody, so the percentile floors to 0 for the whole tied
+       majority — and this line painted every one of them --critical for a
+       value equal to the fleet median. Measured on production 2026-09-06: two
+       of five drivers sampled, "Days worked 1, fleet median 1", in the colour
+       reserved for the worst thing on the page. standingNote in ui.js knows
+       the size of the tie because the endpoint now returns it; a tied bar gets
+       the neutral fill and says so on hover. */
+    const sn = standingNote(m);
+    const tone = sn.tied ? '--s1'
+      : p >= 75 ? '--good' : p >= 40 ? '--s1' : p >= 20 ? '--warn' : '--critical';
     const u = unitFor(m);
     const inverted = m.higher_is_better === false || /cancel|reject|no.?show/i.test(m.label || '');
     const row = el('div', 'pbar');
@@ -94,6 +105,10 @@ function percentileBars(host, metrics, opts = {}) {
       <div class="pb-v num">${p}<small>${ordinal(p)}</small></div>`;
     row.title = `${m.label}: ${fmt(m.value, 1)}${u ? ' ' + u : ''} — fleet median `
       + `${fmt(m.median, 1)}${u ? ' ' + u : ''}`
+      + (sn.tied
+        ? `. ${fmt(m.tied)} of the ${fmt(m.population)} compared hold this same value, so the `
+          + 'percentile is a tie rather than a rank.'
+        : sn.text ? `. ${sn.text[0].toUpperCase()}${sn.text.slice(1)}.` : '')
       + (inverted ? '. Lower is better here, so a high percentile means FEWER of them.' : '')
       + (opts.note && /revenue|fare|earn/i.test(m.label || '') ? ` ${opts.note}` : '');
     wrap.append(row);
@@ -599,7 +614,12 @@ function identityCard(p) {
 async function tabOverview(root, id, prof) {
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
   const g1 = el('div', 'grid g23'); root.append(g1);
-  const stand = panel('How they rank in the fleet', 'Ranked against every driver with 5 or more trips in this window'); g1.append(stand.panel);
+  /* No number in the subtitle. It said "5 or more trips" — a copy of the
+     floor, in a place the response cannot reach, beside a word ("trips") the
+     measure it describes does not use: the row is count(*), which this
+     profile calls bookings everywhere else. The floor and its unit are stated
+     once, under the bars, from peer_floor as the endpoint applied it. */
+  const stand = panel('How they rank in the fleet', 'Ranked against the drivers who worked enough of this window to compare'); g1.append(stand.panel);
   /* Lifetime, on a page whose every other panel is the selected window — and
      sorted by days held, so the car this person is driving today sat fourth
      behind three they gave back in March. The window is stated and the sort
@@ -684,14 +704,34 @@ async function tabOverview(root, id, prof) {
   const moneyBar = (st.metrics || []).some((m) => /revenue|fare|earn/i.test(m.label || ''));
   percentileBars(stand.body, st.metrics || [], {
     note: 'Fares only — most of this fleet\'s work carries no fare, so this percentile is not comparable.' });
+  /* THE COUNT IN THE SENTENCE AND THE COUNT THE FLOOR WAS APPLIED TO HAVE TO
+     BE THE SAME COUNT.
+     ─────────────────────────────────────────────────────────────────────────
+     This printed k.trips — the /api/driver/kpis figure, over the subject's own
+     accounts — beside a floor /api/driver/standing had applied at a different
+     grain, and asserted the relation between them. On production 2026-09-01..
+     09-07 Muhammad Asif Amir Zada had 5 trips over 3 accounts, none reaching
+     the floor when it was tested per account, and the page read "5 trips in
+     this window, which is fewer than the five a ranking needs". Five is not
+     fewer than five, and the page said so about a named person.
+
+     The floor is on the person now (api/driver_routes.js), and the endpoint
+     returns both trips_in_window and peer_floor so this sentence states the
+     numbers the decision was actually made on rather than re-deriving them.
+     Falls back to k.trips only where an older API is answering, and then
+     without the comparison it can no longer support. */
   if (!(st.metrics || []).length) {
-    stand.body.append(note(k.trips
-      ? `${fmt(k.trips)} trips in this window, which is fewer than the five a ranking needs — this person `
-        + 'is not ranked rather than ranked badly.'
+    const mineTrips = st.trips_in_window ?? k.trips;
+    const floor = st.peer_floor;
+    stand.body.append(note(mineTrips
+      ? `${countOf(mineTrips, 'booking')} in this window`
+        + (floor ? `, which is fewer than the ${fmt(floor)} a ranking needs` : ', which is too few to rank')
+        + ' — this person is not ranked rather than ranked badly.'
       : 'No trip in this window, so there is nothing to rank. Widen the range above.'));
   } else {
     stand.body.append(el('p', 'cap',
-      `Compared against ${countOf(st.n_peers || 0, 'driver')} with five or more trips in this window.`
+      `Compared against ${countOf(st.n_peers || 0, 'driver')} with `
+      + `${st.peer_floor ? `${fmt(st.peer_floor)} or more` : 'five or more'} bookings in this window.`
       + (moneyBar
         ? ` The revenue bar is over FARES only, and ${UBER_FARE_WHY} — so on a fleet that is `
           + 'mostly Uber the median it is measured against is near zero until those weeks land, and '

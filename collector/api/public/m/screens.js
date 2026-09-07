@@ -18,7 +18,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
-import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile,
+import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock } from '../tz.js';
 import { todayLive, todayLede, FARES_LAG } from '../today.js';
@@ -942,12 +942,14 @@ async function driver(deck, ctx) {
       /* "top 76%" is not a compliment and not an insult; it is a number
          facing the wrong way, so below the median it is said as a bottom. And
          the best in the fleet came out as "top 0%", which is not a share of
-         anything — at the very top the honest phrasing names the rank. */
-      note: m.percentile == null ? null
-        : m.percentile >= 100 ? 'highest in the fleet'
-          : m.percentile <= 0 ? 'lowest in the fleet'
-            : m.percentile >= 50 ? `top ${100 - m.percentile}%` : `bottom ${m.percentile}%`,
-      tone: m.percentile >= 75 ? 'good' : m.percentile <= 25 ? 'warn' : null,
+         anything — at the very top the honest phrasing names the rank.
+
+         In ui.js now, with the desktop, because two of the sentences this
+         block used to produce were false: "lowest in the fleet" in warn colour
+         over a value equal to the median (a tie the percentile cannot express)
+         and the same phrase over the fleet's WORST cancellation rate, which
+         the server ranks inverted. See standingNote for both measurements. */
+      ...(() => { const sn = standingNote(m); return { note: sn.text, tone: sn.tone }; })(),
     })));
   }
 

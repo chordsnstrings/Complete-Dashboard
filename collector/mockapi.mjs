@@ -1073,13 +1073,22 @@ app.get('/api/driver/heatmap', (req, r) => {
 
 app.get('/api/driver/standing', (req, r) => {
   const i = idIndex(req.query.id);
-  const mk = (key, label, value, percentile, median) => ({ key, label, value, percentile, median });
-  r.json({ n_peers: 56, metrics: [
-    mk('trips', 'Trips completed', 268 - i * 20, Math.max(4, 96 - i * 12), 141),
-    mk('trips_per_day', 'Trips per working day', 10.3 - i * .6, Math.max(6, 88 - i * 11), 7.2),
+  /* tied/population travel with every metric now, because a percentile of 0
+     cannot tell a rank from a tie and both were being rendered as a rank —
+     "Days worked 1 · fleet median 1 · lowest in the fleet", in the warn
+     colour, for the tied majority of any one-day window. The `days` row here
+     is deliberately the tie case (46 of 56 hold the same value) and every
+     other row is deliberately not, so a browser test cannot pass by only ever
+     rendering one branch. */
+  const N = 56;
+  const mk = (key, label, value, percentile, median, tied = 1) =>
+    ({ key, label, value, percentile, median, tied, population: N });
+  r.json({ n_peers: N, peer_floor: 5, trips_in_window: 268 - i * 20, metrics: [
+    mk('trips', 'Bookings', 268 - i * 20, Math.max(4, 96 - i * 12), 141),
+    mk('trips_per_day', 'Bookings a working day', 10.3 - i * .6, Math.max(6, 88 - i * 11), 7.2),
     mk('km', 'Distance driven', 3410 - i * 240, Math.max(5, 84 - i * 10), 1980),
     mk('avg_km', 'Average trip length', 11.4, 46, 12.1),
-    mk('days', 'Days worked', 26 - i, Math.max(8, 92 - i * 9), 19),
+    mk('days', 'Days worked', 26 - i, Math.max(8, 92 - i * 9), 19, i % 2 ? 46 : 1),
     mk('completion', 'Completion rate', 96.4 - i * .4, Math.max(10, 78 - i * 8), 94.1),
     mk('cancel', 'Cancellation rate', 3.1 + i * .3, Math.max(12, 72 - i * 9), 5.4),
     mk('revenue', 'Revenue booked', 9120 - i * 700, Math.max(6, 90 - i * 11), 5400),

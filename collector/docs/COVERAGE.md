@@ -1092,3 +1092,29 @@ driver's 222 tracker fixes.
   something only the new code has — an alias, a returned field name — and prove
   it by reverting and watching it go red. Two vacuous assertions have now been
   caught this way in one week.
+* **A percentile of 0 is not a rank when the distribution is flat.** It means
+  "nobody is below you", which on a tied majority is a tie, not a low score.
+  Measured on production 2026-09-06 over five sampled drivers: two were told
+  "Days worked 1 · fleet median 1 · lowest in the fleet" in the warn colour,
+  and the desktop painted the same bar `--critical`. `/api/driver/standing`
+  returns `tied` and `population` with every metric now so a renderer can tell
+  the two apart; `standingNote` in `api/public/ui.js` is the only place either
+  shell is allowed to turn a percentile into words.
+* **`pct('cancel', false)` inverts the percentile, so 0 there is the WORST.**
+  A driver at 66.7% cancellations against a 9.1% median scored 0 and the phone
+  printed "lowest in the fleet" — which reads as the fewest. Rank-relative
+  wording ("top of the fleet" / "bottom of the fleet") is the only phrasing
+  that is true for both orientations; never say highest/lowest about a value
+  when what you hold is a rank.
+* **A floor applied in SQL before a fold in JavaScript is a floor on the wrong
+  thing.** `/api/driver/standing` had `GROUP BY 1 HAVING count(*) >= 5` keyed
+  on a provider ACCOUNT and folded to people three hundred lines later, so a
+  person with four accounts of three bookings was not in the cohort at all —
+  104 people qualified over 2026-09-01..09-07 and the endpoint reported 97.
+  One of the seven was then told "5 trips … which is fewer than the five a
+  ranking needs". Whenever a threshold and a grouping live in different
+  languages, check they are talking about the same row.
+* **A page that prints a count from endpoint A beside a threshold applied by
+  endpoint B will eventually assert something false about the relation between
+  them.** Return the count the decision was made on (`trips_in_window`) and the
+  threshold that was used (`peer_floor`), and let the copy state those.

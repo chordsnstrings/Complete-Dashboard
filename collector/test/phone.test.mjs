@@ -52,6 +52,9 @@ check('a cut list is marked cut', unwrap({ rows: [1], total: 9, truncated: true 
 
 /* ── the route table ────────────────────────────────────────────────────── */
 const screensSrc = readFileSync(`${PUB}/m/screens.js`, 'utf8');
+/* The shared component file both shells import — NOT m/ui.js, which is the
+   phone's own renderer. standingNote lives here so the two cannot drift. */
+const sharedUiSrc = readFileSync(`${PUB}/ui.js`, 'utf8');
 /* Comments out first: these files explain themselves in prose, and a word
    inside a comment is not a route name or a line of code. */
 const bare = (t) => t.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
@@ -115,11 +118,30 @@ check('a share is taken over every row, not the visible ones',
   && !/const total = rowsIn\.reduce/.test(uiSrc));
 
 /* A percentile is a rank, and the two ends of it are not shares.
-   "top 0%" is what the best driver in the fleet scored before this. */
+   "top 0%" is what the best driver in the fleet scored before this.
+
+   The rule is unchanged; only its address is. The phone had its own copy of
+   this phrasing and the desktop its own copy of the colour thresholds, and
+   two of the sentences that produced were false — "lowest in the fleet" over
+   a value equal to the median, and the same phrase over the fleet's WORST
+   cancellation rate, which the server ranks inverted. Both shells call
+   standingNote in ui.js now, so the assertion follows it there and this file
+   checks that the phone stopped hand-rolling it. */
+check('the phone does not write this sentence itself',
+  !/'(highest|lowest) in the fleet'/.test(bare(screensSrc))
+    && /standingNote\(m\)/.test(bare(screensSrc)));
 check('the top of the fleet is not called "top 0%"',
-  /percentile >= 100 \? 'highest in the fleet'/.test(bare(screensSrc)));
+  /p >= 100 \? 'top of the fleet'/.test(bare(sharedUiSrc)),
+  '100 must get its own phrase; 100 - 100 is a share of nothing');
 check('…and the bottom is named as a bottom',
-  /percentile < 50|`bottom \$\{m\.percentile\}%`/.test(bare(screensSrc)));
+  /bottom of the fleet/.test(bare(sharedUiSrc))
+    && /`bottom \$\{p\}%`/.test(bare(sharedUiSrc)));
+/* And the two ends never claim a DIRECTION, because half these metrics are
+   ranked inverted and "lowest in the fleet" over the worst cancellation rate
+   in the fleet reads as the best one. */
+check('…neither end says highest or lowest of a VALUE',
+  !/(highest|lowest) in the fleet/.test(bare(sharedUiSrc)),
+  'the percentile is a rank; the value may run either way');
 
 /* ── the PWA files ──────────────────────────────────────────────────────── */
 const manifest = JSON.parse(readFileSync(`${PUB}/manifest.webmanifest`, 'utf8'));

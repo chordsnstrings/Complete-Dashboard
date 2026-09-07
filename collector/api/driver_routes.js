@@ -2262,9 +2262,34 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      FROM trip WHERE ${TW} GROUP BY 1,2 ORDER BY 1,2`, p))));
 
   /* ── standing against the fleet, as percentiles ────────────────────── */
-  // Percentile answers "where does this driver sit", which a raw number never
-  // does. Anyone with fewer than 5 trips in the window is excluded from the
-  // comparison set — otherwise a single-trip driver distorts every rank.
+  /* Percentile answers "where does this driver sit", which a raw number never
+     does. Anyone with fewer than 5 trips in the window is excluded from the
+     comparison set — otherwise a single-trip driver distorts every rank.
+
+     THE FLOOR IS ON THE PERSON, and for a year it was on the ACCOUNT.
+     ─────────────────────────────────────────────────────────────────────────
+     The sentence above says "anyone", the page says "every driver with 5 or
+     more trips in this window", and the SQL said `GROUP BY 1 HAVING count(*)
+     >= 5` — keyed on one provider account, evaluated before the fold three
+     hundred lines below that turns a person's several accounts into one row.
+     A person with four accounts of three trips has twelve trips and was not in
+     the cohort at all.
+
+     Measured on production 2026-09-01..09-07: /api/drivers/directory, which
+     folds to people, holds 104 people with 5 or more trips. This endpoint
+     reported n_peers 97. Seven people are ranked against a cohort they belong
+     in, and — worse — are told they are not rankable on their own page.
+
+     Muhammad Asif Amir Zada (6640364) is one of them: 5 trips over 3 accounts,
+     none of them reaching 5, so /api/driver/standing returned metrics [] and
+     api/public/driver.js:688 printed "5 trips in this window, which is fewer
+     than the five a ranking needs". Five is not fewer than five. The page
+     stated a false arithmetic fact about a named person because the count it
+     was comparing came from a different grain than the count it printed.
+
+     The floor now runs after the fold, over the same population the
+     percentiles are taken over, which is what every sentence about it already
+     claimed. */
   app.get('/api/driver/standing', withDriver(async (req, res, d, p) => {
     const peers = await q(
       `SELECT ${PKEY} AS driver_ext_id,
@@ -2291,21 +2316,13 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          -- anyone else instead of being quietly left out of the cohort they
          -- are being ranked against
          AND (coalesce(btrim(driver_ext_id), '') <> '' OR coalesce(btrim(driver_name), '') <> '')
-       GROUP BY 1 HAVING count(*) >= 5`, [p[0], p[1]]);
+       /* No HAVING. The five-trip floor is applied to the FOLDED population
+          below, because the floor is a statement about a person and this
+          GROUP BY is keyed on an account. See the block above the route. */
+       GROUP BY 1`, [p[0], p[1]]);
     // The peers query projects the PERSON KEY, so the match set is the one to
     // compare against — the account list would miss their id-less rows.
     const mineIds = new Set(d.keys);
-    const mine = peers.filter((r) => mineIds.has(r.driver_ext_id));
-    if (!mine.length) return res.json({ n_peers: peers.length, metrics: [] });
-    const sum = (k) => mine.reduce((a, r) => a + (+r[k] || 0), 0);
-    const wavg = (k) => { const t = sum('trips'); return t ? mine.reduce((a, r) => a + (+r[k] || 0) * r.trips, 0) / t : null; };
-    const me = {
-      trips: sum('trips'), km: sum('km'), revenue: sum('revenue'),
-      days: Math.max(...mine.map((r) => r.days)),
-      avg_km: wavg('avg_km'), completion: wavg('completion'), cancel: wavg('cancel'),
-      trips_per_day: null,
-    };
-    me.trips_per_day = me.days ? me.trips / me.days : null;
 
     /* Peer values folded to one per person, which is what this claimed to do
        and did not.
@@ -2342,20 +2359,85 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       if (c._cw) { c.avg_km /= c._cw; c.completion /= c._cw; c.cancel /= c._cw; }
       c.trips_per_day = c.days ? c.trips / c.days : 0;
     }
-    const pop = [...folded.values()];
+    /* THE FLOOR, here, on the person — see the block above the route for the
+       seven people the account-grain version left out and the false sentence
+       it printed for one of them. FLOOR is named rather than inlined so the
+       response can state the number it applied, which is the only way a page
+       can say "five or more" without a copy of the five in its own source. */
+    const FLOOR = 5;
+    const pop = [...folded.values()].filter((c) => c.trips >= FLOOR);
+    /* `me` is the subject's own folded row, not a second sum of the same
+       numbers. It WAS a second sum — sum()/wavg() over `mine`, arithmetic
+       identical to the fold and sitting fifteen lines from it — and two
+       implementations of one figure is how a page comes to disagree with
+       itself. One of them is now the only one.
+
+       Read from `folded` rather than from `pop`, so a subject under the floor
+       still has their own count to report in the branch below; `pop` is the
+       comparison set and the subject is only in it when they qualify. */
+    const me = folded.get('__me__');
+    if (!me || me.trips < FLOOR) {
+      /* n_peers meant two different things in the two branches: this one
+         returned peers.length — the raw ACCOUNT count, 117 on production for
+         2026-09-01..09-07 — while the ranked branch returned the folded people,
+         97. The same field, the same window, twenty rows apart, depending only
+         on whether the reader happened to be rankable. It is the cohort in
+         both branches now.
+
+         trips_in_window travels with it so the page can say the true number
+         instead of deriving "fewer than five" from a count it fetched from a
+         different endpoint at a different grain. */
+      return res.json({ n_peers: pop.length, peer_floor: FLOOR,
+        trips_in_window: me ? me.trips : 0, metrics: [] });
+    }
+    /* HOW MANY PEOPLE HOLD THE SAME VALUE, returned with the percentile.
+       ───────────────────────────────────────────────────────────────────────
+       A percentile of 0 means "nobody is below you". On a flat distribution
+       that is not a low score, it is a tie — and the phones rendered it as
+       `percentile <= 0 ? 'lowest in the fleet'` in the warn colour
+       (api/public/m/screens.js:947). On any one-day window most drivers have
+       days_worked 1, so the median is 1, so every one of them scored 0 and
+       every one of them was told they were the worst in the fleet at a figure
+       they shared with the majority.
+
+       The percentile cannot express that on its own: 0 is 0 whether one person
+       is at the bottom or ninety are level. So the SIZE of the tie travels
+       with it and the renderers decide what is sayable — the API's job is to
+       report the shape of the distribution, not to guess which sentence a
+       given width wants. Exact equality is the right test: the metrics that
+       actually tie are integer counts (days, bookings), and a float that ties
+       to the last bit genuinely is the same measurement. */
     const pct = (key, higherIsBetter = true) => {
       const vals = pop.map((c) => +c[key] || 0).sort((a, b) => a - b);
       const v = +me[key] || 0;
       let below = 0; while (below < vals.length && vals[below] < v) below++;
+      let tied = 0; for (const x of vals) if (x === v) tied++;
       const raw = vals.length > 1 ? (below / (vals.length - 1)) * 100 : 50;
       return { value: v, percentile: Math.round(higherIsBetter ? raw : 100 - raw),
-        median: vals[Math.floor(vals.length / 2)] };
+        median: vals[Math.floor(vals.length / 2)],
+        /* Both, so a reader of the response can compute the share without
+           knowing n_peers is the same population — it is, and saying so twice
+           is cheaper than a caller assuming it wrongly. */
+        tied, population: vals.length };
     };
     res.json({
       n_peers: pop.length,
+      peer_floor: FLOOR,
+      trips_in_window: me.trips,
       metrics: [
-        { key: 'trips', label: 'Trips completed', ...pct('trips') },
-        { key: 'trips_per_day', label: 'Trips per working day', ...pct('trips_per_day') },
+        /* "Trips completed" was count(*), with no completion filter anywhere
+           in the query — a count of BOOKINGS printed under the word completed,
+           eight pixels below a Completion tile reading "81 of 95 completed,
+           14 did not" for the same person and the same window. The row said 95.
+
+           The measure is not changed: bookings taken is the workload rank this
+           panel wants, and the panel already carries Completion rate and
+           Cancellation rate as their own rows, taken over outcome. Only the
+           name was wrong, and "Bookings" is the word the rest of this profile
+           already uses for count(*) — the phone's header ("95 BOOKINGS IN THIS
+           WINDOW"), its own tile, and countOf(n, 'booking') throughout ui.js. */
+        { key: 'trips', label: 'Bookings', ...pct('trips') },
+        { key: 'trips_per_day', label: 'Bookings a working day', ...pct('trips_per_day') },
         { key: 'km', label: 'Distance driven', ...pct('km') },
         { key: 'avg_km', label: 'Average trip length', ...pct('avg_km') },
         { key: 'days', label: 'Days worked', ...pct('days') },

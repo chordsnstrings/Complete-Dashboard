@@ -1869,6 +1869,54 @@ export function faresTile(k) {
 
    Both field spellings, because the two endpoints disagree: /api/driver/kpis
    carries trips_with_distance and /api/vehicle/kpis carries measured_trips. */
+/* WHAT A PERCENTILE IS ALLOWED TO BE CALLED, in one place for both shells.
+   ─────────────────────────────────────────────────────────────────────────
+   Two false sentences came out of rendering /api/driver/standing's percentile
+   straight, and both were measured on production for 2026-09-06:
+
+     · "Days worked 1 · fleet median 1 · LOWEST IN THE FLEET", in the warn
+       colour, on two of the five drivers sampled. On a one-day window almost
+       everybody has days_worked 1, so nobody is BELOW anybody, so the
+       percentile floors to 0 for the whole tied majority — and 0 was read as a
+       rank. It is a tie. api/public/m/screens.js:947 said it; the desktop bar
+       painted the same value --critical (api/public/driver.js:83).
+
+     · "Cancellation rate 66.7% · fleet median 9.1% · LOWEST IN THE FLEET" on a
+       driver who cancels seven times the median. The server inverts that
+       metric so a HIGH percentile means fewer cancellations
+       (api/driver_routes.js, pct('cancel', false)), so percentile 0 there is
+       the WORST canceller in the fleet — and "lowest" reads as the fewest.
+       The desktop carries a caption explaining the inversion; the phone
+       carried the sentence with none.
+
+   So the wording is rank-relative and direction-free — "top of the fleet",
+   "bottom of the fleet", "top 24%" — which is true whichever way the metric
+   was oriented, and a tie held by half the population or more is named as a
+   tie rather than as a rank. `tied` comes back so a caller that paints a
+   colour can decline to paint one; a tie is not an achievement and not a
+   failing.
+
+   Needs `tied` and `population` from the endpoint. Where an older response
+   carries neither, the tie branch cannot fire and the phrasing degrades to
+   what it always was, minus the two sentences above. */
+export function standingNote(m) {
+  const p = Number(m?.percentile);
+  const tied = Number(m?.tied);
+  const n = Number(m?.population);
+  if (Number.isFinite(tied) && Number.isFinite(n) && n > 0 && tied > 1 && tied / n >= 0.5) {
+    return { text: tied >= n ? 'the same as everyone measured' : 'level with most of the fleet',
+      tone: null, tied: true };
+  }
+  if (!Number.isFinite(p)) return { text: null, tone: null, tied: false };
+  return {
+    text: p >= 100 ? 'top of the fleet'
+      : p <= 0 ? 'bottom of the fleet'
+        : p >= 50 ? `top ${100 - p}%` : `bottom ${p}%`,
+    tone: p >= 75 ? 'good' : p <= 25 ? 'warn' : null,
+    tied: false,
+  };
+}
+
 export function avgKmSub(k, { noun = 'booking' } = {}) {
   const measured = k?.trips_with_distance ?? k?.measured_trips ?? null;
   const total = k?.trips ?? k?.bookings ?? null;
