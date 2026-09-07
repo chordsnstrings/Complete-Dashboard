@@ -1601,7 +1601,32 @@ export function probeRoutes(app, { wrap }) {
       'X-API-Key': key, 'X-Client-ID': clientId,
       'content-type': 'application/json', 'Accept-Language': 'en',
     });
-    const call = async (path, clientId, body) => {
+    /* The field names of the first records, and nothing else.
+       ─────────────────────────────────────────────────────────────────────
+       A collector is written against field NAMES, and the 240-character slice
+       above is not enough to read them off — the first order alone is longer
+       than that. So for the surfaces that answer, this returns the union of
+       the keys the provider actually sent, one level deep, with the type of
+       each and nothing of the value. No record, no name, no plate, no id
+       leaves this module; the same rule the rest of the file is written to. */
+    const shapeOf = (records) => {
+      const seen = new Map();
+      for (const rec of records.slice(0, 20)) {
+        if (!rec || typeof rec !== 'object') continue;
+        for (const [k, v] of Object.entries(rec)) {
+          const t = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+          const had = seen.get(k);
+          /* "null on the rows we saw" is a different fact from "absent", and a
+             collector that maps a column on the strength of one non-null row
+             needs to know which it is looking at. */
+          if (!had) seen.set(k, { key: k, types: [t], nonNull: t !== 'null' ? 1 : 0 });
+          else { if (!had.types.includes(t)) had.types.push(t); if (t !== 'null') had.nonNull += 1; }
+        }
+      }
+      return [...seen.values()].map((f) => ({ key: f.key, type: f.types.join('|'),
+        non_null_of_sampled: f.nonNull }));
+    };
+    const call = async (path, clientId, body, recordKey) => {
       try {
         const { status, data } = await http(`${HOST}${path}`, {
           method: 'POST', timeoutMs: 30000, retries: 0,
@@ -1611,11 +1636,14 @@ export function probeRoutes(app, { wrap }) {
         /* SHAPE, not records: the top-level keys and the count the provider
            reports, never the rows. body_starts is a 240-character slice of the
            provider's own words, which is what a refusal is worth reading for. */
+        const records = isJson && recordKey && Array.isArray(data[recordKey]) ? data[recordKey] : null;
         return { status, json: isJson,
           answered_by: isJson ? 'the API (a JSON answer)'
             : 'something in front of the API (an HTML page)',
           top_level_keys: isJson && !Array.isArray(data) ? Object.keys(data).slice(0, 20) : null,
           total: isJson && Number.isFinite(data.total) ? data.total : null,
+          records_sampled: records ? records.length : null,
+          fields: records && records.length ? shapeOf(records) : null,
           body_starts: (typeof data === 'string' ? data : JSON.stringify(data ?? null)).slice(0, 240) };
       } catch (e) { return { status: null, error: String(e.message || e).slice(0, 160) }; }
     };
@@ -1648,12 +1676,15 @@ export function probeRoutes(app, { wrap }) {
        answer can tell a missing nicety from a missing collector. */
     const SURFACES = [
       { path: '/v1/parks/driver-profiles/list', needs: 'the roster and the driver names',
-        body: { query: { park: { id: park } }, limit: 5, offset: 0 } },
+        records: 'driver_profiles',
+        body: { query: { park: { id: park } }, limit: 20, offset: 0 } },
       { path: '/v1/parks/cars/list', needs: 'plates, VINs and the car roster',
-        body: { query: { park: { id: park } }, limit: 5, offset: 0 } },
+        records: 'cars',
+        body: { query: { park: { id: park } }, limit: 20, offset: 0 } },
       { path: '/v1/parks/orders/list', needs: 'trips, which is the whole of the Yango trip table',
+        records: 'orders',
         body: { query: { park: { id: park, order: { booked_at: { from: at(from), to: at(to, true) } } } },
-          limit: 5 } },
+          limit: 20 } },
       { path: '/v1/parks/transactions/list', needs: 'the payment ledger',
         body: { query: { park: { id: park, transaction: { event_at: { from: at(from), to: at(to, true) } } } },
           limit: 5 } },
@@ -1668,7 +1699,7 @@ export function probeRoutes(app, { wrap }) {
     ];
     const surfaces = clientId
       ? await Promise.all(SURFACES.map(async (sf) => (
-        { path: sf.path, needs: sf.needs, ...(await call(sf.path, clientId, sf.body)) })))
+        { path: sf.path, needs: sf.needs, ...(await call(sf.path, clientId, sf.body, sf.records)) })))
       : [];
 
     const live = surfaces.filter((sf) => sf.status === 200).map((sf) => sf.path);
