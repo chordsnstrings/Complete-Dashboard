@@ -322,17 +322,24 @@ const get = async (p) => {
        CASE (api/identity_map.js, generated into sql/schema_v53.sql). The
        property these checks exist for is unchanged and is still asserted — the
        rule prefers the folded NAME and falls back to the ID — with one added:
-       the ONLY ids that escape that rule are the three a human verified one at
-       a time. A fourth appearing here without an entry in the register is the
-       rule having widened, which is the failure this file is for. */
+       the ONLY ids that escape that rule are the ones written into the
+       register. One appearing here without an entry in it is the rule having
+       widened, which is the failure this file is for.
+
+       Counted per ALIAS ID and not per entry. An entry's alias is often two
+       provider records — a Bolt numeral and a hotel ObjectId filed under one
+       long name — so the register's ninety-three entries carry a hundred and
+       thirty ids, and a count of entries would have read as agreement while
+       the SQL carried a different list from the JS. */
     const { MERGES } = await import('../api/identity_map.js');
+    const aliasIds = MERGES.flatMap((m) => (m.merge?.ids || [m.merge?.id]).filter(Boolean));
     const pk = personKey('i', 'n');
     check('the person key prefers the name and falls back to the id',
       pk.includes("coalesce(nullif(regexp_replace") && pk.trimEnd().endsWith('i) END'), pk);
     check('…and the only ids that escape that rule are the verified merges',
-      MERGES.every((m) => pk.includes(`'${m.merge.id}'`))
-      && (pk.match(/WHEN '/g) || []).length === MERGES.length,
-      `${(pk.match(/WHEN '/g) || []).length} exceptions against ${MERGES.length} in the register`);
+      aliasIds.every((id) => pk.includes(`'${id}'`))
+      && (pk.match(/WHEN '/g) || []).length === aliasIds.length,
+      `${(pk.match(/WHEN '/g) || []).length} exceptions against ${aliasIds.length} in the register`);
     check('counting people counts distinct person keys, not distinct records',
       peopleCount('i', 'n').startsWith('count(DISTINCT ')
       && peopleCount('i', 'n').includes("coalesce(nullif(regexp_replace"),

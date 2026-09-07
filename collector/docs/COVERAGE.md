@@ -483,7 +483,48 @@ folds the driver directory and the driver pages. It does **not** move
 counts the two records apart. `bin/promote-links.mjs` prints the unpromoted
 links as register entries for a human to review; pasting them in and running
 `bin/gen-schema-v53.mjs` is what moves the stored column. `#identity` prints
-this distinction rather than implying the fold is complete.
+this distinction rather than implying the fold is complete, and
+`/api/drivers/identity-links` marks each row `promoted` so the two kinds are
+not read as one.
+
+### The register as it stands — 2026-09-07
+
+`api/identity_map.js` now applies **93 entries over 90 people**, from three
+sweeps that are kept apart in the file because they are believable for three
+different reasons:
+
+| sweep | entries | what decided each |
+|---|---|---|
+| hand-checked, 2026-09-03 | 3 | shared plates, interleaved custody days, the gap between one record handing a car to the other |
+| shared history, 2026-09-05 | 45 applied (+5 held back) | same cars, same days, trips interleaving **inside** the day rather than following one another |
+| shared phone, 2026-09-07 | 45 | one phone number the roster filed against both records |
+
+Twenty-six people were found by BOTH the custody sweep and the phone sweep,
+independently — which is the strongest reason to believe either — and the
+phone list carries only the forty-five the custody list did not already hold.
+Three people are on the list twice, once from each sweep: that is one person
+with three or four records, not two pairs, and `mergedIds` unions across every
+entry on the key rather than taking the first (it took the first until
+2026-09-07, so opening Aliyan khalil's Uber record found his Yango work and
+not his Bolt standing).
+
+**The five held back** carry a CONTRADICTION — a day on which both records
+took a trip at the same time in different cars — and two of the five also
+share a phone. When a shared phone and a simultaneous trip disagree, the
+records stay apart: merging two humans' work and money is the mistake no page
+can help a reader notice.
+
+Measured over the 395-row directory fixture (`test/fixtures/roster_395.json`,
+production on 2026-09-03): the register joins **72 groups** and takes the
+distinct-people count from **395 to 322**. The other 18 people have a second
+record that has never filed a trip — 56 of the register's 130 alias ids are
+Bolt standings and hotel ObjectIds carrying a phone and no work — which is
+precisely why no name fold could ever have reached them.
+
+**A promotion is one-way from the links page.** Rejecting a promoted link
+takes it off `#identity` and leaves the two records folded, because the fold
+now lives in the stored column. Undoing one means editing
+`api/identity_map.js` and re-running `bin/gen-schema-v53.mjs`.
 
 ### The limit, stated
 

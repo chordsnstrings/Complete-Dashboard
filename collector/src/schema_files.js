@@ -25,9 +25,12 @@ export const SCHEMA_FILES = [
   'schema_v38.sql', 'schema_v39.sql', 'schema_v40.sql',
   'schema_v41.sql', 'schema_v42.sql', 'schema_v43.sql', 'schema_v44.sql', 'schema_v45.sql', 'schema_v46.sql', 'schema_v47.sql', 'schema_v48.sql', 'schema_v49.sql', 'schema_v50.sql', 'schema_v51.sql', 'schema_v52.sql',
   /* v53 is GENERATED from api/identity_map.js by bin/gen-schema-v53.mjs — it
-     rebuilds person_key so the three verified duplicate records fold onto the
-     record they duplicate. Last, so it replaces the expression v20/v42/v51
-     installed rather than racing them. */
+     rebuilds person_key so every verified duplicate record folds onto the
+     record it duplicates. After v20/v42/v51, so it replaces the expression
+     they installed rather than racing them. It is re-runnable and is meant to
+     be regenerated whenever the register grows: the guard inside it probes the
+     LAST alias id and the number of WHEN clauses, so a column built from an
+     older register rebuilds instead of being skipped. */
   'schema_v53.sql',
   'schema_v54.sql',
   'schema_v55.sql',

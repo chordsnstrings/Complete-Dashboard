@@ -4192,10 +4192,11 @@ app.get('/api/finance/ledger', (_, r) => r.json([
   { category: 'toll', n: 233, amount: -932, currency: 'AED' },
 ]));
 
-/* The identity links. The fixture carries the three states the page keeps
-   apart — a link no name rule could have made, a link the names already cover,
-   and one a person overruled — plus the coverage figure that stops the page
-   reading as a clean bill of health. */
+/* The identity links. The fixture carries the four states the page keeps
+   apart — a link no name rule could have made and that the register has since
+   promoted into the stored key, one the rule made and nobody has promoted, a
+   link the names already cover, and one a person overruled — plus the coverage
+   figure that stops the page reading as a clean bill of health. */
 app.get('/api/drivers/identity-links', (_, r) => r.json({
   links: [
     { alias_ext_id: '76ede4ae-768b-4126-804b-0b5c88043682', alias_platform: 'uber',
@@ -4206,7 +4207,8 @@ app.get('/api/drivers/identity-links', (_, r) => r.json({
         + 'against the same phone number, ending 9547 — the names do not fold together, so '
         + 'nothing else could have joined them',
       phone_tail: '9547', first_seen_at: '2026-09-07T09:10:00.000Z',
-      last_seen_at: '2026-09-07T09:10:00.000Z', confirmed_at: null, confirmed_by: null },
+      last_seen_at: '2026-09-07T09:10:00.000Z', confirmed_at: null, confirmed_by: null,
+      promoted: true },
     { alias_ext_id: '6612345', alias_platform: 'bolt', alias_name: 'Zubair Khan Shaukat Ali',
       canonical_ext_id: 'a1b2c3d4-0000-4000-8000-000000000001', canonical_platform: 'uber',
       canonical_name: 'Zubair Khan Ali', canonical_key: 'zubair khan ali',
@@ -4216,15 +4218,17 @@ app.get('/api/drivers/identity-links', (_, r) => r.json({
         + 'could have joined them',
       phone_tail: '4471', first_seen_at: '2026-09-07T09:10:00.000Z',
       last_seen_at: '2026-09-07T09:10:00.000Z',
-      confirmed_at: '2026-09-07T10:00:00.000Z', confirmed_by: 'ops' },
+      confirmed_at: '2026-09-07T10:00:00.000Z', confirmed_by: 'ops', promoted: true },
     { alias_ext_id: '6698765', alias_platform: 'bolt', alias_name: 'same person',
       canonical_ext_id: 'a1b2c3d4-0000-4000-8000-000000000002', canonical_platform: 'uber',
       canonical_name: 'Same Person', canonical_key: 'same person', basis: 'shared_phone',
       evidence: 'uber filed “Same Person” and bolt filed “same person” against the same phone '
         + 'number, ending 1188 — the names also fold together, so this link changes nothing',
       phone_tail: '1188', first_seen_at: '2026-09-07T09:10:00.000Z',
-      last_seen_at: '2026-09-07T09:10:00.000Z', confirmed_at: null, confirmed_by: null },
+      last_seen_at: '2026-09-07T09:10:00.000Z', confirmed_at: null, confirmed_by: null,
+      promoted: false },
   ],
+  promoted: 2,
   rejected: [
     { alias_ext_id: '67483c64055e070d79100114', alias_platform: 'hotel',
       alias_name: 'Sana Ullah Sher Zamin',
@@ -4243,7 +4247,9 @@ app.get('/api/drivers/identity-links', (_, r) => r.json({
   reach_note: 'This can only see a record that carries a phone number. Bolt files none at all, '
     + 'and reaches Uber only because Bolt and the hotel channel file the same full name.',
   applies_note: 'A link folds the driver directory and the driver pages on the next request. '
-    + 'It does not move person_key, which is a stored column.',
+    + 'On its own it does not move person_key, which is a stored column. The rows marked '
+    + 'promoted have been moved into api/identity_map.js, so the stored key carries them and '
+    + 'every rollup folds them too.',
 }));
 
 /* The receipts register. The fixture carries the three cases the page's copy

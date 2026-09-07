@@ -45,6 +45,22 @@ start on every boot and the ledger skips shas it has already seen, so an edit
 to an old file silently does nothing on production. Add a new numbered file
 **and** register it in `src/schema_files.js`.
 
+*The one exception:* `sql/schema_v53.sql` is **generated** from
+`api/identity_map.js` by `bin/gen-schema-v53.mjs` and is meant to be
+regenerated whenever the merge register changes — it drops and re-adds the
+`person_key` generated column and recreates its indexes, and its guard probes
+the LAST alias id plus the WHEN count, so a column built from an older
+register rebuilds instead of being skipped. Edit the register, run
+`node bin/gen-schema-v53.mjs`, and never hand-edit the .sql.
+
+**Who is one person lives in `api/identity_map.js`,** a hand-reviewed LIST of
+verified pairs — never a name rule. It applies 93 entries over 90 people
+(3 hand-checked, 45 from a shared-custody sweep, 45 on a phone number the
+roster filed against both records) and deliberately holds back 5 that carry a
+simultaneous trip in two cars. `docs/COVERAGE.md` carries the measurements.
+`mergedIds`/`canonicalName` union across every entry on a key: three people are
+on the list twice.
+
 **`test/mount.mjs` slices `api/server.js` and injects globals.** Any new import
 added to `server.js` must be added there too, or the whole API test suite dies
 with an unhelpful error.

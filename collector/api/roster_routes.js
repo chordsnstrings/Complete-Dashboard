@@ -29,14 +29,14 @@ const round = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? null
   : Math.round(Number(v) * 10 ** d) / 10 ** d);
 
 /* Two spellings of one person. The same collapse the driver pages use: a
-   doubled surname ("Asad Khan Khan") is one человек, not two. */
+   doubled surname ("Asad Khan Khan") is one person, not two. */
 /* The fold, imported rather than repeated. This file held a fourth copy of it
    — api/server.js had a third, api/custody_sql.js exports the original, and
    sql/schema_v20.sql stores it as a generated column. Four definitions of "the
    same human" is how one person becomes two on a page nobody is looking at. */
 const CANON = personFold('full_name');
-/* The STORED fold, which is the same expression plus the three verified
-   merges (sql/schema_v53.sql generates driver_platform_state.person_key from
+/* The STORED fold, which is the same expression plus the verified merge
+   register (sql/schema_v53.sql generates driver_platform_state.person_key from
    api/identity_map.js). Re-folding full_name here instead would leave the
    roster the one page in the product that still reads a merged pair as two
    people — and it is the page an operator counts heads on. coalesce keeps the

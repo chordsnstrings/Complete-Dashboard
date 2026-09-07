@@ -1,11 +1,25 @@
-/* ── the merge register: identities a human verified, one pair at a time ─────
+/* ── the merge register: identities somebody verified, one pair at a time ────
    ──────────────────────────────────────────────────────────────────────────
-   Two lists live here. MERGES is APPLIED: three pairs the database already
-   folds, because sql/schema_v53.sql is generated from it and stores the answer
-   in person_key. PENDING is VERIFIED BUT NOT APPLIED: fifty more pairs
-   measured the same way on 2026-09-05, held out of the SQL until the migration
-   that can rebuild the stored column exists. The long comment above PENDING
-   says what was measured, where the line was drawn, and what promotes it.
+   Two lists come out of this file. MERGES is APPLIED — ninety-three entries
+   over ninety people, which sql/schema_v53.sql is generated from, so the
+   database already stores the answer in person_key. PENDING is VERIFIED AND
+   DELIBERATELY NOT APPLIED: five pairs that carry a CONTRADICTION, a day on
+   which both records took a trip at the same time in different cars, which is
+   the one observation that a shared car, a shared route and a shared phone
+   cannot explain away.
+
+   Three sweeps built the ninety-three, and they are kept apart below rather
+   than blended, because they are believable for three different reasons:
+
+     ·  3 in HAND_MERGES, checked one pair at a time against production.
+     · 50 in CANDIDATES, from the shared-history sweep — same cars, same days,
+       trips interleaving inside the day rather than following one another.
+       Forty-five are clean and applied; the five with a contradiction are
+       what PENDING is.
+     · 45 in FROM_ROSTER, from src/identity_link.js, on a phone number the
+       roster filed against both records. The twenty-six the sweep had already
+       found are not repeated there — the same people, found twice by two
+       independent methods, which is the strongest reason to believe either.
 
    personFold (api/custody_sql.js) decides that two RECORDS are one human from
    the name alone. It collapses case, runs of whitespace and an adjacent
@@ -14,7 +28,7 @@
    that will one day fire on two names nobody has looked at.
 
    That was measured rather than assumed. The one widening that would catch two
-   of the three pairs below — sort the folded words, so "Khalil Aliyan" keys the
+   of the first three pairs below — sort the folded words, so "Khalil Aliyan" keys the
    same as "Aliyan khalil" — was run over all 395 real names from
    /api/drivers/directory?days=3660 on 2026-09-03. Today it joins exactly the
    two pairs we want and nothing else. That is a fact about today's roster and
@@ -46,7 +60,7 @@
    ── where the merge lands ───────────────────────────────────────────────
    On person_key, which is what every surface in this product already groups
    people by — trips, custody, platform standing, earnings components,
-   statements and payouts. The canonical key of all three pairs is the folded
+   statements and payouts. The canonical key of every entry is the folded
    name of the SURVIVING record, unchanged, so no key in the system moves
    except the alias record's, which moves onto the survivor. The alias record's
    work is then counted with the survivor's rather than beside it. */
@@ -65,9 +79,9 @@
    The old pattern accepted none of them, and assertRegister() below runs at
    IMPORT: the first Bolt id written into either list would have thrown while
    api/identity_map.js was still loading, taking down every route that imports
-   it rather than failing a test. Since fifty of the fifty-three pairs in this
-   file have a Bolt numeral on the alias side, that was the first thing in the
-   way. The width is deliberate — four to twelve digits, because 8361571 is
+   it rather than failing a test. Since fifty of the ninety-eight entries in
+   this file have a Bolt numeral on the alias side, that was the first thing in
+   the way. The width is deliberate — four to twelve digits, because 8361571 is
    seven today and a counter that reaches eight digits is not a new id shape —
    and it is still a shape rather than a promise: the register's ids are
    interpolated into SQL as literals, so what is not one of these four does not
@@ -86,7 +100,10 @@ export const foldName = (s) => String(s == null ? '' : s)
    `keep` is the record that survives; `merge` is the record folded into it.
    `key` is the folded name of `keep` and is asserted below to be exactly that,
    so an entry cannot invent a key that belongs to neither record. */
-export const MERGES = Object.freeze([
+/* The three a person checked one at a time, id to id, before any rule existed.
+   They are the oldest and best-evidenced entries here and they keep their own
+   name so a reader can see which merges predate the roster rule. */
+const HAND_MERGES = Object.freeze([
   {
     key: 'aliyan khalil',
     keep:  { id: '5f16534e-68be-451b-b057-3e3d948e868b', name: 'Aliyan khalil', channel: 'uber' },
@@ -401,7 +418,7 @@ const pending = (m) => Object.freeze({
    man a third way rather than a second. `channel` on each side is the channels
    that record files TRIPS on; an id in the list may belong to a record of
    another channel that has filed none. */
-export const PENDING = Object.freeze([
+const CANDIDATES = Object.freeze([
   pending({
     key: 'shehzad ahmad ghulam muhammad',
     keep:  { id: 'f6253b6e-fca4-41cf-99c1-6c2f3e2e67b2', name: 'Shehzad Ahmad Ghulam Muhammad', channel: 'uber,hotel' },
@@ -904,6 +921,357 @@ export const PENDING = Object.freeze([
   }),
 ]);
 
+/* ── the pairs the ROSTER proved, on a phone number both channels filed ────
+   Discovered by src/identity_link.js rather than checked one at a time, and
+   that difference is why they carry a `basis` and why the evidence names the
+   property that makes the rule safe rather than the history of one person.
+
+   Measured over the 289 roster rows on 2026-09-07: 217 distinct phone
+   numbers, none on more than two records, none twice within a single channel,
+   72 shared across two channels — and 61 of those carrying names no fold can
+   reach, because Bolt and the hotel channel file the full legal name while
+   Uber drops the middle one. A number that identified a handset rather than a
+   person would have to appear on three records or twice in one channel, and
+   none does.
+
+   These forty-five are the ones CANDIDATES above does not already hold. The
+   twenty-six it does hold are not repeated here — they are the same people,
+   found twice by two independent methods, which is the strongest reason to
+   believe either.
+
+   Twelve of the forty-five are pairs the name fold ALREADY joins — the two
+   channels filed the same name, or one of them doubled a word. They are kept
+   anyway: an entry pins the pair id to id, so the answer stops depending on
+   two providers going on spelling a man's name the same way. Each of the
+   twelve says which it is, below. */
+
+/* One sentence, built rather than repeated forty-five times — the same shape
+   pending() above uses, and for the same reason: what differs between these
+   entries is two records and four digits, and forty-five copies of the same
+   three sentences hide that behind three hundred characters each.
+
+   The last clause is COMPUTED, not asserted. It read "The two names do not
+   fold together, so no name rule could have joined them" on every entry, and
+   that is false on twelve of the forty-five: "Abidullah Safi" is filed under
+   the same name on both channels, and "Sajid Gul Gul Muhammad" folds onto
+   "Sajid Gul Muhammad" by the doubled-word rule. Those twelve are redundant
+   with the name fold rather than beyond its reach — still true, still worth
+   carrying so the id-level answer does not depend on the name, but a register
+   that overstates its own evidence is a register a reader stops trusting. */
+const rosterEvidence = (m) => {
+  const reach = foldName(m.keep.name) === foldName(m.merge.name)
+    ? 'The two names already fold together, so this pair was joined without the phone as well; '
+      + 'the entry pins it id to id so the answer no longer depends on the spelling.'
+    : 'The two names do not fold together, so no name rule could have joined them.';
+  return `The roster filed one phone number against both records: ${m.keep.channel} as `
+    + `'${m.keep.name}' and ${m.merge.channel} as '${m.merge.name}', ending ${m.phoneTail}. `
+    + 'Over the 289 roster rows the number is unambiguous: no phone appears on more than two '
+    + 'records and none appears twice within one channel, so it names a person rather than a '
+    + `handset. ${reach}`;
+};
+
+const fromRoster = (m) => Object.freeze({
+  ...m, plate: null, verified: '2026-09-07', basis: 'shared_phone', evidence: rosterEvidence(m),
+});
+
+const FROM_ROSTER = Object.freeze([
+  fromRoster({
+    key: 'abidullah safi',
+    keep:  { id: 'dae09063-88a3-432e-b39f-969d8de7992b', name: 'Abidullah Safi', channel: 'uber' },
+    merge: { id: '6a5645c839f87dec92ca9386', name: 'Abidullah Safi', channel: 'hotel' },
+    phoneTail: '6800',
+  }),
+  fromRoster({
+    key: 'abusaad siddiqui akhlaque ahmad',
+    keep:  { id: '68f744f88c482942eaaba18b', name: 'Abusaad Siddiqui Akhlaque Ahmad', channel: 'hotel' },
+    merge: { id: 'beada3aa-c836-47d2-9100-feea4b1f31e2', name: 'Abusaad Siddiqui Ahmad', channel: 'uber' },
+    phoneTail: '7157',
+  }),
+  fromRoster({
+    key: 'aftab ahmed muhammad sharif altaf',
+    keep:  { id: '68905c41d0a931b9d7544982', name: 'Aftab Ahmed Muhammad Sharif Altaf', channel: 'hotel' },
+    merge: { id: '78b5741e-1c72-4b56-907f-da18807e5f57', name: 'Aftab Ahmed Altaf', channel: 'uber' },
+    phoneTail: '0419',
+  }),
+  fromRoster({
+    key: 'alakbar rahimov',
+    keep:  { id: 'cf08a7df-1a9f-450c-92aa-baa8d9da5f7b', name: 'ALAKBAR RAHIMOV', channel: 'uber' },
+    merge: { id: '69707aaeb905b635fcc054f3', name: 'Alakbar Rahimov', channel: 'hotel' },
+    phoneTail: '6737',
+  }),
+  fromRoster({
+    key: 'ali nawaz muhammad nawaz',
+    keep:  { id: '67483c64055e070d791000f0', name: 'ALI NAWAZ MUHAMMAD NAWAZ', channel: 'hotel' },
+    merge: { id: '42114339-fce7-448d-a4b5-b22aeea680cf', name: 'Ali Nawaz Nawaz', channel: 'uber' },
+    phoneTail: '9092',
+  }),
+  fromRoster({
+    key: 'aman ullah amir mehboob alam',
+    keep:  { id: '68766d7d03051f14d95a8209', name: 'Aman Ullah Amir Mehboob Alam', channel: 'hotel' },
+    merge: { id: '41b08fe8-4e12-4541-bb74-51c44bd54357', name: 'Amanullah Alam', channel: 'uber' },
+    phoneTail: '1767',
+  }),
+  fromRoster({
+    key: 'amshid khan aleem khan',
+    keep:  { id: '67483c64055e070d791000e5', name: 'AMSHID KHAN ALEEM KHAN', channel: 'hotel' },
+    merge: { id: '9c09415b-9aa2-43dc-ac9e-298c3c72ac32', name: 'Amshid Khan Khan', channel: 'uber' },
+    phoneTail: '0954',
+  }),
+  fromRoster({
+    key: 'ansar murtaza butt rashid murtaza',
+    keep:  { id: '67483c64055e070d791000e0', name: 'ANSAR MURTAZA BUTT RASHID MURTAZA', channel: 'hotel' },
+    merge: { id: '84dea951-8a05-4b19-8b88-072ac72f3d2c', name: 'Ansar Murtaza Butt', channel: 'uber' },
+    phoneTail: '7413',
+  }),
+  fromRoster({
+    key: 'edwin nyasani mandere',
+    keep:  { id: '6a48ed8f13880329d04ebbbd', name: 'Edwin Nyasani Mandere', channel: 'hotel' },
+    merge: { id: '513d8c27-b88d-4c3e-8b20-c74680dede03', name: 'Edwin Mandere', channel: 'uber' },
+    phoneTail: '8523',
+  }),
+  fromRoster({
+    key: 'faisal badshah rasool badshah',
+    keep:  { id: '67483c64055e070d79100109', name: 'FAISAL BADSHAH RASOOL BADSHAH', channel: 'hotel' },
+    merge: { id: '9d1c60ce-e906-4ce7-ac3f-dd33eed89c99', name: 'Faisal Badshah Badshah', channel: 'uber' },
+    phoneTail: '3832',
+  }),
+  fromRoster({
+    key: 'farman ullah ghafoor khan',
+    keep:  { id: 'de9a4044-c57e-427c-ae06-5bca66873857', name: 'Farman Ullah Ghafoor Khan', channel: 'uber' },
+    merge: { id: '690b535b8c482942eaacb83c', name: 'Farman Ullah Ghafoor Khan', channel: 'hotel' },
+    phoneTail: '8936',
+  }),
+  fromRoster({
+    key: 'fawad ali khan ayaz muhammad',
+    keep:  { id: '67483c64055e070d791000d0', name: 'FAWAD ALI KHAN AYAZ MUHAMMAD', channel: 'hotel' },
+    merge: { id: 'df270275-028d-40e7-91c8-5f3b80e3efed', name: 'Fawad Ali Muhammad', channel: 'uber' },
+    phoneTail: '2628',
+  }),
+  fromRoster({
+    key: 'hassan talaat kamel abousira',
+    keep:  { id: '293f7986-1768-4c56-8317-133ee31d89fb', name: 'Hassan Talaat Kamel Abousira', channel: 'uber' },
+    merge: { id: '69046cc38c482942eaac6ee7', name: 'Hassan Talaat Kamel Abousira', channel: 'hotel' },
+    phoneTail: '2904',
+  }),
+  fromRoster({
+    key: 'irfan ullah awal ameen',
+    keep:  { id: '04c30a0a-1d4f-40f3-b9aa-378ed5ceeee4', name: 'Irfan Ullah Awal Ameen', channel: 'uber' },
+    merge: { id: '67483c64055e070d791000f1', name: 'IRFAN ULLAH AWAL AMEEN', channel: 'hotel' },
+    phoneTail: '8611',
+  }),
+  fromRoster({
+    key: 'joseph wandera',
+    keep:  { id: '1e2311ad-cc26-4e2b-839a-41363ef67672', name: 'Joseph Wandera', channel: 'uber' },
+    merge: { id: '68e368e3ff76a73626e0720e', name: 'Joseph Wandera', channel: 'hotel' },
+    phoneTail: '4794',
+  }),
+  fromRoster({
+    key: 'kashan malik abdul malik',
+    keep:  { id: '67483c64055e070d791000fc', name: 'KASHAN MALIK ABDUL MALIK', channel: 'hotel' },
+    merge: { id: 'ec9980b3-9663-43ac-9444-a1fc81675c0a', name: 'Kashan Malik Malik', channel: 'uber' },
+    phoneTail: '8907',
+  }),
+  fromRoster({
+    key: 'kashif ali ayyub khan',
+    keep:  { id: '84d498cf-a74a-4750-9ac2-5eabdeec3b8d', name: 'Kashif Ali Ayyub khan', channel: 'uber' },
+    merge: { id: '67483c64055e070d791000e3', name: 'KASHIF ALI AYYUB KHAN', channel: 'hotel' },
+    phoneTail: '3892',
+  }),
+  fromRoster({
+    key: 'kazi fuad ahmed kazi alim ullah',
+    keep:  { id: '67483c64055e070d791000ca', name: 'Kazi Fuad Ahmed Kazi Alim Ullah', channel: 'hotel' },
+    merge: { id: '8cf0d6e0-5399-4686-81fd-2aa8682ce786', name: 'Kazi Fuad Alim Ullah', channel: 'uber' },
+    phoneTail: '2161',
+  }),
+  fromRoster({
+    key: 'majid shah mehboob shah',
+    keep:  { id: '67483c64055e070d791000ee', name: 'MAJID SHAH MEHBOOB SHAH', channel: 'hotel' },
+    merge: { id: '4963067e-9979-411e-8c66-926ca581a0f2', name: 'Majid Shah Shah', channel: 'uber' },
+    phoneTail: '1645',
+  }),
+  fromRoster({
+    key: 'md imran hasan rahi md mostafa',
+    keep:  { id: '67483c64055e070d7910012e', name: 'Md Imran Hasan Rahi Md Mostafa', channel: 'hotel' },
+    merge: { id: '7edf1e96-da02-4f5a-ae10-5b9a1842c828', name: 'Md Imran Mostafa', channel: 'uber' },
+    phoneTail: '5338',
+  }),
+  fromRoster({
+    key: 'maen m alaa shekfa',
+    keep:  { id: '67483c64055e070d79100133', name: 'M MAEN M ALAA SHEKFA', channel: 'hotel' },
+    merge: { id: 'e4cb0cd6-a078-461b-984a-b7c6fc32a247', name: 'M Maen Shekfa', channel: 'uber' },
+    phoneTail: '9775',
+  }),
+  fromRoster({
+    key: 'mohammad naeem adam khan',
+    keep:  { id: '67483c64055e070d79100117', name: 'MOHAMMAD NAEEM ADAM KHAN', channel: 'hotel' },
+    merge: { id: 'd31e25fa-dc28-424c-a6e5-c2cbcf516870', name: 'Mohammad Naeem Khan', channel: 'uber' },
+    phoneTail: '5690',
+  }),
+  fromRoster({
+    key: 'mohammad shahin mohammad shahazanan',
+    keep:  { id: '67483c64055e070d79100129', name: 'Mohammad Shahin Mohammad Shahazanan', channel: 'hotel' },
+    merge: { id: '47f7edb9-b533-45b9-8f42-2f383b8384bb', name: 'Mohammad Shahin Shahazanan', channel: 'uber' },
+    phoneTail: '2825',
+  }),
+  fromRoster({
+    key: 'mohammed alsoos',
+    keep:  { id: '67483c64055e070d7910012f', name: 'MOHAMMED A A ALSOOS', channel: 'hotel' },
+    merge: { id: 'ba5e864f-6035-469c-97a1-db3e4a087385', name: 'Mohammed Alsous', channel: 'uber' },
+    phoneTail: '8559',
+  }),
+  fromRoster({
+    key: 'mohammed musab rahmathulla',
+    keep:  { id: '2c085db3-dbb1-48a6-99ca-0af7e5ee3ea5', name: 'Mohammed Musab Rahmathulla', channel: 'uber' },
+    merge: { id: '68905130d0a931b9d7544863', name: 'Mohammed Musab Rahmathulla', channel: 'hotel' },
+    phoneTail: '3246',
+  }),
+  fromRoster({
+    key: 'moses bale',
+    keep:  { id: '628fbdea-1404-4289-a5b5-9bab4dc69cf0', name: 'Moses Bale', channel: 'uber' },
+    merge: { id: '68e36905ff76a73626e07220', name: 'Moses Bale', channel: 'hotel' },
+    phoneTail: '4909',
+  }),
+  fromRoster({
+    key: 'muhammad abid ali khan noor',
+    keep:  { id: '67483c64055e070d791000de', name: 'MUHAMMAD ABID ALI KHAN NOOR NOOR', channel: 'hotel' },
+    merge: { id: '0b4d7f5b-086e-4f40-96c6-2e2ffe727214', name: 'Muhammad Abid Khan', channel: 'uber' },
+    phoneTail: '2133',
+  }),
+  fromRoster({
+    key: 'muhammad ahmad ghulam qadir',
+    keep:  { id: '6a7f3e80d87732ee9b2068a3', name: 'MUHAMMAD AHMAD GHULAM QADIR', channel: 'hotel' },
+    merge: { id: '8b6b8f45-eda3-44be-85d8-0d45d9dad64e', name: 'Muhammad Ahmad khan', channel: 'uber' },
+    phoneTail: '1075',
+  }),
+  fromRoster({
+    key: 'muhammad amir misree khan',
+    keep:  { id: '67483c64055e070d791000d3', name: 'MUHAMMAD AMIR MISREE KHAN', channel: 'hotel' },
+    merge: { id: 'b00986ad-2af2-4fac-babd-df87d3cd5a05', name: 'Muhammad Amir Khan', channel: 'uber' },
+    phoneTail: '4163',
+  }),
+  fromRoster({
+    key: 'muhammad hanan munir muhammad munir',
+    keep:  { id: '688085f5a0bf23d354fd60b0', name: 'Muhammad Hanan Munir Muhammad Munir', channel: 'hotel' },
+    merge: { id: '3113020f-f05b-4f77-882b-394cce34efc7', name: 'Muhammad Hanan Munir', channel: 'uber' },
+    phoneTail: '3145',
+  }),
+  fromRoster({
+    key: 'muhammad hasham tanveer ahmad khan',
+    keep:  { id: '67483c64055e070d791000e2', name: 'MUHAMMAD HASHAM TANVEER TANVEER AHMAD KHAN', channel: 'hotel' },
+    merge: { id: '147935b6-3c73-4689-a5f2-3efd07d91c12', name: 'Muhammad Hasham KHAN', channel: 'uber' },
+    phoneTail: '0618',
+  }),
+  fromRoster({
+    key: 'muhammad khalifa afzal khalid',
+    keep:  { id: '67483c64055e070d79100112', name: 'MUHAMMAD KHALIFA AFZAL KHALID', channel: 'hotel' },
+    merge: { id: '76ede4ae-768b-4126-804b-0b5c88043682', name: 'Muhammad Khalid', channel: 'uber' },
+    phoneTail: '9547',
+  }),
+  fromRoster({
+    key: 'muhammad sameer shamrez asghar',
+    keep:  { id: '67483c64055e070d79100131', name: 'MUHAMMAD SAMEER SHAMREZ ASGHAR', channel: 'hotel' },
+    merge: { id: '1f5bbf3c-ba34-4dec-a28a-6af17d241033', name: 'Muhammad Sameer Asghar', channel: 'uber' },
+    phoneTail: '3717',
+  }),
+  fromRoster({
+    key: 'nauman hassan shida muhammad',
+    keep:  { id: '67483c64055e070d791000f9', name: 'NAUMAN HASSAN SHIDA MUHAMMAD', channel: 'hotel' },
+    merge: { id: '8583f89a-6620-4557-a985-4c12bf08b02a', name: 'Nauman Hassan Muhammad', channel: 'uber' },
+    phoneTail: '7656',
+  }),
+  fromRoster({
+    key: 'norah chia nsom',
+    keep:  { id: '8daae9c7-5a34-4e67-a178-565b92191461', name: 'Norah Chia Nsom', channel: 'uber' },
+    merge: { id: '6a18229d284c6a435463e0fb', name: 'Norah chia Nsom', channel: 'hotel' },
+    phoneTail: '0823',
+  }),
+  fromRoster({
+    key: 'saad ali akram muhammad akram bhatti',
+    keep:  { id: '67483c64055e070d791000d9', name: 'SAAD ALI AKRAM MUHAMMAD AKRAM BHATTI', channel: 'hotel' },
+    merge: { id: '69845f36-babb-46b3-ae7d-d39c864bc427', name: 'Saad ali Bhatti', channel: 'uber' },
+    phoneTail: '6680',
+  }),
+  fromRoster({
+    key: 'sabbir hossain shahalom',
+    keep:  { id: '006e7f5c-f7c4-45f2-bd00-336121105d3f', name: 'Sabbir Hossain Shahalom', channel: 'uber' },
+    merge: { id: '67483c64055e070d791000cd', name: 'SABBIR HOSSAIN SHAHALOM', channel: 'hotel' },
+    phoneTail: '5536',
+  }),
+  fromRoster({
+    key: 'sajid gul muhammad',
+    keep:  { id: '68905711d0a931b9d754492a', name: 'Sajid Gul Gul Muhammad', channel: 'hotel' },
+    merge: { id: 'a2692332-5580-4aef-890b-48416e7eeed0', name: 'Sajid Gul Muhammad', channel: 'uber' },
+    phoneTail: '7095',
+  }),
+  fromRoster({
+    key: 'sar zamin khan shah bahadar',
+    keep:  { id: '69411d3a8c482942eaaf083e', name: 'Sar Zamin Khan Shah Bahadar', channel: 'hotel' },
+    merge: { id: '14852992-6178-4043-976e-4dd4e8fc72ad', name: 'Sar Zamin Bahadar', channel: 'uber' },
+    phoneTail: '8958',
+  }),
+  fromRoster({
+    key: 'sohib hussein mohamed',
+    keep:  { id: '99c3016d-12da-4831-a4c6-7102c696b849', name: 'Sohib Hussein Mohamed', channel: 'uber' },
+    merge: { id: '69a6b3ea0c67e9caa6353337', name: 'Sohib Hussein Ahmed', channel: 'hotel' },
+    phoneTail: '5270',
+  }),
+  fromRoster({
+    key: 'umar ali zarid khan',
+    keep:  { id: '67483c64055e070d791000f8', name: 'Umar Ali Zarid Khan', channel: 'hotel' },
+    merge: { id: '758b9949-6042-4c2d-b6f0-aebe8501d5be', name: 'Umar Ali Khan', channel: 'uber' },
+    phoneTail: '3801',
+  }),
+  fromRoster({
+    key: 'waseem abbas ghulam nabi',
+    keep:  { id: '6911c82f8c482942eaacf939', name: 'Waseem Abbas Ghulam Nabi', channel: 'hotel' },
+    merge: { id: '4056c8cc-3c12-41ba-9948-e7e740d67fbe', name: 'Waseem Abbas Nabi', channel: 'uber' },
+    phoneTail: '9942',
+  }),
+  fromRoster({
+    key: 'zain ul abideen muhammad irfan',
+    keep:  { id: '67483c64055e070d791000df', name: 'ZAIN UL ABIDEEN MUHAMMAD IRFAN', channel: 'hotel' },
+    merge: { id: '362aca28-e48d-4c09-bce2-f5fe23266723', name: 'Zain Ul Abideen Irfan', channel: 'uber' },
+    phoneTail: '1304',
+  }),
+  fromRoster({
+    key: 'zia ali said muhammad',
+    keep:  { id: '67483c64055e070d7910012d', name: 'ZIA ALI SAID MUHAMMAD', channel: 'hotel' },
+    merge: { id: '4ce6eea7-ea84-49d9-b6c5-14f67d3f5cc3', name: 'Zia Ali Muhammad', channel: 'uber' },
+    phoneTail: '2816',
+  }),
+  fromRoster({
+    key: 'zubair khan shaukat ali',
+    keep:  { id: '67483c64055e070d791000e4', name: 'ZUBAIR KHAN SHAUKAT ALI', channel: 'hotel' },
+    merge: { id: 'a83f63fc-88bb-4bbd-9ee3-55d5aeb00e8c', name: 'Zubair Khan Ali', channel: 'uber' },
+    phoneTail: '1373',
+  }),
+]);
+
+/* ── what is applied, and what is held back ───────────────────────────────
+   A pair with a CONTRADICTION is a day on which both records took a trip at
+   the same time, which is the one observation that cannot be explained by one
+   person holding two accounts. Five of the fifty carry one or two such days
+   against two hundred and more shared ones, and two of those five also share a
+   phone. A shared phone is strong and a simultaneous trip is disconfirming,
+   and when the two disagree the honest answer is to leave the records apart
+   and say so: merging two humans' work and money is the mistake no page can
+   help a reader notice, and it is the one this whole register exists to avoid
+   making by accident.
+
+   So they stay in PENDING — verified, published, and not applied — and the
+   forty-five clean ones join the register. */
+const hasContradiction = (m) => ((m.contradictions || []).length > 0);
+
+export const MERGES = Object.freeze([
+  ...HAND_MERGES,
+  ...CANDIDATES.filter((m) => !hasContradiction(m)),
+  ...FROM_ROSTER,
+]);
+
+/** The ones still held back, and why each one is. */
+export const PENDING = Object.freeze(CANDIDATES.filter(hasContradiction));
+
+
 /* ── the guard, run at import ─────────────────────────────────────────────
    A register that loads a malformed entry is a register nobody re-reads. It
    runs over BOTH lists, because an entry in PENDING is one migration away from
@@ -957,6 +1325,26 @@ function assertRegister() {
         + ' — the register must be flat');
     }
   }
+  /* One key, one survivor.
+     ─────────────────────────────────────────────────────────────────────────
+     A key may carry more than one entry — "Aliyan khalil" was proved by hand
+     against his Yango record and again by the shared-history sweep against his
+     Bolt one, and that is one man with three records rather than two pairs.
+     What may NOT happen is two entries claiming the same key for two DIFFERENT
+     surviving records: the key is the folded name of the survivor, so that
+     shape is two men with the same folded name being quietly merged by a
+     register entry nobody wrote. It cannot arise from foldName alone, because
+     both would already share a key without any register at all — it arises
+     from a hand edit, which is exactly what this list is. */
+  const survivor = new Map();
+  for (const m of [...MERGES, ...PENDING]) {
+    const had = survivor.get(m.key);
+    if (had && had !== m.keep.id) {
+      throw new Error(`identity_map: key ${JSON.stringify(m.key)} names two different `
+        + `surviving records (${had} and ${m.keep.id}) — one key, one survivor`);
+    }
+    survivor.set(m.key, m.keep.id);
+  }
   /* The refusals are about PAIRS, not about ids, and the check used to be
      about ids: no id could appear in both a merge and a refusal. That was
      right while the merges were three and is wrong now. "Muhammad Khalid Gul"
@@ -1009,7 +1397,15 @@ function assertMeasured(m, where) {
 assertRegister();
 
 /** alias id → the person key it resolves to. Empty for every other id. */
-export const ALIAS_KEY = Object.freeze(new Map(MERGES.map((m) => [m.merge.id, m.key])));
+/* EVERY alias id, not the first one.
+   ─────────────────────────────────────────────────────────────────────────
+   This read `m.merge.id`, which is right for a pair whose alias is one record
+   and silently wrong for one whose alias is two — a Bolt numeral and the hotel
+   ObjectId filed under the same long name. `merge.ids` is the commoner shape
+   in the register now, and mapping one of them and not the other would split
+   the person a third way rather than folding them a second. */
+export const ALIAS_KEY = Object.freeze(new Map(
+  MERGES.flatMap((m) => mergeIdsOf(m).map((id) => [id, m.key]))));
 
 /** The same thing for the pending fifty, and it is NOT wired to anything.
     ─────────────────────────────────────────────────────────────────────────
@@ -1022,23 +1418,38 @@ export const ALIAS_KEY = Object.freeze(new Map(MERGES.map((m) => [m.merge.id, m.
 export const PENDING_ALIAS_KEY = Object.freeze(new Map(
   PENDING.flatMap((m) => mergeIdsOf(m).map((id) => [id, m.key]))));
 
-/** Both ids of a pair, given either of them; just the id given, otherwise. */
+/** EVERY entry on this person's key, not the first one that mentions the id.
+    ─────────────────────────────────────────────────────────────────────────
+    This was a `.find`, which is right for a person the register holds once and
+    silently wrong for the three it holds twice. "Aliyan khalil" is one man with
+    three records — an Uber id, a Yango id proved by hand, and a Bolt id proved
+    by the sweep — filed as two entries on one key. A `.find` from the Uber id
+    returned the hand entry and therefore two of his three ids, so opening his
+    page found his Yango work and not his Bolt standing, and opening the Bolt
+    record found the Bolt standing and not the Yango work. The key is the
+    person; the entries are the evidence; the ids are the union. */
+const entriesFor = (id) => {
+  const hit = MERGES.find((x) => x.keep.id === id || mergeIdsOf(x).includes(id));
+  return hit ? MERGES.filter((x) => x.key === hit.key) : [];
+};
+
 export function mergedIds(id) {
-  const m = MERGES.find((x) => x.keep.id === id || x.merge.id === id);
-  return m ? [m.keep.id, m.merge.id] : [id];
+  const es = entriesFor(id);
+  if (!es.length) return [id];
+  return [...new Set([es[0].keep.id, ...es.flatMap(mergeIdsOf)])];
 }
 
 /** The name the merged person is filed under — the surviving record's. */
 export function canonicalName(id) {
-  const m = MERGES.find((x) => x.keep.id === id || x.merge.id === id);
-  return m ? m.keep.name : null;
+  const es = entriesFor(id);
+  return es.length ? es[0].keep.name : null;
 }
 
-/** Both spellings of a merged person, so a driver page can match rows filed
-    under either. Empty for an id the register has never been told about. */
+/** Every spelling of a merged person, so a driver page can match rows filed
+    under any of them. Empty for an id the register has never been told about. */
 export function mergedNames(id) {
-  const m = MERGES.find((x) => x.keep.id === id || x.merge.id === id);
-  return m ? [m.keep.name, m.merge.name] : [];
+  const es = entriesFor(id);
+  return es.length ? [...new Set([es[0].keep.name, ...es.map((m) => m.merge.name)])] : [];
 }
 
 /** The channels the pair's two records live on. The Bolt record in the
@@ -1047,8 +1458,18 @@ export function mergedNames(id) {
     the very fact the merge exists to surface (an account the fleet
     deactivated). */
 export function mergedPlatforms(id) {
-  const m = MERGES.find((x) => x.keep.id === id || x.merge.id === id);
-  return m ? [m.keep.channel, m.merge.channel] : [];
+  const es = entriesFor(id);
+  /* SPLIT on the comma. `channel` is the channels a record files trips on and
+     sixteen entries name two of them ("uber,bolt", "bolt,hotel"), so returning
+     the field verbatim put the literal string "uber,bolt" into the driver
+     page's platform list — one chip reading `uber,bolt` beside the real ones,
+     and every `platforms.includes('bolt')` test on that person answering no.
+     Harmless while the register was three single-channel pairs; live the day
+     the sweep's entries were applied. */
+  return es.length
+    ? [...new Set([es[0].keep.channel, ...es.map((m) => m.merge.channel)]
+      .flatMap((c) => String(c).split(',')).map((c) => c.trim()).filter(Boolean))]
+    : [];
 }
 
 /** The person key for one record, in JS: the register first, then the fold. */
@@ -1066,11 +1487,15 @@ const lit = (s) => `'${String(s).replace(/'/g, "''")}'`;
 /** `fallback`, except for the ids in the register, which answer their person. */
 export const identityCase = (idCol, fallback) =>
   `CASE ${idCol}\n`
-  + MERGES.map((m) => `         WHEN ${lit(m.merge.id)} THEN ${lit(m.key)}`).join('\n')
+  + MERGES.flatMap((m) => mergeIdsOf(m).map(
+    (id) => `         WHEN ${lit(id)} THEN ${lit(m.key)}`)).join('\n')
   + `\n         ELSE ${fallback} END`;
 
 /** The register as a comment block, so the schema file carries its own reasons. */
 export const registerComment = () => MERGES.map((m) =>
-  `-- ${m.merge.id} (${m.merge.channel} "${m.merge.name}")\n`
+  `-- ${mergeIdsOf(m).join(', ')} (${m.merge.channel} "${m.merge.name}")\n`
   + `--   -> ${m.keep.id} (${m.keep.channel} "${m.keep.name}") = ${lit(m.key)}\n`
-  + `--   verified ${m.verified} on plate ${m.plate}`).join('\n');
+  + `--   verified ${m.verified}`
+  + (m.basis ? ` on a ${m.basis.replace(/_/g, ' ')}`
+    : m.plate ? ` on plate ${m.plate}`
+      : m.plates ? ` on ${m.plates.length} shared plate${m.plates.length === 1 ? '' : 's'}` : '')).join('\n');

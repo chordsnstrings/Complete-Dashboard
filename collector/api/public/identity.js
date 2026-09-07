@@ -46,6 +46,11 @@ export async function renderIdentity(root) {
   const links = d.links || [];
   const rejected = d.rejected || [];
   const cov = d.coverage || {};
+  /* Promoted: the rule found it AND somebody moved it into the register, so it
+     is in the stored person_key column and every rollup in the product folds
+     it. Un-promoted links fold the driver pages and nothing else, and the two
+     look identical on this page unless it says which is which. */
+  const promoted = links.filter((r) => r.promoted);
   /* A link whose two names already fold is real and redundant — the name rule
      has it. Separating them is the difference between "the rule found sixty
      people" and "the rule found sixty people, of whom fifty-eight were being
@@ -57,6 +62,12 @@ export async function renderIdentity(root) {
       sub: needed.length === links.length
         ? 'every one of them a pair no name rule could have reached'
         : `${fmt(needed.length)} of them could not have been joined by name` },
+    promoted.length
+      ? { label: 'In every total', value: fmt(promoted.length),
+        sub: `of ${fmt(links.length)} — these are in the stored key, so the money and trip `
+          + 'rollups fold them too; the rest fold the driver pages only',
+        tone: 'ok' }
+      : null,
     { label: 'Accounts carrying a phone', value: fmt(cov.with_phone ?? 0),
       sub: `of ${fmt(cov.accounts ?? 0)} the product counts work for — this rule can only see `
         + 'an account that carries one' },
@@ -94,6 +105,10 @@ export async function renderIdentity(root) {
         render: (r) => (/changes nothing/.test(r.evidence || '')
           ? '<span class="tag ok" title="the two names fold together, so the existing name rule already joined these">Yes — already folded</span>'
           : '<span class="tag warn" title="the two channels file different names for this person, so nothing but the phone could have joined them">No</span>') },
+      { label: 'Folds the totals too', key: 'promoted',
+        render: (r) => (r.promoted
+          ? '<span class="tag ok" title="this pair is in api/identity_map.js, so the stored person_key column carries it and every rollup in the product folds the two records">Yes — in the stored key</span>'
+          : '<span class="tag" title="this link folds the driver directory and the driver pages on the next request, but person_key is a stored column and still counts the two records apart">Pages only</span>') },
       { label: 'Checked by a person', key: 'confirmed_at',
         render: (r) => (r.confirmed_at
           ? `${dtStr(r.confirmed_at)}${r.confirmed_by ? `<span class="dim"> · ${esc(r.confirmed_by)}</span>` : ''}`

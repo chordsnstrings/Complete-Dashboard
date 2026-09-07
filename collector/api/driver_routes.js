@@ -28,7 +28,7 @@ import { areaOf } from './analytics_routes.js';
 import { isoDay } from '../src/sources/ledger.js';
 import { isAdmin } from './admin_gate.js';
 import { IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, photoHref } from './redact.js';
-/* The three identities a human verified, id to id — see api/identity_map.js
+/* The ninety identities the register applies, id to id — see api/identity_map.js
    for the measurement behind each and why this is a LIST and not a rule. The
    stored person_key already carries them (sql/schema_v53.sql generates it from
    the same module), so every aggregate here folds them together on its own.
@@ -335,9 +335,24 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       `SELECT alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
               canonical_name, evidence, phone_tail, rejected_reason, last_seen_at
          FROM driver_identity_link WHERE rejected ORDER BY canonical_name NULLS LAST`);
+    /* Which of these the register has already taken.
+       ─────────────────────────────────────────────────────────────────────
+       Forty-five of the pairs this rule found were promoted into
+       api/identity_map.js and are now in the stored person_key column, and a
+       page that lists them beside the ones that are not says the same thing
+       about two rows that behave differently. A promoted pair is folded by
+       every rollup in the product and CANNOT be undone from here — rejecting
+       it takes it off this list and leaves the records folded — so the row has
+       to say so, and applies_note below has to stop claiming otherwise. */
+    const promoted = links.rows.filter((l) =>
+      ALIAS_KEY.has(l.alias_ext_id) || ALIAS_KEY.has(l.canonical_ext_id)).length;
     res.json({
-      links: links.rows,
+      links: links.rows.map((l) => ({
+        ...l,
+        promoted: ALIAS_KEY.has(l.alias_ext_id) || ALIAS_KEY.has(l.canonical_ext_id),
+      })),
       rejected,
+      promoted,
       coverage: {
         roster_rows: cov?.roster_rows ?? 0,
         accounts: cov?.accounts ?? 0,
@@ -355,9 +370,12 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         + 'all, and reaches Uber only because Bolt and the hotel channel file the same full '
         + 'name and the existing name fold already joins those two.',
       applies_note: 'A link folds the driver directory and the driver pages on the next '
-        + 'request. It does not move person_key, which is a stored column, so a rollup that '
-        + 'groups by it counts the two records apart until the link is promoted into '
-        + 'api/identity_map.js by hand.',
+        + 'request. On its own it does not move person_key, which is a stored column, so a '
+        + 'rollup that groups by it counts the two records apart until the link is promoted '
+        + 'into api/identity_map.js by hand. The rows marked promoted have been: they are in '
+        + 'the stored column, every rollup folds them, and rejecting one here takes it off '
+        + 'this list without unfolding the records \u2014 that needs an edit to '
+        + 'api/identity_map.js and a regenerated sql/schema_v53.sql.',
     });
   }));
 
@@ -711,14 +729,15 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     for (const r of rows) {
       /* The register first, then the stored fold, then the name.
          ─────────────────────────────────────────────────────────────────
-         The stored key already carries the three verified merges, so for a
-         person the window measured this changes nothing. It is the OTHER
-         rows this is for: a record with no work in the window has no
-         w.person_key, falls through to the name — and two of the three merged
-         records are exactly that (a Bolt standing with no trips, and a hotel
-         record outside most windows), so without this the directory would
-         still list them as separate people while every aggregate in the
-         product counted them as one. */
+         The stored key already carries the register, so for a person the
+         window measured this changes nothing. It is the OTHER rows this is
+         for: a record with no work in the window has no w.person_key and
+         falls through to the name — and a great many of the merged records
+         are exactly that. Fifty-six of the register's hundred and thirty
+         alias ids have never filed a trip at all (Bolt standings and hotel
+         ObjectIds carrying a phone number and nothing else), so without this
+         the directory would still list them as separate people while every
+         aggregate in the product counted them as one. */
       /* The register, then the roster's own proof, then the stored fold, then
          the name.
          ─────────────────────────────────────────────────────────────────

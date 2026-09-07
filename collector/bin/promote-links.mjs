@@ -14,7 +14,7 @@
    reads the live links, drops the ones the register already holds and the ones
    whose names the fold covers anyway, and prints entries in the register's own
    shape with the evidence attached. What a person then does is read them,
-   delete the ones they disagree with, paste the rest into MERGES, and run
+   delete the ones they disagree with, paste the rest into FROM_ROSTER, and run
    `node bin/gen-schema-v53.mjs` — which is the step that rewrites the stored
    column and is exactly where a review belongs.
 
@@ -26,7 +26,15 @@
 import { pool } from '../src/db.js';
 import { MERGES, REFUSED, foldName } from '../api/identity_map.js';
 
-const held = new Set(MERGES.flatMap((m) => [m.keep.id, m.merge.id]));
+/* EVERY id the register holds, not `m.merge.id`.
+   ─────────────────────────────────────────────────────────────────────────
+   An entry's alias is often two provider records — a Bolt numeral and a hotel
+   ObjectId filed under one long name — so `merge.ids` is the commoner shape
+   and `m.merge.id` is undefined on those entries. Reading the singular field
+   put `undefined` in this set instead of eighty-five real ids, and this tool
+   would then have printed, as new, links the register already holds. */
+const mergeIdsOf = (m) => (m.merge?.ids || [m.merge?.id]).filter(Boolean);
+const held = new Set(MERGES.flatMap((m) => [m.keep.id, ...mergeIdsOf(m)]));
 const refused = new Set(REFUSED.flatMap((r) => [r.a.id, r.b.id]));
 
 const q = (t, p = []) => pool.query(t, p).then((r) => r.rows);
@@ -58,22 +66,25 @@ const day = new Date().toISOString().slice(0, 10);
 
 console.log(`/* ${out.length} link${out.length === 1 ? '' : 's'} the roster proved and the register`);
 console.log('   does not yet hold. Read each one, delete what you disagree with, paste the rest');
-console.log('   into MERGES in api/identity_map.js, then run bin/gen-schema-v53.mjs.');
+console.log('   into FROM_ROSTER in api/identity_map.js, then run bin/gen-schema-v53.mjs.');
 console.log(`   Skipped: ${skip.already_in_register} already in the register, `
   + `${skip.refused_by_hand} refused by hand, ${skip.names_already_fold} whose names the fold`);
 console.log('   already covers. */');
+/* The register's own shape for a roster-found pair: fromRoster() builds the
+   evidence, the verification date and the basis, so what is pasted in is the
+   two records and four digits and nothing a later reader has to check twice.
+   `day` is printed in the header rather than per entry, because the helper
+   stamps the date the whole batch was verified. */
 for (const r of out) {
-  console.log(`  {
+  console.log(`  fromRoster({
     key: '${esc(r.canonical_key)}',
     keep:  { id: '${esc(r.canonical_ext_id)}', name: '${esc(r.canonical_name)}', channel: '${esc(r.canonical_platform)}' },
     merge: { id: '${esc(r.alias_ext_id)}', name: '${esc(r.alias_name)}', channel: '${esc(r.alias_platform)}' },
-    plate: null,
-    verified: '${day}',
-    evidence:
-      '${esc(r.evidence)}. '
-      + 'Discovered by src/identity_link.js on ${r.first_seen_at ? String(r.first_seen_at).slice(0, 10) : day} '
-      + 'and applied at the API boundary since; promoting it moves person_key, '
-      + 'so every rollup counts the two records as one person too.',
-  },`);
+    phoneTail: '${esc(r.phone_tail)}',
+  }),`);
+}
+if (out.length) {
+  console.log(`/* fromRoster() stamps verified '2026-09-07'. These were seen on ${day} — change`);
+  console.log('   the date in the helper, or give this batch its own, before pasting. */');
 }
 await pool.end();

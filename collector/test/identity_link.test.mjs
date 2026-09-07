@@ -300,11 +300,61 @@ console.log('\nthe directory folds the two records into one row');
   check('…and is reported separately, with the reason',
     after.body.rejected?.length === 1 && after.body.rejected[0].rejected_reason === 'two brothers',
     JSON.stringify(after.body.rejected?.[0]?.rejected_reason));
+  /* …and the directory splits the pair again — UNLESS the pair has since been
+     promoted into api/identity_map.js, which this one has.
+     ─────────────────────────────────────────────────────────────────────────
+     This asserted two rows and was right the day it was written. The register
+     has since taken this exact pair: the operator opened this whole line of
+     work with it ("Muhammad Khalifa Afzal Khalid has uber trips, but it
+     doesn't show that uber is there"), it was checked, and it is now one of
+     the forty-five entries the register carries on a shared phone. Promotion
+     moves the join out of this table and into the stored person_key column,
+     where a rejected row cannot reach it.
+
+     That is the design rather than an accident — the register is a decision
+     somebody made and this table is a rule that ran — but it is a LIMIT an
+     operator has to be told: rejecting a PROMOTED link takes it off the links
+     page and leaves the two records folded, and undoing the fold means editing
+     api/identity_map.js and regenerating sql/schema_v53.sql. So both halves
+     are asserted: the promoted pair stays folded, and a pair the register has
+     never heard of still splits on the rejection. */
   const dir2 = await get(`/api/drivers/directory?${W}`);
   const mine2 = (dir2.body || []).filter((r) =>
     (r.ids || []).some((i) => i === KHALIFA[0].driver_ext_id || i === KHALIFA[1].driver_ext_id));
-  check('…and the directory splits them again, because the person said so',
-    mine2.length === 2, JSON.stringify(mine2.map((r) => r.driver_name)));
+  const { ALIAS_KEY } = await import('../api/identity_map.js');
+  check('a promoted pair stays folded through the rejection — the register holds it now',
+    ALIAS_KEY.get(KHALIFA[1].driver_ext_id) === 'muhammad khalifa afzal khalid'
+    && mine2.length === 1, JSON.stringify(mine2.map((r) => r.driver_name)));
+
+  /* The control: two records the register has never been told about, joined by
+     the same rule and split again by the same rejection. Without this the
+     assertion above would be the whole of what this file says about a
+     rejection, and "the rejection did nothing" would pass it. */
+  await db.query(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, phone)
+                  VALUES ('hotel','h-reject','Yusuf Bilal Rahman Ahmad','971500004242'),
+                         ('uber','u-reject','Yusuf Bilal Ahmad','971500004242')`);
+  await db.query(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+                       requested_at, status)
+     VALUES ('hotel','t-r1','ecosine','L11111','h-reject','Yusuf Bilal Rahman Ahmad',
+             '2026-09-02T10:00:00Z','completed'),
+            ('uber','t-r2','ecosine','L22222','u-reject','Yusuf Bilal Ahmad',
+             '2026-09-03T10:00:00Z','completed')`);
+  await refreshIdentityLinks(db);
+  clearIdentityLinkCache();
+  const mineR = async () => ((await get(`/api/drivers/directory?${W}`)).body || [])
+    .filter((r) => (r.ids || []).some((i) => i === 'h-reject' || i === 'u-reject'));
+  const joined = await mineR();
+  check('a pair the register never heard of is folded by the rule alone',
+    joined.length === 1 && (joined[0].ids || []).length === 2,
+    JSON.stringify(joined.map((r) => [r.driver_name, r.ids])));
+  await db.query(`UPDATE driver_identity_link SET rejected = true, rejected_reason = 'two brothers'
+                   WHERE alias_ext_id IN ('h-reject','u-reject')
+                      OR canonical_ext_id IN ('h-reject','u-reject')`);
+  clearIdentityLinkCache();
+  const split = await mineR();
+  check('…and the directory splits it again, because the person said so',
+    split.length === 2, JSON.stringify(split.map((r) => r.driver_name)));
 }
 
 await db.close();
