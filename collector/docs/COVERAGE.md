@@ -661,6 +661,34 @@ the plate and the view is keyed on the raw one.
 finds offenders by regex across `api/*.js` rather than listing them, so a fifth
 file is covered without editing it.
 
+### The second opinion, measured on production 2026-09-07
+
+With the Yango collector reading `fleet-api.yango.tech`, `vehicle_profile`
+finally has two writers. Over all 273 plates:
+
+| | |
+|---|---|
+| plates with a VIN | **138** — the figure that was established by hand, now a column |
+| distinct VINs among them | **138** |
+| plates with no VIN from anybody | 135 |
+| VIN filed by Uber only | 51 |
+| VIN filed by **both** channels | **87** |
+| …of which the two channels **agree** | 46 |
+| …of which they file **different** VINs | **41** |
+
+**Do not read those 41 as 41 re-plated cars.** Yango's own VIN column is
+internally inconsistent: `/api/schema/raw-fields?table=vehicle_profile&platform=yango`
+reports **104 car rows carrying 58 distinct VINs**, so Yango is already
+reusing a VIN across its own cars before Uber is consulted. Uber's 138 are
+1:1 with their plates. So the disagreements are far more likely Yango's data
+than the fleet's plates moving, and `vehicle_plate` prefers Uber's value for
+exactly that reason.
+
+The page says what is known and no more: a disputed plate is drawn as a
+disagreement, with "either the plate moved between cars or one of them is
+wrong, and nothing here can say which". Settling the 41 needs a third source
+— the registration document — not another provider's feed.
+
 ### The claim that could not fail
 
 "138 plates, 138 distinct VINs, not one VIN on two plates" was reported as
