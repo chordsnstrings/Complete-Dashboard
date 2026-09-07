@@ -1566,6 +1566,28 @@ export function probeRoutes(app, { wrap }) {
      YANGO_CLIENT_ID if one has been pasted, then the three shapes Yango's
      fleet products use. Same rule as the Uber tier probe above — the caller
      chooses nothing, and what is not in this list is not tried. */
+  /* The other door, and everything behind it.
+     ─────────────────────────────────────────────────────────────────────────
+     fleet.yango.com is the WEB console and wants a Yandex session cookie. It
+     has answered 403 since 2026-09-06 — an HTML page from a CDN edge, not the
+     JSON every Yango API refusal is — while the same park answers 401 with the
+     cookie removed, which from one origin is an unreachable pair unless
+     something in front of the API is doing the refusing. The park itself is
+     provably right: /api/fleet/ui/v1/parks/users/profile returns 200 and names
+     "ECOSINE TRANSPORTS LLC".
+
+     fleet-api.yango.tech is a DIFFERENT product — Yango's own Fleet API, keyed
+     rather than cookied — and the stored YANGO_API_KEY already opens it, with
+     the client id shaped "taxi/park/<park id>". Measured from production
+     2026-09-07: HTTP 200, 145 driver profiles, no cookie anywhere.
+
+     So this probe asks two questions in order. FIRST which client id shape the
+     key is accepted under, because that is the credential question. THEN, with
+     the shape that won, whether each surface the collector needs exists on
+     this host — the driver roster, the order list and the transaction ledger —
+     because a door that opens onto one endpoint is not a replacement for a
+     collector that reads three. The paths and their request bodies are written
+     down here; nothing the caller sends becomes part of any request. */
   app.get('/api/probe/yango/keyapi', wrap(async (req, res) => {
     await loadSettings();
     const park = config.yango.parkId || '';
@@ -1573,50 +1595,107 @@ export function probeRoutes(app, { wrap }) {
     if (!park || !key) {
       return res.status(400).json({ error: 'YANGO_PARK_ID and YANGO_API_KEY must both be set' });
     }
+    const HOST = 'https://fleet-api.yango.tech';
     const stored = get('YANGO_CLIENT_ID') || null;
+    const hdrs = (clientId) => ({
+      'X-API-Key': key, 'X-Client-ID': clientId,
+      'content-type': 'application/json', 'Accept-Language': 'en',
+    });
+    const call = async (path, clientId, body) => {
+      try {
+        const { status, data } = await http(`${HOST}${path}`, {
+          method: 'POST', timeoutMs: 30000, retries: 0,
+          headers: hdrs(clientId), body: JSON.stringify(body),
+        });
+        const isJson = typeof data === 'object' && data !== null;
+        /* SHAPE, not records: the top-level keys and the count the provider
+           reports, never the rows. body_starts is a 240-character slice of the
+           provider's own words, which is what a refusal is worth reading for. */
+        return { status, json: isJson,
+          answered_by: isJson ? 'the API (a JSON answer)'
+            : 'something in front of the API (an HTML page)',
+          top_level_keys: isJson && !Array.isArray(data) ? Object.keys(data).slice(0, 20) : null,
+          total: isJson && Number.isFinite(data.total) ? data.total : null,
+          body_starts: (typeof data === 'string' ? data : JSON.stringify(data ?? null)).slice(0, 240) };
+      } catch (e) { return { status: null, error: String(e.message || e).slice(0, 160) }; }
+    };
+
+    /* ── 1. which client id shape the key is accepted under ────────────── */
     const candidates = [
       ...(stored ? [{ label: 'the stored YANGO_CLIENT_ID', value: stored }] : []),
       { label: 'taxi/park/<park id>', value: `taxi/park/${park}` },
       { label: 'the park id alone', value: park },
       { label: 'fleet/<park id>', value: `fleet/${park}` },
     ];
-    const url = 'https://fleet-api.yango.tech/v1/parks/driver-profiles/list';
-    const body = JSON.stringify({ query: { park: { id: park } }, limit: 1 });
+    const probeBody = { query: { park: { id: park } }, limit: 1 };
     const tried = [];
     for (const c of candidates) {
-      try {
-        const { status, data } = await http(url, {
-          method: 'POST', timeoutMs: 30000, retries: 0,
-          headers: {
-            'X-API-Key': key, 'X-Client-ID': c.value,
-            'content-type': 'application/json', 'Accept-Language': 'en',
-          },
-          body,
-        });
-        const isJson = typeof data === 'object' && data !== null;
-        tried.push({ shape: c.label, status,
-          answered_by: isJson ? 'the API (a JSON answer)' : 'something in front of the API (an HTML page)',
-          body_starts: (typeof data === 'string' ? data : JSON.stringify(data ?? null)).slice(0, 240) });
-      } catch (e) {
-        tried.push({ shape: c.label, status: null, error: String(e.message || e).slice(0, 160) });
-      }
+      tried.push({ shape: c.label, ...(await call('/v1/parks/driver-profiles/list', c.value, probeBody)) });
     }
-    const won = tried.find((t) => t.status === 200);
+    const wonAt = tried.findIndex((t) => t.status === 200);
+    const won = wonAt >= 0 ? tried[wonAt] : null;
+    const clientId = wonAt >= 0 ? candidates[wonAt].value : null;
+
+    /* ── 2. and what is behind it ──────────────────────────────────────── */
+    /* A seven-day window, so an endpoint that requires one is asked something
+       it can answer and a 400 means the SHAPE is wrong rather than the range.
+       dubaiIso is the fleet's clock; the +04:00 arithmetic lives in one place. */
+    const to = dubaiIso();
+    const from = dubaiIso(new Date(Date.now() - 7 * 864e5));
+    const at = (d, end) => `${d}T${end ? '23:59:59' : '00:00:00'}+04:00`;
+    /* Every surface the collector reads today, and the shape each is asked in.
+       `needs` says what src/sources/yango.js uses it for, so a reader of the
+       answer can tell a missing nicety from a missing collector. */
+    const SURFACES = [
+      { path: '/v1/parks/driver-profiles/list', needs: 'the roster and the driver names',
+        body: { query: { park: { id: park } }, limit: 5, offset: 0 } },
+      { path: '/v1/parks/cars/list', needs: 'plates, VINs and the car roster',
+        body: { query: { park: { id: park } }, limit: 5, offset: 0 } },
+      { path: '/v1/parks/orders/list', needs: 'trips, which is the whole of the Yango trip table',
+        body: { query: { park: { id: park, order: { booked_at: { from: at(from), to: at(to, true) } } } },
+          limit: 5 } },
+      { path: '/v1/parks/transactions/list', needs: 'the payment ledger',
+        body: { query: { park: { id: park, transaction: { event_at: { from: at(from), to: at(to, true) } } } },
+          limit: 5 } },
+      { path: '/v1/parks/transactions/categories/list', needs: 'what each ledger row means',
+        body: { query: { park: { id: park } } } },
+      /* The one the web console serves the weekly driver summary from. It is
+         asked here because the collector's pullDrivers() reads exactly this
+         aggregate, and a 404 is the finding that says pullDrivers has to be
+         rebuilt from the raw orders rather than repointed. */
+      { path: '/v1/parks/summary/drivers/list', needs: 'the weekly per-driver aggregate pullDrivers reads',
+        body: { query: { park: { id: park } }, date_from: from, date_to: to } },
+    ];
+    const surfaces = clientId
+      ? await Promise.all(SURFACES.map(async (sf) => (
+        { path: sf.path, needs: sf.needs, ...(await call(sf.path, clientId, sf.body)) })))
+      : [];
+
+    const live = surfaces.filter((sf) => sf.status === 200).map((sf) => sf.path);
+    const gone = surfaces.filter((sf) => sf.status === 404).map((sf) => sf.path);
     res.json({
-      url, park_id: { len: park.length, head: park.slice(0, 4), tail: park.slice(-4) },
+      host: HOST,
+      park_id: { len: park.length, head: park.slice(0, 4), tail: park.slice(-4) },
       api_key: { len: key.length, head: key.slice(0, 4), tail: key.slice(-4) },
       client_id_stored: !!stored,
+      client_id_shape: won ? won.shape : null,
+      window: { from, to },
       tried,
+      surfaces,
       reading: won
         ? `the key API answers this park with the client id shaped "${won.shape}" — Yango can be `
-          + 'collected without a cookie, and the weekly paste can stop'
+          + `collected without a cookie, and the weekly paste can stop. ${live.length} of `
+          + `${surfaces.length} surfaces answer here`
+          + (gone.length ? `; ${gone.length} do not exist on this host (${gone.join(', ')}), so what `
+            + 'the collector reads from them has to be rebuilt from what does, not repointed at it' : '')
         : tried.every((t) => t.status === 401 || t.status === 403)
           ? 'the key alone is refused by every client id shape tried. Either the key is not '
             + 'entitled to this park on the fleet API, or the real client id is a value only the '
             + 'Yango portal can show — paste it as YANGO_CLIENT_ID and run this again'
           : 'no shape answered 200; read the bodies above, they carry the provider\u2019s own words',
-      note: 'Read-only: one list call, one park, four written-down client id shapes. Nothing the '
-        + 'caller sends becomes part of the request.',
+      note: 'Read-only. One list call per written-down path, one park, four written-down client id '
+        + 'shapes. Nothing the caller sends becomes part of any request, and only the first 240 '
+        + 'characters of each answer are returned.',
     });
   }));
 
