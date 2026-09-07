@@ -1491,9 +1491,22 @@ export function probeRoutes(app, { wrap }) {
           },
           body,
         });
-        const first = typeof data === 'string' ? data.slice(0, 120)
-          : JSON.stringify(data ?? null).slice(0, 120);
-        return { status, body_starts: first };
+        /* 400 characters, not 120, and it is the most useful field here.
+           ─────────────────────────────────────────────────────────────────
+           The first run of this probe returned status 403 with a body opening
+           `<!DOCTYPE html><title>403</title>` while the cookie-free call
+           returned `{"code":"unauthorized"}` as JSON. That difference is the
+           whole diagnosis: every refusal Yango's own API makes is JSON —
+           unauthorized, access_denied — so an HTML error page is something in
+           FRONT of the API answering, and which edge it is decides the fix. A
+           title and a doctype do not say which; four hundred characters
+           usually carry the vendor's own name or a request id. */
+        const first = typeof data === 'string' ? data.slice(0, 400)
+          : JSON.stringify(data ?? null).slice(0, 400);
+        /* And whether it is even the API answering, said as a fact rather than
+           left for a reader to notice in a string. */
+        const isJson = typeof data === 'object' && data !== null;
+        return { status, answered_by: isJson ? 'the Yango API (a JSON error)' : 'something in front of the API (an HTML page)', body_starts: first };
       } catch (e) { return { status: null, error: String(e.message || e).slice(0, 140) }; }
     };
     const withCookie = await ask(true);
