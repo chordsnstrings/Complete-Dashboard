@@ -149,8 +149,16 @@ export async function renderReceipts(root) {
     /* Oldest first, because a month series read left to right is a series and
        read right to left is a list. */
     const series = [...months].reverse();
-    barChart(chart, series.map((m) => ({ label: dateStr(m.month).replace(/^\d+ /, ''), n: m.amount })),
-      { valueFmt: (v) => money(v), axisFmt: (v) => fmt(v) });
+    /* `x` and `y` are the KEY NAMES and barChart gives them no defaults — a
+       call that omits them reads `d[undefined]`, every bar is NaN, and the
+       chart draws an empty 0..1 axis in a full-height panel. Which is exactly
+       what this one did until it was looked at. */
+    barChart(chart, series.map((m) => ({ m: dateStr(m.month).replace(/^\d+ /, ''), amount: m.amount })),
+      { x: 'm', y: 'amount',
+        valueFmt: (v) => money(v),
+        /* Money on the axis as well as in the tooltip: "1,240" and "AED 1,240"
+           are different claims, and this axis is only ever money. */
+        axisFmt: (v) => money(v) });
     mp.body.append(tableFrom(months, [
       { label: 'Month', key: 'month',
         render: (m) => `<b>${esc(dateStr(m.month).replace(/^\d+ /, ''))}</b>` },

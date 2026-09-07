@@ -170,7 +170,7 @@ check('…and it is the SHORTER filing that loses, not both of them',
   && week.superseded === false,
   JSON.stringify(rows.filter((x) => x.superseded).map((x) => [String(x.period_start).slice(0, 10), x.days])));
 check('…so the money in the contested week is counted exactly once',
-  Math.abs((+sep.amount + +sep.superseded_amount) - (16549.24 + 3600)) < 0.01,
+  sep && Math.abs((+sep.amount + +sep.superseded_amount) - (16549.24 + 3600)) < 0.01,
   JSON.stringify([sep?.amount, sep?.superseded_amount]));
 check('…and the loser is still in the register, marked, rather than deleted',
   rows.filter((x) => x.superseded).length === 3,

@@ -750,8 +750,14 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    "Dubai → Sheikh Moha…" inside a 1,132px panel with nine hundred pixels of
    empty track beside it — a cap that was right in a narrow column and wrong
    everywhere else. A percentage scales with the host, and the 84px floor keeps
-   a phone from giving the label nothing. */
-.hb{display:grid;grid-template-columns:minmax(84px,30%) 1fr auto;align-items:center;gap:11px;cursor:default}
+   a phone from giving the label nothing.
+
+   38%, not 30%: once the day page's charts moved into a two-column grid the
+   panel is 515px rather than 1,132px, and 30% of that is 154px — back to
+   "Business Bay → Busines…". At 38% the label column is 196px and the track
+   still has about 250px, which is more length than a ranking needs to be
+   read. */
+.hb{display:grid;grid-template-columns:minmax(84px,38%) 1fr auto;align-items:center;gap:11px;cursor:default}
 .hb .k{font-size:var(--t6);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* A midpoint rule behind the track, so a ranking has a scale rather than only
    a set of lengths — with no axis at all a reader cannot tell whether the
@@ -786,7 +792,6 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    block wraps and the key returns to sitting under the ring, which is what
    happens inside a three-up grid and on a phone. */
 .dnut{display:flex;align-items:center;justify-content:center;gap:26px;flex-wrap:wrap}
-.dnut > svg.donut{flex:none;width:190px;height:190px;margin:0}
 /* 400px, not 520. At 520 the label sat hard left and its share bar hard
    right, with sixty pixels of nothing between them — a key has to read as one
    object or the eye stops treating the row as a single fact. */
@@ -801,7 +806,7 @@ thead th .sarr{font-style:normal;margin-left:.4em;opacity:.85}
    bar starts where the longest word ends. With the label on 1fr it stretched
    and left a 150px hole in the middle of every row. */
 .dnut-keys{
-  flex:1 1 250px;min-width:0;max-width:400px;margin-top:0;
+  flex:1 1 200px;min-width:0;max-width:400px;margin-top:0;
   display:grid;grid-template-columns:10px minmax(0,auto) minmax(40px,1fr) auto auto;
   align-items:center;gap:7px 9px;font-size:var(--t5);color:var(--ink-2);
 }
@@ -1591,8 +1596,29 @@ td .pill,td .tag{white-space:nowrap}
    left ~2,000px of empty card beside the breaks list. */
 .grid{align-items:start}
 
-/* A donut was hard-capped at 190px inside a 740px panel — 74% empty. */
-.panel:not(.mapwrap) svg.donut{max-width:min(100%,300px)}
+/* The ring is a FIXED item beside its key, not a picture that grows to fill
+   the panel.
+   ─────────────────────────────────────────────────────────────────────────
+   This read `max-width:min(100%,300px)`, written when a donut sat alone in a
+   full-width panel and was hard-capped at 190px — 74% empty, and growing it
+   was the right answer then. It is the wrong answer now: the key sits beside
+   the ring, so the ring growing to 300px is 300px the key cannot have, and
+   measured on the day page it pushed the key onto its own line and put the
+   empty space back where it started.
+
+   It lives HERE, near the end of the file, and not beside the other .dnut
+   rules. `.panel:not(.mapwrap) svg{width:100%}` above has the same specificity
+   as `.dnut > svg.donut` — two classes and an element either way — so the one
+   that wins is the one that comes last, and written up with its siblings this
+   rule lost silently: it was there, and the ring still measured 300px. Not
+   scoped to `.panel` either, so the same size holds wherever a ring is drawn,
+   including a test that renders one on its own. */
+.dnut > svg.donut{flex:none;width:200px;height:200px;max-width:100%;margin:0}
+/* Where the key has wrapped underneath, the ring is the only thing on its
+   line and can afford to be the size it was. */
+@media(max-width:560px){
+  .dnut > svg.donut{width:240px;height:240px}
+}
 
 /* ── motion ────────────────────────────────────────────────────────────────
    Restrained on purpose: this is an operational tool. Each of these says

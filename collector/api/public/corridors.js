@@ -63,7 +63,20 @@ export async function renderCorridors(root) {
      window, and drew one page-wide skeleton for all of it. The panels are laid
      out first so the page has a shape while it fills. */
   const kpiHost = el('div'); root.append(kpiHost); loading(kpiHost);
-  const g = el('div', 'grid'); root.append(g);
+  /* `grid` alone is not a grid: app.css:537 sets display and gap and leaves
+     the columns to `.g2`/`.g3`/`.g23`. Every other analytical view in the
+     product passes one of those; this page and #corridors were the only two
+     that did not, so seven chart panels sat in a single 1,132px track. That
+     is what made the day page look the way it did — a nine-bar chart drawn
+     1,090px wide, a 234px donut with 416px of empty panel on either side of
+     it, and a page 1,173px taller than it needs to be.
+
+     Measured in Chromium at four widths: with `g2` the columns become
+     557px + 557px at 1440, the bar chart drops from 1,090px to 515px, the
+     body height goes 8,161 -> 6,988, and 1024 and 900 are byte-for-byte
+     unchanged because app.css:541 already collapses g2 to one column below
+     1080px. */
+  const g = el('div', 'grid g2'); root.append(g);
   const { panel: p1, body: b1 } = panel('Where jobs start', 'Pickup area, all channels combined.');
   g.append(p1); loading(b1);
   const { panel: p2, body: b2 } = panel('Morning areas and evening areas',

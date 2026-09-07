@@ -70,42 +70,47 @@ import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sq
      straddling rows is returned so the page can say how much of the month is
      carried by them. */
 export function receiptRoutes(app, { q, wrap, range }) {
-  /* The two CTEs both queries below share, written once.
-     ─────────────────────────────────────────────────────────────────────────
-     `restated` is the same test /api/finance/provenance applies, deliberately:
-     two pages disagreeing about which rows are a re-file would be worse than
-     either being wrong, and it is the property both of them turn on. Only the
-     kinds that REPORT A PERIOD are eligible — a fare row is one trip and a
-     ledger row is one transaction, so two on a day are two events rather than
-     one restated.
+  app.get('/api/finance/receipts', wrap(async (req, res) => {
+    const p = range(req);
+    /* ONE query, and the month rollup computed from the rows it returns.
+       ─────────────────────────────────────────────────────────────────────
+       Two things were wrong with running a second statement for the months.
+       It did the same expensive work twice — and it could disagree with the
+       list, because the list was capped at 600 rows and the totals were not,
+       so a page could show a month whose bars did not add up to the rows
+       under them. Grouping to (source, channel, fleet, kind, period) collapses
+       every driver line into its filing, which is a few hundred rows over a
+       year rather than the two hundred thousand behind them, so there is
+       nothing left to cap.
 
-     `superseded` is the half provenance does not need and this page cannot do
-     without, and getting it wrong the obvious way understates a month by more
-     than double-counting overstates it.
+       `restated` is the same test /api/finance/provenance applies,
+       deliberately: two pages disagreeing about which rows are a re-file is
+       worse than either being wrong. Only the kinds that REPORT A PERIOD are
+       eligible — a fare row is one trip and a ledger row is one transaction,
+       so two on a day are two events rather than one restated.
 
-     A restatement marks BOTH sides. The weekly filing and the three daily rows
-     that re-serve three of its days all overlap something, so all four are
-     `restated` — which is correct, because either one alone is the truth and
-     the row cannot say which. Excluding every restated row from a total
-     therefore does not remove the duplicate: it removes the money. Measured on
-     the fixture in test/receipts_register.test.mjs, September came to AED
-     7,549.24 against a true 16,549.24, with 12,600 reported as excluded — a
-     figure that is wrong in the direction nobody checks, because a total that
-     is too small looks like a quiet month.
+       `superseded` is the half provenance does not need and this page cannot
+       do without. A restatement marks BOTH sides — the weekly filing and the
+       daily rows that re-serve three of its days all overlap something — which
+       is correct, because either alone is the truth and the row cannot say
+       which. Excluding every marked row from a total therefore does not remove
+       the duplicate, it removes the money: measured on the fixture in
+       test/receipts_register.test.mjs, September came to AED 7,549.24 against
+       a true 16,549.24. So one side wins by a rule said out loud — the longest
+       period, being the provider's canonical filing, and among equal periods
+       the one filed most recently. Same rule sql/schema_v58.sql applies to
+       statements, and the same one August's AED 44,903 false reconciliation
+       gap turned on.
 
-     So one side has to win, by a rule stated out loud. The rule is the
-     provider's own canonical filing: the LONGEST period wins, and among equal
-     periods the one filed most recently. That is the same rule
-     sql/schema_v58.sql applies to statements and the same one the August
-     reconciliation gap turned on — a four-day REST window superseding the full
-     week already held is exactly this mistake in the other direction.
-
-     The self-join is over the contested rows only. A row that supersedes a
-     contested row overlaps it and is therefore contested itself, so both sides
-     of the join live in that small set — the provenance route's warning about
-     a quadratic self-join over two hundred thousand rows does not apply. */
-  const MARKED = `
-       w AS (
+       It is decided by a JOIN and a bool_or, not by a correlated EXISTS over a
+       CTE. The first version used EXISTS, and Postgres materialised the
+       contested set and re-scanned it once per row: on production over a
+       hundred-day window that query ran past the gateway's 120-second patience
+       and the endpoint answered 500. The join carries the six partition
+       columns as equalities, so it hashes and each bucket is one driver's
+       handful of filings. */
+    const rows = await q(
+      `WITH w AS (
          SELECT * FROM money_event
           WHERE period_start <= $2::date AND period_end >= $1::date
             AND ($3::text IS NULL OR platform = $3)
@@ -126,27 +131,30 @@ export function receiptRoutes(app, { q, wrap, range }) {
                            ROWS BETWEEN 1 FOLLOWING AND UNBOUNDED FOLLOWING)
        ),
        contested AS (SELECT * FROM marked WHERE restated),
+       beaten AS (
+         SELECT c.source, c.platform, c.kind, c.category, c.driver_ext_id, c.external_ref,
+                c.period_start, c.period_end
+           FROM contested c
+           JOIN contested o
+             ON o.source = c.source AND o.platform = c.platform AND o.kind = c.kind
+            AND o.category = c.category AND o.driver_ext_id = c.driver_ext_id
+            AND o.external_ref = c.external_ref
+            AND o.period_start <= c.period_end AND o.period_end >= c.period_start
+            AND ((o.period_end - o.period_start) > (c.period_end - c.period_start)
+                 OR ((o.period_end - o.period_start) = (c.period_end - c.period_start)
+                     AND coalesce(o.ingested_at, 'epoch'::timestamptz)
+                       > coalesce(c.ingested_at, 'epoch'::timestamptz)))
+          GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+       ),
        judged AS (
-         SELECT m.*,
-                m.restated AND EXISTS (
-                  SELECT 1 FROM contested o
-                   WHERE o.source = m.source AND o.platform = m.platform
-                     AND o.kind = m.kind AND o.category = m.category
-                     AND o.driver_ext_id = m.driver_ext_id
-                     AND o.external_ref = m.external_ref
-                     AND o.period_start <= m.period_end AND o.period_end >= m.period_start
-                     AND ((o.period_end - o.period_start) > (m.period_end - m.period_start)
-                          OR ((o.period_end - o.period_start) = (m.period_end - m.period_start)
-                              AND coalesce(o.ingested_at, 'epoch'::timestamptz)
-                                > coalesce(m.ingested_at, 'epoch'::timestamptz)))
-                ) AS superseded
+         SELECT m.*, (b.source IS NOT NULL) AS superseded
            FROM marked m
-       )`;
-
-  app.get('/api/finance/receipts', wrap(async (req, res) => {
-    const p = range(req);
-    const rows = await q(
-      `WITH ${MARKED}
+           LEFT JOIN beaten b
+             ON b.source = m.source AND b.platform = m.platform AND b.kind = m.kind
+            AND b.category = m.category AND b.driver_ext_id = m.driver_ext_id
+            AND b.external_ref = m.external_ref
+            AND b.period_start = m.period_start AND b.period_end = m.period_end
+       )
        SELECT source, platform, fleet_id, kind,
               period_start, period_end,
               (period_end - period_start + 1)::int AS days,
@@ -158,11 +166,12 @@ export function receiptRoutes(app, { q, wrap, range }) {
               round(sum(amount) FILTER (WHERE amount > 0)::numeric, 2) AS credits,
               round(sum(amount) FILTER (WHERE amount < 0)::numeric, 2) AS debits,
               bool_or(restated) AS restated,
-              /* Superseded, not merely contested: this is the flag the page
-                 puts against a row to say it is NOT in the month total, and
-                 the two are different rows. */
+              /* bool_and, not bool_or: a filing counts only if EVERY line in it
+                 lost to a longer one. A grouped row that is partly superseded
+                 is money still owed a place in the total. */
               bool_and(superseded) AS superseded,
               round(sum(amount) FILTER (WHERE superseded)::numeric, 2) AS superseded_amount,
+              round(sum(amount) FILTER (WHERE NOT superseded)::numeric, 2) AS counted_amount,
               /* WHEN IT ARRIVED, which is a different date from the period it
                  covers and the one that answers "why did last week's figure
                  change overnight". A provider files late; the money is dated
@@ -176,32 +185,48 @@ export function receiptRoutes(app, { q, wrap, range }) {
          FROM judged
         GROUP BY source, platform, fleet_id, kind, period_start, period_end
         ORDER BY period_end DESC, period_start DESC, sum(abs(amount)) DESC NULLS LAST
-        LIMIT 600`, p);
+        LIMIT 2000`, p);
 
-    /* The month rollup a forecast will eventually read. Built from the same
-       judged set rather than from `rows`, so the LIMIT above cannot silently
-       shorten a total — a capped list feeding a sum is how a figure quietly
-       becomes about the first six hundred rows. */
-    const months = await q(
-      `WITH ${MARKED}
-       SELECT date_trunc('month', period_end)::date AS month, platform, kind,
-              round(sum(amount) FILTER (WHERE NOT superseded)::numeric, 2) AS amount,
-              round(sum(amount) FILTER (WHERE superseded)::numeric, 2) AS superseded_amount,
-              count(*)::int rows_seen,
-              count(DISTINCT (period_start, period_end))::int periods,
-              count(DISTINCT (period_start, period_end)) FILTER (WHERE superseded)::int superseded_periods,
-              count(DISTINCT (period_start, period_end))
-                FILTER (WHERE date_trunc('month', period_start)
-                          <> date_trunc('month', period_end))::int straddling,
-              min(period_start) AS covers_from, max(period_end) AS covers_to
-         FROM judged
-        GROUP BY 1, 2, 3
-        ORDER BY 1 DESC, sum(abs(amount)) DESC NULLS LAST`, p);
+    /* The month rollup, folded from the same rows the page lists — so the
+       bars and the table under them cannot disagree. `counted_amount` rather
+       than `amount`, because a grouped filing can be part superseded and the
+       month is owed the part that was not. */
+    /* A DATE off the driver is a Date object here and a 'YYYY-MM-DD' string
+       under PGlite, and `String(aDate)` is "Mon Aug 31 2026 04:00:00 GMT+0400"
+       — which slices to "Mon Aug 31", keys every row under a different month
+       and empties the rollup. Same trap docs/COVERAGE.md records against
+       node-postgres. Read off the local parts rather than toISOString(),
+       because a DATE parsed as local midnight shifts back a day in UTC. */
+    const ymd = (d) => (d instanceof Date
+      ? `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      : String(d ?? '').slice(0, 10));
+    const byKey = new Map();
+    for (const r of rows) {
+      const k = `${ymd(r.month)}|${r.platform}|${r.kind}`;
+      const cur = byKey.get(k) || { month: ymd(r.month), platform: r.platform,
+        kind: r.kind, amount: 0, superseded_amount: 0, rows_seen: 0, periods: 0,
+        superseded_periods: 0, straddling: 0, covers_from: null, covers_to: null };
+      cur.amount += +r.counted_amount || 0;
+      cur.superseded_amount += +r.superseded_amount || 0;
+      cur.rows_seen += r.rows_seen || 0;
+      cur.periods += 1;
+      if (r.superseded) cur.superseded_periods += 1;
+      if (r.straddles_month) cur.straddling += 1;
+      const from = ymd(r.period_start), to = ymd(r.period_end);
+      cur.covers_from = cur.covers_from && cur.covers_from < from ? cur.covers_from : from;
+      cur.covers_to = cur.covers_to && cur.covers_to > to ? cur.covers_to : to;
+      byKey.set(k, cur);
+    }
+    const months = [...byKey.values()]
+      .map((m) => ({ ...m, amount: Math.round(m.amount * 100) / 100,
+        superseded_amount: Math.round(m.superseded_amount * 100) / 100 }))
+      .sort((a, b) => (a.month === b.month
+        ? Math.abs(b.amount) - Math.abs(a.amount) : (a.month < b.month ? 1 : -1)));
 
     res.json({
       window: { from: p[0], to: p[1] },
       rows, months,
-      truncated: rows.length >= 600,
+      truncated: rows.length >= 2000,
       note: 'One row per document a provider filed, at the grain the provider filed it. '
         + 'A weekly statement is one row covering seven days — it is never divided into daily '
         + 'figures here, because nobody measured those. "First seen" is when the document '

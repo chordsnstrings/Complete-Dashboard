@@ -86,6 +86,79 @@ check('five are five wide, in one row', laid[5].tracks === 5 && laid[5].rows ===
 check('a row built with innerHTML is corrected by the sweep',
   laid.raw.before === 6 && laid.raw.after === 5, JSON.stringify(laid.raw));
 
+/* ── a bar's share of its step must not depend on the window width ─────── */
+/* The cap was `Math.min(step * (1 - pad), 44)`, chosen when these charts were
+   drawn in a fixed 720-unit viewBox where 44 units painted at about 66px after
+   CSS stretched the picture. Once the viewBox became the host's measured width
+   one unit is one CSS pixel, so 44 turned into a hard 44px ceiling while the
+   gap between bars kept growing with the container. Measured on the day page,
+   the same nine bars: 44.0px bar against a 72.2px gap at a 1440px viewport,
+   41.9px against 16.3px at 900px. The same series read as a dense chart on a
+   laptop and as thin stripes on a monitor. */
+const bars = await page.evaluate(async () => {
+  const c = await import('/charts.js');
+  const shape = (n, w) => {
+    const step = (w - 54) / n;
+    const pad = n <= 12 ? 0.28 : n <= 40 ? 0.18 : 0.10;
+    return { step, bw: c.barWidth(step, pad), fill: c.barWidth(step, pad) / step };
+  };
+  return {
+    nine: [515, 1090, 1440].map((w) => shape(9, w)),
+    day: [515, 1090].map((w) => shape(24, w)),
+    two: shape(2, 1090),
+    many: shape(90, 515),
+  };
+});
+/* The invariant is that the shape holds across the widths a PANEL actually
+   takes — 515px in a two-up grid, 1090px full width — not that it holds
+   forever. A ceiling has to exist or a two-bar chart draws two slabs, and
+   where the ceiling bites the fill necessarily falls. What must not happen is
+   the fill falling at ordinary panel widths, which is what a 44px cap did. */
+const fills = bars.nine.slice(0, 2).map((s) => s.fill);
+check('nine bars fill the same share of their step at both panel widths',
+  Math.abs(fills[0] - fills[1]) < 0.001, JSON.stringify(fills.map((f) => f.toFixed(3))));
+check('…and where the ceiling does bite, it still leaves a bar over half its step',
+  bars.nine[2].fill > 0.5, String(bars.nine[2].fill.toFixed(3)));
+check('…and so do twenty-four', Math.abs(bars.day[0].fill - bars.day[1].fill) < 0.001,
+  JSON.stringify(bars.day.map((s) => s.fill.toFixed(3))));
+/* THE REGRESSION, named. At 1090px the old ceiling gave 44px against a 71px
+   gap — 38% fill where the pad asked for 72%. */
+check('…and a wide chart is no longer capped at the old 44 pixels',
+  bars.nine[1].bw > 60, String(bars.nine[1].bw));
+/* The ceiling still exists, and still catches the case it was written for. */
+check('a two-bar chart is still stopped from drawing two slabs',
+  bars.two.bw <= 96.001, String(bars.two.bw));
+/* And pad still decides the density, which capping at a fraction of the step
+   would have taken away — 0.62 is below every value 1 - pad takes, so it would
+   have made a ninety-bar chart and a nine-bar chart the same shape. */
+check('a dense chart is still denser than a sparse one',
+  bars.many.fill > bars.nine[0].fill,
+  JSON.stringify([bars.many.fill.toFixed(2), bars.nine[0].fill.toFixed(2)]));
+check('…and no bar is thinner than its own corner radius',
+  bars.many.bw >= 1.5, String(bars.many.bw));
+
+/* ── and the panel grid has columns ─────────────────────────────────────── */
+/* `grid` alone sets display and gap; the columns live on `.g2`/`.g3`/`.g23`.
+   The day page and #corridors were the only two analytical views in the
+   product that passed no modifier, so seven chart panels sat in one 1,132px
+   track: a nine-bar chart drawn 1,090px wide, a 234px donut with 416px of
+   empty panel either side, and a page 1,173px taller than it needed to be. */
+{
+  const src = await (await fetch(`http://127.0.0.1:${port}/day.js`)).text();
+  const cor = await (await fetch(`http://127.0.0.1:${port}/corridors.js`)).text();
+  check('the day page’s panel grid declares its columns',
+    /el\('div', 'grid g\d/.test(src), (src.match(/el\('div', 'grid[^']*'/) || ['none'])[0]);
+  check('…and so does the corridors page',
+    /el\('div', 'grid g\d/.test(cor), (cor.match(/el\('div', 'grid[^']*'/) || ['none'])[0]);
+  const css = await (await fetch(`http://127.0.0.1:${port}/app.css`)).text();
+  /* And the class they name collapses on a narrow screen, or the fix trades a
+     stretched chart for a horizontal scrollbar. */
+  check('…and that class collapses to one column on a narrow screen',
+    /@media\(max-width:1080px\)\{[^{]*\.g2[^{]*\{grid-template-columns:1fr\}/
+      .test(css.replace(/\s+/g, '')),
+    'app.css must fold .g2 below 1080px, or the fix trades a stretched chart for a scrollbar');
+}
+
 /* ── the donut key ──────────────────────────────────────────────────────── */
 const key = await page.evaluate(async () => {
   const charts = await import('/charts.js');

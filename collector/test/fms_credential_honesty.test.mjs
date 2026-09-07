@@ -254,14 +254,30 @@ console.log('\na rejected login is not answered by asking sixty-two more times')
    morning and verified live by src/credcheck.js as a real fleet session. */
 {
   const y = readFileSync('src/sources/yango.js', 'utf8');
-  const branch = y.slice(y.indexOf('so the session IS'), y.indexOf('so the session IS') + 700);
+  /* 1400, not 700. The branch grew a fourth possibility — measured
+     2026-09-07, the same call with the same three credentials answers 200 from
+     one host and 403 from the deployed app — and the sentence that says
+     re-pasting is futile moved past the end of a window sized for the old
+     text. A fixed-length slice of source is a fragile way to scope an
+     assertion; it is kept because the alternative is asserting against the
+     whole file, where the phrase would match the sibling branch too. */
+  const branch = y.slice(y.indexOf('so the session IS'), y.indexOf('so the session IS') + 1400);
   check('the session-is-read branch no longer prescribes a re-paste',
     !/re-paste YANGO_COOKIE from a logged-in/.test(branch),
     'it had just proved the session works');
   check('…it names entitlement, and the park it was refused for',
     /entitlement/.test(branch) && /parkId/.test(branch));
   check('…and says plainly that re-pasting will not change it',
-    /will not change it/.test(branch));
+    /will not change (it|any of the four)/.test(branch));
+  /* THE FOURTH POSSIBILITY. The three this branch used to list are all things
+     an operator can go and spend an afternoon on. Measured 2026-09-07, minutes
+     apart, with production's stored park id and cookie confirmed updated:
+     byte-identical requests answered 200 with live orders from one host and
+     403 from the deployed app, and both hosts answer 401 with the cookie
+     removed — so the park id clears the pre-auth gate from both, and the API
+     key is inert on that host. Nothing about the credentials is left. */
+  check('…and names the host as a suspect, since nothing about the credentials was left',
+    /refusal is of this HOST/.test(branch), 'the three suspects are all actionable and all wrong');
   check('the account is read from the cookie so "sign in as somebody else" is actionable',
     /yandex_login=\(\[\^;\]\+\)/.test(y) && /const yangoAccount = /.test(y));
   check('and a cookie that demonstrably authenticated is recorded as working',

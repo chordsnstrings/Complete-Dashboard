@@ -162,6 +162,36 @@ export const axisGutter = (labels, { minimum = 30 } = {}) => Math.ceil(Math.max(
    anything is drawn. Extracted rather than duplicated: a second copy of this
    rule would be a second answer to "what does this axis say", and the whole
    point of measuring the gutter is that it matches what lands on the page. */
+/* How wide a bar may be, and why the old ceiling stopped working.
+   ─────────────────────────────────────────────────────────────────────────
+   This was `Math.min(step * (1 - pad), 44)`. The 44 was chosen against the
+   fixed `W = 720` viewBox these charts used to be drawn in, where it was 6.1%
+   of the drawing and painted at about 66px after CSS stretched the picture.
+   Now that the viewBox is the host's MEASURED width, one unit is one CSS
+   pixel and 44 is a hard 44px ceiling — while the gap between bars still grows
+   with the container. Measured on the day page, same nine bars: at a 1440px
+   viewport the bar is 44.0px against a 72.2px gap; at 900px it is 41.9px
+   against 16.3px. The ink-to-air ratio inverts across viewports, so the same
+   series reads as a dense chart on a laptop and as thin stripes on a monitor.
+
+   A ceiling is still wanted — a two-bar chart drawn as two 400px slabs is a
+   diagram, not a chart — but it has to sit far enough out that it only catches
+   the handful-of-bars case it was meant for. 96px does that: at nine bars in a
+   515px panel the step is 57px and the width is 41px, so nothing changes; at
+   nine bars in a 1,090px panel the step is 121px and the bar becomes 87px
+   rather than 44px, which keeps the same 0.72-of-step shape the pad asked for.
+   A two-bar chart still hits the ceiling, which is the case the ceiling is for.
+
+   `pad` keeps deciding the shape, which the first version of this fix took
+   away by capping at a fraction of the step: 0.62 is below every value
+   1 - pad takes, so it would have overridden the count-dependent spacing
+   everywhere and made a ninety-bar chart and a nine-bar chart the same
+   density. The 1.5px floor is unchanged — it is what keeps a ninety-bar chart
+   from drawing bars thinner than their own corner radius. */
+const BAR_MAX_PX = 96;
+export const barWidth = (step, pad) =>
+  Math.max(Math.min(step * (1 - pad), BAR_MAX_PX), 1.5);
+
 export function yTicks({ hi, fixedMax = null, target = 4 }) {
   if (fixedMax != null && fixedMax > 0) {
     return Array.from({ length: target }, (_, i) => (fixedMax * i) / (target - 1));
@@ -248,7 +278,7 @@ export function barChart(host, data, { x, y, label, color = '--b400', colorFor, 
      ninety-bar chart drawing 4.6px bars with a 3px corner radius, which is an
      ellipse rather than a bar. */
   const pad = data.length <= 12 ? 0.28 : data.length <= 40 ? 0.18 : 0.10;
-  const bw = Math.max(Math.min(step * (1 - pad), 44), 1.5);
+  const bw = barWidth(step, pad);
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
   const { max } = yAxis(svg, { hi: raw, pl, pr, pt, ih, W, fmt: axisFmt, fixedMax });
   const xAt = new Set(xTickIndices(data.length));
@@ -339,7 +369,7 @@ export function gapBars(host, data, { x, y, label, color = '--b400', gapKey = 'u
   const raw = Math.max(...vals, secondary ? Math.max(...data.map((d) => +d[secondary] || 0)) : 0) || 1;
   const iw = W - pl - pr, ih = H - pt - pb, step = iw / data.length;
   const pad = data.length <= 12 ? 0.28 : data.length <= 40 ? 0.18 : 0.10;
-  const bw = Math.max(Math.min(step * (1 - pad), 44), 1.5);
+  const bw = barWidth(step, pad);
   const svg = name(mk('svg', { viewBox: `0 0 ${W} ${H}` }), aria);
 
   /* One hatch pattern per CHART, not per page.

@@ -4192,6 +4192,63 @@ app.get('/api/finance/ledger', (_, r) => r.json([
   { category: 'toll', n: 233, amount: -932, currency: 'AED' },
 ]));
 
+/* The receipts register. The fixture carries the three cases the page's copy
+   turns on, because a mock that only holds the happy row lets a browser smoke
+   test pass on a page that cannot draw the others: a weekly filing, a daily
+   filing, and a pair where a short filing is superseded by the long one that
+   covers it. */
+app.get('/api/finance/receipts', (_, r) => {
+  const rows = [
+    { source: 'uber_graphql_breakdown', platform: 'uber', fleet_id: 'ecosine', kind: 'payout',
+      period_start: '2026-08-31', period_end: '2026-09-06', days: 7, is_daily: false,
+      rows_seen: 118, drivers: 96, categories: 0, amount: 17749.24, credits: 19249.24,
+      debits: -1500, restated: true, superseded: false, superseded_amount: null,
+      counted_amount: 17749.24, first_seen: '2026-09-07T05:02:11.000Z',
+      last_seen: '2026-09-07T05:02:11.000Z', month: '2026-09-01', straddles_month: true },
+    { source: 'uber_graphql_breakdown', platform: 'uber', fleet_id: 'ecosine', kind: 'payout',
+      period_start: '2026-09-02', period_end: '2026-09-02', days: 1, is_daily: true,
+      rows_seen: 41, drivers: 41, categories: 0, amount: 2410.5, credits: 2410.5,
+      debits: null, restated: true, superseded: true, superseded_amount: 2410.5,
+      counted_amount: null, first_seen: '2026-09-07T09:10:00.000Z',
+      last_seen: '2026-09-07T09:10:00.000Z', month: '2026-09-01', straddles_month: false },
+    { source: 'yango_ledger', platform: 'yango', fleet_id: 'ecosine', kind: 'ledger',
+      period_start: '2026-09-05', period_end: '2026-09-05', days: 1, is_daily: true,
+      rows_seen: 62, drivers: 9, categories: 6, amount: 1240.75, credits: 1503.25,
+      debits: -262.5, restated: false, superseded: false, superseded_amount: null,
+      counted_amount: 1240.75, first_seen: '2026-09-06T02:15:00.000Z',
+      last_seen: '2026-09-06T02:15:00.000Z', month: '2026-09-01', straddles_month: false },
+    { source: 'ledger_import', platform: 'hotel', fleet_id: 'ecosine', kind: 'statement',
+      period_start: '2026-08-01', period_end: '2026-08-31', days: 31, is_daily: false,
+      rows_seen: 1, drivers: 0, categories: 0, amount: 41280, credits: 41280,
+      debits: null, restated: false, superseded: false, superseded_amount: null,
+      counted_amount: 41280, first_seen: '2026-09-01T06:00:00.000Z',
+      last_seen: '2026-09-01T06:00:00.000Z', month: '2026-08-01', straddles_month: false },
+  ];
+  const months = [
+    { month: '2026-09-01', platform: 'uber', kind: 'payout', amount: 17749.24,
+      superseded_amount: 2410.5, rows_seen: 159, periods: 2, superseded_periods: 1,
+      straddling: 1, covers_from: '2026-08-31', covers_to: '2026-09-06' },
+    { month: '2026-09-01', platform: 'yango', kind: 'ledger', amount: 1240.75,
+      superseded_amount: 0, rows_seen: 62, periods: 1, superseded_periods: 0,
+      straddling: 0, covers_from: '2026-09-05', covers_to: '2026-09-05' },
+    { month: '2026-08-01', platform: 'hotel', kind: 'statement', amount: 41280,
+      superseded_amount: 0, rows_seen: 1, periods: 1, superseded_periods: 0,
+      straddling: 0, covers_from: '2026-08-01', covers_to: '2026-08-31' },
+  ];
+  r.json({
+    window: { from: '2026-08-01', to: '2026-09-07' }, rows, months, truncated: false,
+    note: 'One row per document a provider filed, at the grain the provider filed it. '
+      + 'A weekly statement is one row covering seven days — it is never divided into daily '
+      + 'figures here, because nobody measured those. "First seen" is when the document '
+      + 'reached us, which is a different date from the period it covers.',
+    restated_note: 'A provider that re-files an overlapping period sends the same money twice, '
+      + 'and the two filings mark each other. One wins by a stated rule: the longest period, '
+      + 'and among equal periods the one filed most recently.',
+    month_note: 'A period is booked to the month it ENDS in. Five weeks a year straddle a '
+      + 'month end; the number of those is given per month.',
+  });
+});
+
 const UN_VERDICTS = [
   { verdict: 'unauthorized', n: 21, km: 268, minutes: 640 },
   { verdict: 'authorized', n: 190, km: 2480, minutes: 5120 },
