@@ -254,6 +254,94 @@ the one sentence both shells say it with.
 
 ---
 
+## What each provider does NOT give us — measured 2026-09-07
+
+The most expensive mistakes this session were all the same shape: building on a
+field a provider *appears* to offer and does not populate for this org. Every
+line here is a count off production, not a reading of a doc.
+
+| claim | measured | how |
+|---|---|---|
+| Uber sends a coordinate on a timeline event | **0 of 194,107** rows carry lat/lon | `/api/coverage` → `geo["timeline:uber"]`; ecosine 0/120,002, egari 0/74,105 |
+| Uber sends a pickup coordinate on a trip | **0 of 315,029** | same call, `geo["trip:uber"]` |
+| Bolt sends any coordinate | **0 of 48,346** — no lat/lon field exists in its payload at all | `geo["trip:bolt"]` |
+| FMS sends both an address and a coordinate | **222,330 rows, 100% of both** | `geo["trip:fms"]` |
+| Hotel channel | 1,763 rows, 97.3% address, 68.7% coordinate | `geo["trip:hotel"]` |
+
+**So the trackers are the only source of position at scale.** Anything that
+needs to say *where* — a wait, a driver going online, a dead zone — has to come
+from `telemetry_snapshot` or FMS trips, never from Uber. `driver_timeline_event`
+has `lat`/`lon` columns and the collector maps them at
+`src/sources/uber_timeline.js:147`; Uber answers null every time. The repo's own
+fixture agrees: `test/fixtures/uber_timeline.json` is null on all 17 events.
+
+**FMS is a free gazetteer.** Address and coordinate on the same row means
+444,660 (name, lat, lng) pairs in exactly the area this fleet works, needing no
+key and no network. From a 0.27% sample: 67.6% of stationary tracker fixes have
+a named point within 250 m, median nearest distance 138 m. **The honesty limit
+is measured too** — of 1,200 harvested points, 628 have another named point
+within 150 m and **139 of those (22.1%) carry a different name**. So roughly one
+lookup in five has a rival answer, and any name shown must carry its distance or
+refuse. A place name that is a guess dressed as a fact is worse than the
+coordinate it replaced.
+
+**Addresses are in the RIDER's language.** 22.0% of Uber and 17.4% of Bolt
+addresses contain a non-ASCII character because the string is localised to
+whoever booked. `#corridors` already pays for this: `Дубай` is a corridor
+endpoint with 1,101 Bolt trips — Dubai counted twice under two spellings. Uber
+and hotel use `" - "` hierarchies whose second segment is the community; Bolt
+and Yango are comma-separated (537 of 1,000 Bolt addresses contain no `" - "` at
+all), so one splitter cannot serve both.
+
+**Two feeds nobody reads.** `alert` has 447,543 rows and a populated `location`
+TEXT column (1,062 distinct names, from FMS "Start Location") while `alert.lat`
+and `alert.lng` are written by nothing — a name with no coordinate, the mirror
+image of the telemetry problem. And nothing anywhere reads
+`driver_timeline_event` rows with `kind='job'`.
+
+---
+
+## Uber's recommendation feed is a snapshot, not a verdict
+
+`getRecommendations` (→ `platform_recommendation`, written by
+`pullRecommendations()` in `src/sources/uber_fleet.js`) is republished **during
+the day, about the day in progress**. It is not a closing figure.
+
+This cost the product its most severe finding. On 2026-09-07 the board's top
+item read *"8 drivers were online but completed no trips"* at critical severity.
+Against our own `trip_norm` those eight completed **71 bookings** on 6
+September — 16, 14, 10, 9, 8, 6, 4 and 4 — and Uber's "13.5 hours online in
+total" was **109 hours** measured. All eight were active, could earn, and were
+rated 4.85–4.99 over hundreds of lifetime trips. A driver who went online at
+07:49 and completed his first booking at 09:01 is "1.2 hours online, zero trips"
+in an 08:01 snapshot and a full day's work by evening.
+
+**Rule: never repeat a platform's judgement about a period without checking the
+half of the answer we hold ourselves.** `platformFlags()` now cross-checks
+against `trip_norm` and drops anybody who completed a booking, says how many it
+dropped and why, and reports an unclosed period at warning rather than critical.
+See `test/platform_flags_truth.test.mjs`.
+
+---
+
+## Credentials, and what shape each one is
+
+| credential | shape | consequence |
+|---|---|---|
+| Uber driver photo URL | CloudFront pre-signed, **exactly 12 h** (43,200 s, two runs agreeing to 0.1 s) | never store the URL — store the bytes. `sql/schema_v63.sql` |
+| Bolt refresh token | JWT, **7-day** life (`iat`→`exp`), carries `fleet_owner_id` | a weekly human paste is a scheduled outage; check whether it rotates on use before storing one in an env var |
+| Yango | park id + API key + Yandex session cookie, all three sent on every request | a 403 **with** the cookie and 401 **without** it means the cookie IS being accepted and something else is refused — do not send anybody to re-paste a session that was never the question |
+| Uber timeline window | Uber refuses >31 days; the collector cuts at 30 | `MAX_WINDOW_DAYS` in `src/sources/uber_timeline.js` |
+
+**Reverse geocoding** is reachable from the collector (not from Chromium):
+`photon.komoot.io/reverse?lat=&lon=&lang=en` returns 200. Its `district` field
+is the operator's vocabulary — "Downtown Dubai", "Dubai Marina", "Al Garhoud",
+"Palm Jumeirah". **`&lang=en` is not optional**: without it every answer comes
+back in Arabic. `name` is a building and is often noise ("Wmart"); `district` is
+the useful field.
+
+---
+
 ## Known holes, with owners
 
 | what | state | needs |
@@ -282,3 +370,35 @@ the one sentence both shells say it with.
   `bin/prod-mirror.mjs` (:8200, production bytes) or `bin/live-ui.mjs` (:8100,
   working tree against production data), and pass
   `executablePath: '/opt/pw-browsers/chromium'`.
+* `pkill -f "node test/…"` **matches its own command line**, so `until ! pgrep
+  -f …` never fires and a `pkill` can kill the shell issuing it. Wait on the
+  output file's tally line instead.
+* A python heredoc and a test run in one backgrounded command are **two
+  commands**. A failed `assert` prints a traceback nobody reads and the suite
+  then passes against the unchanged file. This has produced a false "fixed"
+  claim twice. Verify the edit landed (`grep` the file) before believing a
+  green run.
+* Two suite runs writing to one output file clobber each other and lose whole
+  blocks of results. Check `ps` for a live `run-all.mjs` before starting one.
+* `new URL(u).host` carries the **port**; `.hostname` does not.
+* An express fixture that promises a `content-length` it never sends poisons the
+  keep-alive socket for the *next* request — a fixture bug wearing a product
+  bug's clothes, one run in three.
+* `/api/driver/day` derives its position feed from **that day's trips**
+  (`api/driver_routes.js`), so a driver with zero trips gets `fixes: 0` — which
+  is exactly the cohort any "online but idle" question is about. Take the plate
+  from `driver_standing` instead.
+* Online spans are **clipped to the Dubai day**, so a shift that began 23:43 the
+  night before reads as `00:00`. Never print that as a start time; read the
+  un-clipped ONLINE transition.
+* `put()` in `src/insights.js` arbitrates a fleet row on
+  `(code, entity_type, entity_id)`. If `entity_id` is a constant, every row
+  overwrites the last and **the oldest in the batch survives** — and two fleets
+  silently replace each other. Has happened twice: `tracker_feed_dark`, then
+  `drivers_online_no_trips`.
+* Charts are drawn at the host's measured width (`chartBox()` in
+  `api/public/charts.js`). A fixed `viewBox` stretched by CSS scales the TEXT
+  too — it was 1.514× on a 1440px window and 0.44× in a narrow column.
+* A chart's y-axis formatter is **not** its tooltip formatter. `valueFmt` is the
+  tooltip; `axisFmt` is the axis. One serving both put "10 bookings" on every
+  gridline, 28px outside the panel.
