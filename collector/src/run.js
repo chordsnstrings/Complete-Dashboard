@@ -15,6 +15,7 @@ import { computeInsights } from './insights.js';
 import { runAnalyst } from './analyst.js';
 import { probeAll } from './probe.js';
 import { rebuildCustody } from './custody.js';
+import { refreshIdentityLinks } from './identity_link.js';
 import { refreshRollups } from './rollup.js';
 import { config, loadSettings } from './config.js';
 import { monthsAgo, daysAgo, iso, dubaiIso } from './util.js';
@@ -229,6 +230,16 @@ async function runWindowInner(mode, from, to, onProgress, fleet = null, jobId = 
     // dubaiWindow: the 21:00 UTC catch-up is already tomorrow in Dubai.
     await rebuildCustody({ from: day.from, to: day.to });
   } catch (e) { log.error('run', 'custody', { err: String(e) }); }
+  /* Who the roster proves is one person. Runs after the pulls that write
+     driver_compliance — Uber's profile read and the hotel roster — and before
+     anything that counts a person's work, because a link discovered now is a
+     row the directory stops splitting on the next request.
+
+     Its own try/catch, like every step here: a phone number that stops joining
+     two records is a smaller problem than a run that stops. */
+  try {
+    await refreshIdentityLinks();
+  } catch (e) { log.error('run', 'identity links', { err: String(e) }); }
   /* Precompute the aggregates that have no window. /api/trend/monthly,
      /api/forecast and /api/retention each group the ENTIRE trip history, so
      nothing about a request can narrow them — but the answer is the same for

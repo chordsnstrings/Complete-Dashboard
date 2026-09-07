@@ -4192,6 +4192,60 @@ app.get('/api/finance/ledger', (_, r) => r.json([
   { category: 'toll', n: 233, amount: -932, currency: 'AED' },
 ]));
 
+/* The identity links. The fixture carries the three states the page keeps
+   apart — a link no name rule could have made, a link the names already cover,
+   and one a person overruled — plus the coverage figure that stops the page
+   reading as a clean bill of health. */
+app.get('/api/drivers/identity-links', (_, r) => r.json({
+  links: [
+    { alias_ext_id: '76ede4ae-768b-4126-804b-0b5c88043682', alias_platform: 'uber',
+      alias_name: 'Muhammad Khalid', canonical_ext_id: '67483c64055e070d79100112',
+      canonical_platform: 'hotel', canonical_name: 'MUHAMMAD KHALIFA AFZAL KHALID',
+      canonical_key: 'muhammad khalifa afzal khalid', basis: 'shared_phone',
+      evidence: 'hotel filed “MUHAMMAD KHALIFA AFZAL KHALID” and uber filed “Muhammad Khalid” '
+        + 'against the same phone number, ending 9547 — the names do not fold together, so '
+        + 'nothing else could have joined them',
+      phone_tail: '9547', first_seen_at: '2026-09-07T09:10:00.000Z',
+      last_seen_at: '2026-09-07T09:10:00.000Z', confirmed_at: null, confirmed_by: null },
+    { alias_ext_id: '6612345', alias_platform: 'bolt', alias_name: 'Zubair Khan Shaukat Ali',
+      canonical_ext_id: 'a1b2c3d4-0000-4000-8000-000000000001', canonical_platform: 'uber',
+      canonical_name: 'Zubair Khan Ali', canonical_key: 'zubair khan ali',
+      basis: 'shared_phone',
+      evidence: 'uber filed “Zubair Khan Ali” and bolt filed “Zubair Khan Shaukat Ali” against '
+        + 'the same phone number, ending 4471 — the names do not fold together, so nothing else '
+        + 'could have joined them',
+      phone_tail: '4471', first_seen_at: '2026-09-07T09:10:00.000Z',
+      last_seen_at: '2026-09-07T09:10:00.000Z',
+      confirmed_at: '2026-09-07T10:00:00.000Z', confirmed_by: 'ops' },
+    { alias_ext_id: '6698765', alias_platform: 'bolt', alias_name: 'same person',
+      canonical_ext_id: 'a1b2c3d4-0000-4000-8000-000000000002', canonical_platform: 'uber',
+      canonical_name: 'Same Person', canonical_key: 'same person', basis: 'shared_phone',
+      evidence: 'uber filed “Same Person” and bolt filed “same person” against the same phone '
+        + 'number, ending 1188 — the names also fold together, so this link changes nothing',
+      phone_tail: '1188', first_seen_at: '2026-09-07T09:10:00.000Z',
+      last_seen_at: '2026-09-07T09:10:00.000Z', confirmed_at: null, confirmed_by: null },
+  ],
+  rejected: [
+    { alias_ext_id: '67483c64055e070d79100114', alias_platform: 'hotel',
+      alias_name: 'Sana Ullah Sher Zamin',
+      canonical_ext_id: 'b7511fa7-cbdf-4373-8539-c7ae020c31e2', canonical_platform: 'uber',
+      canonical_name: 'Sanaullah Sher Zamin',
+      evidence: 'uber filed “Sanaullah Sher Zamin” and hotel filed “Sana Ullah Sher Zamin” '
+        + 'against the same phone number, ending 3311',
+      phone_tail: '3311', rejected_reason: 'two brothers on one handset — settled by a phone call',
+      last_seen_at: '2026-09-07T09:10:00.000Z' },
+  ],
+  coverage: { roster_rows: 289, with_phone: 289, without_phone: 145 },
+  basis_note: 'Two records the roster gave the same phone number, on two different channels. '
+    + 'A number on three records links nobody, and neither does one that appears twice within '
+    + 'a single channel.',
+  precedence_note: 'A person’s decision wins over the rule in both directions.',
+  reach_note: 'This can only see a record that carries a phone number. Bolt files none at all, '
+    + 'and reaches Uber only because Bolt and the hotel channel file the same full name.',
+  applies_note: 'A link folds the driver directory and the driver pages on the next request. '
+    + 'It does not move person_key, which is a stored column.',
+}));
+
 /* The receipts register. The fixture carries the three cases the page's copy
    turns on, because a mock that only holds the happy row lets a browser smoke
    test pass on a page that cannot draw the others: a weekly filing, a daily

@@ -55,4 +55,9 @@ export const SCHEMA_FILES = [
      A separate table so a bytea never rides along on a contact read. */
   'schema_v63.sql',
   'schema_v64.sql',
+  /* driver_identity_link: the roster carries one phone number on both of a
+     person's records and nothing joined on it, so 58 people rendered as two
+     rows with 13,056 trips on the smaller one. Discovered per roster pull,
+     applied at the boundary, never silently. */
+  'schema_v65.sql',
 ];

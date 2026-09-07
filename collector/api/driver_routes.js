@@ -37,6 +37,10 @@ import { IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, photoHref } fro
    where a record with no work in the window has no stored key to fold on. */
 import { canonicalName, mergedIds, mergedNames, mergedPlatforms, ALIAS_KEY,
   personOf } from './identity_map.js';
+/* The links a roster proved rather than a person checked: two records, two
+   channels, one phone number. Consulted AFTER the register, so a human's
+   decision always wins — see api/identity_links.js. */
+import { identityLinks, linkedKey, linkedName, linkedIds } from './identity_links.js';
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 
@@ -131,7 +135,15 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        aliyan", matched no trip row (they now key as "aliyan khalil") and
        showed a 429-day veteran as a 20-trip newcomer — which is exactly what
        production does today. */
-    const name = canonicalName(id) || seed?.driver_name || nameQ;
+    /* The register, then the roster's proof, then whatever the seed row said.
+       ─────────────────────────────────────────────────────────────────────
+       Same precedence as the directory fold and for the same reason. Opening
+       the Uber record for "Muhammad Khalid" has to land on the person the
+       hotel roster calls MUHAMMAD KHALIFA AFZAL KHALID, or the page shows one
+       of his two accounts and the directory shows both — two answers to one
+       question, which is worse than either being wrong. */
+    const links = await identityLinks(q);
+    const name = canonicalName(id) || (id && linkedName(links, id)) || seed?.driver_name || nameQ;
     if (!name) return id
       ? { id, name: null, ids: [id], keys: [id], platforms: seed ? [seed.platform] : [] }
       : null;
@@ -166,8 +178,14 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        mergedIds returns the id it was given — and it is what carries a record
        that has no row in ANY of the three tables above (the Bolt standing)
        into the account list of the person it belongs to. */
+    /* …and through the roster's links as well as the register's merges. The
+       partner id is what carries a record the name search above cannot reach:
+       the whole point is that the two channels file different names, so
+       matching on the canonical name finds one side and not the other. */
     const ids = [...new Set([...alias.map((a) => a.driver_ext_id), ...(id ? [id] : [])]
-      .filter(Boolean).flatMap(mergedIds))];
+      .filter(Boolean)
+      .flatMap(mergedIds)
+      .flatMap((x) => linkedIds(links, x)))];
     if (!ids.length) return null;
 
     /* Two different lists, and conflating them was a bug in both directions.
@@ -263,6 +281,58 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
      Completion is over trip_norm.outcome, not status='completed': Bolt says
      'finished', and testing for 'completed' scored every completed Bolt trip
      as a failure. */
+  /* Every link the roster proved, with the evidence, so none of them is a
+     merge on trust.
+     ─────────────────────────────────────────────────────────────────────────
+     The register in api/identity_map.js is a list a person checked pair by
+     pair, and it is right to be. This is a rule that ran, so it owes the reader
+     more: which two records, on which two channels, under which phone number's
+     last four digits, and whether the names could have joined them without it.
+
+     It also reports what it could NOT see, which is the half a page built on
+     this must print. Measured 2026-09-07: 166 of 434 directory rows carry no
+     phone on any record — 93 Bolt-only, 51 Uber-only, 80,443 trips between
+     them — and this rule is blind to every one. A page that lists sixty links
+     and says nothing about that reads as "the roster is now clean". */
+  app.get('/api/drivers/identity-links', wrap(async (req, res) => {
+    const links = await identityLinks(q);
+    const [cov] = await q(
+      `SELECT count(*)::int AS roster_rows,
+              count(*) FILTER (WHERE phone IS NOT NULL AND btrim(phone) <> '')::int AS with_phone,
+              count(DISTINCT platform)::int AS channels
+         FROM driver_compliance`);
+    /* The rejected ones are returned SEPARATELY rather than filtered away: an
+       operator who overruled the rule should be able to see that they did, and
+       a link that keeps coming back is a conversation the page should carry. */
+    const rejected = await q(
+      `SELECT alias_ext_id, alias_platform, alias_name, canonical_ext_id, canonical_platform,
+              canonical_name, evidence, phone_tail, rejected_reason, last_seen_at
+         FROM driver_identity_link WHERE rejected ORDER BY canonical_name NULLS LAST`);
+    res.json({
+      links: links.rows,
+      rejected,
+      coverage: {
+        roster_rows: cov?.roster_rows ?? 0,
+        with_phone: cov?.with_phone ?? 0,
+        without_phone: (cov?.roster_rows ?? 0) - (cov?.with_phone ?? 0),
+      },
+      basis_note: 'Two records the roster gave the same phone number, on two different '
+        + 'channels. A number on three records links nobody, and neither does one that '
+        + 'appears twice within a single channel — both identify a handset rather than a '
+        + 'person, and being wrong in that direction merges two people\u2019s work and money.',
+      precedence_note: 'A person\u2019s decision wins over the rule in both directions. Pairs '
+        + 'somebody has already looked at and refused never enter this table, and a link '
+        + 'rejected here survives every later run.',
+      reach_note: 'This can only see a record that carries a phone number. Bolt files none at '
+        + 'all, and reaches Uber only because Bolt and the hotel channel file the same full '
+        + 'name and the existing name fold already joins those two.',
+      applies_note: 'A link folds the driver directory and the driver pages on the next '
+        + 'request. It does not move person_key, which is a stored column, so a rollup that '
+        + 'groups by it counts the two records apart until the link is promoted into '
+        + 'api/identity_map.js by hand.',
+    });
+  }));
+
   app.get('/api/drivers/directory', wrap(async (req, res) => {
     /* range, not winDays. This read from/to and nothing else, so the platform
        and fleet chips above the directory changed none of its 359 rows: with
@@ -605,6 +675,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        for — a name on the books and nothing else — where there is no stored
        key to prefer. It is the same rule; test/consistency.test.mjs runs both
        over the same names and requires the same answer. */
+    /* Read once for the whole fold, not once per row: sixty rows behind a
+       thirty-second cache, and a per-row await would make the directory's cost
+       depend on how many people the fleet has. */
+    const links = await identityLinks(q);
     const byName = new Map();
     for (const r of rows) {
       /* The register first, then the stored fold, then the name.
@@ -617,7 +691,20 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          record outside most windows), so without this the directory would
          still list them as separate people while every aggregate in the
          product counted them as one. */
-      const k = ALIAS_KEY.get(r.driver_ext_id) || r.person_key || canonName(r.driver_name);
+      /* The register, then the roster's own proof, then the stored fold, then
+         the name.
+         ─────────────────────────────────────────────────────────────────
+         The link layer sits SECOND on purpose. ALIAS_KEY is a list a person
+         checked pair by pair against production; driver_identity_link is a
+         rule that ran, and a rule must never overrule the person who looked.
+         It sits above person_key because the stored key is the folded NAME,
+         and the whole finding is that the two channels file different names
+         for one human: "MUHAMMAD KHALIFA AFZAL KHALID" on the hotel roster and
+         "Muhammad Khalid" on Uber, one phone number, 4,461 Uber trips reported
+         under a row that showed 822. */
+      const k = ALIAS_KEY.get(r.driver_ext_id)
+        || linkedKey(links, r.driver_ext_id)
+        || r.person_key || canonName(r.driver_name);
       const cur = byName.get(k);
       if (!cur) {
         byName.set(k, { ...r, ids: [r.driver_ext_id], platforms: [...(r.platforms || [])],

@@ -25,6 +25,7 @@ import { renderTrips } from './trips.js';
 import { peopleCards, peopleResolved, namesLine } from './people.js';
 import { renderProvenance } from './provenance.js';
 import { renderReceipts } from './receipts.js';
+import { renderIdentity } from './identity.js';
 import { renderCorporate, renderProperty, CORP_TABS, PROPERTY_TABS } from './corporate.js';
 import { renderTrip } from './trip.js';
 import { renderSettlement, SETTLE_TABS } from './settlement.js';
@@ -328,6 +329,10 @@ const VIEWS = [
   { id: 'low-performers', label: 'Low performers', ic: '▼', sec: 'People', sub: 'The weakest drivers of the last complete week, and what the data cannot explain' },
   { id: 'retention', label: 'Joiners & leavers', ic: '⇅', sec: 'People', sub: 'Whether the driver count fell because people left or because nobody joined' },
   { id: 'compliance', label: 'Compliance', ic: '❑', sec: 'People', sub: 'Driver licences and vehicle papers, and when each one expires' },
+  /* Because the fold is now partly a RULE, and a rule that joins two humans
+     has to be readable by the person who knows them. Under People rather than
+     under Sources: it is a claim about who somebody is, not about a feed. */
+  { id: 'identity', label: 'One person, two records', ic: '⧉', sec: 'People', sub: 'Records the roster proves belong to the same driver, and the evidence for each' },
   { id: 'vehicles', label: 'Vehicles', ic: '▤', sec: 'Fleet', sub: 'How much each car is used, and how much money it brings in' },
   { id: 'unauthorized', label: 'Unauthorized trips', ic: '⚠', sec: 'Fleet', sub: 'Trips where the seat sensor saw a rider but no platform has a booking' },
   { id: 'safety', label: 'Safety', ic: '△', sec: 'Fleet', sub: 'Harsh braking, speeding and sharp turns from the car trackers, plus tracker faults' },
@@ -1822,6 +1827,7 @@ V.optimise = async (root) => renderOptimise(root);
 V.capacity = async (root) => renderCapacity(root);
 V.trips = async (root) => renderTrips(root);
 V.receipts = async (root) => renderReceipts(root);
+V.identity = async (root) => renderIdentity(root);
 V.provenance = async (root) => renderProvenance(root);
 /* The first screen: the fleet as a ledger rather than as a trip count. */
 V.unit = async (root) => renderEconomics(root);

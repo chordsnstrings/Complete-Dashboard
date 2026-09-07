@@ -31,7 +31,7 @@ export const TABS = [
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
     owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance',
       'sources', 'settings', 'corporate', 'analyst', 'property', 'credentials',
-      'optimise', 'trips', 'provenance'] },
+      'optimise', 'trips', 'provenance', 'identity'] },
 ];
 
 /* The header names the window the screen is ACTUALLY showing. It said
@@ -70,6 +70,7 @@ export function titleFor(view, param) {
        people and asks somebody to ring them. */
     action: ['Finding', 'One flag, and who it is about'],
     receipts: ['What landed', 'Every figure a provider filed'],
+    identity: ['One person, two records', 'Records the roster proves are one driver'],
     compliance: ['Compliance', 'Built for a bigger screen'],
     demand: ['Demand', 'Built for a bigger screen'],
     map: ['Map & replay', 'Built for a bigger screen'],
