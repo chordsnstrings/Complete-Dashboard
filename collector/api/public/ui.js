@@ -1691,8 +1691,55 @@ export function moneyInTile(k, { label = 'Money in' } = {}) {
 
 export function faresTile(k) {
   if (k && k.accounted_fares) {
+    /* THE AVERAGE OVER THE BOOKINGS THIS FIGURE IS MADE OF, and it was not.
+       ─────────────────────────────────────────────────────────────────────
+       The value is accounted_fares, which sums ONLY the channels counted on
+       their fares (api/income_sql.js:515). The caption was avg_fare, which is
+       avg(price) over every priced booking in the window whatever channel it
+       belongs to (api/driver_routes.js:1124) — so a one-channel total was
+       captioned with every channel's average.
+
+       income_sql.js:526 already returns the denominator that belongs to this
+       value, under a comment saying exactly why it exists: "The denominator
+       that belongs to accounted_fares, and only to it … Naming them under a
+       figure they contribute nothing to is a caption describing a different
+       measurement from the one above it." This tile never read it.
+
+       Measured on production 2026-09-01..09-07 for the driver this came in
+       about: "AED 311 · avg fare AED 51", where the 311 is 5 Bolt bookings
+       (AED 62 each) and the 51 is 4,359.11 over 86 bookings across three
+       channels — a denominator 17 times the tile's own. Fleet-wide over one
+       week, 47 of 58 drivers on this branch were shown AED 7,216.60 against
+       AED 134,889.56 of trip-priced fares in their own responses, and TEN
+       printed a total smaller than the average beneath it — "AED 30 · avg
+       fare AED 84" — which is impossible for any count of one or more.
+
+       The channel is deliberately NOT named: accounted_platforms is every
+       MEASURED channel including the payout-basis ones (income_sql.js:530),
+       so naming it here would print "on Bolt, Uber, Yango" under a Bolt-only
+       figure — the same defect in a new place. No field names the fares-basis
+       channels, so the denominator ships alone.
+
+       Guarded rather than divided blind: accounted_fare_bookings is `|| null`
+       at income_sql.js:528, and 139/null is Infinity, which money() renders as
+       a dash. Live data cannot produce that shape — both branches that set
+       basis 'fares' require priced_bookings — but this is a pure function that
+       tests and mockapi.mjs call with hand-made payloads. */
+    const nb = Number(k.accounted_fare_bookings);
+    const priced = Number(k.revenue);
+    /* And the larger figure it did not add, in the shape the two branches
+       below already use. Silence here was the other half of the defect: a
+       driver saw AED 311 with no hint that AED 4,359 of fares sat in the same
+       response, counted on their channels' payout instead. */
+    const rest = Number.isFinite(priced) && priced > Number(k.accounted_fares)
+      ? ` \u2014 the trip feed prices ${money(priced)} over `
+        + `${countOf(k.priced_trips, 'booking')}, the rest counted on its channel's payout`
+      : '';
     return { label: 'Fares', value: money(k.accounted_fares),
-      sub: k.avg_fare ? `avg fare ${money(k.avg_fare)}` : 'where the platform reports fares' };
+      long: !!rest,
+      sub: (Number.isFinite(nb) && nb > 0
+        ? `avg ${money(k.accounted_fares / nb)} over the ${countOf(nb, 'booking')} this counts`
+        : 'where the platform reports fares') + rest };
   }
   if (k && k.statement_fares) {
     /* The "no trip here carries a fare" clause is CONDITIONAL, and was not.

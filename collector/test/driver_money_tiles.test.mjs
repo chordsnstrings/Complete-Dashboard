@@ -68,6 +68,47 @@ console.log('\nFares: the tile may not deny fares the same response carries');
   console.log('\n  the earlier branches still win where they apply');
   check('accounted_fares still leads when a channel was counted on fares',
     faresTile({ ...SEP6, accounted_fares: 139 }).value.includes('139'));
+
+  /* BRANCH 1 had the same defect and was the last one holding it.
+     ───────────────────────────────────────────────────────────────────────
+     The value sums only the channels counted on their FARES; the caption was
+     avg_fare, which averages every priced booking in the window whatever
+     channel it belongs to. Measured on production 2026-09-01..09-07 for this
+     driver: "AED 311 · avg fare AED 51", where 311 is 5 Bolt bookings at AED
+     62 and 51 is 4,359.11 over 86 — a denominator 17x the tile's own. Ten of
+     the 58 drivers on this branch printed a total SMALLER than the average
+     beneath it, which no count of one or more can produce. */
+  const B1 = { trips: 95, accounted_fares: 311, accounted_fare_bookings: 5,
+    avg_fare: 50.69, revenue: 4359.11, priced_trips: 86 };
+  const b1 = faresTile(B1);
+  check('branch 1 no longer captions its own total with every channel\'s average',
+    !/avg fare AED 51/.test(b1.sub), b1.sub);
+  check('…it divides by the bookings the figure is made of',
+    /avg AED 62/.test(b1.sub), b1.sub);
+  check('…and names that denominator',
+    /over the 5 bookings this counts/.test(b1.sub), b1.sub);
+  check('…so the average can never exceed the total it sits under',
+    Number(b1.value.replace(/[^0-9.]/g, '')) >= 62,
+    '"AED 30 · avg fare AED 84" was on production for ten drivers');
+  check('…and the larger figure it did not add is named, as in the branches below',
+    /trip feed prices AED 4,359 over 86 bookings/.test(b1.sub), b1.sub);
+  check('…with why it is not in the total',
+    /counted on its channel's payout/.test(b1.sub), b1.sub);
+  /* accounted_fare_bookings is `|| null` in income_sql.js, and 139/null is
+     Infinity, which money() renders as a dash. Live data cannot make that
+     shape; a hand-made payload in a test or mockapi.mjs can. */
+  check('a null denominator falls back rather than dividing by it',
+    faresTile({ accounted_fares: 139, accounted_fare_bookings: null }).sub
+      === 'where the platform reports fares');
+  check('…and zero does too',
+    !/Infinity|NaN|—/.test(faresTile({ accounted_fares: 139, accounted_fare_bookings: 0 }).sub));
+  /* accounted_platforms is every MEASURED channel, payout-basis ones included
+     (income_sql.js:530) — naming it here would print "on Bolt, Uber, Yango"
+     under a Bolt-only figure, which is this same defect in a new place. */
+  check('the channel is not named from accounted_platforms',
+    !/Bolt|Uber|Yango/i.test(faresTile({ ...B1,
+      accounted_platforms: ['bolt', 'uber', 'yango'] }).sub),
+    'that list includes channels whose money is NOT in this figure');
   const withStmt = faresTile({ ...SEP6, statement_fares: 12638.71, statement_fare_periods: 7 });
   check('the statement figure still leads over raw trip revenue',
     /weekly statement/.test(withStmt.sub));

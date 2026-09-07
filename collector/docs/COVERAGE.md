@@ -1036,3 +1036,33 @@ driver's 222 tracker fixes.
   today and it would have worked. Use `isoDay()` from `src/sources/ledger.js`,
   which takes a string or a Date. A guard that holds only while nobody changes
   where a value comes from is not a guard.
+* **A tile that suppresses part of a figure must caption the part it kept.**
+  `faresTile` has three branches and each one had the same defect, found one
+  at a time over three commits: branch 3 denied fares that `revenue` carried,
+  branch 2 denied them over 1,881 priced bookings, and branch 1 captioned a
+  single channel's total with `avg_fare` — the average over EVERY priced
+  booking in the window. Measured on production 2026-09-01..09-07: "AED 311 ·
+  avg fare AED 51", where the 311 is 5 Bolt bookings at AED 62 and the 51 is
+  4,359.11 over 86 across three channels. Ten of the 58 drivers on that branch
+  printed a total *smaller than the average beneath it*, which no count of one
+  or more can produce. `accounted_fare_bookings` is the denominator that
+  belongs to `accounted_fares` and `api/income_sql.js:526` says so in a
+  comment; nothing read it. **When a function has several branches returning
+  the same shape, fixing one is not fixing it — read them all in the same
+  pass.**
+* **`accounted_platforms` is every MEASURED channel, not the channels in the
+  figure beside it.** It is `measured.map((r) => r.platform)`
+  (`api/income_sql.js:530`), so it includes the payout-basis channels. Naming
+  it under `accounted_fares` would print "on Bolt, Uber, Yango" beneath a
+  Bolt-only total. No field names the fares-basis channels; ship the
+  denominator without the channel rather than inventing the attribution.
+* **A cancelled ride is not dark money.** `dark_bookings` at driver-day grain
+  counts bookings on a channel whose basis is `none` — and a driver whose only
+  Bolt rows that day were `driver_did_not_respond` and `client_cancelled` gets
+  `dark_bookings 2, dark_pct 20` while `/api/revenue` for the same day reports
+  Bolt pricing 11 of 21 bookings and `dark_bookings 0` fleet-wide. Captioning
+  the driver tile "2 bookings report no money" would state a reason that is not
+  the true one — no ride happened — and would make the driver page contradict
+  the fleet page about the same channel on the same day. Check whether a dark
+  booking is an unpriced ride or a ride that never ran before calling it a
+  money hole.
