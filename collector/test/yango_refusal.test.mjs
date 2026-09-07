@@ -49,11 +49,39 @@ check('FMS still checks its own responses', /if \(!r\.ok\)/.test(fms));
 check('…and still says why it does', /asked and refused|indistinguishable from a quiet/.test(fms));
 
 /* The check the operator runs and the call the collector makes have to be the
-   same endpoint, or the check tests its own choice. */
+   same endpoint, or the check tests its own choice.
+   ─────────────────────────────────────────────────────────────────────────
+   This pinned the literal '/api/reports-api/v1/orders/list' in both files, and
+   passed for as long as both spelled it. The collector's orders moved to
+   fleet-api.yango.tech on 2026-09-07 and the console path stayed behind in
+   credcheck.js — two files agreeing about a string neither of them uses for
+   the same thing. So the assertion is now that they SHARE A DEFINITION:
+   src/sources/yango.js exports YANGO_SURFACES and credcheck imports it, which
+   is a property no amount of re-spelling can fake. */
 const chk = readFileSync('src/credcheck.js', 'utf8');
-const PATH = '/api/reports-api/v1/orders/list';
-check('the credential check asks the endpoint the collector asks', chk.includes(PATH));
-check('…and the collector really asks it', yango.includes(PATH));
+const { YANGO_SURFACES } = await import('../src/sources/yango.js');
+check('the collector names its endpoints in one exported place',
+  Object.keys(YANGO_SURFACES).sort().join() === 'console,key'
+  && Object.values(YANGO_SURFACES).every((h) => Object.values(h).every((v) => v.startsWith('/'))),
+  JSON.stringify(YANGO_SURFACES));
+check('the credential check reads that place rather than spelling a path of its own',
+  /import \{[^}]*YANGO_SURFACES[^}]*\} from '\.\/sources\/yango\.js'/.test(chk));
+check('…and spells no Yango path of its own',
+  !/['"`]\/(api\/reports-api|api\/v1\/reports|v1\/parks)\//.test(chk),
+  (chk.match(/['"`]\/(api\/reports-api|api\/v1\/reports|v1\/parks)\/[^'"`]*/g) || []).join('; '));
+/* And every path it asks is one the collector asks. Derived from the export on
+   both sides, so a fourth surface added to the collector is covered without
+   this file being edited. */
+const ALL_PATHS = Object.values(YANGO_SURFACES).flatMap((h) => Object.values(h));
+check('every endpoint the check reaches for is one the collector reads',
+  [...chk.matchAll(/YANGO_SURFACES\.(\w+)\.(\w+)/g)]
+    .every(([, host, name]) => ALL_PATHS.includes(YANGO_SURFACES[host]?.[name])),
+  [...chk.matchAll(/YANGO_SURFACES\.(\w+)\.(\w+)/g)].map((m) => m[0]).join(', '));
+check('and the collector really asks them',
+  ALL_PATHS.every((path) => yango.includes(path)) === false
+    ? false
+    : /keyPost\(YANGO_SURFACES\.key\./.test(yango) && /post\(YANGO_SURFACES\.console\./.test(yango),
+  'the pulls must call through the export, not through a literal');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

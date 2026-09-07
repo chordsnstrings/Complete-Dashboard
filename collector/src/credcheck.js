@@ -30,6 +30,11 @@ import { get, SETTING_DEFAULTS } from './settings.js';
 import { keyFor } from './credkit.js';
 import { UBER_WEB_HOST } from './auth/uber.js';
 import { dubaiIso } from './util.js';
+/* The paths the COLLECTOR reads, so this file cannot test an endpoint the
+   collector abandoned. That is not hypothetical: orders moved to
+   fleet-api.yango.tech and the console path this file used to spell out was
+   left checking a surface nothing collects from. */
+import { YANGO_SURFACES } from './sources/yango.js';
 
 /* The same host the collector uses, from the same export. This checker kept
    its own copy of the URL, so when Uber moved supplier.uber.com to fleethub
@@ -188,6 +193,15 @@ async function checkBolt({ value, fleet }) {
 }
 
 /* ── Yango: does this session list anything? ───────────────────────────── */
+/* Whose session this is, read out of the value being tested rather than out of
+   the stored one — the paste box is testing a candidate, and naming the account
+   the operator is currently signed in as is what makes "sign in as somebody who
+   owns this park" an instruction they can follow. */
+const yangoAccountOf = (cookie) => {
+  const m = /(?:^|;\s*)yandex_login=([^;]+)/.exec(cookie || '');
+  try { return m ? decodeURIComponent(m[1]).slice(0, 60) : null; } catch { return null; }
+};
+
 async function checkYango({ value }) {
   if (!config.yango.parkId || !config.yango.apiKey) {
     return { verdict: 'unknown', detail: 'YANGO_PARK_ID and YANGO_API_KEY must be set before a cookie can be tested' };
@@ -203,17 +217,20 @@ async function checkYango({ value }) {
   /* Three credentials ride on every Yango request — the park id, the API key
      and the cookie — so a refusal names none of them. Asking once cannot tell
      them apart; asking twice can. */
-  const ask = (cookie) => http(`${config.yango.base}/api/reports-api/v1/orders/list`, {
+  /* The path the COLLECTOR still uses on this host, imported rather than
+     spelled: orders moved to fleet-api.yango.tech and this check would
+     otherwise have gone on testing a console path the collector abandoned —
+     the exact "a check that picks its own endpoint tests its own choice"
+     failure the header above warns about, arriving the other way round. */
+  const ask = (cookie) => http(`${config.yango.base}${YANGO_SURFACES.console.summary}`, {
     method: 'POST', timeoutMs: 30000, retries: 0,
     headers: {
       'X-Park-Id': config.yango.parkId, 'X-API-Key': config.yango.apiKey,
       'content-type': 'application/json', 'Accept-Language': 'en',
       ...(cookie ? { cookie } : {}),
     },
-    body: JSON.stringify({
-      date_type: 'booked_at',
-      date_from: `${day(1)}T00:00:00+04:00`, date_to: `${day(0)}T23:59:59+04:00`,
-    }),
+    body: JSON.stringify({ date_from: day(1), date_to: day(0),
+      sort: { field: 'driver_id', direction: 'asc' } }),
   });
   try {
     const { data, status } = await ask(value);
@@ -236,23 +253,111 @@ async function checkYango({ value }) {
           + 'so the cookie is not what it is rejecting — check YANGO_PARK_ID and YANGO_API_KEY, '
           + `whose park is ${config.yango.parkId}`);
       }
-      /* The comparison is reported, not just its verdict: a check that says
-         "refused" without saying what it compared against is the same
-         unfalsifiable claim this block replaced. */
-      if (bare) return verdict(false, `the fleet portal refused this session (${status}), `
-        + `where the same call without a cookie answers ${bare.status} — so the session is being read`);
+      /* A SESSION THAT AUTHENTICATES IS NOT A FAILED SESSION.
+         ─────────────────────────────────────────────────────────────────
+         This returned verdict(false) — "this credential is broken" — for the
+         asymmetric case, and the asymmetric case is precisely the proof that
+         the cookie WORKS: 401 without it and 403 with it means the portal read
+         the session and then refused the request for some other reason. The
+         sentence beside the verdict has said "so the session is being read"
+         all along, one clause after declaring it dead.
+
+         It was a defensible verdict while the console was the collector and a
+         refused console meant no Yango. It is not now: the collector reads
+         trips, the roster and the cars from fleet-api.yango.tech with no
+         session at all, and 403-with-401-without is the console's measured
+         signature since 2026-09-06. So this check as written would reject
+         every cookie an operator pasted, including a fresh one captured
+         minutes earlier — which is the false failure this function's own
+         header is about, arriving through the branch that was supposed to
+         prevent it.
+
+         'unknown' rather than a pass: the session authenticates, and whether
+         it can still DO anything is a question this refusal does not answer.
+         The paste box shows what was measured and does not throw the value
+         away. */
+      if (bare) {
+        return { verdict: 'unknown',
+          detail: `the session authenticates${yangoAccountOf(value) ? ` as ${yangoAccountOf(value)}` : ''} — `
+            + `the portal answers ${bare.status} with no cookie and ${status} with this one, so it is `
+            + 'being read — but the request is refused anyway. Since 2026-09-06 that refusal is an '
+            + 'HTML page from a CDN edge while every Yango API refusal is JSON, so it is about where '
+            + 'the call comes from rather than about this credential. Nothing the collector needs '
+            + 'depends on it: trips, the roster and the cars come from fleet-api.yango.tech with no '
+            + 'session, and only the weekly driver aggregate and the payment ledger are behind '
+            + 'this host.' };
+      }
       return { verdict: 'unknown',
         detail: `the portal refused (${status}), and the cookie-free comparison did not complete, `
           + 'so this does not establish which of the park id, the API key and the cookie is being refused' };
     }
-    /* `orders` present — even empty — is the portal answering as this park. */
-    if (data && typeof data === 'object' && Array.isArray(data.orders)) {
+    /* `items` present — even empty — is the portal answering as this park. */
+    if (data && typeof data === 'object' && Array.isArray(data.items)) {
       return verdict(true, `the fleet portal answered for park ${config.yango.parkId}`);
     }
     if (data && typeof data === 'object') return verdict(true, 'the fleet portal answered with this session');
     return verdict(false, String(status || 'no answer').slice(0, 200));
   } catch (e) {
     if (unreachable(e)) return { verdict: 'unknown', detail: `fleet.yango.com could not be reached: ${String(e.message).slice(0, 120)}` };
+    return verdict(false, String(e.message || e).slice(0, 200));
+  }
+}
+
+/* ── Yango: does this API KEY read this park, with no session at all? ─────
+   A different credential from the cookie above and a different host, so a
+   different check. checkYango tests a Yandex SESSION against fleet.yango.com;
+   this tests YANGO_API_KEY against fleet-api.yango.tech, which is where three
+   of the collector's five surfaces now live — the orders, the roster and the
+   cars — and which needs no cookie at all.
+
+   It matters that this exists rather than being folded into the one above.
+   The console has answered 403 from a CDN edge since 2026-09-06 and will go on
+   doing so; a product whose only Yango check asks the console reports Yango as
+   dead while the collector is reading 145 drivers and 104 cars a run. That is
+   the false failure this file's own header is about, at fleet scale.
+
+   The client id is derived from the park id (`taxi/park/<park id>`) and is the
+   ONLY shape this host accepts — the bare park id and `fleet/<park id>` both
+   answer 403 "invalid client id or api key", measured 2026-09-07. So a refusal
+   here has two suspects and Yango's wording refuses to choose between them,
+   which is what the detail says rather than guessing. */
+async function checkYangoKey({ value }) {
+  if (!config.yango.parkId) {
+    return { verdict: 'unknown', detail: 'YANGO_PARK_ID must be set before an API key can be tested' };
+  }
+  const clientId = config.yango.clientId;
+  try {
+    const { data, status } = await http(
+      `${config.yango.keyBase}${YANGO_SURFACES.key.drivers}`, {
+        method: 'POST', timeoutMs: 30000, retries: 0,
+        headers: { 'X-API-Key': value, 'X-Client-ID': clientId,
+          'content-type': 'application/json', 'Accept-Language': 'en' },
+        body: JSON.stringify({ query: { park: { id: config.yango.parkId } }, limit: 1 }),
+      });
+    if (Array.isArray(data?.driver_profiles)) {
+      return verdict(true, `the Yango fleet API answered for park ${config.yango.parkId}`
+        + `${Number.isFinite(data.total) ? ` — ${data.total} driver profiles` : ''}, with no session`);
+    }
+    if (status === 401 || status === 403) {
+      return verdict(false, `the Yango fleet API refused this key (${status}): `
+        + `${(data && (data.message || data.code)) || 'no reason given'} — this host reads `
+        + 'X-API-Key together with X-Client-ID and its refusal does not say which of the two '
+        + `it means; the client id in use is ${clientId ? 'taxi/park/<park id>' : 'unset'}`);
+    }
+    /* 404 is not a verdict about the key. Three of the six paths measured on
+       this host answer path_not_found, and a key marked dead for a path the
+       provider does not serve is the false failure in a new costume. */
+    if (status === 404) {
+      return { verdict: 'unknown',
+        detail: `the Yango fleet API has no ${YANGO_SURFACES.key.drivers} (404), so this `
+          + 'says nothing about the key — the path moved, not the credential' };
+    }
+    return verdict(false, `the Yango fleet API answered ${status} with no driver_profiles`);
+  } catch (e) {
+    if (unreachable(e)) {
+      return { verdict: 'unknown',
+        detail: `${config.yango.keyBase} could not be reached: ${String(e.message).slice(0, 120)}` };
+    }
     return verdict(false, String(e.message || e).slice(0, 200));
   }
 }
@@ -409,6 +514,10 @@ const CHECKS = { Uber: checkUber, Bolt: checkBolt, Yango: checkYango };
    alike. Only the keys whose check actually tests THAT credential appear. */
 const BY_KEY = {
   YANGO_COOKIE: checkYango,
+  /* A session and an API key are tested nothing alike and now live on two
+     different hosts, so the key is routed to its own check rather than being
+     pasted into a cookie jar and reported as a dead session. */
+  YANGO_API_KEY: checkYangoKey,
   UBER_WEB_COOKIE: checkUber,
   UBER_WEB_COOKIE_EGARI: checkUber,
   BOLT_REFRESH_TOKEN: checkBolt,

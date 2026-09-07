@@ -189,7 +189,10 @@ export function cohortRoutes(app, { q, wrap }) {
                 coalesce(v.fleet_id, vp.fleet_id) AS fleet_id
            FROM unnest($1::text[]) AS p(plate)
            LEFT JOIN vehicle v ON v.plate = p.plate
-           LEFT JOIN vehicle_profile vp ON vp.plate = p.plate`, [plates]),
+           /* vehicle_plate: one row per plate. vehicle_profile is keyed
+              (platform, vehicle_ext_id) and multiplies this query's rows once
+              a car is described by two channels — sql/schema_v66.sql. */
+           LEFT JOIN vehicle_plate vp ON vp.plate = p.plate`, [plates]),
       /* Bookings and telematics journeys counted apart. Adding them is how a
          193,027 km odometer row became 1.6 million km against one car. */
       q(`SELECT n.plate, n.platform,

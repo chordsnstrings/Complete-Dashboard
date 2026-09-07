@@ -41,8 +41,22 @@ check('the two-part name is composed in exactly one place', compositions.length 
   `found ${compositions.length}: ${JSON.stringify(compositions)}`);
 check('and that place is decomposed()', /function decomposed\([^)]*\)\s*\{[\s\S]{0,200}?first_name/.test(CODE));
 
+/* The key host nests what the console kept flat: an order's driver arrives as
+   driver_profile.{id,name} rather than driver_id / driver_full_name. The
+   PROPERTY is unchanged and is what is asserted — a trip's name goes through
+   nameFor, which prefers the decomposed spelling and falls back to whatever
+   the endpoint said. Pinning the console's exact spelling would have passed on
+   a collector that no longer calls that host. */
 check('trips file the driver under the register, not the raw endpoint string',
-  /driver_name:\s*nameFor\(o\.driver_id,\s*o\.driver_full_name\)/.test(CODE));
+  /driver_name:\s*nameFor\(\s*o\.driver_profile\?\.id,\s*o\.driver_profile\?\.name\s*\)/.test(CODE)
+  || /driver_name:\s*nameFor\(o\.driver_id,\s*o\.driver_full_name\)/.test(CODE),
+  'the order mapper must file driver_name through nameFor, not through the raw string');
+/* And no mapper anywhere may reach past nameFor to the endpoint's own string.
+   This is the assertion the one above is a specific case of: it is what would
+   catch a fourth endpoint being added with the split written back in. */
+check('…and no trip, ledger or performance row is filed under a raw endpoint name',
+  !/(driver_name|full_name|name):\s*(o|t|it)\.[a-z_]*(full_name|driver_name)\b/.test(CODE),
+  (CODE.match(/(driver_name|full_name|name):\s*(o|t|it)\.[a-z_]*(full_name|driver_name)\b/g) || []).join('; '));
 check('the ledger does too',
   /driver_name:\s*nameFor\(t\.driver_id,\s*t\.driver_name\)/.test(CODE));
 check('the weekly performance row uses the one composition',
@@ -50,24 +64,50 @@ check('the weekly performance row uses the one composition',
 check('and so does the roster snapshot',
   /name:\s*decomposed\(it\.driver\)/.test(CODE));
 
-/* The order is load-bearing: trips are filed under a name the summary endpoint
-   has not been asked for yet unless it is asked first. */
 /* Each pull is wrapped in surface() now, so that one refused endpoint cannot
    cost the other two — but the ORDER is still load-bearing and still checked:
-   trips and ledger rows are filed under the name the summary endpoint
-   decomposes, so that endpoint has to be asked first. */
-/* Searched inside collect() only. indexOf over the whole file finds each
+   trips and ledger rows are filed under the DECOMPOSED name, so the endpoint
+   that decomposes has to be asked first.
+
+   WHICH endpoint that is has moved. It was the console's summary/drivers,
+   asked as surface('drivers'); it is now the key host's driver-profiles/list,
+   asked as surface('roster'), because the console has answered 403 from a CDN
+   edge since 2026-09-06 and the key host needs no cookie. So the assertion is
+   written against the ROLE rather than the label: whichever surface is the one
+   that composes first_name and last_name goes before the ones that file trips
+   and ledger rows. A test pinned to the label would have gone green on a
+   collector that pulls trips before it knows anybody's name.
+
+   Searched inside collect() only. indexOf over the whole file finds each
    function's DECLARATION, which sits in source order rather than call order —
-   pullDrivers is declared after pullTrips and the assertion inverted. */
+   pullRoster is declared after pullTrips and the assertion would invert. */
 const COLLECT = CODE.slice(CODE.indexOf('export async function collect('));
-const seedAt = COLLECT.indexOf("surface('names'");
-const driversAt = COLLECT.indexOf("surface('drivers'");
-const tripsAt = COLLECT.indexOf("surface('trips'");
-const ledgerAt = COLLECT.indexOf("surface('ledger'");
-check('collect() seeds the names before anything is pulled', seedAt > 0 && seedAt < driversAt);
-check('and pulls drivers before trips', driversAt > 0 && driversAt < tripsAt,
-  `drivers@${driversAt} trips@${tripsAt}`);
-check('and before the ledger', driversAt > 0 && driversAt < ledgerAt);
+const callAt = (label) => COLLECT.indexOf(`surface('${label}`);
+/* The function that holds the one composition, found rather than named.
+   Each declaration's body is taken as far as the NEXT declaration: a lazy
+   [\s\S]*? from the first `async function` happily runs past three of them to
+   reach a decomposed() in the fourth, which named seedNames and made the two
+   order assertions below compare a position with itself. */
+const DECLS = [...CODE.matchAll(/async function (\w+)\s*\(/g)];
+const DECOMPOSER = DECLS.find((m, i) => CODE
+  .slice(m.index, i + 1 < DECLS.length ? DECLS[i + 1].index : CODE.length)
+  .includes('decomposed('))?.[1];
+check('one pull composes the name, and it is found rather than assumed',
+  !!DECOMPOSER, String(DECOMPOSER));
+/* collect() calls it as surface('<label>', fn) or surface('<label>', () => fn(...)) —
+   either spelling, so the lookup is on the FUNCTION and not on the label. */
+const decomposerAt = DECOMPOSER
+  ? COLLECT.search(new RegExp(`surface\\('[^']*',\\s*(\\(\\)\\s*=>\\s*)?${DECOMPOSER}\\b`)) : -1;
+const seedAt = callAt('names');
+const tripsAt = callAt('trips');
+const ledgerAt = callAt('ledger');
+check('collect() seeds the names before anything is pulled',
+  seedAt > 0 && seedAt < decomposerAt, `seed@${seedAt} decomposer@${decomposerAt}`);
+check('and asks the endpoint that decomposes the name before it pulls trips',
+  decomposerAt > 0 && decomposerAt < tripsAt,
+  `${DECOMPOSER}@${decomposerAt} trips@${tripsAt}`);
+check('and before the ledger', decomposerAt > 0 && decomposerAt < ledgerAt,
+  `${DECOMPOSER}@${decomposerAt} ledger@${ledgerAt}`);
 
 /* An id nobody has ever seen decomposed keeps the endpoint's own string. A
    driver with no name at all is worse than a driver with a badly ordered one. */

@@ -1170,8 +1170,53 @@ export async function renderVehicleDirectory(root) {
     });
   }
 
+  /* HOW MANY CARS, which is not the same question as how many plates.
+     ─────────────────────────────────────────────────────────────────────────
+     A plate is the fleet's working name for a car and is reassigned; a VIN is
+     the car. This page has always counted plates and called them Vehicles, and
+     the VIN — held since sql/schema_v5.sql — was reachable only one car at a
+     time through /api/vehicle/profile. So "we do not have 273 cars" was
+     established by fetching 273 pages by hand and writing the answer down in a
+     chat, where it could not be checked and did not survive.
+
+     Both numbers, side by side, with the gap named. The gap is the honest part:
+     a plate with no VIN is not a car this can identify, and calling the VIN
+     count "the fleet" would be the same overclaim in the other direction. */
+  const vins = new Set(rows.map((r) => r.vin).filter(Boolean));
+  const noVin = rows.filter((r) => !r.vin).length;
+  /* Two channels that BOTH FILED A VIN, and filed the same one. This counted
+     rows whose vin_channels had two entries, which was every plate two channels
+     held a record for — including plates where only one of them, or neither,
+     had a VIN at all. "Confirmed by two channels" over a car one channel has
+     never identified is the overclaim this tile exists to replace. */
+  const agreed = rows.filter((r) => (r.vin_channels || []).length > 1 && r.distinct_vins === 1).length;
+  /* And the opposite, which must never be quietly resolved: two channels that
+     filed DIFFERENT VINs against one plate. Either the plate moved between two
+     cars or a provider has it wrong, and both want a person's attention. */
+  const disputed = rows.filter((r) => (r.distinct_vins || 0) > 1);
   kpiHost.replaceWith(kpiRow([
-    { label: 'Vehicles', value: fmt(rows.length), sub: 'with any record at all' },
+    { label: 'Vehicles', value: fmt(rows.length), sub: 'plates with any record at all' },
+    { label: 'Cars, by VIN', value: fmt(vins.size),
+      /* Never "and the rest are duplicates". A plate with no VIN might be a
+         car nobody filed one for or a plate that is not a car at all; this
+         says which question is open rather than answering it. */
+      sub: noVin
+        ? `${fmt(noVin)} ${plural(noVin, 'plate carries', 'plates carry')} no VIN, so `
+          + `${plural(noVin, 'it is', 'they are')} neither counted here nor ruled out`
+        : 'every plate on the list carries one',
+      tone: noVin ? 'warn' : 'good' },
+    agreed
+      ? { label: 'Confirmed by two channels', value: fmt(agreed),
+          sub: 'two providers filed the same VIN against this plate, so its identity is not '
+            + 'one feed\u2019s word',
+          tone: 'good' }
+      : null,
+    disputed.length
+      ? { label: 'Two channels disagree', value: fmt(disputed.length),
+          sub: 'two providers filed DIFFERENT VINs against one plate — either the plate moved '
+            + 'between cars or one of them is wrong, and nothing here can say which',
+          tone: 'critical' }
+      : null,
     { label: 'Took a booking', value: fmt(earning), sub: 'earned in this window',
       tone: earning === rows.length ? 'good' : rows.length - earning > rows.length / 4 ? 'critical' : 'warn' },
     { label: 'Moved, no booking', value: fmt(movedOnly),
@@ -1340,6 +1385,22 @@ export async function renderVehicleDirectory(root) {
       } },
     { label: 'Drivers', key: 'drivers', num: true,
       render: (r) => (r.drivers == null ? '—' : fmt(r.drivers)) },
+    /* The VIN, and which channels filed it. Absent with a reason rather than
+       blank: a car nobody has filed a VIN for is a car this product cannot
+       identify, and an empty cell says nothing about why. */
+    { label: 'VIN', key: 'vin',
+      render: (r) => (r.vin
+        ? `<code title="${esc(
+          (r.distinct_vins || 0) > 1
+            ? `${(r.vin_channels || []).map(sourceLabel).join(' and ')} filed DIFFERENT VINs `
+              + 'against this plate. One of them is shown; nothing here can say which is the car.'
+            : (r.vin_channels || []).length > 1
+              ? `filed by ${(r.vin_channels || []).map(sourceLabel).join(' and ')} — two providers `
+                + 'naming the same car, which is the strongest identity this fleet has'
+              : `filed by ${(r.vin_channels || []).map(sourceLabel).join('') || 'one channel'} only`)}">`
+          + `${esc(r.vin)}</code>`
+        : '<span class="ent-off" title="no channel has filed a VIN for this plate, so nothing '
+          + 'here can say whether it is a car the fleet already counts under another plate">—</span>') },
     /* The pill took its colour from staleness and its text from the provider's
        status word, so a tracker whose status string is "OFFLINE" rendered
        GREEN as long as the fix was recent. Both halves decide the tone now. */
@@ -1363,9 +1424,9 @@ export async function renderVehicleDirectory(root) {
   const draw = (list, term) => {
     tblP.body.innerHTML = '';
     if (!list.length) {
-      tblP.body.append(note(`No vehicle matches “${term}”. Searching plate, make, model and driver across `
-        + `the ${fmt(rows.length)} vehicles on the books — every one is loaded, so this is the whole fleet `
-        + 'and not a page of it.'));
+      tblP.body.append(note(`No vehicle matches “${term}”. Searching plate, VIN, make, model and driver `
+        + `across the ${fmt(rows.length)} vehicles on the books — every one is loaded, so this is the `
+        + 'whole fleet and not a page of it.'));
       return;
     }
     const tbl = tableFrom(list, cols, {
@@ -1377,7 +1438,11 @@ export async function renderVehicleDirectory(root) {
   draw(rows, '');
   bar.querySelector('#vdq').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
-    const list = t ? rows.filter((r) => `${r.plate} ${r.make} ${r.model} ${r.current_driver}`.toLowerCase().includes(t)) : rows;
+    /* The VIN is searchable, because the sentence above says it is — and
+       because a VIN is the one identifier that survives a plate change, so
+       "which car was this" is a question only this field can answer. */
+    const list = t ? rows.filter((r) => `${r.plate} ${r.vin || ''} ${r.make} ${r.model} `
+      + `${r.current_driver}`.toLowerCase().includes(t)) : rows;
     bar.querySelector('#vdn').textContent = `${fmt(list.length)} of ${fmt(rows.length)} vehicles`;
     draw(list, t);
   };

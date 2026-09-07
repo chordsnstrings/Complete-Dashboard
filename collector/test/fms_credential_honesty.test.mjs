@@ -284,9 +284,43 @@ console.log('\na rejected login is not answered by asking sixty-two more times')
     /if \(bare && !cookieIsNotIt\) \{[\s\S]{0,220}credential: 'YANGO_COOKIE',[\s\S]{0,60}state: 'ok'/.test(y),
     'ceasing to blame it does not clear the red row already against it — production carried '
     + 'YANGO_PARK_ID invalid and YANGO_COOKIE invalid at the same time, minutes apart');
-  check('and the credential blamed is not the cookie that just authenticated',
-    /credential: cookieIsNotIt \|\| bare \? 'YANGO_PARK_ID' : 'YANGO_COOKIE'/.test(y),
+  /* The credential blamed is not the cookie that just authenticated — and, as
+     of 2026-09-07, not the park id either.
+     ─────────────────────────────────────────────────────────────────────────
+     This pinned the literal ternary that chose between YANGO_PARK_ID and
+     YANGO_COOKIE. Both of those are now the wrong answer for this branch. The
+     collector reads three of its five surfaces from fleet-api.yango.tech,
+     which proves the park id and the API key on every successful run; two
+     writers on one row means the last one decides the colour, and the console
+     surfaces run last, so the panel would have gone red after every good run.
+
+     What is refused here is the CONSOLE, by an edge in front of it, and the
+     assertion is the property rather than the spelling: the row this branch
+     writes must not name a credential that something else proves, and its
+     state must ask for an errand that is not "replace this". */
+  const consoleRow = /credential: 'YANGO_CONSOLE'/.test(y);
+  check('and the credential blamed is neither the cookie nor the park id, which both authenticate',
+    consoleRow && !/credential: cookieIsNotIt \|\| bare \? 'YANGO_PARK_ID'/.test(y),
     'a red row against a working credential sends somebody to replace it');
+  check('…and the park id is proven by the host that serves the collector, not by this one',
+    /credential,\s*\n?\s*state: 'ok'/.test(y) || /for \(const credential of \['YANGO_API_KEY', 'YANGO_PARK_ID'\]\)/.test(y),
+    'nothing else would ever turn those rows green again');
+  /* 'blocked' has to be EARNED by the asymmetry — authenticated with a
+     session and refused anyway. The same refusal with and without a session is
+     the signature of a park this host does not recognise, and calling that
+     "something in front of the API" would be the same kind of confident wrong
+     sentence this whole file is about. */
+  check('…in a state whose errand is not "replace it"',
+    /state: bare && !cookieIsNotIt \? 'blocked' : 'unknown'/.test(y),
+    (y.match(/credential: 'YANGO_CONSOLE',[\s\S]{0,200}/) || [''])[0]);
+  check('…and the symmetric refusal is not described as an edge, because it is not one',
+    /cookieIsNotIt[\s\S]{0,400}not the park id, which fleet-api\.yango\.tech accepts/.test(y),
+    'a 403 with and without a session says nothing about where the call came from');
+  {
+    const { ERRANDS } = await import('../api/auth_routes.js');
+    check('…which the banner has a written errand for', !!ERRANDS.blocked,
+      Object.keys(ERRANDS).join(', '));
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

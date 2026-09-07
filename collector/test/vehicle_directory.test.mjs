@@ -116,6 +116,14 @@ NEW = NEW.replace('${attributedEarnings()}', attributedEarnings());
    the definition of "device fault" is the drift the module exists to stop. */
 NEW = NEW.replace('${drivingCount()}', drivingCount())
   .replace('${deviceCount()}', deviceCount());
+/* The row cap, read out of the route rather than spelled here. It is asked for
+   as DIR_LIMIT + 1 so the route can tell "all of them" from "the first N of
+   them" — api/public/vehicle.js prints "this is the whole fleet" over the
+   result — and a literal copied into this file would be a second definition of
+   a bound whose whole purpose is to be provably unreachable. */
+const CAP = Number(/const DIR_LIMIT = (\d+);/.exec(SRC)?.[1]);
+if (!Number.isFinite(CAP)) throw new Error('api/vehicle_routes.js no longer declares DIR_LIMIT');
+NEW = NEW.replace('${DIR_LIMIT + 1}', String(CAP + 1));
 if (/\$\{/.test(NEW)) throw new Error(`the route interpolates something this test does not substitute: ${NEW.match(/\$\{[^}]*\}/g)}`);
 
 const WIN = ['2026-08-01', '2026-08-31'];

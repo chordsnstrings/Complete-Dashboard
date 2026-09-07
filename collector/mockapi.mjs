@@ -1257,6 +1257,23 @@ const vDaily = (plate) => {
 
 app.get('/api/vehicles/directory', (_, r) => r.json(plates.map((pl, i) => ({
   plate: pl, trips: i === 6 ? 0 : 470 - i * 44, days: i === 6 ? 0 : 27 - i,
+  /* The VIN, and which channels filed it — the three states the page draws
+     differently, so a browser smoke run exercises all of them rather than the
+     happy one. A VIN is 17 characters; these are shaped like real ones.
+
+       i === 3   no VIN at all: the car the "Cars, by VIN" tile counts as
+                 neither identified nor ruled out
+       i === 5   filed by BOTH channels, which is the identity claim two
+                 providers agree on and the tile calls out separately
+       others    one channel only */
+  vin: i === 3 ? null : `LC0CE6CD${i}R72378${10 + i}`,
+  /* vin_channels is the channels that FILED a VIN, which is a smaller set than
+     the channels holding a record — and distinct_vins is how many different
+     ones they filed. Two channels and one VIN is agreement; two channels and
+     two VINs is a contradiction the page draws in red rather than resolving.
+     i === 2 is that case, so a browser smoke run reaches it. */
+  vin_channels: i === 3 ? [] : (i === 5 || i === 2) ? ['uber', 'yango'] : ['uber'],
+  distinct_vins: i === 3 ? 0 : i === 2 ? 2 : 1,
   // A car that drove and took no booking — the bucket that used to be hidden
   // inside "Earning".
   telematics_journeys: i === 6 ? 38 : Math.round((470 - i * 44) * 1.3),
@@ -3671,10 +3688,47 @@ app.get('/api/auth', (_, r) => {
       + 'the credential is not what is wrong, the URL is',
     surface: 'supplier graphql GetVehicles', last_ok_at: dayISO(1), checked_at: dayISO(0),
     last_ok_age_h: 20.1, run_age_h: 20.1, stall_limit_h: 6, severity: 'stopped' });
-  r.json({ rows, stopped: 2, at_risk: 1, missing: 0, moved: 1, observed: true,
-    headline: 'A credential has stopped working: uber · Egari (UBER_WEB_COOKIE_EGARI) '
-      + '— redirected to auth.uber.com — the session is no longer signed in; '
-      + '1 of them because the endpoint moved, not the credential' });
+  /* The other two errands, so a browser can draw all three sentences.
+     ─────────────────────────────────────────────────────────────────────────
+     Both are production's real cases on 2026-09-07 and both were being
+     described as "stopped working … until they are replaced":
+
+       unentitled  BOLT_CLIENT_ID reads Egari's company and is refused
+                   Ecosine's. A new secret would carry the same entitlement.
+       blocked     fleet.yango.com answers 403 from a CDN edge while the park
+                   itself returns 200. There is nothing to re-paste. */
+  rows.push({ provider: 'bolt', fleet_id: 'ecosine', credential: 'BOLT_CLIENT_ID',
+    state: 'unentitled',
+    detail: 'BOLT_CLIENT_ID is not entitled to company_id 142868 (ecosine): NOT_AUTHORIZED '
+      + 'hint=COMPANIES_NOT_ALLOWED. The same token read 142897 (egari), so the secret is fine. '
+      + 'Add 142868 to this fleet-integration app in the Bolt portal.',
+    surface: 'fleet-integration getDrivers', last_ok_at: null, checked_at: dayISO(0),
+    last_ok_age_h: null, run_age_h: 3.2, stall_limit_h: 24, severity: 'stopped' });
+  rows.push({ provider: 'yango', fleet_id: 'ecosine', credential: 'YANGO_CONSOLE',
+    state: 'blocked',
+    detail: 'fleet.yango.com HTTP 403; without a cookie: HTTP 401. The park id and API key are '
+      + 'proven every run by fleet-api.yango.tech, which serves trips, the roster and the cars; '
+      + 'only the weekly driver aggregate and the payment ledger are behind this host.',
+    surface: '/api/reports-api/v2/summary/drivers/list', last_ok_at: dayISO(1),
+    checked_at: dayISO(0), last_ok_age_h: 21.4, run_age_h: 21.4, stall_limit_h: 12,
+    severity: 'stopped' });
+  const bad = rows.filter((x) => x.severity === 'stopped');
+  const label = (x) => `${x.provider}${x.fleet_id && x.fleet_id !== '*' ? ` · ${x.fleet_id}` : ''} (${x.credential})`;
+  r.json({ rows, stopped: bad.length, at_risk: 1, missing: 0,
+    moved: 1, unentitled: 1, blocked: 1, observed: true,
+    errands: [
+      { state: 'moved', noun: 'endpoint', count: 1,
+        rows: bad.filter((x) => x.state === 'moved').map(label) },
+      { state: 'unentitled', noun: 'credential', count: 1,
+        rows: bad.filter((x) => x.state === 'unentitled').map(label) },
+      { state: 'blocked', noun: 'call', count: 1,
+        rows: bad.filter((x) => x.state === 'blocked').map(label) },
+    ],
+    headline: `${bad.length} credentials have stopped working — 1 of them because the endpoint `
+      + 'moved, not the credential; 1 of them authenticate and are refused the company or park, '
+      + 'which is a permission to grant rather than a secret to replace; 1 of them refused in '
+      + 'front of the API, where no credential is being read: '
+      + bad.map((x) => `${label(x)} — ${x.detail}`).join('; ') });
 });
 
 app.get('/api/trip', (req, r) => {

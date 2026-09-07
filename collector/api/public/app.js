@@ -5881,6 +5881,44 @@ window.addEventListener('data:refreshed', (ev) => {
    jar was measured NOT to be the session (api/auth_routes.js records the
    experiment), and a banner that goes amber on a working fleet is one nobody
    reads twice. */
+/* The short forms the banner uses, keyed on the same state names
+   api/auth_routes.js scores. Its `errands` array carries the long sentences
+   for a caller with room; a banner has one line, so these are the same claims
+   at banner length. Missing key -> the generic sentence, never a wrong one. */
+/* Written for one row and for several, because the banner shows both and a
+   sentence that says "1 call are being refused" is a sentence nobody finishes
+   reading. Keyed on the same state names api/auth_routes.js scores; a state
+   missing here falls to the generic lead, which is wrong but never garbled. */
+const ERRAND_HEAD = {
+  moved: {
+    one: 'moved — the surface behind it is collecting nothing, and the credential is not what '
+      + 'is wrong: the URL is',
+    many: 'moved — the surfaces behind them are collecting nothing, and the credential is not '
+      + 'what is wrong: the URL is',
+  },
+  unentitled: {
+    one: 'authenticates and is refused the company or park it asks for — this is access to grant '
+      + 'in the provider\u2019s portal, not a secret to replace',
+    many: 'authenticate and are refused the company or park they ask for — this is access to '
+      + 'grant in the provider\u2019s portal, not a secret to replace',
+  },
+  blocked: {
+    one: 'is being refused before the request reaches the provider — the credential authenticates '
+      + 'and something in front of the API is turning this caller away',
+    many: 'are being refused before the request reaches the provider — the credentials '
+      + 'authenticate and something in front of the API is turning this caller away',
+  },
+};
+/* The noun each errand counts, so the lead reads "2 endpoints" and not
+   "2 credentials" when the credential is not what is wrong. */
+const NOUN_OF = { moved: 'endpoint', unentitled: 'credential', blocked: 'surface' };
+const ERRAND_PART = {
+  moved: 'because the endpoint moved, not the credential',
+  unentitled: 'not permitted that company or park, which is a permission to grant rather than a '
+    + 'secret to replace',
+  blocked: 'refused in front of the API, where no credential is being read',
+};
+
 async function authBanner() {
   const host = $('#authBanner');
   if (!host) return;
@@ -5903,20 +5941,63 @@ async function authBanner() {
       : h < 48 ? `last worked ${Math.round(h)}h ago`
         : `last worked ${Math.round(h / 24)} days ago`;
   };
-  /* A moved endpoint stops collection exactly as completely as a dead
-     credential and needs a completely different action: somebody changes a
-     URL. Telling them to replace a working cookie is what cost days when
-     supplier.uber.com became fleethub.uber.com. */
-  const moved = stopped.filter((r) => r.state === 'moved');
+  /* THE ERRAND, not just the count.
+     ─────────────────────────────────────────────────────────────────────────
+     Three states stop collection as completely as a dead credential and need
+     three completely different actions, and the headline was telling an
+     operator to do the wrong one for two of them:
+
+       moved       somebody changes a URL — the days lost when
+                   supplier.uber.com became fleethub.uber.com
+       unentitled  the credential authenticates and is refused the company;
+                   somebody grants it in the provider's portal. BOLT_CLIENT_ID
+                   reads Egari's 142897 and is refused Ecosine's 142868, so a
+                   new secret would have exactly the same entitlement.
+       blocked     something in front of the API refuses this caller. Yango's
+                   console answers 403 from a CDN edge while the park itself
+                   returns 200; there is nothing to re-paste.
+
+     The clauses come from api/auth_routes.js as `errands`, so this file and
+     that one cannot describe the same state two ways — and a state added there
+     without a clause simply does not claim to be a replacement here. */
+  /* Derived from the ROWS, with the API's list as a cross-check rather than as
+     the only source. `errands` was read straight off d.errands, which made the
+     page silent about an errand whenever the API predated this field — a
+     browser holding a newer app.js against an older /api/auth would have gone
+     back to telling somebody to replace a URL. The rows carry `state`, which
+     is all this needs. */
+  const errandsOf = (rows) => Object.keys(ERRAND_HEAD)
+    .map((state) => ({ state, count: rows.filter((r) => r.state === state).length }))
+    .filter((e) => e.count > 0);
+  const errands = errandsOf(stopped);
+  /* Every stopped row accounted for by ONE errand, not "there happens to be a
+     single errand present".
+     ─────────────────────────────────────────────────────────────────────────
+     This required errands.length === 1, and production's own two rows on
+     2026-09-07 are two DIFFERENT errands — Bolt unentitled and Yango blocked —
+     so the page fell to the generic lead and told an operator to replace two
+     credentials, neither of which can be replaced. That is the banner this
+     whole change exists to fix, failing on the only case it was written for. */
+  const covered = errands.reduce((a, e) => a + e.count, 0);
+  const sole = errands.length === 1 && errands[0].count === stopped.length ? errands[0] : null;
+  const nth = (n, state) => ERRAND_HEAD[state]?.[n === 1 ? 'one' : 'many'];
   const head = stopped.length
-    ? (moved.length === stopped.length
-      ? `${countOf(stopped.length, 'endpoint')} moved — `
-        + (stopped.length === 1 ? 'the surface behind it is' : 'the surfaces behind them are')
-        + ' collecting nothing, and the credential is not what is wrong: the URL is'
-      : `${countOf(stopped.length, 'credential')} stopped working — `
-        + 'the surfaces behind ' + (stopped.length === 1 ? 'it are' : 'them are')
-        + ' collecting nothing until ' + (stopped.length === 1 ? 'it is' : 'they are') + ' replaced'
-        + (moved.length ? `; ${fmt(moved.length)} of them because the endpoint moved, not the credential` : ''))
+    ? (sole
+      ? `${countOf(stopped.length, sole.noun || NOUN_OF[sole.state] || 'credential')} ${nth(stopped.length, sole.state)}`
+      /* Every stopped row has an errand and there are several: name each one
+         rather than leading with a verb that is wrong for all of them. */
+      : covered === stopped.length
+        ? `${countOf(stopped.length, 'surface')} ${stopped.length === 1 ? 'is' : 'are'} collecting `
+          + `nothing, and ${stopped.length === 1 ? 'it is' : 'none of them is'} a credential to `
+          + `replace — ${errands.map((e) => `${fmt(e.count)} ${ERRAND_PART[e.state]}`).join('; ')}`
+        /* A genuine mix: some rows ARE dead credentials. The lead is true of
+           those and each other errand names itself. */
+        : `${countOf(stopped.length, 'credential')} stopped working — `
+          + 'the surfaces behind ' + (stopped.length === 1 ? 'it is' : 'them are')
+          + ' collecting nothing until ' + (stopped.length === 1 ? 'it is' : 'they are') + ' replaced'
+          + (errands.length
+            ? `; ${errands.map((e) => `${fmt(e.count)} ${ERRAND_PART[e.state]}`).join(', ')}`
+            : ''))
     : `${countOf(risk.length, 'source')} ${risk.length === 1 ? 'has' : 'have'} not collected recently`;
 
   host.className = `authbanner ${tone}`;

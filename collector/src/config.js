@@ -132,9 +132,21 @@ export const config = {
   },
 
   get yango() {
+    const parkId = get('YANGO_PARK_ID');
     return {
       base: get('YANGO_BASE', D.YANGO_BASE),
-      parkId: get('YANGO_PARK_ID'),
+      /* The keyed host, and the client id shape it accepts.
+         ─────────────────────────────────────────────────────────────────
+         `taxi/park/<park id>` is the ONLY shape that works: measured from
+         production 2026-09-07, the bare park id and `fleet/<park id>` both
+         answer 403 {"code":"403","message":"invalid client id or api key"}.
+         It is derived from the park id rather than stored, so it cannot drift
+         out of step with it — but YANGO_CLIENT_ID overrides it, because a
+         portal that one day shows a different value should be pasteable
+         without a deploy. */
+      keyBase: get('YANGO_KEY_BASE', D.YANGO_KEY_BASE),
+      clientId: get('YANGO_CLIENT_ID') || (parkId ? `taxi/park/${parkId}` : null),
+      parkId,
       apiKey: get('YANGO_API_KEY'),
       cookie: get('YANGO_COOKIE'),
       fleet: 'ecosine',

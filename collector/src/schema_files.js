@@ -63,4 +63,10 @@ export const SCHEMA_FILES = [
      rows with 13,056 trips on the smaller one. Discovered per roster pull,
      applied at the boundary, never silently. */
   'schema_v65.sql',
+  /* vehicle_plate: one row per plate over vehicle_profile, which is keyed
+     (platform, vehicle_ext_id) and so holds one car once per channel. Until
+     Yango's cars/list only Uber wrote that table, and four LEFT JOINs in the
+     read API were written as though one-row-per-plate were a property of the
+     table. It was a property of who was filling it. */
+  'schema_v66.sql',
 ];

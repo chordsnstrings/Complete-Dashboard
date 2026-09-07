@@ -409,7 +409,9 @@ async function licenceRisk() {
   }
 
   const rows = await q(
-    `SELECT platform, driver_ext_id, full_name, phone, licence_no, licence_expires, fleet_id
+    /* licence_no is NOT selected. A column that is never read cannot be
+       written into a body by a later edit, which is how it got there. */
+    `SELECT platform, driver_ext_id, full_name, phone, licence_expires, fleet_id
      FROM driver_compliance
      WHERE licence_expires IS NOT NULL AND licence_expires < (now() + interval '45 days')
      ORDER BY licence_expires ASC LIMIT 100`);
@@ -421,7 +423,21 @@ async function licenceRisk() {
       severity: gone ? 'critical' : 'warning', category: 'compliance',
       entity_type: 'driver', entity_id: r.driver_ext_id, fleet_id: r.fleet_id,
       title: `${r.full_name || r.driver_ext_id}'s licence ${gone ? 'has expired' : 'expires soon'} (${isoDay(r.licence_expires)})`,
-      detail: `Licence ${r.licence_no || '—'} on ${r.platform}. ${gone
+      /* NOT the licence number.
+         ─────────────────────────────────────────────────────────────────
+         This wrote the driver's licence number into an insight body, and
+         /api/insights has no admin gate — api/redact.js strips identity
+         documents from the driver routes and nothing strips them from here.
+         It leaked nothing only by accident: every licence_no on production was
+         the hotel channel's placeholder "123456". Yango's driver-profiles/list
+         files real ones for 145 drivers, so the day that collector ships this
+         line would serve real licence numbers to anonymous callers.
+
+         The number is not what the insight is about. The finding is that a
+         date has passed; the platform says where to go and look, and the
+         driver is already named in the title. Nothing an operator needs to act
+         on this is lost. */
+      detail: `Licence on ${r.platform} — the number is held on the driver page. ${gone
         ? 'Every trip driven on an expired licence is uninsured exposure for the company, not just the driver.'
         : 'Renewal windows in the UAE take days, not hours.'}`,
       action: gone ? `Stand the driver down until renewal is evidenced.` : `Chase the renewal now and diarise a re-check.`,

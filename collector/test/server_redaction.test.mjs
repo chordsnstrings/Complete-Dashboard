@@ -227,6 +227,17 @@ function complianceApp() {
     if (/GROUP BY licence_no/.test(sql)) {
       return [{ licence_no: '123456', n: 94, with_number: 94, distinct_numbers: 1 }];
     }
+    /* The two scope counts the placeholder rule asks for.
+       ─────────────────────────────────────────────────────────────────────
+       The share that decides "this is a default, not a date" is measured
+       against the rows of the CHANNEL the repeated value came from, not
+       against the fleet — otherwise a second channel filing real dates makes
+       the first channel's default silently stop being detected, which is what
+       the Yango roster pull would have done to the hotel channel's 94. So the
+       route asks for the channel's own row count, and this fixture answers it
+       with the production shape: 94 dated rows on the channel, all 94 the
+       same date. */
+    if (/count\(\*\)::int AS in_channel/.test(sql)) return [{ in_channel: 94 }];
     if (/WITH life AS/.test(sql)) return COMPLIANCE_ROWS.map((r) => ({ ...r }));
     if (/count\(\*\)::int total/.test(sql)) return [TOTALS];
     if (/GROUP BY 1 HAVING/.test(sql)) {

@@ -414,15 +414,47 @@ const WIN = 'from=2026-08-01&to=2026-08-31';
      formatted in SQL rather than sliced in JS. */
   check('a date used as an identifier is a date, not a weekday',
     /^\d{4}-\d{2}-\d{2}$/.test(c.placeholder_date || ''), c.placeholder_date);
-  // With fewer repeats than half the roster, nothing is called a placeholder.
+  /* A SECOND CHANNEL FILING REAL DATES DOES NOT MAKE THE FIRST ONE'S DEFAULT
+     GO AWAY — and it used to.
+     ─────────────────────────────────────────────────────────────────────────
+     The share was measured across every dated row in the fleet, so twenty
+     genuine dates from a different channel took the mode from 8 of 9 to 8 of
+     29 and the detector fell silent. That is not a fleet whose data got
+     better: it is the same eight rows nobody ever filled in, now rendering as
+     real expiries, with src/insights.js raising "stand the driver down" for
+     each of them.
+
+     Not hypothetical. Production carried 94 hotel placeholders out of 94 dated
+     rows on 2026-09-07, and the deploy that pointed the Yango collector at
+     fleet-api.yango.tech adds 145 rows with real licence dates — 94 of 239,
+     a share of 0.39, under the floor. The detector would have gone quiet on
+     the day the data got BIGGER.
+
+     A default is a property of a FEED. The share is measured against the
+     channel the repeated value came from, so another channel's rows are not
+     in the denominator and cannot dilute it. */
   for (let i = 0; i < 20; i++) {
     await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, licence_no,
                licence_expires, state) VALUES ('bolt',$1,$2,$3,$4,'active')`,
       [`u${i}`, `Unique ${i}`, `AE${i}`, `2027-0${1 + (i % 9)}-01`]);
   }
   const c2 = await get('/api/compliance/drivers');
+  check('another channel\'s genuine dates do not rescue the channel that files a default',
+    c2.placeholder_date === '2026-01-01', String(c2.placeholder_date));
+  check('…and the genuine row on the SAME channel is still not swept up',
+    (c2.drivers.find((d) => d.full_name === 'Real Person') || {}).licence_placeholder !== true);
+
+  /* And the rule still fails the other way, which is what stops it accusing a
+     roster that is simply small: dates filed by the channel ITSELF, in
+     quantity, are what dilute it. */
+  for (let i = 0; i < 20; i++) {
+    await q(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, licence_no,
+               licence_expires, state) VALUES ('hotel',$1,$2,$3,$4,'active')`,
+      [`h${i}`, `Hotel Unique ${i}`, `HE${i}`, `2028-0${1 + (i % 9)}-01`]);
+  }
+  const c3 = await get('/api/compliance/drivers');
   check('a roster of genuine dates is not accused of being a default',
-    c2.placeholder_date === null, String(c2.placeholder_date));
+    c3.placeholder_date === null, String(c3.placeholder_date));
 }
 
 /* ── revenue per day drew AED 0 where nothing was ever collected ─────── */

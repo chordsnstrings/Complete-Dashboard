@@ -67,6 +67,15 @@ export const SETTING_DEFAULTS = {
      UBER_TOKEN_URL is: a Test-environment application lives on another host. */
   UBER_ORGS_URL: 'https://api.uber.com/v1/vehicle-suppliers/orgs',
   YANGO_BASE: 'https://fleet.yango.com',
+  /* The OTHER Yango host, and the one the collector reads from now.
+     fleet.yango.com is the web console and wants a Yandex session; it has
+     answered 403 with an HTML page from a CDN edge since 2026-09-06, while
+     the same park answers 401 with the cookie removed — a pair that is
+     unreachable from one origin unless an edge is doing the refusing.
+     fleet-api.yango.tech is Yango's own Fleet API, keyed rather than
+     cookied, and the YANGO_API_KEY already stored opens it. Measured from
+     production 2026-09-07: 145 drivers, 104 cars, live orders, no cookie. */
+  YANGO_KEY_BASE: 'https://fleet-api.yango.tech',
   HOTEL_BASE: 'https://whale-app-iofbt.ondigitalocean.app',
   HOTEL_DOMAIN: 'hotel.ecosine.ae',
   /* MiniMax's OpenAI-compatible surface. The previous default was ByteDance

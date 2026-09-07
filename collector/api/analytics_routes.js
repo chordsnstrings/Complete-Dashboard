@@ -991,7 +991,28 @@ export function analyticsRoutes(app, { q, wrap, range, F, FB }) {
        -- join: vehicle_profile also has platform and fleet_id columns, and the
        -- shared filter names them bare, which makes the reference ambiguous.
        FROM (SELECT * FROM trip_ext WHERE ${F} AND platform = 'uber' AND plate IS NOT NULL) t
-       LEFT JOIN vehicle_profile vp ON upper(replace(vp.plate, ' ', '')) = upper(replace(t.plate, ' ', ''))
+       /* ONE profile row per plate, or this join multiplies the rows the
+          aggregates above are computed over.
+          ─────────────────────────────────────────────────────────────────
+          This joined vehicle_profile directly, which is keyed (platform,
+          vehicle_ext_id) and holds a plate once per vehicle record. Uber files
+          MORE THAN ONE vehicle_ext_id per plate — measured on production
+          2026-09-07: 222 of them across 138 plates — so a plate with two
+          records had every figure in this CTE doubled: trips, completed,
+          premium, km, and avg_km left alone only because it is a mean. Proven
+          by construction: five trips on one plate report 5 with one profile
+          row and 10 with two, and 5 again through the view.
+
+          DISTINCT ON rather than the view alone, because the join normalises
+          the plate — vehicle_plate gives one row per RAW plate, and 'L 36397'
+          and 'L36397' are two of those normalising to one. Ordered by plate so
+          the row chosen is stable rather than whatever the heap returns. */
+       LEFT JOIN (SELECT DISTINCT ON (upper(replace(plate, ' ', '')))
+                         upper(replace(plate, ' ', '')) AS norm_plate,
+                         make, model, year, colour
+                    FROM vehicle_plate
+                   ORDER BY upper(replace(plate, ' ', '')), plate) vp
+              ON vp.norm_plate = upper(replace(t.plate, ' ', ''))
        GROUP BY t.plate ORDER BY trips DESC LIMIT 250),
        held AS (
          SELECT v.plate, v.driver_name, v.driver_ext_id, count(DISTINCT v.day)::int days

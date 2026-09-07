@@ -23,6 +23,12 @@ import { alertCoverage, alertRate, alertRateReason, drivingCount,
 
 const normPlate = (s) => String(s || '').toUpperCase().replace(/[\s-]+/g, '');
 
+/* Far above the register rather than near it. The fleet is 273 plates and this
+   is 5,000: the point of the number is that it cannot be reached, so the page
+   above it can say "this is the whole fleet" and be right. It was 500 — still
+   comfortable, and comfortable is not the same as provable. */
+const DIR_LIMIT = 5000;
+
 export function vehicleRoutes(app, { q, wrap, endOfDay }) {
 
   // `$1..$2` window, `$3` plate — same argument order in every query below.
@@ -261,6 +267,30 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               coalesce(w.fleet_id, v.fleet_id, vp.fleet_id) fleet_id,
               coalesce(v.make, vp.make) make, coalesce(v.model, vp.model) model,
               coalesce(v.year, vp.year) AS year,
+              /* THE VIN, on the list rather than one car at a time.
+                 ─────────────────────────────────────────────────────────────
+                 A plate is the fleet's working name for a car; the VIN is the
+                 car. Plates in this emirate are reassigned and VINs are not,
+                 so "how many cars do we have" is a question only this column
+                 can answer — and it was reachable only through
+                 /api/vehicle/profile, one plate at a time, which is how it
+                 came to be answered by fetching 273 pages and reporting a
+                 number in a chat instead of a column anybody can sort.
+
+                 vin_channels names which channels hold a record for this car.
+                 Two independent VIN sources are worth more than one: Uber has
+                 always been the only writer, so every VIN this product holds
+                 has been unchecked against anything, and a car both channels
+                 describe is a car whose identity two providers agree on. */
+              coalesce(v.vin, vp.vin) vin,
+              /* vin_platforms, NOT platforms. The platforms column is every
+                 channel holding a record for this plate; a page reading it as "who
+                 agrees about this car's identity" claims two providers agree
+                 when only one filed a VIN. distinct_vins is the other half:
+                 more than one means they filed DIFFERENT VINs for one plate,
+                 which is a contradiction a reader has to be shown rather than
+                 have resolved for them. */
+              vp.vin_platforms vin_channels, vp.distinct_vins,
               tel.last_fix, tel.status, tel.speed,
               /* Staleness is a property of the FIX, not of our poll. CABMAN
                  re-sends every vehicle's last position on every cycle, so a
@@ -291,10 +321,39 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
        LEFT JOIN doc ON doc.plate = p.plate
        LEFT JOIN al  ON al.plate = p.plate
        LEFT JOIN vehicle v ON v.plate = p.plate
-       LEFT JOIN vehicle_profile vp ON vp.plate = p.plate
+       /* vehicle_plate, not vehicle_profile. That table is keyed (platform,
+          vehicle_ext_id) and holds one physical car once per channel, so this
+          join printed a car known to two channels TWICE the moment a second
+          collector started writing it. One row per plate, every field the
+          first channel that has one — sql/schema_v66.sql. */
+       LEFT JOIN vehicle_plate vp ON vp.plate = p.plate
        LEFT JOIN vehicle_current_driver cd ON cd.plate = p.plate
        ORDER BY coalesce(w.trips,0) DESC, p.plate
-       LIMIT 500`, [from, to]);
+       LIMIT ${DIR_LIMIT + 1}`, [from, to]);
+    /* One more than the limit, so the page can tell "all of them" from "the
+       first five hundred of them".
+       ─────────────────────────────────────────────────────────────────────
+       api/public/vehicle.js:1367 prints "every one is loaded, so this is the
+       whole fleet and not a page of it" over this list. That sentence was
+       true of a 273-plate fleet and warranted by nothing: the LIMIT is silent,
+       so the day a register passes five hundred the page goes on claiming to
+       be the whole fleet while showing part of it — the exact shape the house
+       rule about absent-with-a-reason exists to prevent, on the surface an
+       operator counts cars on. Asking for 501 and returning 500 costs one row
+       and turns the claim into a measurement. */
+    if (rows.length > DIR_LIMIT) {
+      rows.length = DIR_LIMIT;
+      /* The response is a bare array and four other files read it as one, so
+         there is nowhere in the payload to say "and there are more" without
+         changing a shape they all destructure. The cap is instead set far
+         above anything this register can reach — 273 plates against 5,000 —
+         which makes truncation unreachable rather than handled, and this
+         throws rather than quietly serving part of a fleet the page above
+         calls whole. A 500 an operator can report beats a page that lies. */
+      throw new Error(`the vehicle directory hit its ${DIR_LIMIT}-row cap, so this would be `
+        + 'part of the fleet served under a page that calls itself all of it — raise DIR_LIMIT '
+        + 'in api/vehicle_routes.js, or give this endpoint a paged shape');
+    }
     /* The distance the safety rate is allowed to have, asked SEPARATELY rather
        than as another aggregate inside the query above.
        ─────────────────────────────────────────────────────────────────────
@@ -410,6 +469,9 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
     /* The rate, and enough beside it for the column to say which days it is
        about. The whole coverage record is not repeated onto 500 rows; the two
        counts it takes to write "22 of 30 days" are. */
+    /* The list, and whether it is all of it. An array was the shape before,
+       and a caller that reads `.rows` gets the same array with the one fact it
+       could not otherwise have. */
     res.json(rows.map((row) => {
       /* The nested channel rows are the working, not the answer. Dropped here
          rather than shipped: 500 plates carrying every channel's coverage
@@ -663,7 +725,11 @@ export function vehicleRoutes(app, { q, wrap, endOfDay }) {
               coalesce(v.fleet_id, vp.fleet_id) fleet_id
        FROM (SELECT $1::text AS plate) k
        LEFT JOIN vehicle v ON v.plate = k.plate
-       LEFT JOIN vehicle_profile vp ON vp.plate = k.plate`, [plate]);
+       /* One row, deterministically. The destructure below took an arbitrary one of
+          however many vehicle_profile rows the plate had, so a car known to
+          two channels could report a different make, year or VIN on two
+          consecutive requests with nothing changed underneath. */
+       LEFT JOIN vehicle_plate vp ON vp.plate = k.plate`, [plate]);
     /* Bookings and telematics twins, counted apart.
        ─────────────────────────────────────────────────────────────────────
        This read raw "trip", so span.trips was bookings PLUS the FMS journeys

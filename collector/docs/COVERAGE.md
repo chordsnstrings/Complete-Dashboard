@@ -590,6 +590,27 @@ first_name` + `last_name`) that the word-order fix needs, plus
 `driver_profile.phones[]`, `driver_profile.driver_license`,
 `current_status.status`, `accounts[].balance`, and `car.vin`.
 
+**What it is now wired to, as of 2026-09-07.** `src/sources/yango.js` reads
+three surfaces from `fleet-api.yango.tech` (trips, roster, cars) and still
+*asks* the console for the other two every run, so a recovery is noticed
+rather than waited for. The paths live in one exported object,
+`YANGO_SURFACES`, which `src/credcheck.js` imports — the two files used to
+spell the same literal, and the day orders moved the check was left testing a
+surface nothing collects from.
+
+Three things the key host gives that the console never did:
+
+* **VINs, from a second independent source.** `cars/list` returns 104 cars with
+  `vin`. Until now `src/sources/uber_fleet.js` was the *only* writer of
+  `vehicle_profile`, so every VIN this product holds had been checked against
+  nothing.
+* **The decomposed name, without a cookie.** `driver-profiles/list` gives
+  `first_name` and `last_name` separately — the fix for one Yango driver
+  arriving as two people — from a host that needs no session.
+* **Phone numbers.** The roster pull writes `driver_compliance`, which the
+  console path never did, so `src/identity_link.js` can now see Yango drivers
+  at all.
+
 **What the key API cannot replace.** The weekly per-driver aggregate
 (`driver_performance`) and the payment ledger (`ledger_entry`) have no
 endpoint on this host. The aggregate could be recomputed from the orders —
@@ -614,10 +635,82 @@ Those two stay absent with a reason until the console session works again.
 
 ---
 
+## Cars: what the register actually holds — measured 2026-09-07
+
+`vehicle_profile`'s primary key is `(platform, vehicle_ext_id)`, with only a
+non-unique index on `plate`. Two consequences, and both were live:
+
+**One car can be several rows, and one plate several vehicle records.** Uber
+files **222 vehicle_ext_ids across 138 plates**. `api/analytics_routes.js`
+joined `vehicle_profile` on the normalised plate *inside* an aggregate, so
+every plate with two Uber records had its trips, completed count, premium
+count and kilometres **doubled** — before Yango wrote a single row. Proven by
+construction in `test/vehicle_identity.test.mjs`: five trips report 10 and
+100 km through the old join, 5 and 50 through the view.
+
+**`sql/schema_v66.sql` adds the view `vehicle_plate`** — one row per plate,
+every scalar the first non-null in the order uber, yango, then alphabetically,
+plus `platforms` and `profile_rows`. It **coalesces rather than picks**,
+because the channels are complementary: Uber has the image and the compliance
+status, Yango has a VIN for cars Uber has none for. Four read routes were
+repointed at it (`vehicle_routes` ×2, `cohort_routes`, `economics_routes`) and
+`analytics_routes` gets a `DISTINCT ON` over it, because that join normalises
+the plate and the view is keyed on the raw one.
+
+**Read `vehicle_plate`, never `JOIN vehicle_profile ... ON plate`.** The test
+finds offenders by regex across `api/*.js` rather than listing them, so a fifth
+file is covered without editing it.
+
+### The claim that could not fail
+
+"138 plates, 138 distinct VINs, not one VIN on two plates" was reported as
+evidence against re-plating. It is not evidence of anything: each
+`vehicle_profile` row carries one plate and one VIN, so one-to-one is
+guaranteed by the primary key. The **138 VINs are real**; the *inference* was
+not. What can now settle it is the second source — a car both channels file is
+a car two providers name the same way — and the VIN is a column on
+`/api/vehicles/directory`, with a "Cars, by VIN" tile beside the plate count
+and the number of plates carrying no VIN stated rather than implied.
+
+---
+
 ## Traps that have cost time more than once
 
 * Backticks inside a JS template literal, and backticks inside a bash heredoc —
-  both silently break, differently.
+  both silently break, differently. **Hit again 2026-09-07**: a prose comment
+  written *inside* a SQL template literal quoted `const [spec] =` in backticks
+  and took `api/vehicle_routes.js` down with `SyntaxError: missing ) after
+  argument list`, pointing at a line 200 characters away. Comments inside a
+  template literal are still inside the literal.
+* **A shared placeholder detector is diluted by a second channel.** The
+  compliance page decides a licence date is "a default, not a date" when one
+  value covers >=50% of the dated rows. That was measured fleet-wide, so the
+  94 hotel placeholders (94 of 94) would have fallen to 94 of 239 the moment
+  Yango filed 145 real dates — the detector silently stops firing and 94 rows
+  begin rendering as real expiries, with `src/insights.js` raising "stand the
+  driver down" for each. **A default is a property of a FEED**: scope the share
+  to the channel the mode came from. Same for the licence number.
+* **A rule that fails closed still fails open if nothing withdraws its old
+  answers.** `src/identity_link.js` skips a phone on three records — but only
+  ever INSERTed, so a pair linked while the number sat on two records stayed
+  linked once a third appeared. Any new channel that files phone numbers
+  creates exactly that. It now deletes links the run no longer produces,
+  sparing the ones a person rejected or confirmed.
+* **`rowCount` (node-postgres) vs `affectedRows` (PGlite).** A count read off
+  one is `undefined` under the other — so a guard passes in the tests and
+  reports nothing on production. Use `RETURNING` and count the rows.
+* **`JSON.stringify(x).slice(0, N)` into a JSONB column is a time bomb.** A
+  sliced JSON string is not JSON: Postgres answers `invalid input syntax for
+  type json` and the whole batch rolls back, so one oversized record costs
+  every row beside it. `rawJson()` in `src/roster.js` stores the record whole
+  or a small object saying how big it was — never a fragment.
+* `array_remove(array_agg(...), NULL)` removes NULLs and **not empty strings**,
+  so a provider filing `''` beats a real value from another channel in a
+  coalesce. `nullif(btrim(x), '')` inside the agg.
+* A `LEFT JOIN` inside an aggregate does not just add rows to the output — it
+  multiplies the rows the aggregate is computed over. A join that looks
+  harmless because the query `GROUP BY`s afterwards is the most dangerous kind:
+  the row count looks right and every `count(*)` and `sum()` is wrong.
 * A raw `DATE` from node-postgres stringifies as `"Sat Aug 01"`, not
   `"2026-08-01"`. Use `String(d).slice(0, 10)` only after checking which it is.
 * `CREATE OR REPLACE VIEW` can add a column but never remove one. Rename the

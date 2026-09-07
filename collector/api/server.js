@@ -4262,6 +4262,20 @@ app.get('/api/compliance/vehicles', wrap(async (req, res) => {
    btrim is a join that silently matches nothing. */
 const CANON_NAME = (col) => `lower(regexp_replace(btrim(${col}), '\\s+', ' ', 'g'))`;
 
+/* Far above the register rather than near it. The compliance roster is 289
+   rows today and the Yango driver-profiles pull adds 145; this is 5,000. The
+   point of the number is that it cannot be reached, so the page above it can
+   count the whole roster and be right. It was a silent LIMIT 300 —
+   comfortable against 289, and comfortable is not provable.
+
+   Declared HERE, beside its route, and not at the top of the file with the
+   other constants: test/mount.mjs slices this file and evaluates the region as
+   a function body with its helpers injected by name, so a module-level const
+   outside the slice is a ReferenceError inside it — which the harness reports
+   as an empty response body, pointing at the query rather than at the
+   declaration. Same trap as the injected-imports rule, one layer along. */
+const COMPLIANCE_LIMIT = 5000;
+
 app.get('/api/compliance/drivers', wrap(async (req, res) => {
   /* The fleet chip reached this page and was dropped. driver_compliance
      records which fleet's credentials collected the row, and on a two-fleet
@@ -4310,9 +4324,42 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
             count(DISTINCT licence_no)::int distinct_numbers
      FROM driver_compliance
      WHERE licence_expires IS NOT NULL AND ($1::text IS NULL OR fleet_id = $1)
+       /* SCOPED TO THE CHANNEL THAT FILES THE DEFAULT, because a default is a
+          property of a FEED and this share is measured across all of them.
+          ────────────────────────────────────────────────────────────────
+          Every dated row on production today comes from the hotel channel and
+          every one carries 2026-01-01, so the share is 1.0 and the page
+          correctly calls it a default. Yango's driver-profiles/list files real
+          licence dates for 145 drivers. The moment those land, the same 94
+          placeholder rows are 94 of 239 — a share of 0.39, under the 0.5
+          floor — and the detector silently stops firing: 94 rows whose date
+          nobody ever entered begin rendering as real expiries, and
+          src/insights.js raises "licence has expired — stand the driver down"
+          for every one of them.
+
+          The rule is unchanged and is simply asked the question it was always
+          answering: is this ONE CHANNEL filing one date for everybody. A
+          channel that files real dates dilutes nothing, because it is not in
+          the denominator. */
+       AND platform = (SELECT platform FROM driver_compliance
+                        WHERE licence_expires IS NOT NULL
+                          AND ($1::text IS NULL OR fleet_id = $1)
+                        GROUP BY platform, licence_expires
+                        ORDER BY count(*) DESC LIMIT 1)
      GROUP BY licence_expires ORDER BY n DESC LIMIT 1`, [fleet]);
-  // One date on more than half the rows is a default, not a coincidence.
-  const share = mode && mode.with_date ? mode.n / mode.with_date : 0;
+  /* One date on more than half of ONE CHANNEL's dated rows is a default, not a
+     coincidence — and `with_date` counts every channel, so the share has to be
+     measured against the channel the mode came from rather than against the
+     fleet. */
+  const [dateScope] = await q(
+    `SELECT count(*)::int AS in_channel FROM driver_compliance
+      WHERE licence_expires IS NOT NULL AND ($1::text IS NULL OR fleet_id = $1)
+        AND platform = (SELECT platform FROM driver_compliance
+                         WHERE licence_expires IS NOT NULL
+                           AND ($1::text IS NULL OR fleet_id = $1)
+                         GROUP BY platform, licence_expires
+                         ORDER BY count(*) DESC LIMIT 1)`, [fleet]);
+  const share = mode && dateScope?.in_channel ? mode.n / dateScope.in_channel : 0;
   const placeholder = share >= 0.5 && mode.n >= 5;
   const ph = placeholder ? mode.licence_expires : null;
   /* THE NUMBER IS A DEFAULT TOO, and nothing had ever said so.
@@ -4340,8 +4387,25 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
                 AND ($1::text IS NULL OR fleet_id = $1)) AS distinct_numbers
      FROM driver_compliance
      WHERE coalesce(btrim(licence_no), '') <> '' AND ($1::text IS NULL OR fleet_id = $1)
+       /* Per channel, for the same reason and with the same arithmetic as the
+          date above: 94 identical numbers among 94 are a default, and 94 among
+          239 once a second channel files real ones would read as a coincidence
+          — leaving the string "123456" printed beside 94 people as a licence. */
+       AND platform = (SELECT platform FROM driver_compliance
+                        WHERE coalesce(btrim(licence_no), '') <> ''
+                          AND ($1::text IS NULL OR fleet_id = $1)
+                        GROUP BY platform, licence_no
+                        ORDER BY count(*) DESC LIMIT 1)
      GROUP BY licence_no ORDER BY n DESC LIMIT 1`, [fleet]);
-  const numShare = numMode && numMode.with_number ? numMode.n / numMode.with_number : 0;
+  const [numScope] = await q(
+    `SELECT count(*)::int AS in_channel FROM driver_compliance
+      WHERE coalesce(btrim(licence_no), '') <> '' AND ($1::text IS NULL OR fleet_id = $1)
+        AND platform = (SELECT platform FROM driver_compliance
+                         WHERE coalesce(btrim(licence_no), '') <> ''
+                           AND ($1::text IS NULL OR fleet_id = $1)
+                         GROUP BY platform, licence_no
+                         ORDER BY count(*) DESC LIMIT 1)`, [fleet]);
+  const numShare = numMode && numScope?.in_channel ? numMode.n / numScope.in_channel : 0;
   const numPlaceholder = numShare >= 0.5 && numMode.n >= 5;
   const phNum = numPlaceholder ? numMode.licence_no : null;
   /* The list, ordered so the placeholder rows are not the first thing a reader
@@ -4438,7 +4502,22 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
      WHERE ($2::text IS NULL OR c.fleet_id = $2)
      ORDER BY ($1::text IS NOT NULL
                AND to_char(licence_expires,'YYYY-MM-DD') = $1) ASC,
-              licence_expires ASC NULLS LAST LIMIT 300`, [ph, fleet, phNum]);
+              licence_expires ASC NULLS LAST LIMIT ${COMPLIANCE_LIMIT + 1}`, [ph, fleet, phNum]);
+  /* One more than the cap, so the page can tell "all of them" from "the first
+     N of them" — and it throws rather than serving the difference silently.
+     ─────────────────────────────────────────────────────────────────────────
+     The LIMIT was 300 over a table holding 289 rows. The Yango roster pull
+     writes 145 more, so this route would have begun serving 300 of 434 with
+     nothing saying so — and the rows it drops are the ones it sorts LAST.
+     NULLS LAST puts every record with no licence date at the end, which is
+     exactly the population the tile above it counts as "licences that cannot
+     be checked at all": the page would have named a number and then not shown
+     you those people. A 500 an operator can report beats that. */
+  if (rows.length > COMPLIANCE_LIMIT) {
+    throw new Error(`the compliance roster hit its ${COMPLIANCE_LIMIT}-row cap, so this would `
+      + 'serve part of a roster under a page that counts all of it — raise COMPLIANCE_LIMIT in '
+      + 'api/server.js, or give this route a paged shape');
+  }
   /* Counted in the database, excluding the placeholder date, rather than by
      filtering the 300 rows the page happened to receive. "Driver licences
      expired — stand down until renewed" is the single most consequential
@@ -4560,7 +4639,15 @@ app.get('/api/compliance/drivers', wrap(async (req, res) => {
     ? `${t.with_emirates_id} of ${t.total} people carry an Emirates ID. Every one of them `
       + `comes from the ${idBy.filter((r) => r.n > 0).map((r) => r.platform).join(', ')} `
       + 'channel, which is the only one that reports one. Uber names the field absent on '
-      + 'every type it exposes, and Bolt and Yango file no compliance record at all, so a '
+      /* "Yango files no compliance record at all" stopped being true on the
+         deploy that pointed the collector at fleet-api.yango.tech: its
+         driver-profiles/list carries a phone, a licence and a work status for
+         145 drivers, and src/sources/yango.js writes them. Bolt still files
+         none. The sentence is the only thing on this page that tells a reader
+         what a blank MEANS, so leaving it would have made the page's one
+         explanation the wrong one. */
+      + 'every type it exposes; Bolt files no compliance record at all and Yango files one '
+      + 'without an Emirates ID, so a '
       + 'blank here is about which channel onboarded the person, not about their documents.'
       + (admin ? '' : ` ${withheldNote('identity numbers')}`)
     /* Nothing was withheld in this state, so nothing is claimed to have been:

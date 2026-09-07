@@ -48,8 +48,24 @@ export function normaliseState(raw) {
     'applied', 'accepted'].includes(s)) return 'onboarding';
   if (/^rejected/.test(s) || ['declined', 'denied'].includes(s)) return 'rejected';
   if (['suspended', 'blocked', 'banned', 'restricted'].includes(s)) return 'suspended';
-  if (['deactivated', 'deleted', 'removed', 'terminated', 'churned'].includes(s)) return 'deactivated';
-  if (['inactive', 'disabled', 'dormant', 'paused'].includes(s)) return 'inactive';
+  /* Yango's own vocabulary, which none of the lists above reached.
+     ─────────────────────────────────────────────────────────────────────────
+     driver-profiles/list files work_status as `working`, `not_working` or
+     `fired` — measured on production 2026-09-07 — and this function returned
+     'unknown' for all three, so every one of the 145 Yango drivers would have
+     landed with no standing and can_earn NULL: the roster page's "standing not
+     reported" for people the provider had described plainly, which is the
+     exact defect the waitlist prefix above was added for.
+
+     `fired` is deactivated and not suspended: a suspension is a state somebody
+     can come back from and STATES draws it differently. `not_working` is the
+     park saying this person is on the books and not driving, which is
+     'inactive' — not 'offline', which is an availability word this fold
+     already reads as active because a driver between shifts is still earning
+     for the fleet. */
+  if (['fired', 'deactivated', 'deleted', 'removed', 'terminated', 'churned'].includes(s)) return 'deactivated';
+  if (['not_working', 'inactive', 'disabled', 'dormant', 'paused'].includes(s)) return 'inactive';
+  if (s === 'working') return 'active';
   return 'unknown';
 }
 
@@ -67,6 +83,34 @@ export function cleanReason(v) {
   return text ? text.slice(0, 400) : null;
 }
 
+/* A provider record, small enough to store, and always VALID JSON.
+   ─────────────────────────────────────────────────────────────────────────
+   This was JSON.stringify(raw).slice(0, 20000), which is a truncated string
+   the moment a record is bigger than the cap — and every one of these columns
+   is JSONB, so Postgres answers `invalid input syntax for type json` and the
+   whole upsert batch rolls back. One oversized record would have cost the
+   roster of every driver in the same page, and the run would have reported it
+   as a refused surface rather than as a row nobody could store.
+
+   The cap stays — a provider record is evidence, not an archive — but what is
+   stored past it is a small object that SAYS the record was too big and how
+   big, which is a fact a later reader can act on. Never a fragment. */
+export function rawJson(raw, cap = 20000) {
+  if (raw == null) return null;
+  let text;
+  try { text = JSON.stringify(raw); } catch { return JSON.stringify({ _unstorable: 'not serialisable' }); }
+  if (text == null) return null;
+  if (text.length <= cap) return text;
+  return JSON.stringify({
+    _truncated: true, _bytes: text.length, _cap: cap,
+    _why: 'the provider record was larger than the cap this column stores, so it is summarised '
+      + 'rather than cut: a sliced JSON string is not JSON and the insert would have failed',
+    /* The top-level keys, which is usually all a later reader wants from a raw
+       column — enough to know what the provider sent without keeping it. */
+    _keys: (raw && typeof raw === 'object' && !Array.isArray(raw)) ? Object.keys(raw).slice(0, 40) : undefined,
+  });
+}
+
 export function stateRow({ platform, driverExtId, fleetId, name, rawState, reason,
   vehicleExtId, plate, score, raw }) {
   const state = normaliseState(rawState);
@@ -79,6 +123,6 @@ export function stateRow({ platform, driverExtId, fleetId, name, rawState, reaso
     score: Number.isFinite(Number(score)) ? Number(score) : null,
     can_earn: canEarn(state),
     observed_at: new Date().toISOString(),
-    raw: raw ? JSON.stringify(raw).slice(0, 20000) : null,
+    raw: rawJson(raw),
   };
 }

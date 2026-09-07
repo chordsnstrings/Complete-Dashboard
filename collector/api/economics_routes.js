@@ -406,7 +406,14 @@ export function economicsRoutes(app, { q, wrap, range }) {
          LEFT JOIN doc ON doc.plate = p.plate
          LEFT JOIN al  ON al.plate  = p.plate
          LEFT JOIN vehicle v ON v.plate = p.plate
-         LEFT JOIN vehicle_profile vp ON vp.plate = p.plate
+         /* vehicle_plate: one row per plate, with every scalar taken from the
+            first channel that has one — sql/schema_v66.sql. The stamp Map
+            below was written to survive this join returning a plate twice
+            (see its comment), and with the view it cannot; the Map stays,
+            because "any non-null fleet wins" is still the rule and a guard
+            that has become unreachable is cheaper than one that was needed
+            and removed. */
+         LEFT JOIN vehicle_plate vp ON vp.plate = p.plate
          LEFT JOIN vehicle_current_driver cd ON cd.plate = p.plate
          WHERE $4::text IS NULL
             OR coalesce(v.fleet_id, vp.fleet_id) = $4

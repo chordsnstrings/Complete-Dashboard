@@ -120,12 +120,28 @@ check('the Uber check is scoped to the org the credential itself declared',
 /* A check that picks its own endpoint tests its own choice. The Yango check
    asked a path the collector never calls and returned a false failure for a
    cookie that was working — which is worse than no check, because it sends an
-   operator to re-capture a session that is fine. */
-for (const [name, path] of [['Yango', '/api/reports-api/v1/orders/list']]) {
-  check(`the ${name} check calls the endpoint the collector calls`, chk.includes(path));
+   operator to re-capture a session that is fine.
+
+   That was pinned as a literal in both files, and it went stale the way a
+   duplicated literal always does: the collector's orders moved to
+   fleet-api.yango.tech on 2026-09-07 and the check kept the console path, so
+   the two files agreed about a string neither used for the same thing. The
+   assertion is now that they share a DEFINITION — src/sources/yango.js exports
+   YANGO_SURFACES and src/credcheck.js imports it — which no re-spelling can
+   fake. */
+{
+  const { YANGO_SURFACES } = await import('../src/sources/yango.js');
+  const yan = readFileSync('src/sources/yango.js', 'utf8');
+  check('the collector names its Yango endpoints in one exported place',
+    Object.values(YANGO_SURFACES).every((h) => Object.values(h).every((v) => v.startsWith('/'))),
+    JSON.stringify(YANGO_SURFACES));
+  check('the Yango check reads that place rather than a path of its own',
+    /YANGO_SURFACES/.test(chk)
+    && !/['"`]\/(api\/reports-api|api\/v1\/reports|v1\/parks)\//.test(chk),
+    (chk.match(/['"`]\/(api\/reports-api|api\/v1\/reports|v1\/parks)\/[^'"`]*/g) || []).join('; '));
+  check('…and the collector really calls through it, on both hosts',
+    /keyPost\(YANGO_SURFACES\.key\./.test(yan) && /post\(YANGO_SURFACES\.console\./.test(yan));
 }
-check('…and that path is really the collector\'s',
-  readFileSync('src/sources/yango.js', 'utf8').includes('/api/reports-api/v1/orders/list'));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -13,7 +13,7 @@ import { unixS, iso, dubaiIso, jwtPayload, jwtExpiry } from '../util.js';
 import { log } from '../log.js';
 import { stateRow } from '../roster.js';
 import { get, setSetting } from '../settings.js';
-import { noteCredential } from '../auth_state.js';
+import { noteCredential, saysAuth } from '../auth_state.js';
 
 const SRC = 'bolt';
 
@@ -113,7 +113,18 @@ export function fiRefusal(company, data, allowed = []) {
     : '';
   return {
     credential: FI_CREDENTIAL,
-    state: 'invalid',
+    /* 'unentitled', not 'invalid'.
+       ─────────────────────────────────────────────────────────────────────
+       This function's own message has said "the secret is fine" since it was
+       written, and it recorded the state that makes the banner say the
+       opposite: "credentials stopped working — the surfaces behind them are
+       collecting nothing until they are replaced". Replacing BOLT_CLIENT_ID
+       would produce a new secret with exactly the same entitlement, and the
+       proof is in `others` two lines above — the SAME token reads the other
+       company. api/auth_routes.js scores 'unentitled' at the same severity,
+       because nothing is being collected either way; what changes is that the
+       banner asks for the errand that can actually work. */
+    state: 'unentitled',
     fail: `FI roster ${company.fleet}: ${FI_CREDENTIAL} is not entitled to company_id ${company.companyId}`
       + ` — code=${data?.code} ${why}`,
     detail: `${FI_CREDENTIAL} is not entitled to company_id ${company.companyId} (${company.fleet}): ${why}.`
@@ -906,9 +917,26 @@ export async function collect({ from, to, mode }) {
       fails.push(`FI roster: ${why}`);
       /* Named, so the run does not report a fault against no credential at all.
          The roster's grant is BOLT_CLIENT_SECRET; the trips' is the portal
-         refresh token, and only one of them just broke. */
-      await noteCredential(pool, { provider: SRC, fleet: '*', credential: 'BOLT_CLIENT_SECRET',
-        state: 'unknown', surface: 'fiRoster', detail: why }).catch(() => {});
+         refresh token, and only one of them just broke.
+
+         ONLY WHEN THE FAILURE SAYS SOMETHING ABOUT THE CREDENTIAL, and this
+         catch wraps the whole pull.
+         ─────────────────────────────────────────────────────────────────
+         Any throw reached it — a five-minute oidc.bolt.eu outage, an
+         upsertMany that hit a database error, a mapper bug — and wrote
+         'unknown' against BOLT_CLIENT_SECRET, which api/auth_routes.js scores
+         'at-risk'. Nothing else in this codebase ever writes that credential
+         name, so nothing could turn it green again: one bad tick pinned an
+         amber row on the credential panel for ever, about a secret nothing had
+         measured as bad. That is the "a state only something can clear" defect
+         src/sources/fms.js and src/sources/yango.js were both fixed for, and
+         this file's own comment forty lines up says it knows about it.
+
+         saysAuth is the same test the portal branch below already applies. */
+      if (saysAuth(why)) {
+        await noteCredential(pool, { provider: SRC, fleet: '*', credential: 'BOLT_CLIENT_SECRET',
+          state: 'unknown', surface: 'fiRoster', detail: why }).catch(() => {});
+      }
     }
 
     try {

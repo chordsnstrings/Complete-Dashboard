@@ -57,9 +57,67 @@ const SEVERITY_OF = {
      surface from red to amber. supplier.uber.com → fleethub.uber.com is the
      measured case; days went into re-pasting cookies that were fine. */
   moved: 'stopped',
+  /* TWO more states with the severity of 'invalid' and neither of its errands.
+     ─────────────────────────────────────────────────────────────────────────
+     'moved' exists because "stopped working" sent somebody to re-capture a
+     working cookie when the URL was what had changed. The same mistake had two
+     more shapes in this fleet on 2026-09-07, and the banner was making both:
+
+     unentitled — the credential AUTHENTICATES and is not permitted the thing
+       being asked for. BOLT_CLIENT_ID reads company 142897 (Egari) and is
+       refused 142868 (Ecosine) with NOT_AUTHORIZED hint=COMPANIES_NOT_ALLOWED.
+       Nothing an operator does to the secret changes that; somebody with Bolt
+       portal access adds the company to the fleet-integration app. The banner
+       said "stopped working … until they are replaced", and replacing it would
+       have produced a new secret with exactly the same entitlement.
+
+     blocked — the credential authenticates and something IN FRONT of the API
+       refuses the caller. fleet.yango.com answers 403 with an HTML page from a
+       CDN edge while every Yango API refusal is JSON, the park returns 200 and
+       names ECOSINE TRANSPORTS LLC, and the same call answers 401 with the
+       cookie removed — a pair unreachable from one origin unless an edge is
+       deciding. Not a credential, not a URL: where the call comes from.
+
+     Both score 'stopped' because nothing is being collected and the severity
+     is honestly identical. What differs is the sentence, and the sentence is
+     the entire value of the banner. */
+  unentitled: 'stopped',
+  blocked: 'stopped',
   /* A check that could not run is not a check that passed — the Yango
      cookie-free comparison records this when it cannot complete. */
   unknown: 'at-risk',
+};
+
+/* One clause per errand, so a state that is added to the table above and not
+   to this one is a state the headline cannot silently describe as a
+   replacement. `whole` is the sentence when EVERY stopped row is this state;
+   `part` is the clause appended when only some are. */
+export const ERRANDS = {
+  moved: {
+    noun: 'endpoint',
+    whole: (n) => `${n === 1 ? 'An endpoint has' : `${n} endpoints have`} moved — nothing is `
+      + 'being collected from them, and the credential is not what is wrong: the URL is',
+    part: (n) => `${n} of them because the endpoint moved, not the credential`,
+  },
+  unentitled: {
+    noun: 'credential',
+    whole: (n) => `${n === 1 ? 'A credential is' : `${n} credentials are`} not permitted what `
+      + `${n === 1 ? 'it is' : 'they are'} asking for — ${n === 1 ? 'it authenticates' : 'they authenticate'} `
+      + 'and the account is refused the company or park, so replacing the secret changes nothing: '
+      + 'the access has to be granted in the provider\u2019s portal',
+    /* Singular and plural, because these clauses are joined onto a count and
+       "1 of them authenticate" is a sentence a reader stops trusting. */
+    part: (n) => `${n} of them ${n === 1 ? 'authenticates' : 'authenticate'} and `
+      + `${n === 1 ? 'is' : 'are'} refused the company or park, which is a permission to grant `
+      + 'rather than a secret to replace',
+  },
+  blocked: {
+    noun: 'call',
+    whole: (n) => `${n === 1 ? 'A surface is' : `${n} surfaces are`} being refused before the request `
+      + `reaches the provider — ${n === 1 ? 'the credential authenticates' : 'the credentials authenticate'} `
+      + 'and something in front of the API is turning this caller away, so there is nothing to re-paste',
+    part: (n) => `${n} of them refused in front of the API, where no credential is being read`,
+  },
 };
 
 export function authRoutes(app, { q, wrap }) {
@@ -134,13 +192,54 @@ export function authRoutes(app, { q, wrap }) {
          errand: "stopped working" sends somebody to re-capture a credential,
          and for these rows the credential is not what is wrong. */
       moved: rows.filter((r) => r.state === 'moved').length,
+      /* Counted the same way and for the same reason: a page that wants to say
+         "one of these is a permission, not a password" needs the number. */
+      unentitled: rows.filter((r) => r.state === 'unentitled').length,
+      blocked: rows.filter((r) => r.state === 'blocked').length,
+      /* Every errand present among the stopped rows, with the rows that carry
+         it — so a caller composing its own sentence does not have to know the
+         vocabulary, and a state added to SEVERITY_OF without a clause here is
+         visible as an errand nobody named. */
+      errands: Object.entries(ERRANDS)
+        .map(([state, e]) => ({ state, noun: e.noun,
+          count: bad.filter((r) => r.state === state).length,
+          rows: bad.filter((r) => r.state === state).map(label) }))
+        .filter((e) => e.count > 0),
       headline: bad.length
-        ? (bad.every((r) => r.state === 'moved')
-          ? `${bad.length === 1 ? 'An endpoint has' : `${bad.length} endpoints have`} moved — nothing is `
-            + 'being collected from them, and the credential is not what is wrong: '
-            + bad.map((r) => `${label(r)} — ${r.detail || 'redirected'}`).join('; ')
-          : `${bad.length === 1 ? 'A credential has' : `${bad.length} credentials have`} stopped working: `
-            + bad.map((r) => `${label(r)} — ${r.detail || 'refused'}`).join('; '))
+        ? ((() => {
+          const only = Object.keys(ERRANDS).find((st) => bad.every((r) => r.state === st));
+          const detail = bad.map((r) => `${label(r)} — ${r.detail || 'refused'}`).join('; ');
+          if (only) return `${ERRANDS[only].whole(bad.length)}: ${detail}`;
+          const parts = Object.entries(ERRANDS)
+            .map(([st, e]) => [bad.filter((r) => r.state === st).length, e])
+            .filter(([n]) => n > 0).map(([n, e]) => e.part(n));
+          /* EVERY row accounted for, or only some.
+             ─────────────────────────────────────────────────────────────
+             This went straight to the generic "stopped working and have to be
+             replaced" lead whenever more than one errand was present — and
+             production's own pair on 2026-09-07 is two DIFFERENT errands,
+             Bolt unentitled and Yango blocked, neither of which can be
+             replaced. So the sentence written to stop the banner giving the
+             wrong instruction gave it, on the only case it was written for.
+
+             When every stopped row has an errand, none of them is a
+             replacement and the lead must not claim one. The generic lead is
+             for a genuine MIX, where some row really is a dead credential. */
+          const covered = parts.length
+            ? bad.filter((r) => ERRANDS[r.state]).length : 0;
+          if (covered === bad.length) {
+            return `${bad.length === 1 ? 'A surface is' : `${bad.length} surfaces are`} collecting `
+              + `nothing, and ${bad.length === 1 ? 'it is not' : 'none of them is'} a credential to `
+              + `replace — ${parts.join('; ')}: ${detail}`;
+          }
+          /* "and have to be replaced" is stated rather than implied, because
+             that is the errand this lead is claiming and the clauses after it
+             are the exceptions to it. A lead that only says "stopped working"
+             leaves the reader to guess which afternoon's work it means. */
+          return `${bad.length === 1 ? 'A credential has' : `${bad.length} credentials have`} stopped `
+            + `working and ${bad.length === 1 ? 'has' : 'have'} to be replaced`
+            + (parts.length ? ` — except ${parts.join('; ')}` : '') + `: ${detail}`;
+        })())
         : warn.length
           ? `${warn.length === 1 ? 'A source has' : `${warn.length} sources have`} not collected recently: `
             + warn.map((r) => `${label(r)}, last run ${r.run_age_h}h ago`).join('; ')

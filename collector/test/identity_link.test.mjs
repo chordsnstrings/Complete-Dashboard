@@ -173,6 +173,54 @@ check('a confirmation survives it too',
   conf.confirmed_at !== null && conf.confirmed_by === 'ops',
   JSON.stringify(conf));
 
+/* A LINK THE RULE STOPS MAKING STOPS BEING APPLIED.
+   ─────────────────────────────────────────────────────────────────────────
+   The guards above fail CLOSED — a number on three records links nobody — and
+   they failed open over time, because refreshIdentityLinks only ever inserted
+   and updated. A pair linked while their number sat on two records stayed
+   linked once a third appeared: the row stopped being refreshed and nothing
+   removed it, so api/identity_links.js went on folding two people together on
+   a run that no longer supported it. Adding a channel that files phone numbers
+   — which is what the Yango roster pull does — is exactly how a two-record
+   group becomes three. */
+{
+  /* The block above leaves this link CONFIRMED by an operator, and a confirmed
+     link is deliberately out of the sweep's reach — so it is cleared first, or
+     this would test the exemption rather than the rule. The exemption gets its
+     own block below. */
+  await db.query(`UPDATE driver_identity_link SET confirmed_at = NULL, confirmed_by = NULL`);
+  const before = (await db.query('SELECT count(*)::int c FROM driver_identity_link WHERE NOT rejected')).rows[0].c;
+  check('there is a live link to withdraw, so this is not vacuous', before >= 1, String(before));
+  /* The third record on the same number, from a third channel. */
+  await db.query(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, phone)
+                  VALUES ('bolt','b-third','Someone Else',$1)`, [KHALIFA[0].phone]);
+  const r3 = await refreshIdentityLinks(db);
+  check('the rule stops linking a number that now sits on three records',
+    r3.links.length === 0 && r3.skipped.some((sk) => /more than two records/.test(sk.why)),
+    JSON.stringify({ links: r3.links.length, skipped: r3.skipped.map((sk) => sk.why) }));
+  check('…and the link it used to make is withdrawn, not merely left unrefreshed',
+    r3.withdrawn >= 1
+    && (await db.query('SELECT count(*)::int c FROM driver_identity_link WHERE NOT rejected')).rows[0].c === 0,
+    `withdrawn ${r3.withdrawn}`);
+  await db.query(`DELETE FROM driver_compliance WHERE driver_ext_id = 'b-third'`);
+  const r4 = await refreshIdentityLinks(db);
+  check('…and comes back when the third record goes away', r4.links.length === 1);
+}
+
+/* A person's decision is not a rule's to withdraw. */
+{
+  await db.query(`UPDATE driver_identity_link SET rejected = true, rejected_reason = 'two brothers'`);
+  await db.query(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, phone)
+                  VALUES ('bolt','b-third2','Someone Else',$1)`, [KHALIFA[0].phone]);
+  const r5 = await refreshIdentityLinks(db);
+  check('a rejected link survives the withdrawal sweep that removes unsupported ones',
+    (await db.query('SELECT count(*)::int c FROM driver_identity_link WHERE rejected')).rows[0].c === 1,
+    JSON.stringify({ withdrawn: r5.withdrawn }));
+  await db.query(`DELETE FROM driver_compliance WHERE driver_ext_id = 'b-third2'`);
+  await db.query(`UPDATE driver_identity_link SET rejected = false, rejected_reason = NULL`);
+  await refreshIdentityLinks(db);
+}
+
 /* A record with no phone is not a candidate, and must not become one by being
    grouped under an empty key with every other record that has none. */
 await db.query(`INSERT INTO driver_compliance (platform, driver_ext_id, full_name, phone)

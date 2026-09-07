@@ -133,7 +133,25 @@ check('…while keeping Bolt\'s own words, which are what distinguish this from 
   const fi = r.notes.filter((n) => n.provider === 'bolt' && n.credential === 'BOLT_CLIENT_ID');
   const refused = fi.filter((n) => n.fleet === 'ecosine');
   check('the credential panel learns that the FI client was refused',
-    refused.length === 1 && refused[0].state === 'invalid', JSON.stringify(fi));
+    refused.length === 1 && refused[0].state === 'unentitled', JSON.stringify(fi));
+  /* The state has to match the SENTENCE, and the sentence next to it says the
+     secret is fine because the same token read the other company. 'invalid'
+     makes api/auth_routes.js print "credentials stopped working … until they
+     are replaced" over a paragraph explaining that replacing it is pointless —
+     the banner and its own detail line contradicting each other. Asserted as
+     "not a state that asks for a replacement" rather than as one literal, so a
+     later state name that means the same thing still passes and 'invalid'
+     still fails. */
+  check('…in a state that does not send somebody to replace a secret its own detail calls fine',
+    !['invalid', 'expired', 'missing'].includes(refused[0]?.state), refused[0]?.state);
+  /* And the banner must be able to describe it: api/auth_routes.js scores the
+     severity and names the errand, and a state missing from either table
+     reaches an operator as an unexplained red row or as amber. */
+  {
+    const { ERRANDS } = await import('../api/auth_routes.js');
+    check('…which api/auth_routes.js has a written errand for',
+      !!ERRANDS[refused[0]?.state], Object.keys(ERRANDS).join(', '));
+  }
   check('…with the company id in the sentence an operator reads',
     /142868/.test(refused[0]?.detail || ''), refused[0]?.detail);
   check('…and the proof the secret is not what is wrong: the company that DID answer',

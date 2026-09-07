@@ -62,11 +62,28 @@ const ya = src('yango.js');
 check('yango: a refused driver week is caught and the walk carries on',
   /catch \(e\) \{[\s\S]{0,300}?chunks\.push\(\{[\s\S]{0,120}?error: why \}\);[\s\S]{0,40}?continue;/.test(ya),
   'post() throws on >= 400 and nothing stood between it and collect()');
-check('yango: and each of its three surfaces is guarded on its own',
-  /const surface = async \(name, fn\)/.test(ya)
-  && /await surface\('drivers'/.test(ya) && /await surface\('trips'/.test(ya)
-  && /await surface\('ledger'/.test(ya),
-  'one refused week used to cost the trips and the ledger too');
+/* Every surface guarded on its own — and there are five now, across two hosts.
+   Counted rather than listed: the roster and the cars arrived on 2026-09-07
+   when the collector moved to fleet-api.yango.tech, and a test that names three
+   would have gone green while two new pulls sat outside the guard. */
+{
+  const guarded = [...ya.matchAll(/await surface\('([^']+)/g)].map((m) => m[1]);
+  check('yango: every surface is guarded on its own, and there is more than one',
+    /const surface = async \(name, fn\)/.test(ya) && guarded.length >= 5,
+    `${guarded.length}: ${guarded.join(', ')}`);
+  /* The two the key host does not serve must still be ATTEMPTED, or nothing
+     would ever notice the console coming back. */
+  check('yango: including the two console-only surfaces, so a recovery is noticed',
+    guarded.some((g) => /drivers/.test(g)) && guarded.some((g) => /ledger/.test(g)),
+    guarded.join(', '));
+  /* And every pull the file defines is called through it — a pull added and
+     wired in bare would take the whole run down on one refusal. */
+  const pulls = [...ya.matchAll(/async function (pull\w+)/g)].map((m) => m[1]);
+  const called = pulls.filter((fn) => new RegExp(`surface\\('[^']*',\\s*(\\(\\)\\s*=>\\s*)?${fn}\\b`).test(ya));
+  check('yango: and every pull the file defines goes through the guard',
+    pulls.length > 0 && called.length === pulls.length,
+    `${called.length}/${pulls.length}: ${pulls.filter((p) => !called.includes(p)).join(', ') || 'all'}`);
+}
 check('yango: and the windows reach the run row',
   /\.\.\.\(chunks\.length \? \{ chunks \} : \{\}\)/.test(ya));
 

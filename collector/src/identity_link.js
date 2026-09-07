@@ -218,12 +218,41 @@ export async function refreshIdentityLinks(db = pool) {
       [l.alias_ext_id, l.alias_platform, l.alias_name, l.canonical_ext_id, l.canonical_platform,
         l.canonical_name, l.canonical_key, l.basis, l.evidence, l.phone_tail]);
   }
+  /* A LINK THE RULE NO LONGER MAKES HAS TO STOP BEING APPLIED.
+     ─────────────────────────────────────────────────────────────────────────
+     This only ever inserted and updated, so the fail-closed guards above
+     failed OPEN over time: a pair linked when their number appeared on two
+     records stayed linked for ever once a THIRD record appeared on it — the
+     exact case the guard skips, because a number on three records identifies a
+     handset rather than a person. The row simply stopped being refreshed, and
+     api/identity_links.js went on folding two people together on the strength
+     of a run that no longer supports it.
+
+     Not hypothetical: this collector now writes 145 Yango compliance rows with
+     phone numbers, which is precisely how a two-record group becomes three.
+
+     A person's decision is not a rule's to withdraw, so a link somebody has
+     REJECTED or CONFIRMED survives regardless — the same precedence the rest
+     of this file keeps. Everything else the run did not produce goes, and the
+     count is logged rather than left to be noticed. */
+  const keep = links.map((l) => l.alias_ext_id);
+  /* RETURNING, not rowCount. node-postgres names it rowCount and PGlite names
+     it affectedRows, so a count read off one of those two is zero under the
+     other — and the tests run on PGlite while production runs on the pool,
+     which is the shape where a guard passes locally and reports nothing live. */
+  const gone = await db.query(
+    `DELETE FROM driver_identity_link
+      WHERE NOT rejected AND confirmed_at IS NULL
+        AND alias_ext_id <> ALL($1::text[])
+      RETURNING alias_ext_id`, [keep]);
+  const withdrawn = (gone.rows || []).length;
   /* Said out loud on every run, because a rule that quietly starts linking
      nothing looks exactly like a fleet whose roster is clean. */
   log.info(SRC, 'identity links from the roster phone', {
     roster_rows: rows.length, linked: links.length,
     changing_something: live.length, already_folded_by_name: links.length - live.length,
     not_linked: skipped.length,
+    withdrawn,
   });
-  return { rows: rows.length, links, live, skipped };
+  return { rows: rows.length, links, live, skipped, withdrawn };
 }

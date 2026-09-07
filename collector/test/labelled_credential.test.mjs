@@ -82,10 +82,18 @@ console.log('\nand the check that runs matches the credential, not the provider'
   const r = await checkCandidate({ ok: true, ...one('YANGO_API_KEY=abc123def456') });
   check('an API key is not tested by the cookie check',
     r.verdict === 'unknown', JSON.stringify({ v: r.verdict, d: r.detail }));
-  check('…and it says it could not test it, rather than that it failed',
-    /no live check exists for YANGO_API_KEY/.test(r.detail || ''), r.detail);
-  check('…and names what will test it instead',
-    /tested by the next run/.test(r.detail || ''), r.detail);
+  /* This used to assert "no live check exists for YANGO_API_KEY … tested by
+     the next run", which was the honest answer while the key had no check of
+     its own. It has one now — checkYangoKey, against fleet-api.yango.tech,
+     which is where three of the collector's five surfaces live. The property
+     that mattered is unchanged and is what is asserted: an API key must never
+     come back as a dead SESSION, because that sends somebody to re-capture a
+     cookie over a key that may be perfectly good. */
+  check('…and the answer is never about a session',
+    !/session|cookie|portal/i.test(r.detail || ''), r.detail);
+  check('…and it names what it could not do rather than declaring the key broken',
+    r.verdict !== 'fail' && /must be set|could not be reached|no live check/.test(r.detail || ''),
+    r.detail);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);
