@@ -135,5 +135,43 @@ check('schema.sql is still the one file whose failure is fatal',
   /if \(f === 'schema\.sql'\) throw e;/.test(dbSrc));
 
 await db.close();
+/* ── two services boot at once, and only one may migrate ────────────────
+   ─────────────────────────────────────────────────────────────────────────
+   src/index.js and api/server.js both call migrate() and a deploy starts both
+   containers together. That was harmless while every file was additive —
+   CREATE TABLE IF NOT EXISTS twice costs nothing. sql/schema_v53.sql drops
+   nine views, rebuilds six generated columns and puts the views back, and two
+   of those racing take locks on the same objects in whatever order they reach
+   them. Measured on production 2026-09-07, the boot after the view fix:
+
+     ERROR [db] migration schema_v53.sql failed {"err":"deadlock detected"}
+
+   Asserted over the source, because the race needs two processes and this
+   suite has one: the guarantee is that the lock is taken on a CHECKED-OUT
+   client and held across the whole run. An advisory lock is session-scoped, so
+   taking it with pool.query() would release it the moment that query's client
+   went back to the pool — which looks identical in code review and serialises
+   nothing at all. */
+console.log('\nonly one process migrates at a time');
+{
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync('src/db.js', 'utf8');
+  check('migrate() takes an advisory lock before it runs anything',
+    /pg_advisory_lock\(\$1\)/.test(src) && /const MIGRATE_LOCK/.test(src));
+  check('…on a client checked out of the pool, not through pool.query',
+    /pool\.connect\(\)[\s\S]{0,200}?pg_advisory_lock/.test(src),
+    'a session lock taken on the pool is released the moment that query returns');
+  check('…held across the whole run and released in a finally',
+    /finally \{[\s\S]{0,200}?pg_advisory_unlock/.test(src),
+    'a lock leaked by a throwing migration blocks every later boot');
+  /* Both halves, because the negative alone is vacuous: a db.js with no lock
+     at all also contains no pg_try_advisory_lock, so this assertion passed
+     against the unfixed file and proved nothing. Measured by reverting the
+     fix — the three checks above went red and this one stayed green. */
+  check('…and it WAITS rather than skipping when another process holds it',
+    /pg_advisory_lock\(/.test(src) && !/pg_try_advisory_lock/.test(src),
+    'a service that skipped migrations would serve against a schema it has not applied');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

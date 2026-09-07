@@ -833,3 +833,24 @@ and the number of plates carrying no VIN stated rather than implied.
 * A chart's y-axis formatter is **not** its tooltip formatter. `valueFmt` is the
   tooltip; `axisFmt` is the axis. One serving both put "10 bookings" on every
   gridline, 28px outside the panel.
+* **Both services run `migrate()` on boot, and a deploy starts them together.**
+  `src/index.js:20` and `api/server.js:5533`. That was free while every file was
+  additive — two processes racing `CREATE TABLE IF NOT EXISTS` cost nothing. It
+  stopped being free the moment `schema_v53.sql` began dropping nine views,
+  rebuilding six generated columns and putting the views back: the two boots
+  took locks on the same objects in different orders and Postgres killed one
+  with `deadlock detected`. The killed file is not recorded, so the next boot
+  did it again. `src/db.js` now takes `pg_advisory_lock` on a client checked out
+  of the pool — *checked out*, because a session lock taken through `pool.query`
+  is released the moment that query's client goes back to the pool, which is no
+  lock at all. It **waits** rather than using `pg_try_advisory_lock`: a service
+  that skipped migrations to avoid a wait would go on to serve against a schema
+  it had not applied.
+* **A test written only as a negative passes against the unfixed file.**
+  `!/pg_try_advisory_lock/.test(src)` was meant to prove the migration lock
+  blocks rather than gives up. A `db.js` with no lock at all also contains no
+  `pg_try_advisory_lock`, so it was green before the fix and green after, and
+  proved nothing either time. Caught by the house rule — revert the fix and
+  watch the test go red; three of the four went red and this one did not. Assert
+  the thing is *present* in the shape you want, not merely that the wrong shape
+  is absent.

@@ -87,7 +87,52 @@ async function ledger() {
   return new Map(rows.map((r) => [r.file, r.sha]));
 }
 
+/* ONE MIGRATOR AT A TIME.
+   ─────────────────────────────────────────────────────────────────────────
+   Two services run this on boot — src/index.js:20 for the collector and
+   api/server.js:5533 for the API — and a deploy starts both containers at
+   once. That was harmless while every file was additive and idempotent: two
+   processes running CREATE TABLE IF NOT EXISTS against each other cost
+   nothing.
+
+   sql/schema_v53.sql is not additive. It drops nine views, rebuilds six
+   generated columns and puts the views back, and two of those running
+   concurrently take locks on the same objects in whatever order they get to
+   them. Measured on production 2026-09-07, in the boot after the view fix
+   landed:
+
+     ERROR [db] migration schema_v53.sql failed {"err":"deadlock detected"}
+
+   Postgres picked one of the two to kill, the file was not recorded, and the
+   next boot did it again.
+
+   A session advisory lock on a fixed key serialises them: the second process
+   blocks until the first is finished, then reads the ledger, finds every sha
+   already recorded and skips the lot. It waits rather than giving up, because
+   a service that skipped migrations to avoid a wait would serve against a
+   schema it has not applied — which is the failure this whole file guards.
+
+   The key is arbitrary and must only be stable. It is held on ONE checked-out
+   client for the whole run, because an advisory lock is session-scoped and a
+   pooled query would release it the moment that query's client went back. */
+const MIGRATE_LOCK = 0x5f16534e;
+
 export async function migrate() {
+  const gate = await pool.connect().catch(() => null);
+  if (gate) {
+    try { await gate.query('SELECT pg_advisory_lock($1)', [MIGRATE_LOCK]); } catch { /* fall through */ }
+  }
+  try {
+    return await runMigrations();
+  } finally {
+    if (gate) {
+      await gate.query('SELECT pg_advisory_unlock($1)', [MIGRATE_LOCK]).catch(() => {});
+      gate.release();
+    }
+  }
+}
+
+async function runMigrations() {
   let applied;
   try {
     applied = await ledger();
