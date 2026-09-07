@@ -59,6 +59,12 @@ const EXEMPT = {
     + 'Trip UUIDs against ours, by hand and for a week at a time. The PAGE reads /api/coverage/verified, '
     + 'which is where the nightly audit job stores the same comparison for whole months — a report costs '
     + 'minutes at the provider and cannot be produced inside a page load',
+  '/api/probe/yango': 'operator tool: has this HOST report its own request to Yango — the park '
+    + 'id\u2019s shape, whether it matches the one the session cookie itself names, and the two '
+    + 'status codes with and without the cookie. It exists because the same request answered 200 '
+    + 'from one host and 403 from the deployed one on 2026-09-07, and no page can settle which of '
+    + 'those two facts is about the credential and which is about the caller. Not a page: it '
+    + 'answers a question a person asks once, from a terminal, when a feed goes dark',
   '/api/probe/fms/window': 'operator tool: the same question of FMS, whose history has a 152-day hole. '
     + 'Our records say those windows were asked and answered empty, and an empty list is '
     + 'indistinguishable from a malformed request in a row count — this asks again and reports the shape',
