@@ -1557,6 +1557,33 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        array, same window — so the number named here is the number the table
        on this page prints, and no third definition of the money enters the
        product. */
+    /* AND THE PARTS THAT FIGURE IS MADE OF, so a page can decompose it instead
+       of asserting a decomposition.
+       ─────────────────────────────────────────────────────────────────────
+       The operator asked for cash on hand and the bank deposit beside the
+       gross, and the first attempt at those three numbers did not add up:
+       AED 3,245.50 of money against AED 2,635.62 of payout plus AED 464.08 of
+       statement cash, AED 145.80 apart. Nothing on the endpoint could say why,
+       because /api/driver/earnings returns statement gross, fees, cash, salik
+       and tips and NOT net — so the one term that would close the arithmetic
+       was the one term nobody could read.
+
+       Every column here is on driver_day at the same driver-day grain, folded
+       by the same person and the same window as `money` itself, so the parts
+       and the total cannot be measured over different sets. Read from
+       driver_day rather than from driver_statement_day directly for the reason
+       src/rollup.js gives at :1115: statements key on the NAME fold and carry a
+       null driver_ext_id on most rows, so a query keyed on the account ids
+       silently drops them.
+
+       Two identities the page may then state rather than assume, both exact by
+       construction:
+         gross          = stmt_net + (money - stmt_net)     ← the second term is
+                          the fares on channels that filed no statement
+         statement net ?= cash the driver kept + what was wired to the bank
+       The second is the one that has to be MEASURED, not asserted: it holds
+       only where a payout covers the same days the statement does, and the
+       residual is reported rather than hidden. */
     const [dday] = await q(
       `SELECT round(sum(money)::numeric, 2)                        AS day_money,
               count(*) FILTER (WHERE money IS NOT NULL)::int       AS day_money_days,
@@ -1568,7 +1595,35 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
               CASE WHEN count(DISTINCT money_source) FILTER (WHERE money_source <> 'none') > 1
                    THEN 'mixed'
                    ELSE max(money_source) FILTER (WHERE money_source <> 'none') END
-                                                                   AS day_money_source
+                                                                   AS day_money_source,
+              /* The statement side. net is the platform's OWN net, not
+                 gross - fees: several channels report all three and they do
+                 not reconcile to each other, which is a fact about the feeds
+                 and not something to paper over by subtracting. */
+              round(sum(stmt_gross)::numeric, 2)                   AS day_stmt_gross,
+              round(sum(stmt_fees)::numeric, 2)                    AS day_stmt_fees,
+              round(sum(stmt_net)::numeric, 2)                     AS day_stmt_net,
+              round(sum(stmt_tips)::numeric, 2)                    AS day_stmt_tips,
+              round(sum(stmt_salik)::numeric, 2)                   AS day_stmt_salik,
+              /* CASH THE DRIVER ALREADY HOLDS. */
+              round(sum(stmt_cash)::numeric, 2)                    AS day_cash,
+              /* WHAT REACHED THE BANK, and the cash line the payout report
+                 carries beside it — a different record of the same idea, kept
+                 apart so the two can be compared rather than conflated. */
+              round(sum(payout)::numeric, 2)                       AS day_payout,
+              round(sum(payout_cash)::numeric, 2)                  AS day_payout_cash,
+              /* What the trip rows priced. NOT money: on a channel that filed
+                 a statement this is the same money seen from the other side. */
+              round(sum(fares)::numeric, 2)                        AS day_fares,
+              /* Coverage per part, because a null sum and a zero sum are
+                 different facts and each card has to say which it is holding.
+                 A part measured over fewer days than the total is a part that
+                 cannot be subtracted from it without saying so. */
+              count(*) FILTER (WHERE stmt_net IS NOT NULL)::int     AS day_stmt_days,
+              count(*) FILTER (WHERE stmt_cash IS NOT NULL)::int    AS day_cash_days,
+              count(*) FILTER (WHERE payout IS NOT NULL)::int       AS day_payout_days,
+              count(*) FILTER (WHERE fares IS NOT NULL)::int        AS day_fares_days,
+              count(*)::int                                         AS day_rows
          FROM driver_day
         WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date`, p);
 
@@ -1602,6 +1657,23 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       day_money_days: dday?.day_money_days ?? null,
       day_money_period_days: dday?.day_money_period_days ?? null,
       day_money_source: dday?.day_money_source ?? null,
+      /* The parts of that figure, at its own grain. See the query above for
+         why they are read from driver_day and not from the statement and
+         payout tables directly. */
+      day_stmt_gross: num(dday?.day_stmt_gross),
+      day_stmt_fees: num(dday?.day_stmt_fees),
+      day_stmt_net: num(dday?.day_stmt_net),
+      day_stmt_tips: num(dday?.day_stmt_tips),
+      day_stmt_salik: num(dday?.day_stmt_salik),
+      day_cash: num(dday?.day_cash),
+      day_payout: num(dday?.day_payout),
+      day_payout_cash: num(dday?.day_payout_cash),
+      day_fares: num(dday?.day_fares),
+      day_stmt_days: dday?.day_stmt_days ?? null,
+      day_cash_days: dday?.day_cash_days ?? null,
+      day_payout_days: dday?.day_payout_days ?? null,
+      day_fares_days: dday?.day_fares_days ?? null,
+      day_rows: dday?.day_rows ?? null,
       hours_online: hoursOnline,
       /* on_job, not on_trip: request to dropoff, which contains the approach
          and the rider's wait. No feed here separates them. */
@@ -1706,6 +1778,16 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        SELECT day, sum(online_min) online_min, sum(on_job_min) on_job_min,
               sum(idle_online_min) idle_online_min,
               round(sum(money)::numeric, 2) money,
+              /* The parts of the money, per day, so the residual between the
+                 gross and (cash + bank) can be located on the day it arises
+                 rather than inferred from a window total. Same columns and
+                 same reasoning as the block in /api/driver/kpis. */
+              round(sum(stmt_gross)::numeric, 2) stmt_gross,
+              round(sum(stmt_fees)::numeric, 2)  stmt_fees,
+              round(sum(stmt_net)::numeric, 2)   stmt_net,
+              round(sum(stmt_cash)::numeric, 2)  cash,
+              round(sum(payout)::numeric, 2)     payout,
+              round(sum(payout_cash)::numeric, 2) payout_cash,
               /* The report window the money was measured over. Uber files this
                  fleet's earnings WEEKLY and src/rollup.js divides each one
                  across its seven days, so seven consecutive days carry a
@@ -1767,6 +1849,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                Uber-only day — 85 of this fleet's 119 active drivers. */
             round(k.money::numeric,2) AS money, k.money_source,
             k.money_period_days,
+            /* Returned beside the money they decompose. A page that prints a
+               total and its parts from two different endpoints will eventually
+               print a total that is not the sum of the parts it shows. */
+            k.stmt_gross, k.stmt_fees, k.stmt_net, k.cash, k.payout, k.payout_cash,
             round(h.earnings::numeric,2) platform_earnings,
             w.temp_max, w.precipitation, c.is_ramadan
      FROM spine LEFT JOIN t USING (day)
