@@ -866,7 +866,7 @@ export function economicsRoutes(app, { q, wrap, range }) {
        never anything to join TO. */
     const PK = `coalesce(nullif(btrim(t.driver_ext_id), ''), 'name:' || t.person_key)`;
 
-    const [pay, avail, work, who, custody, tele, held, coverage] = await Promise.all([
+    const [pay, stmt, avail, work, who, custody, tele, held, coverage] = await Promise.all([
       /* What each account was actually paid, at day grain with the overlapping
          report windows already resolved — never driver_performance directly,
          where one driver's twenty-eight weeks were held as sixty-seven rows.
@@ -897,6 +897,34 @@ export function economicsRoutes(app, { q, wrap, range }) {
          WHERE day BETWEEN $1::date AND $2::date
            AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
          GROUP BY 1`, p),
+      /* WHAT EACH ACCOUNT'S STATEMENTS SAY IT EARNED, per channel — the figure
+         api/income_sql.js now counts a channel on, and the one these rows have
+         never carried.
+         ─────────────────────────────────────────────────────────────────────
+         chooseBasis prefers a channel's statement net to its payout, the payout
+         being what was wired to the bank rather than what the work earned.
+         These per-driver rows held only fares and payouts, so the branch was
+         unreachable and every driver on this page stayed on the old basis while
+         the fleet totals above them moved. Measured on production for
+         2026-09-01..09-07: this page reported Raja Aliyan Khalil at AED
+         2,635.62 on "uber: payout, yango: payout" while the People list and his
+         own profile both read AED 3,266.
+
+         source <> 'ledger' for the reason api/income_sql.js:154 gives, and the
+         one /api/day was caught breaking: the operator's workbook is reference
+         data and must never become the basis. The API statements carry a
+         driver_ext_id — src/rollup.js groups them by it when it writes them —
+         so this join reaches them; the null-id rows are the workbook, which
+         this predicate excludes anyway. */
+      q(`SELECT driver_ext_id, platform,
+                round(sum(net)::numeric,2) statement_net,
+                count(DISTINCT day)::int statement_days
+           FROM driver_statement_day
+          WHERE source <> 'ledger' AND net IS NOT NULL
+            AND driver_ext_id IS NOT NULL
+            AND day BETWEEN $1::date AND $2::date
+            AND ($3::text IS NULL OR platform=$3) AND ($4::text IS NULL OR fleet_id=$4)
+          GROUP BY 1, 2`, p),
 
       /* AVAILABILITY WE MEASURED OURSELVES.
          ─────────────────────────────────────────────────────────────────
@@ -1161,7 +1189,8 @@ export function economicsRoutes(app, { q, wrap, range }) {
       if (!r.chan.has(name)) {
         r.chan.set(name, { platform: name, bookings: 0, priced_bookings: 0,
           chargeable_bookings: 0, uncharged_bookings: 0, fares: null, km: null,
-          booking_days: 0, payouts: null, cash: null, payout_days: 0 });
+          booking_days: 0, payouts: null, cash: null, payout_days: 0,
+          statement_net: null, statement_days: 0 });
       }
       return r.chan.get(name);
     };
@@ -1250,9 +1279,21 @@ export function economicsRoutes(app, { q, wrap, range }) {
       r.fleet_id = r.fleet_id || w.fleet_id;
       if (!r.last_trip || w.last_trip > r.last_trip) r.last_trip = w.last_trip;
     }
+    /* Statements onto the same channel rows the payouts land on, before the
+       basis is chosen. Keyed on the account id, which both sources carry. */
+    const stmtByAccount = new Map();
+    for (const t2 of stmt) {
+      if (!stmtByAccount.has(t2.driver_ext_id)) stmtByAccount.set(t2.driver_ext_id, []);
+      stmtByAccount.get(t2.driver_ext_id).push(t2);
+    }
     for (const y of pay) {
       const r = person(y.driver_name, y.driver_ext_id);
       r.payouts = add(r.payouts, y.payouts);
+      for (const c of (stmtByAccount.get(y.driver_ext_id) || [])) {
+        const e = chanOf(r, c.platform);
+        e.statement_net = add(e.statement_net, Number(c.statement_net));
+        e.statement_days = Math.max(e.statement_days || 0, c.statement_days || 0);
+      }
       for (const c of (y.channels || [])) {
         const e = chanOf(r, c.platform);
         e.payouts = add(e.payouts, c.payouts);

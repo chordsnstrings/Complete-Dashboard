@@ -1389,6 +1389,33 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       booking_days: f.booking_days });
     for (const y of payByPlat) Object.assign(plat(y.platform), {
       payouts: n(y.payouts), payout_days: y.payout_days ?? 0 });
+    /* THE STATEMENT HALF, WITHOUT WHICH THIS PERSON CANNOT BE COUNTED THE WAY
+       THE FLEET COUNTS THEM.
+       ─────────────────────────────────────────────────────────────────────
+       api/income_sql.js now takes a channel's statement net ahead of its
+       payout — the payout being what was wired to the bank rather than what
+       the work earned. These rows carried only fares and payouts, so
+       chooseBasis could never reach that branch for a driver and every
+       per-driver `accounted` in the product stayed on the old basis. Measured
+       on production for 2026-09-01..09-07: /api/economics/drivers reported this
+       person at AED 2,635.62 on "uber: payout, yango: payout" while the People
+       list and their own profile both read AED 3,266.
+
+       Keyed on driver_ext_id, which the API statements DO carry: src/rollup.js
+       groups driver_earnings_component by driver_ext_id when it writes them
+       (:809-838). The rows with a null id are the operator's imported
+       workbook, and `source <> 'ledger'` excludes those anyway — for the
+       reason api/income_sql.js:154 gives, and the one /api/day was caught
+       breaking. */
+    const stmtByPlat = await q(
+      `SELECT platform, round(sum(net)::numeric, 2) statement_net,
+              count(DISTINCT day)::int statement_days
+         FROM driver_statement_day
+        WHERE source <> 'ledger' AND driver_ext_id = ANY($3)
+          AND day BETWEEN $1::date AND $2::date AND net IS NOT NULL
+        GROUP BY 1`, p);
+    for (const t2 of stmtByPlat) Object.assign(plat(t2.platform), {
+      statement_net: n(t2.statement_net), statement_days: t2.statement_days ?? 0 });
     /* DAYS IN THE WINDOW, counted on the days and not on the timestamps.
        ─────────────────────────────────────────────────────────────────────
        win() widens the upper bound to 23:59:59.999 (see DAYWIN above), so the
