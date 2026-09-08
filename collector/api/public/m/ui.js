@@ -26,10 +26,13 @@ export { el, esc, money, pct, dayStr, fmt, isToday };
    so. This is the same separation for a screen with no chart to hang it on:
    the complete days for anything averaged or compared, and today handed back
    on its own so a screen can mention it as what it is. */
+/* `d` or `day`. The Today module's rows carry `d`; /api/driver/daily's carry
+   `day`, so a driver chart calling this got `today: null` every time and
+   plotted the part-day that is still filling as though it were a whole one. */
 export const splitToday = (rows = []) => {
   const list = Array.isArray(rows) ? rows : [];
   const last = list[list.length - 1];
-  return isToday(last?.d)
+  return isToday(last?.d ?? last?.day)
     ? { complete: list.slice(0, -1), today: last }
     : { complete: list, today: null };
 };
@@ -267,7 +270,32 @@ export const failed = (host, e) => {
 
 /* A sparkline, sized in the box it is given rather than in pixels, so it works
    in a stat card and across a full-width card without two versions. */
-export const spark = (values, { h = 34, tone = 'var(--accent)', fill = true } = {}) => {
+/* THE FLOOR OF A COUNT CHART IS ZERO, AND IT WAS THE SERIES' OWN MINIMUM.
+   ──────────────────────────────────────────────────────────────────────────
+   `lo` was Math.min(...v), so the smallest day in the window was always drawn
+   ON the baseline — which means a day with work and a day with none render
+   identically, and the reader has no axis, no label and no caption to tell
+   them apart.
+
+   Reported from the phone as "I think one day's data is missing", on Shahab
+   Ali Shaukat Hayat over 2026-09-01..09-08. Nothing was missing: the eight
+   days are 12, 11, 11, 12, 12, 9, 14 and 9, and /api/driver/daily returns all
+   eight. 9 was the minimum, so both 9s sat on the floor and the last one — the
+   one with the end-dot on it — read as zero. The operator was right that the
+   chart was wrong and reasonable about which way.
+
+   Every caller of this function plots a count or an amount per day: bookings,
+   fares, bookings, bookings. All four have a meaningful zero, and suppressing
+   it is what made a busy day look like a blank one. `lo` is now Math.min(0, …)
+   — zero for any non-negative series, and the true minimum where a value is
+   negative so a real deficit is still visible with zero on the chart as the
+   line it crosses.
+
+   `zeroBased: false` is there for a series where the zero is not meaningful —
+   a rating between 4.9 and 5.0 would be a flat line at the top of a zero-based
+   axis. Nothing passes it today; a caller that needs it has to ask. */
+export const spark = (values, { h = 34, tone = 'var(--accent)', fill = true,
+  zeroBased = true } = {}) => {
   const v = values.map(Number).filter((n) => Number.isFinite(n));
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
@@ -276,7 +304,8 @@ export const spark = (values, { h = 34, tone = 'var(--accent)', fill = true } = 
   svg.setAttribute('aria-hidden', 'true');
   svg.style.cssText = `display:block;width:100%;height:${h}px;overflow:visible`;
   if (v.length < 2) return svg;
-  const lo = Math.min(...v), hi = Math.max(...v), span = hi - lo || 1;
+  const lo = zeroBased ? Math.min(0, ...v) : Math.min(...v);
+  const hi = Math.max(...v), span = hi - lo || 1;
   const pad = 2.5;
   const pt = (n, i) => [
     (i / (v.length - 1)) * 100,

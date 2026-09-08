@@ -364,6 +364,51 @@ check('…and reporting today separately, as still filling',
 check('the Money screen drops today from its fares spark too',
   /const \{ complete: fullDays, today: partialDay \} = splitToday\(daily\)/.test(scr));
 
+/* A COUNT CHART'S FLOOR IS ZERO, AND IT WAS THE SERIES' OWN MINIMUM.
+   ─────────────────────────────────────────────────────────────────────────
+   `lo` was Math.min(...v), so the smallest day in the window was drawn ON the
+   baseline — a day with work and a day with none rendering identically, with
+   no axis, no label and no caption to separate them.
+
+   Reported from the phone as "I think one day's data is missing", on Shahab
+   Ali Shaukat Hayat over 2026-09-01..09-08. Nothing was missing:
+   /api/driver/daily returns all eight days — 12, 11, 11, 12, 12, 9, 14, 9 —
+   and 9 was the minimum, so both 9s sat on the floor and the last one, the one
+   carrying the end-dot, read as zero. Zero-based, that 9 sits at 64% of the
+   chart's height.
+
+   All four callers of spark() plot a count or an amount per day, every one of
+   which has a meaningful zero. The RATING trend is a different renderer in
+   api/public/ui.js and is correctly min-scaled — test/uber_profile.test.mjs
+   guards that — which is the case `zeroBased: false` exists for. */
+check('the count sparkline puts its floor at zero, not at the smallest day',
+  /const lo = zeroBased \? Math\.min\(0, \.\.\.v\) : Math\.min\(\.\.\.v\);/.test(mui),
+  'the smallest day sat on the baseline, so 9 bookings and 0 rendered the same');
+check('…and a negative value still keeps the true minimum, with zero on the chart',
+  /Math\.min\(0, \.\.\.v\)/.test(mui),
+  'Math.min(0, …) is the min for a series that goes negative and 0 for one that does not');
+check('…while a caller whose zero is meaningless can still ask for the old scale',
+  /zeroBased = true \} = \{\}\) =>/.test(mui),
+  'a rating between 4.9 and 5.0 is a flat line on a zero-based axis');
+check('the measurement that reported it is written down',
+  /one day's data is missing/.test(mui) && /Shahab/.test(mui));
+
+/* splitToday keyed on `d` alone. /api/driver/daily's rows carry `day`, so the
+   driver and vehicle charts got today: null every time and drew the part-day
+   that is still filling as though it were a whole one. */
+check('splitToday finds today whichever key the rows use',
+  /isToday\(last\?\.d \?\? last\?\.day\)/.test(mui),
+  'the Today module keys on d, /api/driver/daily on day');
+check('the driver and vehicle charts drop the part-day as the other two do',
+  (scr.match(/splitToday\(daily\)/g) || []).length >= 4,
+  'four charts on this phone, four exclusions');
+check('…and say what they dropped and how far it has got',
+  /today excluded, it is still filling — \$\{countOf\(n\(partialTripDay\.trips\)/.test(scr),
+  'a chart that silently drops a day is a chart with a hole in it');
+check('…with countOf in scope, since it is the shared helper',
+  /cashOnHandTile, bankDepositTile, countOf,/.test(scr),
+  'it was used in the caption before it was imported, which throws at render');
+
 /* ── the money a phone shows ──────────────────────────────────────────────
    `revenue` is sum(trip.price), and the Uber export carries no fare column —
    on this fleet it describes 875 of 12,410 bookings. The phone printed

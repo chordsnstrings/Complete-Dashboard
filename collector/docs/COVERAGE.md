@@ -1267,3 +1267,22 @@ statement split on coverage exactly as the payout is.
   payout branch precedes the fares branch and that is right for a channel taking
   a commission. Fleet 182,778.38 against a `driver_day` sum of ~183,366 —
   roughly AED 588, 0.3%, all of it Yango, down from AED 2,844.
+* **A count chart's floor must be zero, and the phone's was the series' own
+  minimum.** `spark()` in `api/public/m/ui.js` set `lo = Math.min(...v)`, so the
+  smallest day in the window was drawn ON the baseline — a day with work and a
+  day with none rendering identically, with no axis, no label and no caption to
+  separate them. Reported from the phone as *"I think one day's data is
+  missing"* for Shahab Ali Shaukat Hayat over 2026-09-01..09-08. Nothing was
+  missing: `/api/driver/daily` returns all eight days — 12, 11, 11, 12, 12, 9,
+  14, 9 — and 9 was the minimum, so both 9s sat on the floor and the last one,
+  carrying the end-dot, read as zero. Zero-based it sits at 64% of the height.
+  All four callers plot counts or amounts per day; the RATING trend is a
+  different renderer (`api/public/ui.js`) and is correctly min-scaled, which is
+  the case `zeroBased: false` exists for. **Before drawing a series, ask whether
+  its zero means anything — and if it does, put the floor there.**
+* **`splitToday` keyed on `d` alone while `/api/driver/daily` keys on `day`.**
+  So the driver and vehicle charts got `today: null` every time and drew the
+  part-day that is still filling beside seven finished ones — a driver eight
+  hours into a shift showing a collapse at the right-hand edge. The Today and
+  Fares charts on the same phone had always excluded it and said so. When a
+  helper tests one field name, check every row shape that reaches it.

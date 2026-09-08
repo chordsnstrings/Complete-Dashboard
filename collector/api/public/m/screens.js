@@ -19,7 +19,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
 import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote,
-  cashOnHandTile, bankDepositTile,
+  cashOnHandTile, bankDepositTile, countOf,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock } from '../tz.js';
 import { todayLive, todayLede, FARES_LAG } from '../today.js';
@@ -932,9 +932,26 @@ async function driver(deck, ctx) {
     { label: 'Distance', value: `${fmt(k.km)} km`, sub: avgKmSub(k), long: true },
   ]);
 
-  const series = (daily || []).map((d) => n(d.trips) || 0);
+  /* TODAY IS NOT A DAY YET, and this chart drew it as one.
+     ───────────────────────────────────────────────────────────────────────
+     The two other charts on this phone already exclude the part-day and say
+     so — the Today trend at :252 and Fares a day at :372, both through
+     splitToday. This one plotted it beside seven finished days, so a driver
+     eight hours into a shift showed a collapse at the right-hand edge.
+     Measured for Shahab Ali Shaukat Hayat at 15:35 Dubai on 2026-09-08: seven
+     whole days of 12, 11, 11, 12, 12, 9 and 14, then today's 9-so-far drawn as
+     though the day were over.
+
+     splitToday keys on `d` or `day` now; these rows carry `day`, so it
+     returned "no today" here and the exclusion never fired. */
+  const { complete: fullTripDays, today: partialTripDay } = splitToday(daily);
+  const series = (fullTripDays || []).map((d) => n(d.trips) || 0);
   if (series.length > 1) {
-    const c = card('Bookings a day', `${series.length} days in this window`);
+    const c = card('Bookings a day',
+      `${countOfDays(series.length)}`
+      + (partialTripDay
+        ? ` · today excluded, it is still filling — ${countOf(n(partialTripDay.trips) || 0, 'booking')} so far`
+        : ' in this window'));
     c.body.append(spark(series, { h: 44 }));
     deck.append(c.card);
   }
@@ -1058,9 +1075,26 @@ async function vehicle(deck, ctx) {
       sub: 'held this car' },
   ]);
 
-  const series = (daily || []).map((d) => n(d.trips) || 0);
+  /* TODAY IS NOT A DAY YET, and this chart drew it as one.
+     ───────────────────────────────────────────────────────────────────────
+     The two other charts on this phone already exclude the part-day and say
+     so — the Today trend at :252 and Fares a day at :372, both through
+     splitToday. This one plotted it beside seven finished days, so a driver
+     eight hours into a shift showed a collapse at the right-hand edge.
+     Measured for Shahab Ali Shaukat Hayat at 15:35 Dubai on 2026-09-08: seven
+     whole days of 12, 11, 11, 12, 12, 9 and 14, then today's 9-so-far drawn as
+     though the day were over.
+
+     splitToday keys on `d` or `day` now; these rows carry `day`, so it
+     returned "no today" here and the exclusion never fired. */
+  const { complete: fullTripDays, today: partialTripDay } = splitToday(daily);
+  const series = (fullTripDays || []).map((d) => n(d.trips) || 0);
   if (series.length > 1) {
-    const c = card('Bookings a day', `${series.length} days in this window`);
+    const c = card('Bookings a day',
+      `${countOfDays(series.length)}`
+      + (partialTripDay
+        ? ` · today excluded, it is still filling — ${countOf(n(partialTripDay.trips) || 0, 'booking')} so far`
+        : ' in this window'));
     c.body.append(spark(series, { h: 44 }));
     deck.append(c.card);
   }
