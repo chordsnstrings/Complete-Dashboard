@@ -43,7 +43,12 @@ const KIND = {
    basis it chose per channel, so this is read from the product rather than
    asserted here — a page describing a rule from memory drifts from the rule. */
 const usedBy = (basis) => (basis === 'fares' || basis === 'partial_fares' ? 'fare'
-  : basis === 'payout' || basis === 'partial_payout' ? 'payout' : null);
+  : basis === 'payout' || basis === 'partial_payout' ? 'payout'
+    /* The basis api/income_sql.js now prefers. Without this arm every channel
+       that files a statement — 86% of this fleet's money — returned null here
+       and the page showed no source for it at all, which on a page whose whole
+       job is to say where a number came from is the worst possible answer. */
+    : basis === 'statement' || basis === 'partial_statement' ? 'statement' : null);
 
 export async function renderProvenance(root) {
   root.innerHTML = '';
@@ -72,7 +77,13 @@ export async function renderProvenance(root) {
   }
   const knowsBasis = !!(rev?.platforms || []).length;
 
-  const inHeadline = (r) => knowsBasis && (r.kind === 'fare' || r.kind === 'payout')
+  /* 'statement' joins the two kinds a row can be counted on. Without it every
+     channel that files a statement fell out of `counted` and into `held`, so
+     this page said the fleet's largest source of money was NOT in the
+     headline — the exact opposite of the truth, on the page whose job is to
+     say where the headline came from. */
+  const inHeadline = (r) => knowsBasis
+    && (r.kind === 'fare' || r.kind === 'payout' || r.kind === 'statement')
     && chosen.get(r.platform) === r.kind;
 
   const counted = d.rows.filter(inHeadline);
@@ -165,8 +176,11 @@ export async function renderProvenance(root) {
       if (!knowsBasis) return 'Money by platform did not answer, so this page cannot say';
       const c = chosen.get(r.platform);
       if (c && c !== r.kind) {
-        return `this channel’s headline uses its ${c === 'fare' ? 'fares' : 'payouts'} — a payout is `
-          + 'what is left of those same fares after commission, so counting both counts them nearly twice';
+        return `this channel’s headline uses its `
+          + `${c === 'fare' ? 'fares' : c === 'statement' ? 'statement net' : 'payouts'} — the three `
+          + 'are one flow of money seen at three points, the fare being the gross, the statement net '
+          + 'what is left after commission and the payout what reached the bank after that, so '
+          + 'counting more than one counts the same rides more than once';
       }
       /* Not the same as "we chose the other one": a channel whose basis is
          `none` has nothing the headline can stand on, and saying that is the

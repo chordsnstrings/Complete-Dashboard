@@ -1209,3 +1209,61 @@ Four readers and four measurers established the following against production.
 * **`driver_day.fares` is not the fares half of `money`.** It is
   `sum(trip.price)` over ALL platforms including the ones that filed a
   statement. The fares half is `money − stmt_net`, and only that.
+
+### One money basis — 2026-09-08
+
+`api/income_sql.js` `chooseBasis()` preferred a channel's **payout**. That was
+wrong, not merely inconsistent: `driver_payout_day.earnings` is Uber's
+`netOutstanding`, the amount wired to the bank (`src/sources/uber.js:1430`), so
+every money headline in this product answered *"what reached the bank"* under
+the words *"money in"*. The two differ by the cash the drivers already hold —
+16.9% to 18.8% across three measured windows.
+
+The order is now **statement → zero_payout → payout → fares**, with the
+statement split on coverage exactly as the payout is.
+
+* **Measured, fleet, 2026-09-01..09-07.** accounted 180,482.40 → **182,778.38**;
+  the uber term moving from its payout (155,889.48) to its statement net
+  (158,185.46). Fleet-wide that is AED 2,295.98; on the driver this came in
+  about it was 14%.
+* **`partial_statement` exists for the same reason `partial_payout` does, and
+  leaving it out nearly shipped a false green.** The first version of the branch
+  took any statement and reported no coverage, turning uber's amber
+  *"part-window"* into *"accounted for"* over a statement covering **212 of 365
+  days (58.1%)** — almost exactly the payout's 215. Coverage is a property of
+  the window, not of the channel: the same uber row is `partial_statement` over
+  365 days and `statement` over 31.
+* **`accounted_payouts` stopped meaning "what reached the bank" the moment the
+  statement won.** It sums only the rows *counted on* their payout, so Uber left
+  that set and twelve surfaces reading it for the bank figure would have shown a
+  remainder — `#finance`'s "Platform payouts" tile reading AED 267 where it read
+  AED 155,889, plausible enough not to look broken. `reported_payouts` is the
+  bank side across every row that has one. Never use `accounted_payouts` to mean
+  the bank.
+* **A page cannot infer WHICH payout was excluded, and guessed wrong.**
+  `#finance` named "uber's statement" for money that was yango's fares. The
+  server returns `uncounted_payouts`, `uncounted_payout_platforms` and
+  `uncounted_payout_bases`; the page states, never derives, the reason.
+* **`/api/day` fed the operator's workbook into the basis.** It read
+  `statement_net` from `source = 'ledger'` under a comment promising the field
+  "rides BESIDE the chosen basis and is never added into accounted" — true only
+  while `fleetIncome` ignored it. `test/day_routes.test.mjs` caught it as
+  *"accounted 620.25 vs statement 620.25"*, the two numbers having silently
+  become one. The countable query reads `source <> 'ledger'`; the workbook keeps
+  its own field, `ledger_net`. **Any new field named `statement_net` that
+  reaches `fleetIncome` must exclude `source = 'ledger'`.**
+* **`/api/finance/daily` needed a third per-day source or it lost 86% of the
+  fleet.** Its daily bars are built from `USES_FARES` and `USES_PAYOUT`; with
+  uber in neither, AED 158,185 of AED 182,778 would have vanished from the bars
+  under a tile still showing all of it. The bars adding up to the tile is,
+  in that route's own words, "the only property that makes them trustworthy".
+* **A count and the list that explains it must come from one filter.**
+  `api/public/revenue.js` had its own `underRows` on `partial_payout` alone
+  while the server's total counted both kinds, so the tile rendered *"232,832
+  more are covered by a report that reaches ␣ — money we hold"*.
+* **Yango is a deliberate, measured residual.** `driver_day.money` takes a
+  channel's fares where it files no statement, so at driver grain Yango counts
+  on AED 814.00 of fares; here it keeps its AED 266.57 payout, because the
+  payout branch precedes the fares branch and that is right for a channel taking
+  a commission. Fleet 182,778.38 against a `driver_day` sum of ~183,366 —
+  roughly AED 588, 0.3%, all of it Yango, down from AED 2,844.

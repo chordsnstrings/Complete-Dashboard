@@ -78,17 +78,36 @@ const t365 = fleetIncome(rows365, 365);
 const uber = rows365.find((r) => r.platform === 'uber');
 const totalBookings = rows365.reduce((a, r) => a + r.bookings, 0);
 
-check('the window still puts uber on a part-window payout',
-  uber.basis === 'partial_payout' && uber.payout_coverage_days === 209
-  && uber.payout_coverage_base === 365, `basis=${uber.basis} ${uber.payout_coverage_days}/${uber.payout_coverage_base}`);
-/* 2,419,433.43 and not 2,401,822.21: Yango moved from fares to payout when
-   the basis rule was corrected, and its AED 17,611.22 is now in this half.
-   Yango prices 36 bookings of 36 and Yango's own statement says it paid
-   17,611.22 for the window — the old rule read the 100% coverage and printed
-   the 1,812 of fares instead, a quarter of what arrived. See chooseBasis. */
-check('…and still counts its AED 2.4m inside the accounted total',
-  t365.accounted > 2400000 && t365.accounted_payouts === 2419433.43,
-  `accounted=${t365.accounted} payouts=${t365.accounted_payouts}`);
+/* THE BASIS MOVED, THE RULE DID NOT.
+   ─────────────────────────────────────────────────────────────────────────
+   chooseBasis now prefers a channel's STATEMENT NET to its payout, because
+   driver_payout_day.earnings is Uber's netOutstanding — the amount wired to
+   the bank (src/sources/uber.js:1430) — and not what the work earned. So uber
+   here is partial_statement, over the 206 of 365 days its statements cover,
+   rather than partial_payout over the 209 its payouts cover. Both are
+   part-window; the figure taken is the earnings one now.
+
+   Everything this block was written to defend is unchanged and is still
+   checked below: a part-window figure is measured money and not dark money,
+   the two counts partition the window's bookings rather than both claiming
+   them, and a channel we hold millions for is never called "no money value". */
+check('the window puts uber on a part-window STATEMENT, not a part-window payout',
+  uber.basis === 'partial_statement' && uber.statement_coverage_days === 206
+  && uber.statement_coverage_base === 365,
+  `basis=${uber.basis} ${uber.statement_coverage_days}/${uber.statement_coverage_base}`);
+check('…and it is the earnings figure that is taken, not the bank one',
+  uber.best === 2279334.52,
+  `best=${uber.best} — 2,279,334.52 is the statement net, 2,401,822.21 the payout`);
+check('…and still counts its AED 2.2m inside the accounted total',
+  t365.accounted > 2200000 && t365.accounted_statements === 2279334.52,
+  `accounted=${t365.accounted} statements=${t365.accounted_statements}`);
+/* The bank side does not disappear when it stops being the basis — it moves
+   to its own field, because twelve surfaces read it as "what reached the
+   bank" and accounted_payouts now holds only the rows COUNTED on a payout. */
+check('…while what actually reached the bank is still reported, under its own name',
+  t365.reported_payouts === 2401822.21 + 17611.22
+  && t365.reported_payout_platforms.join() === 'uber,yango',
+  `reported_payouts=${t365.reported_payouts} from ${t365.reported_payout_platforms}`);
 check('…and Yango is counted on what it paid, not on the fares under it',
   rows365.find((r) => r.platform === 'yango')?.basis === 'payout',
   String(rows365.find((r) => r.platform === 'yango')?.basis));
@@ -105,11 +124,23 @@ check('accounted and dark bookings cannot both count the same rows',
 check('a channel we hold AED 2,401,822.21 for is not "no money value"',
   t365.dark_bookings === 0 && t365.dark_pct === 0,
   `dark_bookings=${t365.dark_bookings} dark_pct=${t365.dark_pct}`);
+/* The safety net this whole section exists for, and the one thing the basis
+   change nearly broke: the first version of it took the statement whenever one
+   existed and reported no coverage at all, which turned uber's amber
+   "part-window" into a green "accounted for" over a statement covering 206 of
+   365 days. partial_statement rides with partial_payout in the under-covered
+   set for exactly that reason. undercovered_payouts keeps its name and its
+   meaning — payout rows only — and undercovered_income is the honest total
+   across both kinds. */
 check('…it is reported as under-covered instead, with its own count',
-  t365.undercovered_bookings === 232832 && t365.undercovered_payouts === 2401822.21
+  t365.undercovered_bookings === 232832
+  && t365.undercovered_income === 2279334.52
   && t365.undercovered_platforms.join() === 'uber',
   `undercovered_bookings=${t365.undercovered_bookings} `
-  + `payouts=${t365.undercovered_payouts} platforms=${t365.undercovered_platforms}`);
+  + `income=${t365.undercovered_income} platforms=${t365.undercovered_platforms}`);
+check('…and the payout-only field is not quietly repurposed to say it',
+  t365.undercovered_payouts == null,
+  `undercovered_payouts=${t365.undercovered_payouts} — uber is not a payout row any more`);
 
 /* And the other direction: money that really is absent still counts as dark.
    bolt with bookings and no figure of any kind, and a partial_fares channel. */
@@ -137,15 +168,32 @@ check('…and the 80 it DID price are not called money-less and income at once',
   tAbsent.dark_bookings === 618 + (400 - 80) && tAbsent.accounted_fares === 5100,
   `dark=${tAbsent.dark_bookings} fares=${tAbsent.accounted_fares}`);
 
-/* The July window, where the same channel clears 80% coverage, goes to basis
-   `payout`, and is neither dark nor under-covered. The split has to be a
-   property of the coverage, not of the channel. */
+/* The July window, where the same channel's report clears 80% coverage, takes
+   the full basis and is neither dark nor under-covered. The split has to be a
+   property of the COVERAGE, not of the channel — which is why the same row is
+   partial over 365 days and whole over 31.
+
+   It reads `statement` rather than `payout` now, for the reason at the top of
+   chooseBasis: this row carries both, and the statement's 382,915.61 is what
+   the work earned while the payout's 355,419.78 is what reached the bank after
+   the drivers' cash came out of it. The 27,496 between them is that cash. */
 const july = [{ platform: 'uber', bookings: 9655, priced_bookings: 0, fares: null,
-  payouts: 355419.78, payout_days: 31, booking_days: 31, statement_net: 382915.61 }];
+  payouts: 355419.78, payout_days: 31, booking_days: 31,
+  statement_net: 382915.61, statement_days: 31 }];
 const tJuly = fleetIncome(july, 31);
-check('a payout that covers the window is neither dark nor under-covered',
-  july[0].basis === 'payout' && tJuly.dark_bookings === 0 && tJuly.undercovered_bookings === 0,
+check('a report that covers the window is neither dark nor under-covered',
+  july[0].basis === 'statement' && tJuly.dark_bookings === 0 && tJuly.undercovered_bookings === 0,
   `basis=${july[0].basis} dark=${tJuly.dark_bookings} under=${tJuly.undercovered_bookings}`);
+check('…and the coverage split is a property of the coverage, not the channel',
+  uber.basis === 'partial_statement' && july[0].basis === 'statement',
+  'the same channel is partial over 365 days and whole over 31');
+/* A row with a payout and NO statement still takes the payout — the ordering
+   prefers the statement, it does not require one. */
+const noStmt = [{ platform: 'yango', bookings: 40, priced_bookings: 40, fares: 1800,
+  payouts: 9000, payout_days: 31, booking_days: 31, statement_net: null }];
+fleetIncome(noStmt, 31);
+check('a channel that files no statement is unaffected by the new preference',
+  noStmt[0].basis === 'payout' && noStmt[0].best === 9000, String(noStmt[0].basis));
 
 /* ── the fixture server ──────────────────────────────────────────────────── */
 /* Everything the shell needs comes from mockapi.mjs; the two routes under test
@@ -325,9 +373,18 @@ check('both tiles are on the page', !!accTile && !!darkTile,
   revTiles.map((k) => k.label).join(' | '));
 check('the dark tile no longer claims uber\'s 232,832 bookings',
   darkTile.value === '0', `reads "${darkTile.value}"`);
+/* The sentence names the report the row was COUNTED on, which is the statement
+   now. It had to change with the basis: written against the payout it read
+   "232,832 more are covered by a report that reaches  — money we hold", a
+   blank where the days should be, because the row carries no payout coverage
+   to read once it is counted on its statement. The count and the list that
+   explains it come from one filter now. */
 check('…and says where those bookings actually went',
-  /232,832 more are covered by a payout that reaches 209 of Uber’s 365 days/.test(darkTile.sub),
+  /232,832 more are covered by a report that reaches Uber’s statement over 206 of the 365 days it worked/
+    .test(darkTile.sub),
   `sub was "${darkTile.sub}"`);
+check('…with no blank left where the coverage should be',
+  !/reaches\s+—/.test(darkTile.sub), `sub was "${darkTile.sub}"`);
 check('…and is amber rather than critical, because the money is held',
   darkTile.tone === 't-warn', `tone ${darkTile.tone}`);
 check('the accounted tile no longer says "across 234,499 of 234,499 bookings"',
@@ -338,8 +395,13 @@ check('the accounted tile no longer says "across 234,499 of 234,499 bookings"',
    measurement from the one above them. */
 check('…it names the fare base and its own denominator',
   /AED 130,219 in fares over 1,616 priced bookings/.test(accTile.sub), `sub was "${accTile.sub}"`);
+/* Three halves now, and the largest of them is the statement. The payout half
+   is Yango alone — the only channel left that is counted on what it wired
+   rather than on what it reported earning. */
+check('…and the statement base, which is where most of the money now is',
+  /AED 2,279,335 in statement net from Uber/.test(accTile.sub), `sub was "${accTile.sub}"`);
 check('…and the payout base and ITS denominator, which is days',
-  /AED 2,419,433 in net payout over 209 of the 365 days Uber worked/.test(accTile.sub),
+  /AED 17,611 in net payout over 14 of the 14 days Yango worked/.test(accTile.sub),
   `sub was "${accTile.sub}"`);
 check('…and stays amber while 99.3% of the work sits on a part-window payout',
   accTile.tone === 't-warn', `tone ${accTile.tone}`);
@@ -378,7 +440,7 @@ await open('#revenue?days=300',
   () => [...document.querySelectorAll('.kpi .l')].some((l) => /Accounted for/.test(l.textContent)));
 const tiles300 = await tiles();
 const caps300 = await page.evaluate(() => [...document.querySelectorAll('p.cap')].map((c) => c.textContent.replace(/\s+/g, ' ').trim()));
-const flip = caps300.find((c) => /accounted for by payout/.test(c)) || '';
+const flip = caps300.find((c) => /accounted for by what the platform reports/.test(c)) || '';
 /* Built from the fixture rows the same way api/income_sql.js coverage() builds
    them — priced over the bookings that COULD carry a fare — so this is the
    row's own figure and not a number typed twice. */
@@ -391,14 +453,28 @@ const covOf = (p) => {
 check('the caption is on the page', !!flip, caps300.join('\n---\n').slice(0, 400));
 check('it no longer says the payout channels carry no fare per booking',
   !/carr(y|ies) no fare per booking/.test(flip), flip);
-check('…it names which channels are accounted by payout, which is what is true',
-  /Uber and Yango are accounted for by payout rather than by the fares/.test(flip), flip);
+/* THE CHANNELS, AND WHICH FIGURE EACH IS COUNTED ON — two different figures
+   now. api/income_sql.js prefers a channel's statement net to its payout, so
+   this caption saying "by payout" over Uber would name the bank side of the
+   money for a figure that is the earnings side. Uber is on its statement,
+   Yango on its payout, and the sentence says so per channel. */
+check('…it names which channels are not counted on their fares',
+  /Uber and Yango are accounted for by what the platform reports rather than by the fares/
+    .test(flip), flip);
+check('…and which figure each of them is counted on',
+  /Uber on its own statement of what the work earned and Yango on its net payout/.test(flip),
+  flip);
 check(`…and states Uber's fare coverage as Uber's own row reports it (${covOf('uber')})`,
   flip.includes(`Uber prices ${covOf('uber')} of the bookings that could carry a fare`), flip);
 check(`…and Yango's (${covOf('yango')}), on the same window`,
   flip.includes(`Yango prices ${covOf('yango')} of the bookings that could carry a fare`), flip);
-check('…and says outright that a payout basis is not the absence of a fare',
-  /can be accounted by payout and still price its bookings/.test(flip), flip);
+check('…and says outright that neither basis is the absence of a fare',
+  /can be accounted on what the platform reports and still price its bookings/.test(flip), flip);
+/* And that the three figures are one flow of money seen at three points, which
+   is the whole reason only one of them may be counted. */
+check('…and why only one of the three may be counted',
+  /one flow of money seen at three points/.test(flip)
+    && /only one of the three can be counted as income/.test(flip), flip);
 /* The claim and the table cannot disagree: whatever the caption says about a
    channel's pricing, the row four columns to the left says the same. */
 const priceCells = await page.evaluate(() => [...document.querySelectorAll('table tbody tr')]

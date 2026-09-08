@@ -86,9 +86,20 @@ export async function renderDay(root, day, onDetail) {
        cannot reconcile either. */
     { label: 'Money in', value: h.accounted ? money(h.accounted) : '—',
       sub: h.accounted
-        ? `${money(h.accounted_fares || 0)} in fares · ${money(h.accounted_payouts || 0)} `
-          + (h.payout_basis ? 'estimated from the weekly platform statements' : 'in payouts')
-        : h.statement_net
+        ? [h.accounted_statements ? `${money(h.accounted_statements)} in statement net` : null,
+          h.accounted_fares ? `${money(h.accounted_fares)} in fares` : null,
+          h.accounted_payouts
+            ? `${money(h.accounted_payouts)} `
+              + (h.payout_basis ? 'estimated from the weekly platform statements' : 'in payouts')
+            : null,
+        ].filter(Boolean).join(' · ')
+        /* h.ledger_net, not h.statement_net. The two used to be the same field
+           on this endpoint; they are not any more, because the countable
+           statement became the basis of the money and the operator's imported
+           workbook must never be that (api/day_routes.js, and
+           api/income_sql.js:154 for why). This sentence has always been about
+           the workbook. */
+        : h.ledger_net
           ? 'no fare and no platform payout reaches this day — see the imported statement beside this'
           : 'no fare and no payout statement reaches this day' },
     ...(h.statement_net ? [{

@@ -263,6 +263,110 @@ const faresBesidePayout = (r, { whole = false } = {}) => {
    Mutates the row, because both callers want the reasoning on it. */
 export function chooseBasis(r, windowDays) {
   Object.assign(r, coverage(r, windowDays));
+  /* THE STATEMENT'S NET IS WHAT THE PLATFORM SAYS THE WORK EARNED, and it goes
+     first because the figure this function used to prefer is not earnings at
+     all.
+     ────────────────────────────────────────────────────────────────────────
+     driver_payout_day.earnings is Uber's `netOutstanding` — read at
+     src/sources/uber.js:1430 and described by Uber as the amount it WIRES TO
+     THE BANK. api/public/revenue.js:194 has always labelled it correctly:
+     "Paid into the bank — what the platforms wired to the bank, net of
+     commission AND of cash already collected." It is the bank side of the
+     money. Leading `accounted` with it made every money headline in this
+     product answer "what reached the bank" under the words "money in", and
+     the two differ by the cash the drivers already hold — 16.9% to 18.8% of
+     the money across three measured windows.
+
+     The statement's net is the other side: gross minus the platform's
+     commission, before any of it is split into cash-in-hand and a transfer.
+     That is what an operator means by what a driver earned, and it is the
+     basis the driver profile was moved onto when the operator settled the
+     question ("the driver day or week shows total money in by the driver from
+     all platforms").
+
+     Measured fleet-wide for 2026-09-01..09-07, from /api/revenue:
+
+       platform  fares        payouts      statement_net   old basis
+       uber      242,070.87   155,889.48   158,185.46      payout
+       bolt        7,398.60   —            —               fares
+       hotel      16,927.75   —            —               fares
+       yango         814.00       266.57   —               payout
+
+     accounted was 180,482.40. Under this ordering it is 158,185.46 + 7,398.60
+     + 16,927.75 + 266.57 = 182,778.38 — the uber term moving from its payout
+     to its statement, worth AED 2,295.98 fleet-wide and 14% on the driver this
+     came in about.
+
+     ONE CHANNEL STILL DIFFERS FROM THE DRIVER PAGE, and it is left differing
+     on purpose. driver_day.money takes "statement net where a channel filed
+     one, that channel's FARES where it did not", so at driver grain Yango
+     counts on its fares. Here it keeps its payout, because the branch below
+     prefers a payout to fares and that preference is right for a channel that
+     takes a commission: Yango's AED 814.00 of fares is the gross the riders
+     paid, and the fleet never sees a quarter of it. AED 266.57 is what
+     arrived. Counting the gross as income would be the double-count the
+     doctrine below exists to prevent.
+
+     So the fleet total is 182,778.38 against a driver_day sum of about
+     183,366 — a residual of roughly AED 588, 0.3%, and all of it Yango. That
+     is down from AED 2,844 and it is now a difference this file can explain in
+     one sentence, which the old one could not. Bolt and the hotel channel file
+     no payout at all, so they take their fares under either rule and
+     contribute nothing to the gap.
+
+     This is done HERE and not by summing driver_day, for two reasons
+     api/server.js:2143 already records: a previous attempt at that lost 92
+     people — everybody the statements pay for work the trip record does not
+     carry, AED 56,917 against AED 81,385 over 1–3 September — and driver_day's
+     money column covers every platform at once, so the platform chip could not
+     narrow it. Statements and fares are per platform, so the chip still works.
+
+     Guarded on `> 0`, not on presence. A statement net of exactly zero beside
+     real bookings is the same contradiction the zero-payout branch below
+     refuses to resolve, and a negative net is not an income figure at all;
+     both fall through to the branches that already know what to say. */
+  if (r.statement_net != null && Number(r.statement_net) > 0) {
+    /* PARTIAL, THE SAME WAY A PAYOUT IS PARTIAL — and the suite caught this
+       missing.
+       ─────────────────────────────────────────────────────────────────────
+       The first version of this branch took the statement whenever one
+       existed and reported no coverage at all, which turned a warning the
+       #revenue page had been raising for a year into silence: uber over 365
+       days went from basis partial_payout, tone amber, "a real payout covering
+       only part of the window" to basis statement, tone GOOD, nothing said.
+
+       Measured on production over 365 days: the statement covers 212 of the
+       365 days uber worked (58.1%) and the payout covers 215 (58.9%). The
+       statement is not better covered than the payout — it is a different
+       KIND of figure over almost exactly the same days. Preferring it is right;
+       pretending it is complete is not.
+
+       So it splits the way the payout does, and partial_statement joins
+       partial_payout in the under-covered set below rather than in the dark
+       one: this is present money over a stated fraction of the days, not
+       absent money. Coverage unknown (a statement with no day count) takes the
+       full basis and says so in the note, because a missing denominator is not
+       evidence of poor coverage. */
+    r.statement_coverage_days = r.statement_days ?? null;
+    r.statement_coverage_base = r.booking_days > 0 ? r.booking_days : windowDays;
+    r.statement_coverage_pct = (r.statement_coverage_days != null && r.statement_coverage_base)
+      ? Math.round((r.statement_coverage_days / r.statement_coverage_base) * 1000) / 10 : null;
+    const thin = r.statement_coverage_pct != null && r.statement_coverage_pct < 80;
+    r.basis = thin ? 'partial_statement' : 'statement';
+    r.best = r.statement_net;
+    r.basis_note = 'the platform’s own net for this window — the gross the riders were charged, '
+      + 'less the commission this channel takes out of it'
+      + (r.statement_coverage_pct != null && r.statement_coverage_pct < 99.5
+        ? `, filed over ${r.statement_coverage_days} of the ${r.statement_coverage_base} `
+          + `day(s) this channel worked (${r.statement_coverage_pct}%) — the rest of its money `
+          + 'has not been reported yet'
+        : '')
+      + (r.payouts != null
+        ? '. What the platform wired to the bank is reported beside this figure and is not '
+          + 'added to it: the transfer is what is left after the cash the drivers already took'
+        : '');
+    return r;
+  }
   /* A payout that sums to exactly zero is not a measurement of nothing.
      ────────────────────────────────────────────────────────────────────────
      Reproduced by calling fleetIncome directly on one row — uber, 10,000
@@ -499,7 +603,10 @@ export function fleetIncome(rows, windowDays) {
      reports. Both are absent money. A part-window payout is present money
      over a stated fraction of the days. */
   const darkRows = rows.filter((r) => r.basis === 'none' || r.basis === 'partial_fares');
-  const underRows = rows.filter((r) => r.basis === 'partial_payout');
+  /* partial_statement belongs here and not in darkRows for exactly the reason
+     the paragraph above gives about partial_payout: it is present money over a
+     stated fraction of the days, not money nothing reports. */
+  const underRows = rows.filter((r) => r.basis === 'partial_payout' || r.basis === 'partial_statement');
   /* And the third kind of row: one whose payout sums to exactly zero, which is
      counted nowhere. It is not measured — `best` is null, so it is out of
      `accounted` — and it is not dark either, because it carries fares that the
@@ -516,6 +623,47 @@ export function fleetIncome(rows, windowDays) {
       .map((r) => r.fares)) || null,
     accounted_payouts: sum(rows.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout')
       .map((r) => r.payouts)) || null,
+    /* The third half, now that there is one. Same shape as the two above and
+       the same rule: it sums the CHOSEN figure only, so a channel counted on
+       its statement contributes nothing to fares or payouts and vice versa,
+       and the three add back to `accounted` exactly. */
+    accounted_statements: sum(rows.filter((r) => r.basis === 'statement'
+      || r.basis === 'partial_statement').map((r) => r.statement_net)) || null,
+    accounted_statement_platforms: rows.filter((r) => r.basis === 'statement'
+      || r.basis === 'partial_statement').map((r) => r.platform).sort(),
+    /* AND THE BANK SIDE, WHICH IS NO LONGER A BASIS AND MUST NOT DISAPPEAR.
+       ─────────────────────────────────────────────────────────────────────
+       accounted_payouts sums only the rows COUNTED on their payout, and now
+       that the statement wins wherever it exists, Uber leaves that set — so
+       every caller reading accounted_payouts for "what reached the bank" would
+       have started reading null for 86% of the fleet's money. Twelve surfaces
+       do exactly that, from api/public/revenue.js:164 to the driver profile's
+       bank card.
+
+       The payout is still real and still means what api/public/revenue.js:194
+       says it means. It is reported here across EVERY row that has one,
+       whatever basis that row was counted on, because it answers a different
+       question from `accounted` rather than a competing version of the same
+       one. Measured 2026-09-01..09-07: 156,156.05 across uber and yango,
+       against an accounted of 183,325.81 — the gap being the cash the drivers
+       already hold. */
+    reported_payouts: sum(rows.filter((r) => r.payouts != null).map((r) => r.payouts)) || null,
+    /* AND THE PART OF IT THIS PRODUCT DOES NOT COUNT AS INCOME, with the
+       channels it belongs to and the basis each of them was counted on
+       instead. A page that names the gap has to name the RIGHT reason for it,
+       and it cannot work that reason out from the totals: a fleet where uber
+       is counted on its statement and yango on its fares has two kinds of
+       excluded payout at once, and #finance guessed "uber's statement" for
+       money that was yango's fares. The server knows; it says. */
+    uncounted_payouts: sum(rows.filter((r) => r.payouts != null
+      && r.basis !== 'payout' && r.basis !== 'partial_payout').map((r) => r.payouts)) || null,
+    uncounted_payout_platforms: rows.filter((r) => r.payouts != null
+      && r.basis !== 'payout' && r.basis !== 'partial_payout').map((r) => r.platform).sort(),
+    uncounted_payout_bases: [...new Set(rows.filter((r) => r.payouts != null
+      && r.basis !== 'payout' && r.basis !== 'partial_payout').map((r) => r.basis))].sort(),
+    reported_payout_platforms: rows.filter((r) => r.payouts != null)
+      .map((r) => r.platform).sort(),
+    reported_payout_days: rows.reduce((a, r) => Math.max(a, Number(r.payout_days) || 0), 0) || null,
     /* The denominator that belongs to accounted_fares, and only to it.
        #revenue printed the fare half over the FLEET's priced_bookings, which
        was the same number until a channel could report a fare on every booking
@@ -564,7 +712,12 @@ export function fleetIncome(rows, windowDays) {
     undercovered_bookings: underRows.reduce((a, r) => a + n(r.bookings), 0),
     undercovered_pct: bookings
       ? Math.round((underRows.reduce((a, r) => a + n(r.bookings), 0) / bookings) * 1000) / 10 : null,
-    undercovered_payouts: sum(underRows.map((r) => r.payouts)) || null,
+    /* Still only the PAYOUT rows, because that is what the field is called and
+       twelve callers read it as one. The honest total across both kinds of
+       under-coverage is beside it under its own name. */
+    undercovered_payouts: sum(underRows.filter((r) => r.basis === 'partial_payout')
+      .map((r) => r.payouts)) || null,
+    undercovered_income: sum(underRows.map((r) => r.best)) || null,
     undercovered_platforms: underRows.map((r) => r.platform).sort(),
     /* Money that was charged and is counted as income nowhere, with the
        channels it belongs to, so the page can say it was set aside and why

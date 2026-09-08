@@ -218,8 +218,21 @@ check('kpis carries statement_net', k.statement_net === 370 + 296 + 150 + 70, St
 /* The fixture is empty of payouts here, so accounted must NOT absorb the
    statement: a channel's basis stays fares/payout, and the statement is its
    own field. */
-check('accounted does not swallow the statement',
-  (k.accounted || 0) !== (k.accounted || 0) + k.statement_net, 'tautology guard');
+/* THE INVARIANT CHANGED SHAPE, AND THE OLD ONE WAS A TAUTOLOGY ANYWAY.
+   ─────────────────────────────────────────────────────────────────────────
+   "accounted does not swallow the statement" was written when the statement
+   rode beside the chosen basis and never inside it, and it was checked with
+   `x !== x + n`, which is true for any non-zero n whatever the two numbers
+   are. api/income_sql.js now COUNTS a channel on its statement net — that is
+   the point of the change — so the thing to defend is no longer separation.
+
+   It is non-duplication: a channel contributes exactly one figure, so the
+   three halves add back to the whole and no ride is counted twice. That is
+   the rule the old assertion was reaching for, and it is checkable. */
+check('every channel contributes exactly one figure, so the halves add to the whole',
+  Math.abs(((k.accounted_statements || 0) + (k.accounted_fares || 0)
+    + (k.accounted_payouts || 0)) - (k.accounted || 0)) < 0.02,
+  JSON.stringify([k.accounted_statements, k.accounted_fares, k.accounted_payouts, k.accounted]));
 check('and says which platforms the statement covers',
   Array.isArray(k.statement_platforms) && k.statement_platforms.includes('uber')
   && k.statement_platforms.includes('bolt'), JSON.stringify(k.statement_platforms));
@@ -231,9 +244,19 @@ check('the revenue page shows the statement columns per platform',
   JSON.stringify(uberRow && [uberRow.statement_net, uberRow.statement_cash]));
 check('statement drivers exclude the pseudo rows the money includes',
   uberRow.statement_drivers === 1, String(uberRow.statement_drivers));
-check('the totals carry both views without adding them',
-  rev.totals.statement_net === 886 && rev.totals.statement_net !== rev.totals.accounted,
-  JSON.stringify([rev.totals.statement_net, rev.totals.accounted]));
+/* The statement view is still reported under its own name and still measures
+   886. What has changed is that it is now also the BASIS, so it may equal
+   accounted rather than being required to differ from it — the old assertion
+   forbade exactly the state this product is now in. What must still hold is
+   that it is not added on top of a channel already counted another way. */
+check('the statement view is reported under its own name',
+  rev.totals.statement_net === 886, JSON.stringify(rev.totals.statement_net));
+check('…and it is the basis rather than an addition to one',
+  rev.totals.accounted_statements === 886
+    && Math.abs(((rev.totals.accounted_statements || 0) + (rev.totals.accounted_fares || 0)
+      + (rev.totals.accounted_payouts || 0)) - (rev.totals.accounted || 0)) < 0.02,
+  JSON.stringify([rev.totals.accounted_statements, rev.totals.accounted_fares,
+    rev.totals.accounted_payouts, rev.totals.accounted]));
 
 const tm = (await req('/api/trend/monthly')).body;
 const aug = (tm.months || []).find((m) => m.m === '2026-08');

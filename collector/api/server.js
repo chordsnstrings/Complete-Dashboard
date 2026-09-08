@@ -2189,8 +2189,22 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
     .filter((r) => r.basis === 'fares' || r.basis === 'partial_fares').map((r) => r.platform));
   const USES_PAYOUT = new Set([...byPlat.values()]
     .filter((r) => r.basis === 'payout' || r.basis === 'partial_payout').map((r) => r.platform));
+  /* THE THIRD SET, and without it this series silently loses most of the fleet.
+     ─────────────────────────────────────────────────────────────────────────
+     api/income_sql.js now prefers a channel's STATEMENT NET over its payout,
+     because the payout is Uber's netOutstanding — the amount wired to the bank
+     — and not what the work earned. Uber therefore leaves USES_PAYOUT without
+     joining USES_FARES, and the two loops below would have added nothing for
+     it: AED 158,185.46 of AED 182,778.38 over 2026-09-01..09-07, 86% of the
+     money, missing from the bars under a tile still showing the whole of it.
+     The comment above this block says the bars adding up to the tile "is the
+     only property that makes them trustworthy", and this is the set that keeps
+     that true. */
+  const USES_STATEMENT = new Set([...byPlat.values()]
+    .filter((r) => r.basis === 'statement' || r.basis === 'partial_statement')
+    .map((r) => r.platform));
 
-  const [cal, dayFare, dayPay, led] = await Promise.all([
+  const [cal, dayFare, dayPay, dayStmt, led] = await Promise.all([
     q(`SELECT to_char(d, 'YYYY-MM-DD') AS d
        FROM generate_series($1::date, $2::date, interval '1 day') AS d`, [from, to]),
     /* to_char, not the raw DATE. node-postgres hands a DATE back as a JS Date
@@ -2217,6 +2231,20 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
          AND ($3::text IS NULL OR platform = $3)
          AND ($4::text IS NULL OR fleet_id = $4)
        GROUP BY 1, 2`, p),
+    /* The statement half, per day, from the same table platformStatements()
+       sums over the window — so the bars and the tile are the same rows
+       grouped two ways rather than two answers. source <> 'ledger' for the
+       reason that file gives: the operator's workbook is reference data and
+       folding it in would have the reconciliation checking itself. */
+    q(`SELECT to_char(day, 'YYYY-MM-DD') AS d, platform,
+              round(sum(net)::numeric, 2) statement_net,
+              max(period_days)::int period_days,
+              bool_or(period_days IS NULL) AS unknown_period
+       FROM driver_statement_day
+       WHERE source <> 'ledger' AND day BETWEEN $1::date AND $2::date
+         AND ($3::text IS NULL OR platform = $3)
+         AND ($4::text IS NULL OR fleet_id = $4)
+       GROUP BY 1, 2`, p),
     q(`SELECT to_char((event_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS d,
               round(sum(amount)::numeric, 2) amount, count(*)::int entries
        FROM ledger_entry
@@ -2238,7 +2266,7 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
   const day = new Map(cal.map((c) => [c.d, { d: c.d,
     amount: null, entries: null,
     revenue: null, priced_trips: 0, bookings: 0,
-    money: null, fares_part: null, payout_part: null,
+    money: null, fares_part: null, payout_part: null, statement_part: null,
     money_period_days: 1, money_source: null, payout: null,
     nothing_recorded: true }]));
   const add = (o, k, v) => { if (v != null) o[k] = (o[k] == null ? 0 : o[k]) + Number(v); };
@@ -2269,17 +2297,35 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
       o.money_period_days = Math.max(o.money_period_days, r.period_days || 1);
     }
   }
+  for (const r of dayStmt) {
+    const o = day.get(key(r.d)); if (!o) continue;
+    o.nothing_recorded = false;
+    if (!USES_STATEMENT.has(r.platform)) continue;
+    add(o, 'statement_part', r.statement_net); add(o, 'money', r.statement_net);
+    /* Same grain rule as the payout loop above, and it matters more here:
+       statements are filed weekly and spread evenly across their days, so a
+       day's share is an allocation on every row Uber writes. */
+    if (r.unknown_period) { o.money_period_days = null; unknownGrain = true; }
+    else if (o.money_period_days != null) {
+      o.money_period_days = Math.max(o.money_period_days, r.period_days || 1);
+    }
+  }
   const rows = [...day.values()].map((o) => {
-    const both = o.fares_part != null && o.payout_part != null;
+    /* Three halves now, so "mixed" is any two of them and the single-source
+       name has to be picked from whichever one is present. It used to call the
+       PAYOUT part 'statement', which was the old basis wearing the new basis's
+       name; there is a real statement part to name now. */
+    const parts = [o.statement_part != null && 'statement',
+      o.payout_part != null && 'payout', o.fares_part != null && 'fares'].filter(Boolean);
     return { ...o,
       money: o.money == null ? null : +o.money.toFixed(2),
       revenue: o.revenue == null ? null : +o.revenue.toFixed(2),
       payout: o.payout == null ? null : +o.payout.toFixed(2),
       fares_part: o.fares_part == null ? null : +o.fares_part.toFixed(2),
       payout_part: o.payout_part == null ? null : +o.payout_part.toFixed(2),
+      statement_part: o.statement_part == null ? null : +o.statement_part.toFixed(2),
       money_period_days: o.money == null ? null : o.money_period_days,
-      money_source: o.money == null ? null
-        : both ? 'mixed' : (o.payout_part != null ? 'statement' : 'fares') };
+      money_source: o.money == null ? null : parts.length > 1 ? 'mixed' : parts[0] };
   });
   const sum = (k) => {
     if (!rows.some((r) => r[k] != null)) return null;
@@ -2288,6 +2334,7 @@ app.get('/api/finance/daily', wrap(async (req, res) => {
   res.json({ rows,
     totals: { money: sum('money'), fares: sum('revenue'), payout: sum('payout'),
       money_fares_part: sum('fares_part'), money_payout_part: sum('payout_part'),
+      money_statement_part: sum('statement_part'),
       bookings: rows.reduce((a, r) => a + (r.bookings || 0), 0),
       priced_trips: rows.reduce((a, r) => a + (r.priced_trips || 0), 0),
       /* The window figure this series must add up to, from the identical call
@@ -4122,6 +4169,11 @@ app.get('/api/trend/monthly', wrap(async (req, res) => {
           earning_vehicles: 0, km: null, measured_trips: 0, revenue: null, priced_trips: 0,
           cancel_pct: null, platforms: [], booking_platforms: [],
           accounted: null, accounted_fares: null, accounted_payouts: null,
+          /* The two fields the statement basis added, nulled here with the
+             rest — a fixture or a fallback row missing a key the live route
+             sends is what test/mockapi.test.mjs exists to catch. */
+          accounted_statements: null, accounted_statement_platforms: [],
+          reported_payouts: null, reported_payout_platforms: [],
           accounted_platforms: [], income_missing: false,
           /* The income spread comes AFTER the nulls: a month with no collected
              trips can still hold imported statement money — the pre-API ledger

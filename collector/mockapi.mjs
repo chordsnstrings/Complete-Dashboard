@@ -223,6 +223,13 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
   /* accounted is the best figure PER PLATFORM summed, so it is not fares plus
      payouts: yango reports both here and is counted on its payout only. */
   accounted: 237366, accounted_fares: 41188, accounted_payouts: 196178,
+  /* The statement basis api/income_sql.js now prefers, and the bank side
+     under its own name: accounted_payouts sums only the rows COUNTED on
+     their payout, which is no longer where most of the money is. */
+  accounted_statements: 196178, accounted_statement_platforms: ['uber'],
+  reported_payouts: 196178, reported_payout_platforms: ['uber'],
+  reported_payout_days: 30, undercovered_income: null,
+  uncounted_payouts: null, uncounted_payout_platforms: [], uncounted_payout_bases: [],
   /* Coverage is over the bookings that COULD carry a fare — a ride nobody
      took has none and never will. See platformFares. */
   chargeable_bookings: 1737, uncharged_bookings: 306,
@@ -1033,6 +1040,15 @@ app.get('/api/driver/kpis', (req, r) => {
     accounted: 9800 - i * 500 + Math.round(d.reduce((a, x) => a + x.revenue, 0)),
     accounted_fares: Math.round(d.reduce((a, x) => a + x.revenue, 0)),
     accounted_payouts: 9800 - i * 500, accounted_fare_bookings: 40 + i,
+    /* The statement basis api/income_sql.js now prefers, and the bank side
+       under its own name. accounted_payouts sums only the rows COUNTED on
+       their payout, which is no longer where most of the money is, so a
+       fixture without these two would let a page reading the old field
+       still look populated. */
+    accounted_statements: null, accounted_statement_platforms: [],
+    reported_payouts: 9800 - i * 500, reported_payout_platforms: ['uber'],
+    reported_payout_days: 7, undercovered_income: null,
+    uncounted_payouts: null, uncounted_payout_platforms: [], uncounted_payout_bases: [],
     accounted_platforms: ['hotel', 'uber'], accounted_bookings: trips,
     /* The money a zero payout set aside, reported rather than dropped so a channel whose payout summed to nothing cannot take its fares out of every total in silence. Null throughout this fixture because no mock channel is in that state; the KEYS must still be here, because a fixture whose rows lack a field the real route sends is what test/mockapi.test.mjs exists to catch. */
     set_aside_fares: null, set_aside_fare_bookings: null,
@@ -1589,6 +1605,13 @@ app.get('/api/vehicle/kpis', (req, r) => {
     accounted: 5082.65 + Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
     accounted_fares: Math.round(d.reduce((a, x) => a + (x.revenue || 0), 0)),
     accounted_payouts: 5082.65, accounted_fare_bookings: 62, accounted_platforms: ['hotel', 'uber'],
+    /* The statement basis api/income_sql.js now prefers, and the bank side
+       under its own name: accounted_payouts sums only the rows COUNTED on
+       their payout, which is no longer where most of the money is. */
+    accounted_statements: 5082.65, accounted_statement_platforms: ['uber'],
+    reported_payouts: 5082.65, reported_payout_platforms: ['uber'],
+    reported_payout_days: 30, undercovered_income: null,
+    uncounted_payouts: null, uncounted_payout_platforms: [], uncounted_payout_bases: [],
     /* The money a zero payout set aside, reported rather than dropped so a channel whose payout summed to nothing cannot take its fares out of every total in silence. Null throughout this fixture because no mock channel is in that state; the KEYS must still be here, because a fixture whose rows lack a field the real route sends is what test/mockapi.test.mjs exists to catch. */
     set_aside_fares: null, set_aside_fare_bookings: null,
     set_aside_bookings: 0, set_aside_platforms: [],
@@ -1890,6 +1913,13 @@ app.get('/api/trend/monthly', (_, r) => {
              is a fact the page has to state rather than draw as a flat line. */
           accounted_fares: Math.round(row.trips * 0.35 * 96),
           statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : null, accounted_fare_bookings: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 0.1) : null,
+          /* The statement basis api/income_sql.js now prefers, and the bank side
+             under its own name: accounted_payouts sums only the rows COUNTED on
+             their payout, which is no longer where most of the money is. */
+          accounted_statements: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : null, accounted_statement_platforms: ['uber'],
+          reported_payouts: i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : null, reported_payout_platforms: ['uber'],
+          reported_payout_days: 30, undercovered_income: null,
+    uncounted_payouts: null, uncounted_payout_platforms: [], uncounted_payout_bases: [],
           accounted: Math.round(row.trips * 0.35 * 96)
             + (i >= MONTH_KEYS.length - 6 ? Math.round(row.trips * 26) : 0),
           accounted_platforms: i >= MONTH_KEYS.length - 6 ? ['hotel', 'uber'] : ['hotel'],
@@ -1909,6 +1939,13 @@ app.get('/api/trend/monthly', (_, r) => {
       : { m: k, trips: 0, telematics_journeys: 0, drivers: null, vehicles: 0, earning_vehicles: 0,
           km: null, measured_trips: 0, revenue: null, priced_trips: 0, cancel_pct: null,
           accounted: null, accounted_fares: null, statement_net: 96480, statement_cash: 18200, statement_bank: 74100, statement_platforms: ['uber'], accounted_payouts: null, accounted_fare_bookings: null,
+          /* The statement basis api/income_sql.js now prefers, and the bank side
+             under its own name: accounted_payouts sums only the rows COUNTED on
+             their payout, which is no longer where most of the money is. */
+          accounted_statements: null, accounted_statement_platforms: [],
+          reported_payouts: null, reported_payout_platforms: [],
+          reported_payout_days: null, undercovered_income: null,
+    uncounted_payouts: null, uncounted_payout_platforms: [], uncounted_payout_bases: [],
           accounted_platforms: [], income_missing: false,
           /* The money a zero payout set aside, reported rather than dropped so a channel whose payout summed to nothing cannot take its fares out of every total in silence. Null throughout this fixture because no mock channel is in that state; the KEYS must still be here, because a fixture whose rows lack a field the real route sends is what test/mockapi.test.mjs exists to catch. */
           set_aside_fares: null, set_aside_fare_bookings: null,
@@ -2549,6 +2586,13 @@ app.get('/api/revenue', (_, r) => {
       statement_net: 78800, statement_cash: 12880, statement_bank: 63420,
       tips: 1840,
       accounted: 69710, accounted_fares: 66500, accounted_payouts: 3210, accounted_fare_bookings: 812,
+      /* The statement basis api/income_sql.js now prefers, and the bank side
+         under its own name: accounted_payouts sums only the rows COUNTED on
+         their payout, which is no longer where most of the money is. */
+      accounted_statements: 3210, accounted_statement_platforms: ['uber'],
+      reported_payouts: 3210, reported_payout_platforms: ['uber'],
+      reported_payout_days: 30, undercovered_income: null,
+    uncounted_payouts: null, uncounted_payout_platforms: [], uncounted_payout_bases: [],
       accounted_bookings: 2099, accounted_platforms: ['bolt', 'hotel', 'yango'],
       statement_platforms: ['hotel', 'uber', 'yango'],
       dark_bookings: 6760, dark_pct: 82,
@@ -4304,13 +4348,18 @@ app.get('/api/finance/daily', (req, r) => {
     const fares = Math.round(priced * rnd(58, 88));
     const pending = b <= 1;
     const payout = pending ? null : Math.round(bookings * rnd(52, 74));
+    const stmt = +(fares * 0.62).toFixed(2);
     rows.push({ d,
       amount: b % 7 === 0 ? +(rnd(-40, 180)).toFixed(2) : null,
       entries: b % 7 === 0 ? 3 + Math.round(rnd(0, 9)) : null,
       revenue: fares, priced_trips: priced, bookings,
-      money: pending ? null : fares + payout,
+      /* Three halves. api/income_sql.js prefers a channel's statement net over
+         its payout, so the fleet's largest term is a statement_part now and a
+         fixture without one would let a bar with an unnamed segment pass. */
+      money: pending ? null : fares + payout + stmt,
       fares_part: pending ? null : fares,
       payout_part: payout,
+      statement_part: pending ? null : stmt,
       money_period_days: pending ? null : 7,
       money_source: pending ? null : 'mixed',
       payout,
@@ -4324,6 +4373,7 @@ app.get('/api/finance/daily', (req, r) => {
   r.json({ rows: win,
     totals: { money: sum('money'), fares: sum('revenue'), payout: sum('payout'),
       money_fares_part: sum('fares_part'), money_payout_part: sum('payout_part'),
+      money_statement_part: sum('statement_part'),
       bookings: win.reduce((a, x) => a + (x.bookings || 0), 0),
       priced_trips: win.reduce((a, x) => a + (x.priced_trips || 0), 0),
       /* Equal to the sum of the bars, because on production it must be — the
@@ -4987,7 +5037,10 @@ const uAssets = plates.map((pl, i) => {
     days_earning: daysEarning, days_moved: daysMoved,
     idle_days: uWindowDays - daysMoved, window_days: uWindowDays,
     drivers: still || movedUnpaid ? 0 : 1 + (i % 3),
-    money, fares, payouts, attributed: payouts,
+    /* Beside the payouts, because api/economics_routes.js emits the
+     statement net now: the payout is the bank side and no longer the
+     basis most of the money is counted on. */
+    money, fares, payouts, statement_net: payouts, attributed: payouts,
     money_platforms: money == null ? [] : (fares ? ['hotel', 'uber'] : ['uber']),
     aed_per_earning_day: rt(money, daysEarning),
     aed_per_km: rt(money, km),
@@ -5044,6 +5097,9 @@ app.get('/api/economics/assets', (_, r) => {
         vehicles: 6, basis: 'payout',
         basis_note: 'net payout, after the platform commission — this channel reports no fare at all',
         money: sum((x) => x.payouts), aed_per_km: 2.74, best: sum((x) => x.payouts),
+        /* The statement net rides on these rows now, because the route emits
+           it beside the payouts it no longer counts most of the money on. */
+        statement_net: sum((x) => x.payouts),
         fare_coverage_pct: 0, payout_coverage_pct: 100, payout_coverage_days: 30,
         payout_coverage_base: 30 },
       { platform: 'hotel', bookings: Math.round(bookings * 0.08),
@@ -5051,6 +5107,7 @@ app.get('/api/economics/assets', (_, r) => {
         chargeable_bookings: Math.round(bookings * 0.08), uncharged_bookings: 0,
         km: Math.round(km * 0.06), payouts: null, payout_days: 0, vehicles: 3, basis: 'fares',
         basis_note: 'fares reported on every booking', money: sum((x) => x.fares), aed_per_km: 9.42,
+        statement_net: null,
         best: sum((x) => x.fares), fare_coverage_pct: 100, payout_coverage_pct: null,
         payout_coverage_days: null, payout_coverage_base: null },
     ],
@@ -5100,7 +5157,11 @@ app.get('/api/economics/drivers', (_, r) => {
         /* The CHOSEN halves, which add to `money` — a channel reporting both
            a fare and a payout contributes to one of them, never both. The raw
            sums keep their own names beside them. */
-        money, payouts, fares, money_platforms: [payouts != null ? 'uber' : null,
+        /* Beside the payouts, because api/economics_routes.js emits the
+       statement net now: the payout is the bank side and no longer the
+       basis most of the money is counted on. */
+      money, payouts, fares, statement_net: payouts,
+        money_platforms: [payouts != null ? 'uber' : null,
           fares != null ? 'hotel' : null].filter(Boolean),
         money_basis: [payouts != null ? 'uber: payout' : null,
           fares != null ? 'hotel: fares' : null].filter(Boolean).join(', ') || null,

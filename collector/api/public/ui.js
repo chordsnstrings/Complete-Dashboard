@@ -1921,7 +1921,15 @@ export function bankDepositTile(k) {
      driver-months report a payout of exactly 0 rather than null, and "the
      payout report for this window says AED 0" beside a driver who earned
      thousands is an absence rendered as a figure. */
-  const paid = k && k.accounted_payouts != null ? Number(k.accounted_payouts) : NaN;
+  /* reported_payouts, not accounted_payouts. api/income_sql.js now prefers a
+     channel's statement net, so Uber leaves the payout-basis set entirely and
+     accounted_payouts goes null for 86% of this fleet's money — a bank
+     disclosure that vanishes exactly where there is most to disclose.
+     reported_payouts sums the payout on EVERY row that has one, whatever basis
+     that row was counted on, which is what "what reached the bank" has always
+     meant. Falls back so an older response still says something. */
+  const paidRaw = k && k.reported_payouts != null ? k.reported_payouts : k && k.accounted_payouts;
+  const paid = paidRaw != null ? Number(paidRaw) : NaN;
   const alsoPaid = Number.isFinite(paid) && paid > 0 && Math.abs(paid - p.bank) >= 1
     ? ` The payout report for this window says ${money(paid)}, over its own reporting periods.`
     : '';

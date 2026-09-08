@@ -21,6 +21,26 @@ import { q, href, hrefFilter, state } from './data.js';
 import { revenueVerdict } from './verdicts.js';
 
 const BASIS = {
+  /* THE BASIS THIS PRODUCT NOW PREFERS, and the pill that says so.
+     api/income_sql.js takes a channel's statement net ahead of its payout,
+     because the payout is Uber's netOutstanding — the amount wired to the bank
+     — and the statement's net is what the work earned. Tone 'ok': unlike the
+     payout, it is not a figure that has already had the drivers' cash taken
+     out of it, and unlike the fares it is not gross of a commission the fleet
+     never sees. */
+  statement: { label: 'statement', tone: 'ok',
+    means: 'the platform files a statement for this channel, and this is the net it reports — the '
+      + 'gross the riders were charged less the commission the platform takes out of it, before '
+      + 'any of it is split between cash the drivers keep and a transfer to the bank' },
+  /* The same figure over only part of the days this channel worked. It rides
+     with partial_payout in the under-covered set, not with the dark ones: this
+     is present money over a stated fraction of the window. Measured on
+     production over 365 days, uber's statement covers 212 of the 365 days it
+     worked (58.1%) — almost exactly the payout's 215. */
+  partial_statement: { label: 'part-window', tone: 'warn',
+    means: 'the platform files statements for this channel but only over part of the window — the '
+      + 'figure is right about the days it covers and silent about the others, and the rest of '
+      + 'this channel’s money has not been reported yet' },
   fares: { label: 'measured', tone: 'ok',
     means: 'the provider reports a fare on essentially every booking, so this is what riders were charged' },
   payout: { label: 'payout', tone: 'warn',
@@ -101,7 +121,15 @@ export async function renderRevenue(root) {
           + `days ${sourceLabel(r.platform)} worked`;
     })
     .join(', and ');
-  const underRows = live.filter((r) => r.basis === 'partial_payout');
+  /* Both kinds of part-window coverage, matching api/income_sql.js's own
+     underRows. Filtering on partial_payout alone left this list EMPTY the
+     moment a channel was counted on a part-window statement instead, while
+     totals.undercovered_bookings — computed server-side from both — still said
+     232,832: the tile then rendered "232,832 more are covered by a report that
+     reaches  — money we hold", with nothing between "reaches" and the dash.
+     A count and the list that explains it must come from the same filter. */
+  const underRows = live.filter((r) => r.basis === 'partial_payout'
+    || r.basis === 'partial_statement');
 
   /* This page exists to say which channels report money and which do not, and
      it opened on six tiles of totals. The single most misread figure in the
@@ -160,6 +188,15 @@ export async function renderRevenue(root) {
         t.accounted_fares
           ? `${money(t.accounted_fares)} in fares over `
             + `${fmt(t.accounted_fare_bookings ?? t.priced_bookings)} priced bookings`
+          : null,
+        /* The statement half, named beside the other two. It is the largest of
+           the three on this fleet — AED 158,185.46 of AED 182,778.38 over
+           2026-09-01..09-07 — and before it existed the whole of it was being
+           reported under "net payout", which is the bank side. */
+        t.accounted_statements
+          ? `${money(t.accounted_statements)} in statement net`
+            + ((t.accounted_statement_platforms || []).length
+              ? ` from ${t.accounted_statement_platforms.map(sourceLabel).join(', ')}` : '')
           : null,
         t.accounted_payouts
           ? `${money(t.accounted_payouts)} in net payout over ${payoutSpan || 'the days it covers'}`
@@ -239,10 +276,30 @@ export async function renderRevenue(root) {
           + `${countOf(live.filter((r) => r.basis === 'none').length, 'channel')} of `
           + `${fmt(live.length)} ${plural(live.filter((r) => r.basis === 'none').length,
             'reports', 'report')} no money at all`,
+        /* UNDER-COVERAGE NOW COMES IN TWO KINDS, and this sentence knew only
+           one of them. It read the payout coverage off every under-covered
+           row, so once api/income_sql.js started counting a channel on its
+           statement net the row had no payout coverage to read and the tile
+           rendered "232,832 more are covered by a payout that reaches  — money
+           we hold" — a blank where the days should be, and the wrong noun
+           besides. Measured over 365 days: uber is partial_statement, its
+           statement reaching 212 of the 365 days it worked.
+
+           Each row is described by the coverage of the figure it was actually
+           counted on, and the noun follows the basis. */
         t.undercovered_bookings
-          ? `${fmt(t.undercovered_bookings)} more are covered by a payout that reaches `
-            + `${underRows.map((r) => `${fmt(r.payout_coverage_days)} of ${sourceLabel(r.platform)}’s `
-              + `${fmt(r.payout_coverage_base)} days`).join(', ')} — money we hold, not money missing`
+          ? `${fmt(t.undercovered_bookings)} more are covered by a report that reaches `
+            + `${underRows.map((r) => {
+              const stmt = r.basis === 'partial_statement';
+              const days = stmt ? r.statement_coverage_days : r.payout_coverage_days;
+              const base = (stmt ? r.statement_coverage_base : r.payout_coverage_base)
+                ?? d.window_days;
+              const what = stmt ? 'statement' : 'payout';
+              return days == null
+                ? `${sourceLabel(r.platform)}’s ${what}, over an unstated number of days`
+                : `${sourceLabel(r.platform)}’s ${what} over ${fmt(days)} of the `
+                  + `${fmt(base)} days it worked`;
+            }).join(', ')} — money we hold, not money missing`
           : null,
       ].filter(Boolean).join(' · '),
       tone: t.dark_bookings ? 'critical' : t.undercovered_bookings ? 'warn' : 'good' },
@@ -279,14 +336,29 @@ export async function renderRevenue(root) {
      channels that genuinely price nothing in the window still get that said
      about them, because it is still true of them — separately, and only of
      them. */
-  const flipped = live.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout');
+  /* "Accounted by something other than the fares on the trips" is what this
+     section is about, and a channel counted on its statement net belongs to it
+     for the same reason a payout-counted one does: the fare is the gross the
+     rider paid and neither the statement net nor the payout is that. Without
+     the statement arm, the paragraph explaining why the fleet's largest
+     channel is not counted on its fares stopped mentioning that channel at
+     all — it named Yango and went silent about Uber. */
+  const flipped = live.filter((r) => r.basis === 'payout' || r.basis === 'partial_payout'
+    || r.basis === 'statement' || r.basis === 'partial_statement');
   const flippedPriced = flipped.filter((r) => (+r.priced_bookings || 0) > 0);
   const flippedBare = flipped.filter((r) => !(+r.priced_bookings || 0));
   if (flipped.length) {
     host.append(el('p', 'cap',
       `${andList(flipped.map((r) => sourceLabel(r.platform)))} `
-      + `${plural(flipped.length, 'is', 'are')} accounted for by payout rather than by the fares on `
-      + 'the trips themselves. '
+      + `${plural(flipped.length, 'is', 'are')} accounted for by what the platform reports rather `
+      + 'than by the fares on the trips themselves — '
+      /* Named per channel, because there are two ways to not be counted on your
+         fares now and they are different figures. Saying "by payout" over a
+         channel counted on its statement net would name the bank side of the
+         money for a figure that is the earnings side. */
+      + andList(flipped.map((r) => `${sourceLabel(r.platform)} on its `
+        + (/statement/.test(r.basis || '') ? 'own statement of what the work earned'
+          : 'net payout'))) + '. '
       + (flippedBare.length
         ? `${andList(flippedBare.map((r) => sourceLabel(r.platform)))} `
           + `${plural(flippedBare.length, 'carries', 'carry')} no fare on any booking in this window. `
@@ -294,11 +366,13 @@ export async function renderRevenue(root) {
       + (flippedPriced.length
         ? `${andList(flippedPriced.map((r) => `${sourceLabel(r.platform)} prices `
           + `${pct(r.fare_coverage_pct, 1)} of the bookings that could carry a fare`))} — a channel `
-          + 'can be accounted by payout and still price its bookings: on a channel that takes a '
-          + 'commission the fare is the gross the rider paid and the payout is what reached the '
-          + 'bank, and only one of the two can be counted as income. '
+          + 'can be accounted on what the platform reports and still price its bookings: on a '
+          + 'channel that takes a commission the fare is the gross the rider paid, the statement '
+          + 'net is what is left after that commission and the payout is what reached the bank '
+          + 'after the drivers\u2019 cash came out of it — one flow of money seen at three points, '
+          + 'and only one of the three can be counted as income. '
         : '')
-      + 'A payout covers DAYS, '
+      + 'A statement and a payout both cover DAYS, '
       + 'not bookings, so widening the range past the statements we hold does not add money to the '
       + 'total — it lowers the share of the window that total was measured over. The figure stays '
       + 'right about the days it covers and silent about the others; compare the coverage across two '
@@ -403,7 +477,8 @@ export async function renderRevenue(root) {
          they do not have to sit on the same LINE as it to do that. */
       render: (r) => (r.revenue_per_km != null
         ? `${money(r.revenue_per_km, 'AED', 2)}<span class="dim"><br>${
-          r.per_km_basis === 'payout' ? 'net payout' : 'gross fare'} over ${
+          r.per_km_basis === 'payout' ? 'net payout'
+            : r.per_km_basis === 'statement' ? 'statement net' : 'gross fare'} over ${
           fmt(r.per_km_km ?? r.priced_km)} km</span>`
         : '—') },
     { label: 'Basis', key: 'basis',
@@ -467,7 +542,11 @@ export async function renderRevenue(root) {
       : 'No channel on this window reports both an on-trip statement and a bank payout, so the two '
         + 'cannot be compared here at all. ')
     + 'A payout below the on-trip figure is drivers holding cash, not missing money. '
-    + '"Accounted for" takes fares or payout per channel and says which.'));
+    /* Three, not two, since api/income_sql.js began preferring a channel's
+       statement net. A sentence describing the rule from memory drifts from the
+       rule, and this one had. */
+    + '"Accounted for" takes one figure per channel — its statement net where it files one, '
+    + 'else its payout, else its fares — and says which.'));
   /* And the way to the month-by-month version of the same subtraction, which
      is the only place the gap above can be attributed to a period. */
   const rl = el('p', 'cap');

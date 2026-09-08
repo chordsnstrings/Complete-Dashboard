@@ -363,8 +363,9 @@ async function moneyScreen(deck, ctx) {
       : `Over ${fmt(k.trips)} bookings. `)
       + (inAll
         ? `${money(inAll)} in altogether: ${money(total)} of fares the trips carry a price for, `
-          + `and ${money(n(k.accounted_payouts))} of platform payouts. Uber publishes no per-trip `
-          + 'fare, so most of the work is in the second figure.'
+          + `and ${money(n(k.accounted_statements) + n(k.accounted_payouts))} the platforms report `
+          + 'on their own statements and payouts. Uber publishes no per-trip fare, so most of the '
+          + 'work is in the second figure.'
         : `${money(total)} is what the priced bookings came to.`),
     tone: routed && owed / routed >= 0.3 ? 'warn' : null,
   });

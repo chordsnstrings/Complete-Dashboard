@@ -572,7 +572,26 @@ export function revenueRoutes(app, { q, wrap, range }) {
          reads as smaller than it is because a channel forgot to send one. */
       const paid = r.basis === 'payout' || r.basis === 'partial_payout';
       const r2 = (v) => Math.round(v * 100) / 100;
-      if (paid && r.payouts != null && r.km) {
+      /* THE PER-KM FIGURE MUST BE THE MONEY THE ROW IS COUNTED ON.
+         ───────────────────────────────────────────────────────────────────
+         `paid` tests basis payout|partial_payout only, so once
+         api/income_sql.js started counting a channel on its statement net a
+         statement row fell through to the FARES branch — and the column
+         reported gross-of-commission money beside an accounted figure that is
+         net of it. Measured on 2026-09-01..09-07: uber would print AED 4.48/km
+         from 242,070.87 of fares over 54,015 km, beside an accounted 158,185.46
+         that is AED 2.93/km. At days=365 it is 0.85 → 4.39.
+
+         This column's own comment says it was rewritten to stop exactly that.
+         The statement arm goes first, for the same reason it goes first in
+         chooseBasis, and per_km_basis says which of the three it is so the
+         label beside the number cannot drift from it. */
+      const onStatement = r.basis === 'statement' || r.basis === 'partial_statement';
+      if (onStatement && r.statement_net != null && r.km) {
+        r.revenue_per_km = r2(r.statement_net / r.km);
+        r.per_km_basis = 'statement';
+        r.per_km_km = r.km;
+      } else if (paid && r.payouts != null && r.km) {
         r.revenue_per_km = r2(r.payouts / r.km);
         r.per_km_basis = 'payout';
         r.per_km_km = r.km;

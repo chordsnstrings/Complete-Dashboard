@@ -97,7 +97,15 @@ export async function todayLive() {
        the tile can say which is which. */
     money: num(h.accounted),
     moneyFares: num(h.accounted_fares),
-    moneyPayouts: num(h.accounted_payouts),
+    /* reported_payouts: both shells render this as "N payouts" beside the
+       fares, meaning what the platforms wired today. accounted_payouts is the
+       payouts of the channels COUNTED on their payout, which after
+       api/income_sql.js started preferring the statement net is a small
+       remainder rather than the payout — the Today band would have shown the
+       fleet a couple of hundred dirhams of payouts on a day it was wired six
+       figures. */
+    moneyPayouts: num(h.reported_payouts) ?? num(h.accounted_payouts),
+    moneyStatements: num(h.accounted_statements),
     /* Whether the SERVER said there is no money yet, or we never got the field.
        num() collapses both to null and the tile then printed "no channel has
        been credited yet today" either way — which is a claim about the fleet's

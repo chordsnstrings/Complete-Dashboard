@@ -51,9 +51,17 @@ check('it reads the day’s own fares',
   'the price on the bookings taken since midnight');
 check('…and money in, the figure the fleet is credited with',
   /money: num\(h\.accounted\)/.test(mod));
-check('…which never travels without its two halves named',
+/* THREE halves now, and the middle one is where most of the money is.
+   api/income_sql.js counts a channel on its statement net where it files one,
+   so the band carries that too — and the payout line reads reported_payouts,
+   because accounted_payouts holds only the channels COUNTED on their payout
+   and would have shown the fleet a couple of hundred dirhams of payouts on a
+   day it was wired six figures. The rule is unchanged: a total whose
+   composition is unstated is the figure this product exists to stop printing. */
+check('…which never travels without its halves named',
   /moneyFares: num\(h\.accounted_fares\)/.test(mod)
-  && /moneyPayouts: num\(h\.accounted_payouts\)/.test(mod),
+  && /moneyStatements: num\(h\.accounted_statements\)/.test(mod)
+  && /moneyPayouts: num\(h\.reported_payouts\)/.test(mod),
   'a total whose composition is unstated is the figure this product exists to stop printing');
 /* A stale module is a real state, not a hypothetical: on 2026-09-06 a phone
    rendered a new m/screens.js against a cached today.js with no `money` field

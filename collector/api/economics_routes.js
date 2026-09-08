@@ -628,7 +628,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
         days_earning: r.days_earning, days_moved: r.days_moved, idle_days: idleDays,
         window_days: windowDays,
         drivers: r.drivers,
-        money, fares: income.accounted_fares, payouts: income.accounted_payouts,
+        /* reported_payouts, not accounted_payouts: api/income_sql.js now counts a
+           channel on its statement net where it files one, so Uber leaves the
+           payout-BASIS set and accounted_payouts goes null for most of the
+           money. What this row wants is the bank side, which is every row's
+           payout whatever basis it was counted on. */
+        money, fares: income.accounted_fares, payouts: income.reported_payouts,
+        statement_net: income.accounted_statements,
         attributed: attributedAll,
         money_platforms: income.accounted_platforms,
         /* The three rates the operator asked for, each null rather than zero
@@ -1344,7 +1350,13 @@ export function economicsRoutes(app, { q, wrap, range }) {
            their own names — they are the reconciliation totals and they answer
            a different question. */
         money,
-        payouts: income.accounted_payouts, fares: income.accounted_fares,
+        /* reported_payouts, not accounted_payouts: api/income_sql.js now counts a
+           channel on its statement net where it files one, so Uber leaves the
+           payout-BASIS set and accounted_payouts goes null for most of the
+           money. What this row wants is the bank side, which is every row's
+           payout whatever basis it was counted on. */
+        payouts: income.reported_payouts, fares: income.accounted_fares,
+        statement_net: income.accounted_statements,
         money_platforms: income.accounted_platforms,
         money_basis: [...r.chan.values()].map((c) => `${c.platform}: ${c.basis}`).sort().join(', ')
           || null,

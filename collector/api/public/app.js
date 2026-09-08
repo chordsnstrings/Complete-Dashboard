@@ -804,9 +804,11 @@ V.overview = async (root) => {
        to know which half moved. */
     ['Money in', k.accounted ? 'AED ' + fmt(k.accounted) : '—',
       k.accounted
-        ? `AED ${fmt(k.accounted_fares || 0)} in fares · AED ${fmt(k.accounted_payouts || 0)} in `
-          + `platform payouts · ${(k.accounted_platforms || []).map(sourceLabel).join(', ') || 'no platform'}`
-          + (k.statement_net ? ` · on-trip net AED ${fmt(k.statement_net)}` : '')
+        ? [k.accounted_statements ? `AED ${fmt(k.accounted_statements)} in statement net` : null,
+          k.accounted_fares ? `AED ${fmt(k.accounted_fares)} in fares` : null,
+          k.accounted_payouts ? `AED ${fmt(k.accounted_payouts)} in platform payouts` : null,
+        ].filter(Boolean).join(' · ')
+          + ` · ${(k.accounted_platforms || []).map(sourceLabel).join(', ') || 'no platform'}`
         : 'no fare and no payout statement in this range'],
     ['Completion', k.completion_pct != null ? k.completion_pct + '%' : '—', `${k.cancel_pct ?? 0}% cancelled`],
     /* Booking-scoped, and the tracker-only cars named rather than absorbed.
@@ -2549,18 +2551,46 @@ V.finance = async (root) => {
        describe the STATEMENTS HELD, and the gap between the statements and the
        figure is k.payouts − k.accounted_payouts, which is exactly the money
        being counted somewhere else. */
+    /* THE TILE SAYS "PLATFORM PAYOUTS", SO IT MUST SHOW THE PAYOUTS.
+       ─────────────────────────────────────────────────────────────────────
+       This showed accounted_payouts — the payouts of the channels COUNTED on
+       their payout — which was nearly all of them until api/income_sql.js
+       started preferring a channel's statement net. After that change Uber
+       leaves the payout-basis set and this tile would have read AED 267 where
+       it read AED 155,889, under a label that promises the opposite, with a
+       plausible-looking number rather than a dash to give it away.
+
+       The value is reported_payouts now: every row's payout, whatever basis
+       that row was counted on, which is what "what the platforms wired" has
+       always meant. The counted share is the sentence underneath, and the
+       reason a payout is not counted as income is named from the basis rather
+       than assumed to be fares. */
     (() => {
-      const held = k.payouts == null ? null : +k.payouts;
-      const counted = k.accounted_payouts == null ? null : +k.accounted_payouts;
-      const elsewhere = held != null && counted != null && held - counted >= 1
-        ? Math.round(held - counted) : 0;
-      return { label: 'Platform payouts', value: money(counted),
+      const wired = k.reported_payouts == null ? null : +k.reported_payouts;
+      const counted = k.accounted_payouts == null ? 0 : +k.accounted_payouts;
+      const elsewhere = k.uncounted_payouts != null ? Math.round(k.uncounted_payouts)
+        : (wired != null && wired - counted >= 1 ? Math.round(wired - counted) : 0);
+      /* Named from the server's own answer, not inferred. The page cannot work
+         out which channel the excluded payout belongs to from the totals — a
+         fleet with uber on its statement and yango on its fares has two kinds
+         of excluded payout at once, and guessing "uber's statement" for money
+         that was yango's fares is a caption stating a reason that is not the
+         true one. income_sql.js returns the platforms and their bases. */
+      const bases = k.uncounted_payout_bases || [];
+      const who = (k.uncounted_payout_platforms || []).map(sourceLabel).join(', ');
+      const how = bases.length === 0 ? 'counted on another basis'
+        : bases.every((b) => /statement/.test(b))
+          ? 'counted on its own statement of what the work earned'
+          : bases.every((b) => /fares/.test(b)) ? 'counted on their fares instead'
+            : 'counted on their own statements and fares instead';
+      const on = who ? `${who} being ${how}` : how;
+      return { label: 'Platform payouts', value: money(wired),
         sub: k.payout_days
-          ? `statements held: ${(k.payout_platforms || []).map(sourceLabel).join(', ')} · `
+          ? `wired by ${(k.payout_platforms || []).map(sourceLabel).join(', ')} · `
             + `${countOf(k.payout_days, 'day')}, ${countOf(k.payout_drivers, 'driver')}`
             + (elsewhere
-              ? ` — ${money(elsewhere)} of those statements is not in this figure, on channels `
-                + 'counted on their fares instead, so their work is not counted twice'
+              ? ` — ${money(elsewhere)} of it is not counted as income here, ${on}, `
+                + 'so the same work is not counted twice'
               : '')
           : 'no payout statement covers this range' };
     })(),
@@ -2666,7 +2696,18 @@ V.finance = async (root) => {
            partial_payout and the ledger's own; zero_payout is not one of them. */
         const onPayout = (fin.money_basis || []).filter((b) => /^(partial_)?payout$/.test(b.basis || ''))
           .map((b) => sourceLabel(b.platform));
+        /* The basis api/income_sql.js now prefers, and on this fleet the
+           largest of the three. Without this the bar's biggest segment — AED
+           158,185 of AED 182,778 over 2026-09-01..09-07 — had no sentence
+           under it at all, while the two smaller ones were each named. */
+        const onStatement = (fin.money_basis || [])
+          .filter((b) => /^(partial_)?statement$/.test(b.basis || ''))
+          .map((b) => sourceLabel(b.platform));
         const bits = [];
+        if (t.money_statement_part != null) {
+          bits.push(`${money(t.money_statement_part)} is what ${andList(onStatement)} `
+            + 'reported earning on its own statements, after its commission');
+        }
         if (t.money_fares_part != null) {
           bits.push(`${money(t.money_fares_part)}`
             + (fareShare != null ? ` (${fareShare}%)` : '')

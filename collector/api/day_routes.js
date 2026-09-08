@@ -254,16 +254,44 @@ export function dayRoutes(app, { q, wrap }) {
        which is the rule income_sql.js states and this obeys rather than
        widens. So a day inside the payout horizon is unchanged, and a day
        outside it stops claiming the fleet earned nothing. */
-    const stmtByPlat = await q(
-      `SELECT platform, round(sum(net)::numeric,2) statement_net
-       FROM driver_statement_day
-       WHERE day = $1::date AND source = 'ledger' AND net IS NOT NULL
-       GROUP BY 1`, p);
+    /* TWO STATEMENT QUERIES, AND THE DIFFERENCE IS WHICH ONE MAY BE COUNTED.
+       ─────────────────────────────────────────────────────────────────────
+       This route filled `statement_net` from source='ledger' — the operator's
+       imported workbook — on the stated grounds that it "rides BESIDE the
+       chosen basis and is never added into accounted". That was true while
+       fleetIncome ignored the field. It stopped being true the moment
+       api/income_sql.js started counting a channel on its statement net, and
+       the workbook would have become the basis of the fleet's money on this
+       page alone: test/day_routes.test.mjs caught it as "accounted 620.25 vs
+       statement 620.25", the two numbers having silently become the same one.
+
+       The workbook is REFERENCE data. api/income_sql.js:154 reads
+       `source <> 'ledger'` and says why: "it taught the reconciliation and it
+       verifies our numbers in tests, but the platform displays only what a
+       connected API returned." A basis built from it would have the
+       reconciliation checking itself.
+
+       So `statement_net` is now the API statement, the same rows every other
+       money surface counts, and the workbook keeps its own field and its own
+       job — filling the sentence on a day outside the payout horizon that
+       would otherwise claim the fleet earned nothing. */
+    const [stmtByPlat, ledgerByPlat] = await Promise.all([
+      q(`SELECT platform, round(sum(net)::numeric,2) statement_net,
+                count(DISTINCT day)::int statement_days
+         FROM driver_statement_day
+         WHERE day = $1::date AND source <> 'ledger' AND net IS NOT NULL
+         GROUP BY 1`, p),
+      q(`SELECT platform, round(sum(net)::numeric,2) ledger_net
+         FROM driver_statement_day
+         WHERE day = $1::date AND source = 'ledger' AND net IS NOT NULL
+         GROUP BY 1`, p),
+    ]);
     const byPlat = new Map();
     const plat = (name) => {
       if (!byPlat.has(name)) {
         byPlat.set(name, { platform: name, bookings: 0, booking_days: 0, priced_bookings: 0,
-          fares: null, payouts: null, payout_days: 0, statement_net: null });
+          fares: null, payouts: null, payout_days: 0, statement_net: null,
+          statement_days: 0, ledger_net: null });
       }
       return byPlat.get(name);
     };
@@ -274,7 +302,10 @@ export function dayRoutes(app, { q, wrap }) {
       payouts: y.payouts == null ? null : Number(y.payouts),
       payout_days: y.payout_days ?? 0 });
     for (const y of stmtByPlat) Object.assign(plat(y.platform), {
-      statement_net: y.statement_net == null ? null : Number(y.statement_net) });
+      statement_net: y.statement_net == null ? null : Number(y.statement_net),
+      statement_days: y.statement_days ?? 0 });
+    for (const y of ledgerByPlat) Object.assign(plat(y.platform), {
+      ledger_net: y.ledger_net == null ? null : Number(y.ledger_net) });
     const income = fleetIncome([...byPlat.values()], 1);
 
     res.json({
@@ -282,6 +313,13 @@ export function dayRoutes(app, { q, wrap }) {
       headline: {
         ...h,
         ...income,
+        /* The workbook's own figure, under its own name, AFTER the income
+           spread so it cannot be mistaken for the countable statement. It is
+           what lets this page say "no fare and no platform payout reaches this
+           day, but the imported statement holds one" instead of reporting a
+           day the operator was paid for as a day the fleet earned nothing. */
+        ledger_net: [...byPlat.values()].reduce(
+          (a, r) => (r.ledger_net == null ? a : (a == null ? 0 : a) + r.ledger_net), null),
         /* The estimate is labelled where it is produced, not where it is drawn:
            a caller reading this endpoint directly needs it as much as the page
            does. */

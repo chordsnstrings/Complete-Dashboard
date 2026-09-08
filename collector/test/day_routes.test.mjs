@@ -290,17 +290,32 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
            VALUES ('uber','ecosine','Ann Ahmed','${D}','ledger', 500.25),
                   ('hotel','ecosine','Ann Ahmed','${D}','ledger', 120.00)`);
   const s = (await get(`/api/day?day=${D}`)).headline;
+  /* THE FIELD MOVED, AND WHY IT MOVED IS THE POINT OF THE THIRD CHECK.
+     ───────────────────────────────────────────────────────────────────────
+     This route used to read the operator's workbook into `statement_net` on
+     the stated grounds that the field "rides BESIDE the chosen basis and is
+     never added into accounted". That held only while fleetIncome ignored the
+     field. api/income_sql.js now counts a channel on its statement net, so the
+     workbook would have BECOME the fleet's money on this page — and this test
+     is what caught it, as "accounted 620.25 vs statement 620.25", the two
+     numbers having quietly become one.
+
+     The workbook keeps its job and gets its own name. What it must never be is
+     the basis, and that is now structural rather than hoped for: the countable
+     query reads source <> 'ledger'. */
   check('a day outside the payout horizon reports the imported statement',
-    Number(s.statement_net) === 620.25, JSON.stringify(s.statement_net));
-  check('and names the channels it came from',
-    Array.isArray(s.statement_platforms) && s.statement_platforms.length === 2,
-    JSON.stringify(s.statement_platforms));
-  /* The rule income_sql.js states and this obeys rather than widens: adding a
-     statement to a channel already counted on its fares or its payout would
-     count the same trips twice. */
-  check('but it is never folded into the platform figure',
-    s.accounted == null || Number(s.accounted) !== Number(s.statement_net),
-    `accounted ${s.accounted} vs statement ${s.statement_net}`);
+    Number(s.ledger_net) === 620.25, JSON.stringify(s.ledger_net));
+  check('and the countable statement excludes it entirely',
+    s.statement_net == null || Number(s.statement_net) !== 620.25,
+    `statement_net ${s.statement_net} — the workbook is reference data, never a basis`);
+  check('so it is never folded into the platform figure',
+    s.accounted == null || Number(s.accounted) !== Number(s.ledger_net),
+    `accounted ${s.accounted} vs imported ${s.ledger_net}`);
+  const routes = readFileSync('api/day_routes.js', 'utf8');
+  check('…and the query that feeds the basis says so in SQL',
+    /source <> 'ledger' AND net IS NOT NULL/.test(routes)
+      && /source = 'ledger' AND net IS NOT NULL/.test(routes),
+    'two queries, and only one of them may reach fleetIncome');
   const page = readFileSync('api/public/day.js', 'utf8');
   check('and the page shows it as its own labelled figure',
     /label: 'Imported statement'/.test(page),

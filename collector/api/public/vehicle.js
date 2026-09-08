@@ -143,8 +143,12 @@ async function tabOverview(root, plate, prof) {
        page, three panels down, under "attributed". */
     { label: 'Money in', value: k.accounted ? money(k.accounted) : '—',
       sub: k.accounted
-        ? `${money(k.accounted_fares || 0)} in fares · ${money(k.accounted_payouts || 0)} attributed from `
-          + `platform payouts · ${(k.accounted_platforms || []).map(sourceLabel).join(', ')}`
+        ? [k.accounted_statements ? `${money(k.accounted_statements)} in statement net` : null,
+          k.accounted_fares ? `${money(k.accounted_fares)} in fares` : null,
+          k.accounted_payouts
+            ? `${money(k.accounted_payouts)} attributed from platform payouts` : null,
+        ].filter(Boolean).join(' · ')
+          + ` · ${(k.accounted_platforms || []).map(sourceLabel).join(', ')}`
         : 'no fare and no payout reaches this vehicle in this range' },
     { label: 'Fares', value: k.priced_trips ? money(k.accounted_fares) : '—',
       sub: !k.priced_trips

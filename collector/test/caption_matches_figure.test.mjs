@@ -103,6 +103,21 @@ const DEAD_PADS = DEAD.length;
    name, its 3 drivers and its statement days are all in the caption fields. */
 const PROD_PAYOUTS = {
   payouts: 38194.57,
+  /* What the platforms wired, across every channel that wired anything — the
+     field the tile shows now. It used to show accounted_payouts, the payouts
+     of the channels COUNTED on their payout, and once api/income_sql.js began
+     preferring a channel's statement net that stopped being the payouts at
+     all: on production it would have read AED 267 where it read AED 155,889,
+     under a label promising the opposite. */
+  reported_payouts: 38194.57,
+  reported_payout_platforms: ['uber', 'yango'],
+  /* Which channel's payout is NOT counted as income, and what it was counted
+     on instead. The page used to infer this and got it wrong the moment two
+     kinds of exclusion existed at once: it named uber's statement for money
+     that was yango's fares. */
+  uncounted_payouts: 88.86,
+  uncounted_payout_platforms: ['yango'],
+  uncounted_payout_bases: ['fares'],
   accounted_payouts: 38105.71,
   payout_days: 2,
   payout_drivers: 237,
@@ -218,15 +233,24 @@ await open('#finance',
 const finTiles = await tiles();
 const payTile = finTiles.find((k) => k.label === 'Platform payouts');
 check('the tile is on the page', !!payTile, finTiles.map((k) => k.label).join(' | '));
-check('the figure is still the counted one, uber\'s alone',
-  payTile?.value === 'AED 38,106', `reads "${payTile?.value}"`);
-check('the caption no longer opens by naming the platforms as if they were in it',
-  !/^Uber, Yango ·/.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
-check('…it says what those names, days and drivers actually describe',
-  /statements held/i.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
-check(`…and names the AED ${EXCLUDED} that is deliberately not in the figure`,
+/* THE DEFECT IS FIXED BY THE FIGURE NOW, NOT BY THE CAPTION.
+   ─────────────────────────────────────────────────────────────────────────
+   This block was written because the tile named two platforms over a figure
+   holding one. The answer then was to caption the names as "statements held".
+   The tile shows what the platforms WIRED now — which really is both of them —
+   so naming both is simply correct, and the caption's job is the smaller one
+   of saying how much of it is counted as income here. The rule the block
+   defends is unchanged: every name and number in the caption must describe the
+   figure above it. */
+check('the figure is what the platforms wired, across every channel that wired',
+  payTile?.value === 'AED 38,195', `reads "${payTile?.value}"`);
+check('…so naming both platforms over it is correct rather than misleading',
+  /Uber, Yango/.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
+check('…and the caption says what that figure is',
+  /wired by/i.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
+check(`…and names the AED ${EXCLUDED} of it that is not counted as income here`,
   new RegExp(`AED ${EXCLUDED}`).test(payTile?.sub || '')
-  && /not in this figure/i.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
+  && /not counted as income here/i.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
 check('…with the reason, so the exclusion reads as correct rather than missing',
   /counted on their fares/i.test(payTile?.sub || '')
   && /not counted twice/i.test(payTile?.sub || ''), `sub "${payTile?.sub}"`);
