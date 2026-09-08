@@ -409,20 +409,77 @@ check('…with countOf in scope, since it is the shared helper',
   /cashOnHandTile, bankDepositTile, countOf,/.test(scr),
   'it was used in the caption before it was imported, which throws at render');
 
-/* ── the money a phone shows ──────────────────────────────────────────────
-   `revenue` is sum(trip.price), and the Uber export carries no fare column —
-   on this fleet it describes 875 of 12,410 bookings. The phone printed
-   AED 65,367 under the word Revenue while the fleet had taken AED 469,438.
-   The desktop's Finance page leads with `accounted` for exactly this reason;
-   the phone now agrees with it rather than contradicting it. */
-check('the phone leads with money in, not with fares',
+/* ── the money a phone shows, and a note that went stale under it ─────────
+   The rule here was written when `revenue` — sum(trip.price) — covered 875 of
+   12,410 bookings, because Uber's trip export carries no fare column: the
+   phone printed AED 65,367 under the word Revenue while the fleet had taken
+   AED 469,438, so the screen was made to lead with `accounted` instead.
+
+   The premise has since changed and the rule had to change with it.
+   src/sources/uber.js:563 walks Uber's weekly PAYMENTS report and UPDATEs
+   trip.price to the RIDER FARE; measured on production 2026-09-08, `revenue`
+   covers 12,567 of August's 13,993 bookings (89.8%) and 9,610 of July's
+   10,780. It is no longer one channel in three — it is the fleet's gross trip
+   value, and a screen that hides it is hiding the figure an operator asked for
+   by name: "we should get the trip value overall which was 35k yesterday".
+
+   So both are shown, and the test pins the thing that actually matters — that
+   neither can be read as a second opinion about the other. */
+check('the phone shows what the fleet is credited with',
   /label: 'Money in'/.test(scr));
-check('…sourced from accounted, which is fares PLUS payouts',
-  /k\.accounted/.test(scr));
+check('…sourced from accounted, each channel counted once on its own report',
+  /k\.accounted/.test(scr) && /each channel counted once, on its own report/.test(scr));
 check('…and no tile is labelled Revenue over the fares figure',
   !/label: 'Revenue', value: money\(n\(k\.revenue\)\)/.test(scr));
-check('…while the fares figure is still shown, named as fares',
-  /label: 'Fares on record'/.test(scr));
+/* Each screen pinned by the sub-line only IT carries. A bare
+   /label: 'Trip value'/ passed against a renamed overview tile because the
+   Today card three hundred lines above carries the same label — proved by
+   reverting the overview tile alone and watching the suite stay green. */
+check('…while gross trip value is shown beside it on the window overview',
+  /label: 'Trip value'[\s\S]{0,240}no booking in this range carries a price/.test(scr),
+  'AED 744,136 of work against AED 585,058 credited is two facts, not one figure twice');
+check('…and on the money screen, which is where a reader goes to reconcile it',
+  /label: 'Trip value'[\s\S]{0,200}what riders paid on \$\{fmt\(priced\)\}/.test(scr));
+check('…and it always carries the share of bookings that carry a price',
+  /of \$\{fmt\(k\.trips\)\} bookings priced/.test(scr),
+  'a window that includes today is understated here by construction and has to say so');
+/* MONEY IN IS NOT ALWAYS THE SMALLER OF THE TWO, and copy that assumes it is
+   will be false on every window that includes today. Measured on production
+   2026-09-08: AED 7,170 of money in against AED 2,874 of trip value, because
+   the statement half covers a week whose trips are mostly priced while the
+   day's own Uber bookings are not priced yet. So no screen may describe one
+   figure as a part of the other, or name their difference as commission. */
+{
+  const rendered = scr.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  check('no screen claims money in is a part of trip value',
+    !/of that is money in/.test(rendered) && !/gap is what the platforms keep/.test(rendered),
+    'money in exceeded trip value on 2026-09-08 and the sentence would have been nonsense');
+  check('…each is stated with the base it was measured over instead',
+    /Trip value is \$\{money\(total\)\}/.test(rendered)
+    && /Money in is \$\{money\(inAll\)\}/.test(rendered)
+    && /counted once on the best report it files/.test(rendered));
+}
+
+/* The stale sentence itself, pinned so it cannot come back: a screen telling
+   an operator that most of their work is missing from a figure that holds nine
+   tenths of it makes a correct number look broken.
+
+   Tested against the CODE with its comments stripped, and that distinction is
+   the whole point. A block comment recording what the fleet used to look like
+   and why the copy changed is what this repository asks every fix to leave
+   behind; the same words in a rendered string are a lie told to a reader. A
+   guard that cannot tell them apart forces the next person to delete the
+   history in order to get the suite green. */
+{
+  const rendered = scr.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  check('no screen still tells a reader Uber prices nothing per trip',
+    !/Uber publishes no per-trip fare/.test(rendered)
+    && !/875 of 12,410/.test(rendered),
+    'the weekly payments walk has priced ~90% of every month since it landed');
+  check('…and the history of why it changed is still in the file',
+    /875 of 12,410/.test(scr) && /89\.8%/.test(scr),
+    'the measurement that retired a rule belongs beside the rule it retired');
+}
 
 /* Per km read AED 0 on production. Two faults compounding: it divided the
    PRICED fares by EVERY trip's distance — two different populations, 65,367

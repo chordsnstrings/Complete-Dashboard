@@ -22,7 +22,7 @@ import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, stand
   cashOnHandTile, bankDepositTile, countOf,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock } from '../tz.js';
-import { todayLive, todayLede, FARES_LAG } from '../today.js';
+import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from '../today.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
@@ -128,13 +128,30 @@ async function today(deck, ctx) {
           sub: now.completed != null
             ? `${fmt(now.completed)} done \u00b7 ${fmt(now.cancelled ?? 0)} cancelled` : null,
           href: href('day', now.day) },
-        /* The measured half of today's money. `accounted` on the day page is a
-           share of a weekly statement spread across its days, which is the
-           right figure for a settled day and a projection for a day three
-           hours old. */
-        { label: 'Fares so far', value: now.fares != null ? money(now.fares) : '\u2014',
-          sub: now.priced ? `on ${fmt(now.priced)} of ${fmt(now.bookings)} priced` : 'nothing priced yet',
-          href: href('day', now.day) },
+        /* TRIP VALUE LEADS, because it is the question the screen is opened
+           with. At 20:07 Dubai on 2026-09-08 this tile was captioned "Fares so
+           far" and read AED 2,874 on 47 of 664 priced, beside a 7 September
+           that read AED 35,965 — and the operator's reply was that 2,874
+           "can't be right". It was right, and it was the answer to "what have
+           we been told a price for" rather than to "what did the fleet do".
+           /api/day now values the bookings that carry no price yet; ../today.js
+           holds the wording, including the ≈ and the word estimated, so the
+           two shells cannot drift into describing it differently. */
+        (() => {
+          const tv = tripValue(now, fmt, sourceLabel);
+          return { label: 'Trip value', href: href('day', now.day), sub: tv.sub,
+            value: tv.amount == null ? '\u2014'
+              : (tv.estimated ? `\u2248 ${money(tv.amount)}` : money(tv.amount)) };
+        })(),
+        /* The measured half kept beside it rather than replaced by it: an
+           estimate with nothing to check it against is a number to be taken on
+           faith, and this is the part of it that is on record. Dropped entirely
+           on a settled day, where it would print the tile above it twice. */
+        ...(now.expected != null ? [{ label: 'Priced so far',
+          value: now.fares != null ? money(now.fares) : '\u2014',
+          sub: now.priced ? `on ${fmt(now.priced)} of ${fmt(now.bookings)} bookings`
+            : 'nothing priced yet',
+          href: href('day', now.day) }] : []),
         /* Money in, which is NOT the fares above and must not read as a second
            opinion about them: a fare where the channel publishes one, the
            platform's payout where it publishes a payout instead. Uber is why
@@ -151,9 +168,7 @@ async function today(deck, ctx) {
             /* fmt, not money: the currency is already on the value above, and
                repeating it twice more wrapped the sub onto a second line and
                made this tile taller than the one beside it. */
-            : [now.moneyFares ? `${fmt(now.moneyFares)} fares` : null,
-              now.moneyPayouts ? `${fmt(now.moneyPayouts)} payouts` : null]
-              .filter(Boolean).join(' \u00b7 ') || 'basis on the day page',
+            : moneyHalves(now, fmt) || 'basis on the day page',
           href: href('day', now.day) },
         { label: 'Distance', value: now.km != null ? `${fmt(now.km)} km` : '\u2014',
           sub: now.drivers != null ? `${fmt(now.drivers)} out in ${fmt(now.vehicles)} cars` : null },
@@ -169,6 +184,16 @@ async function today(deck, ctx) {
       if (now.priced != null && now.bookings != null && now.priced < now.bookings) {
         t.body.append(el('p', 'm-cap', FARES_LAG));
       }
+      /* Bookings on a channel with no settled day behind it — valued at
+         nothing rather than at somebody else's price, and said so. */
+      if (now.unrated) {
+        t.body.append(el('p', 'm-cap',
+          `${fmt(now.unrated)} booking${now.unrated === 1 ? '' : 's'} on `
+          + `${(now.unratedPlatforms || []).map(sourceLabel).join(', ') || 'an unmeasured channel'} `
+          + 'are not in the estimate at all: there is no settled day behind them to value them from.'));
+      }
+      const wired = wiredNote(now, fmt, sourceLabel);
+      if (wired) t.body.append(el('p', 'm-cap', wired));
     } else {
       /* Not a grid of noughts. The cars are still worth stating: a fleet with
          no trips yet at 06:00 still has vehicles reporting a position. */
@@ -267,16 +292,40 @@ async function today(deck, ctx) {
        sub-line says what the figure IS when there is no rate to give. */
     { label: 'Bookings', value: fmt(k.trips),
       sub: perDay != null ? `${fmt(perDay)} a day` : 'today so far' },
-    /* MONEY IN, not fares.
+    /* TRIP VALUE AND MONEY IN ARE DIFFERENT QUESTIONS AND BOTH BELONG HERE.
        ─────────────────────────────────────────────────────────────────────
-       `revenue` is sum(trip.price) and the Uber export carries no fare
-       column, so on this fleet it describes 875 of 12,410 bookings — the
-       hotel channel and Yango. This tile said AED 65,367 under the word
-       Revenue while the fleet had taken AED 469,438. The desktop's Finance
-       page leads with `accounted` for exactly this reason and names the two
-       halves it is made of; the phone now agrees with it. */
+       This card carried Money in alone, on a note reading "`revenue` is
+       sum(trip.price) and the Uber export carries no fare column, so on this
+       fleet it describes 875 of 12,410 bookings — the hotel channel and
+       Yango". That was true when it was written and it has stopped being
+       true: src/sources/uber.js:563 walks Uber's weekly PAYMENTS report and
+       UPDATEs trip.price to the RIDER FARE, and measured on production
+       2026-09-08 that covers 12,567 of August's 13,993 bookings (89.8%) and
+       9,610 of July's 10,780 (89.1%). The tenth left over is very nearly the
+       cancellations that took no fee — 2026-09-07 ran 89.9% priced against
+       87.6% completed.
+
+       So `revenue` is now the fleet's GROSS TRIP VALUE, what riders paid,
+       and `accounted` is what the fleet is credited with once each platform
+       has taken its commission and each channel has been counted exactly
+       once. August 2026: AED 744,136 against AED 585,058. Neither is the
+       other and an operator needs both — the first is how much work the
+       fleet did, the second is how much of it is ours.
+
+       The operator asked for the first by name on 2026-09-08, having been
+       shown only the second: "we should get the trip value overall which was
+       35k yesterday which gives us better indication than what is there at
+       the moment." */
+    { label: 'Trip value', value: n(k.revenue) != null ? money(n(k.revenue)) : '\u2014',
+      sub: n(k.priced_trips)
+        ? `on ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings priced`
+        : 'no booking in this range carries a price',
+      /* A window that includes today is understated here by construction and
+         has to say so rather than read as a bad week. */
+      tone: n(k.priced_pct) != null && n(k.priced_pct) < 60 ? 'warn' : null },
     { label: 'Money in', value: money(n(k.accounted) ?? n(k.revenue)),
-      sub: n(k.accounted) ? 'fares plus platform payouts' : 'fares on record' },
+      sub: n(k.accounted) ? 'each channel counted once, on its own report'
+        : 'fares on record' },
     { label: 'Completed', value: `${n(k.completion_pct) ?? '—'}%`,
       sub: `${n(k.cancel_pct) ?? 0}% cancelled`,
       tone: n(k.completion_pct) >= 90 ? 'good' : n(k.completion_pct) >= 80 ? null : 'warn' },
@@ -349,9 +398,21 @@ async function moneyScreen(deck, ctx) {
     .reduce((a, c) => a + (n(c.trips) || 0), 0);
   const routed = cls.reduce((a, c) => a + (n(c.trips) || 0), 0);
 
-  /* What the fleet actually took, and the two kinds of money it is made of.
-     `accounted` is fares PLUS platform payouts; `revenue` is the fares alone,
-     which on this fleet is one channel in three and 7% of the bookings. */
+  /* TWO FIGURES, TWO QUESTIONS, AND ONE OF THEM HAD GONE STALE.
+     ───────────────────────────────────────────────────────────────────────
+     This said "`revenue` is the fares alone, which on this fleet is one
+     channel in three and 7% of the bookings", and the lede below it told the
+     reader that "Uber publishes no per-trip fare, so most of the work is in
+     the second figure". Both were true when written. Uber's weekly PAYMENTS
+     walk (src/sources/uber.js:563) now UPDATEs trip.price to the RIDER FARE,
+     and measured on production 2026-09-08 that is 12,567 of August's 13,993
+     bookings — 89.8%, not 7%. Telling an operator most of their work is
+     missing from a figure that holds nine tenths of it is the kind of stale
+     note that makes a correct number look broken.
+
+     So `revenue` is TRIP VALUE — what riders paid — and `accounted` is money
+     in, each channel counted once on the best report it files. August 2026:
+     AED 744,136 against AED 585,058. */
   const inAll = n(k.accounted);
   lede(deck, {
     claim: owed && routed
@@ -361,26 +422,39 @@ async function moneyScreen(deck, ctx) {
       ? `${fmt(owed)} of ${fmt(routed)} bookings settled into a driver's hand, onto a room, or `
         + 'against salary. '
       : `Over ${fmt(k.trips)} bookings. `)
+      /* TWO FIGURES, STATED SIDE BY SIDE, WITH NO ARITHMETIC BETWEEN THEM.
+         A first draft of this said "${money(inAll)} of that is money in" and
+         closed with "the gap is what the platforms keep". Both are false on a
+         window that still holds unpriced bookings, which is every window that
+         includes today: on 2026-09-08 money in was AED 7,170 against AED 2,874
+         of trip value, so money in was the LARGER of the two and there was no
+         gap to attribute. Each figure now states what it is and what it was
+         measured over, and the sentence draws no relation it cannot prove. */
       + (inAll
-        ? `${money(inAll)} in altogether: ${money(total)} of fares the trips carry a price for, `
-          + `and ${money(n(k.accounted_statements) + n(k.accounted_payouts))} the platforms report `
-          + 'on their own statements and payouts. Uber publishes no per-trip fare, so most of the '
-          + 'work is in the second figure.'
+        ? `Trip value is ${money(total)} — what riders paid, on the ${fmt(priced)} of `
+          + `${fmt(k.trips)} bookings that carry a price. Money in is ${money(inAll)}, `
+          + 'each channel counted once on the best report it files: '
+          + [n(k.accounted_statements) ? `${money(n(k.accounted_statements))} on platform statements` : null,
+            n(k.accounted_fares) ? `${money(n(k.accounted_fares))} in fares` : null,
+            n(k.accounted_payouts) ? `${money(n(k.accounted_payouts))} in payouts` : null,
+          ].filter(Boolean).join(', ')
+          + '.'
         : `${money(total)} is what the priced bookings came to.`),
     tone: routed && owed / routed >= 0.3 ? 'warn' : null,
   });
 
-  const c = card('Fares a day', (priced
-    ? `${fmt(priced)} of ${fmt(k.trips)} bookings carry a fare` : 'no booking carries a fare')
+  const c = card('Trip value a day', (priced
+    ? `${fmt(priced)} of ${fmt(k.trips)} bookings carry a price` : 'no booking carries a price')
     + (partialDay ? ' · today excluded, it is still filling' : ''));
   c.body.append(spark(rev, { h: 46, tone: 'var(--s3)' }));
   deck.append(c.card);
 
   stats(deck, [
+    { label: 'Trip value', value: money(total),
+      sub: priced ? `what riders paid on ${fmt(priced)} of ${fmt(k.trips)} bookings`
+        : 'no booking carries a price', long: true },
     { label: 'Money in', value: money(inAll ?? total),
-      sub: inAll ? 'fares + payouts' : 'fares only', long: true },
-    { label: 'Fares on record', value: money(total),
-      sub: priced ? `${fmt(priced)} of ${fmt(k.trips)} priced` : 'none priced' },
+      sub: inAll ? 'each channel counted once, on its own report' : 'fares only' },
     { label: 'Per priced booking',
       value: total && priced ? money(total / priced, 'AED', 0) : '\u2014',
       sub: priced ? `${fmt(priced)} priced` : 'none priced' },

@@ -9,7 +9,7 @@ import { $, el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, enti
   verdict, dominantBar, foldRows, foldChildren, sourceLine, andList,
   markTallTables, kpiTile, fitKpis, UBER_FARE_WHY } from './ui.js';
 import { dubaiDay, dubaiClock, TZ, TZ_LABEL } from './tz.js';
-import { todayLive, todayLede, FARES_LAG } from './today.js';
+import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from './today.js';
 import { state, api, params, q, qAll, qChan, href, parseHash, navigate, store, setFilter,
   windowDates, windowLabel, newRender, currentGen, alive, hidesRange, hidesChannel, hrefFilter,
   applyWindow } from './data.js';
@@ -779,6 +779,7 @@ V.overview = async (root) => {
      page in the sidebar and hope it was the right one. */
   const GO = {
     Trips: href('demand'), Distance: href('vehicles'), 'Money in': href('revenue'),
+    'Trip value': href('revenue'),
     Completion: href('platforms'), Vehicles: href('vehicles'), 'Safety alerts': href('safety'),
   };
   kpiHost.innerHTML = [
@@ -802,6 +803,26 @@ V.overview = async (root) => {
        and a payout is a weekly statement net of the platform's commission —
        they are both money in, and a reader comparing this month to last needs
        to know which half moved. */
+    /* TRIP VALUE, BESIDE MONEY IN AND NOT INSTEAD OF IT.
+       ──────────────────────────────────────────────────────────────────────
+       `revenue` is sum(trip.price), and every note in this file about it said
+       the Uber export carries no fare column so it covers a tenth of the work.
+       That has stopped being true: src/sources/uber.js:563 walks Uber's weekly
+       PAYMENTS report and UPDATEs trip.price to the RIDER FARE, and measured on
+       production 2026-09-08 it covers 12,567 of August's 13,993 bookings
+       (89.8%) and 9,610 of July's 10,780 (89.1%) — the tenth left over is very
+       nearly the cancellations that took no fee.
+
+       So the card can now answer the question it never could: what the fleet's
+       work was worth. August 2026, AED 744,136 of trip value against AED
+       585,058 of money in — the difference is the platforms' commission and the
+       bookings nobody priced. The two tiles are not two opinions about one
+       number, and the sub-lines say which is which. */
+    ['Trip value', k.revenue != null ? 'AED ' + fmt(k.revenue) : '—',
+      k.priced_trips
+        ? `what riders paid · ${fmt(k.priced_trips)} of ${fmt(k.trips)} bookings`
+          + ` carry a price (${pct(k.priced_pct, 1)})`
+        : 'no booking in this range carries a price'],
     ['Money in', k.accounted ? 'AED ' + fmt(k.accounted) : '—',
       k.accounted
         ? [k.accounted_statements ? `AED ${fmt(k.accounted_statements)} in statement net` : null,
@@ -6097,11 +6118,28 @@ async function todayNow() {
          a band that says 21 twice in eight words reads as a rendering fault. */
       fact('completed', fmt(t.completed),
         t.cancelled ? `${fmt(t.cancelled)} cancelled` : null);
-      /* The fares are a measurement of today; `accounted` is a seventh of a
-         week that has not finished. The count it covers rides with it, because
-         a fare total over an unstated number of bookings is the figure this
-         product spent a month removing from its money pages. */
-      if (t.fares != null && t.priced) {
+      /* TRIP VALUE FIRST, then the part of it that is on record.
+         ───────────────────────────────────────────────────────────────────
+         This band led with the fares, which is a measurement of what we have
+         been TOLD a price for and not of what the fleet did: at 20:07 Dubai
+         on 2026-09-08 it stood at AED 2,874 over 664 bookings because 0 of
+         the day's 596 Uber bookings had reached the weekly report yet, while
+         7 September, walked overnight, stood at AED 35,965 over 675. The
+         estimate that fills the gap, its rounding and the word "estimated"
+         all live in ./today.js so this band and the phone cannot word it
+         differently. */
+      {
+        const tv = tripValue(t, fmt, sourceLabel);
+        if (tv.amount != null) {
+          fact('trip value', tv.estimated ? `\u2248 ${money(tv.amount)}` : money(tv.amount), tv.sub);
+        }
+      }
+      /* The measured fares kept beside the estimate rather than replaced by
+         it — an estimate with nothing to check it against is a number taken
+         on faith. Dropped on a settled day, where it is the tile above. */
+      if (t.expected != null && t.fares != null && t.priced) {
+        fact('priced so far', money(t.fares), `on ${fmt(t.priced)} of ${fmt(t.bookings)} bookings`);
+      } else if (t.expected == null && t.fares != null && t.priced) {
         fact('in fares', money(t.fares), `on ${fmt(t.priced)} of ${fmt(t.bookings)} priced so far`);
       }
       /* Money in, beside the fares rather than instead of them. The two differ
@@ -6111,9 +6149,7 @@ async function todayNow() {
          of leaving a reader to wonder why one figure disagrees with the one
          next to it. Measured 5 September: AED 24,118 in, AED 6,110 of fares. */
       if (t.money != null) {
-        const half = [t.moneyFares ? `${fmt(t.moneyFares)} fares` : null,
-          t.moneyPayouts ? `${fmt(t.moneyPayouts)} payouts` : null].filter(Boolean).join(' \u00b7 ');
-        fact('money in', money(t.money), half || null);
+        fact('money in', money(t.money), moneyHalves(t, fmt) || null);
       }
       /* Why that ratio is low at breakfast and high by lunch — a schedule, not
          a hole. See FARES_LAG. */
@@ -6140,7 +6176,9 @@ async function todayNow() {
     host.title = 'Today so far, across both fleets and every channel \u2014 this band '
       + 'does not follow the filters above it. Fares are the price on the bookings taken '
       + 'since midnight, not a share of a weekly statement.'
-      + (lag ? `\n\n${FARES_LAG}` : '');
+      + (lag ? `\n\n${FARES_LAG}` : '')
+      + (t.projectionBasis ? `\n\nTrip value is ${t.projectionBasis}.` : '')
+      + (wiredNote(t, fmt, sourceLabel) ? `\n\n${wiredNote(t, fmt, sourceLabel)}` : '');
     host.hidden = false;
   } catch {
     /* A band that cannot be built is removed, not left saying something

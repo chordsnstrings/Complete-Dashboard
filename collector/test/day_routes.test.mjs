@@ -322,6 +322,100 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
     'a reader who cannot tell an operator import from a platform payout cannot reconcile either');
 }
 
+/* ── what today will be worth, and when we may not say ──────────────────────
+   The defect this answers, measured on production: at 20:07 Dubai on
+   2026-09-08 the day endpoint answered AED 2,874 of trip value over 664
+   bookings, and AED 35,965 over 675 for the day before. 0 of the day's 596
+   Uber bookings carried a price, because Uber publishes no fare on its trip
+   export and the price lands on a weekly report walked overnight. The measured
+   figure is correct and it is not an answer to "what did the fleet do today".
+
+   Two things have to be true of the estimate that fills that gap: it may not
+   exist when nothing settled backs it, and it must be per BOOKING rather than
+   per priced booking, or it bills the fleet for its cancellations. */
+{
+  const before = await get(`/api/day?day=${DAY}`);
+  /* 41 Uber bookings on the day carry no price, and every Uber day behind it
+     in this fixture is unpriced too — so there is no rate, and the honest
+     output is no estimate at all plus the count that could not be valued. */
+  check('with no settled day behind it there is no estimate, and the bookings are named',
+    before.headline.expected_revenue == null
+      && before.headline.unrated_bookings === 41
+      && (before.headline.unrated_platforms || []).includes('uber'),
+    `expected ${before.headline.expected_revenue} · unrated ${before.headline.unrated_bookings}`);
+  check('and the measured trip value is untouched by the absence',
+    before.headline.revenue === 500, String(before.headline.revenue));
+
+  /* Six settled Uber days inside the fourteen-day lookback: 100 bookings each,
+     90 of them priced at AED 100. Per booking that is AED 90; per PRICED
+     booking it is AED 100. The ten unpriced a day stand for the cancellations
+     that take no fee, which is why the two differ and why only one of them is
+     the right multiplier for a booking whose outcome is not known yet. */
+  for (let d = 1; d <= 6; d++) {
+    await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+               requested_at,distance_km,status,product,payment_type,price)
+             SELECT 'uber','s${d}_'||g,'ecosine','L100','u0','Driver 0',
+                    '2026-08-${String(d).padStart(2, '0')}T12:00:00+04:00'::timestamptz,
+                    10,'completed','UberX','braintree',
+                    CASE WHEN g <= 90 THEN 100 ELSE NULL END
+               FROM generate_series(1,100) g`);
+  }
+  const after = await get(`/api/day?day=${DAY}`);
+  const h = after.headline;
+  const uber = (h.projection_parts || []).find((r) => r.platform === 'uber');
+
+  check('the rate is what a BOOKING was worth, not what a priced booking was worth',
+    uber && uber.per_booking === 90,
+    `${uber && uber.per_booking} a booking — 100 is the priced-only rate, and it would `
+    + 'bill the fleet for its cancellations');
+  /* A HALF-COLLECTED DAY IS THE ONE THAT DOES THE DAMAGE, not an empty one.
+     Days 7–13 hold 50 Uber bookings each with no price at all, and `priced > 0`
+     alone is enough to keep those out. The dangerous shape is a day whose
+     weekly report has begun to land and has not finished: 2026-08-13 is given
+     150 Uber bookings with 10 of them priced, which is exactly what a day looks
+     like the morning after a partial walk. Let into the rate it drops it from
+     AED 90 to AED 73.24 a booking and every projection built on it is 19% low
+     — so the rate takes a day only once half of that channel's bookings on it
+     carry a fare. */
+  await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+             requested_at,distance_km,status,product,payment_type,price)
+           SELECT 'uber','half'||g,'ecosine','L100','u0','Driver 0',
+                  '2026-08-13T12:00:00+04:00'::timestamptz,10,'completed','UberX','braintree',
+                  CASE WHEN g <= 10 THEN 100 ELSE NULL END
+             FROM generate_series(1,100) g`);
+  const guarded = (await get(`/api/day?day=${DAY}`)).headline;
+  const gUber = (guarded.projection_parts || []).find((r) => r.platform === 'uber');
+  check('a half-collected day cannot enter the rate that values the next one',
+    gUber && gUber.per_booking === 90 && gUber.days === 6,
+    `${gUber && gUber.per_booking} a booking over ${gUber && gUber.days} days `
+    + '— 73.24 over 7 is the figure a partly walked 13 August would produce');
+
+  check('the 41 unpriced bookings are projected at that rate',
+    h.projected_bookings === 41 && h.projected_revenue === 3690,
+    `${h.projected_bookings} bookings · ${h.projected_revenue}`);
+  check('expected trip value is the measured fares plus the projection',
+    h.expected_revenue === 4190 && h.expected_revenue === h.revenue + h.projected_revenue,
+    `${h.revenue} + ${h.projected_revenue} = ${h.expected_revenue}`);
+  check('nothing that could be valued is left in the unrated count',
+    h.unrated_bookings == null, String(h.unrated_bookings));
+
+  /* The estimate rides beside the measurement and never becomes it. */
+  check('the measured trip value is still only the fares on record',
+    h.revenue === 500, String(h.revenue));
+  check('and the estimate is never added into money in',
+    h.accounted == null || Number(h.accounted) !== Number(h.expected_revenue),
+    `accounted ${h.accounted} vs expected ${h.expected_revenue}`);
+  check('every estimated figure carries the sentence that says it is one',
+    /estimate/.test(h.projection_basis || '') && /settled/.test(h.projection_basis || ''),
+    h.projection_basis);
+
+  /* A channel with a rate and a channel without must not be confused: hotel is
+     fully priced on the day, so it is neither projected nor unrated. */
+  check('a fully priced channel is neither projected nor unrated',
+    !(h.projection_parts || []).some((r) => r.platform === 'hotel')
+      && !(h.unrated_platforms || []).includes('hotel'));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

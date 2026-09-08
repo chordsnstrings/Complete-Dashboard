@@ -1286,3 +1286,93 @@ statement split on coverage exactly as the payout is.
   hours into a shift showing a collapse at the right-hand edge. The Today and
   Fares charts on the same phone had always excluded it and said so. When a
   helper tests one field name, check every row shape that reaches it.
+
+### Trip value: `revenue` stopped being a tenth of the work — 2026-09-08
+
+Every note in this repository about `revenue` — `sum(trip.price)` — said the
+Uber export carries no fare column, so it describes *"875 of 12,410 bookings,
+the hotel channel and Yango"*. **That premise is dead and the notes outlived
+it.** `src/sources/uber.js:563` walks Uber's weekly PAYMENTS report and
+`UPDATE`s `trip.price` to the **rider fare**, so the coverage measured on
+production is:
+
+| window | bookings | priced | trip value | avg |
+|---|---:|---:|---:|---:|
+| July 2026 | 10,780 | 9,610 (89.1%) | 589,566 | 61.35 |
+| August 2026 | 13,993 | 12,567 (89.8%) | 744,136 | 59.21 |
+| 1–7 Sep 2026 | 4,973 | 4,470 (89.9%) | 267,211 | 59.78 |
+
+The tenth left over is very nearly the cancellations that took no fee:
+2026-09-07 ran **89.9% priced against 87.6% completed**, and `priced_trips`
+(607) *exceeds* `completed_trips` (591) because some cancellations carry a fee.
+
+So `revenue` is the fleet's **gross trip value — what riders paid** — and
+`accounted` is what the fleet is credited with once each channel is counted
+once on the best report it files. **August 2026: AED 744,136 against AED
+585,058.** Neither is the other, and both belong on the screen: the operator
+asked for the first by name on 2026-09-08, having been shown only the second.
+
+**Money in is not always the smaller of the two.** On 2026-09-08 the day held
+AED 7,170 of money in against AED 2,874 of trip value, because the statement
+half covers a week whose trips are mostly priced while the day's own Uber
+bookings are not priced yet. Any copy describing one as a part of the other, or
+naming their difference as commission, is false on every window that includes
+today.
+
+### Today's trip value has to be estimated, and how — 2026-09-08
+
+At 20:07 Dubai on 2026-09-08 `/api/day` answered **AED 2,874 over 664
+bookings**, and **AED 35,965 over 675** for the day before. The fleet had not
+collapsed by 92%: **0 of the day's 596 Uber bookings carried a price.** The
+split by channel that evening was uber 0 of 596, hotel 34 of 34, bolt 10 of 31,
+yango 3 of 3 — every priced booking on the screen came from a channel that is
+not most of the fleet. The measured figure was correct and it was the answer to
+*"what have we been told a price for"*, not to *"what did the fleet do today"*.
+
+`/api/day` now values the bookings that carry no price yet
+(`expected_revenue`, `projected_revenue`, `projection_parts`, and — for a
+channel it cannot value at all — `unrated_bookings`). Two rules make it
+defensible:
+
+* **The rate is per BOOKING, not per priced booking.** About a tenth of
+  bookings never carry a fare, so dividing settled revenue by *priced* bookings
+  and multiplying by every unpriced one bills the fleet for its cancellations:
+  AED 59.25 a priced booking against AED 53.28 a booking on 2026-09-07, an 11%
+  overstatement. Per booking already averages the fee-less cancellations in.
+* **A day joins the rate only once ≥50% of that channel's bookings on it carry
+  a fare.** The dangerous shape is not an empty day — `priced > 0` excludes
+  those — it is a **half-walked** one, a day whose weekly report has begun to
+  land and has not finished. Proved in `test/day_routes.test.mjs`: a fixture day
+  with 10 of 150 priced drags the rate from AED 90 to AED 73.24 a booking, 19%
+  low, and every projection built on it with it.
+
+Measured against the day it projects: valuing 2026-09-08's unpriced bookings at
+the fourteen settled days behind them gives **≈ AED 35,600**, and 2026-09-07
+settled at **AED 35,965**.
+
+The estimate rides beside the measurement and never becomes it — `revenue` is
+untouched, and nothing projected is ever added into `accounted`.
+
+### Traps this added to the list
+
+* **A guard regex over a source file cannot tell a comment from rendered copy.**
+  `test/phone.test.mjs` pinned that no screen still says *"Uber publishes no
+  per-trip fare"* — and failed, because the fix's own block comment quotes the
+  sentence it retired. This repository asks every fix to leave that history
+  behind, so the guard now strips comments before testing and asserts the
+  history separately. **A staleness guard must test the rendered strings, not
+  the file.**
+* **A fixture that does not add up renders a false sentence, and shape checks
+  cannot see it.** `mockapi.mjs` carried `accounted_payouts` equal to
+  `accounted_statements`, so the money screen drew *"AED 237,366 … AED 196,178
+  on platform statements, AED 41,188 in fares, AED 196,178 in payouts"* — three
+  numbers summing to 433,544 under a total of 237,366, on the fixture every
+  rendering pass reads. `test/mockapi.test.mjs` now asserts the identity the
+  pages state.
+* **`day_routes`' `priced_bookings` is a coverage flag, not a count.** It is set
+  to a platform's WHOLE row count when *any* of it carries a fare, which is what
+  `income_sql.js` wants and is not a priced count. The platforms query carries
+  `bookings` and `priced` separately for anything that does arithmetic.
+* **`/api/day`'s `platforms` rows include telematics.** `n` counts every row the
+  channel produced — fms contributed 271 journeys and no booking on 2026-09-08 —
+  so anything reasoning about bookings must filter, not read `n`.

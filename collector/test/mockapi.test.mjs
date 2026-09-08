@@ -152,6 +152,24 @@ for (const route of usedByUi) {
 }
 check('the mock answers in the same shape as the real API, one level into rows',
   drift.length === 0, drift.length ? `\n      ${drift.join('\n      ')}` : '');
+/* A FIXTURE THAT DOES NOT ADD UP RENDERS A FALSE SENTENCE, and shape alone
+   cannot see it. /api/kpis carried accounted_payouts equal to
+   accounted_statements, so the money screen drew "AED 237,366 of that is money
+   in: AED 196,178 on platform statements, AED 41,188 in fares, AED 196,178 in
+   payouts" — three numbers summing to 433,544 under a total of 237,366, on a
+   fixture every rendering pass reads. The pages state these three as the
+   composition of `accounted`, so the fixture has to satisfy that identity the
+   way production does: August 2026 was 490,401.55 + 88,810.38 + 5,846.06 =
+   585,057.99 exactly. */
+{
+  const k = await (await fetch(`http://127.0.0.1:${mockPort}/api/kpis?${WIN}`)).json();
+  const halves = ['accounted_statements', 'accounted_fares', 'accounted_payouts']
+    .reduce((a, f) => a + (Number(k[f]) || 0), 0);
+  check('the fixture\u2019s money halves add up to the total they are the halves of',
+    Math.abs(halves - Number(k.accounted)) < 1,
+    `${halves} against accounted ${k.accounted}`);
+}
+
 /* The comparison is worth nothing if most routes fell into the skip branch.
    In route_smoke's fixture every per-entity route 404s, which is how that
    version of this check ended up comparing only the list routes. */

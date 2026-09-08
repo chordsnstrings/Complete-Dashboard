@@ -222,11 +222,20 @@ app.get('/api/kpis', (req, r) => r.json({ trips: 2043, km: 23120, avg_km: 12.03,
   payout_platforms: ['uber', 'yango'], payout_coverage_pct: 93.3,
   /* accounted is the best figure PER PLATFORM summed, so it is not fares plus
      payouts: yango reports both here and is counted on its payout only. */
-  accounted: 237366, accounted_fares: 41188, accounted_payouts: 196178,
+  /* THE THREE HALVES ADD TO `accounted`, because the pages state them as its
+     composition and a fixture that does not add up renders a false sentence.
+     This carried accounted_payouts: 196178 — the same figure as
+     accounted_statements — so the money screen's lede read "AED 237,366 of
+     that is money in: AED 196,178 on platform statements, AED 41,188 in fares,
+     AED 196,178 in payouts", three numbers summing to 433,544 under a total of
+     237,366. Production's own shape is a large statement, a modest fares half
+     and a small payout residual: August 2026 was 490,401.55 + 88,810.38 +
+     5,846.06 = 585,057.99 exactly. */
+  accounted: 237366, accounted_fares: 41188, accounted_payouts: 6178,
   /* The statement basis api/income_sql.js now prefers, and the bank side
      under its own name: accounted_payouts sums only the rows COUNTED on
      their payout, which is no longer where most of the money is. */
-  accounted_statements: 196178, accounted_statement_platforms: ['uber'],
+  accounted_statements: 190000, accounted_statement_platforms: ['uber'],
   reported_payouts: 196178, reported_payout_platforms: ['uber'],
   reported_payout_days: 30, undercovered_income: null,
   uncounted_payouts: null, uncounted_payout_platforms: [], uncounted_payout_bases: [],
@@ -3504,6 +3513,23 @@ app.get('/api/day', (req, r) => {
       undercovered_bookings: 0, undercovered_pct: 0,
       undercovered_payouts: null, undercovered_platforms: [],
       payout_basis: 'a share of each weekly platform statement, spread evenly across the days it covers',
+      /* TRIP VALUE, MEASURED AND ESTIMATED. The fixture models the shape the
+         real fleet is in every afternoon: Uber's 168 bookings carry no price
+         yet — the fare lands on a weekly report walked overnight — so they are
+         valued at what an Uber booking was worth over the settled days behind
+         them, and every field says the figure is an estimate. Without this the
+         fixture renders only the settled path and the estimate's wording is
+         never seen by a rendering pass. */
+      expected_revenue: 14596, projected_revenue: 10416, projected_bookings: 168,
+      projected_platforms: ['uber'],
+      projection_parts: [{ platform: 'uber', bookings: 168, per_booking: 62, days: 14, value: 10416 }],
+      projection_lookback_days: 14,
+      projection_basis: 'an estimate: each channel\u2019s bookings that carry no price yet, '
+        + 'valued at what a booking on that channel was worth over the settled days behind '
+        + 'this one (up to 14)',
+      unrated_bookings: null, unrated_platforms: [],
+      reported_payouts: 41210, uncounted_payouts: 41210, uncounted_payout_platforms: ['uber'],
+      accounted_statements: null,
       first_at: `${day}T02:14:00Z`, last_at: `${day}T20:41:00Z` },
     versus_neighbours: { median_bookings: 241, delta_pct: -10.8,
       series: Array.from({ length: 15 }, (_, i) => {
@@ -3511,10 +3537,14 @@ app.get('/api/day', (req, r) => {
         return { day: dd, bookings: dd === day ? 215 : 210 + Math.round(Math.sin(i) * 40) };
       }) },
     hours: hours.map((x) => ({ ...x, bookings: Math.round(x.bookings * 215 / (bookings || 1)) })),
+    /* `n` is every row the channel produced and `bookings` only the bookings
+       among them; `priced` is the real priced count, which the fold in
+       api/day_routes.js deliberately does not give (there it is a coverage
+       flag). The projection above is computed from exactly these three. */
     platforms: [
-      { platform: 'uber', n: 168, completed: 160, bookable: 168, revenue: null, km: 2100, completion_pct: 95.2 },
-      { platform: 'hotel', n: 41, completed: 41, bookable: 41, revenue: 4180, km: 690, completion_pct: 100 },
-      { platform: 'yango', n: 6, completed: 5, bookable: 6, revenue: 210, km: 90, completion_pct: 83.3 },
+      { platform: 'uber', n: 168, bookings: 168, priced: 0, completed: 160, bookable: 168, revenue: null, km: 2100, completion_pct: 95.2 },
+      { platform: 'hotel', n: 41, bookings: 41, priced: 41, completed: 41, bookable: 41, revenue: 4180, km: 690, completion_pct: 100 },
+      { platform: 'yango', n: 6, bookings: 6, priced: 6, completed: 5, bookable: 6, revenue: 210, km: 90, completion_pct: 83.3 },
     ],
     drivers: drivers.map((name, i) => ({ driver_name: name, driver_ext_id: `drv-${i}`,
       trips: 22 - i * 2, cancelled: i % 3, revenue: i % 2 ? (22 - i * 2) * 96 : null,

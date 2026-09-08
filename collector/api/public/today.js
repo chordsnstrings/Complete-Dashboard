@@ -104,8 +104,43 @@ export async function todayLive() {
        remainder rather than the payout — the Today band would have shown the
        fleet a couple of hundred dirhams of payouts on a day it was wired six
        figures. */
-    moneyPayouts: num(h.reported_payouts) ?? num(h.accounted_payouts),
+    /* THE HALVES HAVE TO ADD UP TO THE TILE ABOVE THEM.
+       ─────────────────────────────────────────────────────────────────────
+       This read `reported_payouts ?? accounted_payouts`, and on 2026-09-08 at
+       18:44 the phone drew "AED 6,711" over "2,649 fares · 17,010 payouts" —
+       two numbers that sum to 19,659, name a figure the total deliberately
+       EXCLUDES, and omit the 4,062 that is most of it. reported_payouts is
+       what Uber wired; /api/kpis reports it back as `uncounted_payouts` on the
+       same response, because the statement net already counts the same money
+       and adding both would count the week twice.
+
+       So the caption names the three things `accounted` is actually made of —
+       statement net, fares, and the payouts of the channels counted ON their
+       payout — and nothing else. What was wired but not counted is a real
+       question and it gets its own sentence below the tiles rather than a
+       slot inside the tile's arithmetic. */
     moneyStatements: num(h.accounted_statements),
+    moneyPayouts: num(h.accounted_payouts),
+    moneyWired: num(h.reported_payouts),
+    moneyWiredPlatforms: h.uncounted_payout_platforms || h.reported_payout_platforms || [],
+    /* ── what the day's bookings came to ──────────────────────────────────
+       `fares` above is the price ON RECORD, and on this fleet that is not the
+       same question as what the day was worth: Uber publishes no fare on its
+       trip export, so at 20:07 Dubai on 2026-09-08 the record held AED 2,874
+       over 664 bookings while 7 September, whose weekly report had been walked
+       overnight, held AED 35,965 over 675. /api/day now values the bookings
+       that carry no price yet at what a booking on the same channel was worth
+       over the settled days behind them, and labels every part of it. */
+    expected: num(h.expected_revenue),
+    projected: num(h.projected_revenue),
+    projectedBookings: num(h.projected_bookings),
+    projectedPlatforms: h.projected_platforms || [],
+    projectionParts: h.projection_parts || [],
+    projectionBasis: h.projection_basis || null,
+    /* Bookings we could not value at all — a channel with no settled day
+       behind it. Named, never folded in at another channel's price. */
+    unrated: num(h.unrated_bookings),
+    unratedPlatforms: h.unrated_platforms || [],
     /* Whether the SERVER said there is no money yet, or we never got the field.
        num() collapses both to null and the tile then printed "no channel has
        been credited yet today" either way — which is a claim about the fleet's
@@ -146,3 +181,85 @@ export const FARES_LAG = 'Uber carries no fare on its trip export \u2014 the pri
 export const todayLede = (t) => (t.started
   ? `${t.bookings} booking${t.bookings === 1 ? '' : 's'} so far today, as of ${t.asOf} Dubai`
   : `Nothing collected yet today, as of ${t.asOf} Dubai`);
+
+/* An estimate printed to the dirham claims a precision it does not have, and a
+   reader who sees AED 35,593 will reconcile against it. Rounded to the nearest
+   hundred above ten thousand, the nearest ten below, so the figure reads as
+   what it is. */
+export const roughly = (v) => (v == null ? null
+  : (Math.abs(v) >= 10000 ? Math.round(v / 100) * 100 : Math.round(v / 10) * 10));
+
+/* TRIP VALUE — WHAT THE DAY'S BOOKINGS CAME TO.
+   ─────────────────────────────────────────────────────────────────────────
+   Shared rather than written twice, because the two shells wording this
+   differently is how the same fleet ends up with two answers on two screens,
+   and because the honesty of it lives entirely in the wording: the estimate
+   and the measurement must never be able to swap labels.
+
+   Three states, and the caption is different in each:
+
+     MEASURED   every booking that will carry a price has one, so the figure
+                is the fares on record and says what fraction of the day's
+                bookings carry one.
+     ESTIMATED  some of the day's bookings carry no price yet — on this fleet
+                that is the Uber ones until the weekly report is walked
+                overnight — so they are valued at what a booking on the same
+                channel was worth over the settled days behind them. Marked
+                with ≈, captioned "estimated", and rounded so it cannot be
+                mistaken for a measurement.
+     ABSENT     nothing priced and nothing to project it from. A reason, never
+                a zero.
+
+   The operator's own words for why this exists, 2026-09-08: "we should get the
+   trip value overall which was 35k yesterday which gives us better indication
+   than what is there at the moment." AED 2,874 was the true answer to a
+   question nobody had asked. */
+export const tripValue = (t, fmt, label = (x) => x) => {
+  const est = t.expected != null;
+  if (est) {
+    const plats = [...new Set(t.projectedPlatforms || [])].map(label);
+    return {
+      estimated: true,
+      amount: roughly(t.expected),
+      sub: `estimated \u00b7 ${fmt(t.projectedBookings)} booking`
+        + `${t.projectedBookings === 1 ? '' : 's'}`
+        + `${plats.length ? ` on ${plats.join(', ')}` : ''} not priced yet`,
+    };
+  }
+  if (t.fares != null) {
+    return {
+      estimated: false,
+      amount: t.fares,
+      sub: t.priced != null && t.bookings != null
+        ? `on ${fmt(t.priced)} of ${fmt(t.bookings)} bookings priced`
+        : 'the fares on record',
+    };
+  }
+  return {
+    estimated: false,
+    amount: null,
+    sub: t.bookings
+      ? 'no booking carries a price yet, and no settled day to value them from'
+      : 'nothing collected yet',
+  };
+};
+
+/* The halves of Money in, and only the halves that are IN it. See the model
+   above: naming what a platform wired beside a total that excludes it is the
+   defect this replaces. */
+export const moneyHalves = (t, fmt) => [
+  t.moneyStatements ? `${fmt(t.moneyStatements)} statement` : null,
+  t.moneyFares ? `${fmt(t.moneyFares)} fares` : null,
+  t.moneyPayouts ? `${fmt(t.moneyPayouts)} payouts` : null,
+].filter(Boolean).join(' \u00b7 ');
+
+/* And the figure that was wired and deliberately not counted, said out loud
+   rather than left for a reader to find on the day page. Six figures of Uber
+   payout sitting invisibly beside a five-figure total is the kind of gap that
+   gets a dashboard disbelieved. */
+export const wiredNote = (t, fmt, label = (x) => x) => (t.moneyWired && t.moneyStatements
+  ? `${(t.moneyWiredPlatforms || []).map(label).join(', ') || 'The platform'} also wired `
+    + `AED ${fmt(t.moneyWired)} against the week this day falls in. It is not added above: `
+    + 'the statement net already counts the same trips, and adding both would count the '
+    + 'week twice.'
+  : null);

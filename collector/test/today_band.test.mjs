@@ -51,18 +51,57 @@ check('it reads the day’s own fares',
   'the price on the bookings taken since midnight');
 check('…and money in, the figure the fleet is credited with',
   /money: num\(h\.accounted\)/.test(mod));
-/* THREE halves now, and the middle one is where most of the money is.
+/* THREE halves, AND THEY HAVE TO ADD UP TO THE TOTAL ABOVE THEM.
+   ──────────────────────────────────────────────────────────────────────────
    api/income_sql.js counts a channel on its statement net where it files one,
-   so the band carries that too — and the payout line reads reported_payouts,
-   because accounted_payouts holds only the channels COUNTED on their payout
-   and would have shown the fleet a couple of hundred dirhams of payouts on a
-   day it was wired six figures. The rule is unchanged: a total whose
-   composition is unstated is the figure this product exists to stop printing. */
+   so the band carries that too. The payout line briefly read reported_payouts
+   on the argument that accounted_payouts "would have shown the fleet a couple
+   of hundred dirhams of payouts on a day it was wired six figures" — true, and
+   the cure was worse: on 2026-09-08 at 18:44 the phone drew AED 6,711 over
+   "2,649 fares · 17,010 payouts", two numbers summing to 19,659, naming a
+   figure /api/kpis reports on the same response as `uncounted_payouts`, and
+   omitting the 4,062 of statement net that was most of the total.
+
+   The rule is unchanged and this is what obeying it looks like: the caption
+   names the three things `accounted` is made of and nothing else. What was
+   wired and not counted is a real question, and it gets a sentence of its own
+   under its own name rather than a slot in the tile's arithmetic. */
 check('…which never travels without its halves named',
   /moneyFares: num\(h\.accounted_fares\)/.test(mod)
   && /moneyStatements: num\(h\.accounted_statements\)/.test(mod)
-  && /moneyPayouts: num\(h\.reported_payouts\)/.test(mod),
+  && /moneyPayouts: num\(h\.accounted_payouts\)/.test(mod),
   'a total whose composition is unstated is the figure this product exists to stop printing');
+{
+  const halves = (mod.match(/export const moneyHalves[\s\S]*?\.filter\(Boolean\)/) || [''])[0];
+  check('…and the caption is built only from the halves that ARE in the total',
+    /moneyStatements/.test(halves) && /moneyFares/.test(halves)
+    && /moneyPayouts/.test(halves) && !/moneyWired/.test(halves),
+    'a caption naming a figure the total excludes is worse than no caption');
+  check('what a platform wired but the total excludes is carried under its own name',
+    /moneyWired: num\(h\.reported_payouts\)/.test(mod)
+    && /export const wiredNote/.test(mod)
+    && /count the week twice/.test(mod),
+    'AED 19,160 of Uber payout invisible beside a five-figure total is how a dashboard gets disbelieved');
+}
+/* TRIP VALUE — the question the band is actually opened with, and the one it
+   could not answer. Measured on production 2026-09-08 at 20:07: AED 2,874 over
+   664 bookings, because 0 of the day's 596 Uber bookings had reached the weekly
+   report yet, against AED 35,965 over 675 for the day before. The estimate that
+   fills the gap lives in this one module so the two shells cannot word it
+   differently, and it may never lose the mark that says it is one. */
+check('the band carries what the day is expected to come to, not only what is priced',
+  /expected: num\(h\.expected_revenue\)/.test(mod)
+  && /projectedBookings: num\(h\.projected_bookings\)/.test(mod));
+check('…and an estimate can never be printed as a measurement',
+  /export const tripValue/.test(mod) && /estimated: true/.test(mod)
+  && /estimated \\u00b7/.test(mod) && /export const roughly/.test(mod),
+  'the word estimated, and a rounding that stops a reader reconciling against it');
+check('…and both shells mark it with ≈ from that one flag',
+  /tv\.estimated \? `\\u2248/.test(phone) && /tv\.estimated \? `\\u2248/.test(app));
+check('a channel with no settled day behind it is named, not valued at another channel\u2019s price',
+  /unrated: num\(h\.unrated_bookings\)/.test(mod)
+  && /not in the estimate at all/.test(phone),
+  'absent with a reason, and the reason has to be the true one');
 /* A stale module is a real state, not a hypothetical: on 2026-09-06 a phone
    rendered a new m/screens.js against a cached today.js with no `money` field
    and printed "no channel has been credited yet today" while /api/day was
@@ -83,8 +122,8 @@ check('both shells print money in, from the one module',
   /label: 'Money in'/.test(phone) && /fact\('money in'/.test(app),
   'the phone and the desktop disagreeing about today is what this module exists to prevent');
 check('and both name the halves rather than printing a bare total',
-  /moneyFares/.test(phone) && /moneyPayouts/.test(phone)
-  && /moneyFares/.test(app) && /moneyPayouts/.test(app));
+  /moneyHalves\(now, fmt\)/.test(phone) && /moneyHalves\(t, fmt\)/.test(app),
+  'one builder, so the two shells cannot compose the caption differently');
 /* Absent, never zero — the same rule the rest of this card is built on. Before
    any channel has been credited today the tile is a sentence, not AED 0. */
 check('an uncredited day says so rather than printing nought',
