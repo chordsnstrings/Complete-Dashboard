@@ -416,7 +416,7 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
       && !(h.unrated_platforms || []).includes('hotel'));
 }
 
-/* ── a channel that has FINISHED reporting is measured, never estimated ─────
+/* ── a cancelled booking with no price is DONE; a completed one is PENDING ──
    The first version of the projection valued every unpriced booking, and it was
    wrong on exactly the day easiest to check. 2026-09-07 on production is
    settled: Uber's weekly report had been walked overnight and 607 of the day's
@@ -425,37 +425,41 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
 
    Those 68 are not late — they are cancellations that took no fee. The day ran
    89.9% priced against 87.6% completed, and priced already EXCEEDS completed,
-   because some cancellations carry one. And the rate is revenue over all
-   bookings including the fee-less ones, so charging for them again on top is a
-   double count by construction.
+   because some cancellations carry one. The rate is revenue over all bookings
+   including the fee-less ones, so charging for them again is a double count.
 
-   Bolt below stands for that day: 90 of its 100 bookings priced, against a
-   settled share of 90%. It must be measured, not projected, while Uber — 0 of
-   41, against the same 90% — must be. */
+   The signal that separates the two is a count the endpoint already holds:
+   COMPLETED MINUS PRICED, work that finished and carries no money. On
+   production it is 0 on every settled channel and 569 of 569 on the one that
+   is actually mid-walk.
+
+   Bolt below is the settled shape: 90 completed and priced, 10 cancelled with
+   no fee. Uber is the walking one: 40 completed, none priced. */
 {
   for (let d = 1; d <= 6; d++) {
     await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
                requested_at,distance_km,status,product,payment_type,price)
              SELECT 'bolt','bs${d}_'||g,'ecosine','L105','b1','Bolt Driver',
                     '2026-08-${String(d).padStart(2, '0')}T12:00:00+04:00'::timestamptz,
-                    10,'completed','Bolt','card',
-                    CASE WHEN g <= 90 THEN 100 ELSE NULL END
+                    10, CASE WHEN g <= 90 THEN 'completed' ELSE 'client_cancelled' END,
+                    'Bolt','card', CASE WHEN g <= 90 THEN 120 ELSE NULL END
                FROM generate_series(1,100) g`);
   }
   await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
              requested_at,distance_km,status,product,payment_type,price)
            SELECT 'bolt','bd'||g,'ecosine','L105','b1','Bolt Driver',
-                  '${DAY}T13:00:00+04:00'::timestamptz,10,'completed','Bolt','card',
-                  CASE WHEN g <= 90 THEN 100 ELSE NULL END
+                  '${DAY}T13:00:00+04:00'::timestamptz,10,
+                  CASE WHEN g <= 90 THEN 'completed' ELSE 'client_cancelled' END,
+                  'Bolt','card', CASE WHEN g <= 90 THEN 100 ELSE NULL END
              FROM generate_series(1,100) g`);
   const h = (await get(`/api/day?day=${DAY}`)).headline;
   const parts = h.projection_parts || [];
 
-  check('a channel at its settled priced share is left to its measurement',
+  check('a channel whose only unpriced bookings are cancellations is measured',
     !parts.some((r) => r.platform === 'bolt'),
-    'bolt is 90 of 100 priced against a 90% settled share — its 10 unpriced are '
-    + 'cancellations that took no fee, and the rate already spreads those in');
-  check('…while a channel far below its settled share is still projected',
+    'bolt completed 90 and priced 90 — its other 10 were cancelled and took no '
+    + 'fee, and the per-booking rate already spreads those in');
+  check('…while a channel with completed work and no price on it is projected',
     parts.length === 1 && parts[0].platform === 'uber' && parts[0].bookings === 41);
   check('the day\u2019s measured trip value now holds both priced channels',
     h.revenue === 9500, String(h.revenue));
@@ -463,14 +467,19 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
     h.expected_revenue === 13190 && h.projected_revenue === 3690
       && h.projected_bookings === 41,
     `${h.revenue} + ${h.projected_revenue} = ${h.expected_revenue}`);
-  /* Had bolt been projected too, its ten unpriced would have added 900 at the
-     per-booking rate — on a day where every one of them earned nothing. */
-  check('…so the fee-less cancellations are not charged for twice',
-    h.expected_revenue !== 14090, 'bolt\u2019s 10 cancellations valued at AED 90 each');
-  /* The share each channel was judged against, reported rather than implied, so
-     a reader can see why one was estimated and the other was not. */
-  check('the settled share that made the decision is on the row',
-    parts[0] && parts[0].settled_share === 90, String(parts[0] && parts[0].settled_share));
+  /* The lookback days pay AED 120 a completed booking and the day itself pays
+     100, so bolt's rate (108 a booking) sits ABOVE what it actually earned.
+     A bolt wrongly read as still walking would therefore be marked UP to
+     10,800 and add 1,800 to the day — a difference the total can be checked
+     against, rather than a silent no-op. */
+  check('…and a channel that is done is not marked up to its own average',
+    h.expected_revenue !== 14990,
+    'bolt earned 9,000 on the day against a 10,800 rate; it is finished, so the '
+    + 'measurement stands');
+  check('the count that made the decision is on the row, not implied',
+    parts[0] && parts[0].pending === 40 && parts[0].completed === 40
+      && parts[0].pending_pct === 100,
+    JSON.stringify(parts[0]));
 }
 
 /* ── a channel caught MID-WALK: the whole of it is valued, not its remainder ─
@@ -526,6 +535,34 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
   const routes = readFileSync('api/day_routes.js', 'utf8');
   check('an estimate may add to a measurement and never contradict one',
     /Math\.max\(measured, bk \* at\.per_booking\)/.test(routes));
+}
+
+/* ── one unpriced ride does not put a whole channel on an estimate ──────────
+   The threshold above the pending count exists for a shape production shows
+   every day: the hotel channel runs 29 bookings, 29 completed, 28 priced —
+   one complimentary or unbilled ride, 3.4% of the channel. Without a floor
+   under the pending SHARE that single row reads as "still walking" and the
+   whole channel is replaced by an estimate, which on a fully-reported channel
+   can only be worse than the measurement it displaces.
+
+   Yango below is that shape: 20 completed, 19 priced, one ride nobody billed. */
+{
+  await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+             requested_at,distance_km,status,product,payment_type,price)
+           SELECT 'yango','yd'||g,'ecosine','L107','y1','Yango Driver',
+                  '${DAY}T15:00:00+04:00'::timestamptz,10,'completed','Econom','cash',
+                  CASE WHEN g <= 19 THEN 30 ELSE NULL END
+             FROM generate_series(1,20) g`);
+  const h = (await get(`/api/day?day=${DAY}`)).headline;
+  const parts = h.projection_parts || [];
+
+  check('one unbilled ride in twenty does not put the channel on an estimate',
+    !parts.some((r) => r.platform === 'yango'),
+    JSON.stringify(parts.map((r) => [r.platform, r.pending_pct])));
+  check('…so the measurement it would have displaced still stands',
+    h.revenue === 12070 && h.expected_revenue === 22760,
+    `${h.revenue} measured, ${h.expected_revenue} expected — 22,790 is the figure `
+    + 'a channel projected off a single row would have produced');
 }
 
 server.close();

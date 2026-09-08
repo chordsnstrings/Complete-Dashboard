@@ -1346,15 +1346,36 @@ defensible, and two of them were learned by getting it wrong on production:
   with 10 of 150 priced drags the rate from AED 90 to AED 73.24 a booking, 19%
   low, and every projection built on it with it.
 
-* **A channel is projected only while its priced share is short of where it
-  SETTLES — not merely because bookings lack a price.** The first version
-  projected every unpriced booking and was wrong on the day easiest to check:
-  2026-09-07 is settled, and it still added AED 3,355 for the 68 bookings
-  without a price, reporting an expected 39,320 over a measured 35,965. Those 68
-  are not late, they are the fee-less cancellations — the day ran 89.9% priced
-  against 87.6% completed. Below `0.9 × settled_share` the channel is mid-walk;
-  at or above it, **the measurement stands**. The margin is deliberately
-  generous to the measurement.
+* **A channel is projected on COMPLETED MINUS PRICED, not on how many bookings
+  lack a price.** Two wrong versions preceded this, both fixed against
+  production:
+  * *Every unpriced booking.* Wrong on the day easiest to check — 2026-09-07 is
+    settled and it still added AED 3,355 for the 68 bookings without a price,
+    reporting an expected 39,320 over a measured 35,965. Those 68 are fee-less
+    cancellations, and the per-booking rate already spreads them in.
+  * *Priced share below its settled share.* Better, still a proxy: Bolt on
+    2026-09-07 ran 21 of 40 priced against a 61.9% settled share, read as "still
+    walking" and added AED 133 — on a channel that prices every booking as it
+    lands and had simply cancelled more than usual. A channel that never defers
+    pricing would be projected on every bad day and, the estimate being floored
+    at the measurement, never marked down on a good one.
+
+  The signal is a count the endpoint already holds. **Work that finished and
+  carries no money is pending; a cancellation that took no fee is done.**
+  Measured on production it separates the cases outright:
+
+  | day | channel | completed | priced | pending |
+  |---|---|---:|---:|---:|
+  | 2026-09-07 | uber | 541 | 557 | 0 |
+  | 2026-09-07 | bolt | 21 | 21 | 0 |
+  | 2026-09-08 | uber | 569 | 0 | **569 (100%)** |
+  | 2026-09-08 | bolt | 10 | 10 | 0 |
+
+  `priced` exceeds `completed` on a settled Uber day because some cancellations
+  do carry a fee, which is why the count floors at zero. A **10% floor under the
+  pending share** drops the one complimentary hotel ride that shows up as 3.4%
+  of a small channel and would otherwise replace the whole of it with an
+  estimate.
 * **A channel being projected is valued WHOLE, not by its remainder.**
   `measured + unpriced × rate` double counts, because the per-booking rate
   already spreads the never-priced bookings in. It is

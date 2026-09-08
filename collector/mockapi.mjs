@@ -3524,9 +3524,10 @@ app.get('/api/day', (req, r) => {
       projected_platforms: ['uber'],
       projection_parts: [{ platform: 'uber', bookings: 168, per_booking: 62, days: 14, value: 10416 }],
       projection_lookback_days: 14,
-      projection_basis: 'an estimate: each channel\u2019s bookings that carry no price yet, '
-        + 'valued at what a booking on that channel was worth over the settled days behind '
-        + 'this one (up to 14)',
+      projection_basis: 'an estimate: each channel that has completed work carrying no '
+        + 'price yet, valued at what a booking on that channel was worth over the settled '
+        + 'days behind this one (up to 14). A booking that was cancelled without a fee is '
+        + 'not counted as pending',
       unrated_bookings: null, unrated_platforms: [],
       reported_payouts: 41210, uncounted_payouts: 41210, uncounted_payout_platforms: ['uber'],
       accounted_statements: null,

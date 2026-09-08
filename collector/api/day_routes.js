@@ -320,7 +320,7 @@ export function dayRoutes(app, { q, wrap }) {
             WHERE is_booking AND local_day >= $1::date - $2::int
               AND local_day < $1::date
             GROUP BY 1, 2)
-         SELECT platform, sum(bookings)::int rate_bookings, sum(priced)::int rate_priced,
+         SELECT platform, sum(bookings)::int rate_bookings,
                 sum(revenue) rate_revenue, count(*)::int rate_days
            FROM byday
           WHERE priced > 0 AND priced::numeric / bookings >= 0.5
@@ -385,7 +385,7 @@ export function dayRoutes(app, { q, wrap }) {
     for (const r of rateByPlat) {
       if (!r.rate_bookings || r.rate_revenue == null) continue;
       rate.set(r.platform, { per_booking: Number(r.rate_revenue) / r.rate_bookings,
-        settled_share: (r.rate_priced || 0) / r.rate_bookings, days: r.rate_days ?? 0 });
+        days: r.rate_days ?? 0 });
     }
     const projected = [];
     /* Absent with a reason, and the reason has to be the true one: a channel
@@ -399,37 +399,50 @@ export function dayRoutes(app, { q, wrap }) {
       if (bk <= 0 || short <= 0) continue;
       const at = rate.get(r.platform);
       if (!at) { unrated.push({ platform: r.platform, bookings: short }); continue; }
-      /* HAS THIS CHANNEL FINISHED REPORTING, OR IS IT STILL WALKING?
+      /* A COMPLETED BOOKING WITH NO PRICE IS PENDING. A CANCELLED ONE IS DONE.
          ─────────────────────────────────────────────────────────────────────
-         The first version of this projected every unpriced booking, and it was
-         wrong on exactly the day that was easiest to check. 2026-09-07 is
-         settled — Uber's report had been walked overnight and 607 of its 675
-         bookings carry a price — and the endpoint still added AED 3,355 for the
-         remaining 68, reporting an "expected" 39,320 over a measured 35,965.
-         Those 68 are not late. They are CANCELLATIONS THAT TOOK NO FEE: the day
-         ran 89.9% priced against 87.6% completed, and `priced` (607) already
-         exceeds `completed` (591) because some cancellations do carry one.
+         The first version projected every unpriced booking, and it was wrong on
+         the day easiest to check: 2026-09-07 is settled — Uber's report had been
+         walked overnight — and it still added AED 3,355 for the 68 bookings
+         without a price, reporting an expected 39,320 over a measured 35,965.
+         Those 68 are not late. They are cancellations that took no fee, and the
+         per-booking rate already spreads them in, so charging for them again is
+         a double count by construction.
 
-         They were also being counted twice by construction. The rate is revenue
-         over ALL bookings including the fee-less ones, so it already spreads
-         them in; adding `unpriced × rate` on top charges the fleet for them a
-         second time.
+         The second version asked whether the channel's priced share was short
+         of where it settles. Better, and still a proxy: on 2026-09-07 Bolt ran
+         21 of 40 priced against a 61.9% settled share, read as "still walking",
+         and added AED 133 — on a channel that prices every booking as it lands
+         and had simply cancelled more than usual that day. A channel that never
+         defers pricing would be projected on every bad day and, because the
+         estimate is floored at the measurement, never marked down on a good one.
 
-         So the question is not "how many bookings lack a price" but "is this
-         channel's priced share still short of where it settles". Below its own
-         settled share the channel is mid-walk and the whole of it is valued at
-         its rate; at or near that share it has finished and THE MEASUREMENT
-         STANDS. The 0.9 margin is deliberately generous to the measurement — a
-         channel 85% walked against a 90% settled share is left alone and its
-         residual goes unvalued, which is the direction to be wrong in. */
-      if ((r.priced || 0) / bk >= at.settled_share * 0.9) continue;
+         The signal is not a share at all. It is a count this endpoint already
+         holds: COMPLETED MINUS PRICED — work that finished and carries no
+         money. Measured on production, it separates the two cases outright:
+
+           2026-09-07  uber   completed 541  priced 557  pending 0
+                       bolt   completed  21  priced  21  pending 0
+           2026-09-08  uber   completed 569  priced   0  pending 569 (100%)
+                       bolt   completed  10  priced  10  pending 0
+
+         `priced` exceeds `completed` on a settled Uber day because some
+         cancellations do carry a fee, which is why this floors at zero. The 10%
+         threshold drops the one or two complimentary hotel rides that show up as
+         3-5% of a small channel and would otherwise project the whole of it. */
+      const done = r.completed || 0;
+      const pending = Math.max(0, done - (r.priced || 0));
+      if (pending <= 0 || pending < done * 0.1) continue;
       /* Never below what is already on record: an estimate may add to a
          measurement, never contradict one. */
       const measured = r.revenue == null ? 0 : Number(r.revenue);
       const whole = Math.max(measured, bk * at.per_booking);
       projected.push({ platform: r.platform, bookings: short,
+        /* `bookings` is what the caption names — the channel's bookings with no
+           price on them. `pending` is what made the DECISION, reported beside it
+           so the row explains itself rather than asserting a total. */
+        pending, completed: done, pending_pct: round((pending / done) * 100, 1),
         per_booking: round(at.per_booking, 2), days: at.days,
-        settled_share: round(at.settled_share * 100, 1),
         measured: round(measured, 0), value: round(whole - measured, 0) });
     }
     const projectedValue = projected.reduce((a, r) => a + r.value, 0);
@@ -470,9 +483,10 @@ export function dayRoutes(app, { q, wrap }) {
         projection_parts: projected,
         projection_lookback_days: PRICING_LOOKBACK_DAYS,
         projection_basis: projectedBookings
-          ? 'an estimate: each channel\u2019s bookings that carry no price yet, '
-            + 'valued at what a booking on that channel was worth over the settled '
-            + `days behind this one (up to ${PRICING_LOOKBACK_DAYS})`
+          ? 'an estimate: each channel that has completed work carrying no price '
+            + 'yet, valued at what a booking on that channel was worth over the '
+            + `settled days behind this one (up to ${PRICING_LOOKBACK_DAYS}). A `
+            + 'booking that was cancelled without a fee is not counted as pending'
           : null,
         unrated_bookings: unrated.reduce((a, r) => a + r.bookings, 0) || null,
         unrated_platforms: unrated.map((r) => r.platform),
