@@ -18,7 +18,8 @@ import { barChart, gapBars, areaChart, donut, hbars, heatmap, empty } from './ch
 import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   dayStr, dateStr, dtStr, timeStr, hourStr, money, pct, fmt, tripTime,
   sourceLabel, completionTone, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
-  avatar, moneyInTile, faresTile, alertRateFigure, splitAlerts, standingNote,
+  avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
+  alertRateFigure, splitAlerts, standingNote,
   UBER_FARE_WHY } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
@@ -699,6 +700,13 @@ async function tabOverview(root, id, prof) {
        implementation is the only way the two shells cannot disagree about what
        a person earned. */
     moneyInTile(k),
+    /* THE TWO CARDS THE OPERATOR ASKED FOR, and they close: money in is the
+       cash the driver already holds plus what the platforms settle by
+       transfer, with the second defined as the first subtracted from the
+       total. See the block above moneyParts in ui.js for what each feed
+       actually reports and what none of them does. */
+    cashOnHandTile(k),
+    bankDepositTile(k),
     faresTile(k),
     /* The same renderer as the Quality tab, so the two tiles cannot drift into
        showing one driver two different ratings. */

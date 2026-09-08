@@ -1135,3 +1135,77 @@ driver's 222 tracker fixes.
   figure, and only re-measuring both against the deployed API showed it — and
   then explained the residual as a real defect rather than leaving a six-person
   gap unexplained in the notes.
+
+### The driver money model, measured — 2026-09-08
+
+The operator settled what "money in" means (the all-platform day/week total,
+`driver_day.money`) and asked for cash on hand and the bank side beside it.
+Four readers and four measurers established the following against production.
+**Read this before touching any money figure on a driver page.**
+
+* **Only ONE writer fills `driver_statement_day` from a provider**:
+  `src/rollup.js:941`, `source='uber_rest'`, derived from
+  `driver_earnings_component`. So the statement view of the money is **Uber
+  only**. `driver_payout_day` has one writer, `src/rollup.js:658`, over
+  `driver_performance` — **Uber and Yango only**. Bolt, the hotel corporate
+  channel, FMS and CABMAN reach every money surface solely as `trip.price`.
+* **`driver_statement_day.bank`, `network_cash`, `unremitted` and `trips` are
+  dead columns for every API source.** `bank` is NULL on all 212 statement days
+  and 234 statement drivers over 2025-01-01..2026-09-08; the only writer is the
+  operator's workbook import (`api/server.js:3350`, `source='ledger'`), which
+  every money read filters out. **There is no reported bank transfer per
+  driver.**
+* **`driver_payout_day.earnings` IS a bank figure** — for Uber it is
+  `netOutstanding`, "the amount Uber wires" (`src/sources/uber.js:1430`) — so
+  `api/public/revenue.js:194`'s "Paid into the bank" is right about it. What it
+  is not is a figure over the window a reader picked.
+* **Cash is money already in the driver's hand.** `-sum(amount) FILTER
+  (category = 'cash_collected')`, `src/rollup.js:816`; the component arrives
+  negative and is stored as a magnitude. It is 16.9–18.8% of gross across three
+  windows — not 1%, and it is the whole of the 20% gap the driver page used to
+  show between its own two money figures.
+* **`gross = bank + cash` does not hold and cannot be made to.** Across 302
+  driver-window measurements, 260 had all three terms and **exactly 1 closed to
+  within AED 1**. With the measured payout as "bank", **bank + cash exceeds
+  gross on 81 of 89 drivers**. The residual decomposes exactly (zero error over
+  260 rows) and its dominant term is the Uber netOutstanding-vs-statement gap
+  that `api/reconcile_routes.js:66-90` already documents as a structural floor.
+  The only identity that closes is one defined by subtraction, and a card built
+  on it must say it is a remainder.
+* **`money`, `stmt_net`, `stmt_gross`, `stmt_fees` and `stmt_cash` are WEEKLY
+  figures divided by seven.** Over 84 driver-days each takes exactly four
+  distinct values, one per ISO week, changing only on Mondays. **The payout is
+  the opposite**: 90 of 90 Uber payout periods have `period_days = 1`. So on a
+  one-day window the gross and the cash are allocations and the bank is a
+  measurement — the three cards do not share a grain.
+* **A seven-day window is not the filing week.** Uber files Monday–Sunday.
+  2026-09-01..09-07 is offset by one, and for the sampled driver that is worth
+  AED 64.97 of cash and AED 445.00 of gross. `driver_day` stores the grain but
+  not the period bounds, so alignment cannot be detected from the endpoint —
+  qualify whenever the grain is coarser than a day.
+* **`driver_day.payout` over-counts and must never feed a card.** It sums the
+  per-day allocation of every payout row landing on any of a person's accounts:
+  wrong for 2 of 91 people in the week and 5 of 94 in August, and the driver
+  this all came in about is the single worst case in both (+386.34 / 14.7% and
+  +1,524.44 / 13.3%). Use `fleetIncome.accounted_payouts`.
+* **Three cash figures exist and where two are present they never agree**:
+  `day_cash` (Uber statement, the only one with coverage), `cash_earnings`
+  (Yango payout) and `day_payout_cash`. Name them; never sum them.
+* **A cash card built on the statement alone understates and lies by omission.**
+  62 of 112 people took cash on a channel that publishes no cash figure, worth
+  ≥ AED 5,001, and 14 would have been shown a dash reading "no channel reports
+  it" while `trip_ext.driver_holds_cash` marked the very bookings. The set of
+  people with a non-null statement cash figure is **exactly** the set with at
+  least one cash-paid Uber booking (89 = 89, no mismatch either way), and Uber
+  never files a zero cash line.
+* **A caption asserting an ordering between two figures must be gated on their
+  grain.** "The fares are Money in before commission" is true over a filing
+  week and FALSE on a day — the fares were smaller than the money for 36 of the
+  83 drivers who could show both, because the money is a flat weekly seventh
+  and the fares are that day's rides.
+* **`/api/driver/earnings`'s `fare` is not a fare.** It is
+  `sum(driver_statement_day.net)` — gross minus commission — and `tip_pct`
+  divides tips by it while calling the result a share of fares.
+* **`driver_day.fares` is not the fares half of `money`.** It is
+  `sum(trip.price)` over ALL platforms including the ones that filed a
+  statement. The fares half is `money − stmt_net`, and only that.

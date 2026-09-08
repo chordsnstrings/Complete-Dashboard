@@ -522,6 +522,20 @@ const dailyFor = (id) => {
          measured — a fixture where every day looked measured would let a page
          that states an allocation as a fact still look right. */
       money_period_days: b % 4 === 0 ? 1 : 7,
+      /* The parts of that money, on the row that carries it. The statement and
+         the cash inside it are filed weekly and shared across the week, which
+         is why consecutive days repeat here as they do on production — a
+         fixture with a fresh figure every day would hide the very allocation
+         the captions exist to disclose. payout is deliberately NOT equal to
+         money minus cash: it is driver_payout_day, the platform's reported
+         earnings for a period divided across its days, and nothing on the page
+         may treat it as the bank side. */
+      stmt_gross: +(km * rnd(3.1, 4.4)).toFixed(2),
+      stmt_fees: +(km * rnd(0.6, 0.9)).toFixed(2),
+      stmt_net: b % 4 === 0 ? null : +(km * rnd(2.2, 3.4)).toFixed(2),
+      cash: b % 4 === 0 ? null : +(km * rnd(0.3, 0.7)).toFixed(2),
+      payout: +(km * rnd(2.0, 3.6)).toFixed(2),
+      payout_cash: b % 3 === 0 ? null : 4,
       temp_max: +rnd(33, 44).toFixed(1), precipitation: 0, is_ramadan: false,
     });
   }
@@ -979,6 +993,38 @@ app.get('/api/driver/kpis', (req, r) => {
     day_money_days: 7,
     day_money_period_days: i % 2 ? 7 : 1,
     day_money_source: i % 2 ? 'statement' : 'fares',
+    /* The parts the three money cards decompose the gross into. Built so both
+       branches of every card are reachable from the fixture: the even drivers
+       have a statement covering all of it (no priced part, so the "nothing
+       reports the cash on the AED n priced from the bookings" clause must NOT
+       appear), the odd ones have a slice priced from bookings no statement
+       covered, and driver 4 reports no cash at all so the absent-with-a-reason
+       branch renders somewhere. */
+    day_stmt_net: i === 4 ? null
+      : Math.round((9800 - i * 500 + Math.round(d.reduce((a, x) => a + x.revenue, 0)))
+        * (i % 2 ? 0.84 : 1)),
+    day_cash: i === 4 ? null
+      : Math.round((9800 - i * 500 + Math.round(d.reduce((a, x) => a + x.revenue, 0))) * 0.17),
+    day_stmt_gross: 14200 - i * 700,
+    day_stmt_fees: 3600 - i * 180,
+    day_stmt_tips: 40 + i,
+    day_stmt_salik: 8 + i,
+    day_payout: 9800 - i * 500,
+    day_payout_cash: 36,
+    day_fares: Math.round(d.reduce((a, x) => a + x.revenue, 0) * 1.4),
+    /* The trip feed's own cash signal, so the card can tell a channel that
+       files no cash figure from a driver who took none. Driver 4 has cash
+       RIDES and no cash line, which is the branch that used to print a dash
+       denying cash the feed had marked. */
+    cash_bookings: i === 4 ? 9 : (i % 3 === 0 ? 0 : 12 + i),
+    cash_bookings_priced: i === 4 ? 7 : (i % 3 === 0 ? 0 : 9 + i),
+    cash_booking_value: i === 4 ? 310 : (i % 3 === 0 ? null : 240 + i * 12),
+    cash_booking_platforms: i === 4 ? ['bolt'] : ['uber', 'bolt'],
+    day_stmt_days: i === 4 ? 0 : 7,
+    day_cash_days: i === 4 ? 0 : 7,
+    day_payout_days: 7,
+    day_fares_days: 7,
+    day_rows: 12,
     /* Money in, and the two halves it is made of. Deliberately dominated by the
        payout: on this fleet a driver's fares are the few hotel bookings they
        happened to take, so a fixture where the halves are comparable would let

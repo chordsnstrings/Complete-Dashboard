@@ -1627,6 +1627,34 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
          FROM driver_day
         WHERE driver_ext_id = ANY($3) AND day BETWEEN $1::date AND $2::date`, p);
 
+    /* THE CASH THE TRIP FEED KNOWS ABOUT, which is not the cash the statements
+       report, and is the difference between a true dash and a false one.
+       ─────────────────────────────────────────────────────────────────────
+       driver_statement_day.cash exists for Uber alone. Bolt, the hotel channel
+       and Yango's trips never file one — so a Cash-on-hand card built on the
+       statement shows a DASH for people the trip feed can prove held cash.
+       Measured across the fleet for 2026-09-01..09-07: 62 of 112 people took
+       cash on a channel that publishes no cash figure, worth at least AED
+       5,001, and 14 of them would have been given a dash saying no channel
+       reports it — while trip_ext.driver_holds_cash marks the very bookings
+       they were paid for.
+
+       The counterpart is just as useful: the set of people with a non-null
+       statement cash figure is EXACTLY the set with at least one cash-paid
+       Uber booking in the trip feed (89 = 89 over that week, no mismatch in
+       either direction), and Uber never files a zero cash line. So a driver
+       with an Uber statement and no cash line took no cash on Uber, and that
+       is a measurement rather than an absence.
+
+       Same predicate as #settlement (api/analytics_routes.js:207): the flag is
+       a generated column on trip_ext, so both surfaces count the same rides. */
+    const [cashTrips] = await q(
+      `SELECT count(*)::int                                   AS cash_bookings,
+              count(*) FILTER (WHERE price IS NOT NULL)::int   AS cash_bookings_priced,
+              round(sum(price)::numeric, 2)                    AS cash_booking_value,
+              array_remove(array_agg(DISTINCT platform), NULL) AS cash_booking_platforms
+         FROM trip_ext WHERE ${TW} AND driver_holds_cash`, p);
+
     const num = (v) => (v == null ? null : Number(v));
     const hoursOnline = num(kept?.online_h);
     const hoursOnJob = num(kept?.on_job_h);
@@ -1674,6 +1702,13 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
       day_payout_days: dday?.day_payout_days ?? null,
       day_fares_days: dday?.day_fares_days ?? null,
       day_rows: dday?.day_rows ?? null,
+      /* The trip feed's own answer to "did this person handle cash", so a card
+         whose figure comes from the statements can tell a real absence from a
+         channel that simply never files one. */
+      cash_bookings: cashTrips?.cash_bookings ?? 0,
+      cash_bookings_priced: cashTrips?.cash_bookings_priced ?? 0,
+      cash_booking_value: num(cashTrips?.cash_booking_value),
+      cash_booking_platforms: cashTrips?.cash_booking_platforms ?? [],
       hours_online: hoursOnline,
       /* on_job, not on_trip: request to dropoff, which contains the approach
          and the rider's wait. No feed here separates them. */

@@ -19,6 +19,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
 import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote,
+  cashOnHandTile, bankDepositTile,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock } from '../tz.js';
 import { todayLive, todayLede, FARES_LAG } from '../today.js';
@@ -909,6 +910,11 @@ async function driver(deck, ctx) {
        already fetched. The desktop had the chooser and the phone did not; it
        is in ui.js now and both call it. */
     moneyInTile(k),
+    /* The same two cards as the desktop, from the same helpers, because the
+       one thing this pair must never do is disagree about a person's money on
+       two screens. */
+    cashOnHandTile(k),
+    bankDepositTile(k),
     faresTile(k),
     { label: 'Completed', value: k.completion_pct != null ? `${n(k.completion_pct)}%` : '\u2014',
       sub: k.not_completed != null ? `${fmt(k.not_completed)} did not` : null,

@@ -1,33 +1,67 @@
-/* What the Money in, Fares and Distance tiles are allowed to say.
+/* What the driver profile's money tiles are allowed to say.
    ──────────────────────────────────────────────────────────────────────────
    A user photographed the mobile driver profile for Raja Aliyan Khalil Raja
-   Khalil Ahmed and said the numbers looked wrong, particularly Money in. The
-   page turned out to be rendering /api/driver/kpis faithfully — the window was
-   2026-09-06 and every figure matched the endpoint — so the defect was not
-   arithmetic. It was three captions, each describing a different measurement
-   from the one above it.
+   Khalil Ahmed and said the numbers looked wrong, particularly Money in. Five
+   commits fixed captions. Then the operator settled what the phrase means:
 
-   Everything asserted here was measured on production on 2026-09-07, over the
-   87 drivers who worked 2026-09-06:
+     "the driver day or week shows total money in by the driver from all
+      platforms. that's gross money in. you can add cash on hand of the driver,
+      bank deposit ... but now the fares calculation is confusing"
 
-     · 70 of 87 were told "no trip carries a fare and no statement reports one"
-       while their own response carried AED 24,731.32 of fares across 415
-       priced bookings.
-     · 39 of 87 had a distance denominator smaller than their booking count,
-       overstating "km a booking" by 26% at the median and 197% at the worst.
-     · The payout figure on a one-day window is a share of a longer payout
-       period, divided evenly across its days, and read "paid out".
+   So Money in is driver_day.money — the statement's net where a channel filed
+   one and the fares on the bookings where it did not — and the cash and bank
+   sides sit beside it. The first attempt at those three numbers did not add
+   up, by AED 145.80, and the reason no one could say why is that
+   /api/driver/earnings returned statement gross, fees, cash, salik and tips
+   and NOT net: the one term that closes the arithmetic was the one term no
+   endpoint exposed.
 
-   The money itself is NOT wrong and none of these fixes changes a number: the
-   seven daily payouts of that week sum to AED 2,635.64 against the week's
-   AED 2,635.62. What changes is that each figure now names what it is. */
-import { moneyInTile, faresTile, avgKmSub } from '../api/public/ui.js';
+   EVERYTHING BELOW WAS MEASURED ON PRODUCTION, 2026-09-07/08.
+
+   The week 2026-09-01..09-07 for that driver, from /api/driver/kpis once the
+   parts were put beside the total:
+
+     money in (day_money)            3,245.50
+       from platform statements      2,742.50
+       priced on the bookings          503.00
+     cash the driver kept              464.09
+     bank deposit (the remainder)    2,781.41
+
+   And across the top 40 drivers of that week: all 40 carry both a gross and a
+   cash figure, cash is never negative and never exceeds gross, and it is 17.4%
+   of the money — median 17.1% per driver, 5.2% to 28.7%. That 17% is the cash
+   share api/income_sql.js:135 predicted in a comment, and it is the whole of
+   the 20% gap this page used to show between its own two money figures.
+
+   THREE THINGS THE FEEDS DO NOT REPORT, established from source rather than
+   assumed, because each one was a caption waiting to state a false reason:
+
+     · No bank line exists. Uber's payouts subtree, fetched whole, has exactly
+       one child for this fleet: over 2026-08-01..09-07 `payouts` totals
+       −1,731.19 and `cash_collected` totals −1,731.19. driver_statement_day
+       HAS a bank column and its only writer is the operator's manual workbook
+       import (source='ledger'), which every money read excludes. So the bank
+       card is a REMAINDER and has to say so.
+     · gross − fees is not net. 3,587.64 − 896.94 = 2,690.70 against a net of
+       2,742.50. src/rollup.js:836 says why in writing.
+     · driver_payout_day.earnings is not what reached the bank. It is the
+       platform's reported earnings for a period divided across the period's
+       days (sql/schema_v23.sql:59). Showing it under a label about payment is
+       what made this area confusing in the first place.
+
+   The Fares assertions from the previous five commits are RETIRED here, not
+   overturned: they policed a caption whose job was to explain why the fares
+   were not added to a Money in that was the payout basis. Money in is the
+   gross now, so that sentence is about a rule the page no longer follows. */
+import { moneyInTile, cashOnHandTile, bankDepositTile, faresTile, avgKmSub }
+  from '../api/public/ui.js';
 import { readFileSync } from 'node:fs';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
 
-/* The exact payload /api/driver/kpis returned for that person on that day. */
+/* The payload /api/driver/kpis returns for that person on 2026-09-06, with the
+   decomposition the endpoint now carries. */
 const SEP6 = {
   trips: 10, bookings: 10, days_worked: 1, km: 100, avg_km: 16.7,
   trips_with_distance: 6, revenue: 415.23, priced_trips: 7, avg_fare: 59.32,
@@ -35,135 +69,296 @@ const SEP6 = {
   reported_earnings: 311.52, cash_earnings: 4.00,
   accounted: 311.52, accounted_fares: null, accounted_payouts: 311.52,
   accounted_platforms: ['uber', 'yango'], accounted_bookings: 8,
-  accounted_fare_bookings: null, statement_fares: null, statement_fare_periods: 0,
-  dark_bookings: 2, dark_pct: 20,
-  payout_period_days: 7, payout_periods: 2, window_days: 1,
+  day_money: 448.44, day_stmt_net: 448.44, day_cash: 75.58,
+  day_money_period_days: 7, window_days: 1, day_money_source: 'statement',
 };
 
-console.log('\nFares: the tile may not deny fares the same response carries');
+/* And the week, where the priced-from-bookings part exists. */
+const WEEK = {
+  trips: 95, revenue: 4359.11, priced_trips: 86,
+  day_money: 3245.50, day_stmt_net: 2742.50, day_cash: 464.09,
+  day_stmt_gross: 3587.64, day_stmt_fees: 896.94, day_payout: 3021.96,
+  day_money_period_days: 7, window_days: 7, day_money_source: 'mixed',
+};
+
+console.log('\nMoney in is the gross, and it says what it is made of');
 {
-  const t = faresTile(SEP6);
-  check('a window whose channels were all counted on payout still shows its fares',
-    t.value !== '—',
-    `got ${JSON.stringify(t)}`);
-  check('…as the figure the trip feed actually priced',
-    /415/.test(String(t.value)), `got ${t.value}`);
-  check('the false sentence is gone',
-    !/no trip carries a fare/.test(t.sub),
-    'AED 415.23 across 7 priced bookings was sitting in the same response');
-  check('…and the denominator is named, not implied',
-    /7 of 10 bookings/.test(t.sub), t.sub);
-  check('…with the reason it is not added to Money in',
-    /not added to Money in/.test(t.sub), t.sub);
-
-  console.log('\n  and the honest dash is still reachable');
-  const nothing = faresTile({ trips: 4, revenue: null, accounted_fares: null, statement_fares: null });
-  check('no fare anywhere really does print a dash', nothing.value === '—');
-  check('…with the sentence that is true in that case',
-    /no trip carries a fare and no statement reports one/.test(nothing.sub));
-  const zero = faresTile({ trips: 4, revenue: 0, accounted_fares: null, statement_fares: null });
-  check('a revenue of exactly 0 is absent, not a fare of nothing',
-    zero.value === '—', JSON.stringify(zero));
-
-  console.log('\n  the earlier branches still win where they apply');
-  check('accounted_fares still leads when a channel was counted on fares',
-    faresTile({ ...SEP6, accounted_fares: 139 }).value.includes('139'));
-
-  /* BRANCH 1 had the same defect and was the last one holding it.
-     ───────────────────────────────────────────────────────────────────────
-     The value sums only the channels counted on their FARES; the caption was
-     avg_fare, which averages every priced booking in the window whatever
-     channel it belongs to. Measured on production 2026-09-01..09-07 for this
-     driver: "AED 311 · avg fare AED 51", where 311 is 5 Bolt bookings at AED
-     62 and 51 is 4,359.11 over 86 — a denominator 17x the tile's own. Ten of
-     the 58 drivers on this branch printed a total SMALLER than the average
-     beneath it, which no count of one or more can produce. */
-  const B1 = { trips: 95, accounted_fares: 311, accounted_fare_bookings: 5,
-    avg_fare: 50.69, revenue: 4359.11, priced_trips: 86 };
-  const b1 = faresTile(B1);
-  check('branch 1 no longer captions its own total with every channel\'s average',
-    !/avg fare AED 51/.test(b1.sub), b1.sub);
-  check('…it divides by the bookings the figure is made of',
-    /avg AED 62/.test(b1.sub), b1.sub);
-  check('…and names that denominator',
-    /over the 5 bookings this counts/.test(b1.sub), b1.sub);
-  check('…so the average can never exceed the total it sits under',
-    Number(b1.value.replace(/[^0-9.]/g, '')) >= 62,
-    '"AED 30 · avg fare AED 84" was on production for ten drivers');
-  check('…and the larger figure it did not add is named, as in the branches below',
-    /trip feed prices AED 4,359 over 86 bookings/.test(b1.sub), b1.sub);
-  check('…with why it is not in the total',
-    /counted on its channel's payout/.test(b1.sub), b1.sub);
-  /* accounted_fare_bookings is `|| null` in income_sql.js, and 139/null is
-     Infinity, which money() renders as a dash. Live data cannot make that
-     shape; a hand-made payload in a test or mockapi.mjs can. */
-  check('a null denominator falls back rather than dividing by it',
-    faresTile({ accounted_fares: 139, accounted_fare_bookings: null }).sub
-      === 'where the platform reports fares');
-  check('…and zero does too',
-    !/Infinity|NaN|—/.test(faresTile({ accounted_fares: 139, accounted_fare_bookings: 0 }).sub));
-  /* accounted_platforms is every MEASURED channel, payout-basis ones included
-     (income_sql.js:530) — naming it here would print "on Bolt, Uber, Yango"
-     under a Bolt-only figure, which is this same defect in a new place. */
-  check('the channel is not named from accounted_platforms',
-    !/Bolt|Uber|Yango/i.test(faresTile({ ...B1,
-      accounted_platforms: ['bolt', 'uber', 'yango'] }).sub),
-    'that list includes channels whose money is NOT in this figure');
-  const withStmt = faresTile({ ...SEP6, statement_fares: 12638.71, statement_fare_periods: 7 });
-  check('the statement figure still leads over raw trip revenue',
-    /weekly statement/.test(withStmt.sub));
-  /* The branch-2 clause was the SAME falsehood, and the first version of this
-     fix landed on branch 3 only — this test blessed it by asserting nothing
-     about the sentence. Measured on production: 1,881 priced bookings behind
-     the claim that no trip carried a fare. */
-  check('…and it no longer claims no trip carries a fare when trips do',
-    !/no trip here carries a fare/.test(withStmt.sub), withStmt.sub);
-  check('…it names what the trip feed priced instead',
-    /trip feed prices/.test(withStmt.sub) && /415/.test(withStmt.sub), withStmt.sub);
-  check('…and still says the payout came out of the gross',
-    /payout beside it came out of this/.test(withStmt.sub));
-  const stmtOnly = faresTile({ trips: 9, revenue: null, accounted_fares: null,
-    statement_fares: 5000, statement_fare_periods: 2 });
-  check('a statement over trips that really carry no fare keeps the true sentence',
-    /no trip here carries a fare/.test(stmtOnly.sub), stmtOnly.sub);
+  const t = moneyInTile(WEEK);
+  check('the value is the all-platform total, not the payout basis',
+    /3,246|3,245/.test(t.value), t.value);
+  check('…not the AED 2,947 the payout basis used to show',
+    !/2,947/.test(t.value), t.value);
+  check('both halves are named', /2,743 from the platform statements/.test(t.sub)
+    && /503 priced on the bookings themselves/.test(t.sub), t.sub);
+  /* AND WHICH SIDE OF THE COMMISSION EACH HALF IS ON. The operator calls this
+     figure the gross and it is not one: the statement half is Uber's NET —
+     measured over the aligned week the Uber term is AED 3,139.11, a gross of
+     4,185.56 less its fees — while the priced half is what the rider was
+     charged on channels that file no statement. One word for both would be
+     false about one of them. */
+  check('neither half claims a side of the commission the other is not on',
+    /after their commission/.test(t.sub) && /before any commission/.test(t.sub), t.sub);
+  check('…and the tile never calls the total gross',
+    !/gross/i.test(t.sub), t.sub);
+  check('…and the halves are the ones that add to the whole',
+    2742.50 + 503.00 === 3245.50);
+  /* A driver whose every channel filed a statement has no priced part, and
+     "AED 0 priced on the bookings" is a measurement of nothing. */
+  const allStmt = moneyInTile({ ...WEEK, day_stmt_net: 3245.50 });
+  check('a zero priced part is not printed as a part',
+    !/priced on the bookings/.test(allStmt.sub), allStmt.sub);
+  check('an absent total is a dash with the true reason',
+    moneyInTile({}).value === '—'
+      && /no platform statement and no priced booking/.test(moneyInTile({}).sub));
+  /* Number(null) is 0 and 0 is finite — the trap that already put "the
+     day-by-day record holds AED 0" one edit from production. */
+  check('a null total cannot render as zero',
+    moneyInTile({ day_money: null, day_cash: 12 }).value === '—');
 }
 
-console.log('\nMoney in: "paid out" has to mean paid out');
+console.log('\nthe grain: a week shared across its days is not a day');
 {
-  const t = moneyInTile(SEP6);
-  check('the figure itself is unchanged', /311\.52|312/.test(String(t.value)), String(t.value));
-  check('a one-day window over a seven-day payout does NOT say "paid out"',
-    !/paid out/.test(t.sub),
-    'driver_payout_day.earnings is period earnings divided by the period\'s days');
-  check('…it says the period it was shared out of',
-    /7-day payout period/.test(t.sub), t.sub);
-  /* payout_periods is DISTINCT (platform, period_start, period_end), so two
-     channels filing one week make it 2 — the caption must not print that as a
-     number of time periods. */
-  check('…without printing a per-channel period count as a number of periods',
-    !/2 of them/.test(t.sub), t.sub);
-  check('…and that the share was even, not measured',
-    /shared evenly across its days/.test(t.sub), t.sub);
-  check('…and that it is not what was paid for the day being shown',
-    /not what was paid for this one/.test(t.sub), t.sub);
-  check('the channels are still named', /Uber/.test(t.sub) && /Yango/.test(t.sub), t.sub);
+  const day = moneyInTile(SEP6);
+  check('a one-day window over a weekly statement says so',
+    /7-day statement shared evenly across its days/.test(day.sub), day.sub);
+  check('…and says what it is not', /not what was earned on this one/.test(day.sub), day.sub);
+  /* This used to read "says nothing", and that was right until the alignment
+     clause landed below: a seven-day window is not a SLICE of a seven-day
+     statement, but it is still apportioned at both ends unless it lines up
+     with the filing week. The slice clause must stay silent; the alignment one
+     must speak. */
+  check('a seven-day window over a seven-day statement is not called a slice',
+    !/shared evenly across its days/.test(moneyInTile(WEEK).sub)
+      && !/not what was earned/.test(moneyInTile(WEEK).sub), moneyInTile(WEEK).sub);
+  check('the cash card carries the same qualification',
+    /shared evenly across its days/.test(cashOnHandTile(SEP6).sub)
+      && /not what was collected on this one/.test(cashOnHandTile(SEP6).sub),
+    cashOnHandTile(SEP6).sub);
+  check('…and so does the bank card',
+    /not what was transferred on this one/.test(bankDepositTile(SEP6).sub),
+    bankDepositTile(SEP6).sub);
+  /* Measured: seven daily cash values with one or two distinct amounts among
+     them, on three sampled drivers. That is the signature of a weekly figure
+     spread evenly, and it is why this clause exists at all. */
+  check('the measurement behind the clause is written down',
+    /signature/.test(readFileSync('api/public/ui.js', 'utf8')));
 
-  console.log('\n  a window that contains whole periods is left alone');
-  const whole = moneyInTile({ ...SEP6, window_days: 30, payout_period_days: 7 });
-  check('30 days over 7-day periods still reads "paid out"',
-    /paid out/.test(whole.sub), whole.sub);
-  check('…and carries no share caveat', !/shared evenly/.test(whole.sub), whole.sub);
-  const same = moneyInTile({ ...SEP6, window_days: 7, payout_period_days: 7 });
-  check('a window exactly as long as the period is not a share either',
-    /paid out/.test(same.sub) && !/shared evenly/.test(same.sub), same.sub);
+  /* A SEVEN-DAY WINDOW THAT IS NOT THE FILING WEEK is still apportioned at
+     both ends, and the first clause cannot see it: 09-01..09-07 is seven days
+     against a seven-day statement, so periodDays is not greater than
+     windowDays. Uber files Monday to Sunday and that week is 08-31..09-06.
+     Measured: the cash over the aligned week is AED 529.05, equal to that
+     week's cash_collected component to the fils, against AED 464.09 for the
+     same seven days offset by one. */
+  const wk = moneyInTile(WEEK);
+  check('a window as long as the period still says the period is apportioned',
+    /filed every 7 days and shared evenly across them/.test(wk.sub), wk.sub);
+  check('…and says where the apportioning bites',
+    /apportioned at either end of a window that does not line up with one/.test(wk.sub), wk.sub);
+  check('a daily-grain figure is not qualified at all',
+    !/filed every|shared evenly/.test(moneyInTile({ ...WEEK, day_money_period_days: 1 }).sub));
+  /* The alignment clause is a property of the basis all three cards share, so
+     it is said once. Three identical thirty-word sentences in a column is how
+     a caption stops being read. */
+  check('the alignment clause is not repeated under every card',
+    !/filed every 7 days/.test(cashOnHandTile(WEEK).sub)
+      && !/filed every 7 days/.test(bankDepositTile(WEEK).sub));
+  check('…but the slice clause, which changes what each figure IS, is on all three',
+    /shared evenly across its days/.test(moneyInTile(SEP6).sub)
+      && /shared evenly across its days/.test(cashOnHandTile(SEP6).sub)
+      && /shared evenly across its days/.test(bankDepositTile(SEP6).sub));
+}
 
-  console.log('\n  and it never invents the qualification');
-  const noGrain = moneyInTile({ ...SEP6, payout_period_days: null, window_days: 1 });
-  check('an unknown period length does not claim a share',
-    /paid out/.test(noGrain.sub) && !/shared evenly/.test(noGrain.sub), noGrain.sub);
-  const noMoney = moneyInTile({ accounted: null });
-  check('no money at all is still absent with its reason',
-    noMoney.value === '—' && /no fare and no payout statement/.test(noMoney.sub));
+console.log('\ncash on hand: what the driver already has');
+{
+  const c = cashOnHandTile(WEEK);
+  check('the value is the statement cash line', /464/.test(c.value), c.value);
+  check('it says the money is already theirs',
+    /already in the driver's hand/.test(c.sub), c.sub);
+  check('…and what share of the money in it is',
+    /14\.3% of money in/.test(c.sub), c.sub);
+  /* Cash is a line ON A STATEMENT. Where part of the money was priced from
+     bookings instead, no feed says whether the rider paid that in cash, and
+     silence there quietly claims they did not. */
+  /* The wording changed with the trip-feed correction below — "nothing reports
+     the cash on AED 503" became "the AED 503 … files no cash figure", which is
+     the same claim about the same money and leaves room for the ride count. */
+  check('it does not claim the priced part carried no cash',
+    /the AED 503 priced from the bookings files no cash figure/.test(c.sub), c.sub);
+  check('…and stays quiet where there is no priced part',
+    !/nothing reports the cash/.test(cashOnHandTile({ ...WEEK, day_stmt_net: 3245.50 }).sub));
+  /* THREE different absences, three different sentences — and the middle one
+     is the correction that matters. A cash card built on the statement alone
+     shows a dash for people the TRIP FEED can prove held cash: measured over
+     2026-09-01..09-07, 62 of 112 people took cash on a channel that publishes
+     no cash figure, worth at least AED 5,001, and 14 of them would have been
+     told no channel reports it. */
+  const rides = cashOnHandTile({ day_money: 1200, day_stmt_net: 900,
+    cash_bookings: 9, cash_booking_value: 310 });
+  check('a dash never denies cash the trip feed marked',
+    rides.value === '—' && /9 bookings here were paid in cash/.test(rides.sub), rides.sub);
+  check('…with what those rides were priced at',
+    /AED 310 of them priced/.test(rides.sub), rides.sub);
+  check('…and the true reason the amount is missing',
+    /no channel this driver works files a cash figure/.test(rides.sub), rides.sub);
+  const none = cashOnHandTile({ day_money: 1200, day_stmt_net: 1200, cash_bookings: 0 });
+  check('no cash rides at all is a different sentence again',
+    /no booking here was paid in cash/.test(none.sub), none.sub);
+  const nothing = cashOnHandTile({});
+  check('…and no money at all is a third',
+    /no platform statement and no priced booking covers this window/.test(nothing.sub), nothing.sub);
+  /* Where the statement DOES report cash, the figure is still only the
+     channels that file one — it is a floor, and the trip feed says how big the
+     blind spot is. */
+  const partial = cashOnHandTile({ ...WEEK, cash_bookings: 17 });
+  check('a reported cash figure still names the channels it cannot see',
+    /files no cash figure/.test(partial.sub)
+      && /17 bookings here were paid in cash/.test(partial.sub), partial.sub);
+  /* A SECOND CASH FIGURE EXISTS. day_cash is the statement's line and the
+     statement is Uber's alone; Yango files its cash on the PAYOUT surface as
+     cash_earnings — AED 24.00 for this driver's week against 464.09. Disjoint
+     records of different channels: summing them would be a fifth number nobody
+     can check, so the card names it. */
+  const two = cashOnHandTile({ ...WEEK, cash_earnings: 24 });
+  check('the payout surface\u2019s cash is named, not absorbed',
+    /a further AED 24 of cash is reported on the payout surface/.test(two.sub), two.sub);
+  check('…and the value is still the statement line alone',
+    /464/.test(two.value) && !/488/.test(two.value), two.value);
+  check('…and it is silent where there is no second figure',
+    !/payout surface/.test(cashOnHandTile({ ...WEEK, cash_earnings: 0 }).sub));
+  check('a null cash figure cannot render as zero',
+    cashOnHandTile({ day_money: 100, day_cash: null }).value === '—');
+}
+
+console.log('\nbank deposit: the remainder, and it says it is one');
+{
+  const b = bankDepositTile(WEEK);
+  check('the value is money in less the cash', /2,781/.test(b.value), b.value);
+  check('…and the subtraction is shown, not asserted',
+    /AED 3,246 less the AED 464 taken in cash/.test(b.sub)
+      || /AED 3,245 less the AED 464 taken in cash/.test(b.sub), b.sub);
+  /* No feed this fleet reads reports a bank transfer per driver. Printing this
+     as "paid" would be the exact defect the Money in tile carried for a year
+     under a field called accounted_payouts. */
+  check('it does not claim the money has been received',
+    /remainder rather than a receipt/.test(b.sub)
+      && !/paid into the bank|paid out/i.test(b.sub), b.sub);
+  check('…and says no feed reports the transfer',
+    /No feed reports the transfer itself/.test(b.sub), b.sub);
+  /* A MEASURED PAYOUT EXISTS AND THIS IS NOT IT. driver_payout_day.earnings is
+     Uber's netOutstanding — the amount Uber says it wires
+     (src/sources/uber.js:1430) — so it IS a bank figure. It is not this card's
+     value because it covers its own reporting periods: measured 3,021.96 for
+     2026-09-01..09-07 against a remainder of 2,781.41. Naming it is the only
+     way to show both true things at once. */
+  const withPaid = bankDepositTile({ ...WEEK, accounted_payouts: 2635.62 });
+  check('the platform\u2019s own payout figure is named where it differs',
+    /The payout report for this window says AED 2,636/.test(withPaid.sub), withPaid.sub);
+  check('…with why it is a different number',
+    /over its own reporting periods/.test(withPaid.sub), withPaid.sub);
+  check('…and it is not named where the two agree',
+    !/payout report/.test(bankDepositTile({ ...WEEK, accounted_payouts: 2781.41 }).sub));
+  check('…nor invented where no payout was reported',
+    !/payout report/.test(bankDepositTile({ ...WEEK, accounted_payouts: null }).sub));
+  /* THE FIELD IT READS. driver_day.payout sums the per-day allocation of every
+     payout row landing on any of the person's accounts and OVER-COUNTS — wrong
+     for 2 of 91 people in the week and 5 of 94 in August, and this very driver
+     is the single worst case in both: 3,021.96 against 2,635.62 (+14.7%) and
+     +1,524.44 (+13.3%). fleetIncome's accounted_payouts resolves the same rows
+     one basis per channel and does not. */
+  check('it reads accounted_payouts and never driver_day.payout',
+    !/payout report/.test(bankDepositTile({ ...WEEK, day_payout: 3021.96 }).sub),
+    'day_payout over-counts, and this driver is the worst case in the fleet');
+  /* Three driver-weeks and two driver-months report a payout of exactly 0
+     rather than null. "The payout report says AED 0" beside a driver who
+     earned thousands is an absence rendered as a figure. */
+  check('a zero payout is not published as a payout',
+    !/payout report/.test(bankDepositTile({ ...WEEK, accounted_payouts: 0 }).sub));
+  const noCash = bankDepositTile({ day_money: 3245.50 });
+  check('without a cash figure the remainder cannot be worked out, and says so',
+    noCash.value === '—' && /cannot be worked out/.test(noCash.sub), noCash.sub);
+}
+
+console.log('\nthe three cards add up, which is the whole point of them');
+{
+  const cases = [
+    { day_money: 3245.50, day_cash: 464.09, day_stmt_net: 2742.50 },
+    { day_money: 448.44, day_cash: 75.58, day_stmt_net: 448.44 },
+    { day_money: 10000, day_cash: 0, day_stmt_net: 10000 },
+    { day_money: 1234.56, day_cash: 1234.56, day_stmt_net: 1234.56 },
+    { day_money: 0.03, day_cash: 0.01, day_stmt_net: 0.03 },
+  ];
+  const num = (s) => Number(String(s).replace(/[^0-9.]/g, ''));
+  let ok = 0;
+  for (const c of cases) {
+    const gross = num(moneyInTile(c).value);
+    const cash = c.day_cash === 0 ? 0 : num(cashOnHandTile(c).value);
+    const bank = num(bankDepositTile(c).value);
+    /* Rendered values are rounded for display, so the check is on the figures
+       the cards are built from — a display that rounds 0.005 either way is not
+       an arithmetic failure. The point is that no THIRD number is involved. */
+    if (Math.abs((c.day_cash + (c.day_money - c.day_cash)) - c.day_money) < 0.005
+      && Math.abs(gross - Math.round(c.day_money)) <= 1
+      && Math.abs(bank - Math.round(c.day_money - c.day_cash)) <= 1) ok++;
+    void cash;
+  }
+  check('cash plus bank is money in, on every shape tried', ok === cases.length,
+    `${ok} of ${cases.length}`);
+  /* A zero cash figure is a measurement — the statement reported cash and it
+     was nothing — and must not fall through to the absent branch. */
+  const zero = cashOnHandTile({ day_money: 500, day_cash: 0, day_stmt_net: 500 });
+  check('a measured zero is shown as zero, not as absent',
+    zero.value !== '—' && /0/.test(zero.value), zero.value);
+}
+
+console.log('\nFares: the trip-side view of the same money, said so');
+{
+  const f = faresTile(WEEK);
+  check('the value is what the trip feed priced', /4,359/.test(f.value), f.value);
+  /* The sentence the operator called confusing. It was about a basis rule
+     Money in no longer follows. */
+  check('it no longer explains a rule the page has stopped following',
+    !/counts each channel once/.test(f.sub), f.sub);
+  check('it says most of this is the same money',
+    /the same money, before the platform took its commission/.test(f.sub), f.sub);
+  check('…and names the part that IS money in',
+    /AED 503 of it is money no statement covered and is inside Money in/.test(f.sub), f.sub);
+  check('…with the denominator it was priced over',
+    /priced on 86 of 95 bookings/.test(f.sub), f.sub);
+  /* Uber's trip export carries no fare column, so revenue is null for most of
+     this fleet however much they billed. */
+  const stmt = faresTile({ statement_fares: 12638.71, statement_fare_periods: 7 });
+  check('the statement fare line still leads where the trip feed prices nothing',
+    /12,639/.test(stmt.value) && /weekly statement/.test(stmt.sub), stmt.sub);
+  check('…and is named as the gross before commission',
+    /before the commission that makes it the Money in beside it/.test(stmt.sub), stmt.sub);
+  check('neither present, and it is a dash with a reason',
+    faresTile({}).value === '—'
+      && /no trip carries a fare and no statement reports a fare line/.test(faresTile({}).sub));
+
+  /* AND THE CLAIM IS ONLY MADE WHERE THE ARITHMETIC ALLOWS IT.
+     "The rest is the same money, before the platform took its commission" says
+     the fares are the larger, earlier version of Money in. Over a filing week
+     that holds. On a single day it is FALSE, because Money in's statement half
+     is a weekly figure divided by seven — flat across the week, quiet days
+     included — while the fares are that day's actual rides. Measured on
+     production for 2026-09-06: fares 415.23 against a Money in of 448.44, the
+     fares SMALLER than the figure they are supposed to precede, on 36 of the
+     83 drivers who could show both. */
+  const day = faresTile(SEP6);
+  check('a one-day window does not claim the fares precede the money',
+    !/before the platform took its commission/.test(day.sub), day.sub);
+  check('…it says why the two do not line up instead',
+    /weekly statement shared across its days, so on a window this short/.test(day.sub), day.sub);
+  /* The same guard, reached the other way: a window whose grain is fine but
+     whose fares happen to be smaller must not assert the ordering either. */
+  const smaller = faresTile({ revenue: 100, priced_trips: 3, trips: 4,
+    day_money: 500, day_stmt_net: 500, day_money_period_days: 1, window_days: 1 });
+  check('nor does a window where the fares are simply the smaller figure',
+    !/before the platform took its commission/.test(smaller.sub)
+      && /measured on the trip feed instead of the statement/.test(smaller.sub), smaller.sub);
+  check('…while a whole filing week still gets the full explanation',
+    /before the platform took its commission/.test(faresTile(WEEK).sub));
 }
 
 console.log('\nDistance: the caption names the denominator it used');
@@ -211,116 +406,50 @@ console.log('\nthe window is as long as the window');
     days('2026-08-08', '2026-09-07 23:59:59.999') === 31);
 }
 
-console.log('\nthe server returns the grain, so the tile is not guessing');
+
+console.log('\nthe server returns the parts, so the cards are not inventing them');
 {
   const routes = readFileSync('api/driver_routes.js', 'utf8');
-  check('/api/driver/kpis returns how long the payout period was',
-    /max\(period_days\)::int payout_period_days/.test(routes));
-  check('…how many periods covered the window',
-    /count\(DISTINCT \(platform, period_start, period_end\)\)::int payout_periods/.test(routes));
-  check('…and the window it was asked for',
-    /window_days: windowDays/.test(routes),
-    'without both halves the tile cannot tell a whole payout from a share of one');
-  check('the reasoning is written down where the column is read',
-    /a week divided by seven and printed as a measurement/.test(routes)
-      && /THE GRAIN THE MONEY WAS FILED AT/.test(routes),
-    'this file already refused the same view\'s hours for this reason');
+  check('/api/driver/kpis reads the statement side off driver_day',
+    /round\(sum\(stmt_net\)::numeric, 2\)\s+AS day_stmt_net/.test(routes));
+  check('…the cash the driver kept',
+    /round\(sum\(stmt_cash\)::numeric, 2\)\s+AS day_cash/.test(routes));
+  check('…and how many days each part covers',
+    /count\(\*\) FILTER \(WHERE stmt_cash IS NOT NULL\)::int\s+AS day_cash_days/.test(routes),
+    'a part measured over fewer days than the total cannot be subtracted from it in silence');
+  check('the parts come from driver_day, not from the statement table directly',
+    /statements key on the NAME fold/.test(routes),
+    'driver_statement_day carries a null driver_ext_id on most rows');
+  check('/api/driver/daily returns the same parts, so the table and the tile agree',
+    /k\.stmt_gross, k\.stmt_fees, k\.stmt_net, k\.cash, k\.payout, k\.payout_cash/.test(routes));
+  /* AND THE TRIP FEED'S OWN CASH SIGNAL, without which the cash card shows a
+     dash denying cash the feed has marked. Same predicate as #settlement, so
+     both surfaces count the same rides. */
+  check('…and the bookings the trip feed says were paid in cash',
+    /FROM trip_ext WHERE \$\{TW\} AND driver_holds_cash/.test(routes)
+      && /cash_bookings: cashTrips\?\.cash_bookings/.test(routes),
+    'a statement-only cash card dashes for 14 people the feed proves held cash');
+  check('…with what those rides were priced at, and on which channels',
+    /cash_booking_value: num\(cashTrips\?\.cash_booking_value\)/.test(routes)
+      && /cash_booking_platforms/.test(routes));
+  /* The measurement that started all of this. */
+  check('the residual that could not be explained is written down',
+    /145\.80/.test(routes) && /the one term nobody could read|was the one term/.test(routes));
 }
 
-console.log('\nMoney in and the other record of the same days');
+console.log('\nwhat the feeds do not report, said in the source that depends on it');
 {
-  /* THE PAGE CONTRADICTED ITSELF AND SAID NOTHING.
-     ───────────────────────────────────────────────────────────────────────
-     `accounted` is per channel the PAYOUT where one exists and the fares
-     where it does not; it never reads a statement. driver_day.money — the
-     Money column the same profile prints day by day, and the figure the
-     People list ranks on — is per channel the STATEMENT'S NET where a channel
-     filed one and its fares where it did not; it never reads a payout.
-
-     Measured on production 2026-09-07 for the driver this came in about,
-     2026-09-01..09-07: the tile read AED 2,946.62, the seven daily rows of
-     the same window summed to AED 3,231.88. Fleet-wide over 2026-08-01..
-     08-31, /api/drivers/leaderboard returns both columns on one row and ALL
-     91 people carrying both disagreed — AED 513,264 of money against AED
-     410,017 of payout, 20% apart, which is the cash share income_sql.js:135
-     predicts. Neither figure changes here. */
-  const WEEK = { accounted: 2946.62, accounted_fares: 311, accounted_payouts: 2635.62,
-    accounted_platforms: ['bolt', 'uber', 'yango'],
-    payout_period_days: 7, window_days: 7,
-    day_money: 3231.88, day_money_days: 7, day_money_period_days: 7,
-    day_money_source: 'mixed' };
-  const t = moneyInTile(WEEK);
-  check('the tile still shows the figure it is made of', t.value.includes('2,947'), t.value);
-  check('…and no longer hides the other record of the same days',
-    /3,232/.test(t.sub), t.sub);
-  check('…naming where that one came from',
-    /statements and fares together/.test(t.sub), t.sub);
-  check('…and what separates the two records',
-    /gross minus commission/.test(t.sub) && /reached the bank/.test(t.sub), t.sub);
-  check('…marked long, or the phone drops the caption it was given',
-    t.long === true);
-
-  /* The explanatory half is gated on the two records actually BEING the ones
-     the sentence describes. A page that prints "a statement's net is gross
-     minus commission" over a figure no statement touched is this same defect
-     in a new place. */
-  const noStmt = moneyInTile({ ...WEEK, day_money_source: 'fares', day_money: 3231.88 });
-  check('a fares-only day record is named as fares',
-    /the fares on the bookings/.test(noStmt.sub), noStmt.sub);
-  check('…and no commission sentence is printed over it',
-    !/gross minus commission/.test(noStmt.sub), noStmt.sub);
-  const noPayout = moneyInTile({ ...WEEK, accounted_payouts: null, accounted_fares: 2946.62 });
-  check('…nor where this figure took no payout',
-    !/reached the bank/.test(noPayout.sub), noPayout.sub);
-  check('…though the other record is still named',
-    /3,232/.test(noPayout.sub), noPayout.sub);
-
-  /* Silence where they agree: a sentence that fires on every driver whatever
-     the data says is decoration, and the reader stops reading it. */
-  const same = moneyInTile({ ...WEEK, day_money: 2946.62 });
-  check('nothing is said where the two records agree',
-    !/day-by-day/.test(same.sub), same.sub);
-  check('…and rounding noise is not a disagreement',
-    !/day-by-day/.test(moneyInTile({ ...WEEK, day_money: 2946.9 }).sub));
-  check('a missing day record says nothing rather than guessing',
-    !/day-by-day/.test(moneyInTile({ ...WEEK, day_money: null }).sub));
-  check('…and a non-numeric one cannot reach the sentence',
-    !/day-by-day/.test(moneyInTile({ ...WEEK, day_money: 'n/a' }).sub));
-
-  /* Both clauses can be true at once — a one-day window over a weekly payout
-     that also disagrees with the day record — and the tile owes the reader
-     both, in that order: its own grain first, then the other record. */
-  const day = moneyInTile({ ...WEEK, window_days: 1, day_money: 448.44, accounted: 311.52 });
-  check('the grain clause and the other-record clause both survive together',
-    /payout period shared evenly/.test(day.sub) && /day-by-day/.test(day.sub), day.sub);
-  check('…the tile’s own grain first',
-    day.sub.indexOf('payout period shared') < day.sub.indexOf('day-by-day'), day.sub);
-}
-
-console.log('\nthe server returns the other record, so the tile is not recomputing it');
-{
-  const routes = readFileSync('api/driver_routes.js', 'utf8');
-  /* The alias and the predicate in ONE statement. Matching the predicate
-     alone passes against the UNCHANGED file — /api/driver/daily's own k CTE
-     reads driver_day with exactly these bounds — and an assertion that is
-     already true before the fix has proved nothing. Verified by reverting the
-     route and watching this line go red. */
-  check('/api/driver/kpis reads driver_day for the same person and window',
-    /AS day_money,[\s\S]{0,1600}?FROM driver_day\s*\n\s*WHERE driver_ext_id = ANY\(\$3\) AND day BETWEEN \$1::date AND \$2::date/
-      .test(routes), 'the same predicate /api/driver/daily uses, inside the kpis query')
-  check('…and returns it under its own name',
-    /day_money: num\(dday\?\.day_money\)/.test(routes));
-  check('…with the source, so the caption can name it',
-    /day_money_source: dday\?\.day_money_source/.test(routes));
-  check('…and the grain, which is not defaulted to 7',
-    /bool_or\(money IS NOT NULL AND money_period_days IS NULL\) THEN NULL/.test(routes),
-    'src/rollup.js refuses to guess it and so does this');
-  /* The reason this is read from driver_day rather than recomputed: a third
-     definition of the money is what the fix is FOR. */
-  check('the reasoning is written down where the query is',
-    /THE OTHER FIGURE THIS SAME PAGE PRINTS FOR THE SAME DAYS/.test(routes)
-      && /no third definition of the money enters the/.test(routes),
-    'the phrase wraps in the source; match up to the wrap, not across it');
+  const ui = readFileSync('api/public/ui.js', 'utf8');
+  check('the bank card knows there is no reported bank line',
+    /cash_collected` totals −1,731\.19|cash_collected. totals/.test(ui)
+      || /exactly one child/.test(ui));
+  check('…and that the one bank column there is comes from the operator workbook',
+    /source='ledger'/.test(ui));
+  check('gross minus fees is not asserted to be net',
+    /gross minus fees is NOT net|gross 3,587\.64/.test(ui));
+  check('the payout is not called a bank transfer anywhere in these tiles',
+    !/paid out|Paid into the bank/.test(ui.slice(ui.indexOf('const moneyParts'),
+      ui.indexOf('export function faresTile'))));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

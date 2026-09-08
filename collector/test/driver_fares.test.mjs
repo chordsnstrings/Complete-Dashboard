@@ -137,13 +137,29 @@ const ov = await tiles(`#driver/${RIDE}?${W}`);
 const fares = find(ov, /^Fares$/i);
 check('the overview Fares tile is no longer a dash', fares && !/^—$/.test(fares.v), JSON.stringify(fares));
 check('…it is the figure the statement reported', num(fares?.v) === 1200, JSON.stringify(fares));
-check('…and it says whose figure it is and that it contains the payout',
-  /platform's own figure/i.test(fares?.s || '') && /payout beside it came out of this/i.test(fares?.s || ''),
-  (fares?.s || '').slice(0, 200));
-/* The tile next door is the payout. If the two were added the money-in tile
-   would read 2,060; it must still read what actually reached the fleet. */
+/* The intent of this check is unchanged and the words are not: the tile must
+   say WHOSE figure it is and how it relates to the money beside it. It used to
+   say "the platform's own figure … the payout beside it came out of this",
+   because Money in was then the payout basis. The operator has since settled
+   that Money in is the all-platform gross, so the relationship the tile has to
+   state is the commission, not the payout. */
+check('…and it says whose figure it is and how it relates to the money beside it',
+  /platform's own fare line/i.test(fares?.s || '')
+    && /before the commission that makes it the Money in beside it/i.test(fares?.s || ''),
+  (fares?.s || '').slice(0, 220));
+/* The tile next door is the money in. If the two were added it would read
+   2,060; it must still read what the day rows actually hold. */
 const moneyIn = find(ov, /^Money in$/i);
 check('the Money in tile did not absorb the gross', num(moneyIn?.v) !== 2060, JSON.stringify(moneyIn));
+/* And the two cards the operator asked for are on the same strip, adding to
+   it. A fixture driver whose channel files no statement has no cash line, so
+   both of them must be present and both must be honest about that. */
+const cash = find(ov, /^Cash on hand$/i);
+const bank = find(ov, /^Bank deposit$/i);
+check('the cash card is on the overview', !!cash, JSON.stringify(ov.map((t) => t.l)));
+check('the bank card is on the overview', !!bank, JSON.stringify(ov.map((t) => t.l)));
+check('…and the bank card never claims the money was received',
+  !/paid into the bank|paid out/i.test(bank?.s || ''), (bank?.s || '').slice(0, 200));
 
 const hv = await tiles(`#driver/${HOTEL}?${W}`);
 check('a priced channel still shows its trip fares, unchanged',
