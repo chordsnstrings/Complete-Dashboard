@@ -320,7 +320,7 @@ export function dayRoutes(app, { q, wrap }) {
             WHERE is_booking AND local_day >= $1::date - $2::int
               AND local_day < $1::date
             GROUP BY 1, 2)
-         SELECT platform, sum(bookings)::int rate_bookings,
+         SELECT platform, sum(bookings)::int rate_bookings, sum(priced)::int rate_priced,
                 sum(revenue) rate_revenue, count(*)::int rate_days
            FROM byday
           WHERE priced > 0 AND priced::numeric / bookings >= 0.5
@@ -385,7 +385,7 @@ export function dayRoutes(app, { q, wrap }) {
     for (const r of rateByPlat) {
       if (!r.rate_bookings || r.rate_revenue == null) continue;
       rate.set(r.platform, { per_booking: Number(r.rate_revenue) / r.rate_bookings,
-        days: r.rate_days ?? 0 });
+        settled_share: (r.rate_priced || 0) / r.rate_bookings, days: r.rate_days ?? 0 });
     }
     const projected = [];
     /* Absent with a reason, and the reason has to be the true one: a channel
@@ -394,13 +394,43 @@ export function dayRoutes(app, { q, wrap }) {
        price or silently dropped. */
     const unrated = [];
     for (const r of platforms) {
-      const short = (r.bookings || 0) - (r.priced || 0);
-      if (short <= 0) continue;
+      const bk = r.bookings || 0;
+      const short = bk - (r.priced || 0);
+      if (bk <= 0 || short <= 0) continue;
       const at = rate.get(r.platform);
       if (!at) { unrated.push({ platform: r.platform, bookings: short }); continue; }
+      /* HAS THIS CHANNEL FINISHED REPORTING, OR IS IT STILL WALKING?
+         ─────────────────────────────────────────────────────────────────────
+         The first version of this projected every unpriced booking, and it was
+         wrong on exactly the day that was easiest to check. 2026-09-07 is
+         settled — Uber's report had been walked overnight and 607 of its 675
+         bookings carry a price — and the endpoint still added AED 3,355 for the
+         remaining 68, reporting an "expected" 39,320 over a measured 35,965.
+         Those 68 are not late. They are CANCELLATIONS THAT TOOK NO FEE: the day
+         ran 89.9% priced against 87.6% completed, and `priced` (607) already
+         exceeds `completed` (591) because some cancellations do carry one.
+
+         They were also being counted twice by construction. The rate is revenue
+         over ALL bookings including the fee-less ones, so it already spreads
+         them in; adding `unpriced × rate` on top charges the fleet for them a
+         second time.
+
+         So the question is not "how many bookings lack a price" but "is this
+         channel's priced share still short of where it settles". Below its own
+         settled share the channel is mid-walk and the whole of it is valued at
+         its rate; at or near that share it has finished and THE MEASUREMENT
+         STANDS. The 0.9 margin is deliberately generous to the measurement — a
+         channel 85% walked against a 90% settled share is left alone and its
+         residual goes unvalued, which is the direction to be wrong in. */
+      if ((r.priced || 0) / bk >= at.settled_share * 0.9) continue;
+      /* Never below what is already on record: an estimate may add to a
+         measurement, never contradict one. */
+      const measured = r.revenue == null ? 0 : Number(r.revenue);
+      const whole = Math.max(measured, bk * at.per_booking);
       projected.push({ platform: r.platform, bookings: short,
         per_booking: round(at.per_booking, 2), days: at.days,
-        value: round(short * at.per_booking, 0) });
+        settled_share: round(at.settled_share * 100, 1),
+        measured: round(measured, 0), value: round(whole - measured, 0) });
     }
     const projectedValue = projected.reduce((a, r) => a + r.value, 0);
     const projectedBookings = projected.reduce((a, r) => a + r.bookings, 0);

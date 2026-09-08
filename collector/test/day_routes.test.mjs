@@ -416,6 +416,118 @@ check('the trip table survived', (await q('SELECT count(*)::int n FROM trip'))[0
       && !(h.unrated_platforms || []).includes('hotel'));
 }
 
+/* ── a channel that has FINISHED reporting is measured, never estimated ─────
+   The first version of the projection valued every unpriced booking, and it was
+   wrong on exactly the day easiest to check. 2026-09-07 on production is
+   settled: Uber's weekly report had been walked overnight and 607 of the day's
+   675 bookings carry a price. The endpoint still added AED 3,355 for the other
+   68 and reported an expected 39,320 over a measured 35,965.
+
+   Those 68 are not late — they are cancellations that took no fee. The day ran
+   89.9% priced against 87.6% completed, and priced already EXCEEDS completed,
+   because some cancellations carry one. And the rate is revenue over all
+   bookings including the fee-less ones, so charging for them again on top is a
+   double count by construction.
+
+   Bolt below stands for that day: 90 of its 100 bookings priced, against a
+   settled share of 90%. It must be measured, not projected, while Uber — 0 of
+   41, against the same 90% — must be. */
+{
+  for (let d = 1; d <= 6; d++) {
+    await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+               requested_at,distance_km,status,product,payment_type,price)
+             SELECT 'bolt','bs${d}_'||g,'ecosine','L105','b1','Bolt Driver',
+                    '2026-08-${String(d).padStart(2, '0')}T12:00:00+04:00'::timestamptz,
+                    10,'completed','Bolt','card',
+                    CASE WHEN g <= 90 THEN 100 ELSE NULL END
+               FROM generate_series(1,100) g`);
+  }
+  await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+             requested_at,distance_km,status,product,payment_type,price)
+           SELECT 'bolt','bd'||g,'ecosine','L105','b1','Bolt Driver',
+                  '${DAY}T13:00:00+04:00'::timestamptz,10,'completed','Bolt','card',
+                  CASE WHEN g <= 90 THEN 100 ELSE NULL END
+             FROM generate_series(1,100) g`);
+  const h = (await get(`/api/day?day=${DAY}`)).headline;
+  const parts = h.projection_parts || [];
+
+  check('a channel at its settled priced share is left to its measurement',
+    !parts.some((r) => r.platform === 'bolt'),
+    'bolt is 90 of 100 priced against a 90% settled share — its 10 unpriced are '
+    + 'cancellations that took no fee, and the rate already spreads those in');
+  check('…while a channel far below its settled share is still projected',
+    parts.length === 1 && parts[0].platform === 'uber' && parts[0].bookings === 41);
+  check('the day\u2019s measured trip value now holds both priced channels',
+    h.revenue === 9500, String(h.revenue));
+  check('and expected adds only the channel that is still walking',
+    h.expected_revenue === 13190 && h.projected_revenue === 3690
+      && h.projected_bookings === 41,
+    `${h.revenue} + ${h.projected_revenue} = ${h.expected_revenue}`);
+  /* Had bolt been projected too, its ten unpriced would have added 900 at the
+     per-booking rate — on a day where every one of them earned nothing. */
+  check('…so the fee-less cancellations are not charged for twice',
+    h.expected_revenue !== 14090, 'bolt\u2019s 10 cancellations valued at AED 90 each');
+  /* The share each channel was judged against, reported rather than implied, so
+     a reader can see why one was estimated and the other was not. */
+  check('the settled share that made the decision is on the row',
+    parts[0] && parts[0].settled_share === 90, String(parts[0] && parts[0].settled_share));
+}
+
+/* ── a channel caught MID-WALK: the whole of it is valued, not its remainder ─
+   Every projected channel above is all-or-nothing — Uber at 0 of 41 priced —
+   and against that fixture `measured + unpriced × rate` and
+   `max(measured, bookings × rate)` give the same answer, so nothing yet chooses
+   between them. Production is not so tidy: at 20:07 Dubai on 2026-09-08 Bolt
+   stood at 10 of 31 priced with AED 400 on record.
+
+   The remainder form double counts. The rate is revenue over ALL bookings
+   including the tenth that never carry a fare, so applying it to the unpriced
+   remainder charges for those a second time on top of the measured part.
+   Valuing the WHOLE channel at its per-booking rate — floored at what is
+   already on record, because an estimate may add to a measurement and never
+   contradict one — counts each booking exactly once.
+
+   CABMAN below is that shape: 20 of 100 priced against a 90% settled share and
+   an AED 90 rate. The whole channel is worth 9,000, of which 2,000 is measured,
+   so the estimate adds 7,000. The remainder form would add 80 × 90 = 7,200. */
+{
+  for (let d = 1; d <= 6; d++) {
+    await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+               requested_at,distance_km,status,product,payment_type,price)
+             SELECT 'cabman','cs${d}_'||g,'ecosine','L106','c1','Cabman Driver',
+                    '2026-08-${String(d).padStart(2, '0')}T12:00:00+04:00'::timestamptz,
+                    10,'completed','Saloon','card',
+                    CASE WHEN g <= 90 THEN 100 ELSE NULL END
+               FROM generate_series(1,100) g`);
+  }
+  await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+             requested_at,distance_km,status,product,payment_type,price)
+           SELECT 'cabman','cd'||g,'ecosine','L106','c1','Cabman Driver',
+                  '${DAY}T14:00:00+04:00'::timestamptz,10,'completed','Saloon','card',
+                  CASE WHEN g <= 20 THEN 100 ELSE NULL END
+             FROM generate_series(1,100) g`);
+  const h = (await get(`/api/day?day=${DAY}`)).headline;
+  const cab = (h.projection_parts || []).find((r) => r.platform === 'cabman');
+
+  check('a channel caught mid-walk is valued whole, not by its remainder',
+    cab && cab.value === 7000,
+    `${cab && cab.value} added — 7,200 is the remainder form, and it charges twice `
+    + 'for the bookings that never carry a fare');
+  check('…with the part already on record reported beside it',
+    cab && cab.measured === 2000 && cab.bookings === 80,
+    `${cab && cab.measured} measured over ${cab && cab.bookings} unpriced`);
+  check('the day totals to the measured fares plus both estimates',
+    h.revenue === 11500 && h.expected_revenue === 22190
+      && h.expected_revenue === h.revenue + h.projected_revenue,
+    `${h.revenue} + ${h.projected_revenue} = ${h.expected_revenue}`);
+  /* And the floor, which is what stops an estimate contradicting a
+     measurement: a channel that has already out-earned its own rate keeps its
+     measured figure rather than being marked down to the average. */
+  const routes = readFileSync('api/day_routes.js', 'utf8');
+  check('an estimate may add to a measurement and never contradict one',
+    /Math\.max\(measured, bk \* at\.per_booking\)/.test(routes));
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

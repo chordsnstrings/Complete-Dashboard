@@ -1331,8 +1331,8 @@ not most of the fleet. The measured figure was correct and it was the answer to
 
 `/api/day` now values the bookings that carry no price yet
 (`expected_revenue`, `projected_revenue`, `projection_parts`, and — for a
-channel it cannot value at all — `unrated_bookings`). Two rules make it
-defensible:
+channel it cannot value at all — `unrated_bookings`). Four rules make it
+defensible, and two of them were learned by getting it wrong on production:
 
 * **The rate is per BOOKING, not per priced booking.** About a tenth of
   bookings never carry a fare, so dividing settled revenue by *priced* bookings
@@ -1346,9 +1346,26 @@ defensible:
   with 10 of 150 priced drags the rate from AED 90 to AED 73.24 a booking, 19%
   low, and every projection built on it with it.
 
+* **A channel is projected only while its priced share is short of where it
+  SETTLES — not merely because bookings lack a price.** The first version
+  projected every unpriced booking and was wrong on the day easiest to check:
+  2026-09-07 is settled, and it still added AED 3,355 for the 68 bookings
+  without a price, reporting an expected 39,320 over a measured 35,965. Those 68
+  are not late, they are the fee-less cancellations — the day ran 89.9% priced
+  against 87.6% completed. Below `0.9 × settled_share` the channel is mid-walk;
+  at or above it, **the measurement stands**. The margin is deliberately
+  generous to the measurement.
+* **A channel being projected is valued WHOLE, not by its remainder.**
+  `measured + unpriced × rate` double counts, because the per-booking rate
+  already spreads the never-priced bookings in. It is
+  `max(measured, bookings × rate)` — the floor being what stops an estimate
+  contradicting a measurement. Proved in `test/day_routes.test.mjs` on a channel
+  at 20 of 100 priced: whole-channel adds 7,000, the remainder form adds 7,200.
+
 Measured against the day it projects: valuing 2026-09-08's unpriced bookings at
 the fourteen settled days behind them gives **≈ AED 35,600**, and 2026-09-07
-settled at **AED 35,965**.
+settled at **AED 35,965**. A settled day reports **no estimate at all**:
+`expected_revenue` is null and the screens fall back to the measurement.
 
 The estimate rides beside the measurement and never becomes it — `revenue` is
 untouched, and nothing projected is ever added into `accounted`.
