@@ -271,6 +271,142 @@ const after = (await get('/api/slot?dow=2&hour=2')).body;
 check('a telematics journey does not become a trip in the slot',
   after.headline.trips === 3, String(after.headline.trips));
 
+/* ── where it happened, and what the distance was worth ─────────────────────
+   The most serious claim this product makes arrived with no geography and no
+   amount: "L46706, 23:53, 62 km, unauthorized". The row already held
+   start_lat 25.24687004 / start_lng 55.3535881 and rendered neither, and an
+   operator reading that cannot tell a car repositioning to the airport from a
+   car taken home to Sharjah.
+
+   Both halves are pinned here. The names come from the fleet's own gazetteer
+   (place_cell, sql/schema_v67.sql) with the votes behind them, because a cell
+   one trip named is not the claim a cell four hundred trips agree on. The
+   money is the window's own revenue-per-km times the distance, under the name
+   it deserves — revenue forgone, not a cash cost. */
+{
+  /* Cell arithmetic: round(25.1 / 0.005) = 5020, round(55.2 / 0.005) = 11040. */
+  await q(`INSERT INTO place_cell (cell_lat, cell_lng, area, n, distinct_names, observations)
+           VALUES (5020, 11040, 'Deira', 412, 3, 430),
+                  (5040, 11060, 'Dubai Marina', 3, 2, 5)`);
+  /* A segment whose ends sit on ground nothing has ever named. */
+  await seg({ plate: 'L300', at: '2026-08-12T15:00:00+04:00', verdict: 'unauthorized', km: 10 });
+  await q(`UPDATE occupancy_segment SET start_lat = 24.5, start_lng = 54.4,
+             end_lat = 24.6, end_lng = 54.5 WHERE plate = 'L300'`);
+  /* And one that travelled a distance nobody measured. Inserted directly:
+     the seg() helper defaults km with `?? 8`, so passing null silently gets 8
+     and the case this asserts would never be built. */
+  await q(`INSERT INTO occupancy_segment (plate,started_at,fleet_id,verdict,duration_min,
+             distance_km,start_lat,start_lng,end_lat,end_lng)
+           VALUES ('L400','2026-08-12T16:00:00+04:00','ecosine','unauthorized',30,
+                   NULL,25.1,55.2,25.2,55.3)`);
+
+  const segs = (await get('/api/segments?verdict=unauthorized')).body;
+  const alice = segs.rows.find((r) => r.plate === 'L100');
+  const nowhere = segs.rows.find((r) => r.plate === 'L300');
+
+  check('a flagged journey says where it started, in words',
+    alice?.start_place?.area === 'Deira', JSON.stringify(alice?.start_place));
+  check('…and where it ended',
+    alice?.end_place?.area === 'Dubai Marina', JSON.stringify(alice?.end_place));
+  check('the votes behind each name travel with it',
+    alice.start_place.votes === 412 && alice.start_place.seen === 430
+    && alice.end_place.votes === 3,
+    'a cell one trip named is not the claim a cell four hundred trips agree on');
+  check('ground nothing has ever named comes back empty, not guessed at',
+    nowhere && nowhere.start_place === null && nowhere.end_place === null,
+    JSON.stringify({ start: nowhere?.start_place, end: nowhere?.end_place }));
+
+  /* THE RATE IS OVER ONE POPULATION, and getting that wrong is the bug
+     api/server.js:448 already records: "live it came out 3.93 where
+     revenue/priced_km is 5.28". The fixture holds four bookings that carry
+     BOTH a fare and a distance — 3 x AED 40 and 1 x AED 55 over 10 km each —
+     so the rate is 175/40 = AED 4.38/km. The two rows added next would move it
+     to 4.82 if either filter were dropped. */
+  /* Direct inserts for the same reason as above — trip() defaults km with
+     `?? 10`, which would have given the priced-but-unmeasured row a distance
+     and quietly turned this into a test of nothing. */
+  await q(`INSERT INTO trip (platform,external_id,fleet_id,plate,driver_ext_id,driver_name,
+             requested_at,distance_km,status,price)
+           VALUES ('uber','rate-nokm','ecosine','L777','z1','Zed Zayed',
+                   '2026-08-15T10:00:00+04:00', NULL,'completed',500),
+                  ('uber','rate-nofare','ecosine','L778','z2','Zoe Zain',
+                   '2026-08-15T11:00:00+04:00', 100,'completed',NULL)`);
+
+  const ev = (await get(`/api/segment?plate=L100&at=${encodeURIComponent('2026-08-10T18:00:00.000Z')}`)).body;
+  check('the journey carries what its distance was worth',
+    ev.value?.aed_per_km === 4.38 && ev.value?.km === 22
+    && ev.value?.forgone_aed === 96.36,
+    JSON.stringify(ev.value));
+  check('the rate counts only bookings carrying BOTH a fare and a distance',
+    ev.value.aed_per_km !== 4.82 && ev.value.aed_per_km !== 16.88,
+    `${ev.value.aed_per_km} — 4.82 drops one filter, 16.88 drops the other`);
+  check('and says so, with the population it was measured over',
+    /bookings carrying both a fare and a distance/.test(ev.value.basis)
+    && /4\.38\/km/.test(ev.value.basis), ev.value.basis);
+  check('it is never called a cost, because it is not one',
+    /Revenue forgone, not a cash cost/.test(ev.value.basis)
+    && !/costed|cost of/i.test(ev.value.basis),
+    'the fuel and wear behind those kilometres is a different, smaller number');
+
+  const none = (await get(`/api/segment?plate=L400&at=${encodeURIComponent('2026-08-12T12:00:00.000Z')}`)).body;
+  check('a journey whose distance nobody measured is not valued at nought',
+    none.value.forgone_aed === null && none.value.km === null
+    && none.value.aed_per_km === 4.38,
+    JSON.stringify(none.value));
+}
+
+/* ── and what the two screens do with it ────────────────────────────────────
+   The route can return a place and an amount and the page can still print
+   neither, which is how the coordinates sat in this response unrendered for as
+   long as they did. Pinned against the source of the renderers. */
+{
+  const page = readFileSync('api/public/segments.js', 'utf8');
+  const app = readFileSync('api/public/app.js', 'utf8');
+
+  /* PIN THE MECHANISM, NOT A STRING NEAR IT. The first version of these three
+     checks tested for `label: 'From → to'` and `label: 'Forgone'`, and both
+     passed against a file whose columns had been switched off — the label is
+     still written down inside a branch that no longer runs. Same for the thin
+     -name marker, which appears twice in this file, so deleting one occurrence
+     left the regex satisfied. Each of these now names the whole expression
+     that decides whether the column exists, and each was proved by turning
+     that expression off and watching this line fail. */
+  check('the flagged table carries both ends of the journey',
+    /\.\.\.\(anyPlace \? \[\{ label: 'From/.test(page)
+    && /anyPlace = rows\.some\(\(r\) => r\.start_place/.test(page),
+    'the row held start_lat 25.24687004 and rendered nothing');
+  check('…and what the distance was worth',
+    /\.\.\.\(anyValue \? \[\{ label: 'Forgone', key: 'forgone_aed', num: true, render: forgoneCell/.test(page)
+    && /anyValue = rows\.some\(\(r\) => r\.forgone_aed != null\)/.test(page));
+  check('an unnamed cell shows its coordinate rather than a blank or a guess',
+    /never driven near enough to this spot to have a name/.test(page)
+    && /\$\{esc\(Number\(lat\)\.toFixed\(3\)\)\}, \$\{esc\(Number\(lng\)\.toFixed\(3\)\)\}/.test(page));
+  check('a thin name is marked as thin, not printed like a certainty',
+    (page.match(/const thin = place\.votes != null && place\.votes < 5;/g) || []).length === 1
+    && /thin \? ' <span class="dim">\?<\/span>' : ''/.test(page),
+    'a cell one trip named is not the claim a cell four hundred trips agree on');
+  check('the segment page states the route in a sentence and prices it',
+    /Started in \$\{end\(s\.start_place/.test(page)
+    && /label: 'Revenue forgone'/.test(page));
+  check('the window total is on the unauthorized strip',
+    /'Revenue forgone', sum\.value\?\.forgone_aed/.test(app));
+
+  /* THE WORD IS FORGONE, EVERYWHERE. The operator asked what it "costed the
+     company", and the product of AED/km and distance is not a cost — it is
+     revenue those kilometres would have earned. The fuel and wear behind them
+     is a different, smaller number nothing here measures, and printing this
+     under the word cost would be a reason that is not the true one. */
+  const rendered = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+  check('no screen calls it a cost, on either surface',
+    !/cost/i.test(rendered(page).match(/Revenue forgone[\s\S]{0,600}/)?.[0] || '')
+    && /Revenue forgone/.test(rendered(page)) && /Revenue forgone/.test(rendered(app)),
+    'revenue forgone is what it is; the fuel behind it is a different number');
+  check('and the rate is never printed without the population behind it',
+    /rate_basis/.test(page) && /d\.value\?\.basis/.test(page)
+    && /sum\.value\?\.basis/.test(app),
+    'a money figure whose rate is unstated is what this product spent a month removing');
+}
+
 server.close(); await db.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

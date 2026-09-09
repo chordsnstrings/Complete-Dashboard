@@ -3752,6 +3752,12 @@ app.get('/api/mix/detail', (req, r) => {
 /* ── occupancy segments as pages ─────────────────────────────────────────── */
 const SEG_VERDICTS = ['unauthorized', 'authorized', 'sensor_suspect', 'partial', 'unverifiable'];
 const segAt = (i) => new Date(Date.UTC(2026, 7, 3 + (i % 16), 4 + (i % 14), (i * 7) % 60)).toISOString();
+/* The names the gazetteer would return for this fleet's own ground. Real Dubai
+   communities, because a fixture that says "Area 3" cannot show whether the
+   column is wide enough for the names it will actually hold. */
+const SEG_AREAS = ['Deira', 'Business Bay', 'Al Barsha First', 'Dubai Marina',
+  'Jumeirah Lakes Towers', 'Al Quoz Industrial Area 3', 'Nad Al Sheba', 'Mirdif'];
+
 const mkSeg = (i) => ({
   plate: plates[i % plates.length], fleet_id: i % 3 ? 'ecosine' : 'egari',
   started_at: segAt(i),
@@ -3770,6 +3776,19 @@ const mkSeg = (i) => ({
   channels_checked: 'uber, yango, bolt, hotel, fms', boundary_gap_min: i % 11,
   start_lat: rnd(25.05, 25.3), start_lng: rnd(55.1, 55.42),
   end_lat: rnd(25.05, 25.3), end_lng: rnd(55.1, 55.42),
+  /* Both ends named out of the gazetteer, with the votes behind each name.
+     Every fourth segment starts on ground nothing has ever driven near enough
+     to name and every seventh ends on it, so the fixture renders the unnamed
+     case — a coordinate under a "the fleet has never named this" tooltip —
+     rather than only the happy path. And every fifth name is a thin one, three
+     votes, which the table dims and marks: a cell one trip named is not the
+     claim a cell four hundred trips agree on. */
+  start_place: i % 4 === 3 ? null
+    : { area: SEG_AREAS[i % SEG_AREAS.length], votes: i % 5 === 2 ? 3 : 120 + (i % 300),
+        seen: i % 5 === 2 ? 5 : 140 + (i % 300) },
+  end_place: i % 7 === 5 ? null
+    : { area: SEG_AREAS[(i + 3) % SEG_AREAS.length], votes: 60 + (i % 200),
+        seen: 70 + (i % 200) },
   local_day: segAt(i).slice(0, 10),
   drivers: i % 6 === 0 ? null : drivers[i % drivers.length],
   // Name-and-id pairs: a handover day names two people and both must open.
@@ -4009,6 +4028,16 @@ app.get('/api/segment', (req, r) => {
   }));
   r.json({
     segment: seg, track,
+    /* Beside the segment, not inside it: the reconciler recorded the journey,
+       this endpoint values its distance, and the two must not be confused.
+       The detail page prices over the segment's own MONTH while the list
+       prices over the reader's window — each names its basis out loud so the
+       two can be compared rather than read as a contradiction. */
+    value: { forgone_aed: seg.distance_km == null ? null : +(seg.distance_km * UN_RATE).toFixed(2),
+      aed_per_km: UN_RATE, km: seg.distance_km,
+      basis: `AED ${UN_RATE}/km — the fleet\u2019s own rate in August 2026, over 12,567 `
+        + 'bookings carrying both a fare and a distance (161,900 km). '
+        + 'Revenue forgone, not a cash cost.' },
     profile: { fixes: track.length, moving_fixes: 10, moving_pct: 71,
       max_speed: 82, median_speed: 44, observed: seg.max_gap_min <= 11 },
     // Deliberately at the same offset, so the clock-skew warning renders.
@@ -4578,6 +4607,14 @@ const UN_VERDICTS = [
   { verdict: 'unverifiable', n: 6, km: 51, minutes: 130 },
   { verdict: 'stationary', n: 31, km: 2, minutes: 900 },
 ];
+/* The rate the real route measures over the window, and the sentence it sends
+   with it. Every row carries both, because the route answers with a bare array
+   and a figure whose rate is unstated is what this product spent a month
+   removing from its money pages. */
+const UN_RATE = 4.6;
+const UN_BASIS = `the fleet\u2019s own rate over this window — AED ${UN_RATE}/km across 4,428 `
+  + 'bookings carrying both a fare and a distance (60,214 km). Revenue forgone, not a cash cost.';
+
 app.get('/api/unauthorized/summary', (_, r) => {
   const by = Object.fromEntries(UN_VERDICTS.map((v) => [v.verdict, v.n]));
   r.json({
@@ -4591,12 +4628,23 @@ app.get('/api/unauthorized/summary', (_, r) => {
       sensor_suspect: by.sensor_suspect, stationary: by.stationary,
       unauth_km: 268, low_confidence: 6,
     },
+    /* The same kilometres in the unit an operator escalates on, with the rate
+       stated beside them. 268 km x AED 4.60. */
+    value: { forgone_aed: +(268 * UN_RATE).toFixed(2), aed_per_km: UN_RATE, km: 268,
+      basis: `AED ${UN_RATE}/km — the fleet\u2019s own rate over this window, across 4,428 `
+        + 'bookings carrying both a fare and a distance (60,214 km). '
+        + 'Revenue forgone, not a cash cost.' },
   });
 });
 
 app.get('/api/unauthorized/list', (req, r) => {
   const want = req.query.verdict && req.query.verdict !== 'all' ? req.query.verdict : null;
-  r.json(ALL_SEGS.filter((x) => !want || x.verdict === want).slice(0, 40));
+  r.json(ALL_SEGS.filter((x) => !want || x.verdict === want).slice(0, 40).map((x) => ({
+    ...x,
+    forgone_aed: x.distance_km == null ? null : +(x.distance_km * UN_RATE).toFixed(2),
+    aed_per_km: UN_RATE,
+    rate_basis: UN_BASIS,
+  })));
 });
 
 /* {rows, total, segments, shown, truncated} — the "Vehicles involved" tile

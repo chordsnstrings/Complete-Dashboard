@@ -1492,3 +1492,64 @@ had exactly that bug and production named it.
 * **A derived figure must say so.** Recovered fares carry `fare_derived: true`
   into the blob, onto the row, and into a sentence on the page. A derivation
   presented as a reported number breaks the same rule this fix exists to serve.
+
+### Unauthorized trips: where they went, and what the distance was worth — 2026-09-09
+
+The most serious claim this product makes arrived with no geography and no
+amount. `/api/unauthorized/list` returned `start_lat 25.24687004`,
+`start_lng 55.3535881` and both end coordinates on every row, and the page
+rendered **none of them** — so an operator reading "L46706, 23:53, 62 km,
+unauthorized" could not tell a car repositioning to the airport from a car
+taken home to Sharjah.
+
+**The names come from the fleet's own gazetteer, not a geocoder.**
+`place_cell` (`sql/schema_v67.sql`) folds every positioned trip endpoint into
+~0.5 km cells holding the modal area name. Coverage measured on production
+2026-09-09 through `/api/driver/day`: **194 of 197 fixes named**, with 750–1,300
+votes on the named cells. `api/place_sql.js` is the shared fragment; it imports
+`CELL` from `src/places.js` rather than retyping `0.005`, which
+`api/driver_routes.js:2299` does and which is a second place to get it wrong.
+
+**The vote counts travel with the name.** A cell one trip named is not the claim
+a cell four hundred trips agree on. Under five votes the table dims the name and
+marks it; a cell nothing has ever named renders as its coordinate under a
+tooltip saying so, never as a blank and never as the nearest place we hold.
+
+### Revenue forgone is not a cost
+
+The operator asked for "how much that costed the company", as average AED/km
+times distance. The product is worth having and **it is not a cost**: it is the
+revenue those kilometres would have earned had they been sold. The fuel and wear
+behind them is a different, smaller number nothing here measures. Printing it
+under the word *cost* would be a reason that is not the true one, so every
+surface says **forgone** and names the rate.
+
+The rate is the SAME definition `/api/kpis` publishes as `revenue_per_km`
+(`api/server.js:456`) — numerator and denominator over ONE population, bookings
+carrying **both** a fare and a distance. That comment records what happens
+otherwise: *"live it came out 3.93 where revenue/priced_km is 5.28"*, a ratio
+between two different populations. `test/segment_routes.test.mjs` pins it by
+seeding a priced booking with no distance and an unpriced one with 100 km: the
+correct rate is AED 4.38/km, dropping one filter gives 4.82 and the other 16.88.
+
+**Two windows, both stated out loud.** The list values a segment over the window
+the reader picked; the detail page has no window and values it over the
+segment's own calendar month. Each names its basis in the sentence it prints, so
+a reader comparing them sees which is which instead of finding a contradiction.
+
+### Traps this added to the list
+
+* **A source-regex guard that tests a string NEAR the mechanism proves nothing.**
+  Three checks here tested for `label: 'From → to'` and `label: 'Forgone'` and
+  passed against a file whose columns had been switched off — the label is still
+  written down inside a branch that no longer runs. The thin-name marker
+  appears twice in the same file, so deleting one occurrence left its regex
+  satisfied. Pin the whole expression that decides whether the thing exists, and
+  prove it by turning that expression off.
+* **A `?? 0` default in a test helper silently destroys the case being tested.**
+  `seg()` defaults `km` with `?? 8` and `trip()` with `?? 10`, so passing `null`
+  builds a row with a distance and the null-distance assertion tests nothing.
+  Rows that need a null go in with direct SQL.
+* **Widths: a two-place cell set to wrap makes every row three lines tall.**
+  Names are clipped to 18 characters with the full name in the title, and the
+  cell is `nowrap`. The sentence on the detail page carries them in full.

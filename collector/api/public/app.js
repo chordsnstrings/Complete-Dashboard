@@ -3342,6 +3342,21 @@ V.unauthorized = async (root) => {
        segments whose distance was never measured. */
     ['Unexplained km', t.unauth_km == null ? '—' : fmt(t.unauth_km) + ' km',
       t.unauth_km == null ? 'no distance was measured on these segments' : 'distance carried off-book'],
+    /* THE SAME DISTANCE, IN THE UNIT PEOPLE ESCALATE ON.
+       ─────────────────────────────────────────────────────────────────────
+       A kilometre count is a statistic and nobody takes one to a conversation.
+       The endpoint now prices it at the window's own revenue-per-km — the same
+       definition /api/kpis publishes, over bookings carrying BOTH a fare and a
+       distance — and the sub-line states that rate, because a money figure
+       whose rate is unstated is what this product spent a month removing from
+       its money pages.
+
+       Forgone, not cost: these are kilometres that could have been sold and
+       were not. The fuel and wear behind them is a different, smaller number
+       nothing here measures, and calling this a cost would be the kind of
+       reason-that-is-not-the-true-one the house rule forbids. */
+    ['Revenue forgone', sum.value?.forgone_aed == null ? '—' : 'AED ' + fmt(sum.value.forgone_aed, 0),
+      sum.value?.basis || 'no rate to value the unexplained distance at'],
     ['Matched to a booking', fmt(t.authorized || 0), 'legitimate, reconciled'],
     ['Occupied but stationary', fmt(t.stationary || 0), 'seat occupied, the vehicle never really moved'],
     /* Two counts, because one of them can never see the fault the tile is

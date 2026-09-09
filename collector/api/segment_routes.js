@@ -17,6 +17,7 @@
    `/api/segment` is one interval with everything that was true around it —
    every booking on every channel within an hour either side, not just the
    nearest; the driver who actually held the car that day; and the raw fixes. */
+import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
 import { custodyNames, custodyRefs, peopleCount } from './custody_sql.js';
 import { areaOf } from './analytics_routes.js';
 
@@ -59,6 +60,10 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
      o.channels_checked, o.boundary_gap_min,
      ${SKEW('o.verdict_reason')} AS clock_skew_min,
      o.start_lat, o.start_lng, o.end_lat, o.end_lng,
+     /* Both ends named. Shared with /api/unauthorized/list through
+        api/place_sql.js so the same segment cannot be described as starting in
+        two different places on two screens. */
+     ${placeEnds('o')},
      to_char((o.started_at AT TIME ZONE 'Asia/Dubai')::date, 'YYYY-MM-DD') AS local_day`;
 
   /* The driver who held the car ON THE DAY OF THE SEGMENT, from the shared
@@ -248,8 +253,47 @@ export function segmentRoutes(app, { q, wrap, range, DAYWIN }) {
     const speeds = track.map((r) => Number(r.speed)).filter((n) => Number.isFinite(n));
     const moving = speeds.filter((s) => s > 3).length;
 
+    /* WHAT THIS JOURNEY'S DISTANCE WAS WORTH, valued over its own calendar
+       month in Dubai time.
+       ─────────────────────────────────────────────────────────────────────
+       The list route values a segment over the WINDOW the reader picked; this
+       page has no window, and inventing one silently would let the same
+       segment be worth two different amounts on two screens with nothing
+       saying why. So each names its basis out loud — "over this window" there,
+       "the fleet's rate that month" here — and a reader comparing them can see
+       which is which rather than finding a contradiction.
+
+       The month rather than the day: a single Dubai day can hold too few
+       priced-and-measured bookings for a stable rate, and a segment at 03:00
+       would be valued off the handful of night rides around it. */
+    const [rk] = await q(
+      `${RATE_SQL}
+        WHERE (requested_at AT TIME ZONE 'Asia/Dubai')::date
+              >= date_trunc('month', $1::timestamptz AT TIME ZONE 'Asia/Dubai')::date
+          AND (requested_at AT TIME ZONE 'Asia/Dubai')::date
+              < (date_trunc('month', $1::timestamptz AT TIME ZONE 'Asia/Dubai')
+                 + interval '1 month')::date
+          AND ($2::text IS NULL OR fleet_id = $2)`, [seg.started_at, seg.fleet_id || null]);
+    const rate = rk?.aed_per_km == null ? null : Number(rk.aed_per_km);
+    const month = new Date(seg.started_at).toLocaleDateString('en-GB',
+      { timeZone: 'Asia/Dubai', month: 'long', year: 'numeric' });
+
     res.json({
       segment: seg,
+      /* Beside the segment rather than inside it, because it is not something
+         the reconciler recorded about the journey — it is this endpoint
+         valuing the journey's distance, and the two must not be confused. */
+      value: {
+        forgone_aed: forgone(seg.distance_km, rate),
+        aed_per_km: rate,
+        km: seg.distance_km,
+        basis: rate == null
+          ? `no booking in ${month} carries both a fare and a distance, so there is `
+            + 'no rate to value this journey at'
+          : `AED ${rate}/km — the fleet’s own rate in ${month}, over ${rk.rate_trips} `
+            + `bookings carrying both a fare and a distance (${rk.rate_km} km). `
+            + 'Revenue forgone, not a cash cost.',
+      },
       track,
       profile: {
         fixes: track.length,

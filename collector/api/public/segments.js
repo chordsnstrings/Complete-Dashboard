@@ -238,11 +238,60 @@ export async function renderSegments(root, kind, value) {
 
 /* A table of segments where every cell that names something is a link to it.
    Exported because the vehicle and day pages want the same table. */
+/* WHERE A FLAGGED JOURNEY WENT, in the words the gazetteer learned.
+   ──────────────────────────────────────────────────────────────────────────
+   The table printed a plate, a clock time, a distance and a verdict, and the
+   row it printed them from already held both endpoints as decimal pairs. An
+   operator cannot tell a car repositioning to the airport from a car taken
+   home to Sharjah without this, and "the most serious claim this product
+   makes" — the sentence at the top of test/segment_routes.test.mjs — deserved
+   better than 25.24687004.
+
+   The vote count rides in the tooltip rather than the cell: a name four
+   hundred trips agree on and a name one stray reverse-geocode supplied look
+   identical on a table, and the difference matters exactly when somebody is
+   about to act on it. A cell nothing ever named renders as unnamed with its
+   coordinate, not as a blank and not as the nearest place we happen to hold. */
+const placeCell = (place, lat, lng) => {
+  if (place && place.area) {
+    const votes = place.votes == null ? '' : ` \u00b7 ${fmt(place.votes)} of ${fmt(place.seen ?? place.votes)}`
+      + ' trips here call it that';
+    const thin = place.votes != null && place.votes < 5;
+    /* Clipped to the width of a table cell, with the whole name in the title.
+       "Al Quoz Industrial Area 3 → Jumeirah Lakes Towers" set to wrap turned
+       every row three lines tall and halved how many an operator could scan;
+       set to nowrap it pushed the verdict off the screen. The name a person
+       recognises is in its first eighteen characters, and the detail page
+       carries it in full in a sentence. */
+    const short = place.area.length > 18 ? `${place.area.slice(0, 17)}\u2026` : place.area;
+    return `<span class="${thin ? 'dim' : ''}" title="${esc(place.area
+      + ` — from the fleet\u2019s own trip endpoints${votes}`)}">`
+      + `${esc(short)}${thin ? ' <span class="dim">?</span>' : ''}</span>`;
+  }
+  if (lat == null || lng == null) return '<span class="ent-off" title="no position was recorded for this end">—</span>';
+  return `<span class="ent-off" title="the fleet has never driven near enough to this spot to have a name for it">`
+    + `${esc(Number(lat).toFixed(3))}, ${esc(Number(lng).toFixed(3))}</span>`;
+};
+
+/* AED, and never under the word cost. It is the revenue those kilometres
+   would have earned had they been sold; the fuel and wear behind them is a
+   different, smaller number nothing here measures. The rate is on the row so
+   the tooltip can state it — a money figure whose rate is unstated is what
+   this product spent a month removing from its money pages. */
+const forgoneCell = (r) => (r.forgone_aed == null
+  ? `<span class="ent-off" title="${esc(r.rate_basis || 'no distance was measured across this interval')}">—</span>`
+  : `<span title="${esc(r.rate_basis || '')}">AED ${fmt(r.forgone_aed, 0)}</span>`);
+
 export function segmentTable(rows, opts = {}) {
   if (!rows.length) { const d = el('div'); empty(d, opts.emptyMsg || 'Nothing flagged here'); return d; }
   const anyReason = rows.some((r) => r.verdict_reason);
   const anyFleet = rows.some((r) => r.fleet_id);
   const anyFix = rows.some((r) => r.fixes != null || r.max_gap_min != null || r.ignition_ratio != null);
+  /* Both columns are conditional for the same reason every other one here is:
+     a caller that does not select them gets a table without them rather than a
+     column of dashes claiming the data does not exist. */
+  const anyPlace = rows.some((r) => r.start_place || r.end_place || r.start_lat != null);
+  const anyValue = rows.some((r) => r.forgone_aed != null);
   const t = tableFrom(rows, [
     { label: 'Plate', key: 'plate', render: (r) => entity('vehicle', r.plate, r.plate) },
     ...(anyFleet ? [{ label: 'Fleet', key: 'fleet_id',
@@ -266,6 +315,19 @@ export function segmentTable(rows, opts = {}) {
       render: (r) => (r.distance_km == null
         ? '<span class="ent-off" title="no distance was measured across this interval">—</span>'
         : `${fmt(r.distance_km, 1)} km`) },
+    /* Both ends, in one column and in reading order. Two columns would have
+       pushed the verdict off a laptop screen; the arrow is what makes it one
+       fact rather than two. */
+    ...(anyPlace ? [{ label: 'From \u2192 to', key: 'start_place',
+      render: (r) => '<span style="white-space:nowrap">'
+        + `${placeCell(r.start_place, r.start_lat, r.start_lng)}`
+        + '<span class="dim"> \u2192 </span>'
+        + `${placeCell(r.end_place, r.end_lat, r.end_lng)}</span>` }] : []),
+    /* What the distance was worth, beside the distance. An unexplained
+       journey measured in kilometres is a statistic; the same journey in
+       dirhams is a conversation, which is the whole reason this column was
+       asked for. */
+    ...(anyValue ? [{ label: 'Forgone', key: 'forgone_aed', num: true, render: forgoneCell }] : []),
     { label: 'Top speed', key: 'top_speed', num: true,
       render: (r) => (r.top_speed == null ? '<span class="ent-off">—</span>' : `${fmt(r.top_speed)} km/h`) },
     ...(anyFix ? [{ label: 'Fixes', key: 'fixes', num: true,
@@ -323,12 +385,48 @@ export async function renderSegment(root, plate, at) {
     { label: 'Verdict', value: s.verdict || '—', tone: VERDICT_TONE[s.verdict] || null,
       sub: s.matched_platform ? `matched on ${s.matched_platform}` : 'no booking matched' },
     { label: 'Duration', value: (s.duration_min ?? '—') + ' min', sub: `${timeStr(s.started_at)} → ${timeStr(s.ended_at)}` },
-    { label: 'Distance', value: (s.distance_km ?? 0) + ' km',
-      sub: d.profile.max_speed != null ? `peak ${Math.round(d.profile.max_speed)} km/h` : 'no speed recorded' },
+    /* Null is not zero, here as everywhere else in this file: `?? 0` printed
+       "0 km" over a journey whose distance nobody measured, which is a claim
+       that the vehicle did not move — the opposite of what an unexplained
+       occupancy means. */
+    { label: 'Distance', value: s.distance_km == null ? '—' : `${fmt(s.distance_km, 1)} km`,
+      sub: s.distance_km == null ? 'no distance was measured across this interval'
+        : d.profile.max_speed != null ? `peak ${Math.round(d.profile.max_speed)} km/h` : 'no speed recorded' },
+    /* WHAT IT WAS WORTH. The operator's own words for why this tile exists:
+       "how much (average AED/km multiplied by distance) that costed the
+       company for being unauthorized". The product is worth having; the word
+       cost is not right for it, so the tile says forgone and the sub-line
+       names the rate and the population behind it. */
+    { label: 'Revenue forgone', tone: d.value?.forgone_aed ? 'bad' : null,
+      value: d.value?.forgone_aed == null ? '—' : `AED ${fmt(d.value.forgone_aed, 0)}`,
+      sub: d.value?.basis || 'not valued' },
     { label: 'Observed', value: d.profile.observed === null ? '—' : d.profile.observed ? 'fully' : 'with a gap',
       sub: s.max_gap_min != null ? `largest gap ${s.max_gap_min} min` : 'gap not recorded',
       tone: d.profile.observed === false ? 'warn' : null },
   ]));
+
+  /* WHERE IT WENT, stated before the evidence rather than left on a map the
+     reader has to scroll to. Both ends named out of the fleet's own gazetteer
+     (api/place_sql.js), with the coordinate kept beside the name so a reader
+     who wants to check it can. */
+  if (s.start_lat != null || s.end_lat != null) {
+    const where = el('p', 'note');
+    const end = (place, lat, lng) => (place?.area
+      ? `<b>${esc(place.area)}</b>${place.votes != null && place.votes < 5
+        ? ' <span class="dim">(named by only ' + fmt(place.votes) + ' trips here)</span>' : ''}`
+      : lat == null ? '<span class="dim">an unrecorded position</span>'
+        : `<span class="dim">${esc(Number(lat).toFixed(4))}, ${esc(Number(lng).toFixed(4))} — `
+          + 'ground the fleet has never driven near enough to name</span>');
+    where.innerHTML = `Started in ${end(s.start_place, s.start_lat, s.start_lng)}`
+      + ` and ended in ${end(s.end_place, s.end_lat, s.end_lng)}.`
+      + (s.distance_km != null && d.value?.aed_per_km
+        ? ` The ${fmt(s.distance_km, 1)} km between them would have earned `
+          + `<b>AED ${fmt(d.value.forgone_aed, 0)}</b> at the fleet\u2019s own `
+          + `AED ${d.value.aed_per_km}/km. Revenue forgone, not a cash cost \u2014 `
+          + 'the fuel and wear behind those kilometres is a different, smaller number.'
+        : '');
+    root.append(where);
+  }
 
   const head = el('div', 'note');
   head.innerHTML = `<b>${esc(plate)}</b> — ${entity('vehicle', plate, 'vehicle page')} · `

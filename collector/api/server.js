@@ -42,6 +42,7 @@ import { exportRoutes } from './export_routes.js';
 import { supplyRoutes } from './supply_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
 import { revenueRoutes, receiptRoutes } from './revenue_routes.js';
+import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
 import { reconcileRoutes } from './reconcile_routes.js';
 import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
@@ -2618,8 +2619,34 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
   const daysInWindow = Math.max(1, Math.round(
     (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 864e5) + 1);
   const byVerdict = Object.fromEntries(rows.map((r) => [r.verdict, r.n]));
+  /* THE WINDOW'S UNEXPLAINED DISTANCE, PRICED.
+     ───────────────────────────────────────────────────────────────────────
+     `unauth_km` has been on this response since the page was built and a
+     kilometre count is not what anybody escalates on. The same window's own
+     revenue-per-km turns it into the figure an operator can take to a
+     conversation — and the rate travels with it, because a money total whose
+     rate is not stated is exactly the kind of figure this product spent a
+     month removing from its money pages.
+
+     Revenue forgone, not a cash cost: the fuel and wear behind those
+     kilometres is a different, smaller number nothing here measures. Named for
+     what it is on every surface that prints it. */
+  const [rk] = await q(`${RATE_SQL} WHERE ${DAYWIN('requested_at')}
+     AND ($3::text IS NULL OR fleet_id = $3)`, [from, to, fleet]);
+  const rate = rk?.aed_per_km == null ? null : Number(rk.aed_per_km);
   res.json({
     byVerdict: rows,
+    value: {
+      forgone_aed: forgone(extra?.unauth_km, rate),
+      aed_per_km: rate,
+      km: extra?.unauth_km ?? null,
+      basis: rate == null
+        ? 'no booking in this window carries both a fare and a distance, so there is no rate '
+          + 'to value the unexplained distance at'
+        : `AED ${rate}/km — the fleet’s own rate over this window, across ${rk.rate_trips} `
+          + `bookings carrying both a fare and a distance (${rk.rate_km} km). `
+          + 'Revenue forgone, not a cash cost.',
+    },
     /* Stated beside the verdicts rather than left to be inferred from a chart:
        a reader who does not know the evidence covers three days will read every
        figure here as a month's worth. */
@@ -2660,7 +2687,7 @@ app.get('/api/unauthorized/summary', wrap(async (req, res) => {
 app.get('/api/unauthorized/list', wrap(async (req, res) => {
   const [from, to, , fleet] = range(req);
   const verdict = req.query.verdict || 'unauthorized';
-  res.json(await q(
+  const rows = await q(
     /* schema_v8 added verdict_reason, nearest_platform, nearest_trip_id,
        nearest_gap_min, channels_checked and boundary_gap_min for one purpose:
        to make a verdict falsifiable. Its own header says nearest_gap_min is
@@ -2676,6 +2703,13 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
             o.verdict_reason, o.nearest_platform, o.nearest_trip_id, o.nearest_gap_min,
             o.channels_checked, o.boundary_gap_min,
             o.start_lat, o.start_lng, o.end_lat, o.end_lng,
+            /* WHERE it happened, in words. The row already carried both ends
+               as decimal pairs and rendered neither, so the most serious claim
+               this product makes — a car moved with a passenger and nothing
+               paying for it — arrived with no geography at all. An operator
+               cannot tell a reposition to the airport from a car taken home to
+               Sharjah without it. See api/place_sql.js. */
+            ${placeEnds('o')},
             -- The driver who held the car that day, not whoever has it now —
             -- as name-and-id pairs, because a comma-joined string of names is
             -- a dead end by construction and a handover day names two people
@@ -2693,7 +2727,27 @@ app.get('/api/unauthorized/list', wrap(async (req, res) => {
                 AND v.driver_name IS NOT NULL) AS drivers
      FROM occupancy_segment o WHERE ${DAYWIN('o.started_at')} AND ($3='all' OR o.verdict=$3)
        AND ($4::text IS NULL OR o.fleet_id = $4)
-     ORDER BY o.started_at DESC LIMIT 300`, [from, to, verdict, fleet]));
+     ORDER BY o.started_at DESC LIMIT 300`, [from, to, verdict, fleet]);
+  /* AND WHAT THE DISTANCE WAS WORTH. One rate for the whole window, measured
+     over the same window and fleet the segments come from, then multiplied per
+     row — not a per-row lookup, because every row is being valued at the same
+     published figure and a reader has to be able to check the arithmetic.
+
+     It rides on EVERY row rather than in a wrapper: this route answers with a
+     bare array today and three shells read it that way, so the rate and its
+     basis travel with the figure they explain instead of breaking the shape.
+     A row that names an amount and not the rate behind it is exactly the kind
+     of unfootnoted money figure this product spent a month removing. */
+  const [rk] = await q(`${RATE_SQL} WHERE ${DAYWIN('requested_at')}
+     AND ($3::text IS NULL OR fleet_id = $3)`, [from, to, fleet]);
+  const rate = rk?.aed_per_km == null ? null : Number(rk.aed_per_km);
+  res.json(rows.map((r) => ({ ...r,
+    forgone_aed: forgone(r.distance_km, rate),
+    aed_per_km: rate,
+    rate_basis: rate == null
+      ? 'no booking in this window carries both a fare and a distance, so there is no rate to value this at'
+      : `the fleet’s own rate over this window — AED ${rate}/km across ${rk.rate_trips} bookings `
+        + `carrying both a fare and a distance (${rk.rate_km} km). Revenue forgone, not a cash cost.` })));
 }));
 
 // Names the drivers who actually held the car on the days the flags occurred —
