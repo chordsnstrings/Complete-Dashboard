@@ -306,6 +306,79 @@ const ms = await ph.evaluate(() => ({ text: document.body.innerText, cards: docu
 check('the phone search narrows the list', ms.cards < m.cards && ms.cards > 0, `${ms.cards} vs ${m.cards}`);
 check('and says what it is showing', /matching/i.test(ms.text), ms.text.slice(0, 120));
 
+/* ── three reasons a fare cell is empty, and the one that was a lie ─────────
+   This endpoint divided unpriced bookings into exactly two buckets and named
+   a cause for each in prose it serves to the reader: "A cancelled ride that
+   charged nothing has no fare and never will."
+
+   Measured on production 2026-09-08, that sentence was being served over 8
+   rides in the trailing thirty days and 27 more in May 2026 whose stored
+   uber_payments blob shows real earnings and a real service fee — AED 15.00
+   to AED 90.00 the provider says the rider WAS charged. They arrive as rows
+   described "adjust", the fare column is not populated on those, and the walk
+   wrote the resulting null over the price. A blank cell is a gap a reader can
+   chase; a confident wrong reason is not.
+
+   Two properties are held here: the third bucket exists and is counted, and
+   every count on the response describes the WINDOW rather than the page it
+   happens to have returned. */
+{
+  const charged = async (o) => q(
+    `INSERT INTO trip (platform, external_id, fleet_id, plate, driver_ext_id, driver_name,
+       requested_at, ended_at, pickup_addr, dropoff_addr, distance_km, status, price, currency, raw)
+     VALUES ('uber',$1,'ecosine','L9','u9','Fee Driver',$2::timestamptz,
+             $2::timestamptz + interval '3 min','X - Deira - Dubai - UAE',
+             'Y - Al Barsha - Dubai - UAE', 1, 'rider_cancelled', $3, 'AED', $4::jsonb)`,
+    [o.id, o.at, o.price ?? null, JSON.stringify(o.raw)]);
+  /* A day of its own, clear of every other fixture in this file, so the
+     counts below are exactly the four rows seeded here. */
+  const day = DAY(300);
+  /* Billed: the provider's own payments row shows money against it. */
+  await charged({ id: 'fee-1', at: `${day}T08:00:00+04`,
+    raw: { uber_payments: { fare: null, earnings: 11.06, service_fee: -3.75, adjustment: 11.06 } } });
+  await charged({ id: 'fee-2', at: `${day}T08:10:00+04`,
+    raw: { uber_payments: { fare: null, earnings: 13.27, service_fee: -4.50, adjustment: 13.27 } } });
+  /* Repaired by the fix, and saying so: a derived fare, flagged. */
+  await charged({ id: 'fee-3', at: `${day}T08:20:00+04`, price: 15,
+    raw: { uber_payments: { fare: 15, earnings: 11.06, service_fee: -3.75, fare_derived: true } } });
+  /* And a cancellation that genuinely charged nothing — no payments row at
+     all. This one, and only this one, may be called free. */
+  await charged({ id: 'free-1', at: `${day}T08:30:00+04`, raw: {} });
+
+  const w = `from=${day}&to=${day}`;
+  const all = (await get(`/api/trips/list?${w}&limit=500`)).body;
+  check('a cancellation the provider billed is not counted as one that charged nothing',
+    all.unpriced_but_charged === 2, JSON.stringify({
+      charged: all.unpriced_but_charged, free: all.unpriced_cancelled }));
+  check('…and the one with no payments record at all still is',
+    all.unpriced_cancelled === 1, String(all.unpriced_cancelled));
+  check('a derived fare is counted as priced and flagged as derived',
+    all.derived_fares === 1 && all.priced === 1, JSON.stringify(
+      { derived: all.derived_fares, priced: all.priced }));
+  check('the row carries the flag too, so a reader can tell',
+    all.rows.find((r) => r.external_id === 'fee-3')?.fare_derived === true
+    && all.rows.find((r) => r.external_id === 'fee-1')?.charged_off_trip === true
+    && all.rows.find((r) => r.external_id === 'free-1')?.charged_off_trip === false);
+  check('the note no longer promises that an unpriced cancellation charged nothing',
+    !/charged nothing has no fare and never will/.test(all.note)
+    && /no payments record charged nothing/.test(all.note)
+    && /unpriced_but_charged/.test(all.note), all.note.slice(0, 160));
+
+  /* THE COUNTS ARE THE WINDOW'S, NOT THE PAGE'S. `total` was a count(*) over
+     the window while every figure beside it was a filter over the LIMIT/OFFSET
+     page, under the same names on the same response — 5.75x out at the default
+     limit on a 675-booking day. */
+  const page = (await get(`/api/trips/list?${w}&limit=1`)).body;
+  check('every count describes the window even when one row is returned',
+    page.total === all.total && page.priced === all.priced
+    && page.completed === all.completed
+    && page.unpriced_cancelled === all.unpriced_cancelled
+    && page.unpriced_but_charged === all.unpriced_but_charged
+    && page.shown === 1,
+    JSON.stringify({ shown: page.shown, total: page.total, priced: page.priced,
+      charged: page.unpriced_but_charged }));
+}
+
 await browser.close();
 server.close();
 await db.close();

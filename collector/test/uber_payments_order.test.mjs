@@ -19,7 +19,8 @@
         with spaces sits beside 'Paid to you:Your earnings:Fare:Fare' without.
         A mapper keyed on either literal reads null for the other, and a null
         fare is indistinguishable from a trip nobody priced. */
-import { csvToPayments } from '../src/sources/uber.js';
+import { readFileSync } from 'node:fs';
+import { csvToPayments, deriveFare } from '../src/sources/uber.js';
 
 let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => {
@@ -186,6 +187,74 @@ check('a blank fare is null, never 0 — a ride nobody priced is not a free ride
 check('but an explicit 0 is a real value',
   byId['TRIP-A']?.service_fee !== null && byId['TRIP-B']?.cash === 0,
   String(byId['TRIP-B']?.cash));
+
+/* ── the fare a charged cancellation arrives WITHOUT ────────────────────────
+   A cancellation that billed the rider reaches this report as a row whose
+   description says "adjust", and orderKind sends those down a branch that
+   never reads the Fare column — Uber does not populate it on them anyway: the
+   live probe's own adjustment row above carries Fare "0" beside a real Paid
+   to you of 5.00.
+
+   Alone in a week's report — which is what happens whenever the fee settles
+   after the ride's own week closes — that trip came back {fare: null,
+   earnings: 11.06}, passed the walk's `both null` filter, and was written
+   over the ride's price as NULL. Measured on production 2026-09-08: 8 such
+   rows in the trailing thirty days and 27 in May 2026, AED 15.00 to AED 90.00
+   each, while the product told the reader they charged nothing.
+
+   The fare is not in the report as a number, but it is there as the identity
+   this file already pins forty lines above — service fee is a quarter of the
+   fare, plus 5% VAT on the fee. Inverted, that recovers it exactly. */
+console.log('\nthe fare of a charged cancellation');
+const FEE_ONLY = [HEAD, row({ txn: 'a1', drv: 'd9', trip: 'TRIP-CX', what: 'trip fare adjust order',
+  paid: '11.06', earn: '11.06', fare: '0', fee: '-3.75', cash: '0', tip: '0', bank: '0' })].join('\n');
+const feeOnly = csvToPayments(FEE_ONLY).trips[0];
+check('an adjustment row alone no longer comes back with no fare at all',
+  feeOnly.fare === 15, JSON.stringify(feeOnly));
+check('…and says the figure was derived, not reported',
+  feeOnly.fare_derived === true && feeOnly.fare_seen === false,
+  'a derived fare presented as a reported one breaks the rule this fix exists to serve');
+check('the derivation is this file\u2019s own arithmetic, inverted',
+  Math.abs(deriveFare({ earnings: 11.06, service_fee: -3.75, tip: 0 }) - 15) < 0.01
+  && Math.abs(deriveFare({ earnings: 13.27, service_fee: -4.50, tip: 0 }) - 18) < 0.01,
+  'measured on production over 2026-05-01..09-08: exact on 2,518 of 2,518 priced blobs');
+/* The tip is subtracted, and getting that wrong is not hypothetical — the
+   first attempt did, and production named the shapes: fare 15 against
+   earnings 16.06, which is 11.06 plus a 5.00 tip. 21 trips in one window. */
+check('the tip is taken out first, or every tipped ride derives too high',
+  Math.abs(deriveFare({ earnings: 16.06, service_fee: -3.75, tip: 5 }) - 15) < 0.01,
+  String(deriveFare({ earnings: 16.06, service_fee: -3.75, tip: 5 })));
+check('a row with no service fee cannot be derived, and is not guessed at',
+  deriveFare({ earnings: 11.06, service_fee: null, tip: 0 }) === null
+  && deriveFare({ earnings: 11.06, service_fee: 0, tip: 0 }) === null
+  && deriveFare({ earnings: null, service_fee: -3.75, tip: 0 }) === null);
+
+/* And the case that must NOT change: when the ride and its adjustment are in
+   the same report, the fare column was read and the fare stands as Uber
+   stated it. Derivation is for the absence of a fare, never a second opinion
+   about one. */
+check('a reported fare is never replaced by a derived one',
+  byId['TRIP-A']?.fare === 60 && byId['TRIP-A']?.fare_derived === undefined
+  && byId['TRIP-A']?.fare_seen === true, JSON.stringify(byId['TRIP-A']));
+check('and a genuinely blank row still derives nothing',
+  empty.trips[0]?.fare === null && empty.trips[0]?.fare_derived === undefined);
+
+/* ── the write, read out of the collector so the test cannot drift from it ──
+   The statement is pulled from src/sources/uber.js rather than retyped: a
+   copy of the SQL would keep passing after somebody changed the original,
+   which is the failure mode this whole file exists to prevent. */
+console.log('\nthe write');
+const walkSrc = readFileSync('src/sources/uber.js', 'utf8');
+check('the price write can never put a null over a price already stored',
+  /UPDATE trip SET price = coalesce\(\$3, price\)/.test(walkSrc),
+  'the idiom was already one column to the left on the same line, on currency');
+check('…and a held row is counted as held rather than as priced',
+  /if \(t\.fare == null\) held \+= rowCount; else priced \+= rowCount;/.test(walkSrc),
+  'a run reporting priced for a row it wrote null over is how this went unnoticed');
+check('the raw blob is still merged for a held row, because it is the evidence',
+  /raw = coalesce\(raw, '\{\}'::jsonb\) \|\| \$4::jsonb/.test(walkSrc)
+  && !/WHERE[\s\S]{0,80}price IS NULL/.test(walkSrc),
+  'dropping the write would throw away the only record that the fee existed');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

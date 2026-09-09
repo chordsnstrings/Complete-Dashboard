@@ -357,6 +357,53 @@ const money = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
+/* THE FARE A CANCELLATION FEE ARRIVES WITHOUT, RECOVERED FROM ITS OWN ROW.
+   ──────────────────────────────────────────────────────────────────────────
+   A cancellation that DID charge the rider reaches this report as a row whose
+   description says "adjust", and orderKind sends those down the branch above
+   that never reads the fare column at all. Uber does not populate that column
+   on them anyway: the live probe's own adjustment row carries Fare "0" beside
+   a real Paid-to-you of 5.00. So the fare of a charged cancellation is not in
+   the report as a number — but it IS in the report as an arithmetic identity,
+   and the identity is exact.
+
+   Measured on production over 2026-05-01..2026-09-08, every distinct
+   uber_payments blob that holds a fare AND a service fee — 2,518 trips, sixty
+   distinct shapes:
+
+       fare = (earnings − tip) + 1.05 × |service fee|
+
+   lands within six fils on 2,518 of 2,518. Zero misses. The 1.05 is the 5% UAE
+   VAT Uber charges on its own commission; subtracting the tip is what the
+   first attempt got wrong, and it showed up as exactly the tipped shapes
+   (fare 15 against earnings 16.06 — 11.06 plus a 5.00 tip).
+
+   Worked, from the eight rows this repairs in the last thirty days:
+       earnings 11.06, service fee −3.75, tip 0  →  11.06 + 3.9375 = 15.00
+       earnings 13.27, service fee −4.50, tip 0  →  13.27 + 4.7250 = 18.00
+
+   WHAT THIS IS NOT. It is not a substitute for a reported fare — it is used
+   ONLY where no row populated the fare column, and every trip it fills carries
+   `fare_derived: true` into the stored blob so no reader can mistake a derived
+   figure for one the provider stated. The house rule is that a figure which
+   cannot be measured renders absent with a reason and never with a reason that
+   is not the true one; leaving these null made the product tell a reader "a
+   cancelled ride that charged nothing has no fare and never will" over rides
+   the provider's own report says were charged AED 15.00 to AED 90.00. A
+   flagged derivation is the honest answer and a false sentence is not. */
+export function deriveFare({ earnings, service_fee: fee, tip }) {
+  if (earnings == null || fee == null || fee === 0) return null;
+  const gross = (earnings - (tip ?? 0)) + 1.05 * Math.abs(fee);
+  if (!Number.isFinite(gross) || gross <= 0) return null;
+  return Math.round(gross * 100) / 100;
+}
+
+function withDerivedFare(t) {
+  if (t.fare_seen) return t;
+  const d = deriveFare(t);
+  return d == null ? t : { ...t, fare: d, fare_derived: true };
+}
+
 /* One CSV into the two things it holds: a fare per trip, and the settlement
    rows that are not about any trip. */
 export function csvToPayments(csv) {
@@ -384,14 +431,21 @@ export function csvToPayments(csv) {
        upserted one after another, because two upserts on the same primary key
        would leave whichever arrived last, and the answer is the sum. */
     const cur = trips.get(tripId) || { external_id: tripId, fare: null, fare_base: null,
-      adjustment: null, earnings: null, service_fee: null, cash: null, tip: null, txns: 0 };
+      adjustment: null, earnings: null, service_fee: null, cash: null, tip: null, txns: 0,
+      /* Whether any row in this report actually POPULATED the fare column for
+         this trip, as distinct from the fare having summed to null or to zero.
+         The two are not the same fact and the difference is money — see the
+         derivation below. */
+      fare_seen: false };
     const add = (field, v) => { if (v != null) cur[field] = (cur[field] ?? 0) + v; };
     if (kind === 'adjustment') add('adjustment', money(g[PAY_COLS.paid]));
     else {
       /* Branch first, leaf second — see PAY_COLS. `??` and not `||`, because
          a genuine zero fare is a real answer and must not fall through to the
          other column. */
-      add('fare', money(g[PAY_COLS.fare]) ?? money(g[PAY_COLS.fare_base]));
+      const f = money(g[PAY_COLS.fare]) ?? money(g[PAY_COLS.fare_base]);
+      if (f != null) cur.fare_seen = true;
+      add('fare', f);
       add('fare_base', money(g[PAY_COLS.fare_base]));
     }
     add('earnings', money(g[PAY_COLS.earnings]));
@@ -401,7 +455,7 @@ export function csvToPayments(csv) {
     cur.txns += 1;
     trips.set(tripId, cur);
   }
-  return { trips: [...trips.values()], settlements };
+  return { trips: [...trips.values()].map(withDerivedFare), settlements };
 }
 
 
@@ -556,31 +610,68 @@ async function collectFareWeek(w, onStep, checkpoint, state) {
        is a trip outside the collected window, and the row must not be
        invented. The count of rows that matched is what tells an operator
        whether the two reports actually describe the same trips. */
-    let priced = 0;
+    let priced = 0, held = 0;
     for (const t of trips) {
       if (t.fare == null && t.earnings == null) continue;
+      /* NEVER WRITE A NULL OVER A PRICE THAT IS ALREADY THERE.
+         ─────────────────────────────────────────────────────────────────
+         This bound $3 unconditionally, and $3 is null for any trip whose only
+         row in THIS week's report is an adjustment or a tip — the fare column
+         is read on trip-kind rows alone, so a fee that arrives on its own
+         carries no fare. The report is a week wide and a trip's transactions
+         are not: a ride priced from its own week was set back to NULL the
+         moment a later week's report mentioned it again.
+
+         Measured on production 2026-09-08: 8 of the 1,356 unpriced Uber
+         cancellations in the trailing thirty days, and 27 of 1,120 in May
+         2026, hold an uber_payments blob showing real earnings and a real
+         service fee beside price NULL — AED 15.00 to AED 90.00 of money the
+         provider says was charged. May has been through several full Sunday
+         backfills and still holds its 27, so this does not heal with age;
+         nothing could repair it while the walk re-erased it every pass.
+
+         The idiom was already on the line, one column to the left:
+         `currency = coalesce(currency, 'AED')`. It simply was never applied to
+         the column that carries the money.
+
+         coalesce and not a WHERE clause, because the raw blob must still be
+         merged for a trip whose price is held — that blob is the evidence the
+         derivation above runs on, and dropping the write would throw away the
+         only record that the fee existed. */
       const { rowCount } = await pool.query(
-        `UPDATE trip SET price = $3, currency = coalesce(currency, 'AED'),
+        `UPDATE trip SET price = coalesce($3, price),
+                currency = coalesce(currency, 'AED'),
                 raw = coalesce(raw, '{}'::jsonb) || $4::jsonb
            WHERE platform = 'uber' AND external_id = $2 AND fleet_id = $1`,
         [org().fleet, t.external_id, t.fare,
           JSON.stringify({ uber_payments: {
             fare: t.fare, fare_base: t.fare_base, earnings: t.earnings,
             service_fee: t.service_fee, cash_collected: t.cash, tip: t.tip,
-            adjustment: t.adjustment, transactions: t.txns } })]);
-      priced += rowCount;
+            adjustment: t.adjustment, transactions: t.txns,
+            /* Provenance, beside the figure and not inferred from it: a fare
+               this walk computed from the earnings and the service fee is not
+               a fare Uber stated, and a reader has to be able to tell. */
+            fare_derived: t.fare_derived ? true : undefined } })]);
+      /* Two counters, because they answer different questions. `priced` is
+         what this week actually put a price on; `held` is what it declined to
+         un-price. A run reporting `priced` for a row it wrote null over is how
+         this went unnoticed for as long as it did. */
+      if (t.fare == null) held += rowCount; else priced += rowCount;
     }
     state.total += priced;
     chunk.rows = priced;
+    if (held) chunk.held = held;
     /* Both numbers, because they answer different questions. `rows` is what
        landed; `orders` and `unmatched` say whether the payments report and
        the trip report agree about which trips exist, which is the check that
        catches a window collected by one and not the other. */
     chunk.orders = trips.length;
-    chunk.unmatched = trips.length - priced;
+    chunk.unmatched = trips.length - priced - held;
     chunk.settlements = settlements.length;
-    log.info(SRC, `fares ${org().fleet} ${ps}..${pe}`, { orders: trips.length, priced,
-      unmatched: trips.length - priced, settlements: settlements.length });
+    chunk.derived = trips.filter((t) => t.fare_derived).length || undefined;
+    log.info(SRC, `fares ${org().fleet} ${ps}..${pe}`, { orders: trips.length, priced, held,
+      derived: chunk.derived || 0,
+      unmatched: trips.length - priced - held, settlements: settlements.length });
     state.consecutiveFailures = 0;
   } catch (err) {
     const msg = String(err);

@@ -836,11 +836,46 @@ app.get('/api/trips/list', wrap(async (req, res) => {
     q(`SELECT platform, fleet_id, external_id, requested_at, ended_at, local_day,
               driver_name, driver_ext_id, plate, pickup_addr, dropoff_addr,
               distance_km, duration_s, status, outcome, product, payment_type,
-              price, currency, has_fare, is_booking
+              price, currency, has_fare, is_booking,
+              /* The provider's own record of this trip's money, reduced to the
+                 one bit a reader needs: does a payments row exist for it. A
+                 cancellation with a payments row was CHARGED; one without was
+                 not, and only the second may be described as free. */
+              (raw ? 'uber_payments'
+                AND coalesce((raw->'uber_payments'->>'earnings')::numeric, 0) <> 0)
+                AS charged_off_trip,
+              (raw->'uber_payments'->>'fare_derived')::bool AS fare_derived
          FROM trip_norm WHERE ${where}
         ORDER BY requested_at DESC
         LIMIT ${limit} OFFSET ${offset}`, args),
-    q(`SELECT count(*)::int n FROM trip_norm WHERE ${where}`, args),
+    /* THE SUMMARY IS THE WINDOW'S, NOT THE PAGE'S.
+       ───────────────────────────────────────────────────────────────────────
+       `total` was a count(*) over the whole window and every figure beside it
+       was `rows.filter(...)` over the LIMIT/OFFSET page, on the same response
+       and under the same names. At the default limit=100 on a 675-booking day
+       that under-reported by 5.75x, and nothing on the response said which
+       population each number came from. Counted in the same query as `total`
+       so the two cannot describe different sets. */
+    q(`SELECT count(*)::int n,
+              count(*) FILTER (WHERE has_fare)::int priced,
+              count(*) FILTER (WHERE outcome = 'completed')::int completed,
+              count(*) FILTER (WHERE NOT has_fare AND outcome <> 'completed'
+                                 AND NOT (raw ? 'uber_payments'
+                                   AND coalesce((raw->'uber_payments'->>'earnings')::numeric,0) <> 0)
+                              )::int unpriced_cancelled,
+              /* THE THIRD BUCKET, and the reason this route changed. A
+                 cancellation the provider's payments report shows money
+                 against, carrying no price. Measured on production 2026-09-08:
+                 8 in the trailing thirty days and 27 in May 2026 alone, worth
+                 AED 15.00 to AED 90.00 each. They were counted as "cancelled
+                 and charged nothing" and the note below said so in words. */
+              count(*) FILTER (WHERE NOT has_fare AND outcome <> 'completed'
+                                 AND raw ? 'uber_payments'
+                                 AND coalesce((raw->'uber_payments'->>'earnings')::numeric,0) <> 0
+                              )::int unpriced_but_charged,
+              count(*) FILTER (WHERE NOT has_fare AND outcome = 'completed')::int unpriced_completed,
+              count(*) FILTER (WHERE (raw->'uber_payments'->>'fare_derived')::bool)::int derived_fares
+         FROM trip_norm WHERE ${where}`, args),
   ]);
   const total = t?.n ?? rows.length;
   res.json({
@@ -861,14 +896,35 @@ app.get('/api/trips/list', wrap(async (req, res) => {
        fact: the ride was cancelled and charged nothing, which is the correct
        answer and will never change; or its week has not been collected yet,
        which will. Counted separately so a page can say which. */
-    priced: rows.filter((r) => r.has_fare).length,
-    completed: rows.filter((r) => r.outcome === 'completed').length,
-    unpriced_cancelled: rows.filter((r) => !r.has_fare && r.outcome !== 'completed').length,
-    unpriced_completed: rows.filter((r) => !r.has_fare && r.outcome === 'completed').length,
-    note: 'One row per booking. A price appears only where the channel publishes one. A cancelled '
-      + 'ride that charged nothing has no fare and never will; a completed ride with no fare is a '
-      + 'week the provider’s separate payments report has not been collected for yet — Uber files '
-      + 'its fares there rather than on the trip, and the collector walks it a week at a time.',
+    priced: t?.priced ?? 0,
+    completed: t?.completed ?? 0,
+    unpriced_cancelled: t?.unpriced_cancelled ?? 0,
+    unpriced_but_charged: t?.unpriced_but_charged ?? 0,
+    unpriced_completed: t?.unpriced_completed ?? 0,
+    derived_fares: t?.derived_fares ?? 0,
+    /* THREE REASONS, NOT TWO, AND THE THIRD IS THE ONE THAT WAS A LIE.
+       ─────────────────────────────────────────────────────────────────────
+       This note asserted that a cancelled ride with no fare "charged nothing
+       and never will". On 2026-09-08 that sentence was served over 8 rides in
+       the trailing thirty days whose stored uber_payments blob shows real
+       earnings and a real service fee — AED 15.00 to AED 90.00 the provider
+       says the rider WAS charged — and over 27 more in May 2026. A blank cell
+       is a gap a reader can chase; a confident wrong reason is not, and the
+       house rule is that a figure which cannot be measured renders absent with
+       a reason and NEVER with a reason that is not the true one.
+
+       The third bucket exists so the sentence can be true, and the collector
+       fix that fills those fares in (src/sources/uber.js deriveFare) means the
+       count should fall to zero as each week is re-walked. While it is not
+       zero, the number is published rather than the reassurance. */
+    note: 'One row per booking. A price appears only where the channel publishes one. '
+      + 'A cancelled ride with no payments record charged nothing and never will. '
+      + 'A cancelled ride the provider DID bill for shows here as unpriced_but_charged — the fare '
+      + 'column is not populated on a cancellation fee, so its value is recovered from the earnings '
+      + 'and the service fee on the same row and flagged fare_derived. '
+      + 'A completed ride with no fare is either a week the provider’s separate payments report has '
+      + 'not been collected for yet — Uber files its fares there rather than on the trip — or a ride '
+      + 'given away, which carries a price the has_fare rule excludes.',
   });
 }));
 

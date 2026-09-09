@@ -161,6 +161,33 @@ export async function renderTrips(root) {
       `${fmt(from)}–${fmt(to)} of ${fmt(d.total)}`));
     foot.append(nav);
 
+    /* THE NUMBER, NOT THE REASSURANCE.
+       ─────────────────────────────────────────────────────────────────────
+       The note below used to tell a reader that a cancelled ride with no fare
+       "charged nothing and never will". Measured on production 2026-09-08,
+       that sentence was served over 8 rides in the trailing thirty days and 27
+       in May 2026 whose stored payments blob shows the provider billed AED
+       15.00 to AED 90.00. The fare of a cancellation fee is not published in
+       the fare column — it arrives on a row described "adjust", which the
+       walk read as no fare at all and wrote over the price as null.
+
+       The collector now recovers it (src/sources/uber.js deriveFare) and this
+       count should fall to zero as each week is re-walked. Until it does the
+       count is on the screen, because a reader cannot audit a reassurance. */
+    if (d.unpriced_but_charged) {
+      foot.append(el('p', 'cap warn',
+        `${fmt(d.unpriced_but_charged)} cancelled booking`
+        + `${d.unpriced_but_charged === 1 ? '' : 's'} in this window `
+        + `${d.unpriced_but_charged === 1 ? 'shows' : 'show'} no fare, and the platform’s own `
+        + 'payments record says money was charged. Their fare has not been recovered yet — the '
+        + 'week is re-walked nightly for thirty days and weekly for the year.'));
+    }
+    if (d.derived_fares) {
+      foot.append(el('p', 'cap',
+        `${fmt(d.derived_fares)} fare${d.derived_fares === 1 ? '' : 's'} here `
+        + `${d.derived_fares === 1 ? 'was' : 'were'} recovered from the payments breakdown rather `
+        + 'than read off a fare column — the platform does not publish one on a cancellation fee.'));
+    }
     if (d.note) foot.append(el('p', 'cap', d.note));
   }
 

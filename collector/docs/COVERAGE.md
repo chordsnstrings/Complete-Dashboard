@@ -1414,3 +1414,81 @@ untouched, and nothing projected is ever added into `accounted`.
 * **`/api/day`'s `platforms` rows include telematics.** `n` counts every row the
   channel produced — fms contributed 271 journeys and no booking on 2026-09-08 —
   so anything reasoning about bookings must filter, not read `n`.
+
+### The fare of a charged cancellation, and the null that erased it — 2026-09-09
+
+**Uber prices every completed trip.** Measured 2026-09-07: 541 of 541 completed
+Uber bookings carry a fare, and `priced` (557) *exceeds* `completed` because 16
+cancellations carried a fee. Same on 2026-09-01 (557/557), 2026-08-25 (416/416),
+2026-07-15 (290/290). A full scan of the settled week 24–30 August — 3,321 Uber
+bookings — found **zero completed-unpriced and zero priced-at-zero**. The
+permanent ~10% unpriced residual is cancellations, not unfinished collection.
+
+**But a cancellation that DID charge is stored as though it charged nothing.**
+A cancellation fee reaches the payments report as a row whose description says
+*"adjust"*. `orderKind` (`src/sources/uber.js:347`) routes those to a branch that
+never reads the fare column — and Uber does not populate it on them anyway: the
+live probe's own adjustment row carries `Fare "0"` beside a real *Paid to you*
+of 5.00. So the trip came back `{fare: null, earnings: 11.06}`, passed the walk's
+`fare == null && earnings == null` filter, and was written onto `trip.price` as
+**NULL**.
+
+Measured on production 2026-09-08, rows with `price IS NULL` beside an
+`uber_payments` blob showing real earnings and a real service fee:
+
+| window | unpriced Uber cancellations | of those, billed | worth |
+|---|---:|---:|---|
+| 2026-08-10 .. 09-08 | 1,356 | **8** | AED 15.00–18.00 each |
+| 2026-05 (whole month) | 1,120 | **27** | AED 15.00–90.00 each |
+
+**It does not heal with age.** May 2026 has been through several full Sunday
+backfills and still holds its 27 — nothing could repair it while the walk
+re-erased it on every pass.
+
+**The product was not silent about it; it was confidently wrong.**
+`/api/trips/list` served *"A cancelled ride that charged nothing has no fare and
+never will"* over those rows, and `income_sql.js:85` published them as
+`uncharged_bookings`. That is the exact failure the house rule names — absent
+with a reason is required, and **never with a reason that is not the true one**.
+
+**The fare is recoverable, exactly.** It is not in the report as a number but it
+is there as an identity, and `test/uber_payments_order.test.mjs` had already
+pinned it in the other direction (*"the service fee is a quarter of it"*):
+
+```
+fare = (earnings − tip) + 1.05 × |service fee|
+```
+
+The 1.05 is the 5% UAE VAT on Uber's commission. Measured over
+2026-05-01..2026-09-08 against every distinct blob holding both a fare and a
+service fee — **2,518 trips, 60 shapes, exact within six fils on 2,518 of
+2,518, zero misses.** Worked: `11.06 + 3.9375 = 15.00`; `13.27 + 4.725 = 18.00`.
+
+*Subtracting the tip is the part that is easy to get wrong.* Without it the
+tipped shapes miss and nothing else does — fare 15 against earnings 16.06
+(11.06 plus a 5.00 tip), 21 trips in one window. The first attempt at this fix
+had exactly that bug and production named it.
+
+### Traps this added to the list
+
+* **`csvToPayments` folds a WEEK, but a trip's transactions do not respect one.**
+  A trip priced from its own week was un-priced whenever a later week's report
+  mentioned it again — the fare column is read on trip-kind rows alone, so an
+  adjustment or a tip arriving on its own carries no fare. The write is now
+  `price = coalesce($3, price)`; the idiom was already on the same line, one
+  column to the left, on `currency`.
+* **`priced += rowCount` counted an erasure as a success.** A row the walk wrote
+  NULL over was reported as priced, which is why this survived every check
+  anyone ran. `priced` and `held` are now separate, and `derived` rides with
+  them on the chunk.
+* **The damage lands on CANCELLATIONS, where nobody looks.** It never appears as
+  a completed-unpriced row, so the "priced > completed on every settled day"
+  screen, the per-day convergence table and the 20-day sweep all pass while it
+  is happening. The invariant that catches it is
+  `price IS NULL AND raw ? 'uber_payments' AND earnings <> 0`, expected zero.
+* **`/api/trips/list` computed its summary over the PAGE and `total` over the
+  WINDOW**, on the same response and under the same names — 5.75× out at the
+  default limit on a 675-booking day. Both now come from one query.
+* **A derived figure must say so.** Recovered fares carry `fare_derived: true`
+  into the blob, onto the row, and into a sentence on the page. A derivation
+  presented as a reported number breaks the same rule this fix exists to serve.

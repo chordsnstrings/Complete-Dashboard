@@ -4190,6 +4190,17 @@ app.get('/api/trips/list', (req, r) => {
       currency: 'AED',
       has_fare: hotel,
       is_booking: booking,
+      /* Whether the provider's own payments record shows money against this
+         trip. A cancellation carrying one WAS billed and must never be
+         described as free — see the third bucket below. Every ninth
+         cancellation here is the billed shape, so the fixture renders the
+         warn line rather than only the happy path. */
+      charged_off_trip: booking && i % 9 === 4 && i % 27 === 4,
+      /* A fare recovered from the earnings and the service fee rather than
+         read off a fare column, because Uber publishes none on a
+         cancellation fee. Flagged so no reader mistakes it for a reported
+         figure. */
+      fare_derived: booking && i % 45 === 13 ? true : undefined,
     });
   }
   let rows = all.filter((x) => (kind === 'telematics' ? !x.is_booking
@@ -4204,15 +4215,29 @@ app.get('/api/trips/list', (req, r) => {
     rows: page, total: rows.length, shown: page.length, offset, limit,
     truncated: offset + page.length < rows.length,
     window: { from: dayISO(30).slice(0, 10), to: dayISO(0).slice(0, 10) },
-    /* Two reasons a fare cell is empty and they are not the same fact: a
-       cancellation that charged nothing never will have one, and a completed
-       ride without one is a week the payments walk has not reached. */
+    /* THREE reasons a fare cell is empty, and they are not the same fact: a
+       cancellation with no payments record charged nothing and never will; a
+       cancellation the provider DID bill for is money we have not recovered
+       yet; and a completed ride without one is a week the payments walk has
+       not reached, or a ride given away.
+
+       Counted over `rows` — the whole window — and not over `page`. The real
+       route had `priced` computed over the page beside a `total` computed over
+       the window, and so did this fixture, which is how a fixture stops being
+       able to catch anything. */
     completed: rows.filter((r) => r.outcome === 'completed').length,
-    unpriced_cancelled: rows.filter((r) => !r.has_fare && r.outcome !== 'completed').length,
+    unpriced_cancelled: rows.filter((r) => !r.has_fare && r.outcome !== 'completed'
+      && !r.charged_off_trip).length,
+    unpriced_but_charged: rows.filter((r) => !r.has_fare && r.outcome !== 'completed'
+      && r.charged_off_trip).length,
     unpriced_completed: rows.filter((r) => !r.has_fare && r.outcome === 'completed').length,
-    priced: page.filter((x) => x.has_fare).length,
-    note: 'One row per booking. A price appears only where the channel publishes one — the Uber '
-      + 'trip export carries no fare column at all.',
+    derived_fares: rows.filter((r) => r.fare_derived).length,
+    priced: rows.filter((x) => x.has_fare).length,
+    note: 'One row per booking. A price appears only where the channel publishes one. '
+      + 'A cancelled ride with no payments record charged nothing and never will. '
+      + 'A cancelled ride the provider DID bill for shows here as unpriced_but_charged — the fare '
+      + 'column is not populated on a cancellation fee, so its value is recovered from the earnings '
+      + 'and the service fee on the same row and flagged fare_derived.',
   });
 });
 
