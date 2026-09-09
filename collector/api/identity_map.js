@@ -1,25 +1,30 @@
 /* ── the merge register: identities somebody verified, one pair at a time ────
    ──────────────────────────────────────────────────────────────────────────
-   Two lists come out of this file. MERGES is APPLIED — ninety-three entries
-   over ninety people, which sql/schema_v53.sql is generated from, so the
-   database already stores the answer in person_key. PENDING is VERIFIED AND
+   Two lists come out of this file. MERGES is APPLIED — a hundred and thirty
+   entries over a hundred and twenty-four people, which sql/schema_v53.sql is
+   generated from, so the database already stores the answer in person_key. PENDING is VERIFIED AND
    DELIBERATELY NOT APPLIED: five pairs that carry a CONTRADICTION, a day on
    which both records took a trip at the same time in different cars, which is
    the one observation that a shared car, a shared route and a shared phone
    cannot explain away.
 
-   Three sweeps built the ninety-three, and they are kept apart below rather
-   than blended, because they are believable for three different reasons:
+   Three sweeps built the hundred and thirty, and they are kept apart below
+   rather than blended, because they are believable for three different
+   reasons. The counts in this comment are asserted in
+   test/identity_register_counts.test.mjs: they said ninety-three over ninety
+   for long enough that CLAUDE.md copied the wrong pair, and a register whose
+   own header misdescribes it is a register nobody trusts to re-read:
 
      ·  3 in HAND_MERGES, checked one pair at a time against production.
      · 50 in CANDIDATES, from the shared-history sweep — same cars, same days,
        trips interleaving inside the day rather than following one another.
        Forty-five are clean and applied; the five with a contradiction are
        what PENDING is.
-     · 45 in FROM_ROSTER, from src/identity_link.js, on a phone number the
-       roster filed against both records. The twenty-six the sweep had already
-       found are not repeated there — the same people, found twice by two
-       independent methods, which is the strongest reason to believe either.
+     · 82 in FROM_ROSTER, from src/identity_link.js, on a phone number the
+       roster filed against both records. Three of them name a key CANDIDATES
+       had already reached by a different route — the same person found twice
+       by two independent methods, which is the strongest reason to believe
+       either, so both entries are kept and mergedIds() unions them.
 
    personFold (api/custody_sql.js) decides that two RECORDS are one human from
    the name alone. It collapses case, runs of whitespace and an adjacent
