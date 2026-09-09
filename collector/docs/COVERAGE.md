@@ -1553,3 +1553,21 @@ a reader comparing them sees which is which instead of finding a contradiction.
 * **Widths: a two-place cell set to wrap makes every row three lines tall.**
   Names are clipped to 18 characters with the full name in the title, and the
   cell is `nowrap`. The sentence on the detail page carries them in full.
+
+### "Al WarqaAl Warqa 3" is the provider's spelling, not a parser fault
+
+Visible on `#unauthorized` the moment the places landed, so it is worth writing
+down before somebody "fixes" `place_area()` over it. Measured on production
+2026-09-09 through `/api/trips/list?days=365&q=warqaal`: **6 trips in a year**,
+and the concatenation is in the address the provider sent —
+
+```
+Al WarqaAl Warqa 2, Dubai
+Unnamed Road - Al WarqaAl Warqa 1 - Al Warqa'a First - الورقاء الأولى - دبي - …
+```
+
+The dash-separated form of the same community arrives correctly on 728 trips in
+the same window (`5CR5+GW5 - Al Warqa - Al Warqa 3 - Dubai - …` → `Al Warqa 3`),
+so the parser is reading its input faithfully. A rule that collapsed a repeated
+prefix would mangle legitimate names — Dubai has communities that genuinely
+repeat a word — for six rows in a year. **Left as the provider wrote it.**
