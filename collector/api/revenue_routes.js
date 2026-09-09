@@ -31,7 +31,7 @@
    because it is the one somebody can fix. */
 import { chooseBasis, fleetIncome, platformStatements } from './income_sql.js';
 import { peopleCountStored, JOIN_TRIP } from './custody_sql.js';
-import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
+import { BOOKING_CHANNELS, channelHealthSql, channelHealth, healthFor } from './channels_sql.js';
 
 /* ── the receipts register ────────────────────────────────────────────────
    "How much got into the account, which date, from the source exactly."
@@ -534,9 +534,12 @@ export function revenueRoutes(app, { q, wrap, range }) {
     const wanted = BOOKING_CHANNELS.filter((c) => !p[2] || c === p[2]);
     for (const pl of wanted) row(pl);
     const byHealth = channelHealth(health);
-    for (const r of byPlatform.values()) Object.assign(r, byHealth.get(r.platform) || {
-      collection_status: null, collection_error: null, collection_at: null,
-    });
+    /* This page folds the two fleets into one row per channel, so it asks for
+       the roll-up rather than a fleet — and the roll-up is now the WORST of the
+       fleets rather than whichever finished last. A channel collecting for one
+       business and refused for the other is not an 'ok' channel, and reporting
+       it as one depended on which run happened to finish second. */
+    for (const r of byPlatform.values()) Object.assign(r, healthFor(byHealth, r.platform, null));
     for (const t of stmts) Object.assign(row(t.platform), {
       statement_net: num(t.statement_net), statement_gross: num(t.statement_gross),
       statement_fees: num(t.statement_fees), statement_tips: num(t.statement_tips),

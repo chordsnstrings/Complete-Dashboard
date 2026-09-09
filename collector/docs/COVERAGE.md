@@ -1571,3 +1571,62 @@ the same window (`5CR5+GW5 - Al Warqa - Al Warqa 3 - Dubai - …` → `Al Warqa 
 so the parser is reading its input faithfully. A rule that collapsed a repeated
 prefix would mangle legitimate names — Dubai has communities that genuinely
 repeat a word — for six rows in a year. **Left as the provider wrote it.**
+
+### One fleet's failure, printed against the other — 2026-09-09
+
+`/api/platforms` reported, on production, `days=1`:
+
+```
+bolt/ecosine  partial  "FI roster ecosine: BOLT_CLIENT_ID is not entitled
+                        to company_id 142868 — NOT_AUTHORIZED …"
+bolt/egari    partial  "FI roster ecosine: BOLT_CLIENT_ID is not entitled
+                        to company_id 142868 — NOT_AUTHORIZED …"
+```
+
+**Egari's row states an Ecosine failure**, and Egari's own FI roster reads
+company 142897 without complaint — the message says so in its own second
+sentence. `channelHealthSql()` was `DISTINCT ON (source)` and `channelHealth()`
+keyed its map by source, so of the two runs a channel makes each pass the later
+one won and was printed against every fleet row on that channel.
+
+`/api/status` was fixed for exactly this and records why in its own header —
+*"Ecosine and Egari are separate businesses with separate credentials on the
+same providers … Keyed on (source, mode) alone, one fleet's row won and the
+other vanished"* — becoming `DISTINCT ON (source, mode, fleet_id)`.
+`api/channels_sql.js` was left behind, and **both** routes reading it kept the
+bug: `/api/platforms` and `/api/revenue`.
+
+**What it cost.** An operator pasted a fresh Bolt portal token, watched the page
+still show Bolt red on both fleets, and concluded the paste had been rejected.
+It had been accepted — `BOLT_REFRESH_TOKEN_ECOSINE` was written at 06:04 UTC and
+picked up by the collector at 07:05 — and a completely different credential on
+the other fleet was down. **A misattributed error costs more than a missing
+one: it sends somebody to re-do work that already succeeded.**
+
+**Two Bolt credentials, and only one of them is a paste.** Worth stating plainly
+because the page conflated them:
+
+| credential | surface | fixable by |
+|---|---|---|
+| `BOLT_REFRESH_TOKEN_*` (portal, fleet-owner login) | trips, orders, fares | pasting a fresh capture |
+| `BOLT_CLIENT_ID` / `_SECRET` (Fleet Integration app) | driver roster, vehicles | adding the company to the app **in the Bolt portal** |
+
+The portal login is entitled to both companies — which is why the curl carrying
+`company_id: 142868` works — while the FI app has its own allow-list, and only
+142897 was ever added to it. `fiRefusal()` already says all of this correctly
+and already records `state: 'unentitled'` rather than `'invalid'`; nothing was
+wrong with the message, only with which fleet it was shown against.
+
+### Traps this added to the list
+
+* **A fleet with no run of its own must report ABSENT, never the other fleet's.**
+  The obvious fallback — try the fleet, then fall back to the channel — is the
+  same defect wearing a hat. `healthFor()` falls back only to a run the source
+  genuinely recorded with `fleet_id` null, and returns absent otherwise.
+* **A caller with no fleet dimension needs the WORST fleet, not the latest.**
+  `/api/revenue` folds the fleets into one row per channel; taking the most
+  recent run made "is this channel healthy" a coin toss between two fleets. A
+  channel collecting for one business and refused for the other is not `ok`.
+* **When a route is fixed for a bug, grep for the shape rather than the route.**
+  `DISTINCT ON (source` was the searchable signature here, and it sat in a
+  second file for as long as it took somebody to be misled by it.

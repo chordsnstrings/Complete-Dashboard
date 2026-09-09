@@ -303,6 +303,73 @@ check('the silent channel is named with the collector\'s reason',
     && /COMPANIES_NOT_ALLOWED/.test(x.collection_error || '')),
   JSON.stringify(revAll.silent_platforms));
 
+/* ── one fleet's failure, printed against the other ─────────────────────────
+   Measured on production 2026-09-09, /api/platforms?days=1:
+
+     bolt/ecosine  partial  "FI roster ecosine: BOLT_CLIENT_ID is not entitled
+                             to company_id 142868 — NOT_AUTHORIZED …"
+     bolt/egari    partial  "FI roster ecosine: BOLT_CLIENT_ID is not entitled
+                             to company_id 142868 — NOT_AUTHORIZED …"
+
+   Egari's row states an ECOSINE failure. Egari's own roster reads company
+   142897 without complaint — the message says as much, "the same token read
+   142897 (egari), so the secret is fine" — so the page accused a fleet of a
+   fault its own run disproves. The operator read it as the Bolt credential
+   they had just pasted being rejected; it had been accepted, and a different
+   credential on the other fleet was down.
+
+   channelHealthSql() was DISTINCT ON (source): of the two runs a channel makes
+   each pass, the later one won and was printed against both fleets.
+   /api/status was fixed for exactly this and became DISTINCT ON (source, mode,
+   fleet_id); this module was left behind and both routes reading it kept the
+   bug. The fixture below is production's shape — Ecosine failing, Egari fine,
+   Ecosine finishing LAST so it is the one that used to win. */
+{
+  await trip({ platform: 'bolt', fleet: 'ecosine', plate: 'ECO-1', drv: 'e-rida',
+    name: 'Rida Aslam', day: D(20), price: 40 });
+  await trip({ platform: 'bolt', fleet: 'egari', plate: 'EGA-1', drv: 'g-one',
+    name: 'Gulzar Khan', day: D(20), price: 40 });
+  await q(`INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, finished_at, error)
+           VALUES ('bolt','egari','incremental','ok',4,'2026-08-31T19:00:00Z',NULL)`);
+
+  const plats = await body(`/api/platforms?${W}`);
+  const bEco = plats.find((r) => r.platform === 'bolt' && r.fleet_id === 'ecosine');
+  const bEga = plats.find((r) => r.platform === 'bolt' && r.fleet_id === 'egari');
+
+  check('the failing fleet carries the failure',
+    /COMPANIES_NOT_ALLOWED/.test(bEco?.collection_error || '')
+    && bEco.collection_status === 'partial', JSON.stringify(bEco?.collection_error));
+  check('and the other fleet is not accused of it',
+    bEga != null && !/COMPANIES_NOT_ALLOWED/.test(bEga.collection_error || '')
+    && bEga.collection_status === 'ok',
+    `egari read ${bEga && bEga.collection_status}: ${bEga && bEga.collection_error}`);
+
+  /* A channel folded across the fleets still has to tell the truth, and the
+     truth is the WORST of them: a channel collecting for one business and
+     refused for the other is not an 'ok' channel. Taking the latest run
+     instead made that a coin toss. */
+  const rev = await body(`/api/revenue?${W}`);
+  const rBolt = rev.platforms.find((r) => r.platform === 'bolt');
+  check('a page with no fleet dimension gets the worst of the fleets, not the latest',
+    rBolt && rBolt.collection_status === 'partial'
+    && /COMPANIES_NOT_ALLOWED/.test(rBolt.collection_error || ''),
+    JSON.stringify({ status: rBolt && rBolt.collection_status, err: rBolt && rBolt.collection_error }));
+
+  /* And the case the fallback must NOT cover. Uber has an ecosine run and no
+     egari one; egari's Uber row is uncollected, and saying so is the honest
+     answer. Borrowing ecosine's 'ok' is the defect above wearing a hat. */
+  await trip({ platform: 'uber', fleet: 'egari', plate: 'EGA-1', drv: 'g-one',
+    name: 'Gulzar Khan', day: D(20), price: 55 });
+  const p2 = await body(`/api/platforms?${W}`);
+  const uEga = p2.find((r) => r.platform === 'uber' && r.fleet_id === 'egari');
+  const uEco = p2.find((r) => r.platform === 'uber' && r.fleet_id === 'ecosine');
+  check('a fleet with no run of its own reports nothing, rather than borrowing one',
+    uEga != null && uEga.collection_status === null && uEga.collection_at === null,
+    `egari uber read ${uEga && uEga.collection_status}`);
+  check('…while the fleet that does have one still reports it',
+    uEco != null && uEco.collection_status === 'ok');
+}
+
 server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

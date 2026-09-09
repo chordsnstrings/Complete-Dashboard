@@ -59,7 +59,7 @@ import { secretField, redactSampleValue, IDENTITY_DOCS, stripIdentity, withheldN
 /* Who a finding is about, resolved from the ids the rule engine already
    stored. api/insight_people.js carries the reasoning and the query. */
 import { refIds, peopleFor, attachPeople } from './insight_people.js';
-import { BOOKING_CHANNELS, channelHealthSql, channelHealth } from './channels_sql.js';
+import { BOOKING_CHANNELS, channelHealthSql, channelHealth, healthFor } from './channels_sql.js';
 import { RAW_ALIASES } from '../src/probe.js';
 
 process.on('unhandledRejection', (e) => log.error('api', 'unhandledRejection', { err: String(e) }));
@@ -2952,9 +2952,13 @@ app.get('/api/platforms', wrap(async (req, res) => {
   res.json([...rows, ...missing].map((r) => ({
     ...r,
     window_from: from, window_to: to, windowed,
-    ...(byHealth.get(r.platform) || {
-      collection_status: null, collection_error: null, collection_at: null,
-    }),
+    /* THIS FLEET'S RUN, not the channel's most recent one. Read by fleet the
+       Egari Bolt row stops carrying "FI roster ecosine: BOLT_CLIENT_ID is not
+       entitled to company_id 142868" — a fault on the other fleet, printed
+       against a fleet whose own roster reads 142897 without complaint. The
+       `missing` rows below carry no fleet by construction and get the roll-up;
+       see healthFor. */
+    ...healthFor(byHealth, r.platform, r.fleet_id),
   })));
 }));
 
