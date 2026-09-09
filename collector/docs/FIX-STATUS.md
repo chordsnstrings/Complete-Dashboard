@@ -242,6 +242,40 @@ rather than quietly rewritten, for that reason.
 
 ---
 
+## Online time — PROVEN ON PRODUCTION, 2026-09-09
+
+| claim | state | the proof |
+|---|---|---|
+| The page exists under People, both shells | **proven** | `bin/prod-mirror.mjs` on :8200, desktop 1440px and phone 402px, screenshots taken |
+| Every driver has one of six reasons, and they partition the page | **proven** | `/api/online-time?day=2026-09-09&start=06:00`: 83 + 0 + 0 + 41 + 30 + 3 = 157 = `people`; 54 + 29 + 74 = 157 |
+| A person Uber dropped from the roster is on the page with their real time | **proven** | 157 people against 127 with an Uber standing that permits work; the extra rows come from the drove-ids union |
+| Deactivated standings are not in the call list | **proven** | 30 `cannot_earn`, all `can_earn === false`, none with `late` set |
+| No standing reaches the reader as a database key | **proven** | three distinct sentences on production, none containing `_` or `onboarding_status` |
+| Every phone number dials | **proven** | 157 `tel:` hrefs on the desktop, 54 on the phone, all matching `^tel:\+\d{8,15}$` |
+| No start time renders absent with a reason, never as zero | **proven** | `?start=half%20seven` → `expected_start: null`, no `late` key in `totals`, `start_why` naming what it was given |
+
+**Not proven, and unprovable from here:** that the 41 `not_asked` people did or
+did not come online. That is the point of the state. It closes only when
+somebody runs `node src/index.js timeline-roster`, which has no cron.
+
+## Bolt per-fleet collection health — PROVEN ON PRODUCTION, 2026-09-09
+
+`/api/platforms` now carries one row per company rather than one for both:
+
+- `bolt` / `ecosine` — `collection_status: "partial"`, `collection_error:
+  "FI roster ecosine: BOLT_CLIENT_ID is not entitled to company_id 142868 —
+  code=503 NOT_AUTHORIZED hint=COMPANIES_NOT_ALLOWED"`, 34,871 bookings held.
+- `bolt` / `egari` — `collection_status: "ok"`, `collection_error: null`,
+  13,575 bookings held.
+
+Which is the whole of the fix: one fleet's refusal is reported against that
+fleet. **The refusal itself is not ours to clear** — the same token reads
+company 142897 (egari) successfully, so the secret is sound; company **142868**
+has to be added to that fleet-integration app in the Bolt portal by whoever
+administers it.
+
+---
+
 ## How to re-check any row here without re-reading the audit
 
 Every proof in the Batch 1 table is a single anonymous curl with `&_=$RANDOM`
