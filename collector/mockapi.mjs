@@ -4665,8 +4665,8 @@ app.get('/api/online-time', (req, r) => {
               + 'every half hour and the timeline every three hours, so the two run on different '
               + 'clocks. It fills in on the next pass; it is not evidence about the driver.'
             : basis === 'cannot_earn'
-              ? 'Uber turned this application down, so this account will not be coming online. '
-                + 'Not coming online is what that means, so there is nothing here to chase.'
+              ? 'Uber turned this application down. This account is not coming online, now or '
+                + 'later, and it should not be on a call list at all.'
               : 'Uber was never asked about this driver. The timeline is only requested for people who '
               + 'took a trip in the previous two days, and this person took none — so we hold no '
               + 'evidence either way, and none is coming until somebody runs the roster sweep.',

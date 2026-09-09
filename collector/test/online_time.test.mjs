@@ -267,8 +267,10 @@ check('a suspended account gets its own reason, not "nobody asked"',
   susp?.online_basis === 'cannot_earn', susp?.online_basis);
 check('…worded in English rather than in Uber\'s enum',
   /Uber has suspended this account/.test(susp?.online_why || ''), susp?.online_why);
-check('…and says there is nothing to chase, because that is the point of the state',
-  /nothing here to chase/.test(susp?.online_why || ''), susp?.online_why);
+check('…and says what to do about it, because that is the point of the state',
+  /not about the morning/.test(susp?.online_why || ''), susp?.online_why);
+check('…without saying the same clause twice, which a shared tail did',
+  !/(coming online).*\1/is.test(susp?.online_why || ''), susp?.online_why);
 check('…and it is never late, whatever the start time',
   susp?.late === null && susp?.online_at === null,
   `${susp?.late} / ${susp?.online_at}`);
@@ -292,6 +294,10 @@ check('the Drove denominator excludes them, so the fleet does not read a third i
     said.every((w) => !/_/.test(w) && !/onboarding_status/i.test(w)), JSON.stringify(said));
   check('a rejected application does not read as one still in progress',
     /turned this application down/.test(said[1]) && !/being onboarded/.test(said[1]), said[1]);
+  check('…and every standing ends by saying what to do about it',
+    said.every((w) => /chase|call list|call worth/.test(w)), JSON.stringify(said));
+  check('…and none of them says the same clause twice',
+    said.every((w) => !/(coming online).*\1/is.test(w)), JSON.stringify(said));
   check('…and the waitlist is not called a suspension',
     /on its waitlist/.test(said[0]), said[0]);
   check('an unrecognised standing shows the provider\'s word, tidied, not a guess',
@@ -299,7 +305,8 @@ check('the Drove denominator excludes them, so the fleet does not read a third i
       .test(standingWords(normaliseState('NOT_A_REAL_STATE'), 'NOT_A_REAL_STATE')),
     standingWords(normaliseState('NOT_A_REAL_STATE'), 'NOT_A_REAL_STATE'));
   check('…and with neither word we say only what is true',
-    standingWords(null, null) === 'Uber does not currently permit this account to take work.');
+    /^Uber does not currently permit this account to take work\./.test(standingWords(null, null)),
+    standingWords(null, null));
 }
 
 console.log('\nasked, or not asked, in the units the collector actually uses');

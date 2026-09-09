@@ -95,13 +95,25 @@ export function startMinutes(v) {
    somebody who was working and was stopped." Six people are in it on
    production, and lumping them under a generic "cannot take work" would have
    an operator chase an application Uber has already turned down. */
+/* Each entry is a WHOLE sentence, including what to do about it. A shared
+   "Not coming online is what that means, so there is nothing here to chase"
+   was appended to all of them at first, and after the rejected one it read
+   "…will not be coming online. Not coming online is what that means" — the
+   same clause twice, on the row where the answer is bluntest. What an operator
+   should do differs by standing, so the ending does too. */
 const STANDING = {
-  waitlist: 'Uber has this account on its waitlist, so it cannot take work yet.',
-  onboarding: 'This account is still being onboarded and has not been let loose yet.',
-  rejected: 'Uber turned this application down, so this account will not be coming online.',
-  suspended: 'Uber has suspended this account, so it cannot take work.',
-  deactivated: 'Uber has deactivated this account, so it cannot take work.',
-  inactive: 'Uber has this account down as inactive, so it cannot take work.',
+  waitlist: 'Uber has this account on its waitlist, so it cannot take work yet. '
+    + 'Nothing to chase until Uber lets them off it.',
+  onboarding: 'This account is still being onboarded and has not been let loose yet. '
+    + 'Nothing to chase until Uber finishes with it.',
+  rejected: 'Uber turned this application down. This account is not coming online, '
+    + 'now or later, and it should not be on a call list at all.',
+  suspended: 'Uber has suspended this account, so it cannot take work. The call worth '
+    + 'making here is about the suspension, not about the morning.',
+  deactivated: 'Uber has deactivated this account, so it cannot take work. If a car is '
+    + 'still attached to this person, that is the thing to chase.',
+  inactive: 'Uber has this account down as inactive, so it cannot take work. Nothing '
+    + 'about this morning to chase.',
 };
 const tidy = (raw) => String(raw)
   .replace(/^onboarding_status_/, '').replace(/_/g, ' ').trim().toLowerCase();
@@ -112,8 +124,12 @@ export function standingWords(state, raw) {
      If one ever does, it falls to the raw word below rather than being given a
      sentence about a standing nobody established. */
   if (state && STANDING[state]) return STANDING[state];
-  if (raw) return `Uber has this account as "${tidy(raw)}", which does not permit taking work.`;
-  return 'Uber does not currently permit this account to take work.';
+  if (raw) {
+    return `Uber has this account as "${tidy(raw)}", which does not permit taking work. `
+      + 'Nothing about this morning to chase.';
+  }
+  return 'Uber does not currently permit this account to take work. Nothing about this '
+    + 'morning to chase.';
 }
 
 export function onlineRoutes(app, { q, wrap }) {
@@ -394,8 +410,7 @@ export function onlineRoutes(app, { q, wrap }) {
            It only claims the remaining case — no event, no trip, and no
            standing that would have let them work. */
         basis = 'cannot_earn';
-        why = `${standingWords(pp.state_word, pp.state_raw)} Not coming online is what that `
-          + 'means, so there is nothing here to chase.';
+        why = standingWords(pp.state_word, pp.state_raw);
       } else if (!askedAbout) {
         basis = 'not_asked';
         why = 'Uber was never asked about this driver. The timeline is only requested for people '
