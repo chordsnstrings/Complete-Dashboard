@@ -109,8 +109,16 @@ export async function renderTrips(root) {
         sub: KIND_SUB[kind] },
       { label: 'On this page', value: fmt(d.shown),
         sub: d.total > d.shown ? `rows ${fmt(d.offset + 1)}–${fmt(d.offset + d.shown)}` : 'all of them' },
+      /* `priced` COUNTS THE WINDOW NOW, AND THIS CAPTION SAID THE PAGE.
+         ─────────────────────────────────────────────────────────────────
+         The route used to compute it over the LIMIT/OFFSET page beside a
+         `total` computed over the window; it now counts both in one query, so
+         the figure changed under a caption that did not. Caught on the
+         production mirror rendering "5,156" above "of the 100 rows on this
+         page" — a figure and a caption describing different populations,
+         which is the defect this product has a whole test file about. */
       { label: 'Carrying a fare', value: fmt(d.priced),
-        sub: d.shown ? `of the ${fmt(d.shown)} rows on this page` : 'nothing to price' },
+        sub: d.total ? `of the ${fmt(d.total)} in this window` : 'nothing to price' },
     ]));
     if (!d.rows.length) {
       empty(host, term ? 'Nothing matches that' : 'No trip in this window');

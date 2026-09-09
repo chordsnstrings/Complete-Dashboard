@@ -379,6 +379,19 @@ check('and says what it is showing', /matching/i.test(ms.text), ms.text.slice(0,
       charged: page.unpriced_but_charged }));
 }
 
+/* The figure and its caption must describe the SAME population. `priced` moved
+   from the page to the window when the summary was fixed, and this caption did
+   not move with it — caught on the production mirror rendering "5,156" above
+   "of the 100 rows on this page". */
+{
+  const src = readFileSync('api/public/trips.js', 'utf8');
+  const tile = (src.match(/label: 'Carrying a fare'[\s\S]{0,220}?\},/) || [''])[0];
+  check('the fare tile is captioned with the population it actually counts',
+    /d\.priced/.test(tile) && /in this window/.test(tile)
+    && !/rows on this page/.test(tile),
+    tile.replace(/\s+/g, ' ').slice(0, 160));
+}
+
 await browser.close();
 server.close();
 await db.close();
