@@ -1671,7 +1671,16 @@ last ran 2026-08-27.
 | `already_online` | the span opened before midnight — this day has no start of its own | n/a, it is the true answer |
 | `awaiting_feed` | trips landed, the three-hourly timeline has not caught up | yes, next tick |
 | `not_asked` | no trip inside the collector's 48 h selection window, so Uber was never asked | **no** — only a manual roster sweep closes it |
+| `cannot_earn` | the Uber standing does not permit taking work at all | n/a, it is the true answer |
 | `absent` | Uber WAS asked and returned nothing for the day | n/a, it is the true answer |
+
+**Thirty of the 157 cannot earn.** Measured 2026-09-09: 157 people hold an Uber
+account, 127 of them a standing that permits work; the other 30 are suspended,
+deactivated or waitlisted. They are on the page — dropping them silently would
+hide a car that may still be attached to somebody who cannot drive it — but
+they carry their own reason, are never counted late, and are out of the "Drove"
+denominator. Before that they fell into `not_asked` and sat in the call list,
+which is the operator's own stated failure mode.
 
 Measured for 2026-09-08: 109 accounts held an active Uber standing, 84 drove,
 and all 25 who did not also took no trip on the 6th or 7th — so the collector

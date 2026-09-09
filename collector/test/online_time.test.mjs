@@ -131,6 +131,19 @@ await trip({ id: 'd-warm', name: 'Hina Sethi', plate: 'L800', at: `2026-08-13T10
 await state({ id: 'd-early', name: 'Tariq Javed', plate: 'L900' });
 await trip({ id: 'd-early', name: 'Tariq Javed', plate: 'L900', at: `2026-08-12T20:00:00+04:00` });
 
+/* ── NINE: a standing that cannot take work at all.
+      ────────────────────────────────────────────────────────────────────────
+      Found on production rather than designed: of 157 people holding an Uber
+      account on 2026-09-09, 30 held one that cannot earn — suspended,
+      deactivated, waitlisted. They fell into `not_asked` and sat in the call
+      list, which is the operator's own stated failure mode: "or else it will
+      be inaccurate data that the operations team will work on." Phoning a
+      deactivated driver to ask why they did not come online is that call. */
+await q(
+  `INSERT INTO driver_platform_state (platform, driver_ext_id, fleet_id, full_name, state,
+     state_raw, can_earn, plate)
+   VALUES ('uber','d-susp','ecosine','Faisal Rehman','suspended','SUSPENDED',false,'L1000')`);
+
 await q(`INSERT INTO collection_run (source, fleet_id, mode, status, rows_written, finished_at)
          VALUES ('uber_timeline','ecosine','timeline','ok',10,$1::timestamptz)`,
 [`${DAY}T06:17:00+00:00`]);
@@ -199,19 +212,23 @@ check('every portal the person holds, folded across their accounts',
   cold.portals.includes('uber') && cold.portals.includes('hotel'), JSON.stringify(cold.portals));
 
 console.log('\nthe page as a whole');
-/* Nine fixtures: four roster people (reported, already-online, awaiting,
+/* Ten fixtures: four roster people (reported, already-online, awaiting,
    never-asked), one who drove with no roster row at all, two unnamed accounts
-   that must not merge, and the two sides of the ask-window. Six of the nine
-   drove on the day; the other three are precisely the ones with no trip, which
-   is what makes them the interesting rows. */
+   that must not merge, the two sides of the ask-window, and one standing that
+   cannot take work. Six of the ten drove on the day; the other four are
+   precisely the ones with no trip, which is what makes them interesting. */
 check('everyone we hold an Uber account for is on it, not only those who drove',
-  d.totals.people === 9 && d.totals.drove === 6, JSON.stringify(d.totals));
+  d.totals.people === 10 && d.totals.drove === 6, JSON.stringify(d.totals));
 check('the totals name each reason rather than lumping them as missing',
   d.totals.reported === 3 && d.totals.already_online === 1
   && d.totals.awaiting_feed === 2 && d.totals.not_asked === 2
-  && d.totals.absent === 1, JSON.stringify(d.totals));
+  && d.totals.cannot_earn === 1 && d.totals.absent === 1, JSON.stringify(d.totals));
 check('and the counted verdict matches the rows',
-  d.totals.late === 2 && d.totals.on_time === 1 && d.totals.unjudged === 6,
+  d.totals.late === 2 && d.totals.on_time === 1 && d.totals.unjudged === 7,
+  JSON.stringify(d.totals));
+check('…and every person carries exactly one of the six reasons',
+  d.totals.reported + d.totals.already_online + d.totals.awaiting_feed
+  + d.totals.not_asked + d.totals.cannot_earn + d.totals.absent === d.totals.people,
   JSON.stringify(d.totals));
 check('…and the three counts partition the page, leaving nobody unaccounted for',
   d.totals.late + d.totals.on_time + d.totals.unjudged === d.totals.people,
@@ -243,6 +260,22 @@ check('…and each keeps its own car',
   anon.find((r) => r.uber_ids[0] === 'd-anon1')?.plate === 'L600'
   && anon.find((r) => r.uber_ids[0] === 'd-anon2')?.plate === 'L700',
   JSON.stringify(anon.map((r) => r.plate)));
+
+console.log('\na standing that cannot take work is not a driver who is late');
+const susp = row('Faisal Rehman');
+check('a suspended account gets its own reason, not "nobody asked"',
+  susp?.online_basis === 'cannot_earn', susp?.online_basis);
+check('…which names the provider\'s own word for the standing',
+  /Uber has it as suspended/.test(susp?.online_why || ''), susp?.online_why);
+check('…and says there is nothing to chase, because that is the point of the state',
+  /nothing here to chase/.test(susp?.online_why || ''), susp?.online_why);
+check('…and it is never late, whatever the start time',
+  susp?.late === null && susp?.online_at === null,
+  `${susp?.late} / ${susp?.online_at}`);
+check('the Drove denominator excludes them, so the fleet does not read a third idler',
+  /of \$\{fmt\(t\.people - \(t\.cannot_earn \|\| 0\)\)\} allowed to take work/
+    .test(await (await import('node:fs')).promises.readFile(
+      new URL('../api/public/onlinetime.js', import.meta.url), 'utf8')));
 
 console.log('\nasked, or not asked, in the units the collector actually uses');
 const warm = row('Hina Sethi');

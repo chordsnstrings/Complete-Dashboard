@@ -4644,7 +4644,7 @@ app.get('/api/online-time', (req, r) => {
        fixture that silently covers less than it says it covers is worse than a
        small one — the smoke run went green over an untested path. Anchoring on
        the end of the list makes the coverage independent of its length. */
-    const GREY = ['already_online', 'awaiting_feed', 'not_asked'];
+    const GREY = ['already_online', 'awaiting_feed', 'not_asked', 'cannot_earn'];
     const back = drivers.length - 1 - i;
     const basis = back < GREY.length ? GREY[back] : 'reported';
     const min = basis === 'reported' ? 300 + ((i * 37) % 260) : null;
@@ -4664,7 +4664,10 @@ app.get('/api/online-time', (req, r) => {
             ? 'This driver took a trip, and no online event has arrived for the day yet. Trips land '
               + 'every half hour and the timeline every three hours, so the two run on different '
               + 'clocks. It fills in on the next pass; it is not evidence about the driver.'
-            : 'Uber was never asked about this driver. The timeline is only requested for people who '
+            : basis === 'cannot_earn'
+              ? 'This account cannot take work — Uber has it as deactivated. Not coming online '
+                + 'is what that means, so there is nothing here to chase.'
+              : 'Uber was never asked about this driver. The timeline is only requested for people who '
               + 'took a trip in the previous two days, and this person took none — so we hold no '
               + 'evidence either way, and none is coming until somebody runs the roster sweep.',
       first_trip_at: trips ? `${day}T${hhmm((min ?? 330) + 40)}:00+04:00` : null,
@@ -4694,6 +4697,7 @@ app.get('/api/online-time', (req, r) => {
       already_online: n((x) => x.online_basis === 'already_online'),
       awaiting_feed: n((x) => x.online_basis === 'awaiting_feed'),
       not_asked: n((x) => x.online_basis === 'not_asked'),
+      cannot_earn: n((x) => x.online_basis === 'cannot_earn'),
       absent: 0,
       drove: n((x) => x.trips > 0),
       ...(startMin == null ? {} : {

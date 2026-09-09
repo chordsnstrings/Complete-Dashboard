@@ -112,6 +112,11 @@ export function onlineRoutes(app, { q, wrap }) {
                 array_remove(array_agg(DISTINCT driver_ext_id), NULL) AS all_ids,
                 array_agg(DISTINCT platform ORDER BY platform) AS portals,
                 bool_or(platform = 'uber' AND can_earn) AS can_earn,
+                /* The provider's OWN word for the standing, not our normalised
+                   one, so the sentence a suspended driver gets can name what
+                   Uber actually said rather than a bucket we chose. */
+                min(state_raw) FILTER (WHERE platform = 'uber' AND can_earn IS NOT TRUE
+                                         AND btrim(coalesce(state_raw, '')) <> '') AS state_word,
                 min(plate) FILTER (WHERE platform = 'uber' AND plate IS NOT NULL) AS state_plate
            FROM driver_platform_state dps
           GROUP BY 1
@@ -321,6 +326,26 @@ export function onlineRoutes(app, { q, wrap }) {
           + 'different clocks'
           + (feedAt ? ` — the timeline last ran at ${new Date(feedAt).toISOString().slice(11, 16)} UTC. ` : '. ')
           + 'It fills in on the next pass; it is not evidence about the driver.';
+      } else if (pp.can_earn === false) {
+        /* A FIFTH state, and it was found on production rather than designed:
+           of 157 people holding an Uber account on 2026-09-09, 30 held one
+           that cannot take work at all — suspended, deactivated, waitlisted.
+           They were falling into `not_asked` and sitting in the call list, and
+           the operator's whole reason for asking for this page was that
+           operations must not be handed inaccurate rows to work on. Phoning a
+           deactivated driver to ask why they did not come online is precisely
+           that call.
+
+           Checked AFTER `reported` and after `awaiting_feed`, deliberately: a
+           suspended driver who DID come online, or who took a trip, is a fact
+           worth surfacing exactly as it is, and this state must never mask it.
+           It only claims the remaining case — no event, no trip, and no
+           standing that would have let them work. */
+        basis = 'cannot_earn';
+        why = 'This account cannot take work' + (pp.state_word
+          ? ` — Uber has it as ${String(pp.state_word).toLowerCase()}. `
+          : ' — Uber does not currently permit it to earn. ')
+          + 'Not coming online is what that means, so there is nothing here to chase.';
       } else if (!askedAbout) {
         basis = 'not_asked';
         why = 'Uber was never asked about this driver. The timeline is only requested for people '
@@ -434,7 +459,8 @@ export function onlineRoutes(app, { q, wrap }) {
        same table said "Late last" too and had to be fixed for the same reason:
        a caption or a comment that contradicts the sort teaches whoever reads
        it next to distrust the sort. */
-    const ORDER = { reported: 0, already_online: 1, awaiting_feed: 2, absent: 3, not_asked: 4 };
+    const ORDER = { reported: 0, already_online: 1, awaiting_feed: 2, absent: 3,
+      not_asked: 4, cannot_earn: 5 };
     rows.sort((a, b) => (ORDER[a.online_basis] - ORDER[b.online_basis])
       || ((b.online_minute ?? -1) - (a.online_minute ?? -1))
       || String(a.name || '').localeCompare(String(b.name || '')));
@@ -471,6 +497,7 @@ export function onlineRoutes(app, { q, wrap }) {
         already_online: count((r) => r.online_basis === 'already_online'),
         awaiting_feed: count((r) => r.online_basis === 'awaiting_feed'),
         not_asked: count((r) => r.online_basis === 'not_asked'),
+        cannot_earn: count((r) => r.online_basis === 'cannot_earn'),
         absent: count((r) => r.online_basis === 'absent'),
         drove: count((r) => r.trips > 0),
         ...(start == null ? {} : {

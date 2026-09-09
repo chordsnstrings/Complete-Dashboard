@@ -49,6 +49,7 @@ export const GREY = {
   already_online: 'already on',
   awaiting_feed: 'not in yet',
   not_asked: 'not asked',
+  cannot_earn: 'cannot earn',
   absent: 'no event',
 };
 
@@ -132,10 +133,16 @@ export async function renderOnlineTime(root) {
       { label: 'Cannot be judged', value: judged ? fmt(t.unjudged ?? 0) : fmt(t.people),
         sub: judged
           ? `${fmt(t.already_online)} already on · ${fmt(t.awaiting_feed)} not in yet · `
-            + `${fmt(t.not_asked)} never asked · ${fmt(t.absent)} no event`
+            + `${fmt(t.not_asked)} never asked · ${fmt(t.cannot_earn)} cannot earn · `
+            + `${fmt(t.absent)} no event`
           : `everyone, for want of a start time · ${fmt(t.already_online + t.awaiting_feed
-            + t.not_asked + t.absent)} would be grey anyway` },
-      { label: 'Drove', value: fmt(t.drove), sub: `of ${fmt(t.people)} with an Uber account` },
+            + t.not_asked + t.cannot_earn + t.absent)} would be grey anyway` },
+      /* The denominator is people who COULD have driven. Counting the 30
+         suspended and deactivated standings into "of 157 with an Uber account"
+         made the fleet look a third idler than it is. */
+      { label: 'Drove', value: fmt(t.drove),
+        sub: `of ${fmt(t.people - (t.cannot_earn || 0))} allowed to take work`
+          + (t.cannot_earn ? ` · ${fmt(t.cannot_earn)} more cannot` : '') },
     ]));
 
     if (t.not_asked) {
