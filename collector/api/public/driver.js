@@ -20,7 +20,7 @@ import { el, esc, panel, loading, tableFrom, kpiRow, tabBar, pill, note, entity,
   sourceLabel, completionTone, plural, countOf, signed, UBER_FARE, UBER_HOURS, NO_DURATION, noneChosen, verdict, foldRows,
   avatar, moneyInTile, cashOnHandTile, bankDepositTile, faresTile,
   alertRateFigure, splitAlerts, standingNote,
-  UBER_FARE_WHY } from './ui.js';
+  UBER_FARE_WHY, dialable } from './ui.js';
 import { qAll, href, currentGen, alive } from './data.js';
 import { driversVerdict } from './verdicts.js';
 import { renderDriverDay } from './driverday.js';
@@ -586,7 +586,7 @@ function identityCard(p) {
     : lic != null ? pill(`licence ${lic < 0 ? `expired ${Math.abs(lic)}d ago` : `${lic}d left`}`, licTone) : ''}
       </div>
       <div class="idfacts">
-        ${c.phone ? `<span><b>Phone</b> <a class="lnk" href="tel:${esc(c.phone)}">${esc(c.phone)}</a></span>` : ''}
+        ${c.phone ? `<span><b>Phone</b> <a class="lnk" href="tel:${esc(dialable(c.phone))}">${esc(c.phone)}</a></span>` : ''}
         ${c.email ? `<span><b>Email</b> <a class="lnk" href="mailto:${esc(c.email)}">${esc(c.email)}</a></span>` : ''}
         ${idFact('licence_no', 'Licence')}
         ${idFact('emirates_id', 'Emirates ID')}

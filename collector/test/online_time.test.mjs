@@ -386,8 +386,15 @@ check('the route table has a screen for it',
   /'online-time': onlineTime,/.test(phone),
   'without this the call list falls to "built for a bigger screen" — on the one '
   + 'page whose action is a phone call, read by somebody holding a phone');
+/* The PROPERTY, not the spelling. This was pinned on the exact
+   `String(r.phone).replace(...)` expression and so failed the moment those
+   five call sites were routed through ui.js's dialable() — a test that has to
+   be edited to accept a correct change is a test that will be edited without
+   being read. What matters is that the row's destination is a call.
+   test/phone.test.mjs owns the separate rule that no tel: link anywhere dials
+   a raw stored string. */
 check('its rows dial rather than drill',
-  /to: r\.phone \? `tel:\$\{String\(r\.phone\)\.replace/.test(phone));
+  /to: r\.phone \? `tel:\$\{dialable\(r\.phone\)\}` : null,/.test(phone));
 check('and it says so, because a chevron that dials is a surprise',
   /Tap a row to call/.test(phone));
 check('the query string is built by q(), not glued onto the path',

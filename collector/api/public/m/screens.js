@@ -18,7 +18,7 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
    copied, so 'fms' is "FMS telematics" on both screens and 13:00Z is 17:00 on
    both: timeStr and dtStr pass timeZone: TZ, which is what makes the phone's
    collector-health times equal the ones on the desktop page beside them. */
-import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote,
+import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote, dialable,
   cashOnHandTile, bankDepositTile, countOf,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
 import { dubaiClock, dubaiDay } from '../tz.js';
@@ -975,7 +975,7 @@ async function driver(deck, ctx) {
   /* Reaching a driver is what a phone is FOR. On a desktop these sit in a row
      of identity facts; here they are the two things somebody standing in a
      yard actually wants, and they are tappable. */
-  const reach = [c.phone && { label: 'Call', v: c.phone, to: `tel:${c.phone}` },
+  const reach = [c.phone && { label: 'Call', v: c.phone, to: `tel:${dialable(c.phone)}` },
     c.email && { label: 'Email', v: c.email, to: `mailto:${c.email}` }].filter(Boolean);
   if (reach.length) {
     const rc = card('Contact', c.platform ? `from the ${sourceLabel(c.platform)} record` : null);
@@ -1519,7 +1519,7 @@ async function onlineTime(deck, ctx) {
         tone: grey ? null : (r.late ? 'bad' : 'good'),
         note: grey ? null
           : (r.minutes_late > 0 ? `+${fmt(r.minutes_late)}m` : 'on time'),
-        to: r.phone ? `tel:${String(r.phone).replace(/[^+\d]/g, '')}` : null,
+        to: r.phone ? `tel:${dialable(r.phone)}` : null,
       });
     }));
     /* ONE LINE PER DISTINCT STATE, not one line for the list.

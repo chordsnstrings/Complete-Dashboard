@@ -20,8 +20,8 @@
    measured over two days on production — so a lateness mark built on it would
    be systematically too kind, and a page that quietly did that would send
    nobody the calls it is for. */
-import { el, esc, panel, loading, tableFrom, kpiRow, entity, pill, sourceLabel, timeStr }
-  from './ui.js';
+import { el, esc, panel, loading, tableFrom, kpiRow, entity, pill, sourceLabel, timeStr,
+  dialable } from './ui.js';
 import { dubaiDay } from './tz.js';
 import { empty, fmt } from './charts.js';
 import { api, href } from './data.js';
@@ -149,7 +149,8 @@ export async function renderOnlineTime(root) {
       /* Named on the page rather than left in a tooltip, because it is the one
          state that does not fix itself: the roster sweep has no schedule. */
       tiles.append(el('p', 'note warn',
-        `${fmt(t.not_asked)} of these ${fmt(t.people)} people were never asked about. Uber's `
+        `${fmt(t.not_asked)} of these ${fmt(t.people - (t.cannot_earn || 0))} people who could `
+        + 'have worked were never asked about. Uber\'s '
         + 'timeline is only requested for drivers who took a trip in the previous two days, so '
         + 'somebody who worked nowhere near a car is not "late" here — they are unmeasured, and '
         + 'will stay that way until a whole-roster sweep runs.'));
@@ -182,7 +183,7 @@ export async function renderOnlineTime(root) {
           : '<span class="ent-off" title="no Uber booking on this day">—</span>') },
       { label: 'Phone', key: 'phone',
         render: (r) => (r.phone
-          ? `<a href="tel:${esc(r.phone)}">${esc(r.phone)}</a>`
+          ? `<a href="tel:${esc(dialable(r.phone))}">${esc(r.phone)}</a>`
           : '<span class="ent-off" title="no phone on this driver’s compliance record">—</span>') },
       { label: 'Car', key: 'plate',
         render: (r) => (r.plate

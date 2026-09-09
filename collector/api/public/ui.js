@@ -782,6 +782,39 @@ export const dtStr = (v) => (asDate(v) ? `${dayStr(v)} ${timeStr(v)}` : '—');
 /* A source's name as a person writes it. These are database keys — `fms`,
    `cabman` — and they were rendered raw as panel HEADINGS on the two pages an
    operator opens to ask which collector is broken. */
+/* A NUMBER A HANDSET WILL ACTUALLY DIAL.
+   ──────────────────────────────────────────────────────────────────────────
+   Five tel: links in this product handed the stored string straight to the
+   href, and the stored string is not one shape. src/identity_link.js:72 records
+   why: "The two channels write the same handset differently — the hotel feed
+   as 971558089547 and Uber as +971558089547 — and a fleet's roster also
+   carries 00971… and 0558089547 for the same line." Measured on the Online
+   time page 2026-09-09, both spellings are live in the same column, three rows
+   apart.
+
+   Without the plus a phone dials it as a LOCAL number. On the one page whose
+   whole purpose is that an operations person taps a row and reaches a driver,
+   a third of the taps would have failed silently — the dialler opens, the call
+   does not connect, and nobody reads that as a data problem.
+
+   The country code is only assumed where the number cannot be anything else: a
+   UAE national number (0 then 9 digits) or a bare 9-digit mobile starting 5.
+   Anything else keeps its digits and is returned WITHOUT a plus rather than
+   being guessed into +971 — a wrong country code dials a stranger. */
+export const dialable = (raw) => {
+  const t = String(raw ?? '').trim();
+  if (!t) return null;
+  const plus = t.startsWith('+');
+  const d = t.replace(/\D/g, '');
+  if (!d) return null;
+  if (plus) return `+${d}`;
+  if (d.startsWith('00')) return `+${d.slice(2)}`;
+  if (d.startsWith('971')) return `+${d}`;
+  if (/^0[0-9]{9}$/.test(d)) return `+971${d.slice(1)}`;
+  if (/^5[0-9]{8}$/.test(d)) return `+971${d}`;
+  return d;
+};
+
 export const SOURCE_LABEL = {
   uber: 'Uber', yango: 'Yango', bolt: 'Bolt', hotel: 'Hotel', fms: 'FMS telematics',
   cabman: 'CABMAN', ecosine: 'Ecosine', egari: 'Egari',

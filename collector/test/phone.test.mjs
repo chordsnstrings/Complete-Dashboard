@@ -35,6 +35,45 @@ const lift = (name) => {
 };
 const unwrap = lift('unwrap');
 
+/* ── the number a handset will dial ────────────────────────────────────
+   Lifted out of ../ui.js the same way, for the same reason. Five tel: links
+   in this product handed the STORED string to the href, and the stored string
+   is not one shape: src/identity_link.js:72 records the hotel feed writing
+   971558089547 where Uber writes +971558089547, and both spellings are live in
+   the same column on #online-time. Without the plus a phone dials it as a
+   local number — the dialler opens, the call does not connect, and nobody
+   reads a failed call as a data problem. */
+const uiSrcTop = readFileSync(`${PUB}/ui.js`, 'utf8');
+const dialable = (() => {
+  const at = uiSrcTop.indexOf('export const dialable = ');
+  const from = uiSrcTop.slice(at + 'export const '.length);
+  const end = from.search(/\n};\n/);
+  // eslint-disable-next-line no-new-func
+  return new Function(`const ${from.slice(0, end + 2)}\nreturn dialable;`)();
+})();
+
+console.log('\nevery stored spelling of one handset dials the same number');
+check('Uber\'s spelling is already E.164', dialable('+971558089547') === '+971558089547');
+check('the hotel feed\'s bare 971 gets its plus', dialable('971558089547') === '+971558089547');
+check('the roster\'s 00971 becomes a plus', dialable('00971558089547') === '+971558089547');
+check('a UAE national number becomes international', dialable('0558089547') === '+971558089547');
+check('…and so does a bare mobile', dialable('558089547') === '+971558089547');
+check('spaces, dashes and brackets are not dialled',
+  dialable(' +971 55-808 9547 ') === '+971558089547');
+check('a number that could be any country keeps its digits and gains NO country code',
+  dialable('4155552671') === '4155552671',
+  'guessing +971 onto a number that is not one dials a stranger');
+check('nothing in, nothing out', dialable(null) === null && dialable('') === null
+  && dialable('   ') === null && dialable('abc') === null);
+
+console.log('\nand every tel: link in the product goes through it');
+for (const f of ['driver.js', 'people.js', 'onlinetime.js', 'm/screens.js']) {
+  const body = readFileSync(`${PUB}/${f}`, 'utf8');
+  const raw = [...body.matchAll(/tel:\$\{([^}]*)\}/g)].map((m) => m[1])
+    .filter((x) => !/dialable\(/.test(x));
+  check(`${f} dials nothing raw`, raw.length === 0, raw.join('; '));
+}
+
 check('an envelope gives up its rows', unwrap({ rows: [1, 2, 3] }).rows.length === 3);
 check('a bare array is an envelope with three rows', unwrap([1, 2, 3]).rows.length === 3);
 check('…and reports itself untruncated', unwrap([1, 2]).truncated === false);

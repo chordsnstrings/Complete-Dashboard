@@ -4,7 +4,7 @@
    reason api/public/roster.js is its own module: a renderer that lives inside
    the router can only be tested by driving the whole application, and one that
    does not can be imported into a page and asked what it produced. */
-import { el, esc, pill, entity, countOf, avatar, dateStr, timeStr } from './ui.js';
+import { el, esc, pill, entity, countOf, avatar, dateStr, timeStr, dialable } from './ui.js';
 import { fmt } from './charts.js';
 import { href } from './data.js';
 
@@ -65,7 +65,7 @@ export function peopleCards(refs) {
     /* tel: and mailto: are the point of the card. A number rendered as text is
        a number somebody retypes into a handset. */
     const contact = [
-      p.phone ? `<a class="lnk" href="tel:${esc(String(p.phone).replace(/[^\d+]/g, ''))}">${esc(p.phone)}</a>` : '',
+      p.phone ? `<a class="lnk" href="tel:${esc(dialable(p.phone))}">${esc(p.phone)}</a>` : '',
       p.email ? `<a class="lnk" href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : '',
     ].filter(Boolean).join('<span class="dim"> · </span>');
     const stateTone = /suspend|deact|block|reject|ban/i.test(p.state_raw || p.state || '') ? 'bad'

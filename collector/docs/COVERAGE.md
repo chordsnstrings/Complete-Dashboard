@@ -1741,3 +1741,23 @@ by both shells.
 - **`driver_timeline_event` needs `driver_ext_id` bound.** Its only useful
   index leads on the id (`schema_v37:56`); the other is on the Dubai-DATE
   expression, so a raw `at` range matches neither and scans ~197k rows.
+
+### One handset, four spellings, and the tel: links that could not dial it
+
+`src/identity_link.js:72` already recorded that the channels write the same
+number differently — the hotel feed as `971558089547`, Uber as
+`+971558089547`, a fleet roster as `00971…` and `0558089547` — and folds the
+last nine digits to match them. Nothing normalised them for **dialling**.
+
+Five `tel:` links across both shells handed the stored string to the href.
+Without a leading `+` a handset dials it as a local number: the dialler opens,
+the call does not connect, and nobody reads a failed call as a data problem.
+Both spellings are live in the same column on `#online-time`, three rows apart
+— measured 2026-09-09.
+
+`dialable()` in `api/public/ui.js` is now the only thing that builds a `tel:`
+href, and `test/phone.test.mjs` fails if any call site dials a raw string. It
+assumes a country code **only** where the number cannot be anything else — a
+UAE national number (`0` + 9 digits) or a bare 9-digit mobile starting `5`.
+Anything else keeps its digits and gets no `+`: a wrong country code dials a
+stranger.
