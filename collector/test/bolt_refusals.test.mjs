@@ -49,7 +49,11 @@ pool.query = async (text, params = []) => {
     notes.push({ provider: params[0], fleet: params[1], credential: params[2],
       state: params[3], detail: params[4], surface: params[5] });
   } else if (/INSERT INTO collection_run/i.test(t)) {
-    runs.push({ source: params[0], status: params[5], rows: params[6], error: params[7] });
+    /* fleet_id is $2 and was not captured, so nothing here could see that
+       Bolt wrote one row for two businesses. See the attribution checks
+       further down: that is the whole defect. */
+    runs.push({ source: params[0], fleet_id: params[1], status: params[5],
+      rows: params[6], error: params[7] });
   }
   return { rows: [{ id: 1 }], rowCount: 1 };
 };
@@ -112,7 +116,24 @@ const runOnce = async () => {
   notes.length = 0; runs.length = 0; sent.length = 0;
   // Dates, as src/run.js hands them over: iso() calls toISOString on them.
   await collect({ from: new Date('2026-08-30T00:00:00Z'), to: new Date('2026-09-02T00:00:00Z'), mode: 'incremental' });
-  return { error: runs[0]?.error || '', notes: notes.slice(), sent: sent.slice() };
+  /* ONE RUN ROW PER FLEET, so this reads them per fleet.
+     ─────────────────────────────────────────────────────────────────────────
+     This returned `runs[0].error` — the single fleet-wide row Bolt used to
+     write — and the four assertions below passed against whatever that one row
+     happened to contain. Bolt now records a verdict per business, because
+     /api/platforms prints a run row against a fleet and printing Ecosine's
+     refusal against Egari accused a business of a fault its own run disproves.
+
+     `error` stays the whole pass, joined, so the assertions that only care
+     that a refusal was recorded AT ALL keep asking exactly that. `errorFor`
+     is what the new attribution checks use. */
+  const byFleet = Object.fromEntries(runs.map((r) => [String(r.fleet_id), r]));
+  return {
+    error: runs.map((r) => r.error || '').filter(Boolean).join('; '),
+    errorFor: (f) => byFleet[f]?.error || '',
+    statusFor: (f) => byFleet[f]?.status || null,
+    runs: runs.slice(), notes: notes.slice(), sent: sent.slice(),
+  };
 };
 
 /* ── 1. the FI gateway refuses a company, and the run has to say which ───── */
@@ -128,6 +149,35 @@ check('…and names the credential it was refused for, not just the fleet',
   /BOLT_CLIENT_ID/.test(r.error), r.error);
 check('…while keeping Bolt\'s own words, which are what distinguish this from an outage',
   /COMPANIES_NOT_ALLOWED/.test(r.error), r.error);
+
+/* ── and it is recorded against the fleet it happened to ────────────────────
+   Measured on production 2026-09-09, /api/platforms?days=1, before this:
+
+     bolt/ecosine  partial  "FI roster ecosine: BOLT_CLIENT_ID is not entitled
+                             to company_id 142868 …"
+     bolt/egari    partial  "FI roster ecosine: BOLT_CLIENT_ID is not entitled
+                             to company_id 142868 …"
+
+   Egari's row states an Ecosine failure. Bolt wrote ONE run row with fleet_id
+   null carrying every surface's failures joined, and every page that reads a
+   run row as a verdict about a business printed it against both. An operator
+   who had just replaced a Bolt credential read it as their paste being
+   rejected and went hunting a fault that was not there.
+
+   In this fixture Ecosine's FI company is refused and Egari's is allowed, so
+   the refusal belongs to Ecosine alone and Egari must never carry it. */
+check('the run is recorded per fleet, not once for both businesses',
+  r.runs.length === 2 && r.runs.every((x) => x.fleet_id),
+  JSON.stringify(r.runs.map((x) => x.fleet_id)));
+check('the refused company\'s own fleet carries the refusal',
+  /BOLT_CLIENT_ID is not entitled to company_id 142868/.test(r.errorFor('ecosine')),
+  r.errorFor('ecosine'));
+check('…and the fleet whose company was allowed is not accused of it',
+  !/142868/.test(r.errorFor('egari')) && !/COMPANIES_NOT_ALLOWED/.test(r.errorFor('egari')),
+  `egari carried: ${r.errorFor('egari')}`);
+check('…while still keeping its own, different problem',
+  /BOLT_REFRESH_TOKEN_EGARI|owner 174036/.test(r.errorFor('egari')),
+  'a per-fleet split that drops a fleet\'s real fault is worse than the shared row');
 
 {
   const fi = r.notes.filter((n) => n.provider === 'bolt' && n.credential === 'BOLT_CLIENT_ID');

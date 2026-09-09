@@ -132,7 +132,7 @@ export function fiRefusal(company, data, allowed = []) {
   };
 }
 
-async function pullFiRoster(from, to, fails) {
+async function pullFiRoster(from, to, fails, rowsByFleet = new Map()) {
   const token = await fiToken();
   let total = 0;
   const [rFrom, rTo] = rosterWindow(from, to);
@@ -164,7 +164,11 @@ async function pullFiRoster(from, to, fails) {
       plate: normPlate(d.active_vehicle?.reg_number), period_start: iso(rFrom), period_end: iso(rTo),
       rating: d.driver_rating, raw: d,
     })).filter((r) => r.driver_ext_id);
-    if (rows.length) total += await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+    if (rows.length) {
+      const n = await upsertMany('driver_performance', rows, ['platform', 'driver_ext_id', 'period_start', 'period_end']);
+      total += n;
+      rowsByFleet.set(c.fleet, (rowsByFleet.get(c.fleet) || 0) + n);
+    }
 
     /* Bolt is the only channel that reports WHY a driver is stopped, and it
        reports the vehicle they still hold while stopped. A suspended driver
@@ -192,7 +196,7 @@ async function pullFiRoster(from, to, fails) {
         // The comparison that makes the refusal readable: the companies this
         // same bearer token DID read, in this same pass.
         companies_this_credential_did_read: allowed.map((a) => a.companyId) });
-    fails.push(r.fail);
+    fails.push({ fleet: c.fleet, text: r.fail });
     if (r.credential) {
       await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: r.credential,
         state: r.state, surface: FI_SURFACE, detail: r.detail });
@@ -675,7 +679,7 @@ async function knownPlates() {
   return new Set(rows.map((r) => r.plate));
 }
 
-async function pullPortalTrips(from, to, fails, allChunks = []) {
+async function pullPortalTrips(from, to, fails, allChunks = [], rowsByFleet = new Map()) {
   let total = 0;
   /* Seeded from every OTHER channel's plates, deliberately: Bolt is the feed
      that drops the letter, so letting its own rows vote would let a phantom
@@ -693,11 +697,13 @@ async function pullPortalTrips(from, to, fails, allChunks = []) {
        never asked at all. Two separate businesses on two separate credentials
        share this loop and nothing else. */
     try {
-      total += await oneFleet(c, from, to, fails, allChunks, plates);
+      const n = await oneFleet(c, from, to, fails, allChunks, plates);
+      total += n;
+      rowsByFleet.set(c.fleet, (rowsByFleet.get(c.fleet) || 0) + n);
     } catch (e) {
       const why = String(e && e.message ? e.message : e).slice(0, 200);
       log.error(SRC, `portal ${c.fleet} failed`, { err: why });
-      fails.push(`portal ${c.fleet}: ${why}`);
+      fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: ${why}` });
       allChunks.push({ from: iso(from), to: iso(to), rows: 0, error: why, fleet: c.fleet });
     }
   }
@@ -716,7 +722,7 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
     const credKey = get(RT_KEY(c.fleet)) ? RT_KEY(c.fleet) : 'BOLT_REFRESH_TOKEN';
     if (!rt) {
       log.warn(SRC, `portal skipped for ${c.fleet} — no refresh token (trips/earnings unavailable)`);
-      fails.push(`portal ${c.fleet}: no refresh token configured`);
+      fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: no refresh token configured` });
       /* A credential that was never supplied is a different problem from one
          that stopped working, and the panel an operator opens to find out what
          to re-paste has to be able to say which. Both were silence before. */
@@ -746,7 +752,7 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
         // leaving a reader to infer it from the absence of a response line.
         asked: !wrongOwner,
       });
-      fails.push(`portal ${c.fleet}: ${err}`);
+      fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: ${err}` });
       /* Bolt refresh tokens last about seven days, so this is the routine
          end of one rather than a fault — but it is only routine to somebody
          who is told. It reached the operator as a source that had quietly
@@ -846,9 +852,9 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
     if (dropped) {
       log.warn(SRC, `portal ${c.fleet}: ${dropped} rows arrived that could not be keyed`,
         { hint: 'driver.id or created is missing — has the portal renamed a column?' });
-      fails.push(`portal ${c.fleet}: ${dropped} unkeyable rows`);
+      fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: ${dropped} unkeyable rows` });
     }
-    if (short) fails.push(`portal ${c.fleet}: ${short} rows short of the counts the portal declared`);
+    if (short) fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: ${short} rows short of the counts the portal declared` });
     /* A refusal that is NOT the retention boundary is worth reporting — but it
        still does not throw away the windows that answered, and it only touches
        the credential when it is the credential being refused. A malformed
@@ -856,7 +862,7 @@ async function oneFleet(c, from, to, fails, allChunks, plates) {
        remedies, and reading the first as the second is what cost this source a
        year of empty tables. */
     if (refused) {
-      fails.push(`portal ${c.fleet}: ${refused.says}`);
+      fails.push({ fleet: c.fleet, text: `portal ${c.fleet}: ${refused.says}` });
       if (AUTH_CODES.has(refused.code)) {
         await noteCredential(pool, { provider: SRC, fleet: c.fleet, credential: credKey,
           state: 'invalid', surface: 'orderHistory', detail: refused.says });
@@ -901,6 +907,7 @@ export async function collect({ from, to, mode }) {
      table. */
   const fails = [];
   const chunks = [];
+  const rowsByFleet = new Map();
   let roster = 0;
   let trips = 0;
   try {
@@ -910,11 +917,11 @@ export async function collect({ from, to, mode }) {
        BOLT_CLIENT_SECRET, or one bad five minutes at oidc.bolt.eu, took the only
        surface carrying money down with the one carrying names. */
     try {
-      roster = await pullFiRoster(from, to, fails);
+      roster = await pullFiRoster(from, to, fails, rowsByFleet);
     } catch (e) {
       const why = String(e && e.message ? e.message : e).slice(0, 200);
       log.error(SRC, 'FI roster failed', { err: why });
-      fails.push(`FI roster: ${why}`);
+      fails.push({ fleet: null, text: `FI roster: ${why}` });
       /* Named, so the run does not report a fault against no credential at all.
          The roster's grant is BOLT_CLIENT_SECRET; the trips' is the portal
          refresh token, and only one of them just broke.
@@ -940,11 +947,11 @@ export async function collect({ from, to, mode }) {
     }
 
     try {
-      trips = await pullPortalTrips(from, to, fails, chunks);
+      trips = await pullPortalTrips(from, to, fails, chunks, rowsByFleet);
     } catch (e) {
       const why = String(e && e.message ? e.message : e).slice(0, 200);
       log.error(SRC, 'portal failed', { err: why });
-      fails.push(`portal: ${why}`);
+      fails.push({ fleet: null, text: `portal: ${why}` });
     }
 
     /* The windows go on the run. Bolt was the only chunking source whose windows
@@ -961,12 +968,48 @@ export async function collect({ from, to, mode }) {
        "FI roster ecosine: BOLT_CLIENT_ID is not entitled" sitting in its own
        error column. A surface that failed has to reach the status the page
        paints, which is the whole reason this file records surfaces at all. */
-    const status = fails.length === 0 ? 'ok' : (roster + trips > 0 ? 'partial' : 'error');
-    await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to,
-      status,
-      ...(chunks.length ? { chunks } : {}),
-      rows_written: roster + trips,
-      error: fails.length ? fails.join('; ').slice(0, 500) : null });
+    /* ONE RUN ROW PER FLEET, because a run row is what the pages read as a
+       verdict about a business.
+       ─────────────────────────────────────────────────────────────────────
+       This wrote a single row with fleet_id null carrying every surface's
+       failures joined together, and /api/platforms then printed it against
+       both fleet rows. Measured on production 2026-09-09:
+
+         bolt/ecosine  partial  "FI roster ecosine: BOLT_CLIENT_ID is not
+                                 entitled to company_id 142868 …"
+         bolt/egari    partial  "FI roster ecosine: BOLT_CLIENT_ID is not
+                                 entitled to company_id 142868 …"
+
+       Egari's row states an ECOSINE failure, and Egari's own roster reads
+       company 142897 without complaint — the message says so in its own second
+       sentence. An operator who had just pasted a fresh Egari-side credential
+       read that as their paste being rejected, and went looking for a fault
+       that was not there. A misattributed error costs more than a missing one.
+
+       Every failure this file records already knows its fleet — the portal
+       loop has `c` in scope at each push and the FI refusal is built per
+       company — so the split is a grouping, not a guess. api/channels_sql.js
+       was fixed at the same time to look health up per fleet; that fix can
+       only be as good as what this writes, and until now this wrote one row
+       for two businesses.
+
+       A failure with NO fleet is a genuine one: the two catches around the
+       whole of each pull fire before any company is reached, so neither fleet
+       was collected and both rows must say so. Those ride with every fleet
+       rather than being dropped or parked on an arbitrary one. */
+    const shared = fails.filter((f) => f.fleet == null).map((f) => f.text);
+    for (const c of config.bolt.companies) {
+      const mine = [...fails.filter((f) => f.fleet === c.fleet).map((f) => f.text), ...shared];
+      const rows = rowsByFleet.get(c.fleet) || 0;
+      const ours = chunks.filter((ch) => ch.fleet === c.fleet);
+      /* The same FLOOR as before, per fleet — see the note below. */
+      const status = mine.length === 0 ? 'ok' : (rows > 0 ? 'partial' : 'error');
+      await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to,
+        status,
+        ...(ours.length ? { chunks: ours } : {}),
+        rows_written: rows,
+        error: mine.length ? mine.join('; ').slice(0, 500) : null });
+    }
     const failedChunks = chunks.filter((c) => c.error).length;
     log[fails.length ? 'warn' : 'info'](SRC, 'done',
       { roster, trips, windows: chunks.length || undefined,
@@ -977,9 +1020,16 @@ export async function collect({ from, to, mode }) {
        source that throws WITHOUT a collection_run row does not show as broken
        on the status page: it disappears from it, which is the one failure mode
        worse than being broken. */
-    await logRun({ source: SRC, fleet_id: null, mode, window_start: from, window_end: to,
-      status: 'error', rows_written: roster + trips,
-      error: [String(e), ...fails].join('; ').slice(0, 500) });
+    /* Per fleet here too. This catch fires for the run row's own write or for
+       something between the two surfaces — neither fleet finished, so both say
+       so rather than one of them silently having no row at all, which is the
+       failure mode this whole block exists to prevent. */
+    for (const c of config.bolt.companies) {
+      await logRun({ source: SRC, fleet_id: c.fleet, mode, window_start: from, window_end: to,
+        status: 'error', rows_written: rowsByFleet.get(c.fleet) || 0,
+        error: [String(e), ...fails.filter((f) => f.fleet == null || f.fleet === c.fleet)
+          .map((f) => f.text)].join('; ').slice(0, 500) });
+    }
     log.error(SRC, 'failed', { err: String(e) });
   }
 }

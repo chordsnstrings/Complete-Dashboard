@@ -485,18 +485,34 @@ const bolt = src('bolt.js');
    harvest that lost fifteen of twenty-one months read exactly like one that
    lost none. The literal expression this used to match is still here for the
    case where there are no windows at all. */
+/* ONE RUN ROW PER FLEET, so every expression below moved from the whole pass
+   to one business's share of it — `fails` to `mine`, `chunks` to `ours`,
+   `roster + trips` to that fleet's own `rows`. The invariants are unchanged;
+   what they are pinned to is not. Bolt wrote a single row with fleet_id null
+   carrying both businesses' failures, and /api/platforms printed it against
+   both fleet rows: on production 2026-09-09 Egari's row read "FI roster
+   ecosine: BOLT_CLIENT_ID is not entitled to company_id 142868" over a fleet
+   whose own roster reads 142897 without complaint. */
 check('a bolt run that wrote nothing and failed everywhere is not "ok"',
-  /\.\.\.\(chunks\.length \? \{ chunks \} : \{\}\)/.test(bolt)
-  && /fails\.length === 0 \? 'ok' : \(roster \+ trips > 0 \? 'partial' : 'error'\)/.test(bolt));
+  /\.\.\.\(ours\.length \? \{ chunks: ours \} : \{\}\)/.test(bolt)
+  && /mine\.length === 0 \? 'ok' : \(rows > 0 \? 'partial' : 'error'\)/.test(bolt));
+check('…and it is one row per fleet, so neither business wears the other\u2019s fault',
+  /for \(const c of config\.bolt\.companies\) \{[\s\S]{0,700}?fleet_id: c\.fleet/.test(bolt)
+  && !/fleet_id: null, mode, window_start/.test(bolt),
+  'a run row is read as a verdict about a business; one row cannot serve two');
+check('…and a failure that names no fleet reaches every fleet rather than one of them',
+  /fails\.filter\(\(f\) => f\.fleet == null\)/.test(bolt)
+  && /\.\.\.shared\]/.test(bolt),
+  'the catches that fire before any company is reached mean NEITHER fleet was collected');
 /* And the chunks may only make it WORSE. Handing logRun the windows and no
    status let a run whose ROSTER half was refused report 'ok', because the
    portal's windows knew nothing about the roster and every one of them
    answered — seen on production minutes after the deploy. */
 check('the chunks refine the status, they do not replace it',
-  /status,\n\s*\.\.\.\(chunks\.length \? \{ chunks \} : \{\}\)/.test(bolt));
+  /status,\n\s*\.\.\.\(ours\.length \? \{ chunks: ours \} : \{\}\)/.test(bolt));
 check('and every window it attempted reaches the run row', /chunks\.push\(|allChunks\.push\(/.test(bolt));
 check('and the failing surfaces are named in the run, not only in the log',
-  /error: fails\.length \? fails\.join/.test(bolt));
+  /error: mine\.length \? mine\.join/.test(bolt));
 check('a partial bolt run does not log at info, where nobody reads it',
   /log\[fails\.length \? 'warn' : 'info'\]/.test(bolt));
 /* One surface must not take the other down with it. The roster is a snapshot of
@@ -512,13 +528,15 @@ check('the roster half cannot take the portal half with it',
   /roster = await pullFiRoster[\s\S]{0,600}?\} catch[\s\S]{0,600}?trips = await pullPortalTrips/.test(boltCode),
   'a throw in the roster used to skip every trip and every fare for both fleets');
 check('and one fleet cannot take the other',
-  /await oneFleet\([\s\S]{0,120}?\} catch/.test(boltCode),
+  /await oneFleet\([\s\S]{0,260}?\} catch/.test(boltCode),
   'egari is walked first; its failure used to cost ecosine its whole harvest');
 // Two fleets came back with two different codes under one message we invented.
 check('the FI gateway rejection carries its own message rather than our verdict',
   /FI getDrivers rejected for/.test(bolt) && /data\?\.message/.test(bolt));
 check('and a thrown bolt run still reports what had already failed',
-  /\[String\(e\), \.\.\.fails\]/.test(bolt));
+  /\[String\(e\), \.\.\.fails\.filter\(/.test(bolt)
+  && /f\.fleet == null \|\| f\.fleet === c\.fleet/.test(bolt),
+  'and reports it against every fleet, because neither of them finished');
 
 /* ── reserved words that only bite as a bare alias ─────────────────────────
    `SELECT n day` is not a column named day — Postgres reads it as the start of

@@ -1596,6 +1596,19 @@ other vanished"* — becoming `DISTINCT ON (source, mode, fleet_id)`.
 `api/channels_sql.js` was left behind, and **both** routes reading it kept the
 bug: `/api/platforms` and `/api/revenue`.
 
+**And the lookup was only half of it.** With the lookup fixed the Egari row
+*still* carried the Ecosine text, because `src/sources/bolt.js` wrote **one run
+row with `fleet_id` null** for both businesses — every surface's failures joined
+into one string — while Uber and FMS write one per fleet. So there was no
+per-fleet Bolt verdict to show. Bolt now writes one row per company: every
+failure it records already knew its fleet (the portal loop has `c` in scope at
+each push, the FI refusal is built per company), so the split is a grouping and
+not a guess. A failure with **no** fleet — the two catches that fire before any
+company is reached — rides with every fleet, because neither was collected.
+
+Confirmed on production after both fixes: `bolt/ecosine` carries the FI refusal,
+`bolt/egari` does not.
+
 **What it cost.** An operator pasted a fresh Bolt portal token, watched the page
 still show Bolt red on both fleets, and concluded the paste had been rejected.
 It had been accepted — `BOLT_REFRESH_TOKEN_ECOSINE` was written at 06:04 UTC and
