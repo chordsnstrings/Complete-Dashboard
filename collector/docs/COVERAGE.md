@@ -1674,9 +1674,16 @@ last ran 2026-08-27.
 | `cannot_earn` | the Uber standing does not permit taking work at all | n/a, it is the true answer |
 | `absent` | Uber WAS asked and returned nothing for the day | n/a, it is the true answer |
 
-**Thirty of the 157 cannot earn.** Measured 2026-09-09: 157 people hold an Uber
-account, 127 of them a standing that permits work; the other 30 are suspended,
-deactivated or waitlisted. They are on the page — dropping them silently would
+**Thirty of the 157 cannot earn, and none of them is a suspension.** Measured
+2026-09-09: 157 people hold an Uber account, 127 of them a standing that
+permits work. The other 30 are all at some stage of ONBOARDING —
+`ONBOARDING_STATUS_WAITLISTED_AUTO_REACTIVATION` ×21, `..._REJECTED` ×6,
+`..._ACCEPTED` ×2, `..._APPLIED` ×1 — which is why the page gives them four
+different sentences rather than one: an application Uber has turned down is not
+a person who simply has not started, and an operator would chase them
+differently. The raw enum is never shown; `standingWords()` maps
+`src/roster.js`'s normalised state, and falls back to the provider's word
+tidied rather than to a key. They are on the page — dropping them silently would
 hide a car that may still be attached to somebody who cannot drive it — but
 they carry their own reason, are never counted late, and are out of the "Drove"
 denominator. Before that they fell into `not_asked` and sat in the call list,

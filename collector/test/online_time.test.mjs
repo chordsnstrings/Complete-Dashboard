@@ -265,8 +265,8 @@ console.log('\na standing that cannot take work is not a driver who is late');
 const susp = row('Faisal Rehman');
 check('a suspended account gets its own reason, not "nobody asked"',
   susp?.online_basis === 'cannot_earn', susp?.online_basis);
-check('…which names the provider\'s own word for the standing',
-  /Uber has it as suspended/.test(susp?.online_why || ''), susp?.online_why);
+check('…worded in English rather than in Uber\'s enum',
+  /Uber has suspended this account/.test(susp?.online_why || ''), susp?.online_why);
 check('…and says there is nothing to chase, because that is the point of the state',
   /nothing here to chase/.test(susp?.online_why || ''), susp?.online_why);
 check('…and it is never late, whatever the start time',
@@ -276,6 +276,31 @@ check('the Drove denominator excludes them, so the fleet does not read a third i
   /of \$\{fmt\(t\.people - \(t\.cannot_earn \|\| 0\)\)\} allowed to take work/
     .test(await (await import('node:fs')).promises.readFile(
       new URL('../api/public/onlinetime.js', import.meta.url), 'utf8')));
+
+/* The four standings production actually returns, measured 2026-09-09: 21
+   waitlisted, 6 rejected, 2 accepted, 1 applied. All four are onboarding
+   states rather than suspensions, and they mean different things to whoever
+   reads the row — an application Uber turned down is not a person who has
+   simply not started. */
+{
+  const { standingWords } = await import('../api/online_routes.js');
+  const { normaliseState } = await import('../src/roster.js');
+  const RAW = ['ONBOARDING_STATUS_WAITLISTED_AUTO_REACTIVATION', 'ONBOARDING_STATUS_REJECTED',
+    'ONBOARDING_STATUS_ACCEPTED', 'ONBOARDING_STATUS_APPLIED'];
+  const said = RAW.map((r) => standingWords(normaliseState(r), r));
+  check('no standing reaches the reader as a database key',
+    said.every((w) => !/_/.test(w) && !/onboarding_status/i.test(w)), JSON.stringify(said));
+  check('a rejected application does not read as one still in progress',
+    /turned this application down/.test(said[1]) && !/being onboarded/.test(said[1]), said[1]);
+  check('…and the waitlist is not called a suspension',
+    /on its waitlist/.test(said[0]), said[0]);
+  check('an unrecognised standing shows the provider\'s word, tidied, not a guess',
+    /^Uber has this account as "not a real state", which does not permit/
+      .test(standingWords(normaliseState('NOT_A_REAL_STATE'), 'NOT_A_REAL_STATE')),
+    standingWords(normaliseState('NOT_A_REAL_STATE'), 'NOT_A_REAL_STATE'));
+  check('…and with neither word we say only what is true',
+    standingWords(null, null) === 'Uber does not currently permit this account to take work.');
+}
 
 console.log('\nasked, or not asked, in the units the collector actually uses');
 const warm = row('Hina Sethi');

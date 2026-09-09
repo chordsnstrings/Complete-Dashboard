@@ -68,6 +68,54 @@ export function startMinutes(v) {
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 }
 
+/* A STANDING, IN WORDS AN OPERATOR READS.
+   ──────────────────────────────────────────────────────────────────────────
+   The first version printed driver_platform_state.state_raw straight into the
+   sentence, and production answered with
+   `onboarding_status_waitlisted_auto_reactivation` — Uber's enum, on a page an
+   operations person reads while deciding who to phone. That is the same defect
+   ui.js's SOURCE_LABEL was written for: "These are database keys — fms,
+   cabman — and they were rendered raw as panel HEADINGS."
+
+   Measured on production 2026-09-09, all thirty accounts that cannot earn are
+   at some stage of onboarding rather than suspended: 21 waitlisted, 6
+   rejected, 2 accepted, 1 applied. So the four sentences say four DIFFERENT
+   things — a person who was rejected is never coming, a person who was
+   accepted has simply not started — because "cannot take work" alone would
+   have an operator chase all four the same way.
+
+   Keyed on the NORMALISED state (schema_v13:26), with the provider's own word
+   as the fallback so a standing the normaliser could not place still says
+   something true rather than nothing. Even that fallback is tidied: the enum's
+   prefix is dropped and its underscores become spaces, because a raw key is
+   never the right thing to show. */
+/* Every non-earning member of src/roster.js's STATES, and `rejected` is the one
+   that must not be missed: STATES:17-22 says why it exists as its own word —
+   "Not 'onboarding' — nothing is in progress — and not 'deactivated', which is
+   somebody who was working and was stopped." Six people are in it on
+   production, and lumping them under a generic "cannot take work" would have
+   an operator chase an application Uber has already turned down. */
+const STANDING = {
+  waitlist: 'Uber has this account on its waitlist, so it cannot take work yet.',
+  onboarding: 'This account is still being onboarded and has not been let loose yet.',
+  rejected: 'Uber turned this application down, so this account will not be coming online.',
+  suspended: 'Uber has suspended this account, so it cannot take work.',
+  deactivated: 'Uber has deactivated this account, so it cannot take work.',
+  inactive: 'Uber has this account down as inactive, so it cannot take work.',
+};
+const tidy = (raw) => String(raw)
+  .replace(/^onboarding_status_/, '').replace(/_/g, ' ').trim().toLowerCase();
+export function standingWords(state, raw) {
+  /* `unknown` is deliberately absent from the map: STATES:26 gives it
+     can_earn null, not false, so a row whose standing we could not read never
+     reaches this branch at all — it is not evidence that somebody cannot work.
+     If one ever does, it falls to the raw word below rather than being given a
+     sentence about a standing nobody established. */
+  if (state && STANDING[state]) return STANDING[state];
+  if (raw) return `Uber has this account as "${tidy(raw)}", which does not permit taking work.`;
+  return 'Uber does not currently permit this account to take work.';
+}
+
 export function onlineRoutes(app, { q, wrap }) {
   app.get('/api/online-time', wrap(async (req, res) => {
     const day = String(req.query.day || '');
@@ -112,11 +160,15 @@ export function onlineRoutes(app, { q, wrap }) {
                 array_remove(array_agg(DISTINCT driver_ext_id), NULL) AS all_ids,
                 array_agg(DISTINCT platform ORDER BY platform) AS portals,
                 bool_or(platform = 'uber' AND can_earn) AS can_earn,
-                /* The provider's OWN word for the standing, not our normalised
-                   one, so the sentence a suspended driver gets can name what
-                   Uber actually said rather than a bucket we chose. */
+                /* BOTH words for the standing. The normalised one
+                   (schema_v13:26 — active | waitlist | onboarding | suspended |
+                   deactivated | inactive | unknown) is what the sentence is
+                   built from; the provider's own is kept beside it for the case
+                   the normaliser could not place. */
+                min(state) FILTER (WHERE platform = 'uber' AND can_earn IS NOT TRUE
+                                     AND btrim(coalesce(state, '')) <> '') AS state_word,
                 min(state_raw) FILTER (WHERE platform = 'uber' AND can_earn IS NOT TRUE
-                                         AND btrim(coalesce(state_raw, '')) <> '') AS state_word,
+                                         AND btrim(coalesce(state_raw, '')) <> '') AS state_raw,
                 min(plate) FILTER (WHERE platform = 'uber' AND plate IS NOT NULL) AS state_plate
            FROM driver_platform_state dps
           GROUP BY 1
@@ -342,10 +394,8 @@ export function onlineRoutes(app, { q, wrap }) {
            It only claims the remaining case — no event, no trip, and no
            standing that would have let them work. */
         basis = 'cannot_earn';
-        why = 'This account cannot take work' + (pp.state_word
-          ? ` — Uber has it as ${String(pp.state_word).toLowerCase()}. `
-          : ' — Uber does not currently permit it to earn. ')
-          + 'Not coming online is what that means, so there is nothing here to chase.';
+        why = `${standingWords(pp.state_word, pp.state_raw)} Not coming online is what that `
+          + 'means, so there is nothing here to chase.';
       } else if (!askedAbout) {
         basis = 'not_asked';
         why = 'Uber was never asked about this driver. The timeline is only requested for people '
