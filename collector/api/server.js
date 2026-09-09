@@ -43,6 +43,7 @@ import { supplyRoutes } from './supply_routes.js';
 import { capacityRoutes } from './capacity_routes.js';
 import { revenueRoutes, receiptRoutes } from './revenue_routes.js';
 import { placeEnds, RATE_SQL, forgone } from './place_sql.js';
+import { onlineRoutes } from './online_routes.js';
 import { reconcileRoutes } from './reconcile_routes.js';
 import { performerRoutes } from './performer_routes.js';
 import { compareRoutes } from './compare_routes.js';
@@ -5399,6 +5400,10 @@ rosterRoutes(app, { q, wrap, range });
    Every source that saw a given Dubai-local day, including whether each one
    was collecting at all. */
 dayRoutes(app, { q, wrap });
+/* Who came online when, for the whole fleet on one day — the call list
+   operations works from. See api/online_routes.js for why a driver with no
+   online time has four possible reasons and only one of them is about them. */
+onlineRoutes(app, { q, wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
 authRoutes(app, { q, wrap });

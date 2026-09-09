@@ -269,6 +269,17 @@ a.m-stat:active{ transform:scale(.985) }
 .m-search input::placeholder{ color:var(--ink-3) }
 .m-search span{ color:var(--ink-3); font-size:var(--t7)}
 
+/* A date or time the reader sets. Native controls, because a phone's own date
+   and time pickers are better than anything built here and are the ones the
+   reader's thumb already knows. min-height 42px is the same touch target the
+   date sheet uses; anything smaller is a control that takes two taps. */
+.m-inp{
+  flex:1 1 auto; min-width:0; appearance:none; border:1px solid var(--rule);
+  background:var(--surface-2); border-radius:11px; padding:9px 11px; min-height:42px;
+  font:inherit; font-size:var(--t7); color:var(--ink); outline:none;
+}
+.m-inp:focus-visible{ border-color:var(--accent-line); box-shadow:0 0 0 2px var(--accent-soft) }
+
 /* ── odds and ends ──────────────────────────────────────────────────────── */
 .m-sec{
   font-family:"IBM Plex Mono",monospace; font-size:var(--t1); letter-spacing:.15em;

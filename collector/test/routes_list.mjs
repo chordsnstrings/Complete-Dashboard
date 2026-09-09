@@ -21,6 +21,10 @@ export const ROUTES = [
   'compare/2026-08-25/2026-08-24?cut=full', 'compare/not-a-date',
   'driver/drv-0', 'driver/drv-0/activity', 'driver/drv-0/territory',
   'driver/drv-0/earnings', 'driver/drv-0/quality', 'driver/drv-0/trips',
+  /* The call list. Audited from the day it existed, because a page whose
+     whole product is refusing to colour a row it cannot support is a page
+     whose rendering has to be looked at. */
+  'online-time',
   'roster', 'roster/pipeline', 'roster/idle', 'roster/blocked', 'roster/states',
   'vehicles', 'vehicle/L45235', 'vehicle/L45235/drivers', 'vehicle/L45235/movement',
   'vehicle/L45235/earnings', 'vehicle/L45235/safety', 'vehicle/L45235/compliance',

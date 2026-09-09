@@ -22,6 +22,7 @@ import { renderCohort } from './cohort.js';
 import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
 import { renderTrips } from './trips.js';
+import { renderOnlineTime } from './onlinetime.js';
 import { peopleCards, peopleResolved, namesLine } from './people.js';
 import { renderProvenance } from './provenance.js';
 import { renderReceipts } from './receipts.js';
@@ -324,6 +325,7 @@ const VIEWS = [
   { id: 'platforms', label: 'Platforms', ic: '◨', sec: 'Work', sub: 'How Uber, Yango and Bolt compare on share, car tier and jobs accepted' },
   { id: 'corridors', label: 'Popular routes', ic: '⇄', sec: 'Work', sub: 'Which pickup areas feed which drop-off areas' },
   { id: 'drivers', label: 'Drivers', ic: '◧', sec: 'People', sub: 'Trips, quality and platform activity for every driver' },
+  { id: 'online-time', label: 'Online time', ic: '◔', sec: 'People', sub: 'When each driver came online on Uber, against the time you expect them to start' },
   { id: 'roster', label: 'Driver roster', ic: '☰', sec: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
   { id: 'top-performers', label: 'Top performers', ic: '▲', sec: 'People', sub: 'The best drivers of the last complete week, and what they did differently' },
   { id: 'low-performers', label: 'Low performers', ic: '▼', sec: 'People', sub: 'The weakest drivers of the last complete week, and what the data cannot explain' },
@@ -674,11 +676,19 @@ function setHeader(detail) {
   setDisp('#fRange', lost || hidesRange(state.view));
   setDisp('#fPlatform', lost || hidesChannel(state.view));
   setDisp('#fFleet', lost || hidesChannel(state.view));
-  /* The grain select has no hiding rule of its own — nothing else in the app
-     touches its display — so it is set both ways here rather than only hidden,
-     or a reader who passed through a bad address would lose the control on
-     every page afterwards. */
-  setDisp('#fGrain', lost);
+  /* The grain select buckets a WINDOW, so it governs exactly nothing on a page
+     that has no window — and it was shown on all sixteen of them. #live,
+     #sources, #day, #trip, #segment, #map, #compliance, #online-time and the
+     rest each carried an "Auto grouping / By day / By week / By month" control
+     that changed nothing they render, and — the part that costs more than the
+     clutter — it rode along into every link leaving those pages, which is the
+     documented reason #capacity's fleet chip and #causes' range chip were
+     hidden. hidesRange() is already the question "does this page have a
+     window": grain has no separate answer to it.
+
+     Still set BOTH ways rather than only hidden, so a reader who passes
+     through a windowless page does not lose the control everywhere after. */
+  setDisp('#fGrain', lost || hidesRange(state.view));
   $('#filters').style.display = 'flex';
 }
 /* ─────────── views ─────────── */
@@ -1515,6 +1525,10 @@ V.demand = async (root) => {
     }
   }
 };
+
+/* Subscripted, because the id carries a hyphen and V.online-time is not a
+   property access. bin/page-audit.mjs matches both forms. */
+V['online-time'] = async (root) => renderOnlineTime(root);
 
 V.drivers = async (root) => {
   const gen = currentGen();

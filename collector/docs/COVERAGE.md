@@ -1643,3 +1643,85 @@ wrong with the message, only with which fleet it was shown against.
 * **When a route is fixed for a bug, grep for the shape rather than the route.**
   `DISTINCT ON (source` was the searchable signature here, and it sat in a
   second file for as long as it took somebody to be misled by it.
+
+### Going online: what Uber tells us, and the four ways it does not — 2026-09-09
+
+The Online time page (`#online-time`, under People) answers "who came online at
+what time, against the hour you expect them to start". It produces a call list,
+so every absence on it had to be told apart from every other absence: a driver
+who is on that list gets phoned.
+
+**What we hold.** `driver_timeline_event` (schema_v37) carries Uber's ONLINE /
+OFFLINE transitions per driver account. Coverage is 100% on complete days since
+2026-07-28 and 0% before — the collector did not exist before that date, and
+Uber's timeline endpoint does not backfill.
+
+**How it is collected.** `src/run.js:407` anchors each tick on the instant it
+wakes: `to = new Date(), from = daysAgo(2)`. `src/sources/uber_timeline.js:203`
+uses that same pair BOTH to choose which drivers to ask about and to bound what
+it fetches, and it chooses them from `trip`, not from the roster. Cron is
+`UBER_TIMELINE_CRON`, `17 */3 * * *`. There is a whole-roster mode
+(`node src/index.js timeline-roster`, 30 days) which has **no cron at all** and
+last ran 2026-08-27.
+
+**The four absences, and which of them heal.**
+
+| state | what it means | heals? |
+|---|---|---|
+| `already_online` | the span opened before midnight — this day has no start of its own | n/a, it is the true answer |
+| `awaiting_feed` | trips landed, the three-hourly timeline has not caught up | yes, next tick |
+| `not_asked` | no trip inside the collector's 48 h selection window, so Uber was never asked | **no** — only a manual roster sweep closes it |
+| `absent` | Uber WAS asked and returned nothing for the day | n/a, it is the true answer |
+
+Measured for 2026-09-08: 109 accounts held an active Uber standing, 84 drove,
+and all 25 who did not also took no trip on the 6th or 7th — so the collector
+never asked Uber about a single one of them. "Never came online" is unprovable
+for those people by construction.
+
+**The ask-window is an INSTANT window, not a calendar one.** This is the trap:
+the collector's window is a rolling 48 hours anchored on the tick, and writing
+it as three Dubai calendar days (`BETWEEN day - 2 AND day`) is up to 24 hours
+too generous — which makes the page print `absent` ("Uber was asked and
+returned no online event") for a day no tick ever fetched. The endpoint now
+uses `requested_at >= least(dayEnd, now()) - interval '48 hours'`: a tick at
+that instant covers the whole day, so a trip inside it is *sufficient* proof of
+selection. It is not necessary, which makes the residual error fall towards
+`not_asked` — the state that claims nothing — rather than towards `absent`.
+
+**Uber drops deactivated drivers from the supplier roster.** 395 people are
+built from trips against 338 on the roster (`api/roster_routes.js:80`). Their
+online events are still collected, because the collector picks who to ask from
+`trip`. Any page that takes Uber ids from `driver_platform_state` alone loses
+them — and, if it then falls through to "no online event has arrived yet",
+excuses a real no-show permanently and silently.
+
+**The first trip is not a start time.** A trip is necessarily after going
+online, by a median of 68 to 73 minutes measured over two days on production.
+It is carried on the row as evidence and never as a verdict; a lateness mark
+built on it would be systematically too kind.
+
+**What Uber does NOT give us here:** a reason for going offline, an ONLINE
+event for a driver it was not asked about, anything at all before 2026-07-28,
+and any notion of a scheduled or rostered start — the expected start time is
+the reader's own, held in `localStorage` under `online-time:start` and shared
+by both shells.
+
+### Traps this added to the list
+
+- **A collector's window is in the collector's units.** Restating a rolling
+  48-hour instant window as Dubai calendar days changed which of two opposite
+  sentences a driver got. When a page's honesty rests on "was this fetched",
+  read the fetch code, not the schedule.
+- **`person_key IS NOT NULL` is not the predicate.** The column is generated
+  from the name, so a blank name folds to `''`, not NULL. Every index in
+  `schema_v53` is partial on `person_key IS NOT NULL AND person_key <> ''` and
+  the schema says why — "an empty key must never become the bucket every
+  anonymous row falls into". Use `coalesce(nullif(person_key, ''),
+  driver_ext_id)`, exported as `personKeyStored` in `api/custody_sql.js`.
+- **The roster is not the population.** `driver_platform_state` is who Uber
+  *currently* lists. `trip` is who drove. For anything about attendance the
+  answer is the union, and taking ids from the roster alone silently drops the
+  people most likely to be worth a phone call.
+- **`driver_timeline_event` needs `driver_ext_id` bound.** Its only useful
+  index leads on the id (`schema_v37:56`); the other is on the Dubai-DATE
+  expression, so a raw `at` range matches neither and scans ~197k rows.

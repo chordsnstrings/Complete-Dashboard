@@ -18,7 +18,7 @@
    top-level `document` and cannot be loaded in node. The shapes below are the
    ones the file actually uses, and each regex is anchored to a declaration
    rather than to prose. */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
 let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { ok ? (pass++, console.log(`  ✓ ${n}`)) : (fail++, console.log(`  ✗ ${n} ${x}`)); };
@@ -28,8 +28,9 @@ const src = readFileSync(new URL('../api/public/app.js', import.meta.url), 'utf8
 /* ── what the file declares ──────────────────────────────────────────────── */
 const SECTIONS = [...src.matchAll(/\{ id: '([A-Z][a-z]+)', ic: '[^']*', to: '([a-z-]+)' \}/g)]
   .map((m) => ({ id: m[1], to: m[2] }));
-const VIEWS = [...src.matchAll(/\{ id: '([a-z-]+)', label: '[^']*', ic: '[^']*', sec: '([A-Z][a-z]+)'/g)]
-  .map((m) => ({ id: m[1], sec: m[2] }));
+const VIEWS = [...src.matchAll(
+  /\{ id: '([a-z-]+)', label: '([^']*)', ic: '[^']*', sec: '([A-Z][a-z]+)'(?:, sub: '([^']*)')?/g)]
+  .map((m) => ({ id: m[1], label: m[2], sec: m[3], sub: m[4] || null }));
 /* Every V.<name> handler, which is the real list of addresses the router can
    reach — VIEWS is only the ones that also want a rail row. */
 const HANDLERS = [...new Set([...src.matchAll(/^V\.([a-zA-Z]+) = /gm)].map((m) => m[1]))];
@@ -100,6 +101,51 @@ check('it is not in any section', !VIEWS.some((v) => v.id === 'settings'),
 const html = readFileSync(new URL('../api/public/index.html', import.meta.url), 'utf8');
 check('…and is reachable from the footer instead',
   /id="settingsLink"[^>]*href="#settings"/.test(html));
+
+/* ── the shell says the page's name; the page must not say it again ─────────
+   The rail's own register already prints each view's label as the <h1> and its
+   `sub` as the sentence under it, before the view's module runs at all. A page
+   that then opens with panel('<its own label>', '<its own sub>') puts the same
+   heading and the same sentence on the screen twice, a few hundred pixels
+   apart — which is the defect the platforms page was fixed for, hand-fixed,
+   with nothing stopping the next page from doing it.
+
+   The Online time page did it the day it was written, and rendered against the
+   fixtures before anybody noticed. So the rule is checked rather than
+   remembered, and it is checked on the SUB rather than only on the label: a
+   sub is a whole sentence, so a module containing one verbatim is repeating
+   the shell and not coincidentally agreeing with it. The label is checked too,
+   but only in the panel-title position, because short labels like "Money" or
+   "Work" appear as ordinary words all over these files. */
+console.log('\nno page reprints the heading the shell already gave it');
+const pages = readdirSync(new URL('../api/public/', import.meta.url))
+  .filter((f) => f.endsWith('.js') && f !== 'app.js');
+const echoes = [];
+for (const f of pages) {
+  const body = readFileSync(new URL(`../api/public/${f}`, import.meta.url), 'utf8');
+  for (const v of VIEWS) {
+    if (v.sub && body.includes(v.sub)) echoes.push(`${f} repeats the sub of #${v.id}`);
+    if (body.includes(`panel('${v.label}'`)) echoes.push(`${f} panels the label of #${v.id}`);
+  }
+}
+check('no view module reprints its own label or its own one-liner',
+  echoes.length === 0, echoes.join('; '));
+
+/* ── a control that governs nothing is not shown ────────────────────────
+   Every control in the toolbar has a rule saying which pages it applies to,
+   and the reason is written at api/public/data.js:330 — "an address that
+   carries a filter the destination page hides is a filter nobody can see,
+   change or undo". The grain select had no rule at all and so appeared on all
+   sixteen windowless pages, bucketing a window they do not have and riding
+   along into every link leaving them. It buckets a window, so it applies
+   exactly where a window does. */
+console.log('\nthe grain select follows the window it buckets');
+check('grain is hidden wherever the range is',
+  /setDisp\('#fGrain', lost \|\| hidesRange\(state\.view\)\);/.test(src),
+  'setDisp(\'#fGrain\', lost) showed it on #live, #sources, #day, #trip, '
+  + '#segment, #map, #compliance, #online-time and eight more');
+check('…and still set both ways, so it is not lost for the rest of the session',
+  /Still set BOTH ways rather than only hidden/.test(src));
 
 console.log('\nthe collapsing-group machinery is gone, not merely unused');
 check('no group heading is rendered', !/el\('button', `grp/.test(src));

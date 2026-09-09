@@ -363,7 +363,22 @@ export const NO_PLATFORM_FLEET = ['driver', 'vehicle', 'property', 'coverage'];
    parameters at all, /api/map/days takes a plate, /api/segment takes a plate
    and a timestamp — so all three controls above these two pages governed
    nothing on them. */
+/* #online-time carries its OWN day picker and its own expected-start time, and
+   /api/online-time takes those two and nothing else. It is Uber-only by
+   construction — an Uber online event is the only thing any provider here
+   reports — so a platform chip above it governs nothing either. Left off this
+   list it rendered under "This month · All platforms · Both fleets", three
+   controls that changed nothing on a page whose subject is ONE day, and that
+   rode along into every link leaving it.
+
+   The fleet chip is the one of the three that COULD mean something:
+   driver_platform_state.fleet_id is populated, so an Ecosine-only call list is
+   answerable. It is deliberately not offered yet — the page was asked for as
+   "ALL drivers that we have data for", and a fleet chip that silently halves
+   the call list is a worse first version than no chip. Split it when somebody
+   asks for one fleet's list, and move this id to NO_RANGE at the same time. */
 export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'action', 'insights',
+  'online-time',
   /* #trip is ONE booking addressed by the provider's own id. /api/trip takes a
      platform and an id and nothing else — a range, a channel or a fleet
      control above it would govern nothing, and would ride along into every

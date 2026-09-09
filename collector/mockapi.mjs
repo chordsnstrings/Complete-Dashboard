@@ -4615,6 +4615,107 @@ const UN_RATE = 4.6;
 const UN_BASIS = `the fleet\u2019s own rate over this window — AED ${UN_RATE}/km across 4,428 `
   + 'bookings carrying both a fare and a distance (60,214 km). Revenue forgone, not a cash cost.';
 
+/* The call list. All FOUR states are present on purpose: a fixture that only
+   holds green and red cannot show that the page refuses to judge a row it has
+   no evidence for, which is the whole product. See api/online_routes.js. */
+app.get('/api/online-time', (req, r) => {
+  const start = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(req.query.start || ''));
+  const startMin = start ? Number(start[1]) * 60 + Number(start[2]) : null;
+  /* The real route tells the two absences apart — nothing asked for, versus
+     something asked for that it could not read — and both shells render the
+     sentence rather than two zeroes. A fixture that returned neither let the
+     smoke run go green over that path. */
+  const startWhy = startMin != null ? null
+    : (String(req.query.start ?? '').trim() === ''
+      ? 'No start time was set, so nobody is marked late or on time.'
+      : `"${String(req.query.start).trim().slice(0, 20)}" is not a time this page can read. `
+        + 'Give it as HH:MM on a 24-hour clock — 06:00, not 6am — and nobody is judged '
+        + 'until it can be.');
+  const hhmm = (n) => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.day || ''))
+    ? req.query.day : dayISO(0).slice(0, 10);
+  const AREAS = ['Deira', 'Business Bay', 'Al Barsha First', 'Dubai Marina', 'Nad Al Sheba'];
+  const rows = drivers.map((name, i) => {
+    /* The LAST THREE drivers take the three states that must never be
+       coloured, one each; everyone before them reports a time. Cycling on
+       `i % 5` was the obvious way to write this and it was wrong: the list is
+       eight names long, so exactly one index satisfied it and the fixture held
+       green, red and ONE grey while the comment above claimed all four. A
+       fixture that silently covers less than it says it covers is worse than a
+       small one — the smoke run went green over an untested path. Anchoring on
+       the end of the list makes the coverage independent of its length. */
+    const GREY = ['already_online', 'awaiting_feed', 'not_asked'];
+    const back = drivers.length - 1 - i;
+    const basis = back < GREY.length ? GREY[back] : 'reported';
+    const min = basis === 'reported' ? 300 + ((i * 37) % 260) : null;
+    const trips = basis === 'not_asked' ? 0 : 4 + (i % 14);
+    const late = startMin == null || min == null ? null : min > startMin;
+    return {
+      person_key: `pk-${i}`, name, driver_ext_id: `drv-${i}`, uber_ids: [`drv-${i}`],
+      can_earn: true,
+      online_at: min == null ? null : `${day}T${hhmm(min)}:00+04:00`,
+      online_minute: min, online_local: min == null ? null : hhmm(min),
+      online_basis: basis,
+      online_why: basis === 'reported' ? 'Uber recorded the driver coming online at this time.'
+        : basis === 'already_online'
+          ? 'The driver was already online when the day began — the shift started before midnight, '
+            + 'so this day has no start time of its own.'
+          : basis === 'awaiting_feed'
+            ? 'This driver took a trip, and no online event has arrived for the day yet. Trips land '
+              + 'every half hour and the timeline every three hours, so the two run on different '
+              + 'clocks. It fills in on the next pass; it is not evidence about the driver.'
+            : 'Uber was never asked about this driver. The timeline is only requested for people who '
+              + 'took a trip in the previous two days, and this person took none — so we hold no '
+              + 'evidence either way, and none is coming until somebody runs the roster sweep.',
+      first_trip_at: trips ? `${day}T${hhmm((min ?? 330) + 40)}:00+04:00` : null,
+      first_trip_local: trips ? hhmm((min ?? 330) + 40) : null,
+      trips,
+      plate: plates[i % plates.length],
+      plate_basis: basis === 'not_asked'
+        ? 'attached on the Uber roster — not a car we saw them drive today' : 'held that day',
+      phone: i % 11 === 7 ? null : `+9715${String(1000000 + i * 7919).slice(0, 7)}`,
+      portals: i % 3 === 0 ? ['uber'] : i % 3 === 1 ? ['hotel', 'uber'] : ['bolt', 'uber', 'yango'],
+      where: basis === 'reported' && i % 9 !== 8
+        ? { area: AREAS[i % AREAS.length], votes: 40 + (i % 400), seen: 60 + (i % 400),
+          lat: 25.1, lng: 55.2, within_min: i % 20 }
+        : null,
+      where_why: basis === 'reported' && i % 9 !== 8
+        ? `nearest fix ${i % 20} min from the moment they came online`
+        : 'no position was recorded for this car within half an hour of the moment they came online',
+      late, minutes_late: late == null ? null : min - startMin,
+    };
+  });
+  const n = (f) => rows.filter(f).length;
+  r.json({
+    day, expected_start: startMin == null ? null : hhmm(startMin), start_why: startWhy, rows,
+    totals: {
+      people: rows.length,
+      reported: n((x) => x.online_basis === 'reported'),
+      already_online: n((x) => x.online_basis === 'already_online'),
+      awaiting_feed: n((x) => x.online_basis === 'awaiting_feed'),
+      not_asked: n((x) => x.online_basis === 'not_asked'),
+      absent: 0,
+      drove: n((x) => x.trips > 0),
+      ...(startMin == null ? {} : {
+        late: n((x) => x.late === true), on_time: n((x) => x.late === false),
+        unjudged: n((x) => x.late == null),
+      }),
+    },
+    feed: {
+      /* An INSTANT, because that is what collection_run.finished_at is and
+         what the real route sends. dayISO(0) is a bare YYYY-MM-DD, which the
+         page's Dubai time formatter reads as midnight UTC and prints as
+         "04:00" — a plausible-looking clock time that is not a measurement of
+         anything. A fixture whose shape differs from the endpoint's is a
+         fixture that green-lights a rendering bug. */
+      last_run_at: new Date(Date.now() - 95 * 6e4).toISOString(),
+      note: 'Uber\u2019s timeline runs every three hours and is only asked about drivers who took a '
+        + 'trip in the previous two days. A driver with no trip was never asked, and renders as such '
+        + 'rather than as absent.',
+    },
+  });
+});
+
 app.get('/api/unauthorized/summary', (_, r) => {
   const by = Object.fromEntries(UN_VERDICTS.map((v) => [v.verdict, v.n]));
   r.json({

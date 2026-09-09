@@ -21,13 +21,19 @@ import { el, esc, money, fmt, dayStr, card, lede, stats, rows, row, seg, search,
 import { sourceLabel, timeStr, dtStr, custodyText, moneyInTile, faresTile, standingNote,
   cashOnHandTile, bankDepositTile, countOf,
   alertRateFigure, splitAlerts, avgKmSub } from '../ui.js';
-import { dubaiClock } from '../tz.js';
+import { dubaiClock, dubaiDay } from '../tz.js';
 import { todayLive, todayLede, FARES_LAG, tripValue, moneyHalves, wiredNote } from '../today.js';
+/* The three words the desktop page uses for the three states it refuses to
+   colour. Imported rather than retyped — see the comment on GREY there. */
+import { GREY } from '../onlinetime.js';
 
 export const TABS = [
   { id: 'today', route: 'today', label: 'Today', ic: '◱', owns: ['today', 'overview', 'demand'] },
   { id: 'money', route: 'money', label: 'Money', ic: '◈', owns: ['money', 'finance', 'receipts', 'platforms'] },
-  { id: 'people', route: 'people', label: 'People', ic: '◧', owns: ['people', 'drivers', 'driver'] },
+  /* 'online-time' is a People page and has a phone screen of its own — the
+     one screen here whose rows dial rather than drill, because chasing a
+     driver who has not come online is done from the phone in your hand. */
+  { id: 'people', route: 'people', label: 'People', ic: '◧', owns: ['people', 'drivers', 'driver', 'online-time'] },
   { id: 'fleet', route: 'fleet', label: 'Fleet', ic: '▤', owns: ['fleet', 'vehicles', 'vehicle'] },
   { id: 'more', route: 'more', label: 'More', ic: '⋯',
     owns: ['more', 'live', 'map', 'safety', 'unauthorized', 'insights', 'compliance',
@@ -49,6 +55,7 @@ export function titleFor(view, param) {
     today: ['Today', `now, then ${WINDOW_NOTE()}`],
     money: ['Money', WINDOW_NOTE()],
     people: ['People', WINDOW_NOTE()],
+    'online-time': ['Online time', 'When each driver came online'],
     fleet: ['Fleet', WINDOW_NOTE()],
     more: ['More', 'Everything else'],
     trips: ['Every trip', WINDOW_NOTE()],
@@ -1377,6 +1384,207 @@ async function credentials(deck, ctx) {
   btn.onclick = () => post(false);
 }
 
+/* ── Online time ─────────────────────────────────────────────────────────
+   The one screen on this app that exists to make somebody pick up a phone.
+
+   It was going to be the fallback — "built for a bigger screen, open the
+   desktop version" — and that was the wrong call for this page specifically.
+   Every other wide table here is something a reader LOOKS at; this one ends in
+   an action, and the action is a phone call to a driver who has not come
+   online. The person doing the chasing is holding the phone they would make
+   the call on. Sending them to a desktop build to read a number they then type
+   by hand is the opposite of what the page is for.
+
+   So the row IS the call. `to` is a tel: link rather than a drill-down, which
+   is the only screen here where that is true, and the caption says so — a
+   chevron that dials is a surprise unless the page tells you first.
+
+   The three grey states from api/online_routes.js survive the shrink intact.
+   A phone has less room to explain, which is exactly why the temptation is to
+   drop the reasons and show two colours; a two-colour version of this screen
+   would put "LATE" beside a driver Uber was never asked about and send a
+   caller to accuse somebody of something that was never measured. The chip
+   carries the state's own short word and the sub carries the full sentence. */
+async function onlineTime(deck, ctx) {
+  /* The same localStorage key the desktop page writes. One reader, one
+     standard for when the fleet starts — a phone that kept its own copy would
+     colour the same morning two different ways depending which screen it was
+     read on. */
+  const KEY = 'online-time:start';
+  const readStart = () => {
+    try { return localStorage.getItem(KEY) || '06:00'; } catch { return '06:00'; }
+  };
+  let start = readStart();
+  let day = dubaiDay();
+  let only = 'late';
+
+  const head = el('div');
+  head.style.cssText = 'display:flex;flex-direction:column;gap:10px';
+  deck.append(head);
+  const body = el('div');
+  deck.append(body);
+
+  const ctrl = el('div');
+  ctrl.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap';
+  const dayIn = el('input'); dayIn.type = 'date'; dayIn.value = day; dayIn.className = 'm-inp';
+  const startIn = el('input'); startIn.type = 'time'; startIn.value = start; startIn.className = 'm-inp';
+  const lab = (t, node) => {
+    const w = el('label');
+    w.style.cssText = 'display:flex;gap:6px;align-items:center;flex:1;min-width:0';
+    w.append(el('span', 'm-cap', esc(t)), node);
+    return w;
+  };
+  ctrl.append(lab('Day', dayIn), lab('Start', startIn));
+  head.append(ctrl);
+
+  const FILTERS = [
+    { id: 'late', label: 'To chase' },
+    { id: 'grey', label: 'Cannot judge' },
+    { id: 'all', label: 'Everyone' },
+  ];
+  seg(head, FILTERS, only, (id) => { only = id; paint(); });
+
+  let d = null;
+  let gen = 0;
+
+  const paint = () => {
+    if (!d) return;
+    body.innerHTML = '';
+    const t = d.totals;
+    /* Same rule as the desktop tiles: with no readable start time there is no
+       verdict, and "Nobody is late" is a claim rather than an absence. The
+       phone is the shell where that matters most — this lede is often the only
+       line read. */
+    const judged = d.expected_start != null;
+    lede(body, {
+      claim: !judged ? 'Nobody can be judged yet'
+        : (t.late
+          ? `${t.late} ${t.late === 1 ? 'driver has' : 'drivers have'} not started on time`
+          : 'Nobody is late'),
+      /* The grey count rides in the lede and not only in the list, because a
+         reader who filters to "To chase" and sees three rows must not conclude
+         that three is the whole problem when four more were never measured. */
+      sub: !judged
+        ? (d.start_why || 'No start time is set.')
+        : `Against ${d.expected_start}. ${fmt(t.on_time || 0)} on time`
+          + (t.unjudged ? ` · ${fmt(t.unjudged)} cannot be judged` : '')
+          + ` · ${fmt(t.people || 0)} people`,
+      tone: !judged ? null : (t.late ? 'bad' : 'good'),
+    });
+
+    /* Worst first. The endpoint returns the roster in its own order and the
+       desktop table re-sorts on the client; the phone has no column headers to
+       sort by, so the order it is given IS the order, and the order a call
+       list wants is the person who is furthest behind. Absences sort last
+       rather than as zero — the same rule every table in ui.js follows. */
+    const worstFirst = (a, b) => (b.minutes_late ?? -Infinity) - (a.minutes_late ?? -Infinity);
+    const late = d.rows.filter((r) => r.late === true).sort(worstFirst);
+    const grey = d.rows.filter((r) => r.late == null);
+    const shown = only === 'late' ? late
+      : (only === 'grey' ? grey : [...late, ...d.rows.filter((r) => r.late === false).sort(worstFirst), ...grey]);
+    if (!shown.length) {
+      /* An empty call list has TWO causes and they are opposite: everybody
+         beat the start time, or there is no start time to beat. This read
+         "Everyone measured on 2026-09-09 was online by null" — a claim that
+         nobody was late, on a day nothing had been judged, with the missing
+         time printed as the word null. */
+      empty(body, only === 'late' ? (judged ? 'Nobody to chase' : 'Nothing to chase yet')
+        : 'Nothing here',
+        only !== 'late' ? 'No driver is in this state on this day.'
+          : (judged ? `Everyone measured on ${d.day} was online by ${d.expected_start}.`
+            /* The lede two inches above already carries start_why in full.
+               Repeating it here is the same sentence twice on a 402px screen. */
+            : 'Set a start time above, as HH:MM, to see who is behind it.'));
+      return;
+    }
+
+    const { card: c, body: cb } = card(
+      only === 'late' ? 'Call these people' : (only === 'grey' ? 'Not measured' : 'Everyone'),
+      'Tap a row to call. A grey time is a reason, not a verdict.');
+    body.append(c);
+    rows(cb, shown.map((r) => {
+      const grey = r.late == null;
+      const where = r.where?.area || null;
+      const car = r.plate ? `${r.plate}${r.plate_basis && /\?|unknown/i.test(r.plate_basis) ? ' ?' : ''}` : null;
+      return row({
+        title: r.name || r.driver_ext_id || '?',
+        name: r.name || '?',
+        photo: r.picture_url || null,
+        /* Car, place and first trip — the three things the caller is asked
+           next. The reason sentence comes last and only when there is one,
+           so a normal row stays one line. */
+        sub: [car, where, r.first_trip_local ? `first trip ${r.first_trip_local}` : null]
+          .filter(Boolean).join(' · ') || 'nothing else known about this day',
+        value: grey ? (GREY[r.online_basis] || 'no event') : r.online_local,
+        tone: grey ? null : (r.late ? 'bad' : 'good'),
+        note: grey ? null
+          : (r.minutes_late > 0 ? `+${fmt(r.minutes_late)}m` : 'on time'),
+        to: r.phone ? `tel:${String(r.phone).replace(/[^+\d]/g, '')}` : null,
+      });
+    }));
+    /* ONE LINE PER DISTINCT STATE, not one line for the list.
+       ─────────────────────────────────────────────────────────────────────
+       This printed the FIRST grey row's `online_why` under the whole list,
+       which on the "Cannot judge" filter meant three drivers in three
+       different states — never asked, not in yet, already on — sat above a
+       single sentence explaining only the first of them. A reader takes a
+       sentence under a list as being about the list. That is the house rule's
+       exact failure: not an absent reason but a reason that is not the true
+       one, which is worse, because it is believed.
+
+       The word each row carries is the key, so the line and the chip cannot
+       drift apart. */
+    const reasons = new Map();
+    for (const r of shown) {
+      if (r.late == null && r.online_why && !reasons.has(r.online_basis)) {
+        reasons.set(r.online_basis, r.online_why);
+      }
+    }
+    for (const [basis, why] of reasons) {
+      cb.append(el('p', 'm-cap', `${GREY[basis] || basis} — ${why}`));
+    }
+    /* Somebody with no number cannot be chased from here at all, and that is
+       a roster gap the operations team can close — so it is stated, not left
+       as a row that quietly does nothing when tapped. */
+    const noPhone = shown.filter((r) => !r.phone).length;
+    if (noPhone) {
+      cb.append(el('p', 'm-cap',
+        `${noPhone} of these ${shown.length} ${noPhone === 1 ? 'has' : 'have'} no phone number `
+        + 'on file and cannot be called from here.'));
+    }
+  };
+
+  const load = async () => {
+    const mine = ++gen;
+    body.innerHTML = '';
+    skeleton(body, 5);
+    try {
+      /* q(path, extra) builds `path?<params>` — the query string is ITS job.
+         Passing a path that already carried one produced
+         `/api/online-time?day=..&start=..?from=..`, so `start` arrived with a
+         `?from=` glued to it, failed the HH:MM validation, and the page
+         rendered "Against null" and judged nobody. It looked like an empty
+         day rather than a broken call, which is the dangerous kind of wrong
+         on a page whose job is to produce a call list. */
+      d = await q('/api/online-time', { day, start });
+    } catch (e) {
+      if (mine !== gen || !ctx.alive()) return;
+      body.innerHTML = '';
+      return failed(body, e);
+    }
+    if (mine !== gen || !ctx.alive()) return;
+    paint();
+  };
+
+  dayIn.onchange = () => { day = dayIn.value || dubaiDay(); load(); };
+  startIn.onchange = () => {
+    start = startIn.value || '06:00';
+    try { localStorage.setItem(KEY, start); } catch { /* private window */ }
+    load();
+  };
+  await load();
+}
+
 /* ── the fallback ───────────────────────────────────────────────────────
    A route this app has no screen for still has to resolve: an address someone
    sent to a phone must not dead-end. A driver or vehicle SUB-page renders the
@@ -1575,6 +1783,7 @@ async function fallback(deck, ctx) {
 export const SCREENS = {
   today, money: moneyScreen, people, fleet, live, safety, unauthorized, sources, more,
   corporate, analyst, credentials, optimise, trips: tripsScreen, fallback,
+  'online-time': onlineTime,
   /* A driver or vehicle with no sub-page gets the phone screen; a sub-page
      (`#driver/x/earnings`) is a desktop tab and goes to the fallback, which
      renders the real module. Decided in render() rather than here, because a
