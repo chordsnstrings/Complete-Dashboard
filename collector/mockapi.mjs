@@ -4433,6 +4433,21 @@ app.get('/api/finance/daily', (req, r) => {
     const fares = Math.round(priced * rnd(58, 88));
     const pending = b <= 1;
     const payout = pending ? null : Math.round(bookings * rnd(52, 74));
+    /* THE OPEN STATEMENT WEEK, which the fixture has to hold or the smoke run
+       goes green over the path this panel was rebuilt for.
+       ──────────────────────────────────────────────────────────────────────
+       Uber files weekly; a week still running has no statement yet, and those
+       days are answered from their own fares at the fleet's measured
+       commission instead (api/statement_fill_sql.js). The last three complete
+       days are that week here, so the fixture exercises BOTH bases — filed
+       statement on the older days, derived on the newer — and a row that
+       carries neither. */
+    const derived = b > 1 && b <= 4;
+    /* Same magnitude on both bases, deliberately: that is the point of the fix
+       being tested. A derived day should land where a filed one would, so a
+       fixture that made them differ would let a chart that still drew the
+       83% cliff pass. What differs is the BASIS, which the fields below carry
+       and the caption reads. */
     const stmt = +(fares * 0.62).toFixed(2);
     rows.push({ d,
       amount: b % 7 === 0 ? +(rnd(-40, 180)).toFixed(2) : null,
@@ -4445,7 +4460,12 @@ app.get('/api/finance/daily', (req, r) => {
       fares_part: pending ? null : fares,
       payout_part: payout,
       statement_part: pending ? null : stmt,
-      money_period_days: pending ? null : 7,
+      /* A derived day is a ONE-day measurement, not a seven-day allocation, so
+         it must not keep the coarse grain — the caption would call a single
+         day's own trips a weekly smear. */
+      money_period_days: pending ? null : (derived ? 1 : 7),
+      money_derived: !!derived,
+      statement_gross: derived ? +(fares * 1.6).toFixed(2) : null,
       money_source: pending ? null : 'mixed',
       payout,
       nothing_recorded: pending });
@@ -4459,6 +4479,13 @@ app.get('/api/finance/daily', (req, r) => {
     totals: { money: sum('money'), fares: sum('revenue'), payout: sum('payout'),
       money_fares_part: sum('fares_part'), money_payout_part: sum('payout_part'),
       money_statement_part: sum('statement_part'),
+      /* How much of that statement part is the open week's derived money. The
+         caption subtracts it so the sentence about what Uber "reported earning
+         on its own statements" is about statements only. */
+      money_derived_part: (() => {
+        const d = win.filter((x) => x.money_derived);
+        return d.length ? +d.reduce((a, x) => a + Number(x.statement_part || 0), 0).toFixed(2) : null;
+      })(),
       bookings: win.reduce((a, x) => a + (x.bookings || 0), 0),
       priced_trips: win.reduce((a, x) => a + (x.priced_trips || 0), 0),
       /* Equal to the sum of the bars, because on production it must be — the
@@ -4469,6 +4496,19 @@ app.get('/api/finance/daily', (req, r) => {
       { platform: 'yango', basis: 'fares', best: 0 },
       { platform: 'uber', basis: 'payout', best: sum('payout_part') }],
     unknown_grain: false,
+    /* One sentence per channel whose statement week is still open, worded by
+       api/statement_fill_sql.js on the real route so both shells and both
+       endpoints say the same thing. Empty on a window that never reaches an
+       open period, which is most of them. */
+    open_statement: win.some((x) => x.money_derived) ? [{
+      platform: 'uber', open_start: win.find((x) => x.money_derived)?.d || null,
+      open_end: dayISO(-3).slice(0, 10), rate: 0.7468, days: 56,
+      why: `Uber files weekly and the week to ${dayISO(-3).slice(0, 10)} has not closed, so its `
+        + 'statement covers only part of what has been earned. These days are instead each '
+        + 'day\u2019s own Uber fares less Uber\u2019s commission, measured at 74.7% over the 56 '
+        + 'closed statement days before it \u2014 not a forecast: every fare in it is one Uber '
+        + 'has already published against a trip that has already run.',
+    }] : [],
     money_narrowed_by_platform: !!req.query.platform,
     fares_narrowed_by_platform: !!req.query.platform,
     platform: req.query.platform || null, fleet: req.query.fleet || null });
