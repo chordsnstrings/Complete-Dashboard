@@ -36,8 +36,35 @@
     Generous against each source's real cadence — the half-hourly incremental,
     CABMAN's five minutes — because one missed tick is a restart and six is a
     problem. */
+/* THE LIMIT HAS TO MATCH THE SCHEDULE, or the alarm is a clock, not a fault.
+   ──────────────────────────────────────────────────────────────────────────
+   Every entry here is "how long may this source go quiet before something is
+   wrong", and it is only meaningful against how often the source actually
+   runs. uber_profile was missing from the table and fell to the 12h default —
+   while src/index.js schedules it `20 0 * * 1`, WEEKLY, on purpose and with
+   its reason written down: an Uber rating is a trailing average over hundreds
+   of trips, so a daily pull would write seven identical history rows for every
+   real movement and spend seven times the calls doing it.
+
+   A weekly source against a twelve-hour limit is at-risk for 156 of every 168
+   hours. Measured on production 2026-09-10 it was the ONLY thing in the
+   credential banner — "2 sources have not collected recently", 86h — with both
+   cookies healthy, the last run successful, and nothing to do. That is the
+   same failure as scoring a refused surface 'stopped': an alarm that is true
+   of a clock and false about the fleet, and it teaches an operator to skip the
+   banner exactly when it is right.
+
+   Eight days, so a genuinely missed Monday still fires on the Tuesday. */
 const STALL_HOURS = {
   cabman: 2, uber: 6, uber_fleet: 6, fms: 6, yango: 12, hotel: 12, bolt: 24,
+  /* Weekly by design — src/index.js, Mondays at 00:20 UTC. */
+  uber_profile: 24 * 8,
+  /* Every three hours by default, per UBER_TIMELINE_CRON — so a twelve-hour
+     silence is already four missed runs. Named rather than left to the default
+     so the next reader can see it was chosen and not merely inherited.
+     (The cron string is not quoted here: a slash-star inside a block comment
+     ends the comment, which is how this file first failed to parse.) */
+  uber_timeline: 12,
 };
 const DEFAULT_STALL_H = 12;
 
