@@ -24,6 +24,7 @@ import { renderCauses } from './causes.js';
 import { renderTrips } from './trips.js';
 import { renderOnlineTime } from './onlinetime.js';
 import { renderTesla } from './tesla.js';
+import { renderCancellations } from './cancellations.js';
 import { peopleCards, peopleResolved, namesLine } from './people.js';
 import { renderProvenance } from './provenance.js';
 import { renderReceipts } from './receipts.js';
@@ -327,6 +328,7 @@ const VIEWS = [
   { id: 'corridors', label: 'Popular routes', ic: '⇄', sec: 'Work', sub: 'Which pickup areas feed which drop-off areas' },
   { id: 'drivers', label: 'Drivers', ic: '◧', sec: 'People', sub: 'Trips, quality and platform activity for every driver' },
   { id: 'online-time', label: 'Online time', ic: '◔', sec: 'People', sub: 'When each driver came online on Uber, against the time you expect them to start' },
+  { id: 'cancellations', label: 'Cancellations', ic: '⊘', sec: 'People', sub: 'Every driver with a cancelled booking, and whether they or the rider called it off' },
   { id: 'roster', label: 'Driver roster', ic: '☰', sec: 'People', sub: 'Every driver on the books on each platform, and who is earning nothing' },
   { id: 'top-performers', label: 'Top performers', ic: '▲', sec: 'People', sub: 'The best drivers of the last complete week, and what they did differently' },
   { id: 'low-performers', label: 'Low performers', ic: '▼', sec: 'People', sub: 'The weakest drivers of the last complete week, and what the data cannot explain' },
@@ -1536,6 +1538,7 @@ V.demand = async (root) => {
    property access. bin/page-audit.mjs matches both forms. */
 V['online-time'] = async (root) => renderOnlineTime(root);
 V.tesla = async (root) => renderTesla(root);
+V.cancellations = async (root) => renderCancellations(root);
 
 V.drivers = async (root) => {
   const gen = currentGen();

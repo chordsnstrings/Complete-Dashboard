@@ -2208,6 +2208,57 @@ const dailySeries = () => {
    The four Model Ys without one are in the fixture on purpose: a car with no
    VIN cannot be matched to anything Tesla returns, so the page has a number to
    render absent and a reason to give for it. */
+/* ── cancellations ────────────────────────────────────────────────────────
+   The third bucket is the point of the fixture, not an afterthought. One
+   driver here works Yango, so `unattributed` is non-zero and the page's
+   "Nobody said who" column, its pill, and the sentence under the table are all
+   rendered by a test run rather than only existing in the source.
+
+   Another driver has NO phone, because "not on the roster" is a state the
+   operator meets and an em-dash there reads as a broken page. And one has no
+   rating, so the column's `absent` sentence has something to describe.
+
+   Shapes match api/cancellation_sql.js exactly — driver_ext_ids and
+   unattributed_platforms are arrays, because the page maps over both. */
+app.get('/api/cancellations', (req, r) => {
+  const rows = [
+    { person_key: 'p1', driver_name: 'Raja Aliyan Khalil', driver_ext_ids: ['d-1'],
+      platforms: ['uber', 'yango'], bookings: 212, completed: 168,
+      cancelled: 44, by_driver: 9, by_rider: 29, unattributed: 6,
+      unattributed_platforms: ['yango'],
+      driver_after_accept: 2, driver_declined_offer: 4, driver_cancelled_uber: 3,
+      rating: 4.99, rating_platform: 'uber', phone: '971501234567' },
+    { person_key: 'p2', driver_name: 'Ahmed Hassan', driver_ext_ids: ['d-2'],
+      platforms: ['uber', 'bolt'], bookings: 190, completed: 171,
+      cancelled: 19, by_driver: 2, by_rider: 17, unattributed: 0,
+      unattributed_platforms: [],
+      driver_after_accept: 1, driver_declined_offer: 1, driver_cancelled_uber: 0,
+      rating: 4.86, rating_platform: 'uber', phone: '971559876543' },
+    /* No phone on the roster, and no rating filed. Both are real states and
+       both have their own sentence rather than a dash. */
+    { person_key: 'p3', driver_name: 'Muhammad Sameer', driver_ext_ids: ['d-3'],
+      platforms: ['bolt'], bookings: 61, completed: 54,
+      cancelled: 7, by_driver: 6, by_rider: 1, unattributed: 0,
+      unattributed_platforms: [],
+      driver_after_accept: 3, driver_declined_offer: 3, driver_cancelled_uber: 0,
+      rating: null, rating_platform: null, phone: null },
+  ];
+  const sum = (k) => rows.reduce((a, x) => a + (x[k] || 0), 0);
+  const unattr = sum('unattributed');
+  r.json({
+    from: dayISO(30), to: dayISO(0), rows,
+    totals: { drivers: rows.length, cancelled: sum('cancelled'), by_driver: sum('by_driver'),
+      by_rider: sum('by_rider'), unattributed: unattr },
+    unattributed_why: unattr
+      ? `${unattr} cancellations in this window came from Yango, which files the bare word `
+        + '"cancelled" and never says who did it. They are counted and kept separate rather '
+        + 'than being shared out — putting them on the rider would flatter every driver who '
+        + 'works that channel, and putting them on the driver would accuse people on the '
+        + 'strength of a word that does not say so.'
+      : null,
+  });
+});
+
 app.get('/api/tesla/status', (_, r) => r.json({
   region: 'eu', api_base: 'https://fleet-api.prd.eu.vn.cloud.tesla.com',
   client_configured: true, granted: false, live: null,

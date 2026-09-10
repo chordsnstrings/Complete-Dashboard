@@ -19,6 +19,7 @@ import { responseCache } from './cache.js';
 import { platformFares, platformPayouts, platformStatements, fleetIncome } from './income_sql.js';
 import { resolveOpenFill, applyFillToPlatforms } from './statement_fill_sql.js';
 import { teslaRoutes } from './tesla_routes.js';
+import { cancellationRoutes } from './cancellation_routes.js';
 import { startWarmer } from './warm.js';
 import { log } from '../src/log.js';
 /* The operator ledger's own module. The import route below is the only thing
@@ -5478,6 +5479,7 @@ dayRoutes(app, { q, wrap });
    operations works from. See api/online_routes.js for why a driver with no
    online time has four possible reasons and only one of them is about them. */
 onlineRoutes(app, { q, wrap });
+cancellationRoutes(app, { q, wrap });
 teslaRoutes(app, { q, wrap });
 /* One booking as an address — reached from every trip table in the product. */
 tripRoutes(app, { q, wrap });
