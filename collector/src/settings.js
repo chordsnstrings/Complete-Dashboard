@@ -206,6 +206,37 @@ export const SETTING_DEFS = [
      them, so being able to point at the other without a deploy is the
      difference between a setting change and an infrastructure project.
      /api/probe/tesla/egress reports which one this server can reach. */
+  /* THE CODE TESLA SENT BACK, HELD BECAUSE WE CANNOT SPEND IT HERE.
+     ────────────────────────────────────────────────────────────────────────
+     Tesla's edge refuses this server's provider range on both auth hosts
+     (measured — see docs/COVERAGE.md), so the authorization code arrives
+     perfectly and cannot be exchanged. Discarding it wasted the operator's
+     entire sign-in: they did the one thing only they can do, and the result
+     was thrown away because of a network problem downstream of them.
+
+     So it is kept, briefly, for `bin/tesla-token.mjs` to spend from a network
+     Tesla answers. A code is single-use and short-lived by design, which is
+     also why holding one is a small thing to hold. */
+  /* NOT MARKED SECRET, and that is a reasoned trade rather than an oversight.
+     ────────────────────────────────────────────────────────────────────────
+     Marked secret, /api/settings redacts it to an empty string and the one
+     tool that exists to spend it cannot read it — the store would be holding a
+     value solely to withhold it from its only reader, which is a way of
+     failing that looks like working.
+
+     What is actually being exposed. An OAuth authorization code is single use,
+     lives for minutes, and CANNOT BE EXCHANGED WITHOUT THE CLIENT SECRET —
+     which stays secret, stays redacted, and is the thing that matters. A code
+     on its own buys nobody anything, and this one is cleared the moment it is
+     spent.
+
+     If the admin gate is ever closed (api/admin_gate.js is deliberately held
+     open while ADMIN_TOKEN is unset), revisit this: with a real gate, secret
+     is free and the tool can present a token. */
+  { key: 'TESLA_PENDING_CODE', group: 'Tesla', label: 'Unspent sign-in code (set automatically)',
+    secret: false,
+    hint: 'Written when Tesla returns a code this server cannot exchange, and cleared once it '
+      + 'is spent. Useless without the client secret, and it expires in minutes.' },
   { key: 'TESLA_TOKEN_HOST', group: 'Tesla', label: 'OAuth token host', secret: false,
     hint: 'Leave blank for the documented default. Set it to '
       + 'https://auth.tesla.com/oauth2/v3 if the default is refused from this server.' },

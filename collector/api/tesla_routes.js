@@ -234,6 +234,22 @@ export function teslaRoutes(app, { q, wrap }) {
          through. The failure is still named in the log and still named on the
          screen; only the code changes. */
       const edge = out.edge;
+      /* THE CODE IS KEPT RATHER THAN WASTED.
+         ──────────────────────────────────────────────────────────────────
+         Signing in is the one step only the person holding the Tesla account
+         can perform, and the code that comes back is the whole product of it.
+         Throwing it away because OUR network cannot spend it makes their
+         effort worthless and asks them to repeat it for no reason — which is
+         exactly what happened, twice, before this was written.
+
+         Held only on the edge-block path: an ordinary OAuth refusal means the
+         code is already spent or invalid, and storing that would be storing
+         rubbish. */
+      if (edge) {
+        try { await setSetting('TESLA_PENDING_CODE', `${code}.${Date.now()}`); } catch { /* the
+          page must still render; a code we failed to keep is not worse than the
+          code we were going to discard. */ }
+      }
       return send(edge ? 'Tesla would not accept the request from this server'
         : 'Tesla refused the sign-in',
         `<p>${esc(out.err)}</p>`
@@ -241,8 +257,11 @@ export function teslaRoutes(app, { q, wrap }) {
           ? '<p>The approval itself worked — Tesla sent us back a valid code. What failed is '
             + 'this server exchanging that code for a token, and it failed at Tesla&rsquo;s front '
             + 'door rather than at the sign-in.</p>'
-            + '<p><b>Nothing has been stored, and nothing you did was wrong.</b> This needs '
-            + 'fixing on our side, not by trying again.</p>'
+            + '<p><b>Your sign-in has not been wasted.</b> The code has been kept, and it can be '
+            + 'exchanged from a network Tesla answers — which finishes the connection without '
+            + 'you signing in again.</p>'
+            + '<p>Nothing else is needed from you. <b>Do not sign in again</b>; a second sign-in '
+            + 'replaces this code and starts over.</p>'
           : '<p><b>Nothing has been stored.</b> You can start again from the Tesla page.</p>'));
     }
     await setSetting('TESLA_REFRESH_TOKEN', out.refresh, true);
