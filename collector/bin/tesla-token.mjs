@@ -94,6 +94,19 @@ const post = async (host, form) => {
   return data;
 };
 
+/* THE ACCESS TOKEN IS THE POINT OF THIS TOOL, not a by-product.
+   The dashboard cannot mint one — Tesla refuses its network — so what it
+   actually runs on is whatever this writes. The expiry goes with it so an
+   expired token is reported as expired rather than as a revoked grant. */
+const storeAccess = async (data) => {
+  if (!data.access_token) return;
+  await putSetting('TESLA_ACCESS_TOKEN', data.access_token);
+  const life = Number(data.expires_in) || 28800;
+  await putSetting('TESLA_ACCESS_EXPIRES', String(Date.now() + life * 1000));
+  const h = Math.round(life / 360) / 10;
+  console.log(`  stored an access token, good for about ${h} hours.`);
+};
+
 const cmd = process.argv[2] || 'status';
 
 if (cmd === 'status') {
@@ -112,6 +125,11 @@ if (cmd === 'status') {
   console.log(`  held code   ${s.TESLA_PENDING_CODE?.configured
     ? 'yes — run `claim` promptly, codes are short-lived' : 'none'}`);
   console.log(`  granted     ${t.body?.granted}`);
+  const exp = Number(s.TESLA_ACCESS_EXPIRES?.value || 0);
+  console.log(`  access tok  ${exp ? (exp > Date.now()
+    ? `valid for ${Math.round((exp - Date.now()) / 60000)} more minutes`
+    : `EXPIRED ${Math.round((Date.now() - exp) / 60000)} minutes ago — run \`refresh\``)
+    : 'none — run `claim` or `refresh`'}`);
   console.log(`  teslas      ${t.body?.total_teslas}\n`);
 
 } else if (cmd === 'claim') {
@@ -141,6 +159,7 @@ if (cmd === 'status') {
   if (!data.refresh_token) die('Tesla returned no refresh token. The grant is missing '
     + 'offline_access — check the scopes on the app in Tesla’s console.');
   await putSetting('TESLA_REFRESH_TOKEN', data.refresh_token);
+  await storeAccess(data);
   /* Cleared, because a spent code is rubbish and a stored one invites a
      second attempt that can only fail. */
   await putSetting('TESLA_PENDING_CODE', '');
@@ -160,6 +179,7 @@ if (cmd === 'status') {
       + '  `claim` prints nothing secret; keep the value it stored from that run.');
   const data = await post(await tokenHost(),
     { grant_type: 'refresh_token', client_id: id, refresh_token: rt });
+  await storeAccess(data);
   if (data.refresh_token) {
     await putSetting('TESLA_REFRESH_TOKEN', data.refresh_token);
     console.log('\n  renewed, and stored the ROTATED refresh token.');

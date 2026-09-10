@@ -235,6 +235,28 @@ export const SETTING_DEFS = [
     secret: true,
     hint: 'Written when Tesla returns a code this server cannot exchange, and cleared once it '
       + 'is spent. The callback page shows it; it is not read back out of here.' },
+  /* THE ACCESS TOKEN, STORED — because this server cannot mint one.
+     ────────────────────────────────────────────────────────────────────────
+     Normally an access token is a derived thing nobody stores: you hold the
+     refresh token and mint one whenever you need it. That assumes you can
+     REACH the auth host, and this server cannot — Tesla's edge refuses its
+     provider range (measured; docs/COVERAGE.md). The data host answers it
+     perfectly.
+
+     So the split is: something on a network Tesla answers mints the token
+     (bin/tesla-token.mjs), and this server USES it until it expires. Storing
+     the expiry beside it is what keeps that honest — a token used past its
+     life produces a 401 that reads like a revoked grant, and the difference
+     between "expired, ask the keeper to run" and "Tesla revoked us" is the
+     difference between a chore and an incident. */
+  { key: 'TESLA_ACCESS_TOKEN', group: 'Tesla', label: 'Access token (set by the token keeper)',
+    secret: true,
+    hint: 'Minted off-server because Tesla refuses this one, and used until it expires — about '
+      + 'eight hours. bin/tesla-token.mjs writes it.' },
+  { key: 'TESLA_ACCESS_EXPIRES', group: 'Tesla', label: 'Access token expiry (epoch ms)',
+    secret: false,
+    hint: 'Written beside the access token so an expired one is reported as expired rather than '
+      + 'as Tesla revoking access.' },
   { key: 'TESLA_TOKEN_HOST', group: 'Tesla', label: 'OAuth token host', secret: false,
     hint: 'Leave blank for the documented default. Set it to '
       + 'https://auth.tesla.com/oauth2/v3 if the default is refused from this server.' },

@@ -123,6 +123,29 @@ export async function partnerToken() {
 export async function accessToken() {
   const { id, secret } = creds();
   const refresh = get('TESLA_REFRESH_TOKEN', '');
+
+  /* A STORED TOKEN WINS, and on this deployment it is the only thing that
+     works. See src/settings.js: Tesla's edge refuses this server's provider
+     range on the auth hosts, so minting happens off-server and the result is
+     left here to be used. Checked first rather than as a fallback, because
+     falling back to it would mean attempting — and failing — a refresh on
+     every single call, which is a 403 per request against a rate limit and a
+     log full of alarming nothing.
+
+     Sixty seconds of headroom: a token that expires while the request it is
+     attached to is in flight fails in the least legible way available. */
+  const held = String(get('TESLA_ACCESS_TOKEN', '') || '');
+  const until = Number(get('TESLA_ACCESS_EXPIRES', 0)) || 0;
+  if (held && until > Date.now() + 60000) return { token: held, expires_in: Math.floor((until - Date.now()) / 1000) };
+  if (held && refresh) {
+    /* Held but stale, and we cannot renew it here. Say exactly that: the fix
+       is one command on another machine, and an operator who is told "Tesla
+       refused us" will go looking for a revoked grant instead. */
+    const mins = Math.round((Date.now() - until) / 60000);
+    return { err: `the stored Tesla access token expired ${mins} minute(s) ago and this server `
+      + 'cannot mint a new one — Tesla refuses its network. Run `node bin/tesla-token.mjs refresh` '
+      + 'from a machine Tesla answers, which stores a fresh one.', stale: true };
+  }
   if (!id || !secret) return { err: 'TESLA_CLIENT_ID and TESLA_CLIENT_SECRET are not set' };
   if (!refresh) {
     return { err: 'no Tesla refresh token: nobody has approved this application against the '
