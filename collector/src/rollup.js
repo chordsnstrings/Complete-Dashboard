@@ -27,6 +27,12 @@
       exposes it, so a page reading a cached answer can date it.  */
 import { pool } from './db.js';
 import { personKey } from '../api/custody_sql.js';
+/* One definition of an online span, shared with the three read endpoints that
+   draw one. This module is the writer and they are the readers, so a fifth
+   private copy here is a fifth answer to "how long was this person available"
+   — which is exactly how the dangling-ONLINE defect survived in four places at
+   once. Imported the same way personKey above is. */
+import { onlineSpansSql } from '../api/online_span_sql.js';
 import { log } from './log.js';
 import { dubaiIso } from './util.js';
 
@@ -1040,13 +1046,28 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
               coalesce(max(greatest(0, s - prev_end))
                        FILTER (WHERE prev_end IS NOT NULL AND e IS NOT NULL), 0)::int AS longest_wait_min
          FROM gapped GROUP BY 1, 2),
-     ev AS (
-       SELECT driver_ext_id, at, status,
-              lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
-         FROM driver_timeline_event WHERE kind = 'status' AND status <> ''),
-     spans AS (
-       SELECT driver_ext_id, at AS s, next_at AS e FROM ev
-        WHERE next_at IS NOT NULL AND status = 'ONLINE'),
+     /* AVAILABILITY, from the one definition of it — see api/online_span_sql.js.
+        ─────────────────────────────────────────────────────────────────
+        This CTE was four lines of its own and carried the defect the module's
+        header measures: a next_at IS NOT NULL filter deleted every driver's
+        most recent ONLINE, and Uber stops sending ONLINE heartbeats while a
+        driver is on a job, so the event it deleted was the one immediately
+        before the work. Measured on production 2026-09-10: 60 of 89 drivers
+        sat on a dangling ONLINE and 7,518 minutes — 125 driver-hours — of
+        availability was dropped from that single day.
+
+        It matters more here than anywhere else it was wrong, because this is
+        the WRITER. driver_day.online_min is read by /api/driver/days, the
+        cohort pages, the economics ledgers and every panel that asks how much
+        availability earned nothing, and none of them can see past what this
+        statement stored. A page can be re-rendered; a row that was written
+        short stays short until the next refresh.
+
+        Unbounded in time deliberately: the since bound narrows which DAYS are
+        rewritten below, and bounding the event scan as well would close a span
+        that opens before the bound. The union in the days CTE stops an
+        unbounded scan from resurrecting old rows. */
+     ${onlineSpansSql()},
      /* ── the money, combined PER PLATFORM ──────────────────────────────
         Statement net and per-trip fares are complementary, not alternatives:
         Uber publishes a daily statement and no fare, the hotel channel
@@ -1166,11 +1187,12 @@ export async function refreshDriverDays(db = pool, { since = null } = {}) {
      online AS (
        SELECT driver_ext_id, d AS day,
               sum(greatest(0, extract(epoch FROM (
-                least(e AT TIME ZONE 'Asia/Dubai', d::timestamp + interval '1 day')
-                - greatest(s AT TIME ZONE 'Asia/Dubai', d::timestamp)))/60))::int AS online_min
+                least(span_end AT TIME ZONE 'Asia/Dubai', d::timestamp + interval '1 day')
+                - greatest(span_start AT TIME ZONE 'Asia/Dubai', d::timestamp)))/60))::int AS online_min
          FROM spans,
-              LATERAL generate_series((s AT TIME ZONE 'Asia/Dubai')::date,
-                                      (e AT TIME ZONE 'Asia/Dubai')::date, interval '1 day') AS g(d)
+              LATERAL generate_series((span_start AT TIME ZONE 'Asia/Dubai')::date,
+                                      (span_end AT TIME ZONE 'Asia/Dubai')::date,
+                                      interval '1 day') AS g(d)
         GROUP BY 1, 2),
      /* Every driver-day ANY source knows about, not only the ones with trips.
         A statement or a payout that lands on a day the trip feed missed is

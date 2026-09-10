@@ -12,6 +12,11 @@
    is a worse failure than showing the same person twice. */
 
 import { win, winDays } from './window.js';
+/* One definition of an online span, shared with /api/supply/heat and with the
+   rollup that writes driver_day.online_min. Four private copies of it had
+   drifted into the same defect at once; see the module header for the
+   measurement. */
+import { onlineSpansSql } from './online_span_sql.js';
 import { fleetIncome, COMPLETED_SQL } from './income_sql.js';
 /* The alerts-per-distance rule, shared with the fleet headline and both
    economics ledgers so this page cannot disagree with the tables that link
@@ -26,6 +31,11 @@ import { areaOf } from './analytics_routes.js';
    copy of a rule this product has now got wrong in four places is a fourth
    place to get it wrong. */
 import { isoDay } from '../src/sources/ledger.js';
+/* The collector's own schedule, so a page can say how long a still-filling day
+   has to wait rather than asking the reader to take the gap on trust. Imported
+   the same way api/supply_routes.js imports it; src/config.js reaches only the
+   settings table, so there is no cycle. */
+import { config } from '../src/config.js';
 import { isAdmin } from './admin_gate.js';
 import { IDENTITY_DOCS, stripIdentity, withheldNote, withPhotos, photoHref } from './redact.js';
 /* The ninety identities the register applies, id to id — see api/identity_map.js
@@ -43,6 +53,23 @@ import { canonicalName, mergedIds, mergedNames, mergedPlatforms, ALIAS_KEY,
 import { identityLinks, linkedKey, linkedName, linkedIds, linkedByName } from './identity_links.js';
 
 const norm = (s) => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+/* "every N hours", read off a cron expression's hour field, or null when the
+   expression says something a sentence cannot summarise. Only the two shapes
+   the product actually uses are answered — a stepped hour field and a bare
+   one —
+   because a half-right summary of a complicated schedule is worse than none:
+   the caller drops the clause entirely when this returns null. */
+export function cronEveryHours(expr) {
+  const f = String(expr || '').trim().split(/\s+/);
+  if (f.length < 5) return null;
+  const step = /^\*\/(\d{1,2})$/.exec(f[1]);
+  if (step) {
+    const n = Number(step[1]);
+    return n >= 1 && n <= 24 ? n : null;
+  }
+  return f[1] === '*' ? 1 : null;
+}
 
 /* Some feeds duplicate a name part ("Khan Khan", "Gul Gul"). Collapsing an
    immediately-repeated word is safe — it never merges distinct names.
@@ -2047,48 +2074,44 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        Clamped to the Dubai day, and a span crossing midnight is emitted on
        both days it touches: an evening shift is one span in the data and two
        bars on the chart. */
-    const online = await q(
-      `WITH ev AS (
-         /* PARTITIONED by account. A person can hold two Uber accounts
-            (resolve() above returns the match set, not one id), and one
-            ordering across both interleaves their transitions into spans that
-            belong to neither — an ONLINE on account A closed by an OFFLINE on
-            account B. */
-         SELECT at, status,
-                lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
-           FROM driver_timeline_event
-          WHERE driver_ext_id = ANY($3) AND kind = 'status' AND status <> ''
-            /* Dubai day bounds, widened by a day at each end.
-               ─────────────────────────────────────────────────────────────
-               Two separate faults, one line. at >= $1::timestamptz bound
-               the FIRST day at UTC midnight, which is 04:00 Dubai, so the
-               window's opening four hours had no events and the day drew as
-               offline. And a span is opened by one event and closed by the
-               NEXT: an ONLINE at 23:40 on the day before the window is what
-               makes the window's first morning online at all, and clipping
-               the fetch to the window threw that event away along with the
-               lead() that needed it.
+    /* Built by api/online_span_sql.js rather than here.
+       ─────────────────────────────────────────────────────────────────────
+       The CTE this replaces filtered `next_at IS NOT NULL`, which drops the
+       most recent ONLINE — and Uber sends ONLINE as a repeated heartbeat that
+       STOPS while a driver is on a job, so the dropped event is the one
+       immediately before the work. Measured on production 2026-09-10: 60 of
+       89 drivers sat on a dangling ONLINE, 56 of them dated that day, and
+       7,518 minutes of availability disappeared from it. The module also
+       unions the kind='job' intervals in, because Uber does not dispatch an
+       offline driver and those intervals cover exactly the stretches where the
+       heartbeat goes quiet.
 
-               So the fetch reaches a day either side — exactly as
-               /api/driver/day does below — and the days CTE clamps each span
-               to the Dubai days it actually covers. Days outside the window
-               fall out at the join, which reads only the days already drawn. */
-            AND at >= (($1::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
-            AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai')),
-       /* span_start/span_end, not s/e. These are CTE values, and
-          test/indexes.test.mjs reads every Dubai-day cast in api/ as a column
-          that needs an index — rightly, since an unindexed one scans the
-          table. A one-letter alias is indistinguishable from a real column to
-          that check and to a reader; a named one says what it is and can be
-          declared derived without the exemption swallowing some future column
-          called s. */
-       spans AS (
-         SELECT status, at AS span_start, next_at AS span_end FROM ev
-          WHERE next_at IS NOT NULL AND status = 'ONLINE'),
+       The fetch still reaches a day either side of the window. A span is
+       opened by one event and closed by the NEXT, so the ONLINE at 23:40 on
+       the day before the window is what makes the window's first morning
+       online at all, and clipping the fetch to the window threw that event
+       away along with the lead() that needed it. The bound is a Dubai-day
+       bound, not `$1::timestamptz`, which bound the first day at UTC midnight
+       — 04:00 Dubai — and drew the opening four hours of it as offline.
+
+       span_start/span_end, not s/e, and the module keeps those names for the
+       same reason this query did: test/indexes.test.mjs reads every Dubai-day
+       cast in api/ as a column that needs an index, rightly, and a one-letter
+       alias is indistinguishable from a real column to that check and to a
+       reader.
+
+       The days CTE clamps each span to the Dubai days it actually covers, and
+       days outside the window fall out at the join below, which reads only the
+       days already drawn. */
+    const online = await q(
+      `WITH ${onlineSpansSql({ where: `driver_ext_id = ANY($3)
+              AND at >= (($1::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+              AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai')` })},
        days AS (
          SELECT generate_series((span_start AT TIME ZONE 'Asia/Dubai')::date,
                                 (span_end AT TIME ZONE 'Asia/Dubai')::date,
-                                interval '1 day')::date AS d, span_start, span_end
+                                interval '1 day')::date AS d,
+                span_start, span_end, open_ended
            FROM spans)
        SELECT to_char(d, 'YYYY-MM-DD') AS day,
               greatest(0, extract(epoch FROM (
@@ -2096,7 +2119,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
                 - d::timestamp))/60)::int AS s,
               least(1440, extract(epoch FROM (
                 least(span_end AT TIME ZONE 'Asia/Dubai', d::timestamp + interval '1 day')
-                - d::timestamp))/60)::int AS e
+                - d::timestamp))/60)::int AS e,
+              /* Only on the day the span actually runs out on. A shift that
+                 crosses midnight is one span and two bars, and the earlier bar
+                 ends at 24:00 because the day does, not because the record
+                 does. Written as a bound on the whole day rather than as a
+                 date equality so that a span closed exactly AT midnight — what
+                 a dangling ONLINE on a past day is closed at — still marks the
+                 day it was actually drawn on. */
+              (open_ended
+               AND (span_end AT TIME ZONE 'Asia/Dubai') <= d::timestamp + interval '1 day')
+                AS open_ended
          FROM days
         ORDER BY 1, 2`, p);          // same $1..$3 order as TW, deliberately
 
@@ -2104,7 +2137,10 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
     for (const r of online) {
       if (r.e <= r.s) continue;                 // a span that ends where it starts
       if (!onlineByDay.has(r.day)) onlineByDay.set(r.day, []);
-      onlineByDay.get(r.day).push({ s: r.s, e: r.e });
+      /* open_ended travels with the span: a bar that stops because the record
+         stops is not the same claim as one that stops because the driver went
+         offline, and only the caller can decide how to draw the difference. */
+      onlineByDay.get(r.day).push({ s: r.s, e: r.e, open_ended: r.open_ended });
     }
     /* Attached to the day rows the chart already draws, and only where the day
        HAS availability: a day with none must render as it always did rather
@@ -2254,24 +2290,127 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
 
     /* ONLINE spans clipped to this Dubai day. A shift that starts at 21:00 and
        ends at 03:00 is one span in the data and belongs to two days; this asks
-       only for the part inside the day being drawn. */
+       only for the part inside the day being drawn.
+
+       THIS IS THE QUERY THE DEFECT WAS MEASURED ON.
+       ─────────────────────────────────────────────────────────────────────
+       It filtered `next_at IS NOT NULL`, which drops the last ONLINE — the one
+       whose successor has not arrived. Uber sends ONLINE as a repeated
+       heartbeat and stops sending it while a driver is on a job, so the
+       dropped event is the one immediately before the work. Driver
+       369dd9c1-ae0a-4526-8d46-d91a8c217121 on 2026-09-10 went online at
+       09:59:15 and was dispatched six seconds later; this page drew him online
+       08:35→09:59 and then printed "99% of online time", dividing 83 minutes
+       of job time taken from the WHOLE day into an 84-minute window that
+       stopped before two of his three trips. Fleet-wide that day: 60 of 89
+       drivers on a dangling ONLINE, 7,518 minutes dropped.
+
+       api/online_span_sql.js now owns the definition — it keeps the dangling
+       ONLINE, closes it at the earlier of now() and the end of its own Dubai
+       day, marks it open_ended, and unions in the kind='job' intervals, which
+       are proof of being online for exactly the stretches the heartbeat does
+       not cover. */
     const online = await q(
-      `WITH ev AS (
-         SELECT at, status, lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
-           FROM driver_timeline_event
-          WHERE driver_ext_id = ANY($1) AND kind = 'status' AND status <> ''
-            AND at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
-            AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai'))
+      `WITH ${onlineSpansSql({ where: `driver_ext_id = ANY($1)
+              AND at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+              AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai')` })}
        SELECT greatest(0, extract(epoch FROM (
-                greatest(at AT TIME ZONE 'Asia/Dubai', $2::timestamp) - $2::timestamp))/60)::int AS s,
+                greatest(span_start AT TIME ZONE 'Asia/Dubai', $2::timestamp)
+                - $2::timestamp))/60)::int AS s,
               least(1440, extract(epoch FROM (
-                least(next_at AT TIME ZONE 'Asia/Dubai', $2::timestamp + interval '1 day')
-                - $2::timestamp))/60)::int AS e
-         FROM ev
-        WHERE next_at IS NOT NULL AND status = 'ONLINE'
-          AND next_at > (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')
-          AND at < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+                least(span_end AT TIME ZONE 'Asia/Dubai', $2::timestamp + interval '1 day')
+                - $2::timestamp))/60)::int AS e,
+              /* Open-ended only where the span really runs out inside this day.
+                 A span that merely crosses the day's far edge is clipped at
+                 24:00 because the day ends, which is not a claim about the
+                 driver. */
+              (open_ended
+               AND (span_end AT TIME ZONE 'Asia/Dubai') <= $2::timestamp + interval '1 day')
+                AS open_ended
+         FROM spans
+        WHERE span_end > (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND span_start < (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')
         ORDER BY 1`, p);
+
+    /* HOW MUCH OF THIS DAY HAS ACTUALLY BEEN ASKED ABOUT.
+       ─────────────────────────────────────────────────────────────────────
+       The timeline collector runs on UBER_TIMELINE_CRON (src/settings.js:53),
+       which ships as every three hours. Trips arrive on the half-hourly
+       incremental. So the last few hours of today are routinely not fetched
+       yet, and the page has no way to tell that from a driver who stopped.
+
+       It is not a corner case. Driver 369dd9c1-ae0a-4526-8d46-d91a8c217121 on
+       2026-09-10: his timeline events stop at 10:05:46 and the 10:44 trip he
+       went on to make has no timeline events at all. Drawn without this, the
+       band simply ends and the reader concludes he went home. The same
+       distinction is what api/online_routes.js calls `awaiting_feed`, and it
+       reads the same row of collection_run to say it.
+
+       Two clocks, because they answer two different questions. The FEED's last
+       run bounds what anybody could know about this day; this DRIVER's last
+       event is the sharper statement where it is earlier still. status <>
+       'error' rather than status = 'ok', so a partial run — which did collect
+       something — still counts as having reached the day. */
+    const [feed] = await q(
+      `SELECT max(finished_at) AS last_run_at,
+              greatest(0, least(1440, floor(extract(epoch FROM (
+                least(max(finished_at), (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))
+                - (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')))/60))::int))::int
+                AS collected_to_min
+         FROM collection_run
+        WHERE source = 'uber_timeline' AND status <> 'error'`, p);
+    const [reach] = await q(
+      `SELECT max(at) AS last_event_at,
+              max((extract(hour FROM at AT TIME ZONE 'Asia/Dubai') * 60
+                   + extract(minute FROM at AT TIME ZONE 'Asia/Dubai'))::int) AS last_event_min,
+              array_remove(array_agg(DISTINCT platform), NULL) AS platforms
+         FROM driver_timeline_event
+        WHERE driver_ext_id = ANY($1)
+          AND at >= (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND at <  (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai')`, p);
+
+    /* The day is finished only when a collection ran AFTER it ended. Anything
+       short of that leaves a tail nobody has asked Uber about, and the size of
+       that tail is the thing the page has to be able to name. */
+    const collectedTo = feed?.collected_to_min ?? null;
+    const collectedFull = feed?.last_run_at != null && collectedTo >= 1440;
+    const collection = {
+      source: 'uber_timeline',
+      /* The cadence in words, read from the setting rather than written into
+         the sentence. An operator can change UBER_TIMELINE_CRON without a
+         deploy, and a hard-coded "every three hours" would go on being printed
+         after they did. The cron expression itself never reaches the page —
+         it is a configuration key, and this file's own house rule is that a
+         raw key is never the right thing to show a reader. */
+      every_hours: cronEveryHours(config.uberTimelineCron),
+      last_run_at: feed?.last_run_at || null,
+      /* Minute of this Dubai day the feed has reached, clamped to the day. 1440
+         means a pass finished after the day ended, so the day is closed. */
+      collected_to_min: feed?.last_run_at ? collectedTo : null,
+      last_event_at: reach?.last_event_at || null,
+      last_event_min: reach?.last_event_at ? reach.last_event_min : null,
+      /* Which channels have an availability record at all. Only Uber files one
+         — src/sources/uber_timeline.js is the sole writer of the table — but it
+         is read off the rows rather than asserted, so a second channel filing
+         one tomorrow does not leave this sentence lying. */
+      platforms: reach?.platforms || [],
+      complete: collectedFull,
+      why: null,
+    };
+    if (!feed?.last_run_at) {
+      collection.why = 'Uber\u2019s driver timeline has never been collected, so nothing on this '
+        + 'day is evidence about whether anybody was online.';
+    } else if (!collectedFull) {
+      const left = 1440 - collectedTo;
+      const every = collection.every_hours;
+      collection.why = 'This day is still being collected. The availability feed'
+        + (every ? ` runs every ${every === 1 ? 'hour' : `${every} hours`} and` : '')
+        + ` last reached ${String(Math.floor(collectedTo / 60)).padStart(2, '0')}:`
+        + `${String(collectedTo % 60).padStart(2, '0')}, so the remaining `
+        + `${Math.floor(left / 60)}h ${String(left % 60).padStart(2, '0')}m of the day has not `
+        + 'been fetched yet. A band that stops there is the record stopping, not necessarily '
+        + 'the driver.';
+    }
 
     /* Where the car was, minute-bucketed. Returned as fixes rather than as
        per-gap rollups because the gaps are computed on the client from the
@@ -2382,6 +2521,9 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
         e: t.e == null ? null : (t.past_midnight ? 1440 : Math.max(t.e, t.s)),
       })),
       online: onlinePlaced,
+      /* What has and has not been asked about, so a band that stops early can
+         say which of the two it is. See the query above. */
+      collection,
       fixes,
       /* Which areas this person went online in today, and how many of the
          day's spans could not be placed at all — never a list that quietly

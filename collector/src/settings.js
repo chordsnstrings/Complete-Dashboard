@@ -160,6 +160,37 @@ export const SETTING_DEFS = [
   { key: 'HOTEL_DOMAIN', group: 'Hotel (ecosine.ae)', label: 'x-domain header', secret: false },
   { key: 'HOTEL_BASE', group: 'Hotel (ecosine.ae)', label: 'API base url', secret: false },
 
+  /* TESLA FLEET API.
+     ────────────────────────────────────────────────────────────────────────
+     The fleet owns 80 Teslas — 70 Model Y and 10 Model 3 of 273 vehicles,
+     measured on production 2026-09-10 — and we already hold a VIN for each,
+     which is Tesla's own join key.
+
+     Two tokens, and they are not interchangeable. The CLIENT ID and SECRET
+     produce a PARTNER token through client_credentials, which authenticates
+     the application and owns no vehicles: measured live, it answers
+     `GET /api/1/vehicles` with 200 and a count of 0. Reading the fleet's cars
+     needs a THIRD-PARTY token, which only the authorization-code flow can
+     issue and which only the person who owns the cars in their Tesla account
+     can approve. That approval yields a refresh token, and the refresh token
+     is what lives here — it is the only one of the three that cannot be
+     recovered without a human going back to Tesla and signing in again. */
+  { key: 'TESLA_CLIENT_ID', group: 'Tesla', label: 'OAuth client id', secret: true },
+  { key: 'TESLA_CLIENT_SECRET', group: 'Tesla', label: 'OAuth client secret', secret: true },
+  { key: 'TESLA_REFRESH_TOKEN', group: 'Tesla', label: 'Refresh token (from the Tesla sign-in)',
+    secret: true,
+    hint: 'Issued when the Tesla account owner approves access. Until it is set, no Tesla-native '
+      + 'data can be read at all — the partner credentials above authenticate the app, not the cars.' },
+  /* Region decides the API host AND the token audience, and the two must
+     match or every call 401s. Tesla serves three: na, eu and cn. A UAE fleet
+     is EMEA, which Tesla routes through `eu`. Kept as a setting rather than a
+     constant because the fleet could be re-homed and because getting it wrong
+     produces an authentication error that reads like a bad secret. */
+  { key: 'TESLA_REGION', group: 'Tesla', label: 'Fleet API region', secret: false,
+    hint: 'eu for the Middle East, na for the Americas and Asia-Pacific, cn for China' },
+  { key: 'TESLA_CRON', group: 'Collector', label: 'Tesla schedule (cron)', secret: false,
+    hint: 'One request per car per run — Tesla bills per call and a sleeping car must not be woken' },
+
   { key: 'BACKFILL_MONTHS', group: 'Collector', label: 'Backfill months', secret: false },
   { key: 'INCREMENTAL_DAYS', group: 'Collector', label: 'Incremental window (days)', secret: false },
   { key: 'CABMAN_CRON', group: 'Collector', label: 'CABMAN schedule (cron)', secret: false },

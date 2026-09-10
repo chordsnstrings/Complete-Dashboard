@@ -71,6 +71,132 @@ function gapMotion(fixes, from, to) {
   };
 }
 
+/* ── the online share, and when it must refuse to exist ────────────────────
+   This panel printed "99% of online time" about a driver who was online for
+   most of the day. Measured on production 2026-09-10, driver
+   369dd9c1-ae0a-4526-8d46-d91a8c217121: /api/driver/day dropped his last
+   ONLINE — the one with no successor yet — so the online record stopped at
+   09:59 while the jobs it was divided into were taken from the whole day, two
+   of the three after that. 83 minutes of job time over an 84-minute window is
+   99%, and every part of that sentence is arithmetic performed on two
+   different days.
+
+   api/online_span_sql.js fixes the window. This is the guard that has to exist
+   anyway, because the ratio has three OTHER ways of being uncomputable and all
+   three are ordinary here:
+
+     · A JOB ON A CHANNEL WITH NO AVAILABILITY FEED. Only Uber files a driver
+       timeline (src/sources/uber_timeline.js is the sole writer of the table).
+       A driver who takes a hotel booking has job minutes and no online window
+       they can belong to, so the two cannot be divided at all.
+     · THE DAY IS STILL BEING COLLECTED. The timeline runs a few times a day,
+       the trips every half hour, so the last hours of today routinely hold
+       jobs whose availability has not been fetched.
+     · OVERLAPPING DISPATCHES. The next rider is assigned before the current
+       one is dropped, which is real on this fleet — api/driver_routes.js
+       counts the overlaps rather than clamping them — so job minutes SUMMED
+       can exceed any wall clock, online or not.
+
+   In every one of those the honest answer is the absence and its reason, not a
+   ratio at or above 100%. A pure function, so the branch can be asserted:
+   nothing in a rendered page distinguishes "this page concluded 99%" from
+   "this page divided two unrelated numbers". */
+
+/* Union of [start, end) minute ranges, sorted and de-overlapped. */
+function merge(ranges) {
+  const out = [];
+  for (const r of [...ranges].filter((x) => x.e > x.s).sort((a, b) => a.s - b.s)) {
+    const last = out[out.length - 1];
+    if (last && r.s <= last.e) last.e = Math.max(last.e, r.e);
+    else out.push({ ...r });
+  }
+  return out;
+}
+const spanMin = (rs) => rs.reduce((a, r) => a + (r.e - r.s), 0);
+/* The parts of `rs` that no range in `by` covers, carrying whatever else each
+   range holds — the platform, here, because which channel a stretch of
+   uncovered job time belongs to IS the reason the ratio cannot be computed. */
+function without(rs, by) {
+  const out = [];
+  for (const r of rs) {
+    let at = r.s;
+    for (const b of by) {
+      if (b.e <= at || b.s >= r.e) continue;
+      if (b.s > at) out.push({ ...r, s: at, e: b.s });
+      at = Math.max(at, b.e);
+    }
+    if (at < r.e) out.push({ ...r, s: at, e: r.e });
+  }
+  return out.filter((x) => x.e > x.s);
+}
+
+const listWords = (xs) => (xs.length < 2 ? (xs[0] || '')
+  : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
+export function onlineShare({ online = [], trips = [], collection = null } = {}) {
+  const onlineSpans = merge(online.map((o) => ({ s: +o.s, e: +o.e })));
+  const onlineMin = spanMin(onlineSpans);
+  const jobs = trips.filter((t) => t.s != null && t.e != null && t.e > t.s)
+    .map((t) => ({ s: t.s, e: t.e, platform: t.platform || null }));
+  /* SUMMED, not merged — this is the figure the panel prints as time carrying
+     someone, and two riders in the car at once is two jobs' worth of work. The
+     merged version below is only used to ask whether the online record reaches
+     them, which is a question about the clock rather than about the work. */
+  const onJobMin = jobs.reduce((a, j) => a + (j.e - j.s), 0);
+  const jobSpans = merge(jobs);
+  const uncovered = without(jobSpans, onlineSpans);
+  const uncoveredMin = spanMin(uncovered);
+  const idleMin = Math.max(0, onlineMin - onJobMin);
+
+  if (!onlineMin) {
+    return { basis: 'span', onlineMin: 0, onJobMin, uncoveredMin, idleMin: null,
+      pct: null, why: null, reason: null };
+  }
+
+  const base = { onlineMin, onJobMin, uncoveredMin, idleMin };
+  if (uncoveredMin > 0) {
+    /* WHICH channels those uncovered minutes belong to, and whether any of
+       them files an availability record at all. The set comes from the API —
+       the platforms the timeline actually holds for this day — rather than
+       from a hard-coded 'uber', so a second channel filing one tomorrow does
+       not leave this sentence lying. */
+    const feeds = new Set(collection?.platforms || []);
+    const noFeed = [...new Set(uncovered.map((u) => u.platform).filter(Boolean))]
+      .filter((pf) => !feeds.has(pf)).sort();
+    if (noFeed.length) {
+      return { ...base, basis: 'refused', pct: null,
+        why: `${listWords(noFeed)} file no availability`,
+        reason: `${dur(uncoveredMin)} of this day's jobs ran on `
+          + `${listWords(noFeed)}, which file no availability record at all, so those minutes `
+          + 'belong to no online window and the share cannot be computed. The jobs and the '
+          + 'waiting below are unaffected — only the division is.' };
+    }
+    if (collection && collection.complete === false) {
+      return { ...base, basis: 'refused', pct: null,
+        why: 'the day is still being collected',
+        reason: `${dur(uncoveredMin)} of this day's jobs sit outside the availability record `
+          + `because the record does not reach them yet. ${collection.why || ''}`.trim() };
+    }
+    return { ...base, basis: 'refused', pct: null,
+      why: 'the availability record does not cover the jobs',
+      reason: `${dur(uncoveredMin)} of this day's job time falls outside every ONLINE span we `
+        + 'hold for this driver. Uber does not dispatch an offline driver, so the two records '
+        + 'contradict each other and neither can be divided into the other until that is '
+        + 'explained.' };
+  }
+  if (onJobMin > onlineMin) {
+    /* Fully inside the online window and still longer than it: the only thing
+       that can do that is two jobs running at once. */
+    return { ...base, basis: 'refused', pct: null,
+      why: 'jobs overlap, so they outrun the clock',
+      reason: `The jobs sum to ${dur(onJobMin)} inside an online window of ${dur(onlineMin)} `
+        + 'because dispatches overlap — the next rider is assigned before the last is dropped. '
+        + 'A share of online time would be over 100% and mean nothing.' };
+  }
+  return { ...base, basis: 'online', pct: Math.round((onJobMin / onlineMin) * 100),
+    why: null, reason: null };
+}
+
 export async function renderDriverDay(root, id, day) {
   root.innerHTML = '';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || ''))) {
@@ -103,7 +229,11 @@ export async function renderDriverDay(root, id, day) {
   }
   const onJob = trips.reduce((a, t) => a + (t.e != null ? Math.max(0, t.e - t.s) : 0), 0);
   const waited = gaps.reduce((a, g) => a + (g.to - g.from), 0);
-  const onlineMin = online.reduce((a, o) => a + Math.max(0, o.e - o.s), 0);
+  /* One decision, made once. The share, the idle figure and the caption all
+     read off this — three sentences derived separately are three chances to
+     print a ratio the other two have already refused. */
+  const share = onlineShare({ online, trips, collection: d.collection });
+  const onlineMin = share.onlineMin;
   const km = trips.reduce((a, t) => a + (+t.distance_km || 0), 0);
   const first = trips[0].s;
   const last = trips.reduce((m, t) => Math.max(m, t.e ?? t.s), first);
@@ -113,20 +243,32 @@ export async function renderDriverDay(root, id, day) {
 
   /* ── the verdict ───────────────────────────────────────────────────────── */
   {
-    const idle = onlineMin ? Math.max(0, onlineMin - onJob) : null;
+    /* A figure that cannot be measured renders ABSENT WITH ITS REASON — never
+       as zero, never as a ratio at or above 100%, and never with a reason that
+       is not the true one. onlineShare() decides which of the four cases this
+       day is; this only draws it. */
+    const refused = share.basis === 'refused';
+    const claim = share.basis === 'online'
+      ? `${dur(onJob)} carrying someone, ${dur(share.idleMin)} online and waiting`
+      : `${dur(onJob)} carrying someone across ${trips.length} ${trips.length === 1 ? 'job' : 'jobs'}`;
     verdict(root, {
-      claim: onlineMin
-        ? `${dur(onJob)} carrying someone, ${dur(idle)} online and waiting`
-        : `${dur(onJob)} carrying someone across ${trips.length} ${trips.length === 1 ? 'job' : 'jobs'}`,
-      figure: onlineMin ? `${Math.round((onJob / onlineMin) * 100)}%` : `${Math.round((onJob / span) * 100)}%`,
-      unit: onlineMin ? 'of online time' : 'of the trip span',
-      tone: onlineMin && onJob / onlineMin < 0.25 ? 'warn' : null,
+      claim,
+      figure: refused ? '—'
+        : share.basis === 'online' ? `${share.pct}%` : `${Math.round((onJob / span) * 100)}%`,
+      unit: refused ? share.why : share.basis === 'online' ? 'of online time' : 'of the trip span',
+      tone: share.basis === 'online' && share.pct < 25 ? 'warn' : null,
       meta: `${fmt(trips.length)} trips · ${fmt(km, 1)} km`,
       sub: `${hhmm(first)} to ${hhmm(last)}`
         + (onlineMin ? `, online ${dur(onlineMin)} of it` : '')
         + `${medianGap != null ? `. The median gap between jobs was ${dur(medianGap)}` : ''}.`
         + (onlineMin ? '' : ' Uber availability has not been collected for this day, so the waiting '
-          + 'below cannot be split into online and offline.'),
+          + 'below cannot be split into online and offline.')
+        + (refused ? ` ${share.reason}` : '')
+        /* The day still filling is worth saying even when the share HAS been
+           computed: the band below stops where the collector stopped, and a
+           reader who is not told that reads it as the driver stopping. */
+        + (!refused && d.collection && d.collection.complete === false && d.collection.why
+          ? ` ${d.collection.why}` : ''),
     });
   }
 
@@ -150,13 +292,27 @@ export async function renderDriverDay(root, id, day) {
   bandP.body.append(bandWrap);
   if (online.length) {
     const ob = el('div', 'dday-online');
+    /* An OPEN-ENDED span is one whose closing event has not arrived: the last
+       ONLINE Uber sent, with nothing after it yet. It is drawn to the earlier
+       of now and the end of the day and says so on hover, because "online
+       until 14:00" and "online at 14:00, and that is the last we were told"
+       are different claims and the bar looks identical. */
     ob.innerHTML = online.map((o) =>
-      `<i style="left:${pct(o.s)}%;width:${pct(Math.max(2, o.e - o.s))}%" title="online ${esc(hhmm(o.s))}–${esc(hhmm(o.e))}"></i>`).join('');
+      `<i style="left:${pct(o.s)}%;width:${pct(Math.max(2, o.e - o.s))}%" title="${
+        o.open_ended
+          ? `online from ${esc(hhmm(o.s))}; no later event has arrived, so this is drawn to ${esc(hhmm(o.e))}`
+          : `online ${esc(hhmm(o.s))}–${esc(hhmm(o.e))}`}"></i>`).join('');
     const row = el('div', 'dday-onrow');
     row.innerHTML = '<span class="dday-onlab">online per Uber</span>';
     row.append(ob);
     row.append(el('span', 'dday-ontot', dur(onlineMin)));
     bandP.body.append(row);
+    /* Under the band, where the band stops. The collector runs a few times a
+       day and the trip feed every half hour, so the right-hand end of this bar
+       is routinely the collector's reach rather than the driver's evening. */
+    if (d.collection && d.collection.complete === false && d.collection.why) {
+      bandP.body.append(el('div', 'dday-onbasis dim', d.collection.why));
+    }
 
     /* WHERE they went online, which is the supply question the bar above
        cannot answer. Uber returns no coordinates on the timeline, so this is

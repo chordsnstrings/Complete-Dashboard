@@ -34,6 +34,12 @@ import { config } from '../src/config.js';
    midnight and has no instant to convert, whereas every value converted here is
    a real timestamptz instant, which has to be moved onto the Dubai clock. */
 import { dubaiIso } from '../src/util.js';
+/* One definition of an online span, shared with the driver pages and with the
+   rollup that writes driver_day.online_min — src/rollup.js computes this same
+   shape, and the two agreeing is the whole reason the module exists rather
+   than a fourth private copy. See its header for the defect all four copies
+   carried. */
+import { onlineSpansSql } from './online_span_sql.js';
 
 /* ── charging ─────────────────────────────────────────────────────────────
    A car standing still for fifty minutes is not automatically waste. This
@@ -220,27 +226,34 @@ export function supplyRoutes(app, { q, wrap, range, FB }) {
        has no window function to disturb, and what it reports is the reach of
        the chip's own rows, which is exactly what min(at)/max(at) over them
        means. */
+    /* The chip predicates are handed to the shared builder as its `keep`
+       argument, which applies them after lead() for exactly the reason set out
+       above — see api/online_span_sql.js, which records the reproduction.
+
+       The builder is also what stops this heatmap under-reporting supply. Its
+       `spans` CTE used to filter `next_at IS NOT NULL`, so every driver whose
+       most recent status event is ONLINE contributed nothing from that instant
+       onward; Uber sends ONLINE as a repeated heartbeat and stops sending it
+       while a driver is on a job, so the dropped event is the one immediately
+       before the work. On production 2026-09-10 that was 60 of 89 drivers and
+       7,518 minutes of availability in a single day — all of it missing from
+       the denominator of every idle-share this endpoint computes, in the
+       direction that flatters the fleet. */
     const supply = await q(
-      `WITH ev AS (
-         SELECT driver_ext_id, at, status, platform, fleet_id,
-                lead(at) OVER (PARTITION BY driver_ext_id ORDER BY at) AS next_at
-           FROM driver_timeline_event
-          WHERE kind = 'status' AND status <> ''
-            AND at >= $1::timestamptz AND at <= $2::timestamptz),
-       spans AS (
-         SELECT driver_ext_id, at AS s, next_at AS e FROM ev
-          WHERE next_at IS NOT NULL AND status = 'ONLINE'
-            AND ($3::text IS NULL OR platform = $3)
-            AND ($4::text IS NULL OR fleet_id = $4)),
+      `WITH ${onlineSpansSql({
+    where: 'at >= $1::timestamptz AND at <= $2::timestamptz',
+    keep: `($3::text IS NULL OR platform = $3)
+              AND ($4::text IS NULL OR fleet_id = $4)`,
+  })},
        slots AS (
          SELECT sp.driver_ext_id, g AS slot,
                 extract(epoch FROM (
-                  least(sp.e AT TIME ZONE 'Asia/Dubai', g + interval '1 hour')
-                  - greatest(sp.s AT TIME ZONE 'Asia/Dubai', g)))/60 AS mins
+                  least(sp.span_end AT TIME ZONE 'Asia/Dubai', g + interval '1 hour')
+                  - greatest(sp.span_start AT TIME ZONE 'Asia/Dubai', g)))/60 AS mins
            FROM spans sp,
                 LATERAL generate_series(
-                  date_trunc('hour', sp.s AT TIME ZONE 'Asia/Dubai'),
-                  sp.e AT TIME ZONE 'Asia/Dubai', interval '1 hour') AS g)
+                  date_trunc('hour', sp.span_start AT TIME ZONE 'Asia/Dubai'),
+                  sp.span_end AT TIME ZONE 'Asia/Dubai', interval '1 hour') AS g)
        SELECT extract(dow FROM slot)::int AS dow,
               extract(hour FROM slot)::int AS h,
               round(sum(greatest(0, mins))::numeric / 60, 1) AS online_h,
