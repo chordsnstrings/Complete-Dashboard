@@ -45,11 +45,33 @@ export const teslaTokenHost = () =>
    endpoint by it. */
 export const TESLA_AUTH = teslaTokenHost();
 
-/* The scopes a READ-ONLY fleet view needs, and deliberately not one more.
-   `vehicle_cmds` and `vehicle_charging_cmds` would let this application open
-   doors and start charging sessions on eighty-two cars; nothing here wants that,
-   and a grant is far easier to widen later than to explain afterwards. */
-export const READ_SCOPES = 'openid offline_access vehicle_device_data vehicle_location';
+/* THE SCOPES, AND ONE OF THEM IS A TRADE RATHER THAN A CHOICE.
+   ──────────────────────────────────────────────────────────────────────────
+   This read `openid offline_access vehicle_device_data vehicle_location` and
+   said, correctly, that vehicle_cmds and vehicle_charging_cmds would let this
+   application open doors and start charging sessions on eighty-two cars, which
+   nothing here wants.
+
+   `vehicle_charging_cmds` is added anyway, and the reason is measured rather
+   than assumed. Tesla's charging history — GET /api/1/dx/charging/history, the
+   ONLY historical dataset the Fleet API offers and the one carrying per-car
+   Supercharging spend — refused us on 2026-09-10 with
+
+       403 {"code":403,"message":"missing scope: vehicle_charging_cmds"}
+
+   A SCOPE refusal, not an ownership refusal, and a different answer from the
+   empty list /api/1/vehicles gives. That difference is the whole reason to try
+   it: the vehicles endpoint says "you have no cars", while the charging
+   endpoint says "ask me properly" — and only one of those is about ownership.
+
+   Tesla bundles reading charging history with commanding charging; there is no
+   read-only half, so the choice is the whole dataset or none of it.
+
+   vehicle_cmds is still NOT requested — nothing unlocks a door with this
+   grant. And the widening is written down here with the measurement that
+   forced it, because a grant is easier to widen than to explain afterwards. */
+export const READ_SCOPES = 'openid offline_access vehicle_device_data vehicle_location '
+  + 'vehicle_charging_cmds';
 
 export const teslaRegion = () => String(get('TESLA_REGION', 'eu') || 'eu').trim().toLowerCase();
 export const teslaBase = (region = teslaRegion()) =>

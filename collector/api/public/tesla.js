@@ -201,51 +201,53 @@ function livePanel(s) {
   return p;
 }
 
-/* THE STEP NOBODY EXPECTS: THE APP IS ALLOWED IN, THE CARS ARE NOT.
+/* WHERE THIS ACTUALLY STANDS, so the next reader does not re-walk it.
    ──────────────────────────────────────────────────────────────────────────
-   Measured 2026-09-10, and it is the answer to "why give us a Fleet API if the
-   fleet is not in it". Tesla separates PERMISSION TO ASK from PERMISSION PER
-   CAR, and we have only the first:
+   This replaced a panel telling the operator to pair a virtual key on a car.
+   That was wrong twice over: it is a per-car mechanism — 82 taps, and Model 3
+   and Model Y both require the Vehicle Command Protocol so none of it
+   automates — and it is a workaround for a fleet-level problem rather than a
+   fix for it. The operator was right to reject it.
 
-     the application is registered   proven — Tesla returns our public key from
-                                     /api/1/partner_accounts/public_key
-     both token types work           proven — a third-party token and a partner
-                                     token both reach the API and answer 200
-     cars in the list                ZERO, on both
+   WHY THE CARS SHOW IN TESLA'S PORTAL AND NOT HERE, which is the obvious
+   question and has a real answer: the portal is a person signing in to
+   Tesla's own business system with a role on the account, and it renders what
+   that ROLE may see. The Fleet API is a different surface entirely — it
+   renders what an APPLICATION has been granted, and no car has been granted
+   to this one. Seeing a car in the portal is therefore not evidence the API
+   should return it, however strongly it feels like it.
 
-   `/api/1/vehicles` answering 200 with an empty array is Tesla being precise:
-   "you may ask, and you have no cars". It is not 401 and it is not a fault.
-   The account that signed in carries account_type `person` — read out of the
-   token itself — and the 82 Teslas belong to a Tesla BUSINESS account, so no
-   car has ever been attached to this application.
+   Everything measured on 2026-09-10:
 
-   Attaching one is the vehicle owner's action and cannot be done from here:
-   Tesla's virtual-key flow hands the owner a link that opens the Tesla mobile
-   app, and they add the app to a car from there. So this panel exists to hand
-   over that link, because the link is the only thing this end can contribute.
-
-   NOT VERIFIED FROM HERE, and said so on the page: Tesla's edge refuses this
-   server's network on tesla.com as well as on the auth hosts, so we cannot
-   fetch the pairing page to confirm it renders. It is the documented URL
-   shape and it costs one tap to find out. */
-function pairPanel(s) {
-  const p = panel('Attach the cars to this application',
-    'The application is allowed in; the cars are not — and that is a different permission');
-  const host = location.hostname;
-  const url = `https://tesla.com/_ak/${host}`;
-  p.body.append(note('Tesla answered our last request with HTTP 200 and an empty list of '
-    + 'vehicles. That is not a failure and not a missing token — it means no car has been '
-    + 'attached to this application yet. Signing in grants the APP access to Tesla; each CAR '
-    + 'is a separate permission that only its owner can give.'));
-  p.body.append(el('p', 'cap', 'Open this on a phone that has the Tesla app installed, signed '
-    + 'in as the account that owns the cars:'));
-  const a = el('a', 'tesla-url');
-  a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = url;
-  p.body.append(a);
-  p.body.append(note('Try it on ONE car first. If that car then appears under “What Tesla '
-    + 'returns” below, the route is proven and the rest can follow. If it does not, the cars '
-    + 'are held by a Tesla Business account that has to attach the application itself — and '
-    + 'that is worth knowing before anybody works through eighty-two of them.'));
+     the application is registered   Tesla returns our own public key
+     a human sign-in works           token issued, accepted by the API
+     the application's own token     issued, accepted by the API
+     both see                        HTTP 200 and ZERO vehicles
+     the cars                        under OWNED VEHICLES in the Business
+                                     account — owned by the company, not by a
+                                     person
+     Vehicle Management              empty on all 82, and not settable by a
+                                     Fleet Manager */
+function standingPanel() {
+  const p = panel('Where this stands',
+    'Everything on this side is built and proven; the fleet is not attached to it');
+  const ul = el('ul', 'tesla-limits');
+  ul.innerHTML = `
+    <li><b>Working:</b> the application is registered with Tesla, both kinds of token are
+      issued and accepted, the region is right, and this dashboard reads Tesla successfully.</li>
+    <li><b>Blocked:</b> Tesla returns <b>zero vehicles</b> — HTTP 200 with an empty list, which
+      means &ldquo;you may ask, and no car is attached to you&rdquo;. The 82 cars are owned by the
+      <em>company</em> in Tesla&rsquo;s Business portal, and the <b>Vehicle Management</b> column
+      is empty on every one of them.</li>
+    <li><b>Why they show in Tesla&rsquo;s portal but not here.</b> The portal renders what a
+      signed-in <em>person&rsquo;s role</em> may see. The Fleet API renders what an
+      <em>application</em> has been granted. They are separate permissions, and only the first
+      one exists today.</li>
+    <li><b>Not fixable in this code.</b> Attaching a business fleet to an application is
+      Tesla&rsquo;s step, it is not exposed to a Fleet Manager in the portal, and Tesla&rsquo;s
+      public documentation never describes it. <code>docs/tesla-support-request.md</code> is the
+      question to ask them, with every identifier and measurement already filled in.</li>`;
+  p.body.append(ul);
   return p;
 }
 
@@ -362,7 +364,7 @@ export async function renderTesla(root) {
   root.append(grantPanel(s).panel);
   /* Only once the grant exists: before that the empty list has a different
      cause and this panel would be answering a question nobody has yet. */
-  if (s.granted) root.append(pairPanel(s).panel);
+  if (s.granted) root.append(standingPanel().panel);
   root.append(heldPanel(s).panel);
   root.append(livePanel(s).panel);
   root.append(canPanel().panel);
