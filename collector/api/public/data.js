@@ -383,6 +383,12 @@ export const NO_FILTER = ['settings', 'live', 'sources', 'day', 'providers', 'ac
      platform and an id and nothing else — a range, a channel or a fleet
      control above it would govern nothing, and would ride along into every
      link leaving the page. */
+  /* #tesla is the fleet's Teslas and what Tesla says about them. Neither
+     /api/tesla/status nor /api/tesla/vehicles takes a window, a platform or a
+     fleet — a Tesla is a Tesla in either fleet, and the page reports the split
+     rather than filtering by it — so all three controls would govern nothing
+     and would ride along into every link leaving the page. */
+  'tesla',
   'compliance', 'forecast', 'retention', 'capacity', 'map', 'segment', 'trip'];
 
 export const hidesRange = (v) => NO_FILTER.includes(v) || NO_RANGE.includes(v);

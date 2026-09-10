@@ -2196,6 +2196,53 @@ const dailySeries = () => {
   return rows;
 };
 
+/* ── Tesla ────────────────────────────────────────────────────────────────
+   Fixtured in the NOT-GRANTED state, because that is the state production is
+   actually in and it is the one the page exists to explain. A fixture that
+   showed a connected account would render the one screen nobody can currently
+   see and would leave the "absent, and here is why" path — which is the whole
+   product here — exercised by nothing.
+
+   The counts are the real ones, measured on production 2026-09-10 through this
+   very endpoint: 82 Teslas, 72 Model Y and 10 Model 3, of which 78 carry a VIN.
+   The four Model Ys without one are in the fixture on purpose: a car with no
+   VIN cannot be matched to anything Tesla returns, so the page has a number to
+   render absent and a reason to give for it. */
+app.get('/api/tesla/status', (_, r) => r.json({
+  region: 'eu', api_base: 'https://fleet-api.prd.eu.vn.cloud.tesla.com',
+  client_configured: true, granted: false, live: null,
+  teslas: [
+    { model: 'Model Y', plates: 72, with_vin: 68, ecosine: 54, egari: 18 },
+    { model: 'Model 3', plates: 10, with_vin: 10, ecosine: 10, egari: 0 },
+  ],
+  total_teslas: 82,
+  why: 'The Tesla application is configured but nobody has approved it against the Tesla '
+    + 'account that owns the cars. Those credentials authenticate the app, not the vehicles — '
+    + 'until somebody signs in, Tesla answers with an empty list, and that is a fact about the '
+    + 'grant rather than about the fleet.',
+}));
+
+app.get('/api/tesla/connect', (_, r) => r.json({
+  url: 'https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/authorize?response_type=code'
+    + '&client_id=00000000-0000-0000-0000-000000000000'
+    + '&redirect_uri=https%3A%2F%2Fexample.invalid%2Fteslaredirect'
+    + '&scope=openid+offline_access+vehicle_device_data+vehicle_location&state=fixture',
+  redirect_uri: 'https://example.invalid/teslaredirect',
+  expires_in_min: 60,
+  note: 'Open this as the person whose Tesla account owns the cars. Approving it grants '
+    + 'read-only access — vehicle data and location, no commands.',
+}));
+
+/* Shape-pinned even though the page will not call it while granted is false:
+   the smoke test asserts a fixture exists for every route the UI can reach,
+   and "unreachable today" is not "unreachable". */
+app.get('/api/tesla/vehicles', (_, r) => r.json({
+  status: 200, count: 0, vehicles: [],
+  why: 'The token is valid and Tesla returned no vehicles. That means the account that approved '
+    + 'this application does not have the cars in it — a fleet is usually held in a Tesla '
+    + 'Business account, and each car has to be in that account before it appears here.',
+}));
+
 app.get('/api/trips/daily', (req, r) => {
   const out = dailySeries();
   /* HONOUR THE WINDOW, so a today-only range can be tested at all.

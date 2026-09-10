@@ -4,8 +4,27 @@ import { log } from './log.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* WHAT NODE CALLS ITSELF, AND WHY THAT IS A PROBLEM.
+   ──────────────────────────────────────────────────────────────────────────
+   Node's global fetch sends `user-agent: node` and `sec-fetch-mode: cors`
+   unless told otherwise — measured, not assumed. The first is a published
+   automated-client signature and the second is a browser header that makes no
+   sense from a server, and edge providers score both. Every request this
+   product makes to every provider carried them.
+
+   So a real name is sent instead, identifying the application rather than the
+   runtime. A caller may still override it; nothing here forces it. This is
+   not a workaround for one provider — it is what a well-behaved API client
+   sends, and `node` is what a client sends when nobody has thought about it. */
+const UA = 'ecosine-fleet-dashboard/1.0 (+https://fleet-dashboard-wpeqb.ondigitalocean.app)';
+
 export async function http(url, { method = 'GET', headers = {}, body, timeoutMs = 60000,
                                   retries = 4, retryOn = [429, 500, 502, 503, 504], expect = 'json' } = {}) {
+  /* Case-insensitively, because a caller that already set one must win and
+     HTTP header names are not case sensitive. */
+  if (!Object.keys(headers).some((h) => h.toLowerCase() === 'user-agent')) {
+    headers = { ...headers, 'user-agent': UA };
+  }
   let attempt = 0;
   for (;;) {
     attempt++;
@@ -39,8 +58,14 @@ export async function http(url, { method = 'GET', headers = {}, body, timeoutMs 
          changes is that a refusal can no longer pass without saying so, in any
          of them, which is what let this one hide. */
       if (!res.ok) {
+        /* 600, not 160. An edge provider's refusal is an HTML page whose only
+           useful content — the rule reference that says WHY — sits past the
+           first 160 characters, so the truncation kept exactly the boilerplate
+           and dropped the diagnosis. That cost a round trip through the logs
+           on a Tesla 403 that turned out to be an edge block rather than a
+           credential problem. */
         log.warn('http', `${res.status} ${String(url).split('?')[0]}`,
-          { status: res.status, body: String(text).slice(0, 160) });
+          { status: res.status, body: String(text).slice(0, 600) });
       }
       /* finalUrl and redirected, because fetch follows redirects silently and
          by the time a caller sees the response the 302 is gone. A provider

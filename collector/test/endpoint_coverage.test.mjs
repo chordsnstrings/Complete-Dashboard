@@ -55,13 +55,13 @@ const EXEMPT = {
     + 'tier — Blue, Gold, Platinum, Diamond — by trying introspection, then a fixed list of candidate fields '
     + 'on GetDriver, then a fixed list of candidate operations. Every candidate is written in the file; nothing '
     + 'the caller sends becomes part of a query. Not a page: it answers whether a page COULD exist',
-  '/api/tesla/status': 'the Tesla section renders from it — what the fleet holds for its 80 '
-    + 'Teslas, and whether Tesla has been granted access to say anything about them',
-  '/api/tesla/connect': 'operator tool: builds the one-time Tesla sign-in link to hand to '
-    + 'whoever owns the Tesla account, since only they can approve read access',
-  '/api/tesla/vehicles': 'operator tool: asks Tesla live what vehicles the granted account '
-    + 'holds — kept out of the page because the tier is pay-as-you-go and a page that renders '
-    + 'on every load must not bill on every load',
+  /* The three Tesla routes were exempted here, and the exemption for
+     /api/tesla/status read "the Tesla section renders from it" — describing a
+     page that did not exist. An exemption is a claim about the product, and
+     that one was false the day it was written: the API and the handshake were
+     built and no page, no view and no rail row ever were, so the whole
+     integration was reachable only by curl. #tesla now exists and calls all
+     three, so all three are ordinary UI routes with ordinary fixtures. */
   '/api/probe/uber/timeline': 'operator tool: returns the raw driver_timeline_event rows for one '
     + 'driver on one day, with that day\u2019s trips beside them and the status vocabulary the '
     + 'feed actually uses \u2014 the spans every page derives are an inference, and when a page '

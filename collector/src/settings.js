@@ -181,6 +181,28 @@ export const SETTING_DEFS = [
     secret: true,
     hint: 'Issued when the Tesla account owner approves access. Until it is set, no Tesla-native '
       + 'data can be read at all — the partner credentials above authenticate the app, not the cars.' },
+  /* THE PENDING SIGN-IN, and it is here rather than in memory because the
+     link is meant to be FORWARDED.
+     ────────────────────────────────────────────────────────────────────────
+     api/tesla_routes.js used to hold the OAuth `state` in a Map, on the
+     reasoning that a handshake is one browser round trip and a value that
+     survived a redeploy is a value an attacker had longer to guess. That
+     reasoning describes a person signing in at their own keyboard. This link
+     is built to be shown, copied and sent to whoever actually holds the Tesla
+     account — usually not the person looking at the dashboard — and a
+     forwarded link that dies in fifteen minutes, or the moment a basic-xxs
+     container recycles, is a link that fails in normal use. It did, on the
+     first real attempt: "That sign-in has expired", with nobody having done
+     anything wrong.
+
+     Persisting it costs nothing that matters. The value is still 24 random
+     bytes, still compared in constant time, still single-use — consumed on
+     the first match — and now it also has an explicit expiry stored beside
+     it, which the Map only ever had by accident of process lifetime. */
+  { key: 'TESLA_OAUTH_STATE', group: 'Tesla', label: 'Pending sign-in (set automatically)',
+    secret: true,
+    hint: 'Written when a sign-in link is minted and cleared the moment it is used. Not '
+      + 'something to set by hand.' },
   /* Region decides the API host AND the token audience, and the two must
      match or every call 401s. Tesla serves three: na, eu and cn. A UAE fleet
      is EMEA, which Tesla routes through `eu`. Kept as a setting rather than a

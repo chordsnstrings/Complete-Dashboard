@@ -2341,3 +2341,20 @@ a.shift.clickable:focus-visible{outline:2px solid var(--accent);outline-offset:2
   font-size:var(--t4);color:var(--ink-2);margin-top:4px;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
+
+/* ── the Tesla page ────────────────────────────────────────────────────────
+   The sign-in URL is rendered as TEXT a person can select and copy, not only
+   as something to click: whoever holds the Tesla account is usually not the
+   person looking at this dashboard, so the useful artefact is a string they
+   can paste into a message. It therefore has to wrap, and a bare <a> with a
+   200-character href does not — it forces the whole panel wide. */
+.tesla-link{margin-top:10px}
+a.tesla-url{display:block;margin:6px 0;padding:8px 10px;
+  font-family:"IBM Plex Mono",monospace;font-size:var(--t4);
+  background:var(--surface-2);border:1px solid var(--rule);border-radius:6px;
+  overflow-wrap:anywhere;word-break:break-all;line-height:1.5}
+a.tesla-url:hover{border-color:var(--rule-strong)}
+/* The two limits read as prose, not as a checklist: they are things that are
+   true about Tesla, not tasks anybody can tick off. */
+ul.tesla-limits{margin:0;padding-left:1.1rem}
+ul.tesla-limits li{margin:.5rem 0;line-height:1.55;color:var(--ink-2)}

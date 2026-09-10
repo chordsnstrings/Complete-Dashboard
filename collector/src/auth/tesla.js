@@ -40,6 +40,38 @@ const creds = () => ({
 
 const form = (o) => new URLSearchParams(o).toString();
 
+/* WHAT WENT WRONG, IN WORDS, INCLUDING WHEN IT WAS NOT OAUTH THAT ANSWERED.
+   ──────────────────────────────────────────────────────────────────────────
+   Tesla's auth host sits behind an edge that answers a request it does not
+   like with an HTML "Access Denied" page and HTTP 403 — before OAuth sees it
+   at all. Pasted into an error string that read "code exchange refused (403):"
+   the operator got a wall of markup and a status code, and every reading of it
+   pointed at the credentials, which were fine.
+
+   The two failures need telling apart because the remedies have nothing in
+   common: a JSON `error` is Tesla saying no to THIS request and is fixed by
+   changing the request, while an HTML body is Tesla's edge saying no to this
+   CALLER and is fixed nowhere in this file. Measured on production
+   2026-09-10: every code exchange from the DigitalOcean fra1 egress came back
+   as the second, while the identical request from another network reached
+   OAuth and got a normal JSON refusal. */
+const refusal = (what, status, data) => {
+  const body = typeof data === 'string' ? data : '';
+  if (/<html|access denied/i.test(body)) {
+    /* Akamai's reference number is the only part of that page worth keeping —
+       it is what a provider support ticket is answered against. */
+    const ref = body.match(/Reference[^0-9a-z]*([0-9a-z.#&;\-]+)/i);
+    return { err: `${what}: Tesla's edge refused the request with HTTP ${status} before the `
+      + 'sign-in server saw it. This is not a credential problem — the same request from a '
+      + 'different network reaches Tesla normally. It is the address this server calls from '
+      + `being refused.${ref ? ` Tesla's reference: ${ref[1]}` : ''}`,
+      edge: true, status };
+  }
+  const j = data && typeof data === 'object' ? data : {};
+  return { err: `${what} (${status}): ${j.error || ''} ${j.error_description || ''}`.trim()
+    || `${what} (${status})`, edge: false, status };
+};
+
 /* Never throws for a missing credential — returns the reason instead. A
    collector that throws here records "the provider refused us", which is a
    different and wrong claim from "nobody has given us a token yet". */
@@ -53,7 +85,7 @@ export async function partnerToken() {
       scope: READ_SCOPES, audience: teslaBase() }),
   });
   if (data?.access_token) return { token: data.access_token, expires_in: data.expires_in };
-  return { err: `partner token refused (${status}): ${data?.error || ''} ${data?.error_description || ''}`.trim() };
+  return refusal('partner token refused', status, data);
 }
 
 /* The token the collector actually reads vehicles with. */
@@ -79,7 +111,7 @@ export async function accessToken() {
          not store the new one is one exchange away from being signed out. */
       refresh: data.refresh_token || null };
   }
-  return { err: `access token refused (${status}): ${data?.error || ''} ${data?.error_description || ''}`.trim() };
+  return refusal('access token refused', status, data);
 }
 
 /* The URL a human opens once. `state` is echoed back by Tesla and checked on
@@ -103,5 +135,5 @@ export async function exchangeCode({ code, redirectUri }) {
   if (data?.refresh_token) {
     return { refresh: data.refresh_token, token: data.access_token, expires_in: data.expires_in };
   }
-  return { err: `code exchange refused (${status}): ${data?.error || ''} ${data?.error_description || ''}`.trim() };
+  return refusal('code exchange refused', status, data);
 }

@@ -32,30 +32,63 @@ import { get, setSetting, loadSettings } from '../src/settings.js';
 
 const REDIRECT = 'https://fleet-dashboard-wpeqb.ondigitalocean.app/teslaredirect';
 
-/* The `state` parameter, held in memory rather than in the database.
+/* The `state` parameter, STORED rather than held in memory — and the reason
+   is the whole shape of this handshake.
    ──────────────────────────────────────────────────────────────────────────
    It exists so a stray GET to the callback cannot plant a refresh token: the
-   code that comes back is only accepted if it carries a state this process
-   issued. In memory is the right lifetime — the handshake is one browser
-   round trip, minutes at most, and a value that survived a redeploy would be
-   a value an attacker had longer to guess. A restart mid-handshake costs the
-   reader one click on the link again, which is the correct trade. */
-const pending = new Map();
-const STATE_TTL_MS = 15 * 60 * 1000;
-const sweep = () => {
-  const now = Date.now();
-  for (const [k, at] of pending) if (now - at > STATE_TTL_MS) pending.delete(k);
+   code that comes back is only accepted if it carries a state this server
+   issued.
+
+   This was a Map, on the reasoning that a handshake is one browser round trip
+   and a value surviving a redeploy is a value an attacker has longer to guess
+   — "a restart mid-handshake costs the reader one click on the link again,
+   which is the correct trade". That reasoning describes somebody signing in at
+   their own keyboard, and it is not what this link is for. /api/tesla/connect
+   RETURNS the URL rather than redirecting to it precisely so it can be shown,
+   copied and sent to whoever actually holds the Tesla account, who is usually
+   not the person looking at the dashboard. A link built to be forwarded, that
+   dies in fifteen minutes and cannot outlive a basic-xxs container recycling,
+   fails in exactly its intended use.
+
+   It did, on the first real attempt: the operator opened the link and got
+   "That sign-in has expired" having done nothing wrong. The trade was wrong,
+   so it is reversed.
+
+   WHAT IS NOT GIVEN UP. The value is still 24 random bytes from
+   randomBytes — 192 bits, which an hour of guessing does not dent — still
+   compared in constant time, and still SINGLE USE: the first match clears it,
+   so a replayed callback is refused like any stranger's. What it gains is an
+   expiry that is written down instead of being an accident of process
+   lifetime, and a handshake that survives the deploy that happens to land
+   while somebody is reading their email. */
+const STATE_TTL_MS = 60 * 60 * 1000;
+const STATE_KEY = 'TESLA_OAUTH_STATE';
+
+/* Stored as `<state>.<expiry-ms>` rather than JSON: one row, one string, and
+   nothing to parse defensively on a path where a parse failure would lock the
+   only way in. Anything unreadable is treated as no pending sign-in. */
+const putState = (state) => setSetting(STATE_KEY, `${state}.${Date.now() + STATE_TTL_MS}`);
+
+const readState = () => {
+  const raw = String(get(STATE_KEY, '') || '');
+  const cut = raw.lastIndexOf('.');
+  if (cut < 1) return null;
+  const until = Number(raw.slice(cut + 1));
+  if (!Number.isFinite(until) || Date.now() > until) return null;
+  return raw.slice(0, cut);
 };
+
 /* Constant time, because a state check that leaks its answer through timing is
-   not a check. */
-const stateOk = (given) => {
-  sweep();
+   not a check. Consumed on success — a state that has been used is not a state
+   this server issued any more. */
+const stateOk = async (given) => {
+  const held = readState();
+  if (!held) return false;
   const g = Buffer.from(String(given || ''));
-  for (const k of pending.keys()) {
-    const b = Buffer.from(k);
-    if (b.length === g.length && timingSafeEqual(b, g)) { pending.delete(k); return true; }
-  }
-  return false;
+  const b = Buffer.from(held);
+  if (b.length !== g.length || !timingSafeEqual(b, g)) return false;
+  await setSetting(STATE_KEY, '');
+  return true;
 };
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
@@ -149,7 +182,9 @@ export function teslaRoutes(app, { q, wrap }) {
       return res.status(400).json({ error: 'TESLA_CLIENT_ID is not set, so no sign-in link can '
         + 'be built. Paste the client id and secret into Settings first.' });
     }
-    pending.set(state, Date.now());
+    /* Awaited: a link handed out before its state is stored is a link that
+       races the reader, and the reader wins often enough to matter. */
+    await putState(state);
     res.json({ url, redirect_uri: REDIRECT, expires_in_min: STATE_TTL_MS / 60000,
       note: 'Open this as the person whose Tesla account owns the cars. Approving it grants '
         + 'read-only access — vehicle data and location, no commands.' });
@@ -175,16 +210,40 @@ export function teslaRoutes(app, { q, wrap }) {
     }
     /* The state check. A code that arrives without one this process issued is
        not a code we asked for. */
-    if (!stateOk(req.query.state)) {
+    if (!(await stateOk(req.query.state))) {
       return send('That sign-in has expired',
-        '<p>The approval came back without a request this server recognises — usually because '
-        + 'it took more than fifteen minutes, or because the server restarted in between.</p>'
-        + '<p><b>Nothing has been stored.</b> Open the link from the Tesla page again.</p>', 400);
+        '<p>The approval came back without a sign-in this server is waiting for. A link lasts an '
+        + 'hour, and it can only be used once — so this is either an hour old, or it has already '
+        + 'been used, or a newer link was asked for and replaced it.</p>'
+        + '<p><b>Nothing has been stored, and nothing is broken.</b> Open the Tesla page in the '
+        + 'dashboard and ask for a new link.</p>', 400);
     }
     const out = await exchangeCode({ code, redirectUri: REDIRECT });
     if (out.err) {
-      return send('Tesla refused the exchange',
-        `<p><code>${esc(out.err)}</code></p><p>Nothing has been stored.</p>`, 502);
+      /* HTTP 200, AND THE STATUS CODE IS THE POINT.
+         ──────────────────────────────────────────────────────────────────
+         This answered 502, which is semantically right and operationally
+         useless: DigitalOcean's edge replaces the body of a 5xx with its own
+         "Well, This is unexpected" page, so the explanation written three
+         lines above never reached the person reading it. The operator saw a
+         generic 502 twice and had no way to tell an edge block from a bad
+         secret — the exact substitution of a reason for a shrug that this
+         product exists to refuse.
+
+         The page IS the answer, so it is delivered with a status that lets it
+         through. The failure is still named in the log and still named on the
+         screen; only the code changes. */
+      const edge = out.edge;
+      return send(edge ? 'Tesla would not accept the request from this server'
+        : 'Tesla refused the sign-in',
+        `<p>${esc(out.err)}</p>`
+        + (edge
+          ? '<p>The approval itself worked — Tesla sent us back a valid code. What failed is '
+            + 'this server exchanging that code for a token, and it failed at Tesla&rsquo;s front '
+            + 'door rather than at the sign-in.</p>'
+            + '<p><b>Nothing has been stored, and nothing you did was wrong.</b> This needs '
+            + 'fixing on our side, not by trying again.</p>'
+          : '<p><b>Nothing has been stored.</b> You can start again from the Tesla page.</p>'));
     }
     await setSetting('TESLA_REFRESH_TOKEN', out.refresh, true);
     await loadSettings(true);

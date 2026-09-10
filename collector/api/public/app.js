@@ -23,6 +23,7 @@ import { COHORTS, membersOf } from './cohorts.js';
 import { renderCauses } from './causes.js';
 import { renderTrips } from './trips.js';
 import { renderOnlineTime } from './onlinetime.js';
+import { renderTesla } from './tesla.js';
 import { peopleCards, peopleResolved, namesLine } from './people.js';
 import { renderProvenance } from './provenance.js';
 import { renderReceipts } from './receipts.js';
@@ -340,6 +341,11 @@ const VIEWS = [
   { id: 'safety', label: 'Safety', ic: '△', sec: 'Fleet', sub: 'Harsh braking, speeding and sharp turns from the car trackers, plus tracker faults' },
   { id: 'live', label: 'Live fleet', ic: '◉', sec: 'Fleet', sub: 'Live vehicle positions, refreshed by CABMAN every 5 minutes' },
   { id: 'map', label: 'Map & replay', ic: '◍', sec: 'Fleet', sub: 'Where every vehicle is now, and where it went on any given day' },
+  /* A page rather than a section: a Tesla section would need two pages to
+     earn a rail row (test/nav_sections.test.mjs), and until the account grant
+     lands there is one page's worth of fact. Promote it when Tesla is
+     answering and live and history are two different questions. */
+  { id: 'tesla', label: 'Tesla', ic: '⚡', sec: 'Fleet', sub: 'The 82 Teslas in the fleet, and what Tesla itself will say about them' },
   { id: 'causes', label: 'Why trips changed', ic: '◔', sec: 'Work', sub: 'When trips changed sharply, and whether supply or demand moved with it' },
   { id: 'forecast', label: 'Forecast', ic: '◠', sec: 'Work', sub: 'Expected trips for next month, day by day, and how uncertain each day is' },
   { id: 'optimise', label: 'Cut waiting time', ic: '◎', sec: 'Work', sub: 'Which online hours sell, and where drivers wait for the next job' },
@@ -1529,6 +1535,7 @@ V.demand = async (root) => {
 /* Subscripted, because the id carries a hyphen and V.online-time is not a
    property access. bin/page-audit.mjs matches both forms. */
 V['online-time'] = async (root) => renderOnlineTime(root);
+V.tesla = async (root) => renderTesla(root);
 
 V.drivers = async (root) => {
   const gen = currentGen();
