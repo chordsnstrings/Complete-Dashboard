@@ -2352,13 +2352,17 @@ export function driverRoutes(app, { q, wrap, endOfDay }) {
        'error' rather than status = 'ok', so a partial run — which did collect
        something — still counts as having reached the day. */
     const [feed] = await q(
+      /* The day alone, not the driver's ids: this asks about the FEED, which
+         has one clock for everybody. Passing the whole of `p` to a statement
+         that never mentions $1 leaves that parameter with no inferable type
+         and Postgres refuses the query outright. */
       `SELECT max(finished_at) AS last_run_at,
               greatest(0, least(1440, floor(extract(epoch FROM (
-                least(max(finished_at), (($2::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))
-                - (($2::date)::timestamp AT TIME ZONE 'Asia/Dubai')))/60))::int))::int
+                least(max(finished_at), (($1::date + 1)::timestamp AT TIME ZONE 'Asia/Dubai'))
+                - (($1::date)::timestamp AT TIME ZONE 'Asia/Dubai')))/60)))::int
                 AS collected_to_min
          FROM collection_run
-        WHERE source = 'uber_timeline' AND status <> 'error'`, p);
+        WHERE source = 'uber_timeline' AND status <> 'error'`, [day]);
     const [reach] = await q(
       `SELECT max(at) AS last_event_at,
               max((extract(hour FROM at AT TIME ZONE 'Asia/Dubai') * 60
