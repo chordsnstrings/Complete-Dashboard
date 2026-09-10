@@ -342,10 +342,31 @@ which. In `docs/COVERAGE.md`.
 | The fleet's Teslas are identified | **proven** | 82 — 72 Model Y, 10 Model 3; 78 carry a VIN, Tesla's own join key |
 | Tesla will tell us anything about them | **NO — blocked** | a partner token answers `GET /api/1/vehicles` with 200 and **count 0**. It authenticates the application, not an account. |
 
-**The one remaining step is not ours:** somebody signed into the Tesla account
-that owns the cars must approve the app once, at the link
-`/api/tesla/connect` mints. Until then every Tesla-native figure is absent with
-that reason, which is what `/api/tesla/status` returns.
+**The approval has now happened, and it was not the blocker.** The operator
+completed the sign-in on 2026-09-10; Tesla accepted it and issued a valid code.
+The code exchange was then refused by Tesla's **edge** — HTTP 403 with an
+Akamai "Access Denied" page rather than an OAuth refusal.
+
+`/api/probe/tesla/egress` measured the shape of that refusal from production:
+
+| claim | state | the proof |
+|---|---|---|
+| The account approval works | **proven** | Tesla redirected back with a code; the state check passed |
+| The refusal is of the CALLER, not the credential | **proven** | HTML block page, not a JSON `error`; identical request from another network reaches OAuth |
+| It is not the User-Agent | **proven** | a real UA was deployed and the answer did not change; `user-agent: node` also passes from another network |
+| Tesla's **auth** host refuses this server | **proven** | 403 + Akamai ref `#18.ccd5ce17.1789035013.1637d0b9` from 164.92.186.179 |
+| Tesla's **data** host does **not** | **proven** | 401 with no block page — a normal unauthenticated answer |
+| It is the egress address specifically | **not proven** | best-supported explanation; only Tesla can confirm which rule fired |
+
+**What that means for the design, and it is not a detail:** a token minted
+elsewhere does not fix this. Access tokens last about eight hours and the
+`refresh_token` renewal posts to the same blocked host, so the refresh has to
+happen somewhere Tesla accepts and be written back into `app_setting`.
+
+**The one remaining step is still not ours**, but it has changed: ask Tesla to
+allow **164.92.186.179**, quoting that reference. The alternatives — proxying
+only the auth calls, or a token-keeper off this server — both leave moving
+parts behind.
 
 **CORRECTED 2026-09-10, having been checked against Tesla's documentation
 rather than recalled.** This paragraph read: *"there is no per-trip, drive or

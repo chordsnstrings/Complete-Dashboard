@@ -2161,9 +2161,39 @@ last Tuesday.
   Only an `authorization_code` grant from the account that owns the cars reads a
   fleet. Measured, and the single most misread result here.
 - **Tesla's auth edge refuses some callers before OAuth sees them**, answering
-  HTTP 403 with an HTML "Access Denied" page rather than a JSON error. Measured
-  on production 2026-09-10: every code exchange from the DigitalOcean fra1
-  egress came back that way, while the identical request from another network
-  reached OAuth and got a normal JSON refusal. An HTML body on an auth endpoint
-  means the CALLER was refused, not the credential — do not go and rotate a
-  secret over it.
+  HTTP 403 with an HTML "Access Denied" page rather than a JSON error. An HTML
+  body on an auth endpoint means the CALLER was refused, not the credential —
+  do not go and rotate a secret over it.
+
+### The block, measured rather than inferred — `/api/probe/tesla/egress`, 2026-09-10
+
+Production's egress address is **164.92.186.179** (agreed by two independent
+services). From it:
+
+| host | answer | reading |
+|---|---|---|
+| `fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token` | **403, HTML block page**, Akamai ref `#18.ccd5ce17.1789035013.1637d0b9` | refused at the edge |
+| `fleet-api.prd.eu.vn.cloud.tesla.com/api/1/vehicles` | **401**, no block page | reached Tesla normally |
+
+**The auth host is blocked and the data host is not.** That is the specific
+shape that decides the design, and all three readings were live before it was
+taken:
+
+- Tokens **cannot be minted or refreshed** from this server — `authorization_code`
+  and `refresh_token` both post to the blocked host.
+- Tokens **can be used** from this server, because the data host answers.
+- So a one-time exchange elsewhere does **not** solve it: an access token lasts
+  about eight hours and the refresh that renews it is also blocked. Anything
+  built on this needs the refresh to happen somewhere Tesla accepts, with the
+  token written back into `app_setting`.
+
+The three ways out, in the order they should be tried: ask Tesla to allow
+164.92.186.179 (the reference above is what the ticket is answered against);
+route only the auth calls through an egress Tesla accepts; or run a small
+token-keeper off this server that refreshes and stores. The first is the only
+one that leaves no moving parts behind.
+
+**The lesson worth keeping:** an HTML body where JSON belongs is a fact about
+the CALLER, and it took a page saying so, then a probe measuring it, to stop
+this reading as a credential problem. Both now exist; neither did when the
+integration was written.
