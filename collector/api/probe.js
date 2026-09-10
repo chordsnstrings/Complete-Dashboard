@@ -1030,6 +1030,68 @@ export function probeRoutes(app, { wrap }) {
       surfaces: out,
     });
   }));
+  /* THE RAW TIMELINE, FOR ONE DRIVER ON ONE DAY.
+     ─────────────────────────────────────────────────────────────────────────
+     Every page that says when somebody was online derives it from spans, and a
+     span is an inference: ONLINE at one instant, closed by whatever event comes
+     next. When a page and the data disagree — Bashir Ahmad Amin on 2026-09-10
+     drove three Uber jobs from 08:35 to 11:03 while the day page drew him
+     online for 84 minutes ending at 09:59 — the argument cannot be settled from
+     the spans, because the spans are the thing in question.
+
+     So this returns the EVENTS, unaggregated and in order, with the trips
+     beside them on the same clock. Read-only, one driver, one day. It exists
+     because "what did Uber actually send" is a question this codebase has had
+     to answer three times from inference and could not answer from a query. */
+  app.get('/api/probe/uber/timeline', wrap(async (req, res) => {
+    await loadSettings();
+    const id = String(req.query.id || '');
+    const day = String(req.query.day || '');
+    if (!id || !/^\d{4}-\d{2}-\d{2}$/.test(day)) {
+      return res.status(400).json({ error: 'id and day (YYYY-MM-DD) are required' });
+    }
+    /* A day either side, because a span is opened by one event and closed by
+       the next: the ONLINE that explains this morning may have been sent last
+       night, and the event that closes tonight arrives tomorrow. */
+    const evs = await pool.query(
+      `SELECT to_char(at AT TIME ZONE 'Asia/Dubai', 'YYYY-MM-DD HH24:MI:SS') AS at_dubai,
+              kind, status, state, offline_reason, job_ext_id,
+              lat, lon,
+              extract(epoch FROM (at AT TIME ZONE 'Asia/Dubai' - $2::timestamp))/60 AS minute
+         FROM driver_timeline_event
+        WHERE driver_ext_id = $1
+          AND at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai')
+        ORDER BY at`, [id, day]);
+    const trips = await pool.query(
+      `SELECT to_char(requested_at AT TIME ZONE 'Asia/Dubai', 'HH24:MI:SS') AS started,
+              to_char(ended_at AT TIME ZONE 'Asia/Dubai', 'HH24:MI:SS') AS ended,
+              status, product, external_id
+         FROM trip
+        WHERE driver_ext_id = $1 AND platform = 'uber'
+          AND (requested_at AT TIME ZONE 'Asia/Dubai')::date = $2::date
+        ORDER BY requested_at`, [id, day]);
+    const counts = await pool.query(
+      `SELECT kind, status, state, count(*)::int AS n
+         FROM driver_timeline_event
+        WHERE driver_ext_id = $1
+          AND at >= (($2::date - 1)::timestamp AT TIME ZONE 'Asia/Dubai')
+          AND at <  (($2::date + 2)::timestamp AT TIME ZONE 'Asia/Dubai')
+        GROUP BY 1,2,3 ORDER BY 4 DESC`, [id, day]);
+    /* What the WHOLE table holds, not just this driver: whether a status value
+       exists at all is a fact about the feed, and a driver who never produced
+       one says nothing about whether anybody does. */
+    const vocab = await pool.query(
+      `SELECT kind, status, state, count(*)::int AS n
+         FROM driver_timeline_event
+        WHERE at > now() - interval '30 days'
+        GROUP BY 1,2,3 ORDER BY 4 DESC LIMIT 40`);
+    res.json({ id, day,
+      events: evs.rows, trips: trips.rows,
+      this_driver_this_day: counts.rows,
+      every_value_the_feed_has_sent_in_30_days: vocab.rows });
+  }));
+
   /* THE REALTIME TRANSACTION FEED, ASKED WITH THE VERB IT DOCUMENTS.
      ─────────────────────────────────────────────────────────────────────────
      docs/fleet-tracking-api-reference.md:200 documents this surface as

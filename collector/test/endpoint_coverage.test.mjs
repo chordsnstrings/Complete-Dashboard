@@ -55,6 +55,10 @@ const EXEMPT = {
     + 'tier — Blue, Gold, Platinum, Diamond — by trying introspection, then a fixed list of candidate fields '
     + 'on GetDriver, then a fixed list of candidate operations. Every candidate is written in the file; nothing '
     + 'the caller sends becomes part of a query. Not a page: it answers whether a page COULD exist',
+  '/api/probe/uber/timeline': 'operator tool: returns the raw driver_timeline_event rows for one '
+    + 'driver on one day, with that day\u2019s trips beside them and the status vocabulary the '
+    + 'feed actually uses \u2014 the spans every page derives are an inference, and when a page '
+    + 'and the data disagree the spans cannot settle it',
   '/api/probe/uber/realtime': 'operator tool: asks the live per-trip transaction feed with the verb '
     + 'it documents (POST) rather than the GET all three existing probes send, and reports which '
     + 'parameter shape Uber accepts — the gate on getting Uber money at day grain instead of a '
