@@ -2291,3 +2291,51 @@ measurement above, but Tesla's public documentation does not describe the
 business-fleet association step at all, and only Tesla can confirm it.
 `docs/tesla-support-request.md` is the question to ask them, with every
 identifier already filled in.
+
+
+## Completed trips with a fare and no distance — measured, 2026-09-10
+
+`/api/probe/zero-distance?days=30`, fleet-wide. Two different things wear the
+same shape, and the split by platform is what tells them apart:
+
+| platform | trips | drivers | money | cash | under a minute |
+|---|---|---|---|---|---|
+| hotel | 17 | 4 | AED 4,310 | 0 | 2 |
+| yango | 10 | **1** | AED 76 | **10** | **10** |
+| uber | 2 | 2 | AED 30 | 0 | 0 |
+
+**The hotel rows are a coverage gap, not an anomaly.** Seventeen trips across
+four drivers averaging AED 253, none in cash, only two under a minute. The
+hotel channel does not report distance; these are real journeys with a column
+missing. Worth naming on the page as absent-with-a-reason, not worth
+investigating.
+
+**The Yango rows are one person.** Ten trips, ONE driver, every one in cash,
+every one under a minute — 10 to 24 seconds between `created_at` and
+`ended_at`, 0.0000 mileage, 6–12 AED, all marked `complete`. If Yango simply
+failed to report distance on short cash orders this would appear across its
+drivers; it does not, and Yango has 109 bookings in the window. One driver
+carrying the entire pattern is what makes it a question rather than a
+coverage note.
+
+**It is a note, not a page.** Twenty-nine trips fleet-wide over thirty days
+does not earn a view. What it earns is a named finding — see
+`docs/FIXLIST-2026-09-05.md` — and the probe, so the same question can be
+re-asked cheaply rather than re-derived.
+
+**Stated as a pattern, not a verdict.** Nothing here establishes intent, and a
+dashboard should not imply one. What is established: ten completed cash
+bookings, one driver, zero distance, all under a minute, over thirty days. That
+is a thing for a person to look at, and the naming is so somebody can.
+
+### The trap underneath it
+
+- **A discard rule can hide a whole shape.** `api/analytics_routes.js`'s
+  `TRIP_SECONDS` drops any trip whose end precedes its request, calling it "a
+  clock artefact" — correctly, in isolation. But Yango's `requested_at` was
+  mapped from `booked_at`, that provider's CLOSING stamp, so EVERY Yango trip
+  fell inside the discard and nothing derived from durations ever saw one. The
+  bug and the guard concealed each other: the mapping error made the data look
+  like the exact thing the guard was written to ignore. When a guard silently
+  drops a whole source, that is a finding about the source, not hygiene —
+  count what a discard removes, per source, or it will keep something from you.
