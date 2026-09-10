@@ -2358,3 +2358,16 @@ a.tesla-url:hover{border-color:var(--rule-strong)}
    true about Tesla, not tasks anybody can tick off. */
 ul.tesla-limits{margin:0;padding-left:1.1rem}
 ul.tesla-limits li{margin:.5rem 0;line-height:1.55;color:var(--ink-2)}
+
+/* ── a refused feed on a channel that is still collecting ──────────────────
+   Neither red nor amber, deliberately. Bolt Ecosine's fleet-integration roster
+   is permanently refused — the company is not on the app — while the portal
+   half delivers its trips on the same run: 34,897 bookings in the table beside
+   a banner that read "collecting nothing". Nothing is being lost here and an
+   operator shown red for it learns to ignore red, so it renders as the quiet,
+   informational state it is. */
+.authbanner.degraded{
+  background:var(--surface-2); border-color:var(--rule);
+  color:var(--ink-2);
+}
+.authbanner.degraded .ab-dot{background:var(--ink-3)}

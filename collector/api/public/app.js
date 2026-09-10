@@ -6045,10 +6045,28 @@ async function authBanner() {
   try { d = await api('/api/auth'); } catch { host.innerHTML = ''; return; }
   const stopped = (d?.rows || []).filter((r) => r.severity === 'stopped');
   const risk = (d?.rows || []).filter((r) => r.severity === 'at-risk');
-  const show = stopped.length ? stopped : risk;
-  if (!show.length) { host.innerHTML = ''; return; }
+  /* ONE SURFACE REFUSED, THE CHANNEL STILL DELIVERING — and it is neither an
+     emergency nor nothing.
+     ─────────────────────────────────────────────────────────────────────────
+     This banner said "the surfaces behind them are collecting nothing" and
+     "never authenticated" over Bolt Ecosine, which had 34,897 bookings and 158
+     drivers in the table at the time — measured 2026-09-10. BOLT_CLIENT_ID is
+     refused company 142868, so the fleet-integration ROSTER collects nothing;
+     the portal collects the trips on the same run. A credential covers a
+     surface, and this page was reporting a surface as if it were the channel.
+     api/auth_routes.js scores those rows 'degraded' now, against evidence that
+     the channel is still writing rows.
 
-  const tone = stopped.length ? 'stopped' : 'at-risk';
+     They are kept ON the banner rather than dropped, because a feed that is
+     genuinely not arriving should not go quiet — but below the fold, in their
+     own sentence, and never colouring the banner red. */
+  const degraded = (d?.rows || []).filter((r) => r.severity === 'degraded');
+  const show = stopped.length ? stopped : risk;
+  if (!show.length && !degraded.length) { host.innerHTML = ''; return; }
+
+  /* Degraded alone never turns the banner red or amber: nothing is being lost
+     and an operator who is shown red for it learns to ignore red. */
+  const tone = stopped.length ? 'stopped' : risk.length ? 'at-risk' : 'degraded';
   const fleetOf = (r) => (r.fleet_id && r.fleet_id !== '*'
     ? ` · ${sourceLabel(r.fleet_id)}` : '');
   /* "last worked 2h ago" is the half that makes the other half actionable:
@@ -6117,18 +6135,38 @@ async function authBanner() {
           + (errands.length
             ? `; ${errands.map((e) => `${fmt(e.count)} ${ERRAND_PART[e.state]}`).join(', ')}`
             : ''))
-    : `${countOf(risk.length, 'source')} ${risk.length === 1 ? 'has' : 'have'} not collected recently`;
+    : risk.length
+      ? `${countOf(risk.length, 'source')} ${risk.length === 1 ? 'has' : 'have'} not collected recently`
+      /* Degraded only. The sentence leads with what is NOT wrong, because the
+         thing this row is most likely to cause is a hunt for missing data
+         that is already in the table. */
+      : `${countOf(degraded.length, 'feed')} ${degraded.length === 1 ? 'is' : 'are'} refused, and `
+        + `the ${degraded.length === 1 ? 'channel behind it is' : 'channels behind them are'} `
+        + 'still collecting — no bookings are missing';
 
   host.className = `authbanner ${tone}`;
   host.innerHTML = `<span class="ab-dot"></span><div class="ab-body">`
     + `<div class="ab-head">${esc(head)}</div>`
     + `<ul class="ab-list ab-detail">`
-    + show.map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
+    + show.concat(degraded).map((r) => `<li><strong>${esc(sourceLabel(r.provider))}${esc(fleetOf(r))}</strong> `
       + `<code>${esc(r.credential)}</code> — `
       + esc(r.severity === 'stopped'
         ? (r.detail || 'the credential was refused')
-        : `no completed run in ${r.run_age_h}h, against a ${r.stall_limit_h}h expectation`)
-      + ` <span class="ab-when">· ${esc(since(r))}</span></li>`).join('')
+        /* A degraded row is COLLECTING. The at-risk sentence — "no completed
+           run in Xh" — would be false on it, and the stall clock it quotes is
+           the very clock that proved the channel alive. So it says what is
+           refused and, in the same breath, that nothing is being lost. */
+        : r.severity === 'degraded'
+          ? `${r.detail || 'this feed is refused'} — the rest of this channel is still `
+            + 'collecting, so no bookings are missing'
+          : `no completed run in ${r.run_age_h}h, against a ${r.stall_limit_h}h expectation`)
+      /* "never authenticated" is true of the CREDENTIAL and false about the
+         channel, which is the whole confusion this row existed to cause. On a
+         degraded row the useful clock is the one that shows it working. */
+      + ` <span class="ab-when">· ${esc(r.severity === 'degraded'
+        ? (r.run_age_h != null ? `channel last collected ${Math.round(r.run_age_h)}h ago`
+          : 'the channel is collecting')
+        : since(r))}</span></li>`).join('')
     + `</ul></div>`;
 }
 

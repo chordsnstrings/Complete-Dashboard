@@ -78,11 +78,34 @@ const SEVERITY_OF = {
        cookie removed — a pair unreachable from one origin unless an edge is
        deciding. Not a credential, not a URL: where the call comes from.
 
-     Both score 'stopped' because nothing is being collected and the severity
-     is honestly identical. What differs is the sentence, and the sentence is
-     the entire value of the banner. */
+     Both scored 'stopped' on the reasoning that "nothing is being collected
+     and the severity is honestly identical". THAT PREMISE IS FALSE, and it was
+     false about the very row it was written for.
+
+     A credential covers a SURFACE. A channel can have several. Bolt has two:
+     the fleet-integration API, on client credentials, and the portal, on a
+     user session. BOLT_CLIENT_ID is refused company 142868 — so the FI ROSTER
+     collects nothing for Ecosine — while the portal collects Ecosine's trips
+     on the same runs. Measured on production 2026-09-10: **34,897 Bolt
+     bookings for ecosine** and 158 drivers seen on them, beside a banner
+     reading "the surfaces behind them are collecting nothing" and "never
+     authenticated".
+
+     That is a reason which is not the true one, on the page whose whole
+     purpose is to give the true one. An operator reading it either goes
+     hunting for missing Bolt data that is already there, or stops trusting
+     the banner — and the second is worse and permanent.
+
+     So these two states are scored against EVIDENCE rather than assumption:
+     if the source is still collecting for that fleet — `lastOk` below, which
+     already means exactly "a run finished and wrote rows" — the channel is
+     DEGRADED, one surface of it permanently unavailable. Only when nothing is
+     arriving at all is it stopped. The errand is unchanged either way; what
+     changes is the claim about what it costs. */
   unentitled: 'stopped',
   blocked: 'stopped',
+  /* The states above are re-scored per row when the channel is still
+     collecting; see SURFACE_STATES where the rows are built. */
   /* A check that could not run is not a check that passed — the Yango
      cookie-free comparison records this when it cannot complete. */
   unknown: 'at-risk',
@@ -119,6 +142,13 @@ export const ERRANDS = {
     part: (n) => `${n} of them refused in front of the API, where no credential is being read`,
   },
 };
+
+/* The states that describe ONE SURFACE of a channel rather than the channel.
+   A credential in one of these can be permanently refused while the channel
+   keeps collecting through another surface — which is exactly Bolt: the
+   fleet-integration roster is refused for Ecosine and the portal delivers its
+   trips on the same run. */
+const SURFACE_STATES = new Set(['unentitled', 'blocked']);
 
 export function authRoutes(app, { q, wrap }) {
   app.get('/api/auth', wrap(async (_req, res) => {
@@ -173,18 +203,37 @@ export function authRoutes(app, { q, wrap }) {
            A state this does not know is at-risk rather than fine, because
            that is the failure that just happened: a state added by one change
            and silently rendered healthy by another. */
+        /* Whether the CHANNEL is still delivering, whatever this one
+           credential's surface is doing. runAge comes from lastOk, which
+           counts a run only if it finished and wrote rows — so this is
+           evidence, not optimism. */
+        still_collecting: runAge != null && runAge <= limit,
         severity: c.state === 'ok'
           ? (stalled ? 'at-risk' : 'ok')
-          : (SEVERITY_OF[c.state] || 'at-risk'),
+          /* A surface-level refusal on a channel that is still collecting is
+             degraded, not stopped. See SEVERITY_OF: saying "collecting
+             nothing" over 34,897 collected bookings is the failure this
+             guards against. */
+          : (SURFACE_STATES.has(c.state) && runAge != null && runAge <= limit
+            ? 'degraded'
+            : SEVERITY_OF[c.state] || 'at-risk'),
       };
     });
 
     const bad = rows.filter((r) => r.severity === 'stopped');
+    const degraded = rows.filter((r) => r.severity === 'degraded');
     const warn = rows.filter((r) => r.severity === 'at-risk');
     res.json({
       rows,
       stopped: bad.length,
       at_risk: warn.length,
+      /* One surface refused, the channel still delivering. Counted separately
+         because it is neither an emergency nor nothing: there IS a feed that
+         is not arriving, and there is no data loss to chase. */
+      degraded: degraded.length,
+      degraded_rows: degraded.map((r) => ({ label: label(r),
+        provider: r.provider, fleet_id: r.fleet_id, state: r.state,
+        surface: r.surface, detail: r.detail })),
       missing: rows.filter((r) => r.severity === 'missing').length,
       /* One sentence the banner can print without the page having to compose
          it, so every surface that shows this says the same thing. */
