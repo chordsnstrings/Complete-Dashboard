@@ -1860,3 +1860,82 @@ them says so.
   `net = fare + service_fee`, and the service fee is exactly −25.00% of fare on
   29 of 29 sampled rows. The fleet-level net/gross lands at 0.7468 because the
   remaining spread is tips and taxes.
+
+### Uber's live per-trip feed WORKS — the request shape, measured 2026-09-10
+
+`POST /v1/vehicle-suppliers/transactions` returns per-trip money at sub-minute
+freshness on the scope `src/config.js:125` already requests. It has been
+recorded in this codebase three times as a surface that "serves nothing"; that
+was our verb, then our parameter shape, then our clock.
+
+**The one request shape that answers:**
+
+```
+POST https://api.uber.com/v1/vehicle-suppliers/transactions?org_id=<org>
+Authorization: Bearer <oauth token>
+Content-Type: application/json
+
+{"filters":[{"field":"timeRange",
+             "operator":"FILTER_OPERATOR_IN_RANGE",
+             "value":["<epoch-ms as a STRING>","<epoch-ms as a STRING>"]}],
+ "pagination_options":{"page_size":50}}
+```
+
+Everything about that is load-bearing. Each refusal below named the next
+correction, which is the only reason the shape was found at all:
+
+| what was sent | what Uber said |
+|---|---|
+| `GET` (what all three of our probes send) | `404 page not found` |
+| POST, no `filters` | `required field filters not found in data` |
+| `paginationOptions` | `required field pagination_options not found in data` |
+| `value` as `{startTime,endTime}` | `ReadArrayCB: expect [ or n` — it is an ARRAY |
+| `operator: 'IN_RANGE'` | `unknown enum value` — the `FILTER_OPERATOR_` prefix is required |
+| `field: 'time_range'` / `'processed_at'` / `'processedAt'` | `Invalid filter passed in request` |
+| numeric `value` entries | `expected string value, got ValueType(2)` |
+| epoch **seconds**, ISO ±millis, RFC3339 +offset | `invalid start time` |
+| a window ending at `now` | `invalid start time` — `startTime` must be **≥5 minutes old** |
+
+So: `timeRange`, the prefixed enum, **epoch milliseconds as strings**, a window
+that lags ~6 minutes, and a snake_case envelope. Rate limit 1 req/s — a sixth
+attempt fired back-to-back drew `429 TooManyRequests`, which without pacing
+reads as "this shape does not work".
+
+**What a row carries** (9 transactions in a 14-minute window):
+
+```
+driverInfo      { driverUuid, firstName, lastName }
+transactionInfo { transactionUuid, tripUuid, processedAt, description,
+                  breakDowns[] }
+description     TRIP | PERSONAL_TRANSPORT
+```
+
+`breakDowns` is the same category tree the weekly statement carries, per trip,
+with amounts in **e5** (divide by 100,000 for AED):
+
+```
+paid_to_you
+└── your_earnings              AED 34.61
+    ├── fare                   AED 46.94
+    │   ├── little_fare        AED 45.77
+    │   └── wait_time          AED  1.17
+    ├── service_fee           −AED 11.74
+    └── taxes_earnings        −AED  0.59
+```
+
+**It independently confirms the commission this fleet derives money from.**
+`service_fee / fare` on that trip is **25.01%**, and `your_earnings / fare` is
+**0.7373** — inside the 0.7372–0.7526 band measured across ten closed weekly
+statements, reached by a completely different route. The derived open-week
+figure and this feed agree.
+
+**Its ceiling, stated honestly.** Range ≤15 minutes, lookback ≤24 hours,
+`startTime` ≥5 minutes old, 1 req/s, `page_size` 1–500. It therefore **can
+never backfill**: ~96 polls per org per day with a stored cursor would keep
+today current, and nothing older than 24 hours is reachable. It is a freshness
+tier on top of the weekly payments walk, never a replacement for it.
+
+**What it would fix.** Today is the one day the money chart still reads low,
+because the Uber fare walk runs on the nightly catch-up rather than the
+half-hourly pass — 2 of 95 bookings priced at 09:07. This feed would price them
+within a minute of the trip ending.
