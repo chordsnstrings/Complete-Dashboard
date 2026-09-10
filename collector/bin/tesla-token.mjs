@@ -152,10 +152,29 @@ if (cmd === 'status') {
       + '  link as the person who owns the cars, then run this with the code that page prints:\n'
       + '\n    node bin/tesla-token.mjs claim <code>\n');
   }
+  /* THE REGION COMES FROM THE CODE, not from our setting.
+     ────────────────────────────────────────────────────────────────────────
+     Tesla prefixes the authorization code with the region it was issued in —
+     `EU_…`, `NA_…`, `CN_…` — and the `audience` on the exchange must match the
+     account's region or every later call 401s in a way that reads like a bad
+     secret (see src/auth/tesla.js). TESLA_REGION is OUR guess, set once; the
+     prefix is Tesla's own answer for THIS sign-in.
+
+     That distinction is about to matter: the personal account that first
+     approved is UAE/EU, while the business account holding the 82 cars shows
+     US in its portal. Reading the region off the code means the same command
+     works for either without anybody remembering to change a setting. */
+  const prefix = (code.match(/^([A-Z]{2})_/) || [])[1];
+  const region = prefix ? prefix.toLowerCase() : (s.TESLA_REGION?.value || 'eu');
+  if (prefix) console.log(`  the code is ${prefix}-issued, so the audience is the ${region} host`);
+  const audience = `https://fleet-api.prd.${region}.vn.cloud.tesla.com`;
   const host = await tokenHost();
   const data = await post(host, { grant_type: 'authorization_code', client_id: id,
-    client_secret: secret, code, redirect_uri: REDIRECT,
-    audience: `https://fleet-api.prd.${(s.TESLA_REGION?.value || 'eu')}.vn.cloud.tesla.com` });
+    client_secret: secret, code, redirect_uri: REDIRECT, audience });
+  /* Stored, so the dashboard's own calls go to the same host the token was
+     minted for. A token issued for one region and spent against another is
+     the 401 that looks like a revoked grant. */
+  if (prefix && region !== (s.TESLA_REGION?.value || '')) await putSetting('TESLA_REGION', region);
   if (!data.refresh_token) die('Tesla returned no refresh token. The grant is missing '
     + 'offline_access — check the scopes on the app in Tesla’s console.');
   await putSetting('TESLA_REFRESH_TOKEN', data.refresh_token);
