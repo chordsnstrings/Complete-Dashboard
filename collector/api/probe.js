@@ -1080,9 +1080,51 @@ export function probeRoutes(app, { wrap }) {
     const auth = { authorization: `Bearer ${token}` };
     const json = { ...auth, 'content-type': 'application/json' };
 
+    /* Uber's own answer to round one, kept here because it is what shaped
+       round two. Probed on production 2026-09-10:
+
+         GET  -> 404 "404 page not found"           (the control)
+         POST -> 400 "error transforming request: FieldConverter error,
+                      toField: request, error: required field filters not
+                      found in data"
+
+       So the surface is REACHABLE and it was only ever the verb. A 404 to a
+       GET on a POST-only route is not a statement about the provider, and
+       three probes in this codebase have been recording it as one. The 400
+       names the field it wants, which is what makes the next attempt a
+       correction rather than another guess. */
+    const win = { startTime: iso(start), endTime: iso(end) };
+    const winMs = { startTime: ms(start), endTime: ms(end) };
+    const page = { pageSize: 50 };
+
     /* Each attempt names what it is testing, so the result reads as an
        experiment rather than as a list of failures. */
     const attempts = [
+      /* The documented shape: a filters array of {field, operator, value},
+         org_id staying on the query string. */
+      { name: 'POST, filters[] timeRange IN_RANGE, ISO instants',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: { filters: [{ field: 'timeRange', operator: 'FILTER_OPERATOR_IN_RANGE',
+          value: win }], paginationOptions: page } },
+      { name: 'POST, filters[] timeRange IN_RANGE, epoch-ms instants',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: { filters: [{ field: 'timeRange', operator: 'FILTER_OPERATOR_IN_RANGE',
+          value: winMs }], paginationOptions: page } },
+      { name: 'POST, filters[] wrapped in a request envelope',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: { request: { filters: [{ field: 'timeRange',
+          operator: 'FILTER_OPERATOR_IN_RANGE', value: win }], paginationOptions: page } } },
+      { name: 'POST, filters[] with a bare IN_RANGE operator spelling',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: { filters: [{ field: 'timeRange', operator: 'IN_RANGE', value: win }],
+          paginationOptions: page } },
+      { name: 'POST, filters[] and org_id in the body too',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: { org_id: org, filters: [{ field: 'timeRange',
+          operator: 'FILTER_OPERATOR_IN_RANGE', value: win }], paginationOptions: page } },
+      { name: 'POST, empty filters[] - what does it say the field must contain',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: { filters: [], paginationOptions: page } },
       { name: 'GET (control — what the three existing probes send)',
         url: `${base}?${qs({ org_id: org, limit: 50 })}`, method: 'GET', headers: auth },
       { name: 'POST, org_id in query, empty body',
@@ -1105,7 +1147,15 @@ export function probeRoutes(app, { wrap }) {
     ];
 
     const out = [];
+    /* ONE PER SECOND. The documented rate limit is 1 req/s and round two
+       collected a 429 on the sixth attempt, which is a refusal about pace
+       rather than about shape - and one that would have been read as "this
+       shape does not work". */
+    const pause = () => new Promise((r) => setTimeout(r, 1100));
+    let first = true;
     for (const a of attempts) {
+      if (!first) await pause();
+      first = false;
       try {
         const { data, status } = await http(a.url, { method: a.method, headers: a.headers,
           timeoutMs: 30000, retries: 0,
