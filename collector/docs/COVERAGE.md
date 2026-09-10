@@ -2098,3 +2098,72 @@ tier on top of the weekly payments walk, never a replacement for it.
 because the Uber fare walk runs on the nightly catch-up rather than the
 half-hourly pass — 2 of 95 bookings priced at 09:07. This feed would price them
 within a minute of the trip ending.
+
+
+## Tesla Fleet API — what it holds, verified 2026-09-10
+
+Checked against Tesla's own documentation, not recalled. An earlier note in
+`FIX-STATUS.md` said there was "no per-trip, drive or odometer history at all";
+that was wrong about the odometer and wrong about charging, and it is corrected
+there.
+
+**Per car, live** (`GET /api/1/vehicles/{vin}/vehicle_data`, or streamed):
+
+| what | field | note |
+|---|---|---|
+| State of charge | `BatteryLevel`, `Soc` | the percentage and the *usable* percentage differ; the usable one is what a driver has |
+| Energy | `EnergyRemaining` (kWh), `EstBatteryRange` | |
+| Charge state | `ChargeState`, `DetailedChargeState` | the granular one needs firmware 2024.38+ |
+| Energy in / used | `ACChargingEnergyIn`, `DCChargingEnergyIn`, `LifetimeEnergyUsed` | cost per km per car, measured rather than modelled |
+| **Odometer** | `Odometer` | a live reading, not a series — but two reads a day apart bound a day's distance |
+| Movement | `Location`, `GpsHeading`, `VehicleSpeed`, `Gear` | a second opinion on CABMAN and FMS, not a replacement |
+| Tyres | `TpmsPressureFl/Fr/Rl/Rr`, `TpmsHardWarnings`, `TpmsSoftWarnings` | **nothing in this product reports tyre pressure today** |
+| Software | version and update status | |
+| Closures | locked, sentry, doors, boot | |
+
+**Historical, and the one place Tesla gives us the past:**
+
+- `GET /api/1/dx/charging/history` — paginated past sessions.
+- `GET /api/1/dx/charging/sessions` — pricing and energy; **business fleet
+  owners only**, which this fleet is.
+- `GET /api/1/dx/charging/invoice/{id}` — the invoice PDF.
+
+**Genuinely absent:** a per-DRIVE history. Tesla will not say where a car went
+last Tuesday.
+
+### The two access routes are opposites, not alternatives
+
+- **Polling `vehicle_data`.** Tesla's own docs: regularly polling it "is not
+  recommended and will be expensive". Rate limit 60/min per device. Worse for a
+  working fleet, **a parked car is asleep**, and waking it needs the
+  `vehicle_cmds` scope this application deliberately does not request — so a
+  sleeping car cannot be read at all. Wakes are capped at 3/min regardless.
+  On firmware 2023.38+ reading location **shows a sharing icon on the car's own
+  screen**, which is a thing drivers will ask about.
+- **Fleet Telemetry**, which Tesla recommends. The car pushes fields to our
+  server over mTLS, up to every 500ms, no polling and no waking. The cost is a
+  **virtual key paired per vehicle**, and Model 3 and Model Y both require the
+  Vehicle Command Protocol — so that is 82 manual pairings; automatic pairing
+  does not cover them.
+
+### The traps
+
+- **The default spend limit is $0** and can only be raised after a payment
+  method is added — and the **UAE is not on Tesla's payment-supported country
+  list**. That check gates everything else.
+- **Every response below a 500 is billable, including refusals.** Only Tesla's
+  own server errors are free.
+- **Exceeding the limit deletes the Fleet Telemetry configuration**, and
+  Tesla's documentation says it "will not be restored". An overrun therefore
+  costs the 82 pairings, not just the month.
+- **A partner token is not an account grant.** `client_credentials` authenticates
+  the APPLICATION; it answers `GET /api/1/vehicles` with HTTP 200 and count 0.
+  Only an `authorization_code` grant from the account that owns the cars reads a
+  fleet. Measured, and the single most misread result here.
+- **Tesla's auth edge refuses some callers before OAuth sees them**, answering
+  HTTP 403 with an HTML "Access Denied" page rather than a JSON error. Measured
+  on production 2026-09-10: every code exchange from the DigitalOcean fra1
+  egress came back that way, while the identical request from another network
+  reached OAuth and got a normal JSON refusal. An HTML body on an auth endpoint
+  means the CALLER was refused, not the credential — do not go and rotate a
+  secret over it.

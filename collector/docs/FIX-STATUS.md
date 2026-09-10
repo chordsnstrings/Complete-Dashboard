@@ -347,11 +347,30 @@ that owns the cars must approve the app once, at the link
 `/api/tesla/connect` mints. Until then every Tesla-native figure is absent with
 that reason, which is what `/api/tesla/status` returns.
 
-**Two facts that bound what this can ever become**, from Tesla's own docs:
-there is **no per-trip, drive or odometer history in the Fleet API at all** —
-history accrues only forward from the day streaming is switched on — and the
-**UAE is not on Tesla's payment-supported country list**, with a default
-billing limit of $0.
+**CORRECTED 2026-09-10, having been checked against Tesla's documentation
+rather than recalled.** This paragraph read: *"there is no per-trip, drive or
+odometer history in the Fleet API at all"*. That is wrong twice, and it was
+stated confidently enough to plan around:
+
+- **The odometer is a live field**, read on every `vehicle_data` call and
+  streamed with a 0.1-mile delta. There is no historical *series*, but two
+  reads a day apart bound a day's distance — an independent check on the
+  tracker-derived kilometres this dashboard already draws.
+- **Charging history exists.** `GET /api/1/dx/charging/history` is paginated
+  past sessions; `/api/1/dx/charging/sessions` carries pricing and energy and
+  is restricted to business fleet owners, which this fleet is; and
+  `/api/1/dx/charging/invoice/{id}` returns the invoice PDF.
+
+What is genuinely absent is a per-**drive** history — Tesla will not say where
+a car went last Tuesday. "No history" and "no trip history" lead to entirely
+different build decisions, which is why the imprecision mattered.
+
+**The cost constraint stands and is sharper than recorded.** The UAE is not on
+Tesla's payment-supported country list and the default spend limit is $0. Every
+response below a 500 is billable, including refusals. And exceeding the limit
+does not merely pause billing: Tesla suspends access **and deletes the Fleet
+Telemetry configuration**, which its documentation says "will not be restored"
+— so an overrun costs the per-vehicle pairings, not just the month.
 
 ---
 

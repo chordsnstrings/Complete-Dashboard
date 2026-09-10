@@ -201,26 +201,99 @@ function livePanel(s) {
   return p;
 }
 
-/* THE TWO LIMITS THAT THE GRANT WILL NOT LIFT, stated before anybody plans
-   work around them rather than after. Both are from Tesla's own documentation
-   and neither is a fact about this fleet. */
-function limitsPanel() {
-  const p = panel('What the Fleet API will never give us',
-    'Two limits that connecting does not lift');
+/* WHAT TESLA ACTUALLY HOLDS PER CAR, verified against Tesla's own docs on
+   2026-09-10 rather than remembered.
+   ──────────────────────────────────────────────────────────────────────────
+   This panel replaces one that said "there is no trip, drive or odometer
+   history in the Fleet API at all". That was wrong twice over and it was
+   written with enough confidence to plan around:
+
+     - the ODOMETER is a first-class live field, and two reads a day apart
+       bound a day's distance — which is an independent check on the
+       tracker-derived kilometres this dashboard already draws;
+     - CHARGING HISTORY EXISTS. /api/1/dx/charging/history is paginated
+       history, /api/1/dx/charging/sessions carries pricing and energy and is
+       restricted to business fleet owners — which this fleet is — and
+       /api/1/dx/charging/invoice/{id} returns the invoice PDF.
+
+   What is genuinely absent is a per-DRIVE history: Tesla will not say where a
+   car went last Tuesday. Everything else here accrues forward from the day it
+   is switched on. Naming that precisely matters, because "no history" and "no
+   trip history" lead to completely different decisions about what to build. */
+function canPanel() {
+  const p = panel('What Tesla can tell us about each car',
+    'Verified against Tesla’s documentation, 2026-09-10 — none of it is being read yet');
+  const g = (title, items) => {
+    const h = el('p', 'cap', title);
+    const ul = el('ul', 'tesla-limits');
+    ul.innerHTML = items.map((i) => `<li>${i}</li>`).join('');
+    p.body.append(h, ul);
+  };
+  g('Battery and charge', [
+    '<b>State of charge</b> as a percentage, and the usable figure beside it — they differ, '
+    + 'and the usable one is what a driver actually has.',
+    '<b>Energy remaining in kWh</b> and the estimated range from it.',
+    '<b>Charging state</b>, with a granular version on newer firmware, plus energy added by '
+    + 'AC and by DC separately and lifetime energy used — which is cost per kilometre, per car, '
+    + 'measured rather than modelled.',
+  ]);
+  g('Distance and movement', [
+    '<b>Odometer.</b> A live reading, not a series — but two readings a day apart bound that '
+    + 'day’s distance, and that is an independent check on the tracker kilometres this '
+    + 'dashboard already draws.',
+    '<b>Position, heading, speed and gear</b>, second by second on the streaming feed. A '
+    + 'second opinion on CABMAN and FMS rather than a replacement for them.',
+  ]);
+  g('Condition', [
+    '<b>Tyre pressure on each wheel</b>, with Tesla’s own hard and soft warnings. Nothing in '
+    + 'this product reports that today.',
+    '<b>Software version and update status</b>, and whether the car is locked, in sentry mode, '
+    + 'or has a door or boot open.',
+  ]);
+  g('Money', [
+    '<b>Charging history</b> — paginated past sessions, with pricing and energy on the '
+    + 'business-fleet endpoint, and the invoice PDF for any one of them. This is the one place '
+    + 'Tesla does give us the past.',
+  ]);
+  return p;
+}
+
+/* TWO WAYS IN, AND THEY ARE NOT ALTERNATIVES SO MUCH AS OPPOSITES. */
+function routesPanel() {
+  const p = panel('The two ways to get it', 'One is billed per look; the other is pushed to us');
   const ul = el('ul', 'tesla-limits');
   ul.innerHTML = `
-    <li><b>There is no trip, drive or odometer history.</b> The Fleet API has no
-      historical endpoint at all — history accrues only forward from the day
-      streaming is switched on. Connecting today buys live state and a clock
-      that starts now; it does not recover a single past kilometre. Everything
-      this dashboard already shows about where these cars have been comes from
-      the trackers and the booking channels, and will continue to.</li>
-    <li><b>The UAE is not on Tesla&rsquo;s payment-supported country list</b>, and the
-      default billing limit is $0. Somebody with the Tesla account should check
-      for a &ldquo;Billing and Usage&rdquo; button in the developer console before any
-      per-vehicle rollout is planned — Model 3 and Model Y both require the
-      Vehicle Command Protocol, so a virtual key has to be paired on each car
-      and automatic pairing will not cover them.</li>`;
+    <li><b>Asking, per car, per look.</b> Tesla&rsquo;s own documentation says regularly polling
+      this &ldquo;is not recommended and will be expensive&rdquo;. Worse for a working fleet: a
+      parked car is asleep, and waking it needs the command scope this application
+      deliberately did not ask for &mdash; so a sleeping car simply cannot be read, and
+      wakes are capped at three a minute anyway.</li>
+    <li><b>Fleet Telemetry, which Tesla recommends instead.</b> The car pushes its own fields
+      to a server of ours over a mutually authenticated connection, as often as twice a
+      second, with no polling and no waking. The cost is setup: a virtual key paired on
+      <em>each</em> car, and both Model 3 and Model Y require the Vehicle Command Protocol, so
+      that is 82 pairings a person has to do &mdash; automatic pairing will not cover them.</li>`;
+  p.body.append(ul);
+  return p;
+}
+
+/* THE SHARP EDGE. Stated as its own panel because it is the one that can cost
+   money or silently break a feed after it is working. */
+function costPanel() {
+  const p = panel('What it costs, and how it breaks',
+    'Worth settling before anybody pairs 82 cars');
+  const ul = el('ul', 'tesla-limits');
+  ul.innerHTML = `
+    <li><b>Pay per use, and the default spend limit is $0.</b> It can only be raised after a
+      payment method is added, and <b>the UAE is not on Tesla&rsquo;s payment-supported country
+      list</b>. Somebody with the Tesla account should check for a &ldquo;Billing and Usage&rdquo;
+      button before any of this is planned &mdash; that check is the gate on everything above.</li>
+    <li><b>Every answer below a 500 is billable</b>, including the refusals. Only Tesla&rsquo;s
+      own server errors are free.</li>
+    <li><b>Going over the limit does not just pause billing.</b> Tesla suspends API access
+      <em>and deletes the Fleet Telemetry configuration</em>, and its documentation says it
+      &ldquo;will not be restored&rdquo; &mdash; so an overrun costs the 82 pairings, not just the
+      month.</li>`;
   p.body.append(ul);
   return p;
 }
@@ -241,5 +314,7 @@ export async function renderTesla(root) {
   root.append(grantPanel(s).panel);
   root.append(heldPanel(s).panel);
   root.append(livePanel(s).panel);
-  root.append(limitsPanel().panel);
+  root.append(canPanel().panel);
+  root.append(routesPanel().panel);
+  root.append(costPanel().panel);
 }
