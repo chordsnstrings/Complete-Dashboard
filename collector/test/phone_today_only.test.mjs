@@ -68,13 +68,46 @@ const read = async (hash) => {
 const today = dubaiDay();
 const todayOnly = await read(`today?from=${today}&to=${today}`);
 
+/* WHAT THE API ITSELF SAYS TODAY IS, read from the same server the screen was
+   rendered against.
+   ─────────────────────────────────────────────────────────────────────────
+   Two assertions below used to read `!== '0'` and `!/^0\b/` as a proxy for
+   "the screen shows the real total". That proxy is only valid when the fixture
+   HAS bookings today, and it silently changes meaning when it does not: over
+   an empty day the product is correct to print 0, and the test reports the
+   product as broken.
+
+   It happened. The default BASE is port 8099, which is mockapi.mjs — whose
+   series is built relative to now (`dayISO(b)`) precisely so a today-only
+   window can be tested at all. test/preview.mjs defaults to the SAME port and
+   seeds `2026-08-01`..`2026-08-31`, hard-coded. With preview on 8099 every
+   September day is empty, the screen correctly says "0 bookings so far today",
+   and these two checks failed against a product that was right.
+
+   So the assertion is now AGREEMENT: whatever the endpoint reports for today
+   is what the claim and the tile must show. That still catches the reported
+   bug exactly — 0 in the claim over 523 in the tile is a disagreement — and it
+   no longer depends on which server answered. The precondition is checked
+   separately and out loud, because a fixture that cannot express the shape a
+   bug lives in is a fixture that certifies the bug. */
+const digits = (t) => {
+  const m = String(t ?? '').replace(/[\s,]/g, '').match(/\d+/);
+  return m ? Number(m[0]) : null;
+};
+const apiToday = await fetch(`${BASE}/api/trips/daily?from=${today}&to=${today}&_=${Math.random()}`)
+  .then((r) => r.json())
+  .then((d) => (Array.isArray(d) ? d : d?.rows || []).find((r) => (r.d || r.day) === today))
+  .then((r) => (r ? Number(r.trips) || 0 : null))
+  .catch(() => null);
+
 /* ── the reported bug ────────────────────────────────────────────────────── */
 check('the claim is not a rate of zero',
   !/^0 bookings a day/.test(todayOnly.claim), JSON.stringify(todayOnly.claim));
 check('the claim says what the figure actually is',
   /so far today|bookings$/.test(todayOnly.claim), JSON.stringify(todayOnly.claim));
-check('the figure in the claim is not zero',
-  !/^0\b/.test(todayOnly.claim), JSON.stringify(todayOnly.claim));
+check('the figure in the claim is the one the endpoint reports for today',
+  apiToday != null && digits(todayOnly.claim) === apiToday,
+  `screen ${JSON.stringify(todayOnly.claim)} against /api/trips/daily = ${apiToday}`);
 check('"0 a day over the 0 days that are complete" is unreachable',
   !/0 a day over the 0 day/.test(todayOnly.sub), JSON.stringify(todayOnly.sub));
 check('and no daily rate is claimed at all',
@@ -91,7 +124,18 @@ check('the Bookings tile exists', !!bookings, JSON.stringify(todayOnly.stats.map
 check('and its sub-line does not read "0 a day"',
   bookings && !/^0 a day/.test(bookings.sub), JSON.stringify(bookings));
 check('the tile value is the real total, unchanged',
-  bookings && /\d/.test(bookings.value) && bookings.value !== '0', JSON.stringify(bookings?.value));
+  bookings && apiToday != null && digits(bookings.value) === apiToday,
+  `tile ${JSON.stringify(bookings?.value)} against /api/trips/daily = ${apiToday}`);
+/* And the precondition, stated rather than assumed: with no bookings today the
+   two checks above agree on zero and prove nothing about the defect this file
+   exists for. Named loudly, because the answer is to point it at the right
+   server, not to relax the assertions. */
+check('the fixture behind this run has bookings today, so the shape under test exists',
+  apiToday > 0,
+  `${BASE} reports ${apiToday} booking(s) for ${today}. This file needs a fixture whose data is `
+  + 'relative to now — that is mockapi.mjs, which defaults to :8099. test/preview.mjs defaults to '
+  + 'the same port and seeds August 2026 only, so a today-only window there is empty by '
+  + 'construction and the two checks above can only agree on zero.');
 
 const chart = todayOnly.cards.find((c) => /Bookings a day/i.test(c.title));
 if (chart) {

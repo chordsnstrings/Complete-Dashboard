@@ -23,6 +23,35 @@ const drivers = ['Ahmed Tarig Mohamed', 'Muhammad Ashraf Bakhsh', 'Najeeb Ullah 
   'Muhammad Khalid Gul', 'Aliyan Khalil', 'Asad Khan Khan', 'Mohammed Alsous'];
 const rnd = (a, b) => a + Math.random() * (b - a);
 
+/* ONE TODAY FOR THE WHOLE FIXTURE.
+   ──────────────────────────────────────────────────────────────────────────
+   Three endpoints answer "how many bookings today" — /api/trips/daily,
+   /api/day and /api/kpis — and the phone Today screen renders all three onto
+   one card. On production they agree: measured 2026-09-10, all three said
+   247. This fixture said 65 in the claim, 215 in the tile and 2,043 in the
+   sub-line ON ONE RENDER, which is not a harder version of the real data, it
+   is a different product.
+
+   Worse, the contradiction it manufactured is the exact one the code fixed and
+   documents at api/public/m/screens.js:265 — "on production the two printed 68
+   and 56 for the same day on the same screen. One today per screen." A fixture
+   that recreates the bug the product fixed can never certify the fix, and a
+   test comparing two surfaces against it is a coin flip rather than an
+   assertion. So today is written down once, here, and every endpoint that
+   speaks about today reads it.
+
+   /api/kpis is NOT reconciled here: it ignores from/to entirely and answers at
+   the thirty-day scale whatever window it is asked for, which is a larger
+   defect than this one and has its own entry in docs/COVERAGE.md. */
+const TODAY = { bookings: 215, completed: 201, cancelled: 14, telematics: 240,
+  km: 3120, revenue: 4180, priced: 41, drivers: 34, vehicles: 41 };
+
+/* Where the daily series used to call Math.random(). The numbers still look
+   irregular — that is the point of them — but they are now a function of the
+   day, so two reads of the same day agree, and a run that fails can be
+   reproduced instead of merely re-rolled. */
+const wob = (b, a, c) => a + (Math.abs(Math.sin((b + 1) * 12.9898) * 43758.5453) % 1) * (c - a);
+
 app.get('/api/live', (_, r) => r.json(plates.map((p, i) => ({
   plate: p, fleet_id: i % 3 ? 'ecosine' : 'egari', source: 'cabman',
   captured_at: new Date(Date.now() - i * 6e4).toISOString(), polled_at: new Date().toISOString(),
@@ -2121,27 +2150,54 @@ app.get('/api/context', (_, r) => {
   r.json(out);
 });
 
-app.get('/api/trips/daily', (req, r) => {
-  /* Deliberately includes a collection hole and a partially-silent stretch:
-     the whole point of this series is that a day nobody collected must not be
-     drawn as a day nobody drove. */
-  const out = [];
+/* Deliberately includes a collection hole and a partially-silent stretch: the
+   whole point of this series is that a day nobody collected must not be drawn
+   as a day nobody drove.
+
+   BUILT ONCE PER DUBAI DAY, not once per request. It was rebuilt inside the
+   handler with unseeded Math.random(), so two calls seconds apart returned 66
+   and 80 for the same day — and the phone Today screen reads this endpoint
+   twice per render, once for the claim and once for the chart. The screen
+   therefore disagreed with itself, off a fixture, for no reason in the
+   product. Keyed on today's date rather than merely memoised, so a server left
+   running across midnight Dubai rolls over instead of serving yesterday. */
+let dailyCache = null;
+const dailySeries = () => {
+  const key = dayISO(0).slice(0, 10);
+  if (dailyCache && dailyCache.key === key) return dailyCache.rows;
+  const rows = [];
   for (let b = 30; b >= 0; b--) {
     const d = dayISO(b).slice(0, 10);
     const uncollected = b >= 12 && b <= 17;
     const partial = !uncollected && b >= 18 && b <= 21;
-    const trips = uncollected ? 0 : Math.round(60 + Math.sin(b / 3) * 18 + rnd(0, 22) - (partial ? 30 : 0));
-    out.push({ d, trips, completed: Math.round(trips * 0.94), cancelled: Math.round(trips * 0.06),
-      telematics_journeys: uncollected ? 0 : Math.round(trips * 1.3),
-      km: uncollected ? null : Math.round(trips * rnd(9, 14)),
-      revenue: uncollected ? null : Math.round(trips * rnd(28, 42)),
-      priced_trips: uncollected ? 0 : Math.round(trips * 0.15),
-      drivers: uncollected ? 0 : 30 + Math.round(rnd(0, 8)),
+    /* TODAY comes from the shared object rather than the curve, so this
+       endpoint and /api/day cannot disagree about the day the Today screen is
+       entirely about. */
+    const trips = b === 0 ? TODAY.bookings
+      : uncollected ? 0
+        : Math.round(60 + Math.sin(b / 3) * 18 + wob(b, 0, 22) - (partial ? 30 : 0));
+    rows.push({ d, trips,
+      completed: b === 0 ? TODAY.completed : Math.round(trips * 0.94),
+      cancelled: b === 0 ? TODAY.cancelled : Math.round(trips * 0.06),
+      telematics_journeys: b === 0 ? TODAY.telematics
+        : uncollected ? 0 : Math.round(trips * 1.3),
+      km: b === 0 ? TODAY.km : uncollected ? null : Math.round(trips * wob(b + 100, 9, 14)),
+      revenue: b === 0 ? TODAY.revenue
+        : uncollected ? null : Math.round(trips * wob(b + 200, 28, 42)),
+      priced_trips: b === 0 ? TODAY.priced : uncollected ? 0 : Math.round(trips * 0.15),
+      drivers: b === 0 ? TODAY.drivers
+        : uncollected ? 0 : 30 + Math.round(wob(b + 300, 0, 8)),
       sources_silent: uncollected ? 4 : partial ? 1 : 0,
       sources_expected: 4,
       silent_sources: uncollected ? ['uber', 'fms', 'hotel', 'yango'] : partial ? ['uber'] : null,
       uncollected });
   }
+  dailyCache = { key, rows };
+  return rows;
+};
+
+app.get('/api/trips/daily', (req, r) => {
+  const out = dailySeries();
   /* HONOUR THE WINDOW, so a today-only range can be tested at all.
      ─────────────────────────────────────────────────────────────────────────
      This served the same thirty days whatever from/to it was given, which is
@@ -2448,13 +2504,51 @@ app.get('/api/driver/day', (req, r) => {
        which on production is the common one for a night shift with no tracker
        coverage. */
     online: [
-      { s: mins(9, 20), e: mins(19, 35),
+      { s: mins(9, 20), e: mins(19, 35), open_ended: false, closed_by: null,
         went_online: { where: 'Dubai Marina', within_min: 4, lat: 25.247, lng: 55.347,
           votes: 312, of: 340, why: null } },
-      { s: mins(21, 10), e: mins(23, 40),
+      /* OPEN-ENDED: the last ONLINE Uber sent, with nothing after it yet. The
+         span is drawn to the earlier of now and the end of the day and the flag
+         says which — the common shape on this fleet, since Uber sends ONLINE as
+         a repeated heartbeat and stops sending it the moment a driver is
+         dispatched. A fixture where every span closes would let the renderer
+         regress to drawing the two the same. */
+      /* closed_by 'collection': the bar stops at 23:40 because that is the last
+         moment anybody asked Uber, not because the driver stopped. The other
+         values are 'now' (still running as far as we know) and 'day' (only the
+         calendar closed it) — three different claims that look identical on a
+         chart, which is why the fixture carries one of them. */
+      /* Ends at 22:17 — the SAME minute `collection.collected_to_min` below
+         reports — because that is what closed_by 'collection' MEANS. A fixture
+         whose band ran to 23:40 under this flag would render a hover saying
+         "23:40 is the last moment we asked Uber" one line above a caption
+         saying collection last reached 22:17: the page contradicting itself in
+         two adjacent sentences, certified by the fixture. */
+      { s: mins(21, 10), e: mins(22, 17), open_ended: true, closed_by: 'collection',
         went_online: { where: null,
           why: 'the nearest named position is 96 minutes away, too far to call it the same place' } },
     ],
+    /* How much of the day has actually been asked about. The timeline runs a
+       few times a day and the trips every half hour, so the right-hand end of
+       the online band is routinely the collector's reach rather than the
+       driver's evening — and the page has to be able to say which. */
+    collection: {
+      source: 'uber_timeline',
+      every_hours: 3,
+      last_run_at: `${day}T18:17:00.000Z`,
+      collected_to_min: mins(22, 17),
+      /* The last event we HOLD, which cannot be later than the last moment we
+         asked: an event after `collected_to_min` would mean we hold something
+         we could not have fetched. 21:10 Dubai is the dangling ONLINE itself —
+         the newest thing in the stream, and the reason the band is open. */
+      last_event_at: `${day}T17:10:00.000Z`,
+      last_event_min: mins(21, 10),
+      platforms: ['uber'],
+      complete: false,
+      why: 'This day is still being collected. The availability feed runs every 3 hours and last '
+        + 'reached 22:17, so the remaining 1h 43m of the day has not been fetched yet. A band that '
+        + 'stops there is the record stopping, not necessarily the driver.',
+    },
     fixes: [
       { plate: 'A 12345', m: mins(10, 10), lat: 25.247, lng: 55.347, speed: 0,
         area: 'Dubai Marina', area_votes: 312, area_seen: 340 },
@@ -3495,20 +3589,29 @@ app.get('/api/day', (req, r) => {
     bookings: Math.max(0, Math.round(30 * Math.exp(-((h - 19) ** 2) / 26) + 18 * Math.exp(-((h - 7) ** 2) / 9))),
     telematics: Math.max(0, Math.round(20 * Math.exp(-((h - 19) ** 2) / 30))),
     cancelled: h % 7 === 0 ? 2 : 0 }));
-  const bookings = hours.reduce((a, x) => a + x.bookings, 0);
+  /* The raw sum of the hour curve, which is only ever a DIVISOR: the curve is
+     rescaled below so the hours add up to the headline exactly. */
+  const curveTotal = hours.reduce((a, x) => a + x.bookings, 0);
   r.json({
     day,
-    // Kept internally consistent on purpose: a fixture whose headline and its
-    // own breakdowns disagree makes every review of the page harder than the
-    // real data would.
-    headline: { bookings: 215, telematics: 240, completed: 201, not_completed: 14,
-      bookable: 215, priced: 41, revenue: 4180, avg_fare: 101.95, booked_km: 3120,
-      telematics_km: 4210, drivers: 34, vehicles: 41, completion_pct: 93.5,
+    /* Kept internally consistent on purpose: a fixture whose headline and its
+       own breakdowns disagree makes every review of the page harder than the
+       real data would. That intent was stated here and not kept — `bookings`
+       was summed off `hours` on the line above and then thrown away for a
+       hardcoded 215, and 215 in turn disagreed with what /api/trips/daily said
+       about the same day. Both now read TODAY, which is the whole point of
+       there being a TODAY. */
+    headline: { bookings: TODAY.bookings, telematics: TODAY.telematics,
+      completed: TODAY.completed, not_completed: TODAY.cancelled,
+      bookable: TODAY.bookings, priced: TODAY.priced, revenue: TODAY.revenue,
+      avg_fare: 101.95, booked_km: TODAY.km,
+      telematics_km: 4210, drivers: TODAY.drivers, vehicles: TODAY.vehicles,
+      completion_pct: 93.5,
       /* The day's income: fares from the hotel channel plus a share of the
          weekly Uber statements covering this day. payout_basis is what stops
          that share reading as something measured on the day itself. */
       accounted: 10430, accounted_fares: 4180, accounted_payouts: 6250, accounted_fare_bookings: 51,
-      accounted_platforms: ['hotel', 'uber'], accounted_bookings: 215,
+      accounted_platforms: ['hotel', 'uber'], accounted_bookings: TODAY.bookings,
       dark_bookings: 0, dark_pct: 0,
       undercovered_bookings: 0, undercovered_pct: 0,
       undercovered_payouts: null, undercovered_platforms: [],
@@ -3535,9 +3638,11 @@ app.get('/api/day', (req, r) => {
     versus_neighbours: { median_bookings: 241, delta_pct: -10.8,
       series: Array.from({ length: 15 }, (_, i) => {
         const dd = dayISO(14 - i).slice(0, 10);
-        return { day: dd, bookings: dd === day ? 215 : 210 + Math.round(Math.sin(i) * 40) };
+        return { day: dd,
+          bookings: dd === day ? TODAY.bookings : 210 + Math.round(Math.sin(i) * 40) };
       }) },
-    hours: hours.map((x) => ({ ...x, bookings: Math.round(x.bookings * 215 / (bookings || 1)) })),
+    hours: hours.map((x) => ({ ...x,
+      bookings: Math.round(x.bookings * TODAY.bookings / (curveTotal || 1)) })),
     /* `n` is every row the channel produced and `bookings` only the bookings
        among them; `priced` is the real priced count, which the fold in
        api/day_routes.js deliberately does not give (there it is a coverage

@@ -17,6 +17,11 @@
 import { readdirSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { cpus } from 'node:os';
+import { createServer } from 'node:net';
+/* The fleet's calendar is Dubai's, and this file asks a question about TODAY.
+   Imported rather than re-derived: a local copy of the clock is how
+   onlinetime.js came to print a collector time in UTC. */
+import { dubaiDay } from '../api/window.js';
 
 const files = readdirSync('test').filter((f) => f.endsWith('.test.mjs')).sort();
 if (!files.length) { console.error('no test files found — is the cwd the collector root?'); process.exit(1); }
@@ -34,36 +39,117 @@ if (!files.length) { console.error('no test files found — is the cwd the colle
 
    So the suite starts one itself, and stops it at the end. If a server is
    already listening — a developer's own, or a run against production through
-   bin/prod-mirror.mjs — it is left alone and used as it stands. */
-const BASE = process.env.SMOKE_BASE || 'http://localhost:8099';
-const alive = async () => {
+   bin/prod-mirror.mjs — it is left alone and used as it stands.
+
+   ── ANSWERING AND USABLE ARE TWO QUESTIONS ──────────────────────────────
+   Asking only the first cost a session. The probe here was
+   `GET /api/kpis?days=1 → r.ok`, and a server that answers that is a server
+   this suite adopts. test/preview.mjs mounts the same real handlers and
+   defaults to the SAME port 8099, so it answers it perfectly — but it seeds
+   `2026-08-01`..`2026-08-31` and nothing else, hard-coded. Every browser test
+   that asks about TODAY then reads an empty day off a correct product:
+   phone_today_only reported two failures, the screen was right, and the
+   search went into the product before it went into the port.
+
+   The probe therefore asks the second question too — can whatever is there
+   serve TODAY — and the answer decides what happens here, out loud, rather
+   than being rediscovered twenty minutes later inside a test file. */
+const DEFAULT_BASE = 'http://localhost:8099';
+const BASE = process.env.SMOKE_BASE || DEFAULT_BASE;
+const TODAY = dubaiDay(new Date());
+
+const answering = async (base) => {
   try {
-    const r = await fetch(`${BASE}/api/kpis?days=1`, { signal: AbortSignal.timeout(2000) });
+    const r = await fetch(`${base}/api/kpis?days=1`, { signal: AbortSignal.timeout(2000) });
     return r.ok;
   } catch { return false; }
 };
 
-let mock = null;
-if (await alive()) {
-  console.log(`using the server already on ${BASE}`);
-} else if (process.env.SMOKE_BASE) {
-  console.error(`SMOKE_BASE is ${BASE} and nothing is answering there.`);
-  process.exit(1);
-} else {
-  mock = spawn(process.execPath, ['mockapi.mjs'], { stdio: ['ignore', 'ignore', 'pipe'] });
+/* Bookings today, off the same endpoint the screens read. A row of zero and no
+   row at all are the same answer to the question being asked — neither can
+   exercise a today-only window — and an endpoint that throws is not a server
+   that can serve today either. `_` because prod-mirror sits behind a cache. */
+const bookingsToday = async (base) => {
+  try {
+    const r = await fetch(`${base}/api/trips/daily?from=${TODAY}&to=${TODAY}&_=${process.pid}`,
+      { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return 0;
+    const d = await r.json();
+    const rows = Array.isArray(d) ? d : d?.rows || [];
+    const row = rows.find((x) => (x.d || x.day) === TODAY);
+    return row ? Number(row.trips) || 0 : 0;
+  } catch { return 0; }
+};
+
+/* A port the kernel just told us is free. Better than probing 8100, 8101…:
+   bin/live-ui.mjs is on 8100 and bin/prod-mirror.mjs on 8200, and a suite that
+   guessed its way up that range would eventually adopt one of them. */
+const freePort = () => new Promise((resolve, reject) => {
+  const s = createServer();
+  s.on('error', reject);
+  s.listen(0, '127.0.0.1', () => {
+    const { port } = s.address();
+    s.close(() => resolve(port));
+  });
+});
+
+const startMock = async (port, base) => {
+  const m = spawn(process.execPath, ['mockapi.mjs'],
+    { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, PORT: String(port) } });
   let why = '';
-  mock.stderr.on('data', (d) => { why += d; });
+  m.stderr.on('data', (d) => { why += d; });
   const deadline = Date.now() + 30_000;
-  while (!(await alive())) {
-    if (mock.exitCode !== null || Date.now() > deadline) {
-      console.error(`could not start mockapi.mjs on ${BASE} — the browser tests cannot run.`);
+  while (!(await answering(base))) {
+    if (m.exitCode !== null || Date.now() > deadline) {
+      console.error(`could not start mockapi.mjs on ${base} — the browser tests cannot run.`);
       if (why) console.error(why.split('\n').slice(0, 8).join('\n'));
       process.exit(1);
     }
     await new Promise((r) => setTimeout(r, 300));
   }
-  console.log(`started mockapi.mjs on ${BASE} for the browser tests`);
+  console.log(`started mockapi.mjs on ${base} for the browser tests`);
+  return m;
+};
+
+let mock = null;
+let base = BASE;
+if (await answering(BASE)) {
+  const n = await bookingsToday(BASE);
+  if (n > 0) {
+    console.log(`using the server already on ${BASE} — ${n} booking(s) for ${TODAY}`);
+  } else if (process.env.SMOKE_BASE) {
+    /* An explicit SMOKE_BASE is a choice, and this suite does not overrule a
+       choice: bin/prod-mirror.mjs at 00:30 Dubai is a legitimate reason for a
+       genuinely empty today, and 208 files do not care either way. So it is
+       used as it stands and the consequence is named — by file — so that a
+       failure over there is read as the fixture it is and not as a defect. */
+    console.log(`WARNING: ${BASE} reports no bookings for ${TODAY}, and it is SMOKE_BASE, so it`
+      + ' is used as it stands.\n  The files that drive a today-only window —'
+      + ' phone_today_only.test.mjs above all — cannot\n  exercise their shape against an empty'
+      + ' day, and will say so rather than pass quietly.');
+  } else {
+    /* Nobody asked for that server. 8099 is only the default port and
+       something else reached it first — test/preview.mjs defaults to it, and
+       seeds August 2026. Leave it running, because it is somebody's, and take
+       a port of our own instead of failing or adopting a fixture that cannot
+       answer the question the browser tests ask. */
+    const port = await freePort();
+    base = `http://localhost:${port}`;
+    console.log(`something is answering on ${BASE} but has no data for ${TODAY}`
+      + ' — test/preview.mjs defaults to that port and seeds\n  August 2026 only.'
+      + ` Leaving it alone; starting mockapi.mjs on ${base} instead.`);
+    mock = await startMock(port, base);
+  }
+} else if (process.env.SMOKE_BASE) {
+  console.error(`SMOKE_BASE is ${BASE} and nothing is answering there.`);
+  process.exit(1);
+} else {
+  mock = await startMock(8099, BASE);
 }
+/* Every browser test file reads SMOKE_BASE, and a spawn with no `env` inherits
+   this one — so this single line is what points them at whichever server the
+   block above settled on. */
+process.env.SMOKE_BASE = base;
 const stopMock = () => { if (mock && mock.exitCode === null) mock.kill('SIGTERM'); };
 process.on('exit', stopMock);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { stopMock(); process.exit(1); });

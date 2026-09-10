@@ -951,6 +951,40 @@ driver's 222 tracker fixes.
   lock at all. It **waits** rather than using `pg_try_advisory_lock`: a service
   that skipped migrations to avoid a wait would go on to serve against a schema
   it had not applied.
+* **A fixture that redraws on every request cannot certify agreement between
+  two surfaces.** `mockapi.mjs`'s `/api/trips/daily` built its series inside the
+  handler with unseeded `Math.random()`, so two calls seconds apart returned 66
+  and 80 for the same day. The phone Today screen reads that endpoint TWICE per
+  render — once for the claim, once for the chart — so the screen disagreed
+  with itself off the fixture alone, recreating the exact production bug
+  `api/public/m/screens.js:265` fixed and documents ("68 and 56 for the same day
+  on the same screen. One today per screen"). Any test comparing two surfaces
+  against such a fixture is a coin flip wearing an assertion's clothes. Measured
+  2026-09-10: production's `/api/trips/daily`, `/api/day` and `/api/kpis` all
+  said **247** for today; the mock said **65**, **215** and **2,043** on one
+  render. The series is now built once per Dubai day from a deterministic
+  wobble, and `TODAY` is written down once for every endpoint that speaks about
+  it.
+* **`mockapi.mjs`'s `/api/kpis` ignores `from`/`to` entirely** — it takes `req`
+  and never reads it, answering at the thirty-day scale whatever window it is
+  asked for. On a today-only window the phone sub-line therefore reads "2,043
+  across 56 drivers and 52 vehicles" beside a claim of 215 bookings today. The
+  real endpoint honours the window (`api/window.js` exists for exactly this),
+  so the mock is the thing that is wrong. **Not yet fixed** — every windowed
+  figure in that constant would have to scale together, and it is a wider change
+  than the one it was found inside. Anything asserting a windowed KPI against
+  the mock is asserting nothing.
+* **"Something is answering on the port" is not "that server can serve today".**
+  `test/run-all.mjs` adopted whatever was listening on :8099 on the strength of
+  `GET /api/kpis?days=1 → 200`. `test/preview.mjs` mounts the SAME real
+  handlers and defaults to the SAME port, and seeds `2026-08-01`..`2026-08-31`
+  hard-coded — so it answers that probe perfectly and every today-only window
+  reads an empty day. `phone_today_only.test.mjs` reported two failures against
+  a product that was correct, and the search went into the product before it
+  went into the port. Probe a server for the DATA the tests need, not for a
+  pulse; `run-all.mjs` now asks `/api/trips/daily` about today and, if the
+  answer is empty, leaves the squatter alone and starts its own mockapi on a
+  kernel-assigned port.
 * **A test written only as a negative passes against the unfixed file.**
   `!/pg_try_advisory_lock/.test(src)` was meant to prove the migration lock
   blocks rather than gives up. A `db.js` with no lock at all also contains no
