@@ -1080,70 +1080,64 @@ export function probeRoutes(app, { wrap }) {
     const auth = { authorization: `Bearer ${token}` };
     const json = { ...auth, 'content-type': 'application/json' };
 
-    /* Uber's own answer to round one, kept here because it is what shaped
-       round two. Probed on production 2026-09-10:
+    /* WHAT UBER HAS TOLD US SO FAR, round by round, on production 2026-09-10.
+       ──────────────────────────────────────────────────────────────────────
+       Round 1 — the verb.
+         GET  -> 404 "404 page not found"                    (the control)
+         POST -> 400 "required field filters not found in data"
+       The surface is REACHABLE and only the verb was ever wrong. Three probes
+       here send a GET, collect that 404, and record "the provider serves
+       nothing" — a statement about our request kept as a fact about Uber.
 
-         GET  -> 404 "404 page not found"           (the control)
-         POST -> 400 "error transforming request: FieldConverter error,
-                      toField: request, error: required field filters not
-                      found in data"
+       Round 2 — the shape, three faults named one at a time.
+         value as an object -> "toField: value, ReadArrayCB: expect [ or n"
+             so `value` is an ARRAY, not a {startTime,endTime} pair.
+         operator 'IN_RANGE' -> "unknown enum value string:IN_R…"
+             so the FILTER_OPERATOR_ prefix is required, and every attempt
+             carrying it drew no complaint about the operator at all.
+         filters:[] -> "required field pagination_options not found in data"
+             so the envelope is SNAKE_CASE. paginationOptions was silently the
+             wrong key; the empty-filters attempt is the only one that could
+             have surfaced that, which is why it is worth sending a request
+             you expect to fail.
 
-       So the surface is REACHABLE and it was only ever the verb. A 404 to a
-       GET on a POST-only route is not a statement about the provider, and
-       three probes in this codebase have been recording it as one. The 400
-       names the field it wants, which is what makes the next attempt a
-       correction rather than another guess. */
-    const win = { startTime: iso(start), endTime: iso(end) };
-    const winMs = { startTime: ms(start), endTime: ms(end) };
-    const page = { pageSize: 50 };
+       Round 3 asks with all three corrections and varies only the field name
+       and the value's units, because those are the two things nothing has
+       named yet. */
+    const isoPair = [iso(start), iso(end)];
+    const msPair = [ms(start), ms(end)];
+    const page = { page_size: 50 };
+    const filt = (field, value, operator = 'FILTER_OPERATOR_IN_RANGE') =>
+      ({ filters: [{ field, operator, value }], pagination_options: page });
 
-    /* Each attempt names what it is testing, so the result reads as an
-       experiment rather than as a list of failures. */
     const attempts = [
-      /* The documented shape: a filters array of {field, operator, value},
-         org_id staying on the query string. */
-      { name: 'POST, filters[] timeRange IN_RANGE, ISO instants',
+      /* No filter at all. If the feed defaults to its own recent window this
+         answers outright, and it is the shortest path to seeing a row. */
+      { name: 'POST, no filters, snake_case pagination_options',
         url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: { filters: [{ field: 'timeRange', operator: 'FILTER_OPERATOR_IN_RANGE',
-          value: win }], paginationOptions: page } },
-      { name: 'POST, filters[] timeRange IN_RANGE, epoch-ms instants',
+        body: { filters: [], pagination_options: page } },
+      { name: 'POST, timeRange IN_RANGE, value as [ISO, ISO]',
         url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: { filters: [{ field: 'timeRange', operator: 'FILTER_OPERATOR_IN_RANGE',
-          value: winMs }], paginationOptions: page } },
-      { name: 'POST, filters[] wrapped in a request envelope',
+        body: filt('timeRange', isoPair) },
+      { name: 'POST, time_range IN_RANGE, value as [ISO, ISO]',
         url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: { request: { filters: [{ field: 'timeRange',
-          operator: 'FILTER_OPERATOR_IN_RANGE', value: win }], paginationOptions: page } } },
-      { name: 'POST, filters[] with a bare IN_RANGE operator spelling',
+        body: filt('time_range', isoPair) },
+      { name: 'POST, timeRange IN_RANGE, value as [epoch-ms, epoch-ms]',
         url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: { filters: [{ field: 'timeRange', operator: 'IN_RANGE', value: win }],
-          paginationOptions: page } },
-      { name: 'POST, filters[] and org_id in the body too',
+        body: filt('timeRange', msPair) },
+      { name: 'POST, processed_at IN_RANGE, value as [ISO, ISO]',
         url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: { org_id: org, filters: [{ field: 'timeRange',
-          operator: 'FILTER_OPERATOR_IN_RANGE', value: win }], paginationOptions: page } },
-      { name: 'POST, empty filters[] - what does it say the field must contain',
+        body: filt('processed_at', isoPair) },
+      { name: 'POST, processedAt IN_RANGE, value as [ISO, ISO]',
         url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: { filters: [], paginationOptions: page } },
+        body: filt('processedAt', isoPair) },
+      /* A deliberately wrong field name, to make Uber enumerate the ones it
+         accepts — the same trick that produced pagination_options above. */
+      { name: 'POST, a field name that cannot exist, to draw out the valid set',
+        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
+        body: filt('not_a_real_field', isoPair) },
       { name: 'GET (control — what the three existing probes send)',
         url: `${base}?${qs({ org_id: org, limit: 50 })}`, method: 'GET', headers: auth },
-      { name: 'POST, org_id in query, empty body',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json, body: {} },
-      { name: 'POST, org_id in query, epoch-ms window in body',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: { start_time: ms(start), end_time: ms(end), limit: 50 } },
-      { name: 'POST, org_id in query, ISO window in body, camelCase',
-        url: `${base}?${qs({ org_id: org })}`, method: 'POST', headers: json,
-        body: { startTime: iso(start), endTime: iso(end), limit: 50 } },
-      { name: 'POST, everything in the body, snake_case',
-        url: base, method: 'POST', headers: json,
-        body: { org_id: org, start_time: ms(start), end_time: ms(end), limit: 50 } },
-      { name: 'POST, everything in the body, camelCase',
-        url: base, method: 'POST', headers: json,
-        body: { orgId: org, startTime: iso(start), endTime: iso(end), limit: 50 } },
-      { name: 'POST, whole window in the query as the GET shape did',
-        url: `${base}?${qs({ org_id: org, start_time: ms(start), end_time: ms(end), limit: 50 })}`,
-        method: 'POST', headers: json, body: {} },
     ];
 
     const out = [];
