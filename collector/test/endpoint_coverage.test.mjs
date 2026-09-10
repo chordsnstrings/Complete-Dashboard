@@ -66,6 +66,12 @@ const EXEMPT = {
     + 'driver on one day, with that day\u2019s trips beside them and the status vocabulary the '
     + 'feed actually uses \u2014 the spans every page derives are an inference, and when a page '
     + 'and the data disagree the spans cannot settle it',
+  '/api/probe/zero-distance': 'operator tool: counts bookings marked COMPLETED that carry a '
+    + 'fare and zero distance, by platform and by driver. Found on one driver as six Yango '
+    + 'orders in eight minutes — ten seconds of driving each, 0.0000 mileage, 6-12 AED in cash, '
+    + 'all marked complete. A trip that went nowhere and still charged is either a provider that '
+    + 'does not report distance or a booking that did not happen, and the two have to be told '
+    + 'apart before either is acted on. Not a page yet: this exists to size the thing first',
   '/api/probe/tesla/egress': 'operator tool: asks, FROM PRODUCTION, what Tesla\u2019s auth host '
     + 'and data host answer this server and what address the outside world sees us at. A code '
     + 'exchange here comes back as an Akamai block page rather than an OAuth refusal, which is '

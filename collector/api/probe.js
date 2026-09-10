@@ -1174,6 +1174,68 @@ export function probeRoutes(app, { wrap }) {
      and the data probe sends no token at all: a reachable host answers both
      with a JSON refusal, and a blocked one answers with HTML. Telling those
      two apart is the whole measurement, and it needs no secret to make. */
+  /* COMPLETED TRIPS THAT WENT NOWHERE, and how much money is on them.
+     ────────────────────────────────────────────────────────────────────────
+     Found on one driver on 2026-09-10: six Yango orders inside eight minutes,
+     each `status: complete`, each `mileage: "0.0000"`, each 6–12 AED in CASH,
+     and each lasting ten seconds between driving_at and ended_at. The raw
+     order for one of them:
+
+         created_at  08:54:08
+         driving_at  08:54:11
+         ended_at    08:54:21     ten seconds
+         mileage     "0.0000"
+         price       "12.0000"
+         status      "complete"
+
+     That is not a taxi ride, and six of them in a row is not an accident of
+     one order. It reached nobody because the product had no reason to look:
+     analytics discards a trip whose end precedes its request as "a clock
+     artefact" (api/analytics_routes.js TRIP_SECONDS), and until the mapping
+     fix in src/sources/yango.js every Yango trip looked like exactly that, so
+     the whole shape was inside the discard.
+
+     This counts them so the decision about what to build is taken against a
+     number. Six on one driver is a note; six thousand across the fleet is a
+     page, and it is not obvious in advance which one this is. */
+  app.get('/api/probe/zero-distance', wrap(async (req, res) => {
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
+    const { rows } = await pool.query(
+      `SELECT platform,
+              count(*)::int AS trips,
+              count(DISTINCT driver_ext_id)::int AS drivers,
+              round(sum(coalesce(price, 0))::numeric, 2) AS money,
+              count(*) FILTER (WHERE payment_type = 'cash')::int AS cash_trips,
+              /* Under a minute between the two stamps we hold. A real fare
+                 takes longer than a lift doors-closed-to-open. */
+              count(*) FILTER (WHERE ended_at IS NOT NULL AND requested_at IS NOT NULL
+                AND ended_at > requested_at
+                AND ended_at < requested_at + interval '60 seconds')::int AS under_a_minute
+         FROM trip
+        WHERE requested_at >= now() - ($1 || ' days')::interval
+          AND status IN ('complete', 'completed')
+          AND coalesce(distance_km, 0) = 0
+          AND coalesce(price, 0) > 0
+        GROUP BY platform
+        ORDER BY trips DESC`, [String(days)]);
+    const { rows: worst } = await pool.query(
+      `SELECT driver_name, driver_ext_id, platform,
+              count(*)::int AS trips,
+              round(sum(coalesce(price, 0))::numeric, 2) AS money
+         FROM trip
+        WHERE requested_at >= now() - ($1 || ' days')::interval
+          AND status IN ('complete', 'completed')
+          AND coalesce(distance_km, 0) = 0
+          AND coalesce(price, 0) > 0
+        GROUP BY 1, 2, 3
+        ORDER BY trips DESC
+        LIMIT 15`, [String(days)]);
+    res.json({ days, by_platform: rows, worst_drivers: worst,
+      what_this_is: 'Bookings marked completed that carry a fare and zero distance. A trip that '
+        + 'went nowhere and still charged is either a provider that does not report distance, or '
+        + 'a booking that did not happen. The two need telling apart before either is acted on.' });
+  }));
+
   app.get('/api/probe/tesla/egress', wrap(async (_req, res) => {
     const { http } = await import('../src/http.js');
     const shape = (r) => {

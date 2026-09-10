@@ -478,7 +478,31 @@ async function pullTrips(from, to) {
       platform: SRC, external_id: o.id, fleet_id: config.yango.fleet, plate: orderPlate(o),
       driver_ext_id: o.driver_profile?.id,
       driver_name: nameFor(o.driver_profile?.id, o.driver_profile?.name),
-      requested_at: o.booked_at, ended_at: o.ended_at,
+      /* created_at, NOT booked_at — measured from the raw order on 2026-09-10.
+         ────────────────────────────────────────────────────────────────────
+         `booked_at` is Yango's CLOSING stamp, not the request. On order
+         a9247ff0…:
+
+             created_at   08:54:08   the order exists
+             driving_at   08:54:11   the driver moves
+             ended_at     08:54:21   the trip ends
+             booked_at    08:55:07   AFTER the end
+
+         and `order_time_interval` confirms it — its `to` is booked_at to the
+         millisecond. Mapping booked_at onto requested_at therefore filed every
+         Yango trip as ENDING BEFORE IT STARTED: 7 of 7 for this driver on this
+         day, and it is systematic rather than occasional, so every Yango
+         duration this product has ever shown was negative.
+
+         Nothing noticed because nothing subtracts them where a reader would
+         see it. The trip list prints both and the eye slides over an end time
+         a minute earlier — which is exactly the sort of thing a page has to
+         check rather than display. api/trip_shape_sql.js now refuses a
+         negative duration outright.
+
+         booked_at is kept as the fallback for an order that somehow carries no
+         created_at: a request time that is late is better than none. */
+      requested_at: o.created_at || o.booked_at, ended_at: o.ended_at,
       pickup_addr: o.address_from?.address || null,
       /* The coordinates, which the console never sent and this host does. The
          columns have existed since sql/schema.sql; leaving them null would put

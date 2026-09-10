@@ -81,4 +81,8 @@ export const SCHEMA_FILES = [
      in a three-segment address was being returned as a place name. Empties the
      gazetteer so the next collector pass rebuilds it under the new rule. */
   'schema_v68.sql',
+  /* Repairs Yango's requested_at, which was mapped from booked_at — that
+     provider's closing stamp — and so filed every Yango trip as ending before
+     it started. Possible only because trip.raw holds the whole order. */
+  'schema_v69.sql',
 ];

@@ -1831,8 +1831,40 @@ export function moneyInTile(k, { label = 'Money in' } = {}) {
     Number.isFinite(p.priced) && p.priced > 0
       ? `${money(p.priced)} priced on the bookings themselves, before any commission` : null,
   ].filter(Boolean);
-  return { label, value: money(p.gross), long: true,
-    sub: (parts.join(' · ')
+  /* HOW MUCH OF THE WORK THIS FIGURE ACTUALLY COVERS, which the tile did not
+     say and which can be most of it.
+     ────────────────────────────────────────────────────────────────────────
+     Measured on production 2026-09-10, one driver, one day: 17 bookings, and
+     the tile read AED 183. Of those bookings NINE were Uber and carried no
+     fare at all — 109 of his 131 km, 83% of the driving — because Uber files
+     fares in a weekly payments report that had not landed. AED 94 of the
+     remaining 138 was a single Bolt trip. At that driver's own measured Uber
+     rate over the previous thirty days (3.97 AED/km across 134 priced trips)
+     the missing nine were worth roughly AED 433, so the day was nearer 570
+     than 183 and the tile was showing about a quarter of it.
+
+     The sub-line named the halves honestly and still left the reader with a
+     bold number that reads as the answer. A figure that covers eight of
+     seventeen bookings is a FLOOR, and the house rule is that a figure which
+     cannot be measured says so rather than presenting the measurable part as
+     the whole. So the count comes first — it is the thing that decides how to
+     read everything after it — and the word "at least" goes on the value.
+
+     Only when bookings are genuinely missing a fare: a driver whose channels
+     all filed statements has no unpriced remainder, and saying "17 of 17
+     priced" on every other tile would be noise. */
+  const trips = Number(k && k.trips);
+  const pricedN = Number(k && k.priced_trips);
+  const unpriced = Number.isFinite(trips) && Number.isFinite(pricedN) && trips > pricedN
+    ? trips - pricedN : 0;
+  const floorClause = unpriced
+    ? `${countOf(unpriced, 'booking')} here ${unpriced === 1 ? 'carries' : 'carry'} no fare yet, `
+      + 'so this is a floor rather than the total — Uber files its fares in a weekly payments '
+      + 'report, and those bookings are worth nothing here until it lands. '
+    : '';
+  return { label, value: (unpriced ? 'at least ' : '') + money(p.gross), long: true,
+    sub: floorClause
+      + (parts.join(' · ')
       || 'what the platforms report this driver earned, across every channel')
       + grainClause(p, 'what was earned', { alignment: true }) };
 }
