@@ -2187,11 +2187,38 @@ taken:
   built on this needs the refresh to happen somewhere Tesla accepts, with the
   token written back into `app_setting`.
 
-The three ways out, in the order they should be tried: ask Tesla to allow
-164.92.186.179 (the reference above is what the ticket is answered against);
-route only the auth calls through an egress Tesla accepts; or run a small
-token-keeper off this server that refreshes and stores. The first is the only
-one that leaves no moving parts behind.
+### It is the ADDRESS, not the request — and the address does not hold still
+
+Two follow-up measurements, both of which changed the answer.
+
+**The request shape is not the rule.** The comparison that first suggested "the
+egress address" changed two variables at once: the request that reached OAuth
+came from a different network AND a different client. Akamai scores both. So
+the same invalid grant was sent four ways from production itself — ours, no
+user-agent at all, curl-like, and a full browser header set with `sec-ch-ua`,
+`origin` and `referer`. **All four came back 403 with the block page.** No
+header set clears it, and the fingerprint theory is dead.
+
+**The egress address is per-container and changes on every deploy.** Measured
+`164.92.186.179`, then `165.232.77.209` after a redeploy, then that same second
+address five times in a row. Both are DigitalOcean ranges. So the address is
+stable within a container's life and not across deploys — which means
+**asking Tesla to allow one IP is useless**: the next deploy moves off it. The
+whole provider range is the thing being refused, which is ordinary Akamai
+policy for datacentre ranges.
+
+That retires the advice this file carried an hour earlier ("ask Tesla to allow
+164.92.186.179"). What is left:
+
+| way out | what it needs | catch |
+|---|---|---|
+| A **stable dedicated egress** for the app, then ask Tesla to allow that one address | a DO feature on a paid tier, plus Tesla acting | still needs Tesla to move, but now there is a durable address to ask about |
+| **Route only the auth calls** through a host Tesla accepts | somewhere to run it that is not in a blocked range | most cloud ranges are blocked for the same reason |
+| **A token-keeper off this server** — refresh where Tesla answers, write the token into `app_setting` | the same non-blocked host, plus a schedule under 8h | the data host answers from here, so only the auth half has to move |
+
+The third is the smallest, because the measurement above says the DATA host is
+reachable from production: only token minting and refreshing have to happen
+elsewhere.
 
 **The lesson worth keeping:** an HTML body where JSON belongs is a fact about
 the CALLER, and it took a page saying so, then a probe measuring it, to stop

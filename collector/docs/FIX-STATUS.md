@@ -356,17 +356,20 @@ Akamai "Access Denied" page rather than an OAuth refusal.
 | It is not the User-Agent | **proven** | a real UA was deployed and the answer did not change; `user-agent: node` also passes from another network |
 | Tesla's **auth** host refuses this server | **proven** | 403 + Akamai ref `#18.ccd5ce17.1789035013.1637d0b9` from 164.92.186.179 |
 | Tesla's **data** host does **not** | **proven** | 401 with no block page — a normal unauthenticated answer |
-| It is the egress address specifically | **not proven** | best-supported explanation; only Tesla can confirm which rule fired |
+| It is the egress address, not the request shape | **proven** | four header sets from production — ours, no-UA, curl-like, full browser with sec-ch-ua/origin/referer — all 403 with the block page |
+| A single IP allowlist would fix it | **DISPROVEN** | the egress is per-container: 164.92.186.179, then 165.232.77.209 after a redeploy, then that one five times running. Both DigitalOcean ranges — the next deploy moves off any address Tesla allows |
 
 **What that means for the design, and it is not a detail:** a token minted
 elsewhere does not fix this. Access tokens last about eight hours and the
 `refresh_token` renewal posts to the same blocked host, so the refresh has to
 happen somewhere Tesla accepts and be written back into `app_setting`.
 
-**The one remaining step is still not ours**, but it has changed: ask Tesla to
-allow **164.92.186.179**, quoting that reference. The alternatives — proxying
-only the auth calls, or a token-keeper off this server — both leave moving
-parts behind.
+**Superseded.** This said "ask Tesla to allow 164.92.186.179". The egress
+address changes on every deploy, so allowlisting one is useless. The realistic
+routes are a stable dedicated egress for the app and then a Tesla allowlist for
+that durable address, or moving only the auth half — minting and refreshing —
+to a host Tesla answers. The data host is reachable from production, so the
+auth half is all that has to move.
 
 **CORRECTED 2026-09-10, having been checked against Tesla's documentation
 rather than recalled.** This paragraph read: *"there is no per-trip, drive or
